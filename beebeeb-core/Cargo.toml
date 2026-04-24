@@ -1,0 +1,20 @@
+[package]
+name = "beebeeb-core"
+description = "Cryptographic core for Beebeeb — encryption, key derivation, recovery phrases"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+beebeeb-types = { path = "../beebeeb-types" }
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+hkdf = "0.12"
+sha2 = "0.10"
+zeroize = { version = "1", features = ["derive"] }
+bip39 = { version = "2", features = ["rand"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+hex = "0.4"

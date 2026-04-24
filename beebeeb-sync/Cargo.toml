@@ -1,0 +1,22 @@
+[package]
+name = "beebeeb-sync"
+description = "Desktop sync engine for Beebeeb — watches local files, syncs encrypted to cloud"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+beebeeb-core = { path = "../beebeeb-core" }
+beebeeb-types = { path = "../beebeeb-types" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+notify = "8"
+reqwest = { version = "0.12", features = ["json"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
