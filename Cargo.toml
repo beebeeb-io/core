@@ -4,6 +4,7 @@ members = [
     "beebeeb-core",
     "beebeeb-types",
     "beebeeb-sync",
+    "beebeeb-wasm",
 ]
 
 [workspace.package]

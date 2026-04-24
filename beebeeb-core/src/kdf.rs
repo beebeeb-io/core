@@ -22,6 +22,21 @@ impl MasterKey {
     pub(crate) fn as_bytes(&self) -> &[u8; 32] {
         &self.bytes
     }
+
+    /// Export the raw key bytes. **WASM boundary only** — the caller is
+    /// responsible for zeroizing the returned array when it is no longer needed.
+    /// Prefer keeping a `MasterKey` handle whenever possible.
+    pub fn to_bytes(&self) -> [u8; 32] {
+        self.bytes
+    }
+
+    /// Reconstruct a `MasterKey` from raw bytes that previously crossed
+    /// the WASM boundary. The source array is zeroized after construction.
+    pub fn from_bytes(mut bytes: [u8; 32]) -> Self {
+        let mk = Self { bytes };
+        bytes.zeroize();
+        mk
+    }
 }
 
 /// 32-byte file-encryption key derived from a master key. Zeroized on drop.
@@ -34,6 +49,14 @@ pub struct FileKey {
 impl FileKey {
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.bytes
+    }
+
+    /// Reconstruct a `FileKey` from raw bytes that previously crossed
+    /// the WASM boundary. The source array is zeroized after construction.
+    pub fn from_bytes(mut bytes: [u8; 32]) -> Self {
+        let fk = Self { bytes };
+        bytes.zeroize();
+        fk
     }
 }
 
