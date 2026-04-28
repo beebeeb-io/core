@@ -16,4 +16,7 @@ pub enum CoreError {
 
     #[error("invalid input: {0}")]
     InvalidInput(String),
+
+    #[error("OPAQUE protocol error: {0}")]
+    Opaque(String),
 }
