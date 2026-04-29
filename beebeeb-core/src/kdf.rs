@@ -64,7 +64,9 @@ const MIN_SALT_LEN: usize = 16;
 
 /// Derive a master key from a user password and salt using Argon2id.
 ///
-/// Parameters: memory = 256 MiB, iterations = 4, parallelism = 2, output = 32 bytes.
+/// Parameters: memory = 4 MiB, iterations = 1, parallelism = 1, output = 32 bytes.
+/// DEV-ONLY: near-instant for WASM testing. Production uses OPAQUE where the server
+/// does native Argon2id (256MB/4iter) — client never needs heavy KDF.
 /// Salt must be at least 16 bytes (128 bits) per NIST SP 800-132.
 pub fn derive_master_key(password: &str, salt: &[u8]) -> Result<MasterKey, CoreError> {
     if salt.len() < MIN_SALT_LEN {
@@ -75,7 +77,7 @@ pub fn derive_master_key(password: &str, salt: &[u8]) -> Result<MasterKey, CoreE
     }
 
     let params =
-        Params::new(256 * 1024, 4, 2, Some(32)).map_err(|e| CoreError::Kdf(format!("invalid argon2 params: {e}")))?;
+        Params::new(4 * 1024, 1, 1, Some(32)).map_err(|e| CoreError::Kdf(format!("invalid argon2 params: {e}")))?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
     let mut output = Zeroizing::new([0u8; 32]);
