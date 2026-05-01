@@ -2,59 +2,67 @@
   "generated_by": "beebeeb-core test vector generator",
   "vectors": [
     {
-      "expected_master_key_hex": "bd03192a42f0f7b3b38514c69cee88336a67993712e7d1a6bc7e630ba87f18c9",
+      "expected_master_key_hex": "ee35f2c2c31ca961ebc5252a56016164e1926cb0cec243925d8bd8f5547ab7e2",
       "name": "master_key_from_password",
       "password": "correct-horse-battery-staple",
       "salt_hex": "626565626565622d746573742d73616c742d313662"
     },
     {
-      "expected_file_key_hex": "55e11db680c9a4d9c58e8b64de76cdd76566e518f3665360c35fc6a93d1170ae",
+      "expected_file_key_hex": "2e0a77966d2fefc52a8905f501af9b04c830c6dc1de5b2714ffdd9387376e1ee",
       "file_id_hex": "35353065383430302d653239622d343164342d613731362d343436363535343430303030",
-      "master_key_hex": "bd03192a42f0f7b3b38514c69cee88336a67993712e7d1a6bc7e630ba87f18c9",
+      "master_key_hex": "ee35f2c2c31ca961ebc5252a56016164e1926cb0cec243925d8bd8f5547ab7e2",
       "name": "file_key_derivation"
     },
     {
-      "ciphertext_hex": "723a11422107a131369e6630ab4cc631b20c63f822a452436264f89b7d8b4466dc99b3706e9bbedb3768c1a07420ba",
-      "file_key_hex": "55e11db680c9a4d9c58e8b64de76cdd76566e518f3665360c35fc6a93d1170ae",
+      "ciphertext_hex": "0ab31780e8033f9cbe828c37e81cbaaaa7d8d983100eec03eaf8afa79ae7abcb70f9dac50d58f82de98cd09b6d1280",
+      "file_key_hex": "2e0a77966d2fefc52a8905f501af9b04c830c6dc1de5b2714ffdd9387376e1ee",
       "name": "chunk_encrypt_decrypt",
-      "nonce_hex": "4f9136defd4ca3546a86822e",
+      "nonce_hex": "8108db7effb34d1ce011e53f",
       "note": "nonce is random — use this vector for decrypt-only testing. To verify encrypt, check that decrypt(encrypt(plaintext)) == plaintext.",
       "plaintext_hex": "48656c6c6f2c2042656562656562212054686973206973206120746573742e"
     },
     {
-      "expected_x25519_private_hex": "6a4d95cf23171c6c6718be4636804ded891d742ded2b96220d222223d7cd8837",
-      "expected_x25519_public_hex": "75f57a0b7ca0e2427317f800286dd098ce08abd3f29b29240e4f8764beef0f17",
-      "master_key_hex": "bd03192a42f0f7b3b38514c69cee88336a67993712e7d1a6bc7e630ba87f18c9",
+      "expected_x25519_private_hex": "0816fb8d15f2d564ca299c7340f814ebeee28fb18a5b3c54bf509c92cb48d9cd",
+      "expected_x25519_public_hex": "a102b30aff00be11d3855f541297a7876d85acbfe5ce9c6dd742fce0b93e714e",
+      "master_key_hex": "ee35f2c2c31ca961ebc5252a56016164e1926cb0cec243925d8bd8f5547ab7e2",
       "name": "x25519_identity_keypair"
     },
     {
-      "alice_master_key_hex": "bd03192a42f0f7b3b38514c69cee88336a67993712e7d1a6bc7e630ba87f18c9",
-      "alice_x25519_public_hex": "75f57a0b7ca0e2427317f800286dd098ce08abd3f29b29240e4f8764beef0f17",
-      "bob_master_key_hex": "b32818d88c7feec881de1e0d47066dc7da54e574ee28614799c4dbb8257f0e14",
-      "bob_x25519_public_hex": "4a84123436a753a8edb38614e1249e3bb2dffd68b4b5cf5559cc2956f1fa5b33",
-      "expected_share_key_hex": "e6625247cc62262e520c567da87290157300d561ca339997c1b2ff7ea4232266",
-      "expected_shared_secret_hex": "d279e16bad8c2d555d3753c6a9e07ba936a4ae71e0e29507880e7467765a541c",
+      "alice_master_key_hex": "ee35f2c2c31ca961ebc5252a56016164e1926cb0cec243925d8bd8f5547ab7e2",
+      "alice_x25519_public_hex": "a102b30aff00be11d3855f541297a7876d85acbfe5ce9c6dd742fce0b93e714e",
+      "bob_master_key_hex": "1f7bc1ef7a7ee0322514bb0c112ea9a10ecfac2f6066b9d1687e7f298f8036aa",
+      "bob_x25519_public_hex": "4d5bea2b7ee9900784024a07de57cd71c92105a1b52ce317653254bf9e54980d",
+      "expected_share_key_hex": "019f9eb7e1c145b0e9ff4d10b887fbec7f4c29ef89f37be94a61fbc66fd32b07",
+      "expected_shared_secret_hex": "7f2d7ecf67f1439a1d687c5318fb5aa1b1a239ebecab370c3323742d13e48967",
       "file_id_hex": "35353065383430302d653239622d343164342d613731362d343436363535343430303030",
       "name": "x25519_share_key_exchange"
     },
     {
-      "expected_recovery_check_hex": "43db9aaae145f38686be16a30e8af87bec6382dd0a9ae1d2498f2d55fdd55e83",
-      "master_key_hex": "bd03192a42f0f7b3b38514c69cee88336a67993712e7d1a6bc7e630ba87f18c9",
+      "expected_recovery_check_hex": "f69f707f9c1a91addf127e6855ff3a38d0135fe56206fb627b975365bb4ca67c",
+      "master_key_hex": "ee35f2c2c31ca961ebc5252a56016164e1926cb0cec243925d8bd8f5547ab7e2",
       "name": "recovery_check"
     },
     {
-      "expected_envelope_hex": "bd03192a42f0f7b3b38514c69cee88336a67993712e7d1a6bc7e630ba87f18c96a4d95cf23171c6c6718be4636804ded891d742ded2b96220d222223d7cd883743db9aaae145f38686be16a30e8af87bec6382dd0a9ae1d2498f2d55fdd55e83",
-      "master_key_hex": "bd03192a42f0f7b3b38514c69cee88336a67993712e7d1a6bc7e630ba87f18c9",
+      "expected_envelope_hex": "ee35f2c2c31ca961ebc5252a56016164e1926cb0cec243925d8bd8f5547ab7e20816fb8d15f2d564ca299c7340f814ebeee28fb18a5b3c54bf509c92cb48d9cdf69f707f9c1a91addf127e6855ff3a38d0135fe56206fb627b975365bb4ca67c",
+      "master_key_hex": "ee35f2c2c31ca961ebc5252a56016164e1926cb0cec243925d8bd8f5547ab7e2",
       "name": "envelope_serialization",
-      "recovery_check_hex": "43db9aaae145f38686be16a30e8af87bec6382dd0a9ae1d2498f2d55fdd55e83",
-      "x25519_private_hex": "6a4d95cf23171c6c6718be4636804ded891d742ded2b96220d222223d7cd8837"
+      "recovery_check_hex": "f69f707f9c1a91addf127e6855ff3a38d0135fe56206fb627b975365bb4ca67c",
+      "x25519_private_hex": "0816fb8d15f2d564ca299c7340f814ebeee28fb18a5b3c54bf509c92cb48d9cd"
     },
     {
-      "expected_master_key_hex": "6e326374f67a2b8437778e51d947c1e826aa67bcfa07c306629b063114cc1b94",
-      "mnemonic": "bachelor type category spare balcony early dial liberty three final office initial",
+      "expected_master_key_hex": "37c9aea439d1e4759a918259709daa087456e8350033212d3f041a7c478e9552",
+      "mnemonic": "bottom oxygen chuckle flat february lawn flat lawsuit worth quarter oil share",
       "name": "recovery_phrase_roundtrip",
       "note": "mnemonic is random — use this to verify recover_from_phrase(phrase) produces the expected key."
+    },
+    {
+      "ciphertext_hex": "b61a7afbed70823c960e274405215690d1d6e825863e66e36740ee148224b8dad21902ee657de576df18894131f0e2a4be96151b88709a83",
+      "file_key_hex": "2e0a77966d2fefc52a8905f501af9b04c830c6dc1de5b2714ffdd9387376e1ee",
+      "metadata": "photos/vacation/2025-summer/IMG_0042.jpg",
+      "name": "metadata_encrypt_decrypt",
+      "nonce_hex": "b148ce14b98c33d376cd45c8",
+      "note": "nonce is random — use this vector for decrypt-only testing. To verify encrypt, check that decrypt(encrypt(metadata)) == metadata."
     }
   ],
-  "version": 1
+  "version": 2
 }

@@ -61,7 +61,7 @@ pub fn decrypt_metadata(key: &FileKey, blob: &EncryptedBlob) -> Result<String, C
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kdf::{MasterKey, derive_file_key, derive_master_key};
+    use crate::kdf::{derive_file_key, derive_master_key};
 
     fn test_file_key() -> FileKey {
         let mk = derive_master_key("test-password", b"test-salt-16bytes").unwrap();

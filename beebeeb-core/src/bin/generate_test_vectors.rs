@@ -1,4 +1,4 @@
-use beebeeb_core::encrypt::{decrypt_chunk, encrypt_chunk};
+use beebeeb_core::encrypt::{decrypt_chunk, decrypt_metadata, encrypt_chunk, encrypt_metadata};
 use beebeeb_core::kdf::{derive_file_key, derive_master_key};
 use beebeeb_core::opaque::{
     compute_recovery_check, derive_share_key, derive_x25519_private, derive_x25519_public,
@@ -116,8 +116,24 @@ fn main() {
         "note": "mnemonic is random — use this to verify recover_from_phrase(phrase) produces the expected key."
     }));
 
+    // Vector 9: Metadata (filename) encryption — uses the same file key as chunk encryption
+    let metadata = "photos/vacation/2025-summer/IMG_0042.jpg";
+    let encrypted_meta = encrypt_metadata(&fk, metadata).unwrap();
+    let meta_nonce_hex = hex(&encrypted_meta.nonce);
+    let meta_ciphertext_hex = hex(&encrypted_meta.ciphertext);
+    let decrypted_meta = decrypt_metadata(&fk, &encrypted_meta).unwrap();
+    assert_eq!(&decrypted_meta, metadata);
+    vectors.push(json!({
+        "name": "metadata_encrypt_decrypt",
+        "file_key_hex": hex(fk.as_bytes()),
+        "metadata": metadata,
+        "nonce_hex": meta_nonce_hex,
+        "ciphertext_hex": meta_ciphertext_hex,
+        "note": "nonce is random — use this vector for decrypt-only testing. To verify encrypt, check that decrypt(encrypt(metadata)) == metadata."
+    }));
+
     let output = json!({
-        "version": 1,
+        "version": 2,
         "generated_by": "beebeeb-core test vector generator",
         "vectors": vectors,
     });
