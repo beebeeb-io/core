@@ -17,6 +17,7 @@ bip39 = { version = "2", features = ["rand"] }
 thiserror = { workspace = true }
 opaque-ke = { version = "4.0.1", features = ["ristretto255"] }
 x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
+reed-solomon-erasure = "6"
 serde_json.workspace = true
 
 [dev-dependencies]

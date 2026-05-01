@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use zeroize::Zeroize;
 
+use beebeeb_core::constellation;
 use beebeeb_core::kdf;
 use beebeeb_core::encrypt;
 use beebeeb_core::recovery;
@@ -666,5 +667,226 @@ mod tests {
         let enc = fk_handle.encrypt_metadata(name.into()).unwrap();
         let dec = fk_handle.decrypt_metadata(enc.nonce, enc.ciphertext).unwrap();
         assert_eq!(dec, name);
+    }
+
+    // --- Constellation tests ---
+
+    #[test]
+    fn constellation_session_roundtrip() {
+        let init = constellation_new_session(300);
+        assert_eq!(init.confirm_code.len(), 6);
+
+        let decoder = ConstellationDecoderHandle::new();
+        let mut recovered: Option<ConstellationPayloadDto> = None;
+        for frame_index in 0..16u32 {
+            let frame = constellation_encode(init.payload.clone(), frame_index).unwrap();
+            let observations: Vec<ObservedNodeDto> = frame
+                .nodes
+                .iter()
+                .enumerate()
+                .map(|(i, n)| ObservedNodeDto {
+                    idx: i as u32,
+                    brightness: n.brightness,
+                    confidence: 1.0,
+                })
+                .collect();
+            recovered = decoder.ingest_frame(observations);
+            if recovered.is_some() {
+                break;
+            }
+        }
+        let recovered = recovered.expect("decoder recovers payload");
+        assert_eq!(recovered.session_id, init.payload.session_id);
+        assert_eq!(recovered.ephemeral_pubkey, init.payload.ephemeral_pubkey);
+        assert!(constellation_verify_code(recovered, init.confirm_code));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Constellation visual auth codec
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ConstellationPayloadDto {
+    pub session_id: Vec<u8>,
+    pub ephemeral_pubkey: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub expires_at_unix_ms: u64,
+    pub confirm_code_hash: Vec<u8>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ConstellationNodeDto {
+    pub kind: u8,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub brightness: f32,
+    pub pulse_phase: f32,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ConstellationEdgeDto {
+    pub from_idx: u32,
+    pub to_idx: u32,
+    pub weight: f32,
+    pub flow_speed: f32,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ConstellationFrameDto {
+    pub frame_index: u32,
+    pub seed: u64,
+    pub nodes: Vec<ConstellationNodeDto>,
+    pub edges: Vec<ConstellationEdgeDto>,
+    pub ring_phase: f32,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ConstellationSessionInitDto {
+    pub payload: ConstellationPayloadDto,
+    pub confirm_code: String,
+    pub ephemeral_private: Vec<u8>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ObservedNodeDto {
+    pub idx: u32,
+    pub brightness: f32,
+    pub confidence: f32,
+}
+
+fn payload_to_dto(p: &constellation::ConstellationPayload) -> ConstellationPayloadDto {
+    ConstellationPayloadDto {
+        session_id: p.session_id.to_vec(),
+        ephemeral_pubkey: p.ephemeral_pubkey.to_vec(),
+        nonce: p.nonce.to_vec(),
+        expires_at_unix_ms: p.expires_at_unix_ms,
+        confirm_code_hash: p.confirm_code_hash.to_vec(),
+    }
+}
+
+fn payload_from_dto(dto: &ConstellationPayloadDto) -> Result<constellation::ConstellationPayload, CryptoError> {
+    let session_id: [u8; 16] = dto.session_id.as_slice().try_into().map_err(|_| {
+        CryptoError::InvalidInput { detail: "session_id must be 16 bytes".into() }
+    })?;
+    let ephemeral_pubkey: [u8; 32] = dto.ephemeral_pubkey.as_slice().try_into().map_err(|_| {
+        CryptoError::InvalidInput { detail: "ephemeral_pubkey must be 32 bytes".into() }
+    })?;
+    let nonce: [u8; 16] = dto.nonce.as_slice().try_into().map_err(|_| {
+        CryptoError::InvalidInput { detail: "nonce must be 16 bytes".into() }
+    })?;
+    let confirm_code_hash: [u8; 32] = dto.confirm_code_hash.as_slice().try_into().map_err(|_| {
+        CryptoError::InvalidInput { detail: "confirm_code_hash must be 32 bytes".into() }
+    })?;
+    Ok(constellation::ConstellationPayload {
+        session_id,
+        ephemeral_pubkey,
+        nonce,
+        expires_at_unix_ms: dto.expires_at_unix_ms,
+        confirm_code_hash,
+    })
+}
+
+/// Generate a fresh pairing session (display side).
+#[uniffi::export]
+pub fn constellation_new_session(expires_in_secs: u32) -> ConstellationSessionInitDto {
+    let init = constellation::constellation_new_session(expires_in_secs);
+    ConstellationSessionInitDto {
+        payload: payload_to_dto(&init.payload),
+        confirm_code: init.confirm_code,
+        ephemeral_private: init.ephemeral_private.to_vec(),
+    }
+}
+
+/// Encode `payload` into the visualisation frame at `frame_index`.
+#[uniffi::export]
+pub fn constellation_encode(
+    payload: ConstellationPayloadDto,
+    frame_index: u32,
+) -> Result<ConstellationFrameDto, CryptoError> {
+    let p = payload_from_dto(&payload)?;
+    let frame = constellation::constellation_encode(&p, frame_index);
+    Ok(ConstellationFrameDto {
+        frame_index: frame.frame_index,
+        seed: frame.seed,
+        nodes: frame
+            .nodes
+            .into_iter()
+            .map(|n| ConstellationNodeDto {
+                kind: n.kind,
+                x: n.x,
+                y: n.y,
+                z: n.z,
+                brightness: n.brightness,
+                pulse_phase: n.pulse_phase,
+            })
+            .collect(),
+        edges: frame
+            .edges
+            .into_iter()
+            .map(|e| ConstellationEdgeDto {
+                from_idx: e.from_idx,
+                to_idx: e.to_idx,
+                weight: e.weight,
+                flow_speed: e.flow_speed,
+            })
+            .collect(),
+        ring_phase: frame.ring_phase,
+    })
+}
+
+/// Constant-time verify a 6-digit code against a payload.
+#[uniffi::export]
+pub fn constellation_verify_code(payload: ConstellationPayloadDto, code: String) -> bool {
+    let Ok(p) = payload_from_dto(&payload) else {
+        return false;
+    };
+    constellation::constellation_verify_code(&p, &code)
+}
+
+/// Stateful decoder handle.
+#[derive(uniffi::Object)]
+pub struct ConstellationDecoderHandle {
+    inner: constellation::ConstellationDecoder,
+}
+
+#[uniffi::export]
+impl ConstellationDecoderHandle {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            inner: constellation::ConstellationDecoder::new(),
+        })
+    }
+
+    /// Feed one observed frame. Returns the recovered payload when the
+    /// codeword is complete, otherwise `None`.
+    pub fn ingest_frame(&self, observations: Vec<ObservedNodeDto>) -> Option<ConstellationPayloadDto> {
+        let obs: Vec<constellation::ObservedNode> = observations
+            .into_iter()
+            .map(|o| constellation::ObservedNode {
+                idx: o.idx,
+                brightness: o.brightness,
+                confidence: o.confidence,
+            })
+            .collect();
+        self.inner.ingest_frame(&obs).map(|p| payload_to_dto(&p))
+    }
+
+    pub fn progress(&self) -> f32 {
+        self.inner.progress()
+    }
+
+    pub fn shards_collected(&self) -> u32 {
+        self.inner.shards_collected()
+    }
+
+    pub fn frames_ingested(&self) -> u32 {
+        self.inner.frames_ingested()
+    }
+
+    pub fn reset(&self) {
+        self.inner.reset();
     }
 }
