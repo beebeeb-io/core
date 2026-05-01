@@ -11,6 +11,9 @@ build/
 .next/
 .astro/
 *.wasm
+# iOS xcframework build outputs (rebuild via build-ios.sh)
+BeebeebCore.xcframework/
+BeebeebCore.swift
 
 # Environment & secrets
 .env
