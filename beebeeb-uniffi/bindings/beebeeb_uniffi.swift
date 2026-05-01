@@ -476,6 +476,367 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 }
 
 
+
+
+/**
+ * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`.
+ */
+public protocol FileKeyHandleProtocol: AnyObject, Sendable {
+    
+    func decryptChunk(nonce: Data, ciphertext: Data) throws  -> Data
+    
+    func decryptMetadata(nonce: Data, ciphertext: Data) throws  -> String
+    
+    func encryptChunk(plaintext: Data) throws  -> EncryptedData
+    
+    func encryptMetadata(metadata: String) throws  -> EncryptedData
+    
+}
+/**
+ * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`.
+ */
+open class FileKeyHandle: FileKeyHandleProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_filekeyhandle(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_filekeyhandle(handle, $0) }
+    }
+
+    
+
+    
+open func decryptChunk(nonce: Data, ciphertext: Data)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_chunk(
+            self.uniffiCloneHandle(),
+        FfiConverterData.lower(nonce),
+        FfiConverterData.lower(ciphertext),$0
+    )
+})
+}
+    
+open func decryptMetadata(nonce: Data, ciphertext: Data)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_metadata(
+            self.uniffiCloneHandle(),
+        FfiConverterData.lower(nonce),
+        FfiConverterData.lower(ciphertext),$0
+    )
+})
+}
+    
+open func encryptChunk(plaintext: Data)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_chunk(
+            self.uniffiCloneHandle(),
+        FfiConverterData.lower(plaintext),$0
+    )
+})
+}
+    
+open func encryptMetadata(metadata: String)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_metadata(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(metadata),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFileKeyHandle: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = FileKeyHandle
+
+    public static func lift(_ handle: UInt64) throws -> FileKeyHandle {
+        return FileKeyHandle(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: FileKeyHandle) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FileKeyHandle {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: FileKeyHandle, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFileKeyHandle_lift(_ handle: UInt64) throws -> FileKeyHandle {
+    return try FfiConverterTypeFileKeyHandle.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFileKeyHandle_lower(_ value: FileKeyHandle) -> UInt64 {
+    return FfiConverterTypeFileKeyHandle.lower(value)
+}
+
+
+
+
+
+
+/**
+ * Opaque handle to a MasterKey. The key bytes never leave Rust except via
+ * `export_for_keychain`, which is only called once to persist to the OS keychain.
+ */
+public protocol MasterKeyHandleProtocol: AnyObject, Sendable {
+    
+    /**
+     * Compute the recovery-check value (stored server-side to verify the phrase).
+     */
+    func computeRecoveryCheck() throws  -> Data
+    
+    /**
+     * Derive a FileKeyHandle for the given file ID.
+     */
+    func deriveFileKey(fileId: Data) throws  -> FileKeyHandle
+    
+    /**
+     * Derive the X25519 secret scalar from the master key. Returns 32 bytes.
+     */
+    func deriveX25519Private() throws  -> Data
+    
+    /**
+     * Export the raw 32-byte key for writing to the OS keychain.
+     * Only call this once at account setup; never log or transmit the result.
+     */
+    func exportForKeychain() throws  -> Data
+    
+}
+/**
+ * Opaque handle to a MasterKey. The key bytes never leave Rust except via
+ * `export_for_keychain`, which is only called once to persist to the OS keychain.
+ */
+open class MasterKeyHandle: MasterKeyHandleProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_masterkeyhandle(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_masterkeyhandle(handle, $0) }
+    }
+
+    
+    /**
+     * Reconstruct a MasterKeyHandle from 32 raw bytes read from the OS keychain.
+     */
+public static func fromKeychainBytes(bytes: Data)throws  -> MasterKeyHandle  {
+    return try  FfiConverterTypeMasterKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_masterkeyhandle_from_keychain_bytes(
+        FfiConverterData.lower(bytes),$0
+    )
+})
+}
+    
+    /**
+     * Reconstruct a MasterKeyHandle from a 12-word BIP39 recovery phrase.
+     */
+public static func fromRecoveryPhrase(phrase: String)throws  -> MasterKeyHandle  {
+    return try  FfiConverterTypeMasterKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_masterkeyhandle_from_recovery_phrase(
+        FfiConverterString.lower(phrase),$0
+    )
+})
+}
+    
+
+    
+    /**
+     * Compute the recovery-check value (stored server-side to verify the phrase).
+     */
+open func computeRecoveryCheck()throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_compute_recovery_check(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Derive a FileKeyHandle for the given file ID.
+     */
+open func deriveFileKey(fileId: Data)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_derive_file_key(
+            self.uniffiCloneHandle(),
+        FfiConverterData.lower(fileId),$0
+    )
+})
+}
+    
+    /**
+     * Derive the X25519 secret scalar from the master key. Returns 32 bytes.
+     */
+open func deriveX25519Private()throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_derive_x25519_private(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Export the raw 32-byte key for writing to the OS keychain.
+     * Only call this once at account setup; never log or transmit the result.
+     */
+open func exportForKeychain()throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_export_for_keychain(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMasterKeyHandle: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = MasterKeyHandle
+
+    public static func lift(_ handle: UInt64) throws -> MasterKeyHandle {
+        return MasterKeyHandle(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: MasterKeyHandle) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MasterKeyHandle {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: MasterKeyHandle, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMasterKeyHandle_lift(_ handle: UInt64) throws -> MasterKeyHandle {
+    return try FfiConverterTypeMasterKeyHandle.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMasterKeyHandle_lower(_ value: MasterKeyHandle) -> UInt64 {
+    return FfiConverterTypeMasterKeyHandle.lower(value)
+}
+
+
+
+
 /**
  * Result of encrypting a chunk or metadata. Contains the cipher suite
  * identifier, a random nonce, and the ciphertext (including the GCM tag).
@@ -1140,6 +1501,36 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_x25519_shared_secret() != 52845) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk() != 50441) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_metadata() != 41867) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_chunk() != 10384) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_metadata() != 60336) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_compute_recovery_check() != 4155) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_derive_file_key() != 1679) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_derive_x25519_private() != 61634) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_export_for_keychain() != 50366) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_masterkeyhandle_from_keychain_bytes() != 25584) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_masterkeyhandle_from_recovery_phrase() != 63639) {
         return InitializationResult.apiChecksumMismatch
     }
 

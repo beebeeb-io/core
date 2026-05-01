@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use zeroize::Zeroize;
 
 use beebeeb_core::kdf;
@@ -338,6 +340,140 @@ pub fn compute_recovery_check(master_key: Vec<u8>) -> Result<Vec<u8>, CryptoErro
 }
 
 // ---------------------------------------------------------------------------
+// Object handles — keys stay in Rust memory; only export_for_keychain crosses
+// ---------------------------------------------------------------------------
+
+/// Opaque handle to a MasterKey. The key bytes never leave Rust except via
+/// `export_for_keychain`, which is only called once to persist to the OS keychain.
+#[derive(uniffi::Object)]
+pub struct MasterKeyHandle {
+    inner: Mutex<Option<kdf::MasterKey>>,
+}
+
+impl MasterKeyHandle {
+    fn new(mk: kdf::MasterKey) -> Arc<Self> {
+        Arc::new(Self {
+            inner: Mutex::new(Some(mk)),
+        })
+    }
+
+    fn with_key<T, F: FnOnce(&kdf::MasterKey) -> T>(&self, f: F) -> Result<T, CryptoError> {
+        let guard = self.inner.lock().unwrap();
+        guard.as_ref().map(f).ok_or(CryptoError::InvalidInput {
+            detail: "key handle has been cleared".into(),
+        })
+    }
+}
+
+#[uniffi::export]
+impl MasterKeyHandle {
+    /// Reconstruct a MasterKeyHandle from a 12-word BIP39 recovery phrase.
+    #[uniffi::constructor]
+    pub fn from_recovery_phrase(phrase: String) -> Result<Arc<Self>, CryptoError> {
+        let mk = recovery::recover_from_phrase(&phrase)?;
+        Ok(Self::new(mk))
+    }
+
+    /// Reconstruct a MasterKeyHandle from 32 raw bytes read from the OS keychain.
+    #[uniffi::constructor]
+    pub fn from_keychain_bytes(bytes: Vec<u8>) -> Result<Arc<Self>, CryptoError> {
+        let arr: [u8; 32] = bytes.try_into().map_err(|_| CryptoError::InvalidInput {
+            detail: "keychain bytes must be exactly 32 bytes".into(),
+        })?;
+        let mk = kdf::MasterKey::from_bytes(arr);
+        Ok(Self::new(mk))
+    }
+
+    /// Derive a FileKeyHandle for the given file ID.
+    pub fn derive_file_key(&self, file_id: Vec<u8>) -> Result<Arc<FileKeyHandle>, CryptoError> {
+        self.with_key(|mk| {
+            let fk = kdf::derive_file_key(mk, &file_id);
+            FileKeyHandle::new(fk)
+        })
+    }
+
+    /// Derive the X25519 secret scalar from the master key. Returns 32 bytes.
+    pub fn derive_x25519_private(&self) -> Result<Vec<u8>, CryptoError> {
+        self.with_key(|mk| beebeeb_core::opaque::derive_x25519_private(mk).to_vec())
+    }
+
+    /// Export the raw 32-byte key for writing to the OS keychain.
+    /// Only call this once at account setup; never log or transmit the result.
+    pub fn export_for_keychain(&self) -> Result<Vec<u8>, CryptoError> {
+        self.with_key(|mk| mk.to_bytes().to_vec())
+    }
+
+    /// Compute the recovery-check value (stored server-side to verify the phrase).
+    pub fn compute_recovery_check(&self) -> Result<Vec<u8>, CryptoError> {
+        self.with_key(|mk| beebeeb_core::opaque::compute_recovery_check(mk).to_vec())
+    }
+}
+
+/// Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`.
+#[derive(uniffi::Object)]
+pub struct FileKeyHandle {
+    inner: Mutex<Option<kdf::FileKey>>,
+}
+
+impl FileKeyHandle {
+    fn new(fk: kdf::FileKey) -> Arc<Self> {
+        Arc::new(Self {
+            inner: Mutex::new(Some(fk)),
+        })
+    }
+
+    fn with_key<T, F: FnOnce(&kdf::FileKey) -> T>(&self, f: F) -> Result<T, CryptoError> {
+        let guard = self.inner.lock().unwrap();
+        guard.as_ref().map(f).ok_or(CryptoError::InvalidInput {
+            detail: "key handle has been cleared".into(),
+        })
+    }
+}
+
+#[uniffi::export]
+impl FileKeyHandle {
+    pub fn encrypt_chunk(&self, plaintext: Vec<u8>) -> Result<EncryptedData, CryptoError> {
+        self.with_key(|fk| encrypt::encrypt_chunk(fk, &plaintext))?
+            .map(|blob| encrypted_blob_to_data(&blob))
+            .map_err(Into::into)
+    }
+
+    pub fn decrypt_chunk(
+        &self,
+        nonce: Vec<u8>,
+        ciphertext: Vec<u8>,
+    ) -> Result<Vec<u8>, CryptoError> {
+        let blob = EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce,
+            ciphertext,
+        };
+        self.with_key(|fk| encrypt::decrypt_chunk(fk, &blob))?
+            .map_err(Into::into)
+    }
+
+    pub fn encrypt_metadata(&self, metadata: String) -> Result<EncryptedData, CryptoError> {
+        self.with_key(|fk| encrypt::encrypt_metadata(fk, &metadata))?
+            .map(|blob| encrypted_blob_to_data(&blob))
+            .map_err(Into::into)
+    }
+
+    pub fn decrypt_metadata(
+        &self,
+        nonce: Vec<u8>,
+        ciphertext: Vec<u8>,
+    ) -> Result<String, CryptoError> {
+        let blob = EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce,
+            ciphertext,
+        };
+        self.with_key(|fk| encrypt::decrypt_metadata(fk, &blob))?
+            .map_err(Into::into)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -460,5 +596,75 @@ mod tests {
     fn wrong_key_size_returns_error() {
         let result = derive_file_key(vec![0u8; 16], TEST_FILE_ID.to_vec());
         assert!(result.is_err());
+    }
+
+    // --- MasterKeyHandle tests ---
+
+    #[test]
+    fn master_key_handle_from_recovery_phrase_roundtrip() {
+        let phrase_result = generate_recovery_phrase().unwrap();
+        let handle = MasterKeyHandle::from_recovery_phrase(phrase_result.phrase.clone()).unwrap();
+        // export_for_keychain should return the same bytes as the free function
+        let exported = handle.export_for_keychain().unwrap();
+        assert_eq!(exported, phrase_result.master_key);
+    }
+
+    #[test]
+    fn master_key_handle_from_keychain_bytes() {
+        let mk = derive_master_key("password".into(), TEST_SALT.to_vec()).unwrap();
+        let handle = MasterKeyHandle::from_keychain_bytes(mk.key.clone()).unwrap();
+        let exported = handle.export_for_keychain().unwrap();
+        assert_eq!(exported, mk.key);
+    }
+
+    #[test]
+    fn master_key_handle_bad_keychain_bytes() {
+        let result = MasterKeyHandle::from_keychain_bytes(vec![0u8; 16]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn master_key_handle_derive_file_key() {
+        let mk = derive_master_key("password".into(), TEST_SALT.to_vec()).unwrap();
+        let handle = MasterKeyHandle::from_keychain_bytes(mk.key).unwrap();
+        let fk_handle = handle.derive_file_key(TEST_FILE_ID.to_vec()).unwrap();
+
+        // Encrypt then decrypt via the FileKeyHandle
+        let plaintext = b"handle roundtrip";
+        let enc = fk_handle.encrypt_chunk(plaintext.to_vec()).unwrap();
+        let dec = fk_handle.decrypt_chunk(enc.nonce, enc.ciphertext).unwrap();
+        assert_eq!(dec, plaintext);
+    }
+
+    #[test]
+    fn master_key_handle_derive_x25519() {
+        let mk = derive_master_key("password".into(), TEST_SALT.to_vec()).unwrap();
+        let handle = MasterKeyHandle::from_keychain_bytes(mk.key.clone()).unwrap();
+        let priv_via_handle = handle.derive_x25519_private().unwrap();
+        let priv_via_free = derive_x25519_private(mk.key).unwrap();
+        assert_eq!(priv_via_handle, priv_via_free);
+    }
+
+    #[test]
+    fn master_key_handle_recovery_check() {
+        let mk = derive_master_key("password".into(), TEST_SALT.to_vec()).unwrap();
+        let handle = MasterKeyHandle::from_keychain_bytes(mk.key.clone()).unwrap();
+        let check_via_handle = handle.compute_recovery_check().unwrap();
+        let check_via_free = compute_recovery_check(mk.key).unwrap();
+        assert_eq!(check_via_handle, check_via_free);
+    }
+
+    // --- FileKeyHandle tests ---
+
+    #[test]
+    fn file_key_handle_encrypt_decrypt_metadata() {
+        let mk = derive_master_key("password".into(), TEST_SALT.to_vec()).unwrap();
+        let handle = MasterKeyHandle::from_keychain_bytes(mk.key).unwrap();
+        let fk_handle = handle.derive_file_key(TEST_FILE_ID.to_vec()).unwrap();
+
+        let name = "documents/taxes/2025.pdf";
+        let enc = fk_handle.encrypt_metadata(name.into()).unwrap();
+        let dec = fk_handle.decrypt_metadata(enc.nonce, enc.ciphertext).unwrap();
+        assert_eq!(dec, name);
     }
 }
