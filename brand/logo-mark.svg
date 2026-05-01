@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Beebeeb mark: amber square with dark "b" -->
+  <rect width="512" height="512" rx="102" fill="#F5B800"/>
+  <text
+    x="256" y="360"
+    text-anchor="middle"
+    font-family="Inter, system-ui, -apple-system, sans-serif"
+    font-size="340"
+    font-weight="800"
+    fill="#1A1714"
+    letter-spacing="-10"
+  >b</text>
+</svg>
