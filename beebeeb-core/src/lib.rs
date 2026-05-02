@@ -6,5 +6,6 @@ pub mod opaque;
 pub mod opaque_protocol;
 pub mod recovery;
 pub mod sync;
+pub mod transfer;
 
 pub use error::CoreError;
