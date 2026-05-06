@@ -46,7 +46,14 @@ impl FileWatcher {
         let (tx, rx) = mpsc::channel::<FileChange>();
 
         let sender = tx.clone();
-        let root = vault_path.to_path_buf();
+        // Canonicalize the vault root so it matches the paths returned by the
+        // OS file-system watcher. On macOS in particular, FSEvents resolves
+        // `/var/...` to `/private/var/...`, which would otherwise cause
+        // `strip_prefix` in `classify_event` to fail and leave the absolute
+        // path to be checked by `is_ignored` — that often contains hidden
+        // components (e.g. `.tmpXXXX` from `tempfile`) and silently filters
+        // every event as "hidden".
+        let root = std::fs::canonicalize(vault_path).unwrap_or_else(|_| vault_path.to_path_buf());
         let mut watcher = RecommendedWatcher::new(
             move |res: Result<Event, notify::Error>| match res {
                 Ok(event) => {
@@ -91,13 +98,21 @@ impl FileWatcher {
 
     /// Drain all currently-pending changes into a vec, deduplicating paths that
     /// appear more than once within the debounce window.
+    ///
+    /// Blocks for up to `DEBOUNCE_MS` waiting for events to arrive. The
+    /// timeout is the *total* window — each `recv_timeout` call uses the
+    /// remaining time, so events can trickle in across the whole window.
     pub fn drain_pending(&self) -> Vec<FileChange> {
         let mut changes = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let deadline = Instant::now() + Duration::from_millis(DEBOUNCE_MS);
 
-        while Instant::now() < deadline {
-            match self.rx.try_recv() {
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match self.rx.recv_timeout(remaining) {
                 Ok(change) => {
                     let key = match &change {
                         FileChange::Created(p)
@@ -109,7 +124,7 @@ impl FileWatcher {
                         changes.push(change);
                     }
                 }
-                Err(_) => break,
+                Err(_) => break, // timeout or channel disconnected — done collecting
             }
         }
         changes
@@ -214,21 +229,24 @@ mod tests {
         let file_path = dir.path().join("test-file.txt");
         fs::write(&file_path, "hello").unwrap();
 
+        // Compare against the canonical path: on macOS the OS watcher resolves
+        // `/var/...` to `/private/var/...`, so events come back canonicalized.
+        let expected = fs::canonicalize(&file_path).unwrap();
+
         // Poll with retries -- inotify delivery can take a moment on some
         // platforms (especially WSL2).
         let mut found = false;
         for _ in 0..20 {
-            std::thread::sleep(Duration::from_millis(100));
             let changes = watcher.drain_pending();
             if changes.iter().any(|c| match c {
-                FileChange::Created(p) | FileChange::Modified(p) => p == &file_path,
+                FileChange::Created(p) | FileChange::Modified(p) => p == &expected,
                 _ => false,
             }) {
                 found = true;
                 break;
             }
         }
-        assert!(found, "expected a change event for {file_path:?}");
+        assert!(found, "expected a change event for {expected:?}");
     }
 
     #[test]
