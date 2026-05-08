@@ -22,11 +22,14 @@
 //!
 //! # Modules
 //!
+//! - [`chunk`] — storage format versions and dynamic chunk planning
 //! - [`crypto`] — cipher suites, KDF parameters, and cryptographic constants
 //! - [`file`] — encrypted blob and chunk metadata types
 
+pub mod chunk;
 pub mod crypto;
 pub mod file;
 
+pub use chunk::*;
 pub use crypto::*;
 pub use file::*;
