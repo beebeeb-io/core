@@ -117,8 +117,7 @@ impl SyncEngine {
         let local_files = self.scan_local_files()?;
 
         // 3. Detect conflicts.
-        let conflicts =
-            conflict::detect_conflicts(&local_files, &remote_files, self.state.last_sync);
+        let conflicts = conflict::detect_conflicts(&local_files, &remote_files, self.state.last_sync);
         for c in &conflicts {
             warn!(
                 path = %c.path.display(),
@@ -126,9 +125,7 @@ impl SyncEngine {
                 remote = %c.remote_modified,
                 "conflict detected"
             );
-            self.state
-                .files
-                .insert(c.path.clone(), FileState::Conflict);
+            self.state.files.insert(c.path.clone(), FileState::Conflict);
         }
 
         // 4-6. Compute the operations list.
@@ -159,9 +156,7 @@ impl SyncEngine {
                 }
                 SyncOp::Download(p) => {
                     info!(path = %p.display(), "would download");
-                    self.state
-                        .files
-                        .insert(p.clone(), FileState::Downloading(0.0));
+                    self.state.files.insert(p.clone(), FileState::Downloading(0.0));
                 }
                 SyncOp::DeleteRemote(p) => {
                     info!(path = %p.display(), "would delete from remote");
@@ -189,11 +184,7 @@ impl SyncEngine {
     ///
     /// The "never silently drop" principle means even KeepLocal / KeepRemote
     /// will rename the losing version rather than deleting it.
-    pub fn resolve_conflict(
-        &mut self,
-        path: &Path,
-        resolution: ConflictResolution,
-    ) -> Result<(), SyncError> {
+    pub fn resolve_conflict(&mut self, path: &Path, resolution: ConflictResolution) -> Result<(), SyncError> {
         info!(
             path = %path.display(),
             resolution = ?resolution,
@@ -254,9 +245,7 @@ impl SyncEngine {
             let path = entry.path();
 
             // Respect selective sync.
-            let rel = path
-                .strip_prefix(&self.config.vault_path)
-                .unwrap_or(&path);
+            let rel = path.strip_prefix(&self.config.vault_path).unwrap_or(&path);
             if !selective::should_sync(rel, &self.selective_config) {
                 continue;
             }
@@ -265,9 +254,7 @@ impl SyncEngine {
                 self.walk_dir(&path, out)?;
             } else {
                 let meta = std::fs::metadata(&path)?;
-                let modified = meta
-                    .modified()
-                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                let modified = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                 let modified: chrono::DateTime<Utc> = modified.into();
                 out.push(FileMeta {
                     path: rel.to_path_buf(),
@@ -288,12 +275,9 @@ impl SyncEngine {
     ) -> Vec<SyncOp> {
         let mut ops = Vec::new();
 
-        let remote_set: std::collections::HashSet<&Path> =
-            remote_files.iter().map(|f| f.path.as_path()).collect();
-        let local_set: std::collections::HashSet<&Path> =
-            local_files.iter().map(|f| f.path.as_path()).collect();
-        let conflict_set: std::collections::HashSet<&Path> =
-            conflicts.iter().map(|c| c.path.as_path()).collect();
+        let remote_set: std::collections::HashSet<&Path> = remote_files.iter().map(|f| f.path.as_path()).collect();
+        let local_set: std::collections::HashSet<&Path> = local_files.iter().map(|f| f.path.as_path()).collect();
+        let conflict_set: std::collections::HashSet<&Path> = conflicts.iter().map(|c| c.path.as_path()).collect();
 
         // Files only on local -> upload.
         for local in local_files {
@@ -306,9 +290,7 @@ impl SyncEngine {
 
         // Files only on remote -> download.
         for remote in remote_files {
-            if !local_set.contains(remote.path.as_path())
-                && !conflict_set.contains(remote.path.as_path())
-            {
+            if !local_set.contains(remote.path.as_path()) && !conflict_set.contains(remote.path.as_path()) {
                 ops.push(SyncOp::Download(remote.path.clone()));
             }
         }
@@ -316,9 +298,7 @@ impl SyncEngine {
         // Files from pending_changes that were deleted locally.
         for change in &self.pending_changes {
             if let FileChange::Deleted(p) = change {
-                let rel = p
-                    .strip_prefix(&self.config.vault_path)
-                    .unwrap_or(p);
+                let rel = p.strip_prefix(&self.config.vault_path).unwrap_or(p);
                 if remote_set.contains(rel) {
                     ops.push(SyncOp::DeleteRemote(rel.to_path_buf()));
                 }
@@ -334,9 +314,7 @@ fn selective_from_mode(mode: &crate::config::SyncMode) -> selective::SelectiveCo
     match mode {
         crate::config::SyncMode::Full => selective::SelectiveConfig::full(),
         crate::config::SyncMode::OnlineOnly => selective::SelectiveConfig::online_only(),
-        crate::config::SyncMode::Custom(folders) => {
-            selective::SelectiveConfig::custom(folders.clone(), Vec::new())
-        }
+        crate::config::SyncMode::Custom(folders) => selective::SelectiveConfig::custom(folders.clone(), Vec::new()),
         crate::config::SyncMode::Smart => {
             // Smart mode syncs everything for now — real heuristics (recent, starred,
             // shared) will come once the API provides those signals.
@@ -352,11 +330,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn test_config(dir: &Path) -> SyncConfig {
-        SyncConfig::new(
-            dir.to_path_buf(),
-            "https://api.beebeeb.io".into(),
-            "tok_test".into(),
-        )
+        SyncConfig::new(dir.to_path_buf(), "https://api.beebeeb.io".into(), "tok_test".into())
     }
 
     #[test]
@@ -442,14 +416,9 @@ mod tests {
         let mut engine = SyncEngine::new(cfg);
 
         let path = PathBuf::from("story-draft.md");
-        engine
-            .state
-            .files
-            .insert(path.clone(), FileState::Conflict);
+        engine.state.files.insert(path.clone(), FileState::Conflict);
 
-        engine
-            .resolve_conflict(&path, ConflictResolution::KeepBoth)
-            .unwrap();
+        engine.resolve_conflict(&path, ConflictResolution::KeepBoth).unwrap();
 
         // Original path should be gone, replaced by two renamed copies.
         assert!(!engine.state.files.contains_key(&path));
@@ -463,20 +432,12 @@ mod tests {
         let mut engine = SyncEngine::new(cfg);
 
         let path = PathBuf::from("report.pdf");
-        engine
-            .state
-            .files
-            .insert(path.clone(), FileState::Conflict);
+        engine.state.files.insert(path.clone(), FileState::Conflict);
 
-        engine
-            .resolve_conflict(&path, ConflictResolution::KeepLocal)
-            .unwrap();
+        engine.resolve_conflict(&path, ConflictResolution::KeepLocal).unwrap();
 
         // Original path is marked Synced, plus the renamed remote copy.
-        assert_eq!(
-            engine.state.files.get(&path),
-            Some(&FileState::Synced)
-        );
+        assert_eq!(engine.state.files.get(&path), Some(&FileState::Synced));
         // There should be a second entry for the loser.
         assert!(engine.state.files.len() >= 2);
     }

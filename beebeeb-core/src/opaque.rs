@@ -34,7 +34,11 @@ impl OpaqueEnvelope {
         master_key.copy_from_slice(&bytes[..32]);
         x25519_private.copy_from_slice(&bytes[32..64]);
         recovery_check.copy_from_slice(&bytes[64..96]);
-        Self { master_key, x25519_private, recovery_check }
+        Self {
+            master_key,
+            x25519_private,
+            recovery_check,
+        }
     }
 
     pub fn into_master_key(self) -> MasterKey {

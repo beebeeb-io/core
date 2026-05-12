@@ -9,8 +9,7 @@ use std::sync::Mutex;
 use reed_solomon_erasure::galois_8::ReedSolomon;
 
 use super::encoder::{
-    BitArray, DATA_SHARDS, FRAME_BITS, PADDED_PAYLOAD_BYTES, PARITY_SHARDS, SHARD_BYTES,
-    TOTAL_SHARDS, parity2,
+    BitArray, DATA_SHARDS, FRAME_BITS, PADDED_PAYLOAD_BYTES, PARITY_SHARDS, SHARD_BYTES, TOTAL_SHARDS, parity2,
 };
 use super::frame::*;
 use super::geometry::NUM_NODES;
@@ -53,7 +52,9 @@ pub struct ConstellationDecoder {
 
 impl ConstellationDecoder {
     pub fn new() -> Self {
-        Self { state: Mutex::new(DecoderState::new()) }
+        Self {
+            state: Mutex::new(DecoderState::new()),
+        }
     }
 
     /// Total frames passed to `ingest_frame` so far.
@@ -141,10 +142,7 @@ impl ConstellationDecoder {
             return None;
         }
 
-        let mut option_shards: Vec<Option<Vec<u8>>> = shards
-            .iter()
-            .map(|s| s.map(|arr| arr.to_vec()))
-            .collect();
+        let mut option_shards: Vec<Option<Vec<u8>>> = shards.iter().map(|s| s.map(|arr| arr.to_vec())).collect();
 
         let rs = ReedSolomon::new(DATA_SHARDS, PARITY_SHARDS).expect("valid RS parameters");
         rs.reconstruct(&mut option_shards).ok()?;

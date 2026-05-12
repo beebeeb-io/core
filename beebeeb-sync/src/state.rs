@@ -7,10 +7,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SyncStatus {
     Idle,
-    Syncing {
-        files_remaining: u64,
-        bytes_remaining: u64,
-    },
+    Syncing { files_remaining: u64, bytes_remaining: u64 },
     Paused,
     Error(String),
     Offline,
@@ -52,10 +49,7 @@ impl SyncState {
 
     /// Number of files currently in conflict.
     pub fn conflict_count(&self) -> usize {
-        self.files
-            .values()
-            .filter(|s| matches!(s, FileState::Conflict))
-            .count()
+        self.files.values().filter(|s| matches!(s, FileState::Conflict)).count()
     }
 
     /// Number of files being uploaded or downloaded.
@@ -88,18 +82,10 @@ mod tests {
     #[test]
     fn conflict_count_tracks_conflicts() {
         let mut state = SyncState::new();
-        state
-            .files
-            .insert(PathBuf::from("a.txt"), FileState::Synced);
-        state
-            .files
-            .insert(PathBuf::from("b.txt"), FileState::Conflict);
-        state
-            .files
-            .insert(PathBuf::from("c.txt"), FileState::Conflict);
-        state
-            .files
-            .insert(PathBuf::from("d.txt"), FileState::Uploading(0.5));
+        state.files.insert(PathBuf::from("a.txt"), FileState::Synced);
+        state.files.insert(PathBuf::from("b.txt"), FileState::Conflict);
+        state.files.insert(PathBuf::from("c.txt"), FileState::Conflict);
+        state.files.insert(PathBuf::from("d.txt"), FileState::Uploading(0.5));
         assert_eq!(state.conflict_count(), 2);
         assert_eq!(state.transfer_count(), 1);
     }

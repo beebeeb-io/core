@@ -47,11 +47,7 @@ impl SyncEngine {
     pub fn apply_remote_op(&mut self, op: SyncOp) -> Option<SyncEvent> {
         // Echo suppression — our own op coming back via SSE.
         if let Some(client_op_id) = op.client_op_id {
-            if let Some(pos) = self
-                .pending_ops
-                .iter()
-                .position(|p| p.client_op_id == client_op_id)
-            {
+            if let Some(pos) = self.pending_ops.iter().position(|p| p.client_op_id == client_op_id) {
                 self.pending_ops.remove(pos);
                 self.last_seq = self.last_seq.max(op.seq_id);
                 return None;
@@ -87,11 +83,7 @@ impl SyncEngine {
     /// op coming back via SSE will also remove it; this is for the direct
     /// `POST /sync/ops` response path.)
     pub fn confirm_op(&mut self, client_op_id: Uuid) {
-        if let Some(pos) = self
-            .pending_ops
-            .iter()
-            .position(|p| p.client_op_id == client_op_id)
-        {
+        if let Some(pos) = self.pending_ops.iter().position(|p| p.client_op_id == client_op_id) {
             self.pending_ops.remove(pos);
         }
     }
@@ -99,11 +91,7 @@ impl SyncEngine {
     /// Server rejected our op (typically a conflict). Roll back the optimistic
     /// change and apply the winning op so the tree converges with the server.
     pub fn reject_op(&mut self, client_op_id: Uuid, winning_op: SyncOp) -> Option<SyncEvent> {
-        if let Some(pos) = self
-            .pending_ops
-            .iter()
-            .position(|p| p.client_op_id == client_op_id)
-        {
+        if let Some(pos) = self.pending_ops.iter().position(|p| p.client_op_id == client_op_id) {
             let pending = self.pending_ops.remove(pos).expect("position just found");
             self.rollback(&pending);
         }
@@ -223,14 +211,8 @@ impl SyncEngine {
             size_bytes: payload.get("size_bytes").and_then(|v| v.as_i64()).unwrap_or(0),
             mime_type: string_field(payload, "mime_type"),
             content_hash: string_field(payload, "content_hash"),
-            version_number: payload
-                .get("version_number")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(1) as i32,
-            has_thumbnail: payload
-                .get("has_thumbnail")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
+            version_number: payload.get("version_number").and_then(|v| v.as_i64()).unwrap_or(1) as i32,
+            has_thumbnail: payload.get("has_thumbnail").and_then(|v| v.as_bool()).unwrap_or(false),
             storage_pool_id: uuid_field(payload, "storage_pool_id"),
             is_trashed: false,
             is_starred: false,
@@ -325,10 +307,7 @@ fn uuid_field(payload: &Value, key: &str) -> Option<Uuid> {
 }
 
 fn string_field(payload: &Value, key: &str) -> Option<String> {
-    payload
-        .get(key)
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+    payload.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
 }
 
 #[cfg(test)]
@@ -460,7 +439,10 @@ mod tests {
 
         assert!(matches!(
             event,
-            Some(SyncEvent::FileMoved { new_parent: Some(_), .. })
+            Some(SyncEvent::FileMoved {
+                new_parent: Some(_),
+                ..
+            })
         ));
         assert_eq!(engine.get_node(file).unwrap().parent_id, Some(folder_b));
         assert_eq!(engine.children(Some(folder_a)).len(), 0);

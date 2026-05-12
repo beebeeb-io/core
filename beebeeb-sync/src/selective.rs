@@ -156,15 +156,9 @@ mod tests {
 
     #[test]
     fn custom_includes_only_listed_folders() {
-        let cfg = SelectiveConfig::custom(
-            vec!["investigations/".into(), "photos/".into()],
-            Vec::new(),
-        );
+        let cfg = SelectiveConfig::custom(vec!["investigations/".into(), "photos/".into()], Vec::new());
         assert!(should_sync(Path::new("investigations/story.md"), &cfg));
-        assert!(should_sync(
-            Path::new("investigations/ledger-gap/data.csv"),
-            &cfg
-        ));
+        assert!(should_sync(Path::new("investigations/ledger-gap/data.csv"), &cfg));
         assert!(should_sync(Path::new("photos/cat.jpg"), &cfg));
         assert!(!should_sync(Path::new("archive/old.zip"), &cfg));
         assert!(!should_sync(Path::new("sketches/draft.png"), &cfg));
@@ -176,10 +170,7 @@ mod tests {
             vec!["investigations/".into()],
             vec!["investigations/interviews-raw/".into()],
         );
-        assert!(should_sync(
-            Path::new("investigations/ledger-gap/doc.md"),
-            &cfg
-        ));
+        assert!(should_sync(Path::new("investigations/ledger-gap/doc.md"), &cfg));
         assert!(!should_sync(
             Path::new("investigations/interviews-raw/tape-01.m4a"),
             &cfg

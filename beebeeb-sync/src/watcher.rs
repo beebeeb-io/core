@@ -14,7 +14,7 @@ const IGNORED_NAMES: &[&str] = &[
     "Thumbs.db",
     "desktop.ini",
     "._",          // macOS resource forks
-    ".Spotlight-",  // Spotlight indexes
+    ".Spotlight-", // Spotlight indexes
     ".Trashes",
     ".fseventsd",
     "$RECYCLE.BIN",
@@ -65,8 +65,7 @@ impl FileWatcher {
                     warn!(error = %e, "file-system watcher error");
                 }
             },
-            notify::Config::default()
-                .with_poll_interval(Duration::from_millis(DEBOUNCE_MS)),
+            notify::Config::default().with_poll_interval(Duration::from_millis(DEBOUNCE_MS)),
         )
         .map_err(|e| SyncError::WatcherError(e.to_string()))?;
 
@@ -80,10 +79,7 @@ impl FileWatcher {
         // watcher closure's sender is dropped.
         drop(tx);
 
-        Ok(Self {
-            _watcher: watcher,
-            rx,
-        })
+        Ok(Self { _watcher: watcher, rx })
     }
 
     /// Block until the next change arrives (or the watcher is dropped).
@@ -115,9 +111,7 @@ impl FileWatcher {
             match self.rx.recv_timeout(remaining) {
                 Ok(change) => {
                     let key = match &change {
-                        FileChange::Created(p)
-                        | FileChange::Modified(p)
-                        | FileChange::Deleted(p) => p.clone(),
+                        FileChange::Created(p) | FileChange::Modified(p) | FileChange::Deleted(p) => p.clone(),
                         FileChange::Renamed { to, .. } => to.clone(),
                     };
                     if seen.insert(key) {
@@ -277,10 +271,7 @@ mod tests {
                             .next()
                             .map(|c| c.as_os_str().to_string_lossy().to_string())
                             .unwrap_or_default();
-                        assert!(
-                            !name.starts_with('.'),
-                            "hidden file should be filtered: {p:?}"
-                        );
+                        assert!(!name.starts_with('.'), "hidden file should be filtered: {p:?}");
                         if p == &canary {
                             saw_canary = true;
                         }

@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use zeroize::Zeroize;
 
 use beebeeb_core::constellation;
-use beebeeb_core::kdf;
 use beebeeb_core::encrypt;
+use beebeeb_core::kdf;
 use beebeeb_core::recovery;
 use beebeeb_types::{CipherSuite, EncryptedBlob};
 
@@ -159,11 +159,7 @@ pub fn encrypt_chunk(key: Vec<u8>, plaintext: Vec<u8>) -> Result<EncryptedData, 
 
 /// Decrypt a ciphertext chunk that was produced by `encrypt_chunk`.
 #[uniffi::export]
-pub fn decrypt_chunk(
-    key: Vec<u8>,
-    nonce: Vec<u8>,
-    ciphertext: Vec<u8>,
-) -> Result<Vec<u8>, CryptoError> {
+pub fn decrypt_chunk(key: Vec<u8>, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let fk = file_key_from_slice(&key)?;
     let blob = EncryptedBlob {
         cipher_suite: CipherSuite::V1Aes256Gcm,
@@ -187,11 +183,7 @@ pub fn encrypt_metadata(key: Vec<u8>, metadata: String) -> Result<EncryptedData,
 
 /// Decrypt a metadata blob back to a UTF-8 string.
 #[uniffi::export]
-pub fn decrypt_metadata(
-    key: Vec<u8>,
-    nonce: Vec<u8>,
-    ciphertext: Vec<u8>,
-) -> Result<String, CryptoError> {
+pub fn decrypt_metadata(key: Vec<u8>, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Result<String, CryptoError> {
     let fk = file_key_from_slice(&key)?;
     let blob = EncryptedBlob {
         cipher_suite: CipherSuite::V1Aes256Gcm,
@@ -274,11 +266,7 @@ pub fn opaque_login_finish(
     password: Vec<u8>,
     server_response: Vec<u8>,
 ) -> Result<OpaqueLoginFinishResult, CryptoError> {
-    let result = beebeeb_core::opaque_protocol::client_login_finish(
-        &client_state,
-        &password,
-        &server_response,
-    )?;
+    let result = beebeeb_core::opaque_protocol::client_login_finish(&client_state, &password, &server_response)?;
     Ok(OpaqueLoginFinishResult {
         message: result.message,
         session_key: result.session_key,
@@ -309,10 +297,7 @@ pub fn derive_x25519_public(private_key: Vec<u8>) -> Result<Vec<u8>, CryptoError
 /// Compute an X25519 shared secret from my secret scalar and their public point.
 /// Returns 32-byte shared secret.
 #[uniffi::export]
-pub fn x25519_shared_secret(
-    my_private: Vec<u8>,
-    their_public: Vec<u8>,
-) -> Result<Vec<u8>, CryptoError> {
+pub fn x25519_shared_secret(my_private: Vec<u8>, their_public: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let priv_key: [u8; 32] = my_private.try_into().map_err(|_| CryptoError::InvalidInput {
         detail: "secret scalar must be 32 bytes".into(),
     })?;
@@ -439,11 +424,7 @@ impl FileKeyHandle {
             .map_err(Into::into)
     }
 
-    pub fn decrypt_chunk(
-        &self,
-        nonce: Vec<u8>,
-        ciphertext: Vec<u8>,
-    ) -> Result<Vec<u8>, CryptoError> {
+    pub fn decrypt_chunk(&self, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
         let blob = EncryptedBlob {
             cipher_suite: CipherSuite::V1Aes256Gcm,
             nonce,
@@ -459,11 +440,7 @@ impl FileKeyHandle {
             .map_err(Into::into)
     }
 
-    pub fn decrypt_metadata(
-        &self,
-        nonce: Vec<u8>,
-        ciphertext: Vec<u8>,
-    ) -> Result<String, CryptoError> {
+    pub fn decrypt_metadata(&self, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Result<String, CryptoError> {
         let blob = EncryptedBlob {
             cipher_suite: CipherSuite::V1Aes256Gcm,
             nonce,
@@ -767,18 +744,30 @@ fn payload_to_dto(p: &constellation::ConstellationPayload) -> ConstellationPaylo
 }
 
 fn payload_from_dto(dto: &ConstellationPayloadDto) -> Result<constellation::ConstellationPayload, CryptoError> {
-    let session_id: [u8; 16] = dto.session_id.as_slice().try_into().map_err(|_| {
-        CryptoError::InvalidInput { detail: "session_id must be 16 bytes".into() }
+    let session_id: [u8; 16] = dto
+        .session_id
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::InvalidInput {
+            detail: "session_id must be 16 bytes".into(),
+        })?;
+    let ephemeral_pubkey: [u8; 32] =
+        dto.ephemeral_pubkey
+            .as_slice()
+            .try_into()
+            .map_err(|_| CryptoError::InvalidInput {
+                detail: "ephemeral_pubkey must be 32 bytes".into(),
+            })?;
+    let nonce: [u8; 16] = dto.nonce.as_slice().try_into().map_err(|_| CryptoError::InvalidInput {
+        detail: "nonce must be 16 bytes".into(),
     })?;
-    let ephemeral_pubkey: [u8; 32] = dto.ephemeral_pubkey.as_slice().try_into().map_err(|_| {
-        CryptoError::InvalidInput { detail: "ephemeral_pubkey must be 32 bytes".into() }
-    })?;
-    let nonce: [u8; 16] = dto.nonce.as_slice().try_into().map_err(|_| {
-        CryptoError::InvalidInput { detail: "nonce must be 16 bytes".into() }
-    })?;
-    let confirm_code_hash: [u8; 32] = dto.confirm_code_hash.as_slice().try_into().map_err(|_| {
-        CryptoError::InvalidInput { detail: "confirm_code_hash must be 32 bytes".into() }
-    })?;
+    let confirm_code_hash: [u8; 32] =
+        dto.confirm_code_hash
+            .as_slice()
+            .try_into()
+            .map_err(|_| CryptoError::InvalidInput {
+                detail: "confirm_code_hash must be 32 bytes".into(),
+            })?;
     Ok(constellation::ConstellationPayload {
         session_id,
         ephemeral_pubkey,

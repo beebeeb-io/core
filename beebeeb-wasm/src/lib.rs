@@ -1,7 +1,7 @@
 use wasm_bindgen::prelude::*;
 
-use beebeeb_core::kdf;
 use beebeeb_core::encrypt;
+use beebeeb_core::kdf;
 use beebeeb_core::recovery;
 use beebeeb_types::CipherSuite;
 use beebeeb_types::EncryptedBlob;
@@ -120,13 +120,21 @@ pub fn recover_from_phrase(phrase: &str) -> Result<Vec<u8>, JsError> {
 /// Start OPAQUE client registration. Returns `{ message: Uint8Array, state: Uint8Array }`.
 #[wasm_bindgen]
 pub fn opaque_registration_start(password: &[u8]) -> Result<JsValue, JsError> {
-    let result = beebeeb_core::opaque_protocol::client_registration_start(password)
-        .map_err(|e| JsError::new(&e.to_string()))?;
+    let result =
+        beebeeb_core::opaque_protocol::client_registration_start(password).map_err(|e| JsError::new(&e.to_string()))?;
     let obj = js_sys::Object::new();
-    js_sys::Reflect::set(&obj, &"message".into(), &js_sys::Uint8Array::from(result.message.as_slice()).into())
-        .map_err(|e| JsError::new(&format!("{e:?}")))?;
-    js_sys::Reflect::set(&obj, &"state".into(), &js_sys::Uint8Array::from(result.state.as_slice()).into())
-        .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(
+        &obj,
+        &"message".into(),
+        &js_sys::Uint8Array::from(result.message.as_slice()).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(
+        &obj,
+        &"state".into(),
+        &js_sys::Uint8Array::from(result.state.as_slice()).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
     Ok(obj.into())
 }
 
@@ -144,32 +152,48 @@ pub fn opaque_registration_finish(
 /// Start OPAQUE client login. Returns `{ message: Uint8Array, state: Uint8Array }`.
 #[wasm_bindgen]
 pub fn opaque_login_start(password: &[u8]) -> Result<JsValue, JsError> {
-    let result = beebeeb_core::opaque_protocol::client_login_start(password)
-        .map_err(|e| JsError::new(&e.to_string()))?;
+    let result =
+        beebeeb_core::opaque_protocol::client_login_start(password).map_err(|e| JsError::new(&e.to_string()))?;
     let obj = js_sys::Object::new();
-    js_sys::Reflect::set(&obj, &"message".into(), &js_sys::Uint8Array::from(result.message.as_slice()).into())
-        .map_err(|e| JsError::new(&format!("{e:?}")))?;
-    js_sys::Reflect::set(&obj, &"state".into(), &js_sys::Uint8Array::from(result.state.as_slice()).into())
-        .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(
+        &obj,
+        &"message".into(),
+        &js_sys::Uint8Array::from(result.message.as_slice()).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(
+        &obj,
+        &"state".into(),
+        &js_sys::Uint8Array::from(result.state.as_slice()).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
     Ok(obj.into())
 }
 
 /// Finish OPAQUE client login. Returns `{ message: Uint8Array, session_key: Uint8Array, export_key: Uint8Array }`.
 #[wasm_bindgen]
-pub fn opaque_login_finish(
-    client_state: &[u8],
-    password: &[u8],
-    server_response: &[u8],
-) -> Result<JsValue, JsError> {
+pub fn opaque_login_finish(client_state: &[u8], password: &[u8], server_response: &[u8]) -> Result<JsValue, JsError> {
     let result = beebeeb_core::opaque_protocol::client_login_finish(client_state, password, server_response)
         .map_err(|e| JsError::new(&e.to_string()))?;
     let obj = js_sys::Object::new();
-    js_sys::Reflect::set(&obj, &"message".into(), &js_sys::Uint8Array::from(result.message.as_slice()).into())
-        .map_err(|e| JsError::new(&format!("{e:?}")))?;
-    js_sys::Reflect::set(&obj, &"session_key".into(), &js_sys::Uint8Array::from(result.session_key.as_slice()).into())
-        .map_err(|e| JsError::new(&format!("{e:?}")))?;
-    js_sys::Reflect::set(&obj, &"export_key".into(), &js_sys::Uint8Array::from(result.export_key.as_slice()).into())
-        .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(
+        &obj,
+        &"message".into(),
+        &js_sys::Uint8Array::from(result.message.as_slice()).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(
+        &obj,
+        &"session_key".into(),
+        &js_sys::Uint8Array::from(result.session_key.as_slice()).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(
+        &obj,
+        &"export_key".into(),
+        &js_sys::Uint8Array::from(result.export_key.as_slice()).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
     Ok(obj.into())
 }
 
@@ -199,22 +223,30 @@ pub fn derive_x25519_public(private_key: &[u8]) -> Result<Vec<u8>, JsError> {
 /// Compute X25519 shared secret for sharing. Returns 32-byte `Uint8Array`.
 #[wasm_bindgen]
 pub fn x25519_shared_secret(my_private: &[u8], their_public: &[u8]) -> Result<Vec<u8>, JsError> {
-    let priv_key: [u8; 32] = my_private.try_into().map_err(|_| JsError::new("signing key must be 32 bytes"))?;
-    let pub_key: [u8; 32] = their_public.try_into().map_err(|_| JsError::new("public key must be 32 bytes"))?;
+    let priv_key: [u8; 32] = my_private
+        .try_into()
+        .map_err(|_| JsError::new("signing key must be 32 bytes"))?;
+    let pub_key: [u8; 32] = their_public
+        .try_into()
+        .map_err(|_| JsError::new("public key must be 32 bytes"))?;
     Ok(beebeeb_core::opaque::x25519_shared_secret(&priv_key, &pub_key).to_vec())
 }
 
 /// Derive a share key from a shared secret + file ID. Returns 32-byte `Uint8Array`.
 #[wasm_bindgen]
 pub fn derive_share_key(shared_secret: &[u8], file_id: &[u8]) -> Result<Vec<u8>, JsError> {
-    let ss: [u8; 32] = shared_secret.try_into().map_err(|_| JsError::new("shared_secret must be 32 bytes"))?;
+    let ss: [u8; 32] = shared_secret
+        .try_into()
+        .map_err(|_| JsError::new("shared_secret must be 32 bytes"))?;
     Ok(beebeeb_core::opaque::derive_share_key(&ss, file_id).to_vec())
 }
 
 /// Compute recovery check from master key. Returns 32-byte `Uint8Array`.
 #[wasm_bindgen]
 pub fn compute_recovery_check(master_key: &[u8]) -> Result<Vec<u8>, JsError> {
-    let mk_bytes: [u8; 32] = master_key.try_into().map_err(|_| JsError::new("master_key must be 32 bytes"))?;
+    let mk_bytes: [u8; 32] = master_key
+        .try_into()
+        .map_err(|_| JsError::new("master_key must be 32 bytes"))?;
     let mk = kdf::MasterKey::from_bytes(mk_bytes);
     Ok(beebeeb_core::opaque::compute_recovery_check(&mk).to_vec())
 }
@@ -242,8 +274,12 @@ fn encrypted_blob_to_js(blob: &EncryptedBlob) -> Result<JsValue, JsError> {
 
     js_sys::Reflect::set(&obj, &"cipher_suite".into(), &JsValue::from_str(suite))
         .map_err(|e| JsError::new(&format!("{e:?}")))?;
-    js_sys::Reflect::set(&obj, &"nonce".into(), &js_sys::Uint8Array::from(blob.nonce.as_slice()).into())
-        .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(
+        &obj,
+        &"nonce".into(),
+        &js_sys::Uint8Array::from(blob.nonce.as_slice()).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
     js_sys::Reflect::set(
         &obj,
         &"ciphertext".into(),

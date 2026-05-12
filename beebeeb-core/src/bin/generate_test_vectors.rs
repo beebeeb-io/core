@@ -1,11 +1,11 @@
 use beebeeb_core::encrypt::{decrypt_chunk, decrypt_metadata, encrypt_chunk, encrypt_metadata};
 use beebeeb_core::kdf::{derive_file_key, derive_master_key};
 use beebeeb_core::opaque::{
-    compute_recovery_check, derive_share_key, derive_x25519_private, derive_x25519_public,
-    x25519_shared_secret, OpaqueEnvelope,
+    OpaqueEnvelope, compute_recovery_check, derive_share_key, derive_x25519_private, derive_x25519_public,
+    x25519_shared_secret,
 };
 use beebeeb_core::recovery::{generate_recovery_phrase, recover_from_phrase};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()

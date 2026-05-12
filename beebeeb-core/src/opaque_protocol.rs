@@ -1,10 +1,9 @@
 use opaque_ke::ciphersuite::CipherSuite;
 use opaque_ke::rand::rngs::OsRng;
 use opaque_ke::{
-    ClientLogin, ClientLoginFinishParameters, ClientRegistration,
-    ClientRegistrationFinishParameters, CredentialFinalization, CredentialRequest,
-    CredentialResponse, RegistrationRequest, RegistrationResponse, RegistrationUpload,
-    ServerLogin, ServerLoginParameters, ServerRegistration, ServerSetup,
+    ClientLogin, ClientLoginFinishParameters, ClientRegistration, ClientRegistrationFinishParameters,
+    CredentialFinalization, CredentialRequest, CredentialResponse, RegistrationRequest, RegistrationResponse,
+    RegistrationUpload, ServerLogin, ServerLoginParameters, ServerRegistration, ServerSetup,
 };
 
 use crate::CoreError;
@@ -108,9 +107,8 @@ pub fn server_login_start(
 ) -> Result<ServerLoginStartResult, CoreError> {
     let server_setup = ServerSetup::<BeebeebCs>::deserialize(server_setup_bytes)
         .map_err(|e| CoreError::Opaque(format!("invalid server setup: {e}")))?;
-    let password_file =
-        ServerRegistration::<BeebeebCs>::deserialize(password_file_bytes)
-            .map_err(|e| CoreError::Opaque(format!("invalid password file: {e}")))?;
+    let password_file = ServerRegistration::<BeebeebCs>::deserialize(password_file_bytes)
+        .map_err(|e| CoreError::Opaque(format!("invalid password file: {e}")))?;
     let request = CredentialRequest::deserialize(credential_request_bytes)
         .map_err(|e| CoreError::Opaque(format!("invalid credential request: {e}")))?;
     let mut rng = OsRng;

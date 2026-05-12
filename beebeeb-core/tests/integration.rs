@@ -45,10 +45,7 @@ fn full_e2ee_roundtrip_multiple_chunks() {
     // Decrypt and verify each chunk
     for (i, (blob, original)) in encrypted.iter().zip(chunks.iter()).enumerate() {
         let decrypted = decrypt_chunk(&file_key, blob).unwrap();
-        assert_eq!(
-            decrypted, *original,
-            "chunk {i} must decrypt to its original plaintext"
-        );
+        assert_eq!(decrypted, *original, "chunk {i} must decrypt to its original plaintext");
     }
 }
 
@@ -64,9 +61,9 @@ fn metadata_encrypt_decrypt_roundtrip() {
     let filenames = [
         "photos/vacation/IMG_2024.jpg",
         "documents/tax-return-2025.pdf",
-        "",                   // empty filename
-        "a",                  // single char
-        "emoji-in-name.txt",  // ASCII-only is fine
+        "",                  // empty filename
+        "a",                 // single char
+        "emoji-in-name.txt", // ASCII-only is fine
         &"x".repeat(4096),   // long filename
     ];
 
@@ -185,8 +182,7 @@ fn recovery_phrase_roundtrip_full_e2ee() {
     let decrypted = decrypt_chunk(&recovered_file_key, &blob).unwrap();
 
     assert_eq!(
-        decrypted,
-        b"critical user data",
+        decrypted, b"critical user data",
         "data encrypted before recovery must be decryptable after recovery"
     );
 }

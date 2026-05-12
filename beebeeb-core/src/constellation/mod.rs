@@ -22,8 +22,8 @@ pub mod geometry;
 pub use decoder::ConstellationDecoder;
 pub use encoder::constellation_encode;
 pub use frame::{
-    ConstellationEdge, ConstellationFrame, ConstellationNode, ConstellationPayload,
-    ConstellationSessionInit, ObservedEdge, ObservedNode,
+    ConstellationEdge, ConstellationFrame, ConstellationNode, ConstellationPayload, ConstellationSessionInit,
+    ObservedEdge, ObservedNode,
 };
 
 use rand::RngCore;

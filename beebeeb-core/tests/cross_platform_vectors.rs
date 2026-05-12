@@ -9,10 +9,10 @@
 //! cross-platform compatibility and existing user data may become unreadable.
 
 use beebeeb_core::encrypt::{decrypt_chunk, decrypt_metadata, encrypt_metadata};
-use beebeeb_core::kdf::{derive_file_key, derive_master_key, FileKey, MasterKey};
+use beebeeb_core::kdf::{FileKey, MasterKey, derive_file_key, derive_master_key};
 use beebeeb_core::opaque::{
-    compute_recovery_check, derive_share_key, derive_x25519_private, derive_x25519_public,
-    x25519_shared_secret, OpaqueEnvelope,
+    OpaqueEnvelope, compute_recovery_check, derive_share_key, derive_x25519_private, derive_x25519_public,
+    x25519_shared_secret,
 };
 use beebeeb_core::recovery::recover_from_phrase;
 use beebeeb_types::{CipherSuite, EncryptedBlob};
@@ -43,9 +43,8 @@ fn decode_hex(v: &serde_json::Value, field: &str) -> Vec<u8> {
 
 fn bytes32(v: &serde_json::Value, field: &str) -> [u8; 32] {
     let b = decode_hex(v, field);
-    b.try_into().unwrap_or_else(|v: Vec<u8>| {
-        panic!("field '{field}' must be 32 bytes, got {}", v.len())
-    })
+    b.try_into()
+        .unwrap_or_else(|v: Vec<u8>| panic!("field '{field}' must be 32 bytes, got {}", v.len()))
 }
 
 // ---------------------------------------------------------------------------
@@ -205,10 +204,7 @@ fn vector_recovery_check() {
     let expected = bytes32(&v, "expected_recovery_check_hex");
 
     let rc = compute_recovery_check(&mk);
-    assert_eq!(
-        rc, expected,
-        "recovery_check: computed value does not match vector"
-    );
+    assert_eq!(rc, expected, "recovery_check: computed value does not match vector");
 }
 
 // ---------------------------------------------------------------------------
@@ -338,10 +334,7 @@ fn vector_metadata_encrypt_decrypt_roundtrip_unicode() {
     for name in &filenames {
         let blob = encrypt_metadata(&file_key, name).unwrap();
         let recovered = decrypt_metadata(&file_key, &blob).unwrap();
-        assert_eq!(
-            &recovered, *name,
-            "metadata roundtrip failed for filename: {name:?}"
-        );
+        assert_eq!(&recovered, *name, "metadata roundtrip failed for filename: {name:?}");
     }
 }
 
@@ -474,7 +467,9 @@ fn vector_file_version_check() {
     let contents = std::fs::read_to_string(path).unwrap();
     let root: serde_json::Value = serde_json::from_str(&contents).unwrap();
 
-    let version = root["version"].as_u64().expect("vectors.json must have a 'version' field");
+    let version = root["version"]
+        .as_u64()
+        .expect("vectors.json must have a 'version' field");
     assert_eq!(
         version, 2,
         "vectors.json version mismatch — expected 2, got {version}. \
@@ -497,9 +492,6 @@ fn vector_file_version_check() {
         "metadata_encrypt_decrypt",
     ];
     for name in &required {
-        assert!(
-            names.contains(name),
-            "vectors.json is missing required vector '{name}'"
-        );
+        assert!(names.contains(name), "vectors.json is missing required vector '{name}'");
     }
 }

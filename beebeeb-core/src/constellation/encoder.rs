@@ -58,7 +58,8 @@ pub(crate) fn encode_shards(payload: &ConstellationPayload) -> [[u8; SHARD_BYTES
     }
 
     let rs = ReedSolomon::new(DATA_SHARDS, PARITY_SHARDS).expect("valid RS parameters");
-    rs.encode(&mut shards).expect("RS encode never fails for this configuration");
+    rs.encode(&mut shards)
+        .expect("RS encode never fails for this configuration");
 
     let mut out = [[0u8; SHARD_BYTES]; TOTAL_SHARDS];
     for (i, shard) in shards.iter().enumerate() {
@@ -78,7 +79,9 @@ pub(crate) struct BitArray {
 
 impl BitArray {
     pub fn new() -> Self {
-        Self { bytes: [0u8; FRAME_BITS.div_ceil(8)] }
+        Self {
+            bytes: [0u8; FRAME_BITS.div_ceil(8)],
+        }
     }
 
     pub fn set(&mut self, pos: usize, value: u8) {
@@ -156,8 +159,14 @@ pub fn constellation_encode(payload: &ConstellationPayload, frame_index: u32) ->
 
     // Cosmetic seed mixes a stable per-payload component with the frame.
     let session_seed = u64::from_le_bytes([
-        payload.session_id[0], payload.session_id[1], payload.session_id[2], payload.session_id[3],
-        payload.session_id[4], payload.session_id[5], payload.session_id[6], payload.session_id[7],
+        payload.session_id[0],
+        payload.session_id[1],
+        payload.session_id[2],
+        payload.session_id[3],
+        payload.session_id[4],
+        payload.session_id[5],
+        payload.session_id[6],
+        payload.session_id[7],
     ]);
     let seed = session_seed ^ (frame_index as u64).wrapping_mul(0x9E3779B97F4A7C15);
 

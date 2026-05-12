@@ -47,10 +47,8 @@ pub fn detect_conflicts(
     remote_files: &[FileMeta],
     last_sync: Option<DateTime<Utc>>,
 ) -> Vec<Conflict> {
-    let remote_map: std::collections::HashMap<&Path, &FileMeta> = remote_files
-        .iter()
-        .map(|f| (f.path.as_path(), f))
-        .collect();
+    let remote_map: std::collections::HashMap<&Path, &FileMeta> =
+        remote_files.iter().map(|f| (f.path.as_path(), f)).collect();
 
     let mut conflicts = Vec::new();
     for local in local_files {
@@ -77,10 +75,7 @@ pub fn detect_conflicts(
 /// Build the "loser" filename used when one version is renamed to make way for
 /// the winner. Pattern from the design: `"file (Device, HH:MM).ext"`.
 pub fn loser_filename(original: &Path, device_name: &str, timestamp: &DateTime<Utc>) -> PathBuf {
-    let stem = original
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("file");
+    let stem = original.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
     let ext = original.extension().and_then(|e| e.to_str());
     let ts = timestamp.format("%H:%M");
 
