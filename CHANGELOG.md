@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Nothing yet.
+
+### Changed
+- Nothing yet.
+
+### Fixed
+- Nothing yet.
+
+### Removed
+- Nothing yet.
+
+### Security
+- Nothing yet.
+
 ## [0.1.0] - 2026-05-13
 
 ### Added
@@ -19,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Desktop sync engine with filesystem watcher and conflict resolution
 - WASM bindings for browser-based encryption
 - UniFFI bindings for native mobile integration
+
+### Changed
+- Nothing yet.
+
+### Fixed
+- Nothing yet.
+
+### Removed
+- Nothing yet.
 
 ### Security
 - Zero-knowledge architecture: server never sees plaintext data or keys
