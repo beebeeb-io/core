@@ -96,7 +96,7 @@ cargo test --workspace
 From the Beebeeb workspace checkout:
 
 ```sh
-cd /Users/guuslangelaar/Development/Beebeeb/beebeeb.io/repos/core
+cd repos/core
 cargo test --workspace
 ```
 
@@ -107,14 +107,14 @@ The expected workspace test suite currently covers 53 tests: 26 core tests and 2
 Build native Rust crates:
 
 ```sh
-cd /Users/guuslangelaar/Development/Beebeeb/beebeeb.io/repos/core
+cd repos/core
 cargo build --workspace --release
 ```
 
 Build the WebAssembly package for the web client:
 
 ```sh
-cd /Users/guuslangelaar/Development/Beebeeb/beebeeb.io/repos/core
+cd repos/core
 wasm-pack build beebeeb-wasm --target web
 ```
 
@@ -127,7 +127,7 @@ beebeeb-wasm/pkg
 Build UniFFI bindings:
 
 ```sh
-cd /Users/guuslangelaar/Development/Beebeeb/beebeeb.io/repos/core
+cd repos/core
 cargo build -p beebeeb-uniffi
 ```
 
@@ -149,28 +149,28 @@ Build tools may still require platform-specific environment setup. Examples incl
 Run all tests:
 
 ```sh
-cd /Users/guuslangelaar/Development/Beebeeb/beebeeb.io/repos/core
+cd repos/core
 cargo test --workspace
 ```
 
 Run compile checks:
 
 ```sh
-cd /Users/guuslangelaar/Development/Beebeeb/beebeeb.io/repos/core
+cd repos/core
 cargo check --workspace
 ```
 
 Lint:
 
 ```sh
-cd /Users/guuslangelaar/Development/Beebeeb/beebeeb.io/repos/core
+cd repos/core
 cargo clippy --workspace -- -D warnings
 ```
 
 Format check:
 
 ```sh
-cd /Users/guuslangelaar/Development/Beebeeb/beebeeb.io/repos/core
+cd repos/core
 cargo fmt -- --check
 ```
 
