@@ -13,6 +13,8 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/beebeeb-io/core"
+homepage = "https://beebeeb.io"
+description = "Cryptographic core, shared types, and sync engine for Beebeeb E2E encrypted storage"
 authors = ["Bram Langelaar <bram@beebeeb.io>", "Guus Langelaar <guus@beebeeb.io>"]
 
 [workspace.dependencies]
