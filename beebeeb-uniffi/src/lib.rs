@@ -33,6 +33,12 @@ pub enum CryptoError {
 
     #[error("OPAQUE protocol error: {detail}")]
     Opaque { detail: String },
+
+    #[error("operation cancelled")]
+    Cancelled,
+
+    #[error("I/O error: {detail}")]
+    Io { detail: String },
 }
 
 impl From<beebeeb_core::CoreError> for CryptoError {
@@ -44,6 +50,8 @@ impl From<beebeeb_core::CoreError> for CryptoError {
             beebeeb_core::CoreError::InvalidRecoveryPhrase => CryptoError::InvalidRecoveryPhrase,
             beebeeb_core::CoreError::InvalidInput(s) => CryptoError::InvalidInput { detail: s },
             beebeeb_core::CoreError::Opaque(s) => CryptoError::Opaque { detail: s },
+            beebeeb_core::CoreError::Cancelled => CryptoError::Cancelled,
+            beebeeb_core::CoreError::Io(s) => CryptoError::Io { detail: s },
         }
     }
 }

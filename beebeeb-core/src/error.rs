@@ -19,4 +19,10 @@ pub enum CoreError {
 
     #[error("OPAQUE protocol error: {0}")]
     Opaque(String),
+
+    #[error("operation cancelled")]
+    Cancelled,
+
+    #[error("I/O error: {0}")]
+    Io(String),
 }
