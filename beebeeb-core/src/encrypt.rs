@@ -58,6 +58,54 @@ pub fn decrypt_metadata(key: &FileKey, blob: &EncryptedBlob) -> Result<String, C
     String::from_utf8(plaintext).map_err(|_| CoreError::Decryption)
 }
 
+// ── High-level API for all clients ──────────────────────────────────
+//
+// These functions handle key derivation + encryption + canonical JSON
+// serialization in one call. ALL clients (CLI, web/WASM, mobile/UniFFI)
+// should use these instead of hand-rolling serialization.
+
+/// Encrypt a filename and return the canonical JSON string.
+///
+/// This is the **only** way clients should produce `name_encrypted`.
+/// The output is `{"cipher_suite":"V1Aes256Gcm","nonce":[...],"ciphertext":[...]}`.
+pub fn encrypt_name(
+    master_key: &crate::kdf::MasterKey,
+    file_id: &str,
+    filename: &str,
+) -> Result<String, CoreError> {
+    let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
+    let blob = encrypt_metadata(&file_key, filename)?;
+    serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
+}
+
+/// Decrypt a `name_encrypted` JSON string back to a plaintext filename.
+///
+/// Accepts the canonical format. Returns `Err` if the JSON is malformed
+/// or the key doesn't match.
+pub fn decrypt_name(
+    master_key: &crate::kdf::MasterKey,
+    file_id: &str,
+    name_encrypted: &str,
+) -> Result<String, CoreError> {
+    let blob: EncryptedBlob = serde_json::from_str(name_encrypted)
+        .map_err(|e| CoreError::Decryption)?;
+    let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
+    decrypt_metadata(&file_key, &blob)
+}
+
+/// Encrypt a file chunk and return the canonical JSON string.
+///
+/// This is the **only** way clients should produce chunk data for upload.
+pub fn encrypt_chunk_json(
+    master_key: &crate::kdf::MasterKey,
+    file_id: &str,
+    plaintext: &[u8],
+) -> Result<String, CoreError> {
+    let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
+    let blob = encrypt_chunk(&file_key, plaintext)?;
+    serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
