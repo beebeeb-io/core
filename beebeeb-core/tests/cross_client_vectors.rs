@@ -4,7 +4,10 @@
 //! (CLI, web, mobile) must produce and consume. Any change to encryption
 //! output that breaks these vectors is a cross-client compatibility bug.
 
-use beebeeb_core::encrypt::{decrypt_chunk, decrypt_metadata, encrypt_chunk, encrypt_metadata};
+use beebeeb_core::encrypt::{
+    decrypt_chunk, decrypt_chunk_raw, decrypt_metadata, encrypt_chunk, encrypt_chunk_raw,
+    encrypt_metadata,
+};
 use beebeeb_core::kdf::{derive_file_key, MasterKey};
 use beebeeb_types::{CipherSuite, EncryptedBlob};
 
@@ -205,4 +208,34 @@ fn unicode_filename_roundtrip() {
         let decrypted = decrypt_metadata(&fk2, &blob).unwrap();
         assert_eq!(&decrypted, *name, "unicode roundtrip failed for: {name:?}");
     }
+}
+
+#[test]
+fn raw_chunk_roundtrip() {
+    let mk = MasterKey::from_bytes(TEST_MASTER_KEY);
+    let fk = derive_file_key(&mk, TEST_FILE_ID.as_bytes());
+    let plaintext = b"Hello, raw binary chunk!";
+    let raw = encrypt_chunk_raw(&fk, plaintext).unwrap();
+    // Raw format: 12 bytes nonce + ciphertext (plaintext + 16 tag)
+    assert_eq!(raw.len(), 12 + plaintext.len() + 16);
+    let decrypted = decrypt_chunk_raw(&fk, &raw).unwrap();
+    assert_eq!(decrypted, plaintext);
+}
+
+#[test]
+fn is_media_classification() {
+    assert!(beebeeb_core::media::is_media(Some("image/jpeg")));
+    assert!(beebeeb_core::media::is_media(Some("video/mp4")));
+    assert!(!beebeeb_core::media::is_media(Some("audio/mpeg")));
+    assert!(!beebeeb_core::media::is_media(Some("application/pdf")));
+    assert!(!beebeeb_core::media::is_media(None));
+}
+
+#[test]
+fn guess_mime_covers_common_types() {
+    assert_eq!(beebeeb_core::media::guess_mime_type("photo.jpg"), Some("image/jpeg"));
+    assert_eq!(beebeeb_core::media::guess_mime_type("video.mp4"), Some("video/mp4"));
+    assert_eq!(beebeeb_core::media::guess_mime_type("song.flac"), Some("audio/flac"));
+    assert_eq!(beebeeb_core::media::guess_mime_type("doc.pdf"), Some("application/pdf"));
+    assert_eq!(beebeeb_core::media::guess_mime_type("unknown.xyz"), None);
 }

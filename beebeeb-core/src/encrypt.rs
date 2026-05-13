@@ -143,6 +143,37 @@ pub fn encrypt_chunk_json(
     serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
 }
 
+/// Encrypt a chunk → raw binary: nonce (12 bytes) || ciphertext (includes GCM tag).
+/// This is the canonical chunk wire format. No JSON, no base64.
+pub fn encrypt_chunk_raw(key: &FileKey, plaintext: &[u8]) -> Result<Vec<u8>, CoreError> {
+    let cipher = Aes256Gcm::new_from_slice(key.as_bytes())
+        .map_err(|e| CoreError::Encryption(e.to_string()))?;
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(nonce, plaintext)
+        .map_err(|e| CoreError::Encryption(e.to_string()))?;
+    let mut out = Vec::with_capacity(NONCE_LEN + ciphertext.len());
+    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(&ciphertext);
+    Ok(out)
+}
+
+/// Decrypt a raw binary chunk: nonce (12 bytes) || ciphertext.
+pub fn decrypt_chunk_raw(key: &FileKey, raw: &[u8]) -> Result<Vec<u8>, CoreError> {
+    if raw.len() < NONCE_LEN + 16 {
+        return Err(CoreError::Decryption);
+    }
+    let (nonce_bytes, ciphertext) = raw.split_at(NONCE_LEN);
+    let cipher = Aes256Gcm::new_from_slice(key.as_bytes())
+        .map_err(|e| CoreError::Encryption(e.to_string()))?;
+    let nonce = Nonce::from_slice(nonce_bytes);
+    cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|_| CoreError::Decryption)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
