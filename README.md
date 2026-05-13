@@ -1,5 +1,10 @@
 # Beebeeb Core
 
+[![CI](https://github.com/beebeeb-io/core/actions/workflows/ci.yml/badge.svg)](https://github.com/beebeeb-io/core/actions/workflows/ci.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+![Rust](https://img.shields.io/badge/rust-2024-orange)
+[![Crates](https://img.shields.io/badge/crates-beebeeb--core-orange)](https://github.com/beebeeb-io/core)
+
 Beebeeb Core is the shared Rust cryptography and sync workspace for Beebeeb, an end-to-end encrypted, zero-knowledge cloud storage product made in Europe and operated by Initlabs B.V. (KvK 95157565), Wijchen, Netherlands.
 
 This repository is the trust anchor for Beebeeb clients. The same Rust code is used by the web app through WebAssembly, by mobile apps through UniFFI bindings, by the CLI as a native Rust dependency, and by server-side code where shared types or protocol helpers are needed.
