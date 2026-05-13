@@ -64,33 +64,70 @@ pub fn decrypt_metadata(key: &FileKey, blob: &EncryptedBlob) -> Result<String, C
 // serialization in one call. ALL clients (CLI, web/WASM, mobile/UniFFI)
 // should use these instead of hand-rolling serialization.
 
-/// Encrypt a filename and return the canonical JSON string.
+/// Encrypt a filename (with MIME type) and return the canonical JSON string.
 ///
 /// This is the **only** way clients should produce `name_encrypted`.
-/// The output is `{"cipher_suite":"V1Aes256Gcm","nonce":[...],"ciphertext":[...]}`.
+/// The plaintext is `{"name":"filename","mime_type":"type/subtype"}` —
+/// matching the web app's zero-knowledge format where MIME is encrypted,
+/// never sent in plaintext to the server.
+///
+/// The output envelope is `{"cipher_suite":"V1Aes256Gcm","nonce":[...],"ciphertext":[...]}`.
 pub fn encrypt_name(
     master_key: &crate::kdf::MasterKey,
     file_id: &str,
     filename: &str,
+    mime_type: Option<&str>,
 ) -> Result<String, CoreError> {
+    let plaintext = serde_json::json!({
+        "name": filename,
+        "mime_type": mime_type,
+    }).to_string();
     let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
-    let blob = encrypt_metadata(&file_key, filename)?;
+    let blob = encrypt_metadata(&file_key, &plaintext)?;
     serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
 }
 
 /// Decrypt a `name_encrypted` JSON string back to a plaintext filename.
 ///
-/// Accepts the canonical format. Returns `Err` if the JSON is malformed
-/// or the key doesn't match.
+/// Handles both formats:
+/// - New: `{"name":"file.pdf","mime_type":"application/pdf"}` (extracts `name`)
+/// - Legacy: bare filename string `"file.pdf"`
 pub fn decrypt_name(
     master_key: &crate::kdf::MasterKey,
     file_id: &str,
     name_encrypted: &str,
 ) -> Result<String, CoreError> {
     let blob: EncryptedBlob = serde_json::from_str(name_encrypted)
-        .map_err(|e| CoreError::Decryption)?;
+        .map_err(|_| CoreError::Decryption)?;
     let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
-    decrypt_metadata(&file_key, &blob)
+    let decrypted = decrypt_metadata(&file_key, &blob)?;
+
+    // Extract filename from JSON metadata envelope, or return bare string
+    if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&decrypted) {
+        if let Some(name) = meta.get("name").and_then(|v| v.as_str()) {
+            return Ok(name.to_string());
+        }
+    }
+    Ok(decrypted)
+}
+
+/// Decrypt a `name_encrypted` JSON string and return both filename and MIME type.
+pub fn decrypt_name_with_mime(
+    master_key: &crate::kdf::MasterKey,
+    file_id: &str,
+    name_encrypted: &str,
+) -> Result<(String, Option<String>), CoreError> {
+    let blob: EncryptedBlob = serde_json::from_str(name_encrypted)
+        .map_err(|_| CoreError::Decryption)?;
+    let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
+    let decrypted = decrypt_metadata(&file_key, &blob)?;
+
+    if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&decrypted) {
+        let name = meta.get("name").and_then(|v| v.as_str()).unwrap_or(&decrypted).to_string();
+        let mime = meta.get("mime_type").and_then(|v| v.as_str()).map(|s| s.to_string());
+        return Ok((name, mime));
+    }
+    Ok((decrypted, None))
 }
 
 /// Encrypt a file chunk and return the canonical JSON string.
