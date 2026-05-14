@@ -853,6 +853,27 @@ mod tests {
         assert_eq!(guess_mime_type("unknown.xyz".into()), None);
     }
 
+    // --- plan_chunks tests ---
+
+    #[test]
+    fn plan_chunks_small_file() {
+        let result = plan_chunks(10_000_000, "mobile".into()).unwrap();
+        assert_eq!(result.chunk_size_bytes, 4 * 1024 * 1024); // 4 MiB for files <= 64 MiB
+        assert_eq!(result.chunk_count, 3); // ceil(10_000_000 / 4_194_304)
+    }
+
+    #[test]
+    fn plan_chunks_large_file() {
+        let result = plan_chunks(2_000_000_000, "desktop".into()).unwrap();
+        assert_eq!(result.chunk_size_bytes, 16 * 1024 * 1024); // 16 MiB for files <= 10 GiB
+    }
+
+    #[test]
+    fn plan_chunks_unknown_profile_errors() {
+        let result = plan_chunks(1000, "unknown".into());
+        assert!(result.is_err());
+    }
+
     // --- Constellation tests ---
 
     #[test]
@@ -884,6 +905,42 @@ mod tests {
         assert_eq!(recovered.ephemeral_pubkey, init.payload.ephemeral_pubkey);
         assert!(constellation_verify_code(recovered, init.confirm_code));
     }
+}
+
+// ---------------------------------------------------------------------------
+// Chunk planning
+// ---------------------------------------------------------------------------
+
+/// Result of planning chunks for a file upload. Contains the chunk size and
+/// count needed for the given file size and client profile.
+#[derive(uniffi::Record)]
+pub struct ChunkPlanResult {
+    pub chunk_size_bytes: u64,
+    pub chunk_count: u64,
+}
+
+/// Plan how to split a file into chunks for upload based on the client profile.
+///
+/// `profile` must be one of: `"desktop"`, `"web"`, `"mobile"`, `"backup"`.
+/// Returns the chunk size and count for the given file size.
+#[uniffi::export]
+pub fn plan_chunks(file_size_bytes: u64, profile: String) -> Result<ChunkPlanResult, CryptoError> {
+    let p = match profile.as_str() {
+        "desktop" => beebeeb_types::ChunkProfile::Desktop,
+        "web" => beebeeb_types::ChunkProfile::Web,
+        "mobile" => beebeeb_types::ChunkProfile::Mobile,
+        "backup" => beebeeb_types::ChunkProfile::BackupAgent,
+        _ => {
+            return Err(CryptoError::InvalidInput {
+                detail: format!("unknown profile: {profile}"),
+            })
+        }
+    };
+    let plan = beebeeb_types::plan_chunks(file_size_bytes, p);
+    Ok(ChunkPlanResult {
+        chunk_size_bytes: plan.chunk_size_bytes,
+        chunk_count: plan.chunk_count,
+    })
 }
 
 // ---------------------------------------------------------------------------

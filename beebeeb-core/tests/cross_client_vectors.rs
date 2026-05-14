@@ -239,3 +239,45 @@ fn guess_mime_covers_common_types() {
     assert_eq!(beebeeb_core::media::guess_mime_type("doc.pdf"), Some("application/pdf"));
     assert_eq!(beebeeb_core::media::guess_mime_type("unknown.xyz"), None);
 }
+
+// ---------------------------------------------------------------------------
+// Chunk planning cross-client vectors
+// ---------------------------------------------------------------------------
+
+#[test]
+fn plan_chunks_small_file_mobile() {
+    let plan = beebeeb_types::plan_chunks(10_000_000, beebeeb_types::ChunkProfile::Mobile);
+    assert_eq!(plan.chunk_size_bytes, 4 * 1024 * 1024); // 4 MiB for files <= 64 MiB
+    assert_eq!(plan.chunk_count, 3); // ceil(10_000_000 / 4_194_304)
+}
+
+#[test]
+fn plan_chunks_large_file_desktop() {
+    let plan = beebeeb_types::plan_chunks(2_000_000_000, beebeeb_types::ChunkProfile::Desktop);
+    assert_eq!(plan.chunk_size_bytes, 16 * 1024 * 1024); // 16 MiB for files <= 10 GiB
+}
+
+#[test]
+fn plan_chunks_empty_file() {
+    let plan = beebeeb_types::plan_chunks(0, beebeeb_types::ChunkProfile::Web);
+    assert_eq!(plan.chunk_count, 1); // empty files still produce one chunk
+}
+
+#[test]
+fn plan_chunks_web_capped() {
+    // 5 GiB file: base_chunk_size = 16 MiB, but Web caps at 64 MiB
+    // so 16 MiB < 64 MiB => chunk_size = 16 MiB (no capping needed here)
+    let plan = beebeeb_types::plan_chunks(5 * 1024 * 1024 * 1024, beebeeb_types::ChunkProfile::Web);
+    assert_eq!(plan.chunk_size_bytes, 16 * 1024 * 1024);
+
+    // 200 GiB file: base_chunk_size = 256 MiB, but Web caps at 64 MiB
+    let plan = beebeeb_types::plan_chunks(200 * 1024 * 1024 * 1024, beebeeb_types::ChunkProfile::Web);
+    assert_eq!(plan.chunk_size_bytes, 64 * 1024 * 1024);
+}
+
+#[test]
+fn plan_chunks_mobile_capped() {
+    // 200 GiB file: base_chunk_size = 256 MiB, but Mobile caps at 16 MiB
+    let plan = beebeeb_types::plan_chunks(200 * 1024 * 1024 * 1024, beebeeb_types::ChunkProfile::Mobile);
+    assert_eq!(plan.chunk_size_bytes, 16 * 1024 * 1024);
+}

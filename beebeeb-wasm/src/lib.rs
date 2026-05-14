@@ -252,6 +252,30 @@ pub fn compute_recovery_check(master_key: &[u8]) -> Result<Vec<u8>, JsError> {
 }
 
 // ---------------------------------------------------------------------------
+// Chunk planning
+// ---------------------------------------------------------------------------
+
+/// Plan how to split a file into chunks for upload based on the client profile.
+///
+/// `profile` must be one of: `"desktop"`, `"web"`, `"mobile"`, `"backup"`.
+/// Returns `{ chunk_size_bytes: number, chunk_count: number }`.
+#[wasm_bindgen]
+pub fn plan_chunks(file_size_bytes: u64, profile: &str) -> Result<JsValue, JsError> {
+    let p = match profile {
+        "desktop" => beebeeb_types::ChunkProfile::Desktop,
+        "web" => beebeeb_types::ChunkProfile::Web,
+        "mobile" => beebeeb_types::ChunkProfile::Mobile,
+        "backup" => beebeeb_types::ChunkProfile::BackupAgent,
+        _ => return Err(JsError::new(&format!("unknown profile: {profile}"))),
+    };
+    let plan = beebeeb_types::plan_chunks(file_size_bytes, p);
+    Ok(serde_wasm_bindgen::to_value(&serde_json::json!({
+        "chunk_size_bytes": plan.chunk_size_bytes,
+        "chunk_count": plan.chunk_count,
+    }))?)
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
