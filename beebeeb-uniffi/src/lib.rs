@@ -5,6 +5,7 @@ use zeroize::Zeroize;
 use beebeeb_core::constellation;
 use beebeeb_core::encrypt;
 use beebeeb_core::kdf;
+use beebeeb_core::media;
 use beebeeb_core::recovery;
 use beebeeb_types::{CipherSuite, EncryptedBlob};
 
@@ -95,6 +96,13 @@ pub struct OpaqueLoginFinishResult {
 pub struct RecoveryPhraseResult {
     pub phrase: String,
     pub master_key: Vec<u8>,
+}
+
+/// Result of decrypting a name_encrypted blob with MIME type.
+#[derive(uniffi::Record)]
+pub struct DecryptedNameWithMime {
+    pub name: String,
+    pub mime_type: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +207,71 @@ pub fn decrypt_metadata(key: Vec<u8>, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Re
         ciphertext,
     };
     Ok(encrypt::decrypt_metadata(&fk, &blob)?)
+}
+
+// ---------------------------------------------------------------------------
+// Name encryption (encrypt_name / decrypt_name)
+// ---------------------------------------------------------------------------
+
+/// Encrypt a filename + optional MIME type into the canonical JSON envelope.
+/// The result is a JSON string containing cipher_suite, nonce, and ciphertext.
+#[uniffi::export]
+pub fn encrypt_name(
+    master_key: Vec<u8>,
+    file_id: String,
+    filename: String,
+    mime_type: Option<String>,
+) -> Result<String, CryptoError> {
+    let mk = master_key_from_slice(&master_key)?;
+    encrypt::encrypt_name(&mk, &file_id, &filename, mime_type.as_deref())
+        .map_err(CryptoError::from)
+}
+
+/// Decrypt a `name_encrypted` JSON envelope back to a plaintext filename.
+/// Handles both new format (`{"name":"...","mime_type":"..."}`) and legacy bare strings.
+#[uniffi::export]
+pub fn decrypt_name(
+    master_key: Vec<u8>,
+    file_id: String,
+    name_encrypted: String,
+) -> Result<String, CryptoError> {
+    let mk = master_key_from_slice(&master_key)?;
+    encrypt::decrypt_name(&mk, &file_id, &name_encrypted).map_err(CryptoError::from)
+}
+
+/// Decrypt a `name_encrypted` JSON envelope and return both the filename and
+/// the MIME type (if present in the encrypted payload).
+#[uniffi::export]
+pub fn decrypt_name_with_mime(
+    master_key: Vec<u8>,
+    file_id: String,
+    name_encrypted: String,
+) -> Result<DecryptedNameWithMime, CryptoError> {
+    let mk = master_key_from_slice(&master_key)?;
+    let (name, mime) =
+        encrypt::decrypt_name_with_mime(&mk, &file_id, &name_encrypted).map_err(CryptoError::from)?;
+    Ok(DecryptedNameWithMime {
+        name,
+        mime_type: mime,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Media utilities
+// ---------------------------------------------------------------------------
+
+/// Returns `true` if the given MIME type represents media (image or video).
+/// Single source of truth for all clients.
+#[uniffi::export]
+pub fn is_media(mime_type: Option<String>) -> bool {
+    media::is_media(mime_type.as_deref())
+}
+
+/// Guess the MIME type from a filename extension.
+/// Returns `None` for unknown extensions.
+#[uniffi::export]
+pub fn guess_mime_type(filename: String) -> Option<String> {
+    media::guess_mime_type(&filename).map(|s| s.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -400,6 +473,44 @@ impl MasterKeyHandle {
     /// Compute the recovery-check value (stored server-side to verify the phrase).
     pub fn compute_recovery_check(&self) -> Result<Vec<u8>, CryptoError> {
         self.with_key(|mk| beebeeb_core::opaque::compute_recovery_check(mk).to_vec())
+    }
+
+    /// Encrypt a filename + optional MIME type using the handle's master key.
+    pub fn encrypt_name(
+        &self,
+        file_id: String,
+        filename: String,
+        mime_type: Option<String>,
+    ) -> Result<String, CryptoError> {
+        self.with_key(|mk| {
+            encrypt::encrypt_name(mk, &file_id, &filename, mime_type.as_deref())
+        })?
+        .map_err(CryptoError::from)
+    }
+
+    /// Decrypt a `name_encrypted` envelope using the handle's master key.
+    pub fn decrypt_name(
+        &self,
+        file_id: String,
+        name_encrypted: String,
+    ) -> Result<String, CryptoError> {
+        self.with_key(|mk| encrypt::decrypt_name(mk, &file_id, &name_encrypted))?
+            .map_err(CryptoError::from)
+    }
+
+    /// Decrypt a `name_encrypted` envelope and return both filename and MIME type.
+    pub fn decrypt_name_with_mime(
+        &self,
+        file_id: String,
+        name_encrypted: String,
+    ) -> Result<DecryptedNameWithMime, CryptoError> {
+        let (name, mime) = self
+            .with_key(|mk| encrypt::decrypt_name_with_mime(mk, &file_id, &name_encrypted))?
+            .map_err(CryptoError::from)?;
+        Ok(DecryptedNameWithMime {
+            name,
+            mime_type: mime,
+        })
     }
 }
 
@@ -652,6 +763,94 @@ mod tests {
         let enc = fk_handle.encrypt_metadata(name.into()).unwrap();
         let dec = fk_handle.decrypt_metadata(enc.nonce, enc.ciphertext).unwrap();
         assert_eq!(dec, name);
+    }
+
+    // --- encrypt_name / decrypt_name tests ---
+
+    #[test]
+    fn roundtrip_encrypt_decrypt_name() {
+        let mk = derive_master_key("password".into(), TEST_SALT.to_vec()).unwrap();
+        let file_id = "file-0001";
+        let filename = "vacation.jpg";
+        let mime = Some("image/jpeg".to_string());
+
+        let encrypted = encrypt_name(mk.key.clone(), file_id.into(), filename.into(), mime).unwrap();
+        let decrypted = decrypt_name(mk.key, file_id.into(), encrypted).unwrap();
+        assert_eq!(decrypted, filename);
+    }
+
+    #[test]
+    fn roundtrip_encrypt_decrypt_name_with_mime() {
+        let mk = derive_master_key("password".into(), TEST_SALT.to_vec()).unwrap();
+        let file_id = "file-0002";
+        let filename = "report.pdf";
+        let mime = Some("application/pdf".to_string());
+
+        let encrypted =
+            encrypt_name(mk.key.clone(), file_id.into(), filename.into(), mime.clone()).unwrap();
+        let result = decrypt_name_with_mime(mk.key, file_id.into(), encrypted).unwrap();
+        assert_eq!(result.name, filename);
+        assert_eq!(result.mime_type, mime);
+    }
+
+    #[test]
+    fn encrypt_name_no_mime() {
+        let mk = derive_master_key("password".into(), TEST_SALT.to_vec()).unwrap();
+        let file_id = "file-0003";
+
+        let encrypted =
+            encrypt_name(mk.key.clone(), file_id.into(), "notes.txt".into(), None).unwrap();
+        let result = decrypt_name_with_mime(mk.key, file_id.into(), encrypted).unwrap();
+        assert_eq!(result.name, "notes.txt");
+        assert_eq!(result.mime_type, None);
+    }
+
+    #[test]
+    fn master_key_handle_encrypt_decrypt_name() {
+        let mk = derive_master_key("password".into(), TEST_SALT.to_vec()).unwrap();
+        let handle = MasterKeyHandle::from_keychain_bytes(mk.key).unwrap();
+        let file_id = "file-0004";
+
+        let encrypted = handle
+            .encrypt_name(file_id.into(), "photo.png".into(), Some("image/png".into()))
+            .unwrap();
+        let decrypted = handle.decrypt_name(file_id.into(), encrypted).unwrap();
+        assert_eq!(decrypted, "photo.png");
+    }
+
+    #[test]
+    fn master_key_handle_decrypt_name_with_mime() {
+        let mk = derive_master_key("password".into(), TEST_SALT.to_vec()).unwrap();
+        let handle = MasterKeyHandle::from_keychain_bytes(mk.key).unwrap();
+        let file_id = "file-0005";
+
+        let encrypted = handle
+            .encrypt_name(file_id.into(), "video.mp4".into(), Some("video/mp4".into()))
+            .unwrap();
+        let result = handle
+            .decrypt_name_with_mime(file_id.into(), encrypted)
+            .unwrap();
+        assert_eq!(result.name, "video.mp4");
+        assert_eq!(result.mime_type, Some("video/mp4".into()));
+    }
+
+    // --- media utility tests ---
+
+    #[test]
+    fn is_media_image() {
+        assert!(is_media(Some("image/jpeg".into())));
+        assert!(is_media(Some("image/png".into())));
+        assert!(is_media(Some("video/mp4".into())));
+        assert!(!is_media(Some("application/pdf".into())));
+        assert!(!is_media(None));
+    }
+
+    #[test]
+    fn guess_mime_type_known_extensions() {
+        assert_eq!(guess_mime_type("photo.jpg".into()), Some("image/jpeg".into()));
+        assert_eq!(guess_mime_type("doc.pdf".into()), Some("application/pdf".into()));
+        assert_eq!(guess_mime_type("clip.mp4".into()), Some("video/mp4".into()));
+        assert_eq!(guess_mime_type("unknown.xyz".into()), None);
     }
 
     // --- Constellation tests ---
