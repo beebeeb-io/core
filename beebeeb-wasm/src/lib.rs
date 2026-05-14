@@ -276,6 +276,22 @@ pub fn plan_chunks(file_size_bytes: u64, profile: &str) -> Result<JsValue, JsErr
 }
 
 // ---------------------------------------------------------------------------
+// Media utilities
+// ---------------------------------------------------------------------------
+
+/// Returns `true` if the given MIME type can be previewed in-app.
+#[wasm_bindgen]
+pub fn is_previewable(mime_type: Option<String>) -> bool {
+    beebeeb_core::media::is_previewable(mime_type.as_deref())
+}
+
+/// Returns `true` if the file extension indicates a previewable file.
+#[wasm_bindgen]
+pub fn is_previewable_by_extension(filename: &str) -> bool {
+    beebeeb_core::media::is_previewable_by_extension(filename)
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

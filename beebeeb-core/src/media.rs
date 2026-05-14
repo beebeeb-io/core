@@ -10,6 +10,51 @@ pub fn is_media(mime_type: Option<&str>) -> bool {
     }
 }
 
+/// Returns true if the MIME type can be previewed in-app.
+/// Covers: images, video, audio, PDF, text, markdown, code.
+pub fn is_previewable(mime_type: Option<&str>) -> bool {
+    match mime_type {
+        None => false,
+        Some(m) => {
+            m.starts_with("image/")
+                || m.starts_with("video/")
+                || m.starts_with("audio/")
+                || m.starts_with("text/")
+                || m == "application/pdf"
+                || m == "application/json"
+                || m == "application/xml"
+                || m == "application/javascript"
+        }
+    }
+}
+
+/// Returns true if the file extension indicates a previewable file.
+/// Use when MIME type is unknown (encrypted).
+pub fn is_previewable_by_extension(filename: &str) -> bool {
+    let ext = match filename.rsplit('.').next() {
+        Some(e) => e.to_lowercase(),
+        None => return false,
+    };
+    matches!(ext.as_str(),
+        // Images
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "svg" | "bmp" | "ico" | "avif" | "heic" | "tiff" | "tif" |
+        // Video
+        "mp4" | "mov" | "webm" | "mkv" | "avi" |
+        // Audio
+        "mp3" | "flac" | "wav" | "aac" | "ogg" | "m4a" | "opus" | "wma" |
+        // PDF
+        "pdf" |
+        // Text / Markdown
+        "txt" | "md" | "markdown" | "csv" | "log" | "rtf" |
+        // Code
+        "py" | "js" | "jsx" | "ts" | "tsx" | "rs" | "go" | "rb" | "java" | "kt" | "swift" |
+        "c" | "cpp" | "h" | "hpp" | "cs" | "php" | "sh" | "bash" | "zsh" |
+        "html" | "htm" | "css" | "scss" | "less" |
+        "json" | "xml" | "yaml" | "yml" | "toml" | "ini" | "conf" |
+        "sql" | "graphql" | "proto" | "dockerfile" | "makefile"
+    )
+}
+
 /// Guess the MIME type from a filename extension.
 /// Returns None for unknown extensions.
 pub fn guess_mime_type(filename: &str) -> Option<&'static str> {

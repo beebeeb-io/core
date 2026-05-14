@@ -232,6 +232,27 @@ fn is_media_classification() {
 }
 
 #[test]
+fn previewable_types() {
+    assert!(beebeeb_core::media::is_previewable(Some("image/jpeg")));
+    assert!(beebeeb_core::media::is_previewable(Some("audio/mpeg")));
+    assert!(beebeeb_core::media::is_previewable(Some("video/mp4")));
+    assert!(beebeeb_core::media::is_previewable(Some("text/plain")));
+    assert!(beebeeb_core::media::is_previewable(Some("application/pdf")));
+    assert!(!beebeeb_core::media::is_previewable(Some("application/zip")));
+    assert!(!beebeeb_core::media::is_previewable(None));
+}
+
+#[test]
+fn previewable_extensions() {
+    assert!(beebeeb_core::media::is_previewable_by_extension("photo.jpg"));
+    assert!(beebeeb_core::media::is_previewable_by_extension("song.mp3"));
+    assert!(beebeeb_core::media::is_previewable_by_extension("code.py"));
+    assert!(beebeeb_core::media::is_previewable_by_extension("readme.md"));
+    assert!(!beebeeb_core::media::is_previewable_by_extension("archive.zip"));
+    assert!(!beebeeb_core::media::is_previewable_by_extension("noext"));
+}
+
+#[test]
 fn guess_mime_covers_common_types() {
     assert_eq!(beebeeb_core::media::guess_mime_type("photo.jpg"), Some("image/jpeg"));
     assert_eq!(beebeeb_core::media::guess_mime_type("video.mp4"), Some("video/mp4"));

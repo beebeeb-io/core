@@ -274,6 +274,18 @@ pub fn guess_mime_type(filename: String) -> Option<String> {
     media::guess_mime_type(&filename).map(|s| s.to_string())
 }
 
+/// Returns `true` if the given MIME type can be previewed in-app.
+#[uniffi::export]
+fn is_previewable(mime_type: Option<String>) -> bool {
+    beebeeb_core::media::is_previewable(mime_type.as_deref())
+}
+
+/// Returns `true` if the file extension indicates a previewable file.
+#[uniffi::export]
+fn is_previewable_by_extension(filename: String) -> bool {
+    beebeeb_core::media::is_previewable_by_extension(&filename)
+}
+
 // ---------------------------------------------------------------------------
 // Recovery phrase
 // ---------------------------------------------------------------------------
