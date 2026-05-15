@@ -292,6 +292,48 @@ pub fn is_previewable_by_extension(filename: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Quota / plan helpers
+// ---------------------------------------------------------------------------
+
+/// Return the base storage quota (in bytes) for a plan slug.
+#[wasm_bindgen]
+pub fn plan_base_storage_bytes(plan_slug: &str) -> i64 {
+    beebeeb_types::Plan::from_slug(plan_slug).base_storage_bytes()
+}
+
+/// Compute the effective quota after add-ons and bonus bytes.
+#[wasm_bindgen]
+pub fn plan_effective_quota(plan_slug: &str, extra_tb: i64, bonus_bytes: i64) -> i64 {
+    let plan = beebeeb_types::Plan::from_slug(plan_slug);
+    beebeeb_types::effective_quota(plan, extra_tb, bonus_bytes)
+}
+
+/// Maximum additional TB a plan may purchase.
+#[wasm_bindgen]
+pub fn plan_max_extra_tb(plan_slug: &str) -> i64 {
+    beebeeb_types::Plan::from_slug(plan_slug).max_extra_tb()
+}
+
+/// Whether the plan supports purchasing extra storage.
+#[wasm_bindgen]
+pub fn plan_can_add_storage(plan_slug: &str) -> bool {
+    beebeeb_types::Plan::from_slug(plan_slug).can_add_storage()
+}
+
+/// Monthly cost in cents for a plan with optional add-ons.
+#[wasm_bindgen]
+pub fn plan_monthly_cost_cents(plan_slug: &str, extra_tb: i64, extra_users: i64) -> i64 {
+    let plan = beebeeb_types::Plan::from_slug(plan_slug);
+    beebeeb_types::monthly_cost_cents(plan, extra_tb, extra_users)
+}
+
+/// Format a byte count as a human-readable SI string (e.g. "5.0 TB").
+#[wasm_bindgen]
+pub fn storage_format_si(bytes: i64) -> String {
+    beebeeb_types::format_storage_si(bytes)
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
