@@ -160,6 +160,36 @@ pub fn encrypt_chunk_raw(key: &FileKey, plaintext: &[u8]) -> Result<Vec<u8>, Cor
     Ok(out)
 }
 
+/// Decrypt a sequence of encrypted chunks and write the plaintext to a file.
+/// Each chunk is an `EncryptedBlob` (V1Aes256Gcm with 12-byte nonce).
+/// Returns the total number of plaintext bytes written.
+pub fn decrypt_chunks_to_file(
+    key: &FileKey,
+    chunks: Vec<(Vec<u8>, Vec<u8>)>, // Vec of (nonce, ciphertext) pairs
+    output_path: &str,
+) -> Result<u64, CoreError> {
+    use std::fs::File;
+    use std::io::Write;
+
+    let mut file = File::create(output_path)
+        .map_err(|e| CoreError::Io(format!("create file: {e}")))?;
+    let mut total: u64 = 0;
+    for (nonce, ciphertext) in chunks {
+        let blob = EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce,
+            ciphertext,
+        };
+        let plaintext = decrypt_chunk(key, &blob)?;
+        file.write_all(&plaintext)
+            .map_err(|e| CoreError::Io(format!("write: {e}")))?;
+        total += plaintext.len() as u64;
+    }
+    file.flush()
+        .map_err(|e| CoreError::Io(format!("flush: {e}")))?;
+    Ok(total)
+}
+
 /// Decrypt a raw binary chunk: nonce (12 bytes) || ciphertext.
 pub fn decrypt_chunk_raw(key: &FileKey, raw: &[u8]) -> Result<Vec<u8>, CoreError> {
     if raw.len() < NONCE_LEN + 16 {
@@ -277,6 +307,68 @@ mod tests {
         let blob1 = encrypt_chunk(&key, b"same").unwrap();
         let blob2 = encrypt_chunk(&key, b"same").unwrap();
         assert_ne!(blob1.nonce, blob2.nonce);
+    }
+
+    #[test]
+    fn decrypt_chunks_to_file_roundtrip() {
+        let key = test_file_key();
+        let chunk1 = b"hello, ";
+        let chunk2 = b"beebeeb!";
+
+        let blob1 = encrypt_chunk(&key, chunk1).unwrap();
+        let blob2 = encrypt_chunk(&key, chunk2).unwrap();
+
+        let chunks = vec![
+            (blob1.nonce, blob1.ciphertext),
+            (blob2.nonce, blob2.ciphertext),
+        ];
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("beebeeb_test_decrypt_chunks.bin");
+        let path_str = path.to_str().unwrap();
+
+        let total = decrypt_chunks_to_file(&key, chunks, path_str).unwrap();
+        assert_eq!(total, (chunk1.len() + chunk2.len()) as u64);
+
+        let written = std::fs::read(&path).unwrap();
+        assert_eq!(written, b"hello, beebeeb!");
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn decrypt_chunks_to_file_empty() {
+        let key = test_file_key();
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("beebeeb_test_decrypt_empty.bin");
+        let path_str = path.to_str().unwrap();
+
+        let total = decrypt_chunks_to_file(&key, vec![], path_str).unwrap();
+        assert_eq!(total, 0);
+
+        let written = std::fs::read(&path).unwrap();
+        assert!(written.is_empty());
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn decrypt_chunks_to_file_wrong_key_fails() {
+        let key = test_file_key();
+        let blob = encrypt_chunk(&key, b"secret data").unwrap();
+        let chunks = vec![(blob.nonce, blob.ciphertext)];
+
+        let mk = derive_master_key("different-password", b"different-salt-16").unwrap();
+        let wrong_key = derive_file_key(&mk, b"wrong-file");
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("beebeeb_test_decrypt_wrong_key.bin");
+        let path_str = path.to_str().unwrap();
+
+        assert!(decrypt_chunks_to_file(&wrong_key, chunks, path_str).is_err());
+
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]

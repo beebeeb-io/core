@@ -98,6 +98,13 @@ pub struct RecoveryPhraseResult {
     pub master_key: Vec<u8>,
 }
 
+/// A single encrypted chunk (nonce + ciphertext) for batch decryption.
+#[derive(uniffi::Record)]
+pub struct EncryptedChunkData {
+    pub nonce: Vec<u8>,
+    pub ciphertext: Vec<u8>,
+}
+
 /// Result of decrypting a name_encrypted blob with MIME type.
 #[derive(uniffi::Record)]
 pub struct DecryptedNameWithMime {
@@ -183,6 +190,23 @@ pub fn decrypt_chunk(key: Vec<u8>, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Resul
         ciphertext,
     };
     Ok(encrypt::decrypt_chunk(&fk, &blob)?)
+}
+
+/// Decrypt a sequence of encrypted chunks and write the plaintext to a file.
+/// Returns the total number of plaintext bytes written.
+#[uniffi::export]
+pub fn decrypt_chunks_to_file(
+    key: Vec<u8>,
+    chunks: Vec<EncryptedChunkData>,
+    output_path: String,
+) -> Result<u64, CryptoError> {
+    let fk = file_key_from_slice(&key)?;
+    let chunk_pairs: Vec<(Vec<u8>, Vec<u8>)> = chunks
+        .into_iter()
+        .map(|c| (c.nonce, c.ciphertext))
+        .collect();
+    encrypt::decrypt_chunks_to_file(&fk, chunk_pairs, &output_path)
+        .map_err(CryptoError::from)
 }
 
 // ---------------------------------------------------------------------------

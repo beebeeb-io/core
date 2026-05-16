@@ -86,6 +86,38 @@ pub fn decrypt_metadata(key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<S
     encrypt::decrypt_metadata(&fk, &blob).map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Decrypt a sequence of encrypted chunks and return the concatenated plaintext.
+/// Each chunk is a JS object `{ nonce: Uint8Array, ciphertext: Uint8Array }`.
+/// Returns the full plaintext as `Uint8Array`.
+#[wasm_bindgen]
+pub fn decrypt_chunks(key: &[u8], chunks: JsValue) -> Result<Vec<u8>, JsError> {
+    let fk = file_key_from_slice(key)?;
+    let arr = js_sys::Array::from(&chunks);
+    let mut result = Vec::new();
+
+    for i in 0..arr.length() {
+        let chunk = arr.get(i);
+        let nonce = js_sys::Reflect::get(&chunk, &"nonce".into())
+            .map_err(|e| JsError::new(&format!("missing nonce: {e:?}")))?;
+        let ciphertext = js_sys::Reflect::get(&chunk, &"ciphertext".into())
+            .map_err(|e| JsError::new(&format!("missing ciphertext: {e:?}")))?;
+
+        let nonce_bytes = js_sys::Uint8Array::new(&nonce).to_vec();
+        let ct_bytes = js_sys::Uint8Array::new(&ciphertext).to_vec();
+
+        let blob = EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce: nonce_bytes,
+            ciphertext: ct_bytes,
+        };
+        let plaintext = encrypt::decrypt_chunk(&fk, &blob)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        result.extend_from_slice(&plaintext);
+    }
+
+    Ok(result)
+}
+
 // ---------------------------------------------------------------------------
 // Recovery phrase
 // ---------------------------------------------------------------------------

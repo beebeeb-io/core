@@ -37,7 +37,7 @@ pub fn is_previewable_by_extension(filename: &str) -> bool {
     };
     matches!(ext.as_str(),
         // Images
-        "jpg" | "jpeg" | "png" | "gif" | "webp" | "svg" | "bmp" | "ico" | "avif" | "heic" | "tiff" | "tif" |
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "svg" | "bmp" | "ico" | "avif" | "heic" | "heif" | "tiff" | "tif" |
         // Video
         "mp4" | "mov" | "webm" | "mkv" | "avi" |
         // Audio
@@ -46,12 +46,18 @@ pub fn is_previewable_by_extension(filename: &str) -> bool {
         "pdf" |
         // Text / Markdown
         "txt" | "md" | "markdown" | "csv" | "log" | "rtf" |
+        // Office
+        "docx" | "xlsx" | "pptx" | "odt" | "ods" | "odp" |
+        // Archives
+        "tar" | "gz" | "tgz" |
         // Code
         "py" | "js" | "jsx" | "ts" | "tsx" | "rs" | "go" | "rb" | "java" | "kt" | "swift" |
         "c" | "cpp" | "h" | "hpp" | "cs" | "php" | "sh" | "bash" | "zsh" |
         "html" | "htm" | "css" | "scss" | "less" |
+        "vue" | "svelte" | "astro" |
+        "dart" | "r" | "ex" | "exs" | "zig" | "nim" | "v" |
         "json" | "xml" | "yaml" | "yml" | "toml" | "ini" | "conf" |
-        "sql" | "graphql" | "proto" | "dockerfile" | "makefile"
+        "sql" | "graphql" | "proto" | "cmake" | "dockerfile" | "makefile"
     )
 }
 
@@ -96,6 +102,9 @@ pub fn guess_mime_type(filename: &str) -> Option<&'static str> {
         "xlsx" => Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
         "ppt" => Some("application/vnd.ms-powerpoint"),
         "pptx" => Some("application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+        "odt" => Some("application/vnd.oasis.opendocument.text"),
+        "ods" => Some("application/vnd.oasis.opendocument.spreadsheet"),
+        "odp" => Some("application/vnd.oasis.opendocument.presentation"),
         "txt" | "text" => Some("text/plain"),
         "csv" => Some("text/csv"),
         "md" | "markdown" => Some("text/markdown"),
@@ -104,9 +113,21 @@ pub fn guess_mime_type(filename: &str) -> Option<&'static str> {
         "html" | "htm" => Some("text/html"),
         "css" => Some("text/css"),
         "js" => Some("application/javascript"),
+        "vue" | "svelte" | "astro" => Some("text/plain"),
+        "kt" => Some("text/x-kotlin"),
+        "swift" => Some("text/x-swift"),
+        "cs" => Some("text/x-csharp"),
+        "dart" => Some("text/x-dart"),
+        "r" => Some("text/x-r"),
+        "ex" | "exs" => Some("text/x-elixir"),
+        "zig" => Some("text/x-zig"),
+        "nim" => Some("text/x-nim"),
+        "v" => Some("text/x-v"),
+        "proto" => Some("text/x-protobuf"),
+        "cmake" => Some("text/x-cmake"),
         // Archives
         "zip" => Some("application/zip"),
-        "gz" | "gzip" => Some("application/gzip"),
+        "gz" | "gzip" | "tgz" => Some("application/gzip"),
         "tar" => Some("application/x-tar"),
         "rar" => Some("application/vnd.rar"),
         "7z" => Some("application/x-7z-compressed"),
