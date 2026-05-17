@@ -11,7 +11,7 @@ const GIB: u64 = 1024 * MIB;
 
 const MIN_CHUNK_SIZE_BYTES: u64 = 4 * MIB;
 const WEB_MAX_CHUNK_SIZE_BYTES: u64 = 64 * MIB;
-const MOBILE_MAX_CHUNK_SIZE_BYTES: u64 = 16 * MIB;
+const MOBILE_MAX_CHUNK_SIZE_BYTES: u64 = 64 * MIB;
 
 /// Client/runtime profile used to choose memory-safe chunk sizes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

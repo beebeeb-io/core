@@ -298,7 +298,7 @@ fn plan_chunks_web_capped() {
 
 #[test]
 fn plan_chunks_mobile_capped() {
-    // 200 GiB file: base_chunk_size = 256 MiB, but Mobile caps at 16 MiB
+    // 200 GiB file: base_chunk_size = 256 MiB, but Mobile caps at 64 MiB
     let plan = beebeeb_types::plan_chunks(200 * 1024 * 1024 * 1024, beebeeb_types::ChunkProfile::Mobile);
-    assert_eq!(plan.chunk_size_bytes, 16 * 1024 * 1024);
+    assert_eq!(plan.chunk_size_bytes, 64 * 1024 * 1024);
 }

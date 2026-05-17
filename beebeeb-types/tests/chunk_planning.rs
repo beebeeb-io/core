@@ -85,15 +85,15 @@ fn web_profile_caps_large_files_at_64_mib_chunks() {
 }
 
 #[test]
-fn mobile_profile_caps_large_files_at_16_mib_chunks() {
+fn mobile_profile_caps_large_files_at_64_mib_chunks() {
     let plan = plan_chunks(500 * GIB, ChunkProfile::Mobile);
 
-    assert_eq!(plan.chunk_size_bytes, 16 * MIB);
-    assert_eq!(plan.chunk_count, 32_000);
+    assert_eq!(plan.chunk_size_bytes, 64 * MIB);
+    assert_eq!(plan.chunk_count, 8_000);
     assert_eq!(
         plan.strategy,
         ChunkStrategy::Capped {
-            max_chunk_size_bytes: 16 * MIB,
+            max_chunk_size_bytes: 64 * MIB,
         }
     );
 }
