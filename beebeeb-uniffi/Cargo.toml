@@ -16,8 +16,10 @@ path = "uniffi-bindgen.rs"
 [dependencies]
 beebeeb-core = { path = "../beebeeb-core" }
 beebeeb-types = { path = "../beebeeb-types" }
+beebeeb-upload = { path = "../beebeeb-upload" }
 uniffi = { version = "0.31.1", features = ["cli"] }
 thiserror = { workspace = true }
+tokio = { version = "1", features = ["rt"] }
 zeroize = { version = "1", features = ["derive"] }
 
 [build-dependencies]

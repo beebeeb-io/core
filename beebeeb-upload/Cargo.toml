@@ -1,0 +1,17 @@
+[package]
+name = "beebeeb-upload"
+version = "0.1.0"
+edition = "2021"
+description = "Upload protocol for Beebeeb E2E encrypted storage"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+beebeeb-core = { path = "../beebeeb-core" }
+beebeeb-types = { path = "../beebeeb-types" }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "macros", "fs", "time"] }
+uuid = { version = "1", features = ["v4"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
