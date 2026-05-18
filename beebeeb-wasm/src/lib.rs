@@ -366,6 +366,99 @@ pub fn storage_format_si(bytes: i64) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// PDF generation
+// ---------------------------------------------------------------------------
+
+/// Generate a recovery kit PDF with a title, recovery words, and metadata.
+///
+/// `metadata_keys` and `metadata_values` are parallel arrays of key-value pairs.
+/// Returns the raw PDF bytes as `Uint8Array`.
+#[wasm_bindgen]
+pub fn generate_recovery_pdf(
+    title: &str,
+    words: JsValue,
+    metadata_keys: JsValue,
+    metadata_values: JsValue,
+) -> Result<Vec<u8>, JsError> {
+    let words_arr = js_sys::Array::from(&words);
+    let keys_arr = js_sys::Array::from(&metadata_keys);
+    let values_arr = js_sys::Array::from(&metadata_values);
+
+    if keys_arr.length() != values_arr.length() {
+        return Err(JsError::new(
+            "metadata_keys and metadata_values must have the same length",
+        ));
+    }
+
+    let words_vec: Vec<String> = (0..words_arr.length())
+        .map(|i| words_arr.get(i).as_string().unwrap_or_default())
+        .collect();
+
+    let keys_vec: Vec<String> = (0..keys_arr.length())
+        .map(|i| keys_arr.get(i).as_string().unwrap_or_default())
+        .collect();
+    let values_vec: Vec<String> = (0..values_arr.length())
+        .map(|i| values_arr.get(i).as_string().unwrap_or_default())
+        .collect();
+
+    let pairs: Vec<(&str, &str)> = keys_vec
+        .iter()
+        .zip(values_vec.iter())
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+
+    Ok(beebeeb_core::pdf::generate_recovery_pdf(title, &words_vec, &pairs))
+}
+
+// ---------------------------------------------------------------------------
+// Archive parsing
+// ---------------------------------------------------------------------------
+
+/// List entries in a TAR archive from raw bytes.
+/// Returns a JS array of `{ name: string, size: number, is_directory: boolean }`.
+#[wasm_bindgen]
+pub fn list_tar_entries(data: &[u8]) -> Result<JsValue, JsError> {
+    let entries =
+        beebeeb_core::archive::list_tar_entries(data).map_err(|e| JsError::new(&e.to_string()))?;
+    archive_entries_to_js(&entries)
+}
+
+/// Decompress gzip-compressed data. Returns `Uint8Array`.
+#[wasm_bindgen]
+pub fn decompress_gzip(data: &[u8]) -> Result<Vec<u8>, JsError> {
+    beebeeb_core::archive::decompress_gzip(data).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// List entries in an archive, detecting format from the filename extension.
+/// Supports `.tar`, `.gz`, `.tgz`, `.tar.gz`.
+/// Returns a JS array of `{ name: string, size: number, is_directory: boolean }`.
+#[wasm_bindgen]
+pub fn list_archive(data: &[u8], filename: &str) -> Result<JsValue, JsError> {
+    let entries = beebeeb_core::archive::list_archive(data, filename)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    archive_entries_to_js(&entries)
+}
+
+fn archive_entries_to_js(entries: &[beebeeb_core::archive::ArchiveEntry]) -> Result<JsValue, JsError> {
+    let arr = js_sys::Array::new_with_length(entries.len() as u32);
+    for (i, entry) in entries.iter().enumerate() {
+        let obj = js_sys::Object::new();
+        js_sys::Reflect::set(&obj, &"name".into(), &JsValue::from_str(&entry.name))
+            .map_err(|e| JsError::new(&format!("{e:?}")))?;
+        js_sys::Reflect::set(&obj, &"size".into(), &JsValue::from_f64(entry.size as f64))
+            .map_err(|e| JsError::new(&format!("{e:?}")))?;
+        js_sys::Reflect::set(
+            &obj,
+            &"is_directory".into(),
+            &JsValue::from_bool(entry.is_directory),
+        )
+        .map_err(|e| JsError::new(&format!("{e:?}")))?;
+        arr.set(i as u32, obj.into());
+    }
+    Ok(arr.into())
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
