@@ -139,6 +139,13 @@ pub struct DecryptedNameWithMime {
     pub mime_type: Option<String>,
 }
 
+/// Parsed encrypted metadata payload (nonce + ciphertext bytes).
+#[derive(uniffi::Record)]
+pub struct EncryptedMetadataParts {
+    pub nonce: Vec<u8>,
+    pub ciphertext: Vec<u8>,
+}
+
 // ---------------------------------------------------------------------------
 // File progress callback — UniFFI callback interface for Swift/Kotlin
 // ---------------------------------------------------------------------------
@@ -1090,6 +1097,223 @@ mod tests {
 }
 
 // ---------------------------------------------------------------------------
+// Blob encrypt/decrypt (P3-1: search index encryption)
+// ---------------------------------------------------------------------------
+
+/// Encrypt an arbitrary byte buffer with AES-256-GCM.
+///
+/// Returns `nonce (12 bytes) || ciphertext`. The key must be exactly 32 bytes.
+/// Used by the search index and anywhere an opaque blob needs authenticated encryption.
+#[uniffi::export]
+pub fn encrypt_blob(key: Vec<u8>, plaintext: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
+    let k: [u8; 32] = key.try_into().map_err(|_| CryptoError::InvalidInput {
+        detail: "key must be exactly 32 bytes".into(),
+    })?;
+    beebeeb_core::blob::encrypt_blob(&k, &plaintext).map_err(CryptoError::from)
+}
+
+/// Decrypt a blob produced by `encrypt_blob`.
+///
+/// Expects `nonce (12 bytes) || ciphertext`. Returns the original plaintext.
+#[uniffi::export]
+pub fn decrypt_blob(key: Vec<u8>, ciphertext: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
+    let k: [u8; 32] = key.try_into().map_err(|_| CryptoError::InvalidInput {
+        detail: "key must be exactly 32 bytes".into(),
+    })?;
+    beebeeb_core::blob::decrypt_blob(&k, &ciphertext).map_err(CryptoError::from)
+}
+
+// ---------------------------------------------------------------------------
+// Metadata wire format (P3-6: metadata serialization)
+// ---------------------------------------------------------------------------
+
+/// Serialize a nonce + ciphertext pair into the canonical JSON metadata format.
+///
+/// Output: `{"nonce":"<base64>","ciphertext":"<base64>"}`.
+#[uniffi::export]
+pub fn serialize_encrypted_metadata(nonce: Vec<u8>, ciphertext: Vec<u8>) -> String {
+    beebeeb_core::metadata_wire::serialize_encrypted_metadata(&nonce, &ciphertext)
+}
+
+/// Parse a JSON-encoded encrypted metadata payload.
+///
+/// Accepts both base64 strings (canonical) and numeric arrays (legacy).
+/// Returns a record with `nonce` and `ciphertext` byte vectors.
+#[uniffi::export]
+pub fn parse_encrypted_metadata(payload: String) -> Result<EncryptedMetadataParts, CryptoError> {
+    let (nonce, ciphertext) =
+        beebeeb_core::metadata_wire::parse_encrypted_metadata(&payload).map_err(CryptoError::from)?;
+    Ok(EncryptedMetadataParts { nonce, ciphertext })
+}
+
+// ---------------------------------------------------------------------------
+// SHA-256 (P3-4)
+// ---------------------------------------------------------------------------
+
+/// Compute the SHA-256 digest of `data`. Returns a 32-byte hash.
+#[uniffi::export]
+pub fn sha256(data: Vec<u8>) -> Vec<u8> {
+    beebeeb_core::hash::sha256(&data)
+}
+
+// ---------------------------------------------------------------------------
+// SAS byte derivation (P2-4)
+// ---------------------------------------------------------------------------
+
+/// Derive `length` bytes from a shared secret using HKDF-SHA256.
+///
+/// Used for SAS word derivation — the word list lookup stays in JS/Swift.
+/// `info` is typically `b"beebeeb-sas-v1"` or similar context string.
+#[uniffi::export]
+pub fn derive_sas_bytes(shared_secret: Vec<u8>, info: Vec<u8>, length: u32) -> Vec<u8> {
+    beebeeb_core::hash::derive_sas_bytes(&shared_secret, &info, length as usize)
+}
+
+// ---------------------------------------------------------------------------
+// Upload protocol — synchronous blocking wrapper for Swift/Kotlin
+// ---------------------------------------------------------------------------
+
+/// Error from the upload protocol (UniFFI-compatible enum).
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum UploadError {
+    #[error("network error: {detail}")]
+    Network { detail: String },
+
+    #[error("server error (HTTP {status}): {message}")]
+    ServerError { status: u16, message: String },
+
+    #[error("client error (HTTP {status}): {message}")]
+    ClientError { status: u16, message: String },
+
+    #[error("rate limited — retry after {retry_after_secs}s")]
+    RateLimited { retry_after_secs: u64 },
+
+    #[error("I/O error: {detail}")]
+    UploadIo { detail: String },
+
+    #[error("invalid response: {detail}")]
+    InvalidResponse { detail: String },
+
+    #[error("invalid input: {detail}")]
+    UploadInvalidInput { detail: String },
+
+    #[error("max retries exhausted ({attempts} attempts): {last_error}")]
+    MaxRetriesExhausted { attempts: u32, last_error: String },
+}
+
+impl From<beebeeb_upload::UploadError> for UploadError {
+    fn from(e: beebeeb_upload::UploadError) -> Self {
+        match e {
+            beebeeb_upload::UploadError::Network(s) => UploadError::Network { detail: s },
+            beebeeb_upload::UploadError::ServerError { status, message } => {
+                UploadError::ServerError { status, message }
+            }
+            beebeeb_upload::UploadError::ClientError { status, message } => {
+                UploadError::ClientError { status, message }
+            }
+            beebeeb_upload::UploadError::RateLimited { retry_after_secs } => {
+                UploadError::RateLimited { retry_after_secs }
+            }
+            beebeeb_upload::UploadError::IoError(s) => UploadError::UploadIo { detail: s },
+            beebeeb_upload::UploadError::InvalidResponse(s) => {
+                UploadError::InvalidResponse { detail: s }
+            }
+            beebeeb_upload::UploadError::InvalidInput(s) => {
+                UploadError::UploadInvalidInput { detail: s }
+            }
+            beebeeb_upload::UploadError::MaxRetriesExhausted {
+                attempts,
+                last_error,
+            } => UploadError::MaxRetriesExhausted {
+                attempts,
+                last_error,
+            },
+        }
+    }
+}
+
+/// Result of a successful file upload.
+#[derive(uniffi::Record)]
+pub struct UploadResultData {
+    pub file_id: String,
+    pub upload_session_id: String,
+    pub chunks_uploaded: u32,
+    pub total_bytes: u64,
+}
+
+/// Callback interface for upload progress. Implemented by Swift/Kotlin.
+#[uniffi::export(callback_interface)]
+pub trait UploadProgressCallback: Send + Sync {
+    fn on_chunk_uploaded(&self, chunk_index: u32, total_chunks: u32);
+    fn on_complete(&self, file_id: String);
+    fn on_error(&self, error: String);
+}
+
+/// Bridge from UniFFI callback to core upload callback.
+struct UploadCallbackBridge<'a>(&'a dyn UploadProgressCallback);
+
+unsafe impl Send for UploadCallbackBridge<'_> {}
+unsafe impl Sync for UploadCallbackBridge<'_> {}
+
+impl beebeeb_upload::UploadProgressCallback for UploadCallbackBridge<'_> {
+    fn on_chunk_uploaded(&self, chunk_index: u32, total_chunks: u32) {
+        self.0.on_chunk_uploaded(chunk_index, total_chunks);
+    }
+    fn on_complete(&self, file_id: &str) {
+        self.0.on_complete(file_id.to_string());
+    }
+    fn on_error(&self, error: &str) {
+        self.0.on_error(error.to_string());
+    }
+}
+
+/// Upload encrypted chunk files to the server. Blocking — call from Swift's
+/// `Task { }` or Kotlin's `withContext(Dispatchers.IO) { }`.
+///
+/// Creates a tokio runtime internally and blocks until complete.
+#[uniffi::export]
+pub fn upload_encrypted_file(
+    api_url: String,
+    token: String,
+    file_id: String,
+    name_encrypted: String,
+    parent_id: Option<String>,
+    mime_type: Option<String>,
+    is_media: bool,
+    chunk_paths: Vec<String>,
+    original_size: u64,
+    created_at: Option<String>,
+    callback: Option<Box<dyn UploadProgressCallback>>,
+) -> Result<UploadResultData, UploadError> {
+    let bridge = callback
+        .as_ref()
+        .map(|cb| UploadCallbackBridge(cb.as_ref()));
+    let core_cb: Option<Box<dyn beebeeb_upload::UploadProgressCallback + '_>> =
+        bridge.map(|b| Box::new(b) as Box<dyn beebeeb_upload::UploadProgressCallback>);
+
+    let result = beebeeb_upload::upload_encrypted_file(
+        &api_url,
+        &token,
+        &file_id,
+        &name_encrypted,
+        parent_id,
+        mime_type,
+        is_media,
+        chunk_paths,
+        original_size,
+        created_at,
+        core_cb,
+    )?;
+
+    Ok(UploadResultData {
+        file_id: result.file_id,
+        upload_session_id: result.upload_session_id,
+        chunks_uploaded: result.chunks_uploaded,
+        total_bytes: result.total_bytes,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Quota / plan helpers
 // ---------------------------------------------------------------------------
 
@@ -1365,5 +1589,74 @@ impl ConstellationDecoderHandle {
 
     pub fn reset(&self) {
         self.inner.reset();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PDF generation
+// ---------------------------------------------------------------------------
+
+/// Generate a recovery kit PDF with a title, recovery words, and metadata.
+///
+/// Returns the raw PDF bytes (valid PDF 1.4).
+#[uniffi::export]
+pub fn generate_recovery_pdf(
+    title: String,
+    words: Vec<String>,
+    metadata_keys: Vec<String>,
+    metadata_values: Vec<String>,
+) -> Result<Vec<u8>, CryptoError> {
+    if metadata_keys.len() != metadata_values.len() {
+        return Err(CryptoError::InvalidInput {
+            detail: "metadata_keys and metadata_values must have the same length".into(),
+        });
+    }
+    let pairs: Vec<(&str, &str)> = metadata_keys
+        .iter()
+        .zip(metadata_values.iter())
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    Ok(beebeeb_core::pdf::generate_recovery_pdf(&title, &words, &pairs))
+}
+
+// ---------------------------------------------------------------------------
+// Archive parsing
+// ---------------------------------------------------------------------------
+
+/// A single entry inside an archive (TAR, GZ, TGZ).
+#[derive(uniffi::Record)]
+pub struct ArchiveEntryDto {
+    pub name: String,
+    pub size: u64,
+    pub is_directory: bool,
+}
+
+/// List entries in a TAR archive from raw bytes.
+#[uniffi::export]
+pub fn list_tar_entries(data: Vec<u8>) -> Result<Vec<ArchiveEntryDto>, CryptoError> {
+    let entries = beebeeb_core::archive::list_tar_entries(&data)?;
+    Ok(entries.into_iter().map(archive_entry_to_dto).collect())
+}
+
+/// Decompress gzip-compressed data.
+#[uniffi::export]
+pub fn decompress_gzip(data: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
+    beebeeb_core::archive::decompress_gzip(&data).map_err(CryptoError::from)
+}
+
+/// List entries in an archive, detecting format from the filename extension.
+///
+/// Supported: `.tar`, `.gz`, `.tgz`, `.tar.gz`.
+#[uniffi::export]
+pub fn list_archive(data: Vec<u8>, filename: String) -> Result<Vec<ArchiveEntryDto>, CryptoError> {
+    let entries = beebeeb_core::archive::list_archive(&data, &filename)?;
+    Ok(entries.into_iter().map(archive_entry_to_dto).collect())
+}
+
+fn archive_entry_to_dto(e: beebeeb_core::archive::ArchiveEntry) -> ArchiveEntryDto {
+    ArchiveEntryDto {
+        name: e.name,
+        size: e.size,
+        is_directory: e.is_directory,
     }
 }

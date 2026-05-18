@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 beebeeb-types = { path = "../beebeeb-types" }
 aes-gcm = "0.10"
+base64 = "0.22"
 argon2 = "0.5"
 rand = "0.8"
 hkdf = "0.12"
@@ -23,6 +24,7 @@ serde_json.workspace = true
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 blake3 = "1"
+flate2 = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]

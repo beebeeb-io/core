@@ -1,11 +1,16 @@
+pub mod archive;
+pub mod blob;
 pub mod constellation;
 pub mod encrypt;
 pub mod error;
 pub mod file_encrypt;
+pub mod hash;
 pub mod kdf;
 pub mod media;
+pub mod metadata_wire;
 pub mod opaque;
 pub mod opaque_protocol;
+pub mod pdf;
 pub mod recovery;
 pub mod sync;
 pub mod transfer;
