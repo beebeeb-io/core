@@ -1660,3 +1660,188 @@ fn archive_entry_to_dto(e: beebeeb_core::archive::ArchiveEntry) -> ArchiveEntryD
         is_directory: e.is_directory,
     }
 }
+
+// ---------------------------------------------------------------------------
+// Download + decrypt — synchronous blocking wrapper for Swift/Kotlin
+// ---------------------------------------------------------------------------
+
+/// Result of a successful file download + decrypt.
+#[derive(uniffi::Record)]
+pub struct DownloadResultData {
+    pub output_path: String,
+    pub plaintext_size: u64,
+    pub chunks_decrypted: u32,
+}
+
+/// Callback interface for download progress. Implemented by Swift/Kotlin.
+#[uniffi::export(callback_interface)]
+pub trait DownloadProgressCallback: Send + Sync {
+    fn on_chunk_decrypted(&self, chunk_index: u32, total_chunks: u32);
+    fn on_complete(&self, output_path: String);
+    fn on_error(&self, error: String);
+}
+
+/// Bridge from UniFFI callback to core download callback.
+struct DownloadCallbackBridge<'a>(&'a dyn DownloadProgressCallback);
+
+unsafe impl Send for DownloadCallbackBridge<'_> {}
+unsafe impl Sync for DownloadCallbackBridge<'_> {}
+
+impl beebeeb_upload::DownloadProgressCallback for DownloadCallbackBridge<'_> {
+    fn on_chunk_decrypted(&self, chunk_index: u32, total_chunks: u32) {
+        self.0.on_chunk_decrypted(chunk_index, total_chunks);
+    }
+    fn on_complete(&self, output_path: &str) {
+        self.0.on_complete(output_path.to_string());
+    }
+    fn on_error(&self, error: &str) {
+        self.0.on_error(error.to_string());
+    }
+}
+
+/// Download an encrypted file, decrypt it, and write plaintext to disk.
+/// Blocking — call from Swift `Task { }` or Kotlin `withContext(Dispatchers.IO)`.
+///
+/// Uses the MasterKeyHandle to derive the per-file key via HKDF, then
+/// fetches `GET /api/v1/files/{file_id}/download`, splits into chunks,
+/// decrypts each with AES-256-GCM, and writes to `output_path`.
+#[uniffi::export]
+pub fn download_and_decrypt_file(
+    api_url: String,
+    token: String,
+    master_key_handle: &MasterKeyHandle,
+    file_id: String,
+    output_path: String,
+    callback: Option<Box<dyn DownloadProgressCallback>>,
+) -> Result<DownloadResultData, UploadError> {
+    // Extract the raw master key bytes while the lock is held, then release.
+    let mk_bytes = master_key_handle
+        .with_key(|mk| mk.to_bytes())
+        .map_err(|_| UploadError::UploadInvalidInput {
+            detail: "master key handle has been cleared".into(),
+        })?;
+    let mk = kdf::MasterKey::from_bytes(mk_bytes);
+
+    let bridge = callback
+        .as_ref()
+        .map(|cb| DownloadCallbackBridge(cb.as_ref()));
+    let core_cb: Option<Box<dyn beebeeb_upload::DownloadProgressCallback + '_>> =
+        bridge.map(|b| Box::new(b) as Box<dyn beebeeb_upload::DownloadProgressCallback>);
+
+    let result = beebeeb_upload::download_and_decrypt_file(
+        &api_url,
+        &token,
+        &mk,
+        &file_id,
+        &output_path,
+        core_cb,
+    )?;
+
+    Ok(DownloadResultData {
+        output_path: result.output_path,
+        plaintext_size: result.plaintext_size,
+        chunks_decrypted: result.chunks_decrypted,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// FileProvider SQLite cache — UniFFI object
+// ---------------------------------------------------------------------------
+
+/// A cached file/folder entry for the iOS FileProvider extension.
+#[derive(uniffi::Record)]
+pub struct CachedFileEntryData {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub name_encrypted: Option<String>,
+    pub name_decrypted: Option<String>,
+    pub mime_type: Option<String>,
+    pub size_bytes: i64,
+    pub is_folder: bool,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+fn cache_entry_to_dto(e: beebeeb_core::fp_cache::CachedFileEntry) -> CachedFileEntryData {
+    CachedFileEntryData {
+        id: e.id,
+        parent_id: e.parent_id,
+        name_encrypted: e.name_encrypted,
+        name_decrypted: e.name_decrypted,
+        mime_type: e.mime_type,
+        size_bytes: e.size_bytes,
+        is_folder: e.is_folder,
+        created_at: e.created_at,
+        updated_at: e.updated_at,
+    }
+}
+
+fn cache_entry_from_dto(d: &CachedFileEntryData) -> beebeeb_core::fp_cache::CachedFileEntry {
+    beebeeb_core::fp_cache::CachedFileEntry {
+        id: d.id.clone(),
+        parent_id: d.parent_id.clone(),
+        name_encrypted: d.name_encrypted.clone(),
+        name_decrypted: d.name_decrypted.clone(),
+        mime_type: d.mime_type.clone(),
+        size_bytes: d.size_bytes,
+        is_folder: d.is_folder,
+        created_at: d.created_at.clone(),
+        updated_at: d.updated_at.clone(),
+    }
+}
+
+/// Opaque handle to a FileProviderCache SQLite database.
+///
+/// Thread-safe — the underlying connection is mutex-protected.
+#[derive(uniffi::Object)]
+pub struct FileProviderCacheHandle {
+    inner: beebeeb_core::fp_cache::FileProviderCache,
+}
+
+#[uniffi::export]
+impl FileProviderCacheHandle {
+    /// Open (or create) the cache database at `db_path`.
+    /// Pass `":memory:"` for an in-memory database (tests).
+    #[uniffi::constructor]
+    pub fn open(db_path: String) -> Result<Arc<Self>, CryptoError> {
+        let cache = beebeeb_core::fp_cache::FileProviderCache::open(&db_path)?;
+        Ok(Arc::new(Self { inner: cache }))
+    }
+
+    /// Insert or update entries in bulk. Returns the number of rows affected.
+    pub fn upsert_entries(&self, entries: Vec<CachedFileEntryData>) -> Result<u32, CryptoError> {
+        let core_entries: Vec<beebeeb_core::fp_cache::CachedFileEntry> =
+            entries.iter().map(cache_entry_from_dto).collect();
+        let count = self.inner.upsert_entries(&core_entries)?;
+        Ok(count as u32)
+    }
+
+    /// Get all children of a parent folder. Pass `None` for root items.
+    pub fn get_children(&self, parent_id: Option<String>) -> Result<Vec<CachedFileEntryData>, CryptoError> {
+        let entries = self.inner.get_children(parent_id.as_deref())?;
+        Ok(entries.into_iter().map(cache_entry_to_dto).collect())
+    }
+
+    /// Get a single item by ID.
+    pub fn get_item(&self, id: String) -> Result<Option<CachedFileEntryData>, CryptoError> {
+        let entry = self.inner.get_item(&id)?;
+        Ok(entry.map(cache_entry_to_dto))
+    }
+
+    /// Delete a single entry by ID. Returns `true` if a row was deleted.
+    pub fn delete_item(&self, id: String) -> Result<bool, CryptoError> {
+        self.inner.delete_item(&id).map_err(CryptoError::from)
+    }
+
+    /// Delete all entries. Returns the number of rows deleted.
+    pub fn clear(&self) -> Result<u32, CryptoError> {
+        let count = self.inner.clear()?;
+        Ok(count as u32)
+    }
+
+    /// Return the total number of cached entries.
+    pub fn count(&self) -> Result<u32, CryptoError> {
+        let count = self.inner.count()?;
+        Ok(count as u32)
+    }
+}

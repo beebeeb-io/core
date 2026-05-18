@@ -243,6 +243,54 @@ typedef void (*UniffiForeignFutureCompleteVoid)(uint64_t, UniffiForeignFutureRes
     );
 
 #endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_FILE_PROGRESS_CALLBACK_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_FILE_PROGRESS_CALLBACK_METHOD0
+typedef void (*UniffiCallbackInterfaceFileProgressCallbackMethod0)(uint64_t, uint32_t, uint32_t, void* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_UPLOAD_PROGRESS_CALLBACK_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_UPLOAD_PROGRESS_CALLBACK_METHOD0
+typedef void (*UniffiCallbackInterfaceUploadProgressCallbackMethod0)(uint64_t, uint32_t, uint32_t, void* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_UPLOAD_PROGRESS_CALLBACK_METHOD1
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_UPLOAD_PROGRESS_CALLBACK_METHOD1
+typedef void (*UniffiCallbackInterfaceUploadProgressCallbackMethod1)(uint64_t, RustBuffer, void* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_UPLOAD_PROGRESS_CALLBACK_METHOD2
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_UPLOAD_PROGRESS_CALLBACK_METHOD2
+typedef void (*UniffiCallbackInterfaceUploadProgressCallbackMethod2)(uint64_t, RustBuffer, void* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_FILE_PROGRESS_CALLBACK
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_FILE_PROGRESS_CALLBACK
+typedef struct UniffiVTableCallbackInterfaceFileProgressCallback {
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+    UniffiCallbackInterfaceClone _Nonnull uniffiClone;
+    UniffiCallbackInterfaceFileProgressCallbackMethod0 _Nonnull onProgress;
+} UniffiVTableCallbackInterfaceFileProgressCallback;
+
+#endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_UPLOAD_PROGRESS_CALLBACK
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_UPLOAD_PROGRESS_CALLBACK
+typedef struct UniffiVTableCallbackInterfaceUploadProgressCallback {
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+    UniffiCallbackInterfaceClone _Nonnull uniffiClone;
+    UniffiCallbackInterfaceUploadProgressCallbackMethod0 _Nonnull onChunkUploaded;
+    UniffiCallbackInterfaceUploadProgressCallbackMethod1 _Nonnull onComplete;
+    UniffiCallbackInterfaceUploadProgressCallbackMethod2 _Nonnull onError;
+} UniffiVTableCallbackInterfaceUploadProgressCallback;
+
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_CONSTELLATIONDECODERHANDLE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_CONSTELLATIONDECODERHANDLE
 uint64_t uniffi_beebeeb_uniffi_fn_clone_constellationdecoderhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
@@ -339,6 +387,11 @@ uint64_t uniffi_beebeeb_uniffi_fn_constructor_masterkeyhandle_from_recovery_phra
 RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_compute_recovery_check(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_DECRYPT_FILE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_DECRYPT_FILE
+RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_decrypt_file(uint64_t ptr, RustBuffer file_id, RustBuffer chunk_paths, RustBuffer output_path, RustBuffer callback, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_DECRYPT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_DECRYPT_NAME
 RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_decrypt_name(uint64_t ptr, RustBuffer file_id, RustBuffer name_encrypted, RustCallStatus *_Nonnull out_status
@@ -359,6 +412,11 @@ uint64_t uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_derive_file_key(uint64_
 RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_derive_x25519_private(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_ENCRYPT_FILE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_ENCRYPT_FILE
+RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_encrypt_file(uint64_t ptr, RustBuffer file_id, RustBuffer input_path, RustBuffer output_dir, RustBuffer profile, RustBuffer callback, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_ENCRYPT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_ENCRYPT_NAME
 RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_encrypt_name(uint64_t ptr, RustBuffer file_id, RustBuffer filename, RustBuffer mime_type, RustCallStatus *_Nonnull out_status
@@ -367,6 +425,16 @@ RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_encrypt_name(uint64_t
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_EXPORT_FOR_KEYCHAIN
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_EXPORT_FOR_KEYCHAIN
 RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_export_for_keychain(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_FILEPROGRESSCALLBACK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_FILEPROGRESSCALLBACK
+void uniffi_beebeeb_uniffi_fn_init_callback_vtable_fileprogresscallback(const UniffiVTableCallbackInterfaceFileProgressCallback* _Nonnull vtable
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_UPLOADPROGRESSCALLBACK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_UPLOADPROGRESSCALLBACK
+void uniffi_beebeeb_uniffi_fn_init_callback_vtable_uploadprogresscallback(const UniffiVTableCallbackInterfaceUploadProgressCallback* _Nonnull vtable
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_COMPUTE_RECOVERY_CHECK
@@ -389,9 +457,24 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_constellation_new_session(uint32_t expi
 int8_t uniffi_beebeeb_uniffi_fn_func_constellation_verify_code(RustBuffer payload, RustBuffer code, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECOMPRESS_GZIP
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECOMPRESS_GZIP
+RustBuffer uniffi_beebeeb_uniffi_fn_func_decompress_gzip(RustBuffer data, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_BLOB
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_BLOB
+RustBuffer uniffi_beebeeb_uniffi_fn_func_decrypt_blob(RustBuffer key, RustBuffer ciphertext, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_CHUNK
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_CHUNK
 RustBuffer uniffi_beebeeb_uniffi_fn_func_decrypt_chunk(RustBuffer key, RustBuffer nonce, RustBuffer ciphertext, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_CHUNKS_TO_FILE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_CHUNKS_TO_FILE
+uint64_t uniffi_beebeeb_uniffi_fn_func_decrypt_chunks_to_file(RustBuffer key, RustBuffer chunks, RustBuffer output_path, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_METADATA
@@ -419,6 +502,11 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_derive_file_key(RustBuffer master_key, 
 RustBuffer uniffi_beebeeb_uniffi_fn_func_derive_master_key(RustBuffer password, RustBuffer salt, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_SAS_BYTES
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_SAS_BYTES
+RustBuffer uniffi_beebeeb_uniffi_fn_func_derive_sas_bytes(RustBuffer shared_secret, RustBuffer info, uint32_t length, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_SHARE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_SHARE_KEY
 RustBuffer uniffi_beebeeb_uniffi_fn_func_derive_share_key(RustBuffer shared_secret, RustBuffer file_id, RustCallStatus *_Nonnull out_status
@@ -432,6 +520,11 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_derive_x25519_private(RustBuffer master
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_X25519_PUBLIC
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_X25519_PUBLIC
 RustBuffer uniffi_beebeeb_uniffi_fn_func_derive_x25519_public(RustBuffer private_key, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ENCRYPT_BLOB
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ENCRYPT_BLOB
+RustBuffer uniffi_beebeeb_uniffi_fn_func_encrypt_blob(RustBuffer key, RustBuffer plaintext, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ENCRYPT_CHUNK
@@ -449,6 +542,11 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_encrypt_metadata(RustBuffer key, RustBu
 RustBuffer uniffi_beebeeb_uniffi_fn_func_encrypt_name(RustBuffer master_key, RustBuffer file_id, RustBuffer filename, RustBuffer mime_type, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_GENERATE_RECOVERY_PDF
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_GENERATE_RECOVERY_PDF
+RustBuffer uniffi_beebeeb_uniffi_fn_func_generate_recovery_pdf(RustBuffer title, RustBuffer words, RustBuffer metadata_keys, RustBuffer metadata_values, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_GENERATE_RECOVERY_PHRASE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_GENERATE_RECOVERY_PHRASE
 RustBuffer uniffi_beebeeb_uniffi_fn_func_generate_recovery_phrase(RustCallStatus *_Nonnull out_status
@@ -463,6 +561,26 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_guess_mime_type(RustBuffer filename, Ru
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_IS_MEDIA
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_IS_MEDIA
 int8_t uniffi_beebeeb_uniffi_fn_func_is_media(RustBuffer mime_type, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_IS_PREVIEWABLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_IS_PREVIEWABLE
+int8_t uniffi_beebeeb_uniffi_fn_func_is_previewable(RustBuffer mime_type, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_IS_PREVIEWABLE_BY_EXTENSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_IS_PREVIEWABLE_BY_EXTENSION
+int8_t uniffi_beebeeb_uniffi_fn_func_is_previewable_by_extension(RustBuffer filename, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_LIST_ARCHIVE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_LIST_ARCHIVE
+RustBuffer uniffi_beebeeb_uniffi_fn_func_list_archive(RustBuffer data, RustBuffer filename, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_LIST_TAR_ENTRIES
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_LIST_TAR_ENTRIES
+RustBuffer uniffi_beebeeb_uniffi_fn_func_list_tar_entries(RustBuffer data, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_OPAQUE_LOGIN_FINISH
@@ -485,9 +603,64 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_opaque_registration_finish(RustBuffer c
 RustBuffer uniffi_beebeeb_uniffi_fn_func_opaque_registration_start(RustBuffer password, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_PARSE_ENCRYPTED_METADATA
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_PARSE_ENCRYPTED_METADATA
+RustBuffer uniffi_beebeeb_uniffi_fn_func_parse_encrypted_metadata(RustBuffer payload, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_PLAN_BASE_STORAGE_BYTES
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_PLAN_BASE_STORAGE_BYTES
+int64_t uniffi_beebeeb_uniffi_fn_func_plan_base_storage_bytes(RustBuffer plan_slug, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_PLAN_CAN_ADD_STORAGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_PLAN_CAN_ADD_STORAGE
+int8_t uniffi_beebeeb_uniffi_fn_func_plan_can_add_storage(RustBuffer plan_slug, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_PLAN_CHUNKS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_PLAN_CHUNKS
+RustBuffer uniffi_beebeeb_uniffi_fn_func_plan_chunks(uint64_t file_size_bytes, RustBuffer profile, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_PLAN_EFFECTIVE_QUOTA
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_PLAN_EFFECTIVE_QUOTA
+int64_t uniffi_beebeeb_uniffi_fn_func_plan_effective_quota(RustBuffer plan_slug, int64_t extra_tb, int64_t bonus_bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_PLAN_MAX_EXTRA_TB
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_PLAN_MAX_EXTRA_TB
+int64_t uniffi_beebeeb_uniffi_fn_func_plan_max_extra_tb(RustBuffer plan_slug, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_PLAN_MONTHLY_COST_CENTS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_PLAN_MONTHLY_COST_CENTS
+int64_t uniffi_beebeeb_uniffi_fn_func_plan_monthly_cost_cents(RustBuffer plan_slug, int64_t extra_tb, int64_t extra_users, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_RECOVER_FROM_PHRASE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_RECOVER_FROM_PHRASE
 RustBuffer uniffi_beebeeb_uniffi_fn_func_recover_from_phrase(RustBuffer phrase, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_SERIALIZE_ENCRYPTED_METADATA
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_SERIALIZE_ENCRYPTED_METADATA
+RustBuffer uniffi_beebeeb_uniffi_fn_func_serialize_encrypted_metadata(RustBuffer nonce, RustBuffer ciphertext, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_SHA256
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_SHA256
+RustBuffer uniffi_beebeeb_uniffi_fn_func_sha256(RustBuffer data, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_STORAGE_FORMAT_SI
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_STORAGE_FORMAT_SI
+RustBuffer uniffi_beebeeb_uniffi_fn_func_storage_format_si(int64_t bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_UPLOAD_ENCRYPTED_FILE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_UPLOAD_ENCRYPTED_FILE
+RustBuffer uniffi_beebeeb_uniffi_fn_func_upload_encrypted_file(RustBuffer api_url, RustBuffer token, RustBuffer file_id, RustBuffer name_encrypted, RustBuffer parent_id, RustBuffer mime_type, int8_t is_media, RustBuffer chunk_paths, uint64_t original_size, RustBuffer created_at, RustBuffer callback, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_X25519_SHARED_SECRET
@@ -779,9 +952,27 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_constellation_verify_code(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECOMPRESS_GZIP
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECOMPRESS_GZIP
+uint16_t uniffi_beebeeb_uniffi_checksum_func_decompress_gzip(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_BLOB
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_BLOB
+uint16_t uniffi_beebeeb_uniffi_checksum_func_decrypt_blob(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_CHUNK
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_CHUNK
 uint16_t uniffi_beebeeb_uniffi_checksum_func_decrypt_chunk(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_CHUNKS_TO_FILE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_CHUNKS_TO_FILE
+uint16_t uniffi_beebeeb_uniffi_checksum_func_decrypt_chunks_to_file(void
     
 );
 #endif
@@ -815,6 +1006,12 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_derive_master_key(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_SAS_BYTES
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_SAS_BYTES
+uint16_t uniffi_beebeeb_uniffi_checksum_func_derive_sas_bytes(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_SHARE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_SHARE_KEY
 uint16_t uniffi_beebeeb_uniffi_checksum_func_derive_share_key(void
@@ -830,6 +1027,12 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_derive_x25519_private(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_X25519_PUBLIC
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_X25519_PUBLIC
 uint16_t uniffi_beebeeb_uniffi_checksum_func_derive_x25519_public(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ENCRYPT_BLOB
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ENCRYPT_BLOB
+uint16_t uniffi_beebeeb_uniffi_checksum_func_encrypt_blob(void
     
 );
 #endif
@@ -851,6 +1054,12 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_encrypt_name(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_GENERATE_RECOVERY_PDF
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_GENERATE_RECOVERY_PDF
+uint16_t uniffi_beebeeb_uniffi_checksum_func_generate_recovery_pdf(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_GENERATE_RECOVERY_PHRASE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_GENERATE_RECOVERY_PHRASE
 uint16_t uniffi_beebeeb_uniffi_checksum_func_generate_recovery_phrase(void
@@ -866,6 +1075,30 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_guess_mime_type(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_IS_MEDIA
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_IS_MEDIA
 uint16_t uniffi_beebeeb_uniffi_checksum_func_is_media(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_IS_PREVIEWABLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_IS_PREVIEWABLE
+uint16_t uniffi_beebeeb_uniffi_checksum_func_is_previewable(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_IS_PREVIEWABLE_BY_EXTENSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_IS_PREVIEWABLE_BY_EXTENSION
+uint16_t uniffi_beebeeb_uniffi_checksum_func_is_previewable_by_extension(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_LIST_ARCHIVE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_LIST_ARCHIVE
+uint16_t uniffi_beebeeb_uniffi_checksum_func_list_archive(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_LIST_TAR_ENTRIES
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_LIST_TAR_ENTRIES
+uint16_t uniffi_beebeeb_uniffi_checksum_func_list_tar_entries(void
     
 );
 #endif
@@ -893,9 +1126,75 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_opaque_registration_start(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_PARSE_ENCRYPTED_METADATA
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_PARSE_ENCRYPTED_METADATA
+uint16_t uniffi_beebeeb_uniffi_checksum_func_parse_encrypted_metadata(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_PLAN_BASE_STORAGE_BYTES
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_PLAN_BASE_STORAGE_BYTES
+uint16_t uniffi_beebeeb_uniffi_checksum_func_plan_base_storage_bytes(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_PLAN_CAN_ADD_STORAGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_PLAN_CAN_ADD_STORAGE
+uint16_t uniffi_beebeeb_uniffi_checksum_func_plan_can_add_storage(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_PLAN_CHUNKS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_PLAN_CHUNKS
+uint16_t uniffi_beebeeb_uniffi_checksum_func_plan_chunks(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_PLAN_EFFECTIVE_QUOTA
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_PLAN_EFFECTIVE_QUOTA
+uint16_t uniffi_beebeeb_uniffi_checksum_func_plan_effective_quota(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_PLAN_MAX_EXTRA_TB
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_PLAN_MAX_EXTRA_TB
+uint16_t uniffi_beebeeb_uniffi_checksum_func_plan_max_extra_tb(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_PLAN_MONTHLY_COST_CENTS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_PLAN_MONTHLY_COST_CENTS
+uint16_t uniffi_beebeeb_uniffi_checksum_func_plan_monthly_cost_cents(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_RECOVER_FROM_PHRASE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_RECOVER_FROM_PHRASE
 uint16_t uniffi_beebeeb_uniffi_checksum_func_recover_from_phrase(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_SERIALIZE_ENCRYPTED_METADATA
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_SERIALIZE_ENCRYPTED_METADATA
+uint16_t uniffi_beebeeb_uniffi_checksum_func_serialize_encrypted_metadata(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_SHA256
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_SHA256
+uint16_t uniffi_beebeeb_uniffi_checksum_func_sha256(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_STORAGE_FORMAT_SI
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_STORAGE_FORMAT_SI
+uint16_t uniffi_beebeeb_uniffi_checksum_func_storage_format_si(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_UPLOAD_ENCRYPTED_FILE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_UPLOAD_ENCRYPTED_FILE
+uint16_t uniffi_beebeeb_uniffi_checksum_func_upload_encrypted_file(void
     
 );
 #endif
@@ -965,6 +1264,12 @@ uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_compute_recovery_
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_DECRYPT_FILE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_DECRYPT_FILE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_decrypt_file(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_DECRYPT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_DECRYPT_NAME
 uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_decrypt_name(void
@@ -986,6 +1291,12 @@ uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_derive_file_key(v
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_DERIVE_X25519_PRIVATE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_DERIVE_X25519_PRIVATE
 uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_derive_x25519_private(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_ENCRYPT_FILE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_ENCRYPT_FILE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_encrypt_file(void
     
 );
 #endif
@@ -1016,6 +1327,30 @@ uint16_t uniffi_beebeeb_uniffi_checksum_constructor_masterkeyhandle_from_keychai
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_MASTERKEYHANDLE_FROM_RECOVERY_PHRASE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_MASTERKEYHANDLE_FROM_RECOVERY_PHRASE
 uint16_t uniffi_beebeeb_uniffi_checksum_constructor_masterkeyhandle_from_recovery_phrase(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROGRESSCALLBACK_ON_PROGRESS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROGRESSCALLBACK_ON_PROGRESS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileprogresscallback_on_progress(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADPROGRESSCALLBACK_ON_CHUNK_UPLOADED
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADPROGRESSCALLBACK_ON_CHUNK_UPLOADED
+uint16_t uniffi_beebeeb_uniffi_checksum_method_uploadprogresscallback_on_chunk_uploaded(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADPROGRESSCALLBACK_ON_COMPLETE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADPROGRESSCALLBACK_ON_COMPLETE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_uploadprogresscallback_on_complete(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADPROGRESSCALLBACK_ON_ERROR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADPROGRESSCALLBACK_ON_ERROR
+uint16_t uniffi_beebeeb_uniffi_checksum_method_uploadprogresscallback_on_error(void
     
 );
 #endif

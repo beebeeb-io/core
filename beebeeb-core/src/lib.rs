@@ -4,6 +4,7 @@ pub mod constellation;
 pub mod encrypt;
 pub mod error;
 pub mod file_encrypt;
+pub mod fp_cache;
 pub mod hash;
 pub mod kdf;
 pub mod media;

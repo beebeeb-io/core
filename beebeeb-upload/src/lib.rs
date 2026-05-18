@@ -8,11 +8,16 @@
 //! Replaces 600+ lines of Swift upload code with a shared Rust implementation
 //! that works on iOS (via UniFFI) and future Android.
 
+pub mod download;
 mod error;
 mod retry;
 #[cfg(test)]
 mod tests;
 
+pub use download::{
+    DownloadClient, DownloadProgressCallback, DownloadResult,
+    download_and_decrypt_file,
+};
 pub use error::UploadError;
 
 use serde::{Deserialize, Serialize};
