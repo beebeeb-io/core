@@ -105,11 +105,58 @@ pub struct EncryptedChunkData {
     pub ciphertext: Vec<u8>,
 }
 
+/// Info about a single encrypted chunk written to disk by `encrypt_file`.
+#[derive(uniffi::Record)]
+pub struct EncryptedChunkInfo {
+    pub chunk_index: u32,
+    pub output_path: String,
+    pub nonce: Vec<u8>,
+    pub plaintext_size: u64,
+    pub ciphertext_size: u64,
+}
+
+/// Result of encrypting a complete file to disk chunks.
+#[derive(uniffi::Record)]
+pub struct EncryptedFileInfo {
+    pub chunks: Vec<EncryptedChunkInfo>,
+    pub total_plaintext_bytes: u64,
+    pub total_ciphertext_bytes: u64,
+    pub chunk_size_bytes: u64,
+}
+
+/// Result of decrypting chunk files back to a single file.
+#[derive(uniffi::Record)]
+pub struct DecryptedFileInfo {
+    pub output_path: String,
+    pub total_bytes: u64,
+    pub chunks_processed: u32,
+}
+
 /// Result of decrypting a name_encrypted blob with MIME type.
 #[derive(uniffi::Record)]
 pub struct DecryptedNameWithMime {
     pub name: String,
     pub mime_type: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// File progress callback — UniFFI callback interface for Swift/Kotlin
+// ---------------------------------------------------------------------------
+
+#[uniffi::export(callback_interface)]
+pub trait FileProgressCallback: Send + Sync {
+    fn on_progress(&self, chunks_completed: u32, chunks_total: u32);
+}
+
+/// Adapter: bridges the UniFFI callback interface to the core trait.
+struct ProgressAdapter<'a> {
+    inner: &'a dyn FileProgressCallback,
+}
+
+impl<'a> beebeeb_core::file_encrypt::FileProgressCallback for ProgressAdapter<'a> {
+    fn on_progress(&self, chunks_completed: u32, chunks_total: u32) {
+        self.inner.on_progress(chunks_completed, chunks_total);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -546,6 +593,105 @@ impl MasterKeyHandle {
         Ok(DecryptedNameWithMime {
             name,
             mime_type: mime,
+        })
+    }
+
+    /// Encrypt a file from disk, writing each chunk as a `.enc` file.
+    ///
+    /// Reads the input file chunk-by-chunk, encrypts with AES-256-GCM,
+    /// writes `nonce || ciphertext` to `{output_dir}/{chunk_index}.enc`.
+    /// Peak memory: 2x chunk_size.
+    ///
+    /// `profile` must be one of: `"desktop"`, `"web"`, `"mobile"`, `"backup"`.
+    pub fn encrypt_file(
+        &self,
+        file_id: String,
+        input_path: String,
+        output_dir: String,
+        profile: String,
+        callback: Option<Box<dyn FileProgressCallback>>,
+    ) -> Result<EncryptedFileInfo, CryptoError> {
+        use std::path::Path;
+
+        let chunk_profile = match profile.as_str() {
+            "desktop" => beebeeb_types::ChunkProfile::Desktop,
+            "web" => beebeeb_types::ChunkProfile::Web,
+            "mobile" => beebeeb_types::ChunkProfile::Mobile,
+            "backup" => beebeeb_types::ChunkProfile::BackupAgent,
+            _ => {
+                return Err(CryptoError::InvalidInput {
+                    detail: format!("unknown profile: {profile}"),
+                })
+            }
+        };
+
+        let adapter = callback.as_ref().map(|cb| ProgressAdapter { inner: cb.as_ref() });
+        let core_cb: Option<&dyn beebeeb_core::file_encrypt::FileProgressCallback> =
+            adapter.as_ref().map(|a| a as &dyn beebeeb_core::file_encrypt::FileProgressCallback);
+
+        let result = self.with_key(|mk| {
+            beebeeb_core::file_encrypt::encrypt_file_to_chunks(
+                mk,
+                &file_id,
+                Path::new(&input_path),
+                Path::new(&output_dir),
+                chunk_profile,
+                core_cb,
+            )
+        })??;
+
+        Ok(EncryptedFileInfo {
+            chunks: result
+                .chunks
+                .into_iter()
+                .map(|c| EncryptedChunkInfo {
+                    chunk_index: c.chunk_index,
+                    output_path: c.output_path.to_string_lossy().into_owned(),
+                    nonce: c.nonce,
+                    plaintext_size: c.plaintext_size,
+                    ciphertext_size: c.ciphertext_size,
+                })
+                .collect(),
+            total_plaintext_bytes: result.total_plaintext_bytes,
+            total_ciphertext_bytes: result.total_ciphertext_bytes,
+            chunk_size_bytes: result.chunk_size_bytes,
+        })
+    }
+
+    /// Decrypt chunk files back to a single output file.
+    ///
+    /// Reads each chunk file (containing `nonce || ciphertext`), decrypts,
+    /// and writes plaintext to output. Atomic rename at end.
+    pub fn decrypt_file(
+        &self,
+        file_id: String,
+        chunk_paths: Vec<String>,
+        output_path: String,
+        callback: Option<Box<dyn FileProgressCallback>>,
+    ) -> Result<DecryptedFileInfo, CryptoError> {
+        use std::path::{Path, PathBuf};
+
+        let path_bufs: Vec<PathBuf> = chunk_paths.iter().map(PathBuf::from).collect();
+        let path_refs: Vec<&Path> = path_bufs.iter().map(|p| p.as_path()).collect();
+
+        let adapter = callback.as_ref().map(|cb| ProgressAdapter { inner: cb.as_ref() });
+        let core_cb: Option<&dyn beebeeb_core::file_encrypt::FileProgressCallback> =
+            adapter.as_ref().map(|a| a as &dyn beebeeb_core::file_encrypt::FileProgressCallback);
+
+        let result = self.with_key(|mk| {
+            beebeeb_core::file_encrypt::decrypt_chunks_to_file(
+                mk,
+                &file_id,
+                &path_refs,
+                Path::new(&output_path),
+                core_cb,
+            )
+        })??;
+
+        Ok(DecryptedFileInfo {
+            output_path: result.output_path.to_string_lossy().into_owned(),
+            total_bytes: result.total_bytes,
+            chunks_processed: result.chunks_processed,
         })
     }
 }

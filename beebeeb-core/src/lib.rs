@@ -1,6 +1,7 @@
 pub mod constellation;
 pub mod encrypt;
 pub mod error;
+pub mod file_encrypt;
 pub mod kdf;
 pub mod media;
 pub mod opaque;
