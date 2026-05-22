@@ -70,7 +70,7 @@ find jniLibs -name "*.so" | sort
 
 echo ""
 echo "Building host library for Kotlin binding generation..."
-cargo build -p beebeeb-uniffi
+cargo build -p beebeeb-uniffi --features cli
 
 # ---------------------------------------------------------------------------
 # 4. Generate Kotlin bindings
@@ -80,11 +80,11 @@ echo ""
 echo "Generating Kotlin bindings..."
 mkdir -p bindings/kotlin
 
-cargo run --bin uniffi-bindgen -- generate \
+cargo run --bin uniffi-bindgen --features cli -- generate \
     --library target/debug/libbeebeeb_uniffi.dylib \
     --language kotlin \
     --out-dir bindings/kotlin/ 2>/dev/null || \
-cargo run --bin uniffi-bindgen -- generate \
+cargo run --bin uniffi-bindgen --features cli -- generate \
     --library target/debug/libbeebeeb_uniffi.so \
     --language kotlin \
     --out-dir bindings/kotlin/

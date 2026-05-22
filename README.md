@@ -143,6 +143,25 @@ Platform helper scripts are available for mobile binding artifacts:
 ./build-android.sh
 ```
 
+The iOS script writes `BeebeebCore.xcframework/` and `BeebeebCore.swift` next
+to itself in `repos/core/`. Both are copied into `repos/mobile/ios/` and
+committed as binary artifacts; the mobile Xcode project links the `.a`
+slices from there.
+
+The size-optimized release profile (`opt-level = "z"`, `codegen-units = 1`,
+`panic = "abort"`, `lto = "off"`, `strip = "symbols"`) plus the
+`cli`-feature gate on `beebeeb-uniffi` keeps the device staticlib around
+22 MB. Regenerating bindings (Swift/Kotlin) uses the `uniffi-bindgen`
+binary, which requires the `cli` feature:
+
+```sh
+cargo run -p beebeeb-uniffi --features cli --bin uniffi-bindgen -- generate ...
+```
+
+`build-android.sh` already passes `--features cli` for the bindgen step;
+`build-ios.sh` does not need it because the Swift bindings are
+pre-generated and copied from `beebeeb-uniffi/bindings/`.
+
 ## Environment Variables
 
 Core does not require runtime environment variables. It is a library workspace. Consumers such as the web, CLI, mobile, and server repos own their own runtime configuration.

@@ -41,6 +41,15 @@ echo ""
 echo "[lipo] Merging simulator slices..."
 lipo -create "$SIM_ARM64_LIB" "$SIM_X86_LIB" -output "$SIM_FAT_LIB"
 
+# Strip debug + local symbols from the device staticlib and simulator fat.
+# `cargo`'s `strip = "symbols"` does not reliably strip `.a` archives, so we
+# do it here after lipo. `2>/dev/null` swallows the harmless
+# "already stripped" warnings for tiny upstream objects.
+echo ""
+echo "[strip] Stripping debug + local symbols from staticlibs..."
+strip -x -S "$DEVICE_LIB" 2>/dev/null || true
+strip -x -S "$SIM_FAT_LIB" 2>/dev/null || true
+
 # Copy headers into a staging dir (xcodebuild -create-xcframework requires a headers dir)
 HEADERS_DIR="$TARGET_DIR/xcframework-headers"
 rm -rf "$HEADERS_DIR"
