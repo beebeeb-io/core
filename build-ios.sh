@@ -19,6 +19,24 @@ for target in aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios; do
   fi
 done
 
+# Regenerate Swift bindings + C header from current Rust source before the
+# iOS cross-builds. This step exists because the previous flow only *copied*
+# committed `bindings/` files into the xcframework, so any drift between
+# `src/lib.rs` and `bindings/` produced an xcframework whose header didn't
+# match the .a binary. Surfaced during 0426: `decrypt_chunks_to_file`,
+# `download_and_decrypt_file`, and the `FileProviderCacheHandle` methods
+# were defined in Rust but absent from the committed `bindings/`, causing
+# 12 "cannot find symbol" errors at app-link time. Regenerating here keeps
+# `bindings/` byte-for-byte in sync with the dylib uniffi-bindgen sees.
+echo ""
+echo "[0/3] Regenerating Swift bindings from current Rust source..."
+cargo build -p beebeeb-uniffi --release
+cargo run -p beebeeb-uniffi --features cli --bin uniffi-bindgen -- \
+    generate \
+    --library "$TARGET_DIR/release/libbeebeeb_uniffi.dylib" \
+    --language swift \
+    --out-dir "$BINDINGS_DIR"
+
 # Build device (arm64)
 echo "[1/3] Building aarch64-apple-ios (device)..."
 cargo build -p beebeeb-uniffi --target aarch64-apple-ios --release

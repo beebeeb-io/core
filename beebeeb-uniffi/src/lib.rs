@@ -247,6 +247,16 @@ pub fn decrypt_chunk(key: Vec<u8>, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Resul
 }
 
 /// Decrypt a sequence of encrypted chunks and write the plaintext to a file.
+///
+/// Chunks are decrypted sequentially and written in order; peak memory is
+/// bounded by the size of the largest single chunk's plaintext, not the
+/// total file size. The output file is created (truncating any existing
+/// file) before the first chunk.
+///
+/// On `Err`, the output file may exist on disk in a partially-written
+/// state — the caller is responsible for deleting it so a downstream
+/// cache layer does not treat the partial file as complete.
+///
 /// Returns the total number of plaintext bytes written.
 #[uniffi::export]
 pub fn decrypt_chunks_to_file(
