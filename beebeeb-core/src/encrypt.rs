@@ -204,6 +204,67 @@ pub fn decrypt_chunk_raw(key: &FileKey, raw: &[u8]) -> Result<Vec<u8>, CoreError
         .map_err(|_| CoreError::Decryption)
 }
 
+/// Decrypt a contiguous encrypted body into a file.
+///
+/// `body` is the wire format produced by concatenating encrypted chunks:
+/// each chunk is `nonce (12 bytes) || ciphertext (chunk_size bytes of AEAD
+/// output + 16 byte GCM tag)`. All chunks but the last produce `chunk_size`
+/// bytes of plaintext; the final chunk is whatever remains in `body` and
+/// may be shorter.
+///
+/// Streams chunk-by-chunk — peak memory is one plaintext chunk, not the
+/// full file. Returns the total number of plaintext bytes written.
+///
+/// On `Err`, the output file may exist on disk in a partially-written
+/// state; the caller is responsible for deleting it so a downstream
+/// cache layer does not treat the partial file as complete.
+pub fn decrypt_contiguous_to_file(
+    key: &FileKey,
+    body: &[u8],
+    chunk_size: u64,
+    output_path: &str,
+) -> Result<u64, CoreError> {
+    use std::fs::File;
+    use std::io::Write;
+
+    if chunk_size == 0 {
+        return Err(CoreError::InvalidInput(
+            "chunk_size must be positive".into(),
+        ));
+    }
+    const TAG_LEN: usize = 16;
+    let chunk_size_usize: usize = chunk_size.try_into().map_err(|_| {
+        CoreError::InvalidInput(format!("chunk_size {chunk_size} exceeds usize range"))
+    })?;
+    let encrypted_chunk_len = NONCE_LEN
+        .checked_add(chunk_size_usize)
+        .and_then(|v| v.checked_add(TAG_LEN))
+        .ok_or_else(|| CoreError::InvalidInput("chunk_size overflows".into()))?;
+
+    let mut file =
+        File::create(output_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
+    let mut total: u64 = 0;
+    let mut offset = 0usize;
+
+    while offset < body.len() {
+        let remaining = body.len() - offset;
+        let take = remaining.min(encrypted_chunk_len);
+        // Need at least NONCE_LEN + TAG_LEN to even attempt a decrypt.
+        if take < NONCE_LEN + TAG_LEN {
+            return Err(CoreError::Decryption);
+        }
+        let raw_chunk = &body[offset..offset + take];
+        let plaintext = decrypt_chunk_raw(key, raw_chunk)?;
+        file.write_all(&plaintext)
+            .map_err(|e| CoreError::Io(format!("write: {e}")))?;
+        total += plaintext.len() as u64;
+        offset += take;
+    }
+    file.flush()
+        .map_err(|e| CoreError::Io(format!("flush: {e}")))?;
+    Ok(total)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,5 +439,108 @@ mod tests {
         let blob = encrypt_chunk(&key, &plaintext).unwrap();
         let decrypted = decrypt_chunk(&key, &blob).unwrap();
         assert_eq!(decrypted, plaintext);
+    }
+
+    fn pack_chunk(blob: &EncryptedBlob) -> Vec<u8> {
+        let mut out = Vec::with_capacity(blob.nonce.len() + blob.ciphertext.len());
+        out.extend_from_slice(&blob.nonce);
+        out.extend_from_slice(&blob.ciphertext);
+        out
+    }
+
+    #[test]
+    fn decrypt_contiguous_roundtrip_two_uniform_chunks() {
+        let key = test_file_key();
+        let chunk_size: u64 = 8;
+        let p1 = b"AAAAAAAA";
+        let p2 = b"BBBBBBBB";
+        let blob1 = encrypt_chunk(&key, p1).unwrap();
+        let blob2 = encrypt_chunk(&key, p2).unwrap();
+        let mut body = pack_chunk(&blob1);
+        body.extend(pack_chunk(&blob2));
+
+        let path = std::env::temp_dir().join("beebeeb_test_contig_uniform.bin");
+        let total =
+            decrypt_contiguous_to_file(&key, &body, chunk_size, path.to_str().unwrap()).unwrap();
+        assert_eq!(total, 16);
+
+        let written = std::fs::read(&path).unwrap();
+        assert_eq!(written, b"AAAAAAAABBBBBBBB");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn decrypt_contiguous_roundtrip_with_remainder() {
+        let key = test_file_key();
+        let chunk_size: u64 = 8;
+        let p1 = b"AAAAAAAA"; // full chunk
+        let p2 = b"BBB"; // short final chunk
+        let blob1 = encrypt_chunk(&key, p1).unwrap();
+        let blob2 = encrypt_chunk(&key, p2).unwrap();
+        let mut body = pack_chunk(&blob1);
+        body.extend(pack_chunk(&blob2));
+
+        let path = std::env::temp_dir().join("beebeeb_test_contig_remainder.bin");
+        let total =
+            decrypt_contiguous_to_file(&key, &body, chunk_size, path.to_str().unwrap()).unwrap();
+        assert_eq!(total, 11);
+
+        let written = std::fs::read(&path).unwrap();
+        assert_eq!(written, b"AAAAAAAABBB");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn decrypt_contiguous_empty_body() {
+        let key = test_file_key();
+        let path = std::env::temp_dir().join("beebeeb_test_contig_empty.bin");
+        let total = decrypt_contiguous_to_file(&key, &[], 8, path.to_str().unwrap()).unwrap();
+        assert_eq!(total, 0);
+        let written = std::fs::read(&path).unwrap();
+        assert!(written.is_empty());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn decrypt_contiguous_zero_chunk_size_rejected() {
+        let key = test_file_key();
+        let body = vec![0u8; NONCE_LEN + 16];
+        let path = std::env::temp_dir().join("beebeeb_test_contig_zero.bin");
+        let err =
+            decrypt_contiguous_to_file(&key, &body, 0, path.to_str().unwrap()).unwrap_err();
+        match err {
+            CoreError::InvalidInput(_) => {}
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+        // Empty file may exist on err; clean up if so.
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn decrypt_contiguous_wrong_key_fails() {
+        let key = test_file_key();
+        let wrong_key = derive_file_key(
+            &derive_master_key("different-password", b"test-salt-16bytes").unwrap(),
+            b"test-file-id",
+        );
+        let blob = encrypt_chunk(&key, b"secrets").unwrap();
+        let body = pack_chunk(&blob);
+        let path = std::env::temp_dir().join("beebeeb_test_contig_wrong_key.bin");
+        let err =
+            decrypt_contiguous_to_file(&wrong_key, &body, 7, path.to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, CoreError::Decryption));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn decrypt_contiguous_truncated_body_rejected() {
+        let key = test_file_key();
+        // Body shorter than NONCE_LEN + TAG_LEN — cannot even attempt decrypt.
+        let body = vec![0u8; NONCE_LEN + 8]; // 8 bytes < 16 byte tag
+        let path = std::env::temp_dir().join("beebeeb_test_contig_truncated.bin");
+        let err =
+            decrypt_contiguous_to_file(&key, &body, 64, path.to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, CoreError::Decryption));
+        std::fs::remove_file(&path).ok();
     }
 }
