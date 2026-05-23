@@ -4,6 +4,8 @@
 //! a small payload (session bootstrap data). The payload travels device-to-device
 //! via camera capture during the device-pairing flow.
 
+use zeroize::Zeroizing;
+
 /// Fixed payload that one device transmits to another during pairing.
 ///
 /// Total size: 104 bytes.
@@ -104,11 +106,15 @@ pub struct ConstellationEdge {
 #[derive(Debug, Clone)]
 pub struct ConstellationSessionInit {
     pub payload: ConstellationPayload,
-    /// Six-digit numeric confirmation code shown to the user.
+    /// Eight-digit numeric confirmation code shown to the user.
     pub confirm_code: String,
     /// X25519 private scalar — kept on the displaying device until the
     /// scanning device confirms with the matching code.
-    pub ephemeral_private: [u8; 32],
+    ///
+    /// Wrapped in [`Zeroizing`] so the key bytes are wiped from memory as
+    /// soon as this struct is dropped. Treat it like any other key handle:
+    /// move it, do not copy it across boundaries.
+    pub ephemeral_private: Zeroizing<[u8; 32]>,
 }
 
 /// Decoder input: a single observed node from the camera frame processor.

@@ -1296,10 +1296,11 @@ pub trait UploadProgressCallback: Send + Sync {
 }
 
 /// Bridge from UniFFI callback to core upload callback.
+///
+/// `Send + Sync` are inherited from the trait bound on
+/// [`UploadProgressCallback`] — no `unsafe impl` is needed because shared
+/// references to a `Sync` trait object are already `Send + Sync`.
 struct UploadCallbackBridge<'a>(&'a dyn UploadProgressCallback);
-
-unsafe impl Send for UploadCallbackBridge<'_> {}
-unsafe impl Sync for UploadCallbackBridge<'_> {}
 
 impl beebeeb_upload::UploadProgressCallback for UploadCallbackBridge<'_> {
     fn on_chunk_uploaded(&self, chunk_index: u32, total_chunks: u32) {
@@ -1728,10 +1729,11 @@ pub trait DownloadProgressCallback: Send + Sync {
 }
 
 /// Bridge from UniFFI callback to core download callback.
+///
+/// `Send + Sync` are inherited from the trait bound on
+/// [`DownloadProgressCallback`] — no `unsafe impl` is needed because shared
+/// references to a `Sync` trait object are already `Send + Sync`.
 struct DownloadCallbackBridge<'a>(&'a dyn DownloadProgressCallback);
-
-unsafe impl Send for DownloadCallbackBridge<'_> {}
-unsafe impl Sync for DownloadCallbackBridge<'_> {}
 
 impl beebeeb_upload::DownloadProgressCallback for DownloadCallbackBridge<'_> {
     fn on_chunk_decrypted(&self, chunk_index: u32, total_chunks: u32) {

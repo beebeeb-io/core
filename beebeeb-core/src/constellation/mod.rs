@@ -4,7 +4,7 @@
 //! of amber nodes and edges. The pattern is designed to be conveyed visually
 //! between two devices (display ↔ camera) during the pairing flow.
 //!
-//! Security comes from ephemeral keys plus a 6-digit confirmation code, **not**
+//! Security comes from ephemeral keys plus an 8-digit confirmation code, **not**
 //! from hiding the algorithm — every part of this module is public.
 //!
 //! ## Layout
@@ -30,10 +30,11 @@ use rand::RngCore;
 use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
+use zeroize::Zeroizing;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Hash a 6-digit confirmation code into the 32 bytes stored in the payload.
+/// Hash an 8-digit confirmation code into the 32 bytes stored in the payload.
 ///
 /// Uses SHA-256 over `domain_tag || code_bytes` so the hash is bound to this
 /// codec and not interchangeable with an arbitrary digest of the digits.
@@ -65,7 +66,7 @@ mod subtle_compare {
     }
 }
 
-/// Generate a fresh pairing session: ephemeral X25519 keypair + 6-digit
+/// Generate a fresh pairing session: ephemeral X25519 keypair + 8-digit
 /// confirmation code + the payload to display.
 ///
 /// `expires_in_secs` is added to the current wall clock to set
@@ -80,12 +81,13 @@ pub fn constellation_new_session(expires_in_secs: u32) -> ConstellationSessionIn
     let mut nonce = [0u8; 16];
     OsRng.fill_bytes(&mut nonce);
 
-    // Six-digit numeric code (zero-padded). 1_000_000 outcomes — plenty of
-    // entropy when combined with the 5-minute session expiry.
+    // Eight-digit numeric code (zero-padded). 100_000_000 outcomes ≈ 26.6 bits
+    // of entropy — meaningfully harder to brute force than the prior 6-digit
+    // (20-bit) code, while still easy for a human to read aloud.
     let mut code_bytes = [0u8; 4];
     OsRng.fill_bytes(&mut code_bytes);
-    let code_value = u32::from_le_bytes(code_bytes) % 1_000_000;
-    let confirm_code = format!("{:06}", code_value);
+    let code_value = u32::from_le_bytes(code_bytes) % 100_000_000;
+    let confirm_code = format!("{:08}", code_value);
     let confirm_code_hash = hash_confirm_code(&confirm_code);
 
     let now_ms = SystemTime::now()
@@ -105,7 +107,7 @@ pub fn constellation_new_session(expires_in_secs: u32) -> ConstellationSessionIn
     ConstellationSessionInit {
         payload,
         confirm_code,
-        ephemeral_private: private.to_bytes(),
+        ephemeral_private: Zeroizing::new(private.to_bytes()),
     }
 }
 
@@ -116,10 +118,10 @@ mod tests {
     #[test]
     fn new_session_is_valid() {
         let init = constellation_new_session(300);
-        assert_eq!(init.confirm_code.len(), 6);
+        assert_eq!(init.confirm_code.len(), 8);
         assert!(init.confirm_code.chars().all(|c| c.is_ascii_digit()));
         assert!(init.payload.expires_at_unix_ms > 0);
-        assert_ne!(init.ephemeral_private, [0u8; 32]);
+        assert_ne!(*init.ephemeral_private, [0u8; 32]);
         assert_ne!(init.payload.ephemeral_pubkey, [0u8; 32]);
     }
 
@@ -127,7 +129,7 @@ mod tests {
     fn confirm_code_verifies() {
         let init = constellation_new_session(60);
         assert!(constellation_verify_code(&init.payload, &init.confirm_code));
-        assert!(!constellation_verify_code(&init.payload, "000000"));
+        assert!(!constellation_verify_code(&init.payload, "00000000"));
         assert!(!constellation_verify_code(&init.payload, ""));
     }
 

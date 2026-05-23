@@ -101,13 +101,32 @@ fn read_null_string(data: &[u8], offset: usize, max_len: usize) -> String {
 // Gzip decompression
 // ---------------------------------------------------------------------------
 
+/// Maximum bytes we will decompress from a gzip stream.
+///
+/// Prevents zip-bomb / OOM DoS: a tiny `.gz` can decompress to gigabytes.
+/// 1 GiB is large enough for legitimate archives but small enough that an
+/// adversarial input cannot exhaust memory on a typical client device.
+const MAX_DECOMPRESS_BYTES: u64 = 1024 * 1024 * 1024;
+
 /// Decompress gzip-compressed data. Returns the decompressed bytes.
+///
+/// The output is bounded at [`MAX_DECOMPRESS_BYTES`]; inputs that decompress
+/// to more than that are rejected with [`CoreError::Io`] rather than allowed
+/// to balloon the process memory.
 pub fn decompress_gzip(data: &[u8]) -> Result<Vec<u8>, CoreError> {
-    let mut decoder = GzDecoder::new(data);
+    let mut decoder = GzDecoder::new(data).take(MAX_DECOMPRESS_BYTES);
     let mut result = Vec::new();
     decoder
         .read_to_end(&mut result)
         .map_err(|e| CoreError::Io(format!("gzip decompression failed: {e}")))?;
+    // `Read::take` silently stops at the limit; if we hit exactly the cap the
+    // stream may have been truncated. Treat that as an error rather than
+    // returning partial data the caller will try to parse.
+    if result.len() as u64 == MAX_DECOMPRESS_BYTES {
+        return Err(CoreError::Io(format!(
+            "gzip decompression exceeded {MAX_DECOMPRESS_BYTES}-byte limit"
+        )));
+    }
     Ok(result)
 }
 

@@ -31,7 +31,10 @@ pub fn encrypt_transfer(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>, Cor
 
 /// Decrypt a `nonce || ciphertext` blob produced by [`encrypt_transfer`].
 pub fn decrypt_transfer(key: &[u8; 32], blob: &[u8]) -> Result<Vec<u8>, CoreError> {
-    if blob.len() < NONCE_LEN {
+    // Need at least nonce + 16-byte AES-GCM auth tag. A blob shorter than
+    // that cannot possibly be a valid ciphertext; reject it before handing
+    // it to AES-GCM so the failure mode matches `decrypt_chunk_raw`.
+    if blob.len() < NONCE_LEN + 16 {
         return Err(CoreError::Decryption);
     }
     let (nonce_bytes, ciphertext) = blob.split_at(NONCE_LEN);
