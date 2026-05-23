@@ -1,20 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 100" fill="none">
   <!-- Beebeeb full logo: mark + wordmark side by side -->
-  <!-- Mark (88x88, scaled from logo-mark.svg's 512x512 viewBox at 88/512 = 0.1719) -->
   <rect x="0" y="6" width="88" height="88" rx="17.5" fill="#F5B800"/>
-  <g transform="translate(0, 6) scale(0.171875)">
-    <rect x="138" y="68" width="72" height="360" rx="8" fill="#1A1714"/>
-    <circle cx="312" cy="308" r="120" fill="#1A1714"/>
-    <circle cx="316" cy="308" r="54" fill="#F5B800"/>
+  <g fill="#1A1714" transform="translate(25.922 71.781) scale(0.029614 -0.029614)">
+    <path d="M754 -19Q663 -19 600.0 12.0Q537 43 497.5 88.5Q458 134 437 179H423V0H128V1490H428V930H437Q457 974 495.5 1021.0Q534 1068 597.5 1100.0Q661 1132 756 1132Q880 1132 983.0 1068.0Q1086 1004 1147.5 876.0Q1209 748 1209 557Q1209 371 1149.0 242.5Q1089 114 986.0 47.5Q883 -19 754 -19ZM662 222Q779 222 840.5 316.0Q902 410 902 558Q902 705 841.0 798.5Q780 892 662 892Q546 892 483.5 801.0Q421 710 421 558Q421 406 484.0 314.0Q547 222 662 222Z"/>
   </g>
-  <!-- Wordmark -->
-  <text
-    x="108" y="76"
-    font-family="Inter, system-ui, -apple-system, sans-serif"
-    font-size="72"
-    font-weight="700"
-    letter-spacing="-2"
-  >
+  <text x="108" y="76"
+        font-family="Inter, ui-sans-serif, system-ui, sans-serif"
+        font-size="72" font-weight="700" letter-spacing="-2">
     <tspan fill="#1A1714">beebeeb</tspan><tspan fill="#F5B800">.io</tspan>
   </text>
 </svg>
