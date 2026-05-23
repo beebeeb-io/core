@@ -16,7 +16,7 @@ sha2 = "0.10"
 zeroize = { version = "1", features = ["derive"] }
 bip39 = { version = "2", features = ["rand"] }
 thiserror = { workspace = true }
-opaque-ke = { version = "4.0.1", features = ["ristretto255"] }
+opaque-ke = { version = "4.0.1", features = ["ristretto255", "argon2"] }
 x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
 reed-solomon-erasure = "6"
 serde.workspace = true

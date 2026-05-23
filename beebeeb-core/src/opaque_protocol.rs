@@ -1,4 +1,8 @@
+use argon2::{Algorithm, Argon2, Params, Version};
 use opaque_ke::ciphersuite::CipherSuite;
+use opaque_ke::errors::InternalError;
+use opaque_ke::generic_array::{ArrayLength, GenericArray};
+use opaque_ke::ksf::Ksf;
 use opaque_ke::rand::rngs::OsRng;
 use opaque_ke::{
     ClientLogin, ClientLoginFinishParameters, ClientRegistration, ClientRegistrationFinishParameters,
@@ -8,12 +12,55 @@ use opaque_ke::{
 
 use crate::CoreError;
 
+/// Argon2id-based Key Stretching Function for OPAQUE.
+///
+/// Production parameters: 256 MiB memory, 4 iterations, 2 lanes.
+/// These match the rest of the Beebeeb crypto stack (see `recovery.rs`,
+/// `kdf.rs`) so an attacker who exfiltrates the OPAQUE password file
+/// pays Argon2id cost per password guess instead of a single Ristretto255
+/// scalar multiplication.
+///
+/// SECURITY NOTE: Changing these parameters (or this KSF type at all)
+/// invalidates every existing `opaque_password_file` in the database.
+/// All affected users must re-register or go through a password reset
+/// flow. This is acceptable pre-launch but MUST NOT change post-launch
+/// without an explicit migration path.
+#[derive(Default)]
+pub struct Argon2idKsf;
+
+impl Ksf for Argon2idKsf {
+    fn hash<L: ArrayLength<u8>>(
+        &self,
+        input: GenericArray<u8, L>,
+    ) -> Result<GenericArray<u8, L>, InternalError> {
+        // 256 MiB, 4 iterations, 2 parallelism, output length = L (the
+        // OPAQUE protocol's KSF expects len(output) == len(input)).
+        let params = Params::new(256 * 1024, 4, 2, Some(L::USIZE))
+            .map_err(|_| InternalError::KsfError)?;
+        let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+
+        // OPAQUE feeds the KSF a value that already mixes in per-user OPRF
+        // output and server-held secrets, so a fixed deterministic salt is
+        // safe here — the KSF input itself is unpredictable per user.
+        // (Same approach as the upstream `Argon2<'_>: Ksf` blanket impl in
+        // opaque-ke, which uses `[0; RECOMMENDED_SALT_LEN]`.)
+        let mut output = GenericArray::<u8, L>::default();
+        argon2
+            .hash_password_into(&input, &[0u8; argon2::RECOMMENDED_SALT_LEN], &mut output)
+            .map_err(|_| InternalError::KsfError)?;
+        Ok(output)
+    }
+}
+
 struct BeebeebCs;
 
 impl CipherSuite for BeebeebCs {
     type OprfCs = opaque_ke::Ristretto255;
     type KeyExchange = opaque_ke::TripleDh<opaque_ke::Ristretto255, sha2::Sha512>;
-    type Ksf = opaque_ke::ksf::Identity;
+    // Argon2id with production parameters (256 MiB / 4 iter / 2 par).
+    // Was `opaque_ke::ksf::Identity` — that left password files brute-forceable
+    // at OPRF cost (~ms per guess) instead of Argon2id cost (~seconds per guess).
+    type Ksf = Argon2idKsf;
 }
 
 pub fn create_server_setup() -> Vec<u8> {
