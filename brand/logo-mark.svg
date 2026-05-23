@@ -1,13 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <!-- Beebeeb mark: amber square with dark "b" -->
+  <!-- Beebeeb mark: amber square, dark "b". Path-based — no font dependency.
+       Optically centered: stem-heavy left side compensated by shifting the
+       whole glyph slightly right of geometric center. -->
   <rect width="512" height="512" rx="102" fill="#F5B800"/>
-  <text
-    x="256" y="360"
-    text-anchor="middle"
-    font-family="Inter, system-ui, -apple-system, sans-serif"
-    font-size="340"
-    font-weight="800"
-    fill="#1A1714"
-    letter-spacing="-10"
-  >b</text>
+  <g fill="#1A1714">
+    <rect x="138" y="68" width="72" height="360" rx="8"/>
+    <circle cx="312" cy="308" r="120"/>
+    <circle cx="316" cy="308" r="54" fill="#F5B800"/>
+  </g>
 </svg>
