@@ -57,7 +57,7 @@ fn main() {
     vectors.push(json!({
         "name": "x25519_identity_keypair",
         "master_key_hex": hex(&mk.to_bytes()),
-        "expected_x25519_private_hex": hex(&x_priv),
+        "expected_x25519_private_hex": hex(&*x_priv),
         "expected_x25519_public_hex": hex(&x_pub),
     }));
 
@@ -66,9 +66,9 @@ fn main() {
     let mk_b = derive_master_key(password_b, salt).unwrap();
     let priv_b = derive_x25519_private(&mk_b);
     let pub_b = derive_x25519_public(&priv_b);
-    let shared_ab = x25519_shared_secret(&x_priv, &pub_b);
-    let shared_ba = x25519_shared_secret(&priv_b, &x_pub);
-    assert_eq!(shared_ab, shared_ba);
+    let shared_ab = x25519_shared_secret(&x_priv, &pub_b).unwrap();
+    let shared_ba = x25519_shared_secret(&priv_b, &x_pub).unwrap();
+    assert_eq!(*shared_ab, *shared_ba);
     let share_key = derive_share_key(&shared_ab, file_id);
     vectors.push(json!({
         "name": "x25519_share_key_exchange",
@@ -76,9 +76,9 @@ fn main() {
         "bob_master_key_hex": hex(&mk_b.to_bytes()),
         "alice_x25519_public_hex": hex(&x_pub),
         "bob_x25519_public_hex": hex(&pub_b),
-        "expected_shared_secret_hex": hex(&shared_ab),
+        "expected_shared_secret_hex": hex(&*shared_ab),
         "file_id_hex": hex(file_id),
-        "expected_share_key_hex": hex(&share_key),
+        "expected_share_key_hex": hex(&*share_key),
     }));
 
     // Vector 6: Recovery check
@@ -86,22 +86,22 @@ fn main() {
     vectors.push(json!({
         "name": "recovery_check",
         "master_key_hex": hex(&mk.to_bytes()),
-        "expected_recovery_check_hex": hex(&rc),
+        "expected_recovery_check_hex": hex(&*rc),
     }));
 
     // Vector 7: Envelope round-trip
     let mk_bytes = mk.to_bytes();
     let envelope = OpaqueEnvelope {
         master_key: mk_bytes,
-        x25519_private: x_priv,
-        recovery_check: rc,
+        x25519_private: *x_priv,
+        recovery_check: *rc,
     };
     let envelope_bytes = envelope.to_bytes();
     vectors.push(json!({
         "name": "envelope_serialization",
         "master_key_hex": hex(&mk.to_bytes()),
-        "x25519_private_hex": hex(&x_priv),
-        "recovery_check_hex": hex(&rc),
+        "x25519_private_hex": hex(&*x_priv),
+        "recovery_check_hex": hex(&*rc),
         "expected_envelope_hex": hex(&envelope_bytes),
     }));
 

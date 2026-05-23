@@ -517,7 +517,11 @@ pub fn x25519_shared_secret(my_private: Vec<u8>, their_public: Vec<u8>) -> Resul
     let pub_key: [u8; 32] = their_public.try_into().map_err(|_| CryptoError::InvalidInput {
         detail: "public key must be 32 bytes".into(),
     })?;
-    Ok(beebeeb_core::opaque::x25519_shared_secret(&priv_key, &pub_key).to_vec())
+    let shared = beebeeb_core::opaque::x25519_shared_secret(&priv_key, &pub_key)
+        .map_err(|e| CryptoError::InvalidInput {
+            detail: e.to_string(),
+        })?;
+    Ok(shared.to_vec())
 }
 
 /// Derive a share key from a shared secret and file ID. Returns 32-byte share key.

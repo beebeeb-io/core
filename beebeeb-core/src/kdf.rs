@@ -94,6 +94,11 @@ pub fn derive_master_key(password: &str, salt: &[u8]) -> Result<MasterKey, CoreE
 /// This ensures each file gets its own key, limiting the blast radius of any single
 /// key compromise and keeping AES-256-GCM nonce collision risk per-file.
 pub fn derive_file_key(master_key: &MasterKey, file_id: &[u8]) -> FileKey {
+    // NB: salt=None is intentional — this derivation is used for both encrypting
+    // and decrypting existing files. Changing the salt would silently break
+    // decryption of every file already stored. A future migration (new
+    // cipher_suite version) could introduce a salted v2 derivation for newly
+    // created files while keeping this path for legacy decryption.
     let hk = Hkdf::<Sha256>::new(None, master_key.as_bytes());
 
     let mut info = Vec::with_capacity(19 + file_id.len());

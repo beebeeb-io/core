@@ -33,4 +33,4 @@ strip = "symbols"
 panic = "abort"
 debug = false
 incremental = false
-overflow-checks = false
+overflow-checks = true

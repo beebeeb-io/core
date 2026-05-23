@@ -133,7 +133,7 @@ fn vector_x25519_identity_keypair() {
     let public = derive_x25519_public(&private);
 
     assert_eq!(
-        private, expected_private,
+        *private, expected_private,
         "x25519_identity_keypair: private key does not match vector"
     );
     assert_eq!(
@@ -175,18 +175,18 @@ fn vector_x25519_share_key_exchange() {
     );
 
     // Shared secret must be identical from both sides
-    let shared_ab = x25519_shared_secret(&priv_a, &pub_b);
-    let shared_ba = x25519_shared_secret(&priv_b, &pub_a);
-    assert_eq!(shared_ab, shared_ba, "x25519 DH must be commutative");
+    let shared_ab = x25519_shared_secret(&priv_a, &pub_b).unwrap();
+    let shared_ba = x25519_shared_secret(&priv_b, &pub_a).unwrap();
+    assert_eq!(*shared_ab, *shared_ba, "x25519 DH must be commutative");
     assert_eq!(
-        shared_ab, expected_shared_secret,
+        *shared_ab, expected_shared_secret,
         "x25519_share_key_exchange: shared secret does not match vector"
     );
 
     // Share key derivation
     let share_key = derive_share_key(&shared_ab, &file_id);
     assert_eq!(
-        share_key, expected_share_key,
+        *share_key, expected_share_key,
         "x25519_share_key_exchange: share key does not match vector"
     );
 }
@@ -204,7 +204,7 @@ fn vector_recovery_check() {
     let expected = bytes32(&v, "expected_recovery_check_hex");
 
     let rc = compute_recovery_check(&mk);
-    assert_eq!(rc, expected, "recovery_check: computed value does not match vector");
+    assert_eq!(*rc, expected, "recovery_check: computed value does not match vector");
 }
 
 // ---------------------------------------------------------------------------

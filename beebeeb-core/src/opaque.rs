@@ -2,6 +2,7 @@ use hkdf::Hkdf;
 use sha2::Sha256;
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::CoreError;
 use crate::kdf::MasterKey;
 
 pub struct OpaqueEnvelope {
@@ -46,12 +47,15 @@ impl OpaqueEnvelope {
     }
 }
 
-pub fn derive_x25519_private(master_key: &MasterKey) -> [u8; 32] {
+pub fn derive_x25519_private(master_key: &MasterKey) -> Zeroizing<[u8; 32]> {
+    // NB: salt=None is a historical choice — changing it would invalidate all
+    // existing X25519 key pairs derived from master keys already in use.
+    // A future key-rotation migration could introduce a salted v2 derivation.
     let hk = Hkdf::<Sha256>::new(None, master_key.as_bytes());
     let mut okm = Zeroizing::new([0u8; 32]);
     hk.expand(b"beebeeb-x25519-identity", &mut *okm)
         .expect("HKDF-SHA256 expand for 32 bytes cannot fail");
-    *okm
+    okm
 }
 
 pub fn derive_x25519_public(private_key: &[u8; 32]) -> [u8; 32] {
@@ -61,26 +65,38 @@ pub fn derive_x25519_public(private_key: &[u8; 32]) -> [u8; 32] {
     *public.as_bytes()
 }
 
-pub fn compute_recovery_check(master_key: &MasterKey) -> [u8; 32] {
+pub fn compute_recovery_check(master_key: &MasterKey) -> Zeroizing<[u8; 32]> {
+    // NB: salt=None is a historical choice — changing it would invalidate all
+    // existing recovery-check values already stored server-side.
+    // A future key-rotation migration could introduce a salted v2 derivation.
     let hk = Hkdf::<Sha256>::new(None, master_key.as_bytes());
-    let mut okm = [0u8; 32];
-    hk.expand(b"beebeeb-recovery-check", &mut okm)
+    let mut okm = Zeroizing::new([0u8; 32]);
+    hk.expand(b"beebeeb-recovery-check", &mut *okm)
         .expect("HKDF-SHA256 expand for 32 bytes cannot fail");
     okm
 }
 
-pub fn x25519_shared_secret(my_private: &[u8; 32], their_public: &[u8; 32]) -> [u8; 32] {
+pub fn x25519_shared_secret(my_private: &[u8; 32], their_public: &[u8; 32]) -> Result<Zeroizing<[u8; 32]>, CoreError> {
     use x25519_dalek::{PublicKey, StaticSecret};
     let secret = StaticSecret::from(*my_private);
     let public = PublicKey::from(*their_public);
     let shared = secret.diffie_hellman(&public);
-    *shared.as_bytes()
+
+    // Reject low-order points (small-subgroup attack). If the peer sends a
+    // low-order point the shared secret is all zeros, making it predictable.
+    if !shared.was_contributory() {
+        return Err(CoreError::InvalidInput(
+            "X25519 shared secret is non-contributory (low-order public key)".into(),
+        ));
+    }
+
+    Ok(Zeroizing::new(*shared.as_bytes()))
 }
 
-pub fn derive_share_key(shared_secret: &[u8; 32], file_id: &[u8]) -> [u8; 32] {
+pub fn derive_share_key(shared_secret: &[u8; 32], file_id: &[u8]) -> Zeroizing<[u8; 32]> {
     let hk = Hkdf::<Sha256>::new(Some(b"beebeeb-share"), shared_secret);
-    let mut okm = [0u8; 32];
-    hk.expand(file_id, &mut okm)
+    let mut okm = Zeroizing::new([0u8; 32]);
+    hk.expand(file_id, &mut *okm)
         .expect("HKDF-SHA256 expand for 32 bytes cannot fail");
     okm
 }
@@ -97,7 +113,7 @@ mod tests {
         let public = derive_x25519_public(&private);
         assert_eq!(private.len(), 32);
         assert_eq!(public.len(), 32);
-        assert_ne!(private, public);
+        assert_ne!(*private, public);
     }
 
     #[test]
@@ -105,7 +121,7 @@ mod tests {
         let mk = derive_master_key("test-password", b"sixteen-byte-salt").unwrap();
         let priv1 = derive_x25519_private(&mk);
         let priv2 = derive_x25519_private(&mk);
-        assert_eq!(priv1, priv2);
+        assert_eq!(*priv1, *priv2);
     }
 
     #[test]
@@ -118,9 +134,19 @@ mod tests {
         let priv_b = derive_x25519_private(&mk_b);
         let pub_b = derive_x25519_public(&priv_b);
 
-        let shared_ab = x25519_shared_secret(&priv_a, &pub_b);
-        let shared_ba = x25519_shared_secret(&priv_b, &pub_a);
-        assert_eq!(shared_ab, shared_ba);
+        let shared_ab = x25519_shared_secret(&priv_a, &pub_b).unwrap();
+        let shared_ba = x25519_shared_secret(&priv_b, &pub_a).unwrap();
+        assert_eq!(*shared_ab, *shared_ba);
+    }
+
+    #[test]
+    fn x25519_rejects_low_order_point() {
+        let mk = derive_master_key("test-password", b"sixteen-byte-salt").unwrap();
+        let priv_key = derive_x25519_private(&mk);
+        // All-zeros public key is a low-order point
+        let zero_public = [0u8; 32];
+        let result = x25519_shared_secret(&priv_key, &zero_public);
+        assert!(result.is_err(), "should reject low-order public key");
     }
 
     #[test]
@@ -131,7 +157,7 @@ mod tests {
         let priv_a = derive_x25519_private(&mk_a);
         let pub_b = derive_x25519_public(&derive_x25519_private(&mk_b));
 
-        let shared = x25519_shared_secret(&priv_a, &pub_b);
+        let shared = x25519_shared_secret(&priv_a, &pub_b).unwrap();
         let share_key = derive_share_key(&shared, b"test-file-uuid");
         assert_eq!(share_key.len(), 32);
     }
@@ -144,10 +170,10 @@ mod tests {
         let priv_a = derive_x25519_private(&mk_a);
         let pub_b = derive_x25519_public(&derive_x25519_private(&mk_b));
 
-        let shared = x25519_shared_secret(&priv_a, &pub_b);
+        let shared = x25519_shared_secret(&priv_a, &pub_b).unwrap();
         let sk1 = derive_share_key(&shared, b"file-1");
         let sk2 = derive_share_key(&shared, b"file-2");
-        assert_ne!(sk1, sk2);
+        assert_ne!(*sk1, *sk2);
     }
 
     #[test]
@@ -155,7 +181,7 @@ mod tests {
         let mk = derive_master_key("test-password", b"sixteen-byte-salt").unwrap();
         let rc1 = compute_recovery_check(&mk);
         let rc2 = compute_recovery_check(&mk);
-        assert_eq!(rc1, rc2);
+        assert_eq!(*rc1, *rc2);
     }
 
     #[test]
