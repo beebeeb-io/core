@@ -222,7 +222,7 @@ fn build_content_stream(title: &str, words: &[String], metadata: &[(&str, &str)]
     let col_width = usable_width / 2.0;
 
     // words per column
-    let rows = (words.len() + 1) / 2;
+    let rows = words.len().div_ceil(2);
 
     for (i, word) in words.iter().enumerate() {
         let col = i / rows;

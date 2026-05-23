@@ -23,6 +23,7 @@ pub struct ZipProgress {
     pub current_file: String,
 }
 
+#[allow(clippy::type_complexity)]
 pub fn stream_folder_zip<W: Write + Seek>(
     master_key: &MasterKey,
     entries: &[ZipEntry],

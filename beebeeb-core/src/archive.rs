@@ -79,7 +79,7 @@ pub fn list_tar_entries(data: &[u8]) -> Result<Vec<ArchiveEntry>, CoreError> {
 
         // Advance past header + data (data padded to 512-byte boundary)
         let data_blocks = if size > 0 {
-            ((size as usize) + TAR_BLOCK_SIZE - 1) / TAR_BLOCK_SIZE
+            (size as usize).div_ceil(TAR_BLOCK_SIZE)
         } else {
             0
         };
