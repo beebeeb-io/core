@@ -34,24 +34,41 @@ render() {
   echo "  ${size}x${size} -> $(basename "$out")"
 }
 
+# render_opaque is for platforms that apply their own icon mask (iOS,
+# macOS/Tauri, Android adaptive). Apple's App Store rejects icons with an
+# alpha channel, so we flatten the master SVG's transparent rounded corners
+# onto a solid amber background. The flattened pixels are invisible after
+# the OS mask is applied, but they pass App Store Connect validation.
+render_opaque() {
+  local size="$1" src="$2" out="$3"
+  rsvg-convert -w "$size" -h "$size" -b "#F5B800" "$src" -o "$out"
+  # rsvg-convert -b sets the canvas background but still writes an alpha
+  # channel. Re-encode to RGB-only (no alpha) so altool is happy.
+  if command -v sips >/dev/null 2>&1; then
+    sips -s format png -s formatOptions normal --deleteColorManagementProperties "$out" --out "$out" >/dev/null 2>&1
+    sips -s hasAlpha no "$out" --out "$out" >/dev/null 2>&1 || true
+  fi
+  echo "  ${size}x${size} -> $(basename "$out") (opaque)"
+}
+
 # ─── iOS AppIcon set ───────────────────────────────────────────────────────
 IOS_ICONSET="$WORKSPACE_ROOT/repos/mobile/ios/Beebeeb/Images.xcassets/AppIcon.appiconset"
 if [ -d "$IOS_ICONSET" ]; then
   echo "iOS AppIcon set ($IOS_ICONSET):"
-  render 40   "$MARK" "$IOS_ICONSET/AppIcon-20x20@2x.png"
-  render 60   "$MARK" "$IOS_ICONSET/AppIcon-20x20@3x.png"
-  render 29   "$MARK" "$IOS_ICONSET/AppIcon-29x29@1x.png"
-  render 58   "$MARK" "$IOS_ICONSET/AppIcon-29x29@2x.png"
-  render 87   "$MARK" "$IOS_ICONSET/AppIcon-29x29@3x.png"
-  render 40   "$MARK" "$IOS_ICONSET/AppIcon-40x40@1x.png"
-  render 80   "$MARK" "$IOS_ICONSET/AppIcon-40x40@2x.png"
-  render 120  "$MARK" "$IOS_ICONSET/AppIcon-40x40@3x.png"
-  render 120  "$MARK" "$IOS_ICONSET/AppIcon-60x60@2x.png"
-  render 180  "$MARK" "$IOS_ICONSET/AppIcon-60x60@3x.png"
-  render 76   "$MARK" "$IOS_ICONSET/AppIcon-76x76@1x.png"
-  render 152  "$MARK" "$IOS_ICONSET/AppIcon-76x76@2x.png"
-  render 167  "$MARK" "$IOS_ICONSET/AppIcon-83.5x83.5@2x.png"
-  render 1024 "$MARK" "$IOS_ICONSET/App-Icon-1024x1024@1x.png"
+  render_opaque 40   "$MARK" "$IOS_ICONSET/AppIcon-20x20@2x.png"
+  render_opaque 60   "$MARK" "$IOS_ICONSET/AppIcon-20x20@3x.png"
+  render_opaque 29   "$MARK" "$IOS_ICONSET/AppIcon-29x29@1x.png"
+  render_opaque 58   "$MARK" "$IOS_ICONSET/AppIcon-29x29@2x.png"
+  render_opaque 87   "$MARK" "$IOS_ICONSET/AppIcon-29x29@3x.png"
+  render_opaque 40   "$MARK" "$IOS_ICONSET/AppIcon-40x40@1x.png"
+  render_opaque 80   "$MARK" "$IOS_ICONSET/AppIcon-40x40@2x.png"
+  render_opaque 120  "$MARK" "$IOS_ICONSET/AppIcon-40x40@3x.png"
+  render_opaque 120  "$MARK" "$IOS_ICONSET/AppIcon-60x60@2x.png"
+  render_opaque 180  "$MARK" "$IOS_ICONSET/AppIcon-60x60@3x.png"
+  render_opaque 76   "$MARK" "$IOS_ICONSET/AppIcon-76x76@1x.png"
+  render_opaque 152  "$MARK" "$IOS_ICONSET/AppIcon-76x76@2x.png"
+  render_opaque 167  "$MARK" "$IOS_ICONSET/AppIcon-83.5x83.5@2x.png"
+  render_opaque 1024 "$MARK" "$IOS_ICONSET/App-Icon-1024x1024@1x.png"
 else
   echo "skip: $IOS_ICONSET not present"
 fi
@@ -60,8 +77,8 @@ fi
 MOBILE_ASSETS="$WORKSPACE_ROOT/repos/mobile/assets"
 if [ -d "$MOBILE_ASSETS" ]; then
   echo "mobile assets ($MOBILE_ASSETS):"
-  render 1024 "$MARK" "$MOBILE_ASSETS/icon.png"
-  render 1024 "$MARK" "$MOBILE_ASSETS/adaptive-icon.png"
+  render_opaque 1024 "$MARK" "$MOBILE_ASSETS/icon.png"
+  render_opaque 1024 "$MARK" "$MOBILE_ASSETS/adaptive-icon.png"
   # favicon used by web preview of mobile app
   if [ -f "$MOBILE_ASSETS/favicon.png" ]; then
     render 48 "$MARK" "$MOBILE_ASSETS/favicon.png"
@@ -103,10 +120,10 @@ fi
 DESKTOP_ICONS="$WORKSPACE_ROOT/repos/desktop/src-tauri/icons"
 if [ -d "$DESKTOP_ICONS" ]; then
   echo "desktop icons ($DESKTOP_ICONS):"
-  render 32   "$MARK" "$DESKTOP_ICONS/32x32.png"
-  render 128  "$MARK" "$DESKTOP_ICONS/128x128.png"
-  render 256  "$MARK" "$DESKTOP_ICONS/128x128@2x.png"
-  render 1024 "$MARK" "$DESKTOP_ICONS/icon.png"
+  render_opaque 32   "$MARK" "$DESKTOP_ICONS/32x32.png"
+  render_opaque 128  "$MARK" "$DESKTOP_ICONS/128x128.png"
+  render_opaque 256  "$MARK" "$DESKTOP_ICONS/128x128@2x.png"
+  render_opaque 1024 "$MARK" "$DESKTOP_ICONS/icon.png"
 else
   echo "skip: $DESKTOP_ICONS not present"
 fi
