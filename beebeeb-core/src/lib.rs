@@ -14,6 +14,7 @@ pub mod opaque_protocol;
 pub mod pdf;
 pub mod recovery;
 pub mod sync;
+pub mod thumbnail;
 pub mod transfer;
 pub mod zip;
 

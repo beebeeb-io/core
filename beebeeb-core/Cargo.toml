@@ -27,6 +27,8 @@ blake3 = "1"
 flate2 = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 zip = { version = "8", default-features = false, features = ["deflate"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+webp = { version = "0.3", default-features = false }
 
 [dev-dependencies]
 hex = "0.4"

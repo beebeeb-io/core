@@ -1640,6 +1640,157 @@ impl ConstellationDecoderHandle {
 }
 
 // ---------------------------------------------------------------------------
+// Thumbnail generation
+// ---------------------------------------------------------------------------
+
+/// A single quality-cascade step for thumbnail generation.
+#[derive(uniffi::Record)]
+pub struct ThumbnailLadderStep {
+    pub max_dimension: u32,
+    pub quality: f32,
+}
+
+/// Configuration for thumbnail generation.
+#[derive(uniffi::Record)]
+pub struct ThumbnailConfigData {
+    pub ladder: Vec<ThumbnailLadderStep>,
+    pub target_bytes: u64,
+    pub max_bytes: u64,
+}
+
+/// Result of thumbnail generation.
+#[derive(uniffi::Record)]
+pub struct ThumbnailResult {
+    pub data: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub quality: f32,
+    pub step_index: u32,
+}
+
+/// Error from thumbnail generation (UniFFI-compatible enum).
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum ThumbnailError {
+    #[error("no ladder step produced output under max_bytes")]
+    AllStepsFailed,
+    #[error("resize failed: {detail}")]
+    ResizeFailed { detail: String },
+    #[error("encode failed: {detail}")]
+    EncodeFailed { detail: String },
+    #[error("invalid input: {detail}")]
+    ThumbnailInvalidInput { detail: String },
+}
+
+impl From<beebeeb_core::thumbnail::ThumbnailError> for ThumbnailError {
+    fn from(e: beebeeb_core::thumbnail::ThumbnailError) -> Self {
+        match e {
+            beebeeb_core::thumbnail::ThumbnailError::AllStepsFailed => ThumbnailError::AllStepsFailed,
+            beebeeb_core::thumbnail::ThumbnailError::ResizeFailed(s) => {
+                ThumbnailError::ResizeFailed { detail: s }
+            }
+            beebeeb_core::thumbnail::ThumbnailError::EncodeFailed(s) => {
+                ThumbnailError::EncodeFailed { detail: s }
+            }
+            beebeeb_core::thumbnail::ThumbnailError::InvalidInput(s) => {
+                ThumbnailError::ThumbnailInvalidInput { detail: s }
+            }
+        }
+    }
+}
+
+fn config_from_dto(dto: &ThumbnailConfigData) -> beebeeb_core::thumbnail::ThumbnailConfig {
+    beebeeb_core::thumbnail::ThumbnailConfig {
+        ladder: dto
+            .ladder
+            .iter()
+            .map(|s| beebeeb_core::thumbnail::LadderStep {
+                max_dimension: s.max_dimension,
+                quality: s.quality,
+            })
+            .collect(),
+        target_bytes: dto.target_bytes as usize,
+        max_bytes: dto.max_bytes as usize,
+    }
+}
+
+/// Generate a lossy WebP thumbnail from raw RGBA pixel data.
+///
+/// Tries each step in the config's quality ladder in order. Returns the
+/// first result that fits under `target_bytes`. If none fit the target but
+/// one fits under `max_bytes`, returns that as a fallback.
+#[uniffi::export]
+pub fn generate_thumbnail(
+    rgba: Vec<u8>,
+    src_width: u32,
+    src_height: u32,
+    config: ThumbnailConfigData,
+) -> Result<ThumbnailResult, ThumbnailError> {
+    let cfg = config_from_dto(&config);
+    let out = beebeeb_core::thumbnail::generate_thumbnail(&rgba, src_width, src_height, &cfg)?;
+    Ok(ThumbnailResult {
+        data: out.data,
+        width: out.width,
+        height: out.height,
+        quality: out.quality,
+        step_index: out.step_index as u32,
+    })
+}
+
+/// Convenience: generate a thumbnail using the built-in "medium" config.
+#[uniffi::export]
+pub fn generate_thumbnail_medium(
+    rgba: Vec<u8>,
+    src_width: u32,
+    src_height: u32,
+) -> Result<ThumbnailResult, ThumbnailError> {
+    let cfg = beebeeb_core::thumbnail::ThumbnailConfig::medium();
+    let out = beebeeb_core::thumbnail::generate_thumbnail(&rgba, src_width, src_height, &cfg)?;
+    Ok(ThumbnailResult {
+        data: out.data,
+        width: out.width,
+        height: out.height,
+        quality: out.quality,
+        step_index: out.step_index as u32,
+    })
+}
+
+/// Convenience: generate a thumbnail using the built-in "small" config.
+#[uniffi::export]
+pub fn generate_thumbnail_small(
+    rgba: Vec<u8>,
+    src_width: u32,
+    src_height: u32,
+) -> Result<ThumbnailResult, ThumbnailError> {
+    let cfg = beebeeb_core::thumbnail::ThumbnailConfig::small();
+    let out = beebeeb_core::thumbnail::generate_thumbnail(&rgba, src_width, src_height, &cfg)?;
+    Ok(ThumbnailResult {
+        data: out.data,
+        width: out.width,
+        height: out.height,
+        quality: out.quality,
+        step_index: out.step_index as u32,
+    })
+}
+
+/// Convenience: generate a thumbnail using the built-in "large" config.
+#[uniffi::export]
+pub fn generate_thumbnail_large(
+    rgba: Vec<u8>,
+    src_width: u32,
+    src_height: u32,
+) -> Result<ThumbnailResult, ThumbnailError> {
+    let cfg = beebeeb_core::thumbnail::ThumbnailConfig::large();
+    let out = beebeeb_core::thumbnail::generate_thumbnail(&rgba, src_width, src_height, &cfg)?;
+    Ok(ThumbnailResult {
+        data: out.data,
+        width: out.width,
+        height: out.height,
+        quality: out.quality,
+        step_index: out.step_index as u32,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // PDF generation
 // ---------------------------------------------------------------------------
 
