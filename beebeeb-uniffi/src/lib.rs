@@ -1642,33 +1642,20 @@ impl ConstellationDecoderHandle {
 // ---------------------------------------------------------------------------
 // Thumbnail generation
 // ---------------------------------------------------------------------------
-
-/// A single quality-cascade step for thumbnail generation.
-#[derive(uniffi::Record)]
-pub struct ThumbnailLadderStep {
-    pub max_dimension: u32,
-    pub quality: f32,
-}
-
-/// Configuration for thumbnail generation.
-#[derive(uniffi::Record)]
-pub struct ThumbnailConfigData {
-    pub ladder: Vec<ThumbnailLadderStep>,
-    pub target_bytes: u64,
-    pub max_bytes: u64,
-}
-
-/// Result of thumbnail generation.
-#[derive(uniffi::Record)]
-pub struct ThumbnailResult {
-    pub data: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
-    pub quality: f32,
-    pub step_index: u32,
-}
+//
+// NOTE: The WebP-encode path (generate_thumbnail_*) is gated behind the
+// `webp-encode` feature. When building for iOS, beebeeb-uniffi is compiled
+// WITHOUT this feature so that the webp C binding is not linked (it conflicts
+// with aws-lc-sys during iOS cross-compilation). iOS generates WebP thumbnails
+// natively via PhotoKit/vImage and calls `resize_for_thumbnail` instead.
+//
+// For all other targets (CLI, desktop, server, Android), `webp-encode` is
+// enabled and the full generate_thumbnail_* API is available.
 
 /// Error from thumbnail generation (UniFFI-compatible enum).
+///
+/// Always available — used by both `resize_for_thumbnail` and
+/// `generate_thumbnail_*`.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum ThumbnailError {
     #[error("no ladder step produced output under max_bytes")]
@@ -1698,6 +1685,63 @@ impl From<beebeeb_core::thumbnail::ThumbnailError> for ThumbnailError {
     }
 }
 
+/// Resize RGBA pixel data for thumbnail use. Always available (no WebP
+/// dependency). The longest side is scaled to `max_dimension` preserving
+/// aspect ratio. If the source already fits, the buffer is returned as-is.
+///
+/// Returns `(resized_rgba, new_width, new_height)` packed as three fields.
+///
+/// iOS calls this and then encodes to WebP natively via vImage/ImageIO.
+#[derive(uniffi::Record)]
+pub struct ResizeResult {
+    pub rgba: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[uniffi::export]
+pub fn resize_for_thumbnail(
+    rgba: Vec<u8>,
+    src_width: u32,
+    src_height: u32,
+    max_dimension: u32,
+) -> Result<ResizeResult, ThumbnailError> {
+    let (resized, w, h) =
+        beebeeb_core::thumbnail::resize_for_thumbnail(&rgba, src_width, src_height, max_dimension)?;
+    Ok(ResizeResult { rgba: resized, width: w, height: h })
+}
+
+// --- WebP encode path (disabled for iOS) ------------------------------------
+
+#[cfg(feature = "webp-encode")]
+/// A single quality-cascade step for thumbnail generation.
+#[derive(uniffi::Record)]
+pub struct ThumbnailLadderStep {
+    pub max_dimension: u32,
+    pub quality: f32,
+}
+
+#[cfg(feature = "webp-encode")]
+/// Configuration for thumbnail generation.
+#[derive(uniffi::Record)]
+pub struct ThumbnailConfigData {
+    pub ladder: Vec<ThumbnailLadderStep>,
+    pub target_bytes: u64,
+    pub max_bytes: u64,
+}
+
+#[cfg(feature = "webp-encode")]
+/// Result of thumbnail generation.
+#[derive(uniffi::Record)]
+pub struct ThumbnailResult {
+    pub data: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub quality: f32,
+    pub step_index: u32,
+}
+
+#[cfg(feature = "webp-encode")]
 fn config_from_dto(dto: &ThumbnailConfigData) -> beebeeb_core::thumbnail::ThumbnailConfig {
     beebeeb_core::thumbnail::ThumbnailConfig {
         ladder: dto
@@ -1718,6 +1762,9 @@ fn config_from_dto(dto: &ThumbnailConfigData) -> beebeeb_core::thumbnail::Thumbn
 /// Tries each step in the config's quality ladder in order. Returns the
 /// first result that fits under `target_bytes`. If none fit the target but
 /// one fits under `max_bytes`, returns that as a fallback.
+///
+/// Not available when building for iOS (feature `webp-encode` is disabled).
+#[cfg(feature = "webp-encode")]
 #[uniffi::export]
 pub fn generate_thumbnail(
     rgba: Vec<u8>,
@@ -1737,6 +1784,9 @@ pub fn generate_thumbnail(
 }
 
 /// Convenience: generate a thumbnail using the built-in "medium" config.
+///
+/// Not available when building for iOS (feature `webp-encode` is disabled).
+#[cfg(feature = "webp-encode")]
 #[uniffi::export]
 pub fn generate_thumbnail_medium(
     rgba: Vec<u8>,
@@ -1755,6 +1805,9 @@ pub fn generate_thumbnail_medium(
 }
 
 /// Convenience: generate a thumbnail using the built-in "small" config.
+///
+/// Not available when building for iOS (feature `webp-encode` is disabled).
+#[cfg(feature = "webp-encode")]
 #[uniffi::export]
 pub fn generate_thumbnail_small(
     rgba: Vec<u8>,
@@ -1773,6 +1826,9 @@ pub fn generate_thumbnail_small(
 }
 
 /// Convenience: generate a thumbnail using the built-in "large" config.
+///
+/// Not available when building for iOS (feature `webp-encode` is disabled).
+#[cfg(feature = "webp-encode")]
 #[uniffi::export]
 pub fn generate_thumbnail_large(
     rgba: Vec<u8>,

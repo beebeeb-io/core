@@ -20,9 +20,13 @@ default = []
 # (~5 MB of code in the iOS staticlib). Only enabled when regenerating Swift
 # bindings via the `uniffi-bindgen` binary; not needed by the shipping cdylib.
 cli = ["uniffi/cli"]
+# Re-enable the libwebp C binding in beebeeb-core for non-iOS targets (CLI,
+# desktop, server). When building the iOS xcframework, leave this disabled so
+# the webp crate's C symbols don't conflict with aws-lc-sys.
+webp-encode = ["beebeeb-core/webp-encode"]
 
 [dependencies]
-beebeeb-core = { path = "../beebeeb-core" }
+beebeeb-core = { path = "../beebeeb-core", default-features = false }
 beebeeb-types = { path = "../beebeeb-types" }
 beebeeb-upload = { path = "../beebeeb-upload" }
 uniffi = { version = "0.31.1" }

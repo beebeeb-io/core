@@ -3,6 +3,14 @@
 //! All clients (iOS, Android, CLI, desktop) call `generate_thumbnail` with
 //! raw RGBA pixel data. The function resizes, encodes to lossy WebP using a
 //! quality cascade, and returns the first result that fits under the byte target.
+//!
+//! Feature flags:
+//! - `webp-encode` (default): includes `generate_thumbnail` and `encode_webp`.
+//!   Requires the `webp` C binding (libwebp). Disable for iOS cross-compilation
+//!   targets where libwebp conflicts with aws-lc-sys. iOS generates thumbnails
+//!   natively via PhotoKit/vImage and only calls `resize_for_thumbnail`.
+//! - No `webp-encode`: only `resize_for_thumbnail` and the config/error types
+//!   are available.
 
 use image::{ImageBuffer, Rgba, imageops::FilterType};
 
@@ -94,11 +102,29 @@ pub enum ThumbnailError {
     InvalidInput(String),
 }
 
+/// Resize RGBA pixels for thumbnail use. Always available (no WebP dependency).
+///
+/// Returns `(resized_rgba, new_width, new_height)`. The longest side is scaled
+/// to `max_dimension` preserving aspect ratio. If the source already fits,
+/// the original buffer is returned unmodified.
+pub fn resize_for_thumbnail(
+    rgba: &[u8],
+    src_width: u32,
+    src_height: u32,
+    max_dimension: u32,
+) -> Result<(Vec<u8>, u32, u32), ThumbnailError> {
+    resize_rgba(rgba, src_width, src_height, max_dimension)
+}
+
 /// Generate a WebP thumbnail from raw RGBA pixel data.
 ///
 /// Tries each step in the config's ladder in order. Returns the first result
 /// that fits under `config.target_bytes`. If none fit the target but one fits
 /// under `config.max_bytes`, returns that as a fallback.
+///
+/// Requires feature `webp-encode`. Not available when building for iOS
+/// (use `resize_for_thumbnail` + native WebP encoding instead).
+#[cfg(feature = "webp-encode")]
 pub fn generate_thumbnail(
     rgba: &[u8],
     src_width: u32,
@@ -191,6 +217,7 @@ fn resize_rgba(
 /// Encode RGBA pixel data to lossy WebP at the given quality.
 ///
 /// Quality is 0.0..=100.0, passed directly to libwebp.
+#[cfg(feature = "webp-encode")]
 fn encode_webp(
     rgba: &[u8],
     width: u32,
@@ -202,7 +229,7 @@ fn encode_webp(
     Ok(mem.to_vec())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "webp-encode"))]
 mod tests {
     use super::*;
 
