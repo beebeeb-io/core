@@ -38,16 +38,21 @@ cargo run -p beebeeb-uniffi --features cli --bin uniffi-bindgen -- \
     --out-dir "$BINDINGS_DIR"
 
 # Build device (arm64)
+# Pass --no-default-features so Cargo does not unify beebeeb-core's webp-encode
+# feature from other workspace members. The webp crate (C libwebp binding)
+# conflicts with aws-lc-sys during iOS cross-compilation. iOS generates WebP
+# thumbnails natively via PhotoKit/vImage using the always-available
+# resize_for_thumbnail UniFFI export instead.
 echo "[1/3] Building aarch64-apple-ios (device)..."
-cargo build -p beebeeb-uniffi --target aarch64-apple-ios --release
+cargo build -p beebeeb-uniffi --target aarch64-apple-ios --release --no-default-features
 
 # Build simulator arm64
 echo "[2/3] Building aarch64-apple-ios-sim (simulator arm64)..."
-cargo build -p beebeeb-uniffi --target aarch64-apple-ios-sim --release
+cargo build -p beebeeb-uniffi --target aarch64-apple-ios-sim --release --no-default-features
 
 # Build simulator x86_64
 echo "[3/3] Building x86_64-apple-ios (simulator x86_64)..."
-cargo build -p beebeeb-uniffi --target x86_64-apple-ios --release
+cargo build -p beebeeb-uniffi --target x86_64-apple-ios --release --no-default-features
 
 # Merge simulator slices into a fat binary
 DEVICE_LIB="$TARGET_DIR/aarch64-apple-ios/release/libbeebeeb_uniffi.a"

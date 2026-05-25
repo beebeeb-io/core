@@ -6,7 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-beebeeb-core = { path = "../beebeeb-core" }
+beebeeb-core = { path = "../beebeeb-core", default-features = false }
 beebeeb-types = { path = "../beebeeb-types" }
 tokio = { workspace = true }
 serde = { workspace = true }

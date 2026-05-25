@@ -6,7 +6,7 @@ description = "Upload protocol for Beebeeb E2E encrypted storage"
 license = "AGPL-3.0-or-later"
 
 [dependencies]
-beebeeb-core = { path = "../beebeeb-core" }
+beebeeb-core = { path = "../beebeeb-core", default-features = false }
 beebeeb-types = { path = "../beebeeb-types" }
 reqwest = { version = "0.13", features = ["json", "rustls"], default-features = false }
 serde = { version = "1", features = ["derive"] }

@@ -8,7 +8,7 @@ description = "WebAssembly bindings for Beebeeb cryptographic core"
 crate-type = ["cdylib"]
 
 [dependencies]
-beebeeb-core = { path = "../beebeeb-core" }
+beebeeb-core = { path = "../beebeeb-core", default-features = false }
 beebeeb-types = { path = "../beebeeb-types" }
 wasm-bindgen = "0.2"
 serde-wasm-bindgen = "0.6"
