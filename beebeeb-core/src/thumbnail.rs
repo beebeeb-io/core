@@ -63,19 +63,19 @@ impl ThumbnailConfig {
         }
     }
 
-    /// Large variant — for full-screen previews.
+    /// Large variant — for full-screen previews (spec 031).
     pub fn large() -> Self {
         Self {
             ladder: vec![
-                LadderStep { max_dimension: 1280, quality: 84.0 },
-                LadderStep { max_dimension: 1280, quality: 76.0 },
-                LadderStep { max_dimension: 1280, quality: 68.0 },
-                LadderStep { max_dimension: 1024, quality: 70.0 },
-                LadderStep { max_dimension: 768, quality: 74.0 },
-                LadderStep { max_dimension: 640, quality: 62.0 },
+                LadderStep { max_dimension: 1600, quality: 90.0 },
+                LadderStep { max_dimension: 1600, quality: 82.0 },
+                LadderStep { max_dimension: 1600, quality: 74.0 },
+                LadderStep { max_dimension: 1600, quality: 66.0 },
+                LadderStep { max_dimension: 1600, quality: 58.0 },
+                LadderStep { max_dimension: 1600, quality: 50.0 },
             ],
-            target_bytes: 150 * 1024,
-            max_bytes: 192 * 1024 - 28,
+            target_bytes: 400 * 1024,
+            max_bytes: 480 * 1024,
         }
     }
 }
@@ -269,7 +269,7 @@ mod tests {
         let rgba = make_test_rgba(2000, 1500);
         let result = generate_thumbnail(&rgba, 2000, 1500, &ThumbnailConfig::large()).unwrap();
         assert!(result.data.len() <= ThumbnailConfig::large().max_bytes);
-        assert!(result.width <= 1280);
+        assert!(result.width <= 1600);
     }
 
     #[test]
