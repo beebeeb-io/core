@@ -1318,6 +1318,9 @@ impl beebeeb_upload::UploadProgressCallback for UploadCallbackBridge<'_> {
 /// `Task { }` or Kotlin's `withContext(Dispatchers.IO) { }`.
 ///
 /// Creates a tokio runtime internally and blocks until complete.
+// FFI surface (UniFFI): the flat argument list IS the Swift/Kotlin ABI; a
+// params struct would have to be mirrored in both bindings for no benefit.
+#[allow(clippy::too_many_arguments)]
 #[uniffi::export]
 pub fn upload_encrypted_file(
     api_url: String,

@@ -132,6 +132,10 @@ impl UploadClient {
     ///
     /// Retries automatically on 429 (rate limit) and 5xx (server error) with
     /// exponential backoff.
+    // Mirrors the v2 upload protocol surface (id, name, parent, mime, sizes,
+    // counts, progress callback); a params struct would only shuffle the same
+    // fields without reducing the caller's burden.
+    #[allow(clippy::too_many_arguments)]
     pub async fn upload_encrypted_chunks(
         &self,
         file_id: &str,
@@ -231,6 +235,9 @@ impl UploadClient {
     // Protocol steps
     // -----------------------------------------------------------------------
 
+    // Carries the upload/init request fields one-to-one (id, name, parent,
+    // media flag, sizes, counts); grouping them adds indirection, not clarity.
+    #[allow(clippy::too_many_arguments)]
     async fn init_upload_session(
         &self,
         file_id: &str,
@@ -431,6 +438,10 @@ impl UploadClient {
 /// `withContext(Dispatchers.IO)`.
 ///
 /// Returns the file ID and upload stats on success.
+// FFI entry point (UniFFI): the flat argument list is the cross-language ABI
+// surface (url, token, id, name, parent, mime, sizes, counts, callback); a
+// struct would have to be mirrored in Swift/Kotlin for no benefit.
+#[allow(clippy::too_many_arguments)]
 pub fn upload_encrypted_file<'a>(
     api_url: &str,
     token: &str,

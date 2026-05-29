@@ -96,7 +96,7 @@ mod tests {
     #[test]
     fn parse_mixed_formats() {
         // nonce as base64, ciphertext as legacy array
-        let nonce_b64 = B64.encode(&[1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        let nonce_b64 = B64.encode([1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
         let payload = format!(
             r#"{{"nonce":"{}","ciphertext":[100,101,102]}}"#,
             nonce_b64
