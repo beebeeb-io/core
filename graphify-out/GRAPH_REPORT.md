@@ -60,14 +60,14 @@
 ## Surprising Connections (you probably didn't know these)
 - `row_to_entry()` --calls--> `ok`  [INFERRED]
   beebeeb-core/src/fp_cache.rs → beebeeb-uniffi/bindings/beebeeb_uniffi.swift
-- `file_encrypt_matches_direct_chunk_encryptor_loop()` --calls--> `derive_master_key()`  [INFERRED]
-  beebeeb-core/tests/chunk_stream_parity.rs → beebeeb-uniffi/src/lib.rs
-- `file_encrypt_empty_file_parity()` --calls--> `derive_master_key()`  [INFERRED]
-  beebeeb-core/tests/chunk_stream_parity.rs → beebeeb-uniffi/src/lib.rs
+- `derive_master_key()` --calls--> `file_encrypt_matches_direct_chunk_encryptor_loop()`  [INFERRED]
+  beebeeb-uniffi/src/lib.rs → beebeeb-core/tests/chunk_stream_parity.rs
+- `derive_master_key()` --calls--> `file_encrypt_empty_file_parity()`  [INFERRED]
+  beebeeb-uniffi/src/lib.rs → beebeeb-core/tests/chunk_stream_parity.rs
 - `derive_master_key()` --calls--> `password_derived_key_is_deterministic()`  [INFERRED]
   beebeeb-uniffi/src/lib.rs → beebeeb-core/tests/integration.rs
-- `mk()` --calls--> `derive_master_key()`  [INFERRED]
-  beebeeb-core/src/chunk_stream.rs → beebeeb-uniffi/src/lib.rs
+- `derive_master_key()` --calls--> `mk()`  [INFERRED]
+  beebeeb-uniffi/src/lib.rs → beebeeb-core/src/chunk_stream.rs
 
 ## Communities
 
