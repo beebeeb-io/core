@@ -59,6 +59,17 @@ CLI can move them into `spawn_blocking`. Core stays synchronous — no tokio.
   `encrypt::decrypt_contiguous_to_file`, `file_encrypt::decrypt_chunks_to_file` —
   are the disk/legacy paths and are **NOT superseded** by `ChunkDecryptor` this
   round (a later cleanup may route them through it).
+- **WASM binding (`beebeeb-wasm`):** `WasmChunkEncryptor` wraps the **push** form
+  for the web client (single-threaded WASM can't `Read` a browser `File`, so JS
+  slices the `Blob`). Constructor `new(master_key, file_id, file_size, profile)`
+  (ladder plan) or static `withChunkSize(...)` (server-dictated size);
+  `pushChunk(plaintext) -> Uint8Array` returns the full `nonce||ct||tag` frame
+  (no JS recombine); consuming `finish()` runs the integrity guard. Getters:
+  `chunkCount` / `chunkSize` / `chunksEmitted` / `expectedTotalCiphertext`. It is
+  the first stateful `#[wasm_bindgen]` struct in the crate. NOTE: a full
+  `wasm-pack build` currently requires `beebeeb-core`'s `rusqlite`/`fp_cache`
+  (native FileProvider cache, bundled C sqlite) to be target-gated off
+  `wasm32` — see the 0648 handoff.
 
 ### UniFFI handles (`beebeeb-uniffi`) — mobile/desktop
 
