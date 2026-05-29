@@ -7,12 +7,47 @@
 
 use std::io::{BufWriter, Write};
 
+use beebeeb_core::chunk_stream::ChunkDecryptor;
+
 use crate::error::UploadError;
 use crate::retry;
 
 const NONCE_LEN: usize = 12;
 /// AES-256-GCM tag length in bytes.
 const GCM_TAG_LEN: usize = 16;
+/// Per-chunk wire overhead: `nonce(12) + tag(16)`.
+const GCM_OVERHEAD: u64 = (NONCE_LEN + GCM_TAG_LEN) as u64;
+
+/// Read more body bytes (via `Response::chunk`) until `buf.len() >= want` or EOF.
+async fn fill_to(
+    resp: &mut reqwest::Response,
+    buf: &mut Vec<u8>,
+    want: usize,
+) -> Result<(), UploadError> {
+    while buf.len() < want {
+        match resp
+            .chunk()
+            .await
+            .map_err(|e| UploadError::Network(format!("reading response body: {e}")))?
+        {
+            Some(b) => buf.extend_from_slice(&b),
+            None => break,
+        }
+    }
+    Ok(())
+}
+
+/// Drain the rest of the response body into `buf`.
+async fn drain_rest(resp: &mut reqwest::Response, buf: &mut Vec<u8>) -> Result<(), UploadError> {
+    while let Some(b) = resp
+        .chunk()
+        .await
+        .map_err(|e| UploadError::Network(format!("reading response body: {e}")))?
+    {
+        buf.extend_from_slice(&b);
+    }
+    Ok(())
+}
 
 /// Callback for download progress reporting. Implemented by Swift/Kotlin callers.
 pub trait DownloadProgressCallback: Send + Sync {
@@ -62,17 +97,19 @@ impl DownloadClient {
         }
     }
 
-    /// Download an encrypted file and decrypt it to disk.
+    /// Download an encrypted file and **stream-decrypt** it to disk with
+    /// constant memory.
     ///
-    /// `GET /api/v1/files/{file_id}/download` returns the encrypted bytes.
-    /// Response headers include `X-Chunk-Count` and `X-Original-Size`.
+    /// `GET /api/v1/files/{file_id}/download` returns the chunks concatenated
+    /// (`nonce(12) || ciphertext || tag(16)` each) with `X-Chunk-Count` +
+    /// `X-Original-Size` headers (no per-chunk-size header). The body is read
+    /// incrementally with `Response::chunk()`, one logical frame at a time, each
+    /// decrypted through the shared [`ChunkDecryptor`] (single crypto point) and
+    /// written out — never buffering the whole payload.
     ///
-    /// The encrypted payload is a concatenation of chunks, each structured as
-    /// `nonce(12) || ciphertext(plaintext_len + 16)`. The chunk boundaries
-    /// are derived from the server-provided chunk count and the total
-    /// encrypted byte length.
-    ///
-    /// The file key is derived via `HKDF(master_key, file_id)`.
+    /// Frame sizing matches [`compute_chunk_boundaries`]: the first N-1 frames
+    /// are `total / chunk_count` bytes, the last frame is the remainder. The
+    /// file key is derived via `HKDF(master_key, file_id)`.
     pub async fn download_and_decrypt(
         &self,
         master_key: &beebeeb_core::kdf::MasterKey,
@@ -80,38 +117,11 @@ impl DownloadClient {
         output_path: &str,
         callback: Option<&dyn DownloadProgressCallback>,
     ) -> Result<DownloadResult, UploadError> {
-        // --- Step 1: Download encrypted bytes ---
-        let (encrypted_bytes, chunk_count, _original_size) =
-            self.download_encrypted(file_id).await?;
+        let url = format!("{}/api/v1/files/{}/download", self.api_url, file_id);
 
-        // --- Step 2: Split into chunks and decrypt ---
-        let file_key =
-            beebeeb_core::kdf::derive_file_key(master_key, file_id.as_bytes());
-
-        let result = decrypt_downloaded_bytes(
-            &file_key,
-            &encrypted_bytes,
-            chunk_count,
-            output_path,
-            callback,
-        )?;
-
-        Ok(result)
-    }
-
-    /// Fetch the encrypted file bytes from the server.
-    ///
-    /// Returns `(encrypted_bytes, chunk_count, original_size)`.
-    async fn download_encrypted(
-        &self,
-        file_id: &str,
-    ) -> Result<(Vec<u8>, u32, u64), UploadError> {
-        let url = format!(
-            "{}/api/v1/files/{}/download",
-            self.api_url, file_id
-        );
-
-        retry::with_retry(|| async {
+        // The retry covers obtaining a good response (connect + status); once we
+        // start streaming the body a mid-stream failure is not retried.
+        let mut resp = retry::with_retry(|| async {
             let resp = self
                 .http
                 .get(&url)
@@ -121,50 +131,143 @@ impl DownloadClient {
                 .map_err(|e| UploadError::Network(e.to_string()))?;
 
             let status = resp.status().as_u16();
-
             if status == 429 {
                 return Err(Self::parse_rate_limit(&resp).await);
             }
-
             if status >= 500 {
                 let text = resp.text().await.unwrap_or_default();
-                return Err(UploadError::ServerError {
-                    status,
-                    message: text,
-                });
+                return Err(UploadError::ServerError { status, message: text });
             }
-
             if status >= 400 {
                 let text = resp.text().await.unwrap_or_default();
-                return Err(UploadError::ClientError {
-                    status,
-                    message: text,
-                });
+                return Err(UploadError::ClientError { status, message: text });
             }
-
-            // Parse headers before consuming body
-            let chunk_count: u32 = resp
-                .headers()
-                .get("X-Chunk-Count")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(1);
-
-            let original_size: u64 = resp
-                .headers()
-                .get("X-Original-Size")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-
-            let bytes = resp
-                .bytes()
-                .await
-                .map_err(|e| UploadError::Network(format!("reading response body: {e}")))?;
-
-            Ok((bytes.to_vec(), chunk_count, original_size))
+            Ok(resp)
         })
-        .await
+        .await?;
+
+        let chunk_count: u32 = resp
+            .headers()
+            .get("X-Chunk-Count")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1);
+        let original_size: u64 = resp
+            .headers()
+            .get("X-Original-Size")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        // Total encrypted length: prefer Content-Length, else derive from the
+        // plaintext size + per-chunk overhead. Only sizes the first N-1 frames;
+        // the last frame drains the remainder, so a small estimate error
+        // self-corrects (and a wrong size fails the GCM tag).
+        let total: u64 = resp
+            .content_length()
+            .filter(|&v| v > 0)
+            .unwrap_or(original_size + GCM_OVERHEAD * chunk_count as u64);
+
+        self.stream_decrypt_to_disk(&mut resp, master_key, file_id, chunk_count, total, output_path, callback)
+            .await
+    }
+
+    /// Read the response body incrementally and decrypt frame-by-frame.
+    #[allow(clippy::too_many_arguments)]
+    async fn stream_decrypt_to_disk(
+        &self,
+        resp: &mut reqwest::Response,
+        master_key: &beebeeb_core::kdf::MasterKey,
+        file_id: &str,
+        chunk_count: u32,
+        total: u64,
+        output_path: &str,
+        callback: Option<&dyn DownloadProgressCallback>,
+    ) -> Result<DownloadResult, UploadError> {
+        if chunk_count == 0 {
+            return Err(UploadError::InvalidInput("chunk_count must be > 0".into()));
+        }
+        let n = chunk_count as usize;
+        // Frame size for the first n-1 frames; the last drains the remainder.
+        let frame_size = if n <= 1 {
+            usize::MAX // single frame == whole body
+        } else {
+            (total / chunk_count as u64) as usize
+        };
+
+        // Write to .tmp then atomic rename.
+        let tmp_path = format!("{output_path}.tmp");
+        if let Some(parent) = std::path::Path::new(output_path).parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| UploadError::IoError(format!("create output parent dir: {e}")))?;
+        }
+        let output_file = std::fs::File::create(&tmp_path)
+            .map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
+        let mut writer = BufWriter::new(output_file);
+
+        let mut decryptor = ChunkDecryptor::for_push(master_key, file_id);
+        let mut carry: Vec<u8> = Vec::new();
+        let mut total_plaintext: u64 = 0;
+        let mut chunks_decrypted: u32 = 0;
+
+        for i in 0..n {
+            let is_last = i == n - 1;
+            let frame: Vec<u8> = if is_last || frame_size == usize::MAX {
+                drain_rest(resp, &mut carry).await?;
+                std::mem::take(&mut carry)
+            } else {
+                fill_to(resp, &mut carry, frame_size).await?;
+                if carry.len() < frame_size {
+                    let _ = std::fs::remove_file(&tmp_path);
+                    return Err(UploadError::InvalidResponse(format!(
+                        "download truncated at chunk {i}/{n}: wanted {frame_size}, got {}",
+                        carry.len()
+                    )));
+                }
+                carry.drain(..frame_size).collect()
+            };
+
+            let dec = match decryptor.push_frame(&frame) {
+                Ok(d) => d,
+                Err(e) => {
+                    let _ = std::fs::remove_file(&tmp_path);
+                    return Err(UploadError::InvalidResponse(format!(
+                        "decryption failed for chunk {i}: {e}"
+                    )));
+                }
+            };
+
+            if let Err(e) = writer.write_all(&dec.data) {
+                let _ = std::fs::remove_file(&tmp_path);
+                return Err(UploadError::IoError(format!("write output: {e}")));
+            }
+            total_plaintext += dec.data.len() as u64;
+            chunks_decrypted += 1;
+            if let Some(cb) = callback {
+                cb.on_chunk_decrypted(chunks_decrypted, chunk_count);
+            }
+        }
+
+        writer
+            .flush()
+            .map_err(|e| UploadError::IoError(format!("flush output: {e}")))?;
+        drop(writer);
+        std::fs::rename(&tmp_path, output_path)
+            .map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
+
+        if let Some(cb) = callback {
+            cb.on_complete(output_path);
+        }
+        tracing::info!(
+            chunks = chunks_decrypted,
+            plaintext_bytes = total_plaintext,
+            "streaming download + decrypt complete"
+        );
+
+        Ok(DownloadResult {
+            output_path: output_path.to_string(),
+            plaintext_size: total_plaintext,
+            chunks_decrypted,
+        })
     }
 
     async fn parse_rate_limit(resp: &reqwest::Response) -> UploadError {
