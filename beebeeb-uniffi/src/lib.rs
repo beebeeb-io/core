@@ -106,6 +106,22 @@ pub struct EncryptedChunkData {
     pub ciphertext: Vec<u8>,
 }
 
+/// A request's X25519 private key wrapped under the owner's master key
+/// (AES-256-GCM ciphertext + nonce). Stored server-side.
+#[derive(uniffi::Record)]
+pub struct WrappedRequestPrivate {
+    pub wrapped: Vec<u8>,
+    pub nonce: Vec<u8>,
+}
+
+/// A content key sealed to a request public key: the uploader's ephemeral
+/// X25519 public key and the wrapped content key (raw `nonce ‖ ciphertext`).
+#[derive(uniffi::Record)]
+pub struct SealedRequestUpload {
+    pub e_pub: Vec<u8>,
+    pub wrapped_key: Vec<u8>,
+}
+
 /// Info about a single encrypted chunk written to disk by `encrypt_file`.
 #[derive(uniffi::Record)]
 pub struct EncryptedChunkInfo {
@@ -541,6 +557,84 @@ pub fn derive_share_key(shared_secret: Vec<u8>, file_id: Vec<u8>) -> Result<Vec<
 pub fn compute_recovery_check(master_key: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let mk = master_key_from_slice(&master_key)?;
     Ok(beebeeb_core::opaque::compute_recovery_check(&mk).to_vec())
+}
+
+// ---------------------------------------------------------------------------
+// File requests (sealed-box / ECIES per request)
+// ---------------------------------------------------------------------------
+
+/// Derive the per-request private-key-wrapping key from the owner's master key.
+/// Returns 32 bytes.
+#[uniffi::export]
+pub fn derive_request_wrap_key(master_key: Vec<u8>, request_id: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
+    let mk = master_key_from_slice(&master_key)?;
+    Ok(beebeeb_core::file_request::derive_request_wrap_key(&mk, &request_id).to_vec())
+}
+
+/// Wrap a request's X25519 private key under the owner's master key.
+#[uniffi::export]
+pub fn wrap_request_private(
+    master_key: Vec<u8>,
+    request_id: Vec<u8>,
+    r_priv: Vec<u8>,
+) -> Result<WrappedRequestPrivate, CryptoError> {
+    let mk = master_key_from_slice(&master_key)?;
+    let r_priv_arr: [u8; 32] = r_priv.try_into().map_err(|_| CryptoError::InvalidInput {
+        detail: "r_priv must be 32 bytes".into(),
+    })?;
+    let (wrapped, nonce) = beebeeb_core::file_request::wrap_request_private(&mk, &request_id, &r_priv_arr)?;
+    Ok(WrappedRequestPrivate { wrapped, nonce })
+}
+
+/// Unwrap a request's X25519 private key. Returns 32 bytes.
+#[uniffi::export]
+pub fn unwrap_request_private(
+    master_key: Vec<u8>,
+    request_id: Vec<u8>,
+    wrapped: Vec<u8>,
+    nonce: Vec<u8>,
+) -> Result<Vec<u8>, CryptoError> {
+    let mk = master_key_from_slice(&master_key)?;
+    let r_priv = beebeeb_core::file_request::unwrap_request_private(&mk, &request_id, &wrapped, &nonce)?;
+    Ok(r_priv.to_vec())
+}
+
+/// Seal a content key to a request's public key (anonymous uploader path).
+#[uniffi::export]
+pub fn seal_to_request(
+    r_pub: Vec<u8>,
+    file_id: Vec<u8>,
+    content_key: Vec<u8>,
+) -> Result<SealedRequestUpload, CryptoError> {
+    let r_pub_arr: [u8; 32] = r_pub.try_into().map_err(|_| CryptoError::InvalidInput {
+        detail: "r_pub must be 32 bytes".into(),
+    })?;
+    let content_key_arr: [u8; 32] = content_key.try_into().map_err(|_| CryptoError::InvalidInput {
+        detail: "content_key must be 32 bytes".into(),
+    })?;
+    let sealed = beebeeb_core::file_request::seal_to_request(&r_pub_arr, &file_id, &content_key_arr)?;
+    Ok(SealedRequestUpload {
+        e_pub: sealed.e_pub.to_vec(),
+        wrapped_key: sealed.wrapped_key,
+    })
+}
+
+/// Open a sealed request upload (owner decrypt path). Returns the 32-byte content key.
+#[uniffi::export]
+pub fn open_request_upload(
+    r_priv: Vec<u8>,
+    e_pub: Vec<u8>,
+    file_id: Vec<u8>,
+    wrapped_key: Vec<u8>,
+) -> Result<Vec<u8>, CryptoError> {
+    let r_priv_arr: [u8; 32] = r_priv.try_into().map_err(|_| CryptoError::InvalidInput {
+        detail: "r_priv must be 32 bytes".into(),
+    })?;
+    let e_pub_arr: [u8; 32] = e_pub.try_into().map_err(|_| CryptoError::InvalidInput {
+        detail: "e_pub must be 32 bytes".into(),
+    })?;
+    let content_key = beebeeb_core::file_request::open_request_upload(&r_priv_arr, &e_pub_arr, &file_id, &wrapped_key)?;
+    Ok(content_key.to_vec())
 }
 
 // ---------------------------------------------------------------------------
@@ -1292,6 +1386,35 @@ mod tests {
         let mk = derive_master_key("password".into(), TEST_SALT.to_vec()).unwrap();
         let check = compute_recovery_check(mk.key).unwrap();
         assert_eq!(check.len(), 32);
+    }
+
+    #[test]
+    fn file_request_wrap_unwrap_roundtrip() {
+        let mk = derive_master_key("owner".into(), TEST_SALT.to_vec()).unwrap();
+        let request_id = b"req-uniffi-001".to_vec();
+        // The request private key is itself an X25519 scalar.
+        let r_priv = derive_x25519_private(mk.key.clone()).unwrap();
+
+        let wrap_key = derive_request_wrap_key(mk.key.clone(), request_id.clone()).unwrap();
+        assert_eq!(wrap_key.len(), 32);
+
+        let wrapped = wrap_request_private(mk.key.clone(), request_id.clone(), r_priv.clone()).unwrap();
+        let recovered = unwrap_request_private(mk.key, request_id, wrapped.wrapped, wrapped.nonce).unwrap();
+        assert_eq!(recovered, r_priv);
+    }
+
+    #[test]
+    fn file_request_seal_open_roundtrip() {
+        let mk = derive_master_key("owner".into(), TEST_SALT.to_vec()).unwrap();
+        let r_priv = derive_x25519_private(mk.key).unwrap();
+        let r_pub = derive_x25519_public(r_priv.clone()).unwrap();
+        let file_id = b"uniffi-uploaded-file".to_vec();
+        let content_key = vec![0x42u8; 32];
+
+        let sealed = seal_to_request(r_pub, file_id.clone(), content_key.clone()).unwrap();
+        assert_eq!(sealed.e_pub.len(), 32);
+        let opened = open_request_upload(r_priv, sealed.e_pub, file_id, sealed.wrapped_key).unwrap();
+        assert_eq!(opened, content_key);
     }
 
     #[test]

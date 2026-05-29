@@ -285,6 +285,108 @@ pub fn compute_recovery_check(master_key: &[u8]) -> Result<Vec<u8>, JsError> {
 }
 
 // ---------------------------------------------------------------------------
+// File requests (sealed-box / ECIES per request)
+// ---------------------------------------------------------------------------
+
+/// Derive the per-request private-key-wrapping key from the owner's master key.
+/// `master_key` is 32 bytes, `request_id` is arbitrary bytes. Returns 32-byte `Uint8Array`.
+#[wasm_bindgen]
+pub fn derive_request_wrap_key(master_key: &[u8], request_id: &[u8]) -> Result<Vec<u8>, JsError> {
+    let mk_bytes: [u8; 32] = master_key
+        .try_into()
+        .map_err(|_| JsError::new("master_key must be 32 bytes"))?;
+    let mk = kdf::MasterKey::from_bytes(mk_bytes);
+    Ok(beebeeb_core::file_request::derive_request_wrap_key(&mk, request_id).to_vec())
+}
+
+/// Wrap a request's X25519 private key under the owner's master key.
+/// Returns `{ wrapped: Uint8Array, nonce: Uint8Array }`.
+#[wasm_bindgen]
+pub fn wrap_request_private(master_key: &[u8], request_id: &[u8], r_priv: &[u8]) -> Result<JsValue, JsError> {
+    let mk_bytes: [u8; 32] = master_key
+        .try_into()
+        .map_err(|_| JsError::new("master_key must be 32 bytes"))?;
+    let mk = kdf::MasterKey::from_bytes(mk_bytes);
+    let r_priv_arr: [u8; 32] = r_priv.try_into().map_err(|_| JsError::new("r_priv must be 32 bytes"))?;
+    let (wrapped, nonce) = beebeeb_core::file_request::wrap_request_private(&mk, request_id, &r_priv_arr)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    let obj = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &obj,
+        &"wrapped".into(),
+        &js_sys::Uint8Array::from(wrapped.as_slice()).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(
+        &obj,
+        &"nonce".into(),
+        &js_sys::Uint8Array::from(nonce.as_slice()).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    Ok(obj.into())
+}
+
+/// Unwrap a request's X25519 private key. Returns 32-byte `Uint8Array`.
+#[wasm_bindgen]
+pub fn unwrap_request_private(
+    master_key: &[u8],
+    request_id: &[u8],
+    wrapped: &[u8],
+    nonce: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    let mk_bytes: [u8; 32] = master_key
+        .try_into()
+        .map_err(|_| JsError::new("master_key must be 32 bytes"))?;
+    let mk = kdf::MasterKey::from_bytes(mk_bytes);
+    let r_priv = beebeeb_core::file_request::unwrap_request_private(&mk, request_id, wrapped, nonce)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(r_priv.to_vec())
+}
+
+/// Seal a content key to a request's public key (anonymous uploader path).
+/// `r_pub` and `content_key` are 32 bytes; `file_id` is arbitrary bytes.
+/// Returns `{ e_pub: Uint8Array, wrapped_key: Uint8Array }`.
+#[wasm_bindgen]
+pub fn seal_to_request(r_pub: &[u8], file_id: &[u8], content_key: &[u8]) -> Result<JsValue, JsError> {
+    let r_pub_arr: [u8; 32] = r_pub.try_into().map_err(|_| JsError::new("r_pub must be 32 bytes"))?;
+    let content_key_arr: [u8; 32] = content_key
+        .try_into()
+        .map_err(|_| JsError::new("content_key must be 32 bytes"))?;
+    let sealed = beebeeb_core::file_request::seal_to_request(&r_pub_arr, file_id, &content_key_arr)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    let obj = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &obj,
+        &"e_pub".into(),
+        &js_sys::Uint8Array::from(&sealed.e_pub[..]).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(
+        &obj,
+        &"wrapped_key".into(),
+        &js_sys::Uint8Array::from(sealed.wrapped_key.as_slice()).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    Ok(obj.into())
+}
+
+/// Open a sealed request upload (owner decrypt path). Recovers the content key.
+/// `r_priv` and `e_pub` are 32 bytes; `file_id` is arbitrary bytes. Returns 32-byte `Uint8Array`.
+#[wasm_bindgen]
+pub fn open_request_upload(
+    r_priv: &[u8],
+    e_pub: &[u8],
+    file_id: &[u8],
+    wrapped_key: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    let r_priv_arr: [u8; 32] = r_priv.try_into().map_err(|_| JsError::new("r_priv must be 32 bytes"))?;
+    let e_pub_arr: [u8; 32] = e_pub.try_into().map_err(|_| JsError::new("e_pub must be 32 bytes"))?;
+    let content_key = beebeeb_core::file_request::open_request_upload(&r_priv_arr, &e_pub_arr, file_id, wrapped_key)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(content_key.to_vec())
+}
+
+// ---------------------------------------------------------------------------
 // Chunk planning
 // ---------------------------------------------------------------------------
 

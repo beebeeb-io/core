@@ -9,6 +9,7 @@
 //! cross-platform compatibility and existing user data may become unreadable.
 
 use beebeeb_core::encrypt::{decrypt_chunk, decrypt_metadata, encrypt_metadata};
+use beebeeb_core::file_request::{derive_request_wrap_key, open_request_upload, unwrap_request_private};
 use beebeeb_core::kdf::{FileKey, MasterKey, derive_file_key, derive_master_key};
 use beebeeb_core::opaque::{
     OpaqueEnvelope, compute_recovery_check, derive_share_key, derive_x25519_private, derive_x25519_public,
@@ -458,7 +459,58 @@ fn vector_share_key_encrypts_and_decrypts() {
 }
 
 // ---------------------------------------------------------------------------
-// 16. Version guard — fail loudly if vectors.json format changes unexpectedly
+// 16. File request seal/open (sealed-box / ECIES per request)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn vector_file_request_seal_open() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "file_request_seal_open");
+
+    let mk = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let request_id = decode_hex(&v, "request_id_hex");
+    let expected_wrap_key = bytes32(&v, "expected_wrap_key_hex");
+    let r_priv = bytes32(&v, "r_priv_hex");
+    let expected_r_pub = bytes32(&v, "r_pub_hex");
+    let file_id = decode_hex(&v, "file_id_hex");
+    let expected_content_key = bytes32(&v, "content_key_hex");
+    let e_pub = bytes32(&v, "e_pub_hex");
+    let wrapped_key = decode_hex(&v, "wrapped_key_hex");
+    let wrapped_private = decode_hex(&v, "wrapped_private_hex");
+    let wrap_nonce = decode_hex(&v, "wrap_nonce_hex");
+
+    // 1. The private-wrap key is deterministic and must match the vector.
+    let wrap_key = derive_request_wrap_key(&mk, &request_id);
+    assert_eq!(
+        *wrap_key, expected_wrap_key,
+        "file_request_seal_open: wrap key does not match vector"
+    );
+
+    // 2. The request public key must match the one derived from r_priv.
+    let r_pub = derive_x25519_public(&r_priv);
+    assert_eq!(
+        r_pub, expected_r_pub,
+        "file_request_seal_open: r_pub does not match vector"
+    );
+
+    // 3. Unwrapping the stored wrapped private key must recover r_priv exactly.
+    let recovered_priv = unwrap_request_private(&mk, &request_id, &wrapped_private, &wrap_nonce).unwrap();
+    assert_eq!(
+        *recovered_priv, r_priv,
+        "file_request_seal_open: unwrapped private key does not match vector"
+    );
+
+    // 4. The critical interop path: a content key sealed on one platform must
+    //    open to the original bytes on any other platform.
+    let opened = open_request_upload(&r_priv, &e_pub, &file_id, &wrapped_key).unwrap();
+    assert_eq!(
+        *opened, expected_content_key,
+        "file_request_seal_open: opened content key does not match vector"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 17. Version guard — fail loudly if vectors.json format changes unexpectedly
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -471,8 +523,8 @@ fn vector_file_version_check() {
         .as_u64()
         .expect("vectors.json must have a 'version' field");
     assert_eq!(
-        version, 2,
-        "vectors.json version mismatch — expected 2, got {version}. \
+        version, 3,
+        "vectors.json version mismatch — expected 3, got {version}. \
          Update this test if you intentionally bumped the version."
     );
 
@@ -490,6 +542,7 @@ fn vector_file_version_check() {
         "envelope_serialization",
         "recovery_phrase_roundtrip",
         "metadata_encrypt_decrypt",
+        "file_request_seal_open",
     ];
     for name in &required {
         assert!(names.contains(name), "vectors.json is missing required vector '{name}'");

@@ -1,4 +1,7 @@
 use beebeeb_core::encrypt::{decrypt_chunk, decrypt_metadata, encrypt_chunk, encrypt_metadata};
+use beebeeb_core::file_request::{
+    derive_request_wrap_key, open_request_upload, seal_to_request, unwrap_request_private, wrap_request_private,
+};
 use beebeeb_core::kdf::{derive_file_key, derive_master_key};
 use beebeeb_core::opaque::{
     OpaqueEnvelope, compute_recovery_check, derive_share_key, derive_x25519_private, derive_x25519_public,
@@ -132,8 +135,40 @@ fn main() {
         "note": "nonce is random — use this vector for decrypt-only testing. To verify encrypt, check that decrypt(encrypt(metadata)) == metadata."
     }));
 
+    // Vector 10: File request seal/open (sealed-box / ECIES per request)
+    // wrap_key is deterministic; e_pub / wrapped_key / wrapped_private use random
+    // ephemeral keys + nonces, so they are for open/unwrap (decrypt-only) testing.
+    let request_id = b"req-550e8400-e29b-41d4-a716-446655440099";
+    let fr_wrap_key = derive_request_wrap_key(&mk, request_id);
+    // Fixed request keypair so r_priv / r_pub are stable in the vector.
+    let r_priv = [0x11u8; 32];
+    let r_pub = derive_x25519_public(&r_priv);
+    let (wrapped_private, wrap_nonce) = wrap_request_private(&mk, request_id, &r_priv).unwrap();
+    let r_priv_check = unwrap_request_private(&mk, request_id, &wrapped_private, &wrap_nonce).unwrap();
+    assert_eq!(*r_priv_check, r_priv);
+    let fr_file_id = b"file-request-uploaded-file-001";
+    let content_key = [0x42u8; 32];
+    let sealed = seal_to_request(&r_pub, fr_file_id, &content_key).unwrap();
+    let opened = open_request_upload(&r_priv, &sealed.e_pub, fr_file_id, &sealed.wrapped_key).unwrap();
+    assert_eq!(*opened, content_key);
+    vectors.push(json!({
+        "name": "file_request_seal_open",
+        "master_key_hex": hex(&mk.to_bytes()),
+        "request_id_hex": hex(request_id),
+        "expected_wrap_key_hex": hex(&*fr_wrap_key),
+        "r_priv_hex": hex(&r_priv),
+        "r_pub_hex": hex(&r_pub),
+        "file_id_hex": hex(fr_file_id),
+        "content_key_hex": hex(&content_key),
+        "e_pub_hex": hex(&sealed.e_pub),
+        "wrapped_key_hex": hex(&sealed.wrapped_key),
+        "wrapped_private_hex": hex(&wrapped_private),
+        "wrap_nonce_hex": hex(&wrap_nonce),
+        "note": "wrap_key is deterministic. e_pub/wrapped_key (random ephemeral+nonce) verify open_request_upload(r_priv,e_pub,file_id,wrapped_key)==content_key; wrapped_private/wrap_nonce (random nonce) verify unwrap_request_private==r_priv."
+    }));
+
     let output = json!({
-        "version": 2,
+        "version": 3,
         "generated_by": "beebeeb-core test vector generator",
         "vectors": vectors,
     });
