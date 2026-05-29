@@ -25,10 +25,14 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 blake3 = "1"
 flate2 = "1"
-rusqlite = { version = "0.32", features = ["bundled"] }
 zip = { version = "8", default-features = false, features = ["deflate"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 webp = { version = "0.3", optional = true, default-features = false }
+
+# rusqlite bundles C SQLite (used only by `fp_cache`) and cannot target wasm32.
+# Gate it to non-wasm targets so `beebeeb-wasm` builds in place. See task 0653.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [features]
 default = ["webp-encode"]

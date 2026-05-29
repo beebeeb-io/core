@@ -66,10 +66,19 @@ CLI can move them into `spawn_blocking`. Core stays synchronous — no tokio.
   `pushChunk(plaintext) -> Uint8Array` returns the full `nonce||ct||tag` frame
   (no JS recombine); consuming `finish()` runs the integrity guard. Getters:
   `chunkCount` / `chunkSize` / `chunksEmitted` / `expectedTotalCiphertext`. It is
-  the first stateful `#[wasm_bindgen]` struct in the crate. NOTE: a full
-  `wasm-pack build` currently requires `beebeeb-core`'s `rusqlite`/`fp_cache`
-  (native FileProvider cache, bundled C sqlite) to be target-gated off
-  `wasm32` — see the 0648 handoff.
+  the first stateful `#[wasm_bindgen]` struct in the crate.
+
+### WASM target gating (0653)
+
+`beebeeb-core` builds for `wasm32-unknown-unknown` (so `beebeeb-wasm` builds in
+place). `rusqlite` (bundled C SQLite, used only by `fp_cache`'s native
+FileProvider cache) cannot target wasm32, so it is gated to non-wasm:
+`rusqlite` lives under `[target.'cfg(not(target_arch = "wasm32"))'.dependencies]`
+in `beebeeb-core/Cargo.toml`, and `pub mod fp_cache;` carries
+`#[cfg(not(target_arch = "wasm32"))]`. Native (cli/server/desktop/uniffi/iOS)
+builds are unaffected — the gate excludes wasm only. WASM JsValue returns
+(`plan_chunks`, `WasmChunkEncryptor::finish`) serialize via typed `#[derive(Serialize)]`
+structs so they cross as plain JS objects, not `Map`s (0655).
 
 ### UniFFI handles (`beebeeb-uniffi`) — mobile/desktop
 

@@ -311,10 +311,17 @@ fn parse_profile(profile: &str) -> Result<beebeeb_types::ChunkProfile, JsError> 
 pub fn plan_chunks(file_size_bytes: u64, profile: &str) -> Result<JsValue, JsError> {
     let p = parse_profile(profile)?;
     let plan = beebeeb_types::plan_chunks(file_size_bytes, p);
-    Ok(serde_wasm_bindgen::to_value(&serde_json::json!({
-        "chunk_size_bytes": plan.chunk_size_bytes,
-        "chunk_count": plan.chunk_count,
-    }))?)
+    // Serialize via a typed struct (NOT serde_json::Value) so serde-wasm-bindgen
+    // emits a plain JS object, not a Map. See 0655.
+    #[derive(serde::Serialize)]
+    struct ChunkPlanJs {
+        chunk_size_bytes: u64,
+        chunk_count: u64,
+    }
+    Ok(serde_wasm_bindgen::to_value(&ChunkPlanJs {
+        chunk_size_bytes: plan.chunk_size_bytes,
+        chunk_count: plan.chunk_count,
+    })?)
 }
 
 // ---------------------------------------------------------------------------
@@ -432,12 +439,21 @@ impl WasmChunkEncryptor {
     /// Errors if the source shrank (fewer chunks/bytes than planned).
     pub fn finish(self) -> Result<JsValue, JsError> {
         let summary = self.finish_summary().map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(serde_wasm_bindgen::to_value(&serde_json::json!({
-            "chunk_count": summary.chunk_count,
-            "total_plaintext": summary.total_plaintext,
-            "total_ciphertext": summary.total_ciphertext,
-            "chunk_size_bytes": summary.chunk_size_bytes,
-        }))?)
+        // Serialize via a typed struct (NOT serde_json::Value) so serde-wasm-bindgen
+        // emits a plain JS object, not a Map. See 0655. chunk_count is u32.
+        #[derive(serde::Serialize)]
+        struct FinishSummaryJs {
+            chunk_count: u32,
+            total_plaintext: u64,
+            total_ciphertext: u64,
+            chunk_size_bytes: u64,
+        }
+        Ok(serde_wasm_bindgen::to_value(&FinishSummaryJs {
+            chunk_count: summary.chunk_count,
+            total_plaintext: summary.total_plaintext,
+            total_ciphertext: summary.total_ciphertext,
+            chunk_size_bytes: summary.chunk_size_bytes,
+        })?)
     }
 }
 
