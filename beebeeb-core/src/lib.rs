@@ -1,5 +1,6 @@
 pub mod archive;
 pub mod blob;
+pub mod chunk_stream;
 pub mod constellation;
 pub mod encrypt;
 pub mod error;

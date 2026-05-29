@@ -7,7 +7,13 @@ use beebeeb_types::{CipherSuite, EncryptedBlob};
 use crate::CoreError;
 use crate::kdf::FileKey;
 
-const NONCE_LEN: usize = 12;
+/// AES-256-GCM nonce length in bytes. Single source of truth for the
+/// `encrypt` / `file_encrypt` / `chunk_stream` cluster.
+pub(crate) const NONCE_LEN: usize = 12;
+
+/// AES-256-GCM authentication tag length in bytes. Single source of truth for
+/// the `encrypt` / `file_encrypt` / `chunk_stream` cluster.
+pub(crate) const TAG_LEN: usize = 16;
 
 /// Encrypt an arbitrary plaintext chunk with AES-256-GCM.
 ///
@@ -232,7 +238,6 @@ pub fn decrypt_contiguous_to_file(
             "chunk_size must be positive".into(),
         ));
     }
-    const TAG_LEN: usize = 16;
     let chunk_size_usize: usize = chunk_size.try_into().map_err(|_| {
         CoreError::InvalidInput(format!("chunk_size {chunk_size} exceeds usize range"))
     })?;
