@@ -11,7 +11,8 @@ Cryptographic core, shared types, and sync engine. This is the trust anchor — 
 ## Build & test
 
 ```sh
-cargo test --workspace    # 53 tests (core: 26, sync: 27)
+cargo test -p beebeeb-core   # 255 tests (8 suites), incl. the chunk_stream streaming primitive
+cargo test --workspace       # full workspace (core + sync + types + upload + uniffi + wasm)
 cargo clippy --workspace -- -D warnings
 cargo fmt -- --check
 ```
@@ -22,6 +23,84 @@ cargo fmt -- --check
 - `FileKey` — 32 bytes, per-file via HKDF. `derive_file_key(master_key, file_id)`.
 - `EncryptedBlob` — cipher_suite + nonce (Vec<u8>) + ciphertext (Vec<u8>).
 - `encrypt_chunk(key: &FileKey, plaintext)` / `decrypt_chunk(key: &FileKey, blob)` — AES-256-GCM.
+
+## Streaming chunk primitive (`chunk_stream.rs`)
+
+`chunk_stream::ChunkEncryptor` / `ChunkDecryptor` are the ONE shared chunk
+encrypt/decrypt loop for every client (cli, desktop, mobile/UniFFI, web/WASM) —
+no client re-implements the chunk loop. Generic-free (the reader is boxed behind
+a private `Source`/`DecSource` enum) so the types cross UniFFI, and `Send` so the
+CLI can move them into `spawn_blocking`. Core stays synchronous — no tokio.
+
+- **Pull** (native): `ChunkEncryptor::from_reader(mk, file_id, file_size, profile, reader)`
+  pulls one chunk at a time into a reused `Zeroizing` buffer (peak memory ≈ one
+  chunk, never file-size-proportional). `next_chunk()` is plan-driven and returns
+  `Ok(None)` once after the last chunk.
+- **Push** (WASM, caller slices): `for_push` / `for_push_with_chunk_size` +
+  `push_chunk`. `ChunkDecryptor::for_push` + `push_frame` mirror it.
+  `for_push_with_chunk_size` lets a v2 server dictate the chunk size.
+- The single crypto point is the private `encrypt_next` → `encrypt_chunk_raw`.
+  `file_key` is derived ONCE in the constructor and is `ZeroizeOnDrop`.
+- `finish()` integrity guard: requires `emitted == chunk_count` AND
+  `running_ciphertext == file_size + 28*chunk_count`. This **detects a source
+  that SHRANK** mid-stream; it provably **cannot detect a source that GREW** when
+  `file_size` is an exact multiple of the chunk size (the loop stops at the
+  original `chunk_count`) — documented on the method.
+- **Wire format UNCHANGED:** `nonce(12) || ciphertext || tag(16)`, fresh random
+  nonce per chunk. Output is roundtrip-compatible with existing files but NOT
+  byte-identical (random nonce) — intentional. `vectors.json` stays v2.
+- `file_encrypt::encrypt_file_to_chunks` now **DELEGATES** to `ChunkEncryptor`
+  (one encrypt loop, no drift); `tests/chunk_stream_parity.rs` enforces an
+  identical chunk plan + that new output decrypts via the legacy `decrypt_chunk_raw`.
+- `NONCE_LEN` / `TAG_LEN` (defined in `encrypt`) and `read_exact_or_eof` (defined
+  in `chunk_stream`) are `pub(crate)` — a single definition shared by the
+  `encrypt` / `file_encrypt` / `chunk_stream` cluster (no duplication).
+- The three legacy decrypt functions — `encrypt::decrypt_chunks_to_file`,
+  `encrypt::decrypt_contiguous_to_file`, `file_encrypt::decrypt_chunks_to_file` —
+  are the disk/legacy paths and are **NOT superseded** by `ChunkDecryptor` this
+  round (a later cleanup may route them through it).
+- **WASM binding (`beebeeb-wasm`):** `WasmChunkEncryptor` wraps the **push** form
+  for the web client (single-threaded WASM can't `Read` a browser `File`, so JS
+  slices the `Blob`). Constructor `new(master_key, file_id, file_size, profile)`
+  (ladder plan) or static `withChunkSize(...)` (server-dictated size);
+  `pushChunk(plaintext) -> Uint8Array` returns the full `nonce||ct||tag` frame
+  (no JS recombine); consuming `finish()` runs the integrity guard. Getters:
+  `chunkCount` / `chunkSize` / `chunksEmitted` / `expectedTotalCiphertext`. It is
+  the first stateful `#[wasm_bindgen]` struct in the crate.
+
+### WASM target gating (0653)
+
+`beebeeb-core` builds for `wasm32-unknown-unknown` (so `beebeeb-wasm` builds in
+place). `rusqlite` (bundled C SQLite, used only by `fp_cache`'s native
+FileProvider cache) cannot target wasm32, so it is gated to non-wasm:
+`rusqlite` lives under `[target.'cfg(not(target_arch = "wasm32"))'.dependencies]`
+in `beebeeb-core/Cargo.toml`, and `pub mod fp_cache;` carries
+`#[cfg(not(target_arch = "wasm32"))]`. Native (cli/server/desktop/uniffi/iOS)
+builds are unaffected — the gate excludes wasm only. WASM JsValue returns
+(`plan_chunks`, `WasmChunkEncryptor::finish`) serialize via typed `#[derive(Serialize)]`
+structs so they cross as plain JS objects, not `Map`s (0655).
+
+### UniFFI handles (`beebeeb-uniffi`) — mobile/desktop
+
+`ChunkEncryptorHandle` / `ChunkDecryptorHandle` wrap the primitive for Swift/Kotlin
+so mobile/desktop drop their bespoke encrypt loops:
+
+- Each is a `#[uniffi::Object]` holding `Mutex<Option<ChunkEncryptor/Decryptor>>`.
+  Constructors: encryptor `from_file` (pull, stats the file) + `for_push`; decryptor
+  `from_file` (pull) + `for_push`. Methods `next_chunk` → `Result<Option<Dto>>`,
+  `push_chunk`/`push_frame` → `Result<Dto>`, plus `chunk_plan`/`expected_total_ciphertext`/
+  `chunks_emitted`; `finish()` `take()`s the `Option` (consume-by-value) so the handle
+  is unusable afterwards. DTOs: `EncryptedChunkDto`/`DecryptedChunkDto` (`index: u32`,
+  `data: Vec<u8>`), `ChunkEncryptorSummaryDto`.
+- The key is derived IN CORE from a borrowed `&MasterKeyHandle` (`with_key`); raw key
+  bytes never cross FFI.
+- **Single-consumer contract:** a handle is an ordered cursor — drive it from ONE
+  sequence. The `Mutex` is only the `Send + Sync` backstop UniFFI requires, not a
+  concurrency primitive. There is deliberately NO UniFFI callback inside these handles
+  (avoids a reentrant lock; contrast `MasterKeyHandle::encrypt_file`).
+- Regenerating Swift/Kotlin bindings: run `build-ios.sh` (regens `beebeeb_uniffiFFI.h`
+  + `BeebeebCore.swift` + xcframework) / `build-android.sh`. Grep the regenerated header
+  for the new symbols before shipping (the 0426 12-symbol drift lesson).
 
 ## Security invariants
 

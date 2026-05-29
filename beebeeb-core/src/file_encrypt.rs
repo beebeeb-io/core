@@ -5,16 +5,15 @@
 //! (one plaintext buffer + one ciphertext buffer). No full-file copies.
 
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use beebeeb_types::{ChunkProfile, plan_chunks};
 
-use crate::encrypt::{encrypt_chunk_raw, decrypt_chunk_raw};
+use crate::chunk_stream::ChunkEncryptor;
+use crate::encrypt::{NONCE_LEN, TAG_LEN, decrypt_chunk_raw};
 use crate::kdf::{MasterKey, derive_file_key};
 use crate::CoreError;
-
-const NONCE_LEN: usize = 12;
 
 /// Information about a single encrypted chunk written to disk.
 #[derive(Debug, Clone)]
@@ -82,39 +81,39 @@ pub fn encrypt_file_to_chunks(
         .map_err(|e| CoreError::Io(format!("stat input: {e}")))?;
     let file_size = metadata.len();
 
-    // Plan chunks
-    let plan = plan_chunks(file_size, profile);
-    let chunk_size = plan.chunk_size_bytes as usize;
-    let chunk_count = plan.chunk_count as u32;
-
-    // Derive file key
-    let file_key = derive_file_key(master_key, file_id.as_bytes());
-
     // Ensure output directory exists
     fs::create_dir_all(output_dir)
         .map_err(|e| CoreError::Io(format!("create output dir: {e}")))?;
 
-    // Open input file
+    // Open input file. The BufReader capacity is bounded to 8 MiB so a large
+    // chunk size does not force a huge buffered-reader allocation; the streaming
+    // primitive reads one chunk at a time regardless.
     let input_file = File::open(input_path)
         .map_err(|e| CoreError::Io(format!("open input: {e}")))?;
-    let mut reader = BufReader::with_capacity(chunk_size.min(8 * 1024 * 1024), input_file);
+    let plan = plan_chunks(file_size, profile);
+    let buf_cap = (plan.chunk_size_bytes as usize).min(8 * 1024 * 1024);
+    let reader = BufReader::with_capacity(buf_cap, input_file);
+
+    // Delegate the chunk loop to the shared streaming primitive so there is
+    // exactly ONE chunk-encryption code path across every client. A parity test
+    // (tests/chunk_stream_parity.rs) fails the instant this drifts from a direct
+    // ChunkEncryptor loop.
+    let mut encryptor =
+        ChunkEncryptor::from_reader(master_key, file_id, file_size, profile, reader)?;
+    let plan = encryptor.chunk_plan();
+    // Safe cast: from_reader already validated chunk_count fits in u32.
+    let chunk_count = plan.chunk_count as u32;
 
     let mut chunks = Vec::with_capacity(chunk_count as usize);
     let mut total_plaintext: u64 = 0;
     let mut total_ciphertext: u64 = 0;
-    let mut buf = vec![0u8; chunk_size];
 
-    for chunk_index in 0..chunk_count {
-        // Read one chunk worth of data
-        let bytes_read = read_exact_or_eof(&mut reader, &mut buf)?;
-
-        // For empty files, plan_chunks returns 1 chunk; we encrypt 0 bytes
-        let plaintext = &buf[..bytes_read];
-
-        // Encrypt: returns nonce || ciphertext
-        let encrypted = encrypt_chunk_raw(&file_key, plaintext)?;
-        let nonce = encrypted[..NONCE_LEN].to_vec();
+    while let Some(chunk) = encryptor.next_chunk()? {
+        let chunk_index = chunk.index;
+        let encrypted = chunk.data; // nonce || ciphertext || tag
         let ciphertext_size = encrypted.len() as u64;
+        let nonce = encrypted[..NONCE_LEN].to_vec();
+        let plaintext_size = ciphertext_size - (NONCE_LEN + TAG_LEN) as u64;
 
         // Write to .tmp then atomic rename to .enc
         let enc_path = output_dir.join(format!("{chunk_index}.enc"));
@@ -136,14 +135,14 @@ pub fn encrypt_file_to_chunks(
         fs::rename(&tmp_path, &enc_path)
             .map_err(|e| CoreError::Io(format!("rename chunk: {e}")))?;
 
-        total_plaintext += bytes_read as u64;
+        total_plaintext += plaintext_size;
         total_ciphertext += ciphertext_size;
 
         chunks.push(EncryptedChunkInfo {
             chunk_index,
             output_path: enc_path,
             nonce,
-            plaintext_size: bytes_read as u64,
+            plaintext_size,
             ciphertext_size,
         });
 
@@ -152,11 +151,14 @@ pub fn encrypt_file_to_chunks(
         }
     }
 
+    // Integrity guard: detects an input that shrank between stat and read.
+    let _summary = encryptor.finish()?;
+
     Ok(EncryptedFileResult {
         chunks,
         total_plaintext_bytes: total_plaintext,
         total_ciphertext_bytes: total_ciphertext,
-        chunk_size_bytes: chunk_size as u64,
+        chunk_size_bytes: plan.chunk_size_bytes,
     })
 }
 
@@ -225,21 +227,6 @@ pub fn decrypt_chunks_to_file(
         total_bytes,
         chunks_processed,
     })
-}
-
-/// Read exactly `buf.len()` bytes, or fewer if EOF is reached.
-/// Returns the number of bytes actually read.
-fn read_exact_or_eof(reader: &mut impl Read, buf: &mut [u8]) -> Result<usize, CoreError> {
-    let mut total = 0;
-    while total < buf.len() {
-        match reader.read(&mut buf[total..]) {
-            Ok(0) => break, // EOF
-            Ok(n) => total += n,
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err(CoreError::Io(format!("read input: {e}"))),
-        }
-    }
-    Ok(total)
 }
 
 #[cfg(test)]

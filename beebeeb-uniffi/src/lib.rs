@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use zeroize::Zeroize;
 
+use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor};
 use beebeeb_core::constellation;
 use beebeeb_core::encrypt;
 use beebeeb_core::kdf;
@@ -802,6 +803,375 @@ impl FileKeyHandle {
         };
         self.with_key(|fk| encrypt::decrypt_metadata(fk, &blob))?
             .map_err(Into::into)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Streaming chunk primitive — UniFFI handles (mobile/desktop convergence)
+// ---------------------------------------------------------------------------
+//
+// These wrap `beebeeb_core::chunk_stream::{ChunkEncryptor, ChunkDecryptor}` — the
+// ONE shared chunk loop — so mobile/desktop drop their bespoke encrypt loops and
+// converge on core. The key is derived IN CORE from a borrowed `&MasterKeyHandle`
+// (via `with_key`); raw key bytes never cross the FFI boundary.
+//
+// THREADING CONTRACT (single-consumer): a handle is a stateful, ordered cursor.
+// Drive each handle from ONE logical sequence — `next_chunk`/`push_chunk` advance
+// an internal index, so concurrent calls would interleave chunk indices and
+// corrupt the stream. The `Mutex` exists only because `#[uniffi::Object]` requires
+// `Send + Sync`; it is a safety backstop against a torn read, NOT a license for
+// concurrent use. There is deliberately NO UniFFI callback inside these handles —
+// a callback invoked while the lock is held could re-enter the handle and
+// deadlock (contrast `MasterKeyHandle::encrypt_file`, which takes a progress
+// callback but never re-enters). Progress is reported by the caller counting the
+// chunks it pulls.
+
+/// One encrypted chunk produced by [`ChunkEncryptorHandle`]:
+/// `data` = `nonce(12) || ciphertext || tag(16)`.
+#[derive(uniffi::Record)]
+pub struct EncryptedChunkDto {
+    pub index: u32,
+    pub data: Vec<u8>,
+}
+
+/// One decrypted chunk produced by [`ChunkDecryptorHandle`].
+#[derive(uniffi::Record)]
+pub struct DecryptedChunkDto {
+    pub index: u32,
+    pub data: Vec<u8>,
+}
+
+/// Summary returned by [`ChunkEncryptorHandle::finish`] after the integrity guard.
+#[derive(uniffi::Record)]
+pub struct ChunkEncryptorSummaryDto {
+    pub chunk_count: u32,
+    pub total_plaintext: u64,
+    pub total_ciphertext: u64,
+    pub chunk_size_bytes: u64,
+}
+
+fn parse_chunk_profile(profile: &str) -> Result<beebeeb_types::ChunkProfile, CryptoError> {
+    match profile {
+        "desktop" => Ok(beebeeb_types::ChunkProfile::Desktop),
+        "web" => Ok(beebeeb_types::ChunkProfile::Web),
+        "mobile" => Ok(beebeeb_types::ChunkProfile::Mobile),
+        "backup" => Ok(beebeeb_types::ChunkProfile::BackupAgent),
+        _ => Err(CryptoError::InvalidInput {
+            detail: format!("unknown profile: {profile}"),
+        }),
+    }
+}
+
+/// Stateful streaming encryptor handle. Single-consumer (see module note).
+///
+/// `inner` is `None` only after [`finish`](Self::finish) has consumed the
+/// encryptor; any method called afterwards returns `InvalidInput`.
+#[derive(uniffi::Object)]
+pub struct ChunkEncryptorHandle {
+    inner: Mutex<Option<ChunkEncryptor>>,
+}
+
+impl ChunkEncryptorHandle {
+    /// Run `f` against the live encryptor, or error if it has been finished.
+    fn with_inner<T, F: FnOnce(&mut ChunkEncryptor) -> T>(&self, f: F) -> Result<T, CryptoError> {
+        let mut guard = self.inner.lock().unwrap();
+        let enc = guard.as_mut().ok_or(CryptoError::InvalidInput {
+            detail: "chunk encryptor handle has been finished or cleared".into(),
+        })?;
+        Ok(f(enc))
+    }
+}
+
+#[uniffi::export]
+impl ChunkEncryptorHandle {
+    /// PULL constructor: stream-encrypt a file from disk. The file is stat'd for
+    /// its size and the chunk plan is derived from (`size`, `profile`). The key is
+    /// derived in core from the borrowed master key.
+    ///
+    /// `profile` must be one of: `"desktop"`, `"web"`, `"mobile"`, `"backup"`.
+    #[uniffi::constructor]
+    pub fn from_file(
+        master_key: &MasterKeyHandle,
+        file_id: String,
+        input_path: String,
+        profile: String,
+    ) -> Result<Arc<Self>, CryptoError> {
+        let chunk_profile = parse_chunk_profile(&profile)?;
+        let path = std::path::Path::new(&input_path);
+        let metadata = std::fs::metadata(path).map_err(|e| CryptoError::Io {
+            detail: format!("stat input: {e}"),
+        })?;
+        let file_size = metadata.len();
+        let file = std::fs::File::open(path).map_err(|e| CryptoError::Io {
+            detail: format!("open input: {e}"),
+        })?;
+        // Bound the read-ahead buffer to one chunk (≤8 MiB) — the primitive reads
+        // one chunk at a time regardless.
+        let plan = beebeeb_types::plan_chunks(file_size, chunk_profile);
+        let buf_cap = (plan.chunk_size_bytes as usize).min(8 * 1024 * 1024).max(8 * 1024);
+        let reader = std::io::BufReader::with_capacity(buf_cap, file);
+        let enc = master_key
+            .with_key(|mk| ChunkEncryptor::from_reader(mk, &file_id, file_size, chunk_profile, reader))??;
+        Ok(Arc::new(Self {
+            inner: Mutex::new(Some(enc)),
+        }))
+    }
+
+    /// PUSH constructor: the caller slices the plaintext and feeds chunks via
+    /// [`push_chunk`](Self::push_chunk). Plan derived from (`file_size`, `profile`).
+    #[uniffi::constructor]
+    pub fn for_push(
+        master_key: &MasterKeyHandle,
+        file_id: String,
+        file_size: u64,
+        profile: String,
+    ) -> Result<Arc<Self>, CryptoError> {
+        let chunk_profile = parse_chunk_profile(&profile)?;
+        let enc = master_key
+            .with_key(|mk| ChunkEncryptor::for_push(mk, &file_id, file_size, chunk_profile))??;
+        Ok(Arc::new(Self {
+            inner: Mutex::new(Some(enc)),
+        }))
+    }
+
+    /// PULL: emit the next encrypted chunk, or `None` once the plan is exhausted.
+    pub fn next_chunk(&self) -> Result<Option<EncryptedChunkDto>, CryptoError> {
+        let chunk = self.with_inner(|e| e.next_chunk())??;
+        Ok(chunk.map(|c| EncryptedChunkDto {
+            index: c.index,
+            data: c.data,
+        }))
+    }
+
+    /// PUSH: encrypt one caller-provided plaintext chunk.
+    pub fn push_chunk(&self, plaintext: Vec<u8>) -> Result<EncryptedChunkDto, CryptoError> {
+        let chunk = self.with_inner(|e| e.push_chunk(&plaintext))??;
+        Ok(EncryptedChunkDto {
+            index: chunk.index,
+            data: chunk.data,
+        })
+    }
+
+    /// The chunk plan (size + count) this encryptor follows.
+    pub fn chunk_plan(&self) -> Result<ChunkPlanResult, CryptoError> {
+        let plan = self.with_inner(|e| e.chunk_plan())?;
+        Ok(ChunkPlanResult {
+            chunk_size_bytes: plan.chunk_size_bytes,
+            chunk_count: plan.chunk_count,
+        })
+    }
+
+    /// Expected total ciphertext bytes: `file_size + 28 * chunk_count`. Use for
+    /// `upload_init` without reading the whole file.
+    pub fn expected_total_ciphertext(&self) -> Result<u64, CryptoError> {
+        self.with_inner(|e| e.expected_total_ciphertext())
+    }
+
+    /// How many chunks have been emitted so far.
+    pub fn chunks_emitted(&self) -> Result<u32, CryptoError> {
+        self.with_inner(|e| e.chunks_emitted())
+    }
+
+    /// Consume the encryptor (by value) and return the summary after the integrity
+    /// guard (detects a source that shrank). The handle is unusable afterwards.
+    pub fn finish(&self) -> Result<ChunkEncryptorSummaryDto, CryptoError> {
+        let mut guard = self.inner.lock().unwrap();
+        let enc = guard.take().ok_or(CryptoError::InvalidInput {
+            detail: "chunk encryptor handle has been finished or cleared".into(),
+        })?;
+        let summary = enc.finish().map_err(CryptoError::from)?;
+        Ok(ChunkEncryptorSummaryDto {
+            chunk_count: summary.chunk_count,
+            total_plaintext: summary.total_plaintext,
+            total_ciphertext: summary.total_ciphertext,
+            chunk_size_bytes: summary.chunk_size_bytes,
+        })
+    }
+}
+
+/// Stateful streaming decryptor handle. Single-consumer (see module note).
+#[derive(uniffi::Object)]
+pub struct ChunkDecryptorHandle {
+    inner: Mutex<Option<ChunkDecryptor>>,
+}
+
+impl ChunkDecryptorHandle {
+    fn with_inner<T, F: FnOnce(&mut ChunkDecryptor) -> T>(&self, f: F) -> Result<T, CryptoError> {
+        let mut guard = self.inner.lock().unwrap();
+        let dec = guard.as_mut().ok_or(CryptoError::InvalidInput {
+            detail: "chunk decryptor handle has been cleared".into(),
+        })?;
+        Ok(f(dec))
+    }
+}
+
+#[uniffi::export]
+impl ChunkDecryptorHandle {
+    /// PULL constructor: stream-decrypt an encrypted file from disk.
+    /// `chunk_size_bytes` is the PLAINTEXT chunk size used at encryption (the wire
+    /// frame is `nonce(12) + chunk_size + tag(16)`). Errors if it is 0.
+    #[uniffi::constructor]
+    pub fn from_file(
+        master_key: &MasterKeyHandle,
+        file_id: String,
+        chunk_size_bytes: u64,
+        input_path: String,
+    ) -> Result<Arc<Self>, CryptoError> {
+        let file = std::fs::File::open(std::path::Path::new(&input_path)).map_err(|e| {
+            CryptoError::Io {
+                detail: format!("open input: {e}"),
+            }
+        })?;
+        let buf_cap = (chunk_size_bytes as usize)
+            .saturating_add(28)
+            .min(8 * 1024 * 1024)
+            .max(8 * 1024);
+        let reader = std::io::BufReader::with_capacity(buf_cap, file);
+        let dec = master_key
+            .with_key(|mk| ChunkDecryptor::from_reader(mk, &file_id, chunk_size_bytes, reader))??;
+        Ok(Arc::new(Self {
+            inner: Mutex::new(Some(dec)),
+        }))
+    }
+
+    /// PUSH constructor: the caller feeds wire frames via
+    /// [`push_frame`](Self::push_frame). Each frame is self-describing, so no chunk
+    /// size is needed.
+    #[uniffi::constructor]
+    pub fn for_push(master_key: &MasterKeyHandle, file_id: String) -> Result<Arc<Self>, CryptoError> {
+        let dec = master_key.with_key(|mk| ChunkDecryptor::for_push(mk, &file_id))?;
+        Ok(Arc::new(Self {
+            inner: Mutex::new(Some(dec)),
+        }))
+    }
+
+    /// PULL: emit the next decrypted chunk, or `None` at clean EOF.
+    pub fn next_chunk(&self) -> Result<Option<DecryptedChunkDto>, CryptoError> {
+        let chunk = self.with_inner(|d| d.next_chunk())??;
+        Ok(chunk.map(|c| DecryptedChunkDto {
+            index: c.index,
+            data: c.data,
+        }))
+    }
+
+    /// PUSH: decrypt one caller-provided wire frame (`nonce || ciphertext || tag`).
+    pub fn push_frame(&self, frame: Vec<u8>) -> Result<DecryptedChunkDto, CryptoError> {
+        let chunk = self.with_inner(|d| d.push_frame(&frame))??;
+        Ok(DecryptedChunkDto {
+            index: chunk.index,
+            data: chunk.data,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Streaming handle smoke tests (in-process — exercises the Send+Sync stateful
+// path). Verifies the Rust handle logic + roundtrip; NOT a real on-device upload.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod chunk_stream_handle_tests {
+    use super::*;
+
+    fn mk_handle() -> Arc<MasterKeyHandle> {
+        // Any 32 bytes is a valid master key for a roundtrip test.
+        MasterKeyHandle::from_keychain_bytes(vec![7u8; 32]).unwrap()
+    }
+
+    #[test]
+    fn push_roundtrip_via_handles() {
+        let mk = mk_handle();
+        let file_id = "ffi-push-roundtrip".to_string();
+        let data = b"hello via the uniffi chunk-stream handle".to_vec();
+
+        let enc =
+            ChunkEncryptorHandle::for_push(&mk, file_id.clone(), data.len() as u64, "mobile".into())
+                .unwrap();
+        assert_eq!(enc.chunk_plan().unwrap().chunk_count, 1);
+        let frame = enc.push_chunk(data.clone()).unwrap();
+        assert_eq!(frame.index, 0);
+        assert_ne!(frame.data, data); // ciphertext != plaintext
+        let summary = enc.finish().unwrap();
+        assert_eq!(summary.chunk_count, 1);
+        assert_eq!(summary.total_plaintext, data.len() as u64);
+
+        let dec = ChunkDecryptorHandle::for_push(&mk, file_id).unwrap();
+        let out = dec.push_frame(frame.data).unwrap();
+        assert_eq!(out.index, 0);
+        assert_eq!(out.data, data);
+    }
+
+    #[test]
+    fn finished_handle_rejects_reuse() {
+        let mk = mk_handle();
+        let enc = ChunkEncryptorHandle::for_push(&mk, "x".into(), 4, "mobile".into()).unwrap();
+        let _ = enc.push_chunk(vec![1, 2, 3, 4]).unwrap();
+        enc.finish().unwrap();
+        assert!(enc.push_chunk(vec![0]).is_err());
+        assert!(enc.finish().is_err());
+        assert!(enc.next_chunk().is_err());
+    }
+
+    #[test]
+    fn wrong_key_decrypt_errors() {
+        let mk = mk_handle();
+        let enc =
+            ChunkEncryptorHandle::for_push(&mk, "secret".into(), 5, "mobile".into()).unwrap();
+        let frame = enc.push_chunk(b"hello".to_vec()).unwrap();
+        let wrong = MasterKeyHandle::from_keychain_bytes(vec![9u8; 32]).unwrap();
+        let dec = ChunkDecryptorHandle::for_push(&wrong, "secret".into()).unwrap();
+        assert!(dec.push_frame(frame.data).is_err());
+    }
+
+    #[test]
+    fn pull_file_roundtrip_via_handles() {
+        use std::io::Write;
+        let mk = mk_handle();
+        let dir = std::env::temp_dir().join("beebeeb_uniffi_chunk_stream_pull");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("in.bin");
+        // 9 MiB → mobile profile 4 MiB chunks → 3 chunks (4 + 4 + 1).
+        let content: Vec<u8> = (0..9 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&input, &content).unwrap();
+
+        let enc = ChunkEncryptorHandle::from_file(
+            &mk,
+            "pullfile".into(),
+            input.to_string_lossy().into_owned(),
+            "mobile".into(),
+        )
+        .unwrap();
+        let chunk_size = enc.chunk_plan().unwrap().chunk_size_bytes;
+        assert_eq!(chunk_size, 4 * 1024 * 1024);
+
+        let enc_path = dir.join("in.enc");
+        let mut out_file = std::fs::File::create(&enc_path).unwrap();
+        let mut frames = 0u32;
+        while let Some(c) = enc.next_chunk().unwrap() {
+            out_file.write_all(&c.data).unwrap();
+            frames += 1;
+        }
+        out_file.flush().unwrap();
+        drop(out_file);
+        assert_eq!(frames, 3);
+        let summary = enc.finish().unwrap();
+        assert_eq!(summary.total_plaintext, content.len() as u64);
+
+        let dec = ChunkDecryptorHandle::from_file(
+            &mk,
+            "pullfile".into(),
+            chunk_size,
+            enc_path.to_string_lossy().into_owned(),
+        )
+        .unwrap();
+        let mut recovered = Vec::new();
+        while let Some(c) = dec.next_chunk().unwrap() {
+            recovered.extend_from_slice(&c.data);
+        }
+        assert_eq!(recovered, content);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

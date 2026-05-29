@@ -1,9 +1,12 @@
 pub mod archive;
 pub mod blob;
+pub mod chunk_stream;
 pub mod constellation;
 pub mod encrypt;
 pub mod error;
 pub mod file_encrypt;
+// rusqlite-backed; native targets only so beebeeb-wasm builds in place (0653).
+#[cfg(not(target_arch = "wasm32"))]
 pub mod fp_cache;
 pub mod hash;
 pub mod kdf;

@@ -110,8 +110,7 @@ pub fn decrypt_chunks(key: &[u8], chunks: JsValue) -> Result<Vec<u8>, JsError> {
             nonce: nonce_bytes,
             ciphertext: ct_bytes,
         };
-        let plaintext = encrypt::decrypt_chunk(&fk, &blob)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        let plaintext = encrypt::decrypt_chunk(&fk, &blob).map_err(|e| JsError::new(&e.to_string()))?;
         result.extend_from_slice(&plaintext);
     }
 
@@ -261,8 +260,8 @@ pub fn x25519_shared_secret(my_private: &[u8], their_public: &[u8]) -> Result<Ve
     let pub_key: [u8; 32] = their_public
         .try_into()
         .map_err(|_| JsError::new("public key must be 32 bytes"))?;
-    let shared = beebeeb_core::opaque::x25519_shared_secret(&priv_key, &pub_key)
-        .map_err(|e| JsError::new(&e.to_string()))?;
+    let shared =
+        beebeeb_core::opaque::x25519_shared_secret(&priv_key, &pub_key).map_err(|e| JsError::new(&e.to_string()))?;
     Ok(shared.to_vec())
 }
 
@@ -289,24 +288,182 @@ pub fn compute_recovery_check(master_key: &[u8]) -> Result<Vec<u8>, JsError> {
 // Chunk planning
 // ---------------------------------------------------------------------------
 
+/// Parse a client-profile string into a [`beebeeb_types::ChunkProfile`].
+///
+/// Accepts `"desktop"`, `"web"`, `"mobile"`, or `"backup"`. Shared by
+/// [`plan_chunks`] and [`WasmChunkEncryptor`] so the profile vocabulary cannot
+/// drift between the two surfaces.
+fn parse_profile(profile: &str) -> Result<beebeeb_types::ChunkProfile, JsError> {
+    match profile {
+        "desktop" => Ok(beebeeb_types::ChunkProfile::Desktop),
+        "web" => Ok(beebeeb_types::ChunkProfile::Web),
+        "mobile" => Ok(beebeeb_types::ChunkProfile::Mobile),
+        "backup" => Ok(beebeeb_types::ChunkProfile::BackupAgent),
+        _ => Err(JsError::new(&format!("unknown profile: {profile}"))),
+    }
+}
+
 /// Plan how to split a file into chunks for upload based on the client profile.
 ///
 /// `profile` must be one of: `"desktop"`, `"web"`, `"mobile"`, `"backup"`.
 /// Returns `{ chunk_size_bytes: number, chunk_count: number }`.
 #[wasm_bindgen]
 pub fn plan_chunks(file_size_bytes: u64, profile: &str) -> Result<JsValue, JsError> {
-    let p = match profile {
-        "desktop" => beebeeb_types::ChunkProfile::Desktop,
-        "web" => beebeeb_types::ChunkProfile::Web,
-        "mobile" => beebeeb_types::ChunkProfile::Mobile,
-        "backup" => beebeeb_types::ChunkProfile::BackupAgent,
-        _ => return Err(JsError::new(&format!("unknown profile: {profile}"))),
-    };
+    let p = parse_profile(profile)?;
     let plan = beebeeb_types::plan_chunks(file_size_bytes, p);
-    Ok(serde_wasm_bindgen::to_value(&serde_json::json!({
-        "chunk_size_bytes": plan.chunk_size_bytes,
-        "chunk_count": plan.chunk_count,
-    }))?)
+    // Serialize via a typed struct (NOT serde_json::Value) so serde-wasm-bindgen
+    // emits a plain JS object, not a Map. See 0655.
+    #[derive(serde::Serialize)]
+    struct ChunkPlanJs {
+        chunk_size_bytes: u64,
+        chunk_count: u64,
+    }
+    Ok(serde_wasm_bindgen::to_value(&ChunkPlanJs {
+        chunk_size_bytes: plan.chunk_size_bytes,
+        chunk_count: plan.chunk_count,
+    })?)
+}
+
+// ---------------------------------------------------------------------------
+// Streaming chunk encryption (push form)
+// ---------------------------------------------------------------------------
+
+/// Stateful, single-file streaming encryptor for the web client.
+///
+/// WASM is single-threaded and cannot `Read` a browser `File`, so the web
+/// client uses the **push** form of the shared `beebeeb-core` primitive: JS
+/// slices the `Blob` and hands each plaintext chunk to [`push_chunk`], and core
+/// encrypts it. This converges the web client onto the exact same crypto loop
+/// (and wire format) as the CLI/desktop/mobile clients — the per-file key is
+/// derived **once** inside core and never recombined in JS.
+///
+/// Lifecycle: construct with [`new`](Self::new) (or
+/// [`withChunkSize`](Self::with_chunk_size) when the server dictates the chunk
+/// size), call [`pushChunk`](Self::push_chunk) once per slice in order, then
+/// [`finish`](Self::finish) to run the integrity guard and get the summary.
+///
+/// This is the first stateful `#[wasm_bindgen]` struct in the crate: it proves
+/// the constructor + `&mut self` method + by-value `self` (consuming `finish`)
+/// pattern across the JS boundary.
+#[wasm_bindgen]
+pub struct WasmChunkEncryptor {
+    inner: beebeeb_core::chunk_stream::ChunkEncryptor,
+}
+
+#[wasm_bindgen]
+impl WasmChunkEncryptor {
+    /// Create a push-form encryptor whose chunk plan is derived from
+    /// `file_size` + `profile` (the client ladder).
+    ///
+    /// `master_key` must be exactly 32 bytes; it is copied into a `MasterKey`
+    /// (zeroized on drop). `profile` is one of `"desktop"`, `"web"`, `"mobile"`,
+    /// `"backup"`.
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        master_key: &[u8],
+        file_id: String,
+        file_size: u64,
+        profile: &str,
+    ) -> Result<WasmChunkEncryptor, JsError> {
+        let mk = master_key_from_slice(master_key)?;
+        let p = parse_profile(profile)?;
+        let inner = beebeeb_core::chunk_stream::ChunkEncryptor::for_push(&mk, &file_id, file_size, p)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    /// Create a push-form encryptor with an explicit, server-dictated chunk
+    /// size. Use this when the v2 upload-init response overrode `chunk_size`
+    /// so the client plan can't diverge from what the server expects.
+    #[wasm_bindgen(js_name = withChunkSize)]
+    pub fn with_chunk_size(
+        master_key: &[u8],
+        file_id: String,
+        file_size: u64,
+        chunk_size_bytes: u64,
+    ) -> Result<WasmChunkEncryptor, JsError> {
+        let mk = master_key_from_slice(master_key)?;
+        let inner = beebeeb_core::chunk_stream::ChunkEncryptor::for_push_with_chunk_size(
+            &mk,
+            &file_id,
+            file_size,
+            chunk_size_bytes,
+        )
+        .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    /// Encrypt one plaintext chunk and return the full wire frame
+    /// (`nonce(12) || ciphertext || tag(16)`) for JS to PUT directly — no
+    /// recombination needed on the JS side. Errors if more chunks are pushed
+    /// than the plan allows.
+    #[wasm_bindgen(js_name = pushChunk)]
+    pub fn push_chunk(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, JsError> {
+        self.inner
+            .push_chunk(plaintext)
+            .map(|c| c.data)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Planned number of chunks for this file.
+    #[wasm_bindgen(getter, js_name = chunkCount)]
+    pub fn chunk_count(&self) -> u32 {
+        // chunk_count is validated to fit in u32 by the core constructor.
+        self.inner.chunk_plan().chunk_count as u32
+    }
+
+    /// Plaintext chunk size in bytes (the last chunk may be smaller). Returned
+    /// as a JS number (`f64`) to avoid `BigInt` at the boundary.
+    #[wasm_bindgen(getter, js_name = chunkSize)]
+    pub fn chunk_size(&self) -> f64 {
+        self.inner.chunk_plan().chunk_size_bytes as f64
+    }
+
+    /// Expected total ciphertext bytes (`file_size + 28 * chunk_count`), the
+    /// value the client passes to `upload_init` as the total. Returned as a JS
+    /// number (`f64`).
+    #[wasm_bindgen(getter, js_name = expectedTotalCiphertext)]
+    pub fn expected_total_ciphertext(&self) -> f64 {
+        self.inner.expected_total_ciphertext() as f64
+    }
+
+    /// How many chunks have been pushed so far.
+    #[wasm_bindgen(getter, js_name = chunksEmitted)]
+    pub fn chunks_emitted(&self) -> u32 {
+        self.inner.chunks_emitted()
+    }
+
+    /// Consume the encryptor, run the integrity guard (all planned chunks
+    /// emitted and the ciphertext total matches), and return the summary
+    /// `{ chunk_count, total_plaintext, total_ciphertext, chunk_size_bytes }`.
+    /// Errors if the source shrank (fewer chunks/bytes than planned).
+    pub fn finish(self) -> Result<JsValue, JsError> {
+        let summary = self.finish_summary().map_err(|e| JsError::new(&e.to_string()))?;
+        // Serialize via a typed struct (NOT serde_json::Value) so serde-wasm-bindgen
+        // emits a plain JS object, not a Map. See 0655. chunk_count is u32.
+        #[derive(serde::Serialize)]
+        struct FinishSummaryJs {
+            chunk_count: u32,
+            total_plaintext: u64,
+            total_ciphertext: u64,
+            chunk_size_bytes: u64,
+        }
+        Ok(serde_wasm_bindgen::to_value(&FinishSummaryJs {
+            chunk_count: summary.chunk_count,
+            total_plaintext: summary.total_plaintext,
+            total_ciphertext: summary.total_ciphertext,
+            chunk_size_bytes: summary.chunk_size_bytes,
+        })?)
+    }
+}
+
+impl WasmChunkEncryptor {
+    /// Testable seam for the consuming `finish`: runs the core integrity guard
+    /// and returns the native summary without crossing the JS boundary, so unit
+    /// tests can exercise the by-value `finish` path without a JS runtime.
+    fn finish_summary(self) -> Result<beebeeb_core::chunk_stream::ChunkEncryptorSummary, beebeeb_core::CoreError> {
+        self.inner.finish()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -420,8 +577,7 @@ pub fn generate_recovery_pdf(
 /// Returns a JS array of `{ name: string, size: number, is_directory: boolean }`.
 #[wasm_bindgen]
 pub fn list_tar_entries(data: &[u8]) -> Result<JsValue, JsError> {
-    let entries =
-        beebeeb_core::archive::list_tar_entries(data).map_err(|e| JsError::new(&e.to_string()))?;
+    let entries = beebeeb_core::archive::list_tar_entries(data).map_err(|e| JsError::new(&e.to_string()))?;
     archive_entries_to_js(&entries)
 }
 
@@ -436,8 +592,7 @@ pub fn decompress_gzip(data: &[u8]) -> Result<Vec<u8>, JsError> {
 /// Returns a JS array of `{ name: string, size: number, is_directory: boolean }`.
 #[wasm_bindgen]
 pub fn list_archive(data: &[u8], filename: &str) -> Result<JsValue, JsError> {
-    let entries = beebeeb_core::archive::list_archive(data, filename)
-        .map_err(|e| JsError::new(&e.to_string()))?;
+    let entries = beebeeb_core::archive::list_archive(data, filename).map_err(|e| JsError::new(&e.to_string()))?;
     archive_entries_to_js(&entries)
 }
 
@@ -449,12 +604,8 @@ fn archive_entries_to_js(entries: &[beebeeb_core::archive::ArchiveEntry]) -> Res
             .map_err(|e| JsError::new(&format!("{e:?}")))?;
         js_sys::Reflect::set(&obj, &"size".into(), &JsValue::from_f64(entry.size as f64))
             .map_err(|e| JsError::new(&format!("{e:?}")))?;
-        js_sys::Reflect::set(
-            &obj,
-            &"is_directory".into(),
-            &JsValue::from_bool(entry.is_directory),
-        )
-        .map_err(|e| JsError::new(&format!("{e:?}")))?;
+        js_sys::Reflect::set(&obj, &"is_directory".into(), &JsValue::from_bool(entry.is_directory))
+            .map_err(|e| JsError::new(&format!("{e:?}")))?;
         arr.set(i as u32, obj.into());
     }
     Ok(arr.into())
@@ -470,6 +621,15 @@ fn file_key_from_slice(key: &[u8]) -> Result<kdf::FileKey, JsError> {
         .try_into()
         .map_err(|_| JsError::new("key must be exactly 32 bytes"))?;
     Ok(kdf::FileKey::from_bytes(bytes))
+}
+
+/// Reconstruct a `MasterKey` from a 32-byte slice received from JS. The
+/// resulting `MasterKey` owns the bytes and zeroizes them on drop.
+fn master_key_from_slice(key: &[u8]) -> Result<kdf::MasterKey, JsError> {
+    let bytes: [u8; 32] = key
+        .try_into()
+        .map_err(|_| JsError::new("master_key must be exactly 32 bytes"))?;
+    Ok(kdf::MasterKey::from_bytes(bytes))
 }
 
 /// Convert an `EncryptedBlob` into a plain JS object with separate fields
@@ -497,4 +657,93 @@ fn encrypted_blob_to_js(blob: &EncryptedBlob) -> Result<JsValue, JsError> {
     .map_err(|e| JsError::new(&format!("{e:?}")))?;
 
     Ok(obj.into())
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use beebeeb_core::chunk_stream::ChunkDecryptor;
+
+    /// Deterministic, non-trivial test data.
+    fn pattern(len: usize) -> Vec<u8> {
+        (0..len).map(|i| (i % 251) as u8).collect()
+    }
+
+    /// Decrypt WASM-produced frames with the core push decryptor and return the
+    /// concatenated plaintext — proves the wrapper emits the standard wire
+    /// format and the FileKey derivation matches.
+    fn decrypt_frames(mk: &kdf::MasterKey, file_id: &str, frames: &[Vec<u8>]) -> Vec<u8> {
+        let mut dec = ChunkDecryptor::for_push(mk, file_id);
+        let mut out = Vec::new();
+        for f in frames {
+            out.extend_from_slice(&dec.push_frame(f).unwrap().data);
+        }
+        out
+    }
+
+    #[test]
+    fn with_chunk_size_push_roundtrip_and_finish() {
+        let mk = kdf::derive_master_key("test-password", b"test-salt-16bytes").unwrap();
+        let mk_bytes = mk.to_bytes();
+        let file_id = "wasm-file-1";
+        let data = pattern(40);
+
+        // Explicit 16-byte chunks => 3 frames (16 + 16 + 8); exercises the
+        // server-dictated-chunk-size constructor.
+        let mut enc =
+            WasmChunkEncryptor::with_chunk_size(&mk_bytes, file_id.to_string(), data.len() as u64, 16).unwrap();
+        assert_eq!(enc.chunk_count(), 3);
+        assert_eq!(enc.chunk_size(), 16.0);
+        assert_eq!(enc.expected_total_ciphertext(), (40 + 28 * 3) as f64);
+
+        let mut frames = Vec::new();
+        for slice in data.chunks(16) {
+            frames.push(enc.push_chunk(slice).unwrap());
+        }
+        assert_eq!(enc.chunks_emitted(), 3);
+        assert_eq!(frames[0].len(), 16 + 28);
+        assert_eq!(frames[2].len(), 8 + 28);
+
+        // Ciphertext frames must not equal the plaintext slices.
+        assert_ne!(frames[0], data[..16].to_vec());
+
+        // By-value finish runs the integrity guard.
+        let summary = enc.finish_summary().unwrap();
+        assert_eq!(summary.chunk_count, 3);
+        assert_eq!(summary.total_plaintext, 40);
+        assert_eq!(summary.total_ciphertext, 40 + 28 * 3);
+
+        // Round-trips back to the original via the core decryptor.
+        assert_eq!(decrypt_frames(&mk, file_id, &frames), data);
+    }
+
+    #[test]
+    fn new_profile_constructor_roundtrip() {
+        let mk = kdf::derive_master_key("another-password", b"another-salt-16b").unwrap();
+        let mk_bytes = mk.to_bytes();
+        let file_id = "wasm-file-2";
+        let data = pattern(1000); // < 4 MiB floor => single chunk on any profile
+
+        let mut enc = WasmChunkEncryptor::new(&mk_bytes, file_id.to_string(), data.len() as u64, "web").unwrap();
+        assert_eq!(enc.chunk_count(), 1);
+
+        let chunk_size = enc.chunk_size() as usize;
+        let mut frames = Vec::new();
+        for slice in data.chunks(chunk_size) {
+            frames.push(enc.push_chunk(slice).unwrap());
+        }
+        enc.finish_summary().unwrap();
+        assert_eq!(decrypt_frames(&mk, file_id, &frames), data);
+    }
+
+    // NOTE: error-path coverage (bad key length, unknown profile, push beyond
+    // plan, u32 chunk_count guard) lives in core's `chunk_stream` tests. It is
+    // NOT duplicated here because the wrapper's error variant is a `JsError`,
+    // whose constructor calls a wasm-bindgen import that panics on a non-wasm
+    // host — so an `is_err()` assertion can't run under `cargo test`. The
+    // wrapper's error paths are still compile-checked.
 }
