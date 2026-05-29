@@ -60,6 +60,28 @@ CLI can move them into `spawn_blocking`. Core stays synchronous — no tokio.
   are the disk/legacy paths and are **NOT superseded** by `ChunkDecryptor` this
   round (a later cleanup may route them through it).
 
+### UniFFI handles (`beebeeb-uniffi`) — mobile/desktop
+
+`ChunkEncryptorHandle` / `ChunkDecryptorHandle` wrap the primitive for Swift/Kotlin
+so mobile/desktop drop their bespoke encrypt loops:
+
+- Each is a `#[uniffi::Object]` holding `Mutex<Option<ChunkEncryptor/Decryptor>>`.
+  Constructors: encryptor `from_file` (pull, stats the file) + `for_push`; decryptor
+  `from_file` (pull) + `for_push`. Methods `next_chunk` → `Result<Option<Dto>>`,
+  `push_chunk`/`push_frame` → `Result<Dto>`, plus `chunk_plan`/`expected_total_ciphertext`/
+  `chunks_emitted`; `finish()` `take()`s the `Option` (consume-by-value) so the handle
+  is unusable afterwards. DTOs: `EncryptedChunkDto`/`DecryptedChunkDto` (`index: u32`,
+  `data: Vec<u8>`), `ChunkEncryptorSummaryDto`.
+- The key is derived IN CORE from a borrowed `&MasterKeyHandle` (`with_key`); raw key
+  bytes never cross FFI.
+- **Single-consumer contract:** a handle is an ordered cursor — drive it from ONE
+  sequence. The `Mutex` is only the `Send + Sync` backstop UniFFI requires, not a
+  concurrency primitive. There is deliberately NO UniFFI callback inside these handles
+  (avoids a reentrant lock; contrast `MasterKeyHandle::encrypt_file`).
+- Regenerating Swift/Kotlin bindings: run `build-ios.sh` (regens `beebeeb_uniffiFFI.h`
+  + `BeebeebCore.swift` + xcframework) / `build-android.sh`. Grep the regenerated header
+  for the new symbols before shipping (the 0426 12-symbol drift lesson).
+
 ## Security invariants
 
 - MasterKey and FileKey are NOT Clone — prevents accidental key copies in memory
