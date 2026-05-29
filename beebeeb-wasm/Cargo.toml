@@ -17,3 +17,16 @@ serde_json = "1"
 js-sys = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
 uuid = { version = "1", features = ["v4", "serde", "js"] }
+
+# wasm-pack's bundled wasm-opt rejects the bulk-memory / sign-ext ops that
+# Rust 1.95 emits by default, so a bare `wasm-pack --release` fails the opt step.
+# Enable those features explicitly so in-place release builds optimize cleanly
+# (these are the flags the web build confirmed work). `-O` runs the optimizer.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = [
+    "--enable-bulk-memory",
+    "--enable-sign-ext",
+    "--enable-mutable-globals",
+    "--enable-nontrapping-float-to-int",
+    "-O",
+]
