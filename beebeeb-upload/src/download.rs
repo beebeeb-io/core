@@ -101,15 +101,21 @@ impl DownloadClient {
     /// constant memory.
     ///
     /// `GET /api/v1/files/{file_id}/download` returns the chunks concatenated
-    /// (`nonce(12) || ciphertext || tag(16)` each) with `X-Chunk-Count` +
-    /// `X-Original-Size` headers (no per-chunk-size header). The body is read
-    /// incrementally with `Response::chunk()`, one logical frame at a time, each
-    /// decrypted through the shared [`ChunkDecryptor`] (single crypto point) and
-    /// written out — never buffering the whole payload.
+    /// (`nonce(12) || ciphertext || tag(16)` each) with `X-Chunk-Count`,
+    /// `X-Original-Size`, and (for V2 files) `X-Chunk-Size` headers. The body is
+    /// read incrementally with `Response::chunk()`, one logical frame at a time,
+    /// each decrypted through the shared [`ChunkDecryptor`] (single crypto
+    /// point) and written out — never buffering the whole payload.
     ///
-    /// Frame sizing matches [`compute_chunk_boundaries`]: the first N-1 frames
-    /// are `total / chunk_count` bytes, the last frame is the remainder. The
-    /// file key is derived via `HKDF(master_key, file_id)`.
+    /// Frame sizing: the server's `X-Chunk-Size` (uniform plaintext chunk size
+    /// for the file's version) is authoritative — each wire frame is
+    /// `chunk_size + GCM_OVERHEAD` for the first N-1 chunks, remainder for the
+    /// last. Streaming uploads make every chunk but the last exactly that size,
+    /// so the old `total / chunk_count` average mis-sized frame 0 whenever the
+    /// file size was not an exact multiple of the chunk size, failing the GCM
+    /// tag. When the header is absent (legacy V1) we fall back to
+    /// `total / chunk_count`, matching [`compute_chunk_boundaries`]. The file
+    /// key is derived via `HKDF(master_key, file_id)`.
     pub async fn download_and_decrypt(
         &self,
         master_key: &beebeeb_core::kdf::MasterKey,
@@ -158,6 +164,15 @@ impl DownloadClient {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
+        // Uniform plaintext chunk size for this file's version (V2 files only).
+        // When present it is authoritative for frame sizing; absent → legacy V1
+        // fallback to the `total / chunk_count` average.
+        let chunk_size: Option<u64> = resp
+            .headers()
+            .get("X-Chunk-Size")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+            .filter(|&v| v > 0);
         // Total encrypted length: prefer Content-Length, else derive from the
         // plaintext size + per-chunk overhead. Only sizes the first N-1 frames;
         // the last frame drains the remainder, so a small estimate error
@@ -167,8 +182,17 @@ impl DownloadClient {
             .filter(|&v| v > 0)
             .unwrap_or(original_size + GCM_OVERHEAD * chunk_count as u64);
 
-        self.stream_decrypt_to_disk(&mut resp, master_key, file_id, chunk_count, total, output_path, callback)
-            .await
+        self.stream_decrypt_to_disk(
+            &mut resp,
+            master_key,
+            file_id,
+            chunk_count,
+            total,
+            chunk_size,
+            output_path,
+            callback,
+        )
+        .await
     }
 
     /// Read the response body incrementally and decrypt frame-by-frame.
@@ -180,6 +204,7 @@ impl DownloadClient {
         file_id: &str,
         chunk_count: u32,
         total: u64,
+        chunk_size: Option<u64>,
         output_path: &str,
         callback: Option<&dyn DownloadProgressCallback>,
     ) -> Result<DownloadResult, UploadError> {
@@ -188,8 +213,15 @@ impl DownloadClient {
         }
         let n = chunk_count as usize;
         // Frame size for the first n-1 frames; the last drains the remainder.
+        // When the server sends `X-Chunk-Size` (V2 files) each wire frame is the
+        // uniform plaintext chunk size + GCM_OVERHEAD (nonce + tag) — exact even
+        // when the file size is not a multiple of the chunk size. Only legacy V1
+        // responses (no header) fall back to the `total / chunk_count` average,
+        // which matches `compute_chunk_boundaries`.
         let frame_size = if n <= 1 {
             usize::MAX // single frame == whole body
+        } else if let Some(cs) = chunk_size {
+            (cs + GCM_OVERHEAD) as usize
         } else {
             (total / chunk_count as u64) as usize
         };
