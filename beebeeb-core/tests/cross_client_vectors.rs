@@ -274,8 +274,10 @@ fn plan_chunks_small_file_mobile() {
 
 #[test]
 fn plan_chunks_large_file_desktop() {
+    // N=32 ladder: 2e9 bytes (~1.86 GiB) → base_chunk_size = 64 MiB (Desktop
+    // cap 128 MiB doesn't bind here).
     let plan = beebeeb_types::plan_chunks(2_000_000_000, beebeeb_types::ChunkProfile::Desktop);
-    assert_eq!(plan.chunk_size_bytes, 16 * 1024 * 1024); // 16 MiB for files <= 10 GiB
+    assert_eq!(plan.chunk_size_bytes, 64 * 1024 * 1024);
 }
 
 #[test]
@@ -286,19 +288,18 @@ fn plan_chunks_empty_file() {
 
 #[test]
 fn plan_chunks_web_capped() {
-    // 5 GiB file: base_chunk_size = 16 MiB, but Web caps at 64 MiB
-    // so 16 MiB < 64 MiB => chunk_size = 16 MiB (no capping needed here)
+    // 5 GiB file: N=32 base_chunk_size = 256 MiB; Web caps at 32 MiB.
     let plan = beebeeb_types::plan_chunks(5 * 1024 * 1024 * 1024, beebeeb_types::ChunkProfile::Web);
-    assert_eq!(plan.chunk_size_bytes, 16 * 1024 * 1024);
+    assert_eq!(plan.chunk_size_bytes, 32 * 1024 * 1024);
 
-    // 200 GiB file: base_chunk_size = 256 MiB, but Web caps at 64 MiB
+    // 200 GiB file: base 256 MiB; Web caps at 32 MiB.
     let plan = beebeeb_types::plan_chunks(200 * 1024 * 1024 * 1024, beebeeb_types::ChunkProfile::Web);
-    assert_eq!(plan.chunk_size_bytes, 64 * 1024 * 1024);
+    assert_eq!(plan.chunk_size_bytes, 32 * 1024 * 1024);
 }
 
 #[test]
 fn plan_chunks_mobile_capped() {
-    // 200 GiB file: base_chunk_size = 256 MiB, but Mobile caps at 64 MiB
+    // 200 GiB file: base 256 MiB; Mobile caps at 32 MiB.
     let plan = beebeeb_types::plan_chunks(200 * 1024 * 1024 * 1024, beebeeb_types::ChunkProfile::Mobile);
-    assert_eq!(plan.chunk_size_bytes, 64 * 1024 * 1024);
+    assert_eq!(plan.chunk_size_bytes, 32 * 1024 * 1024);
 }

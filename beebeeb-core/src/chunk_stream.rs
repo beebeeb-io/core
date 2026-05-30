@@ -188,6 +188,41 @@ impl ChunkEncryptor {
         Self::new(mk, file_id, plan, Source::Push)
     }
 
+    /// **Pull** constructor with an explicit chunk size — the reader-form analog
+    /// of [`for_push_with_chunk_size`](Self::for_push_with_chunk_size). Lets a
+    /// caller apply a concurrency-aware chunk size (e.g.
+    /// `beebeeb_types::plan_chunks_concurrent`) instead of the profile's static
+    /// ladder. Returns `Err` if `chunk_size_bytes == 0`, the derived
+    /// `chunk_count` does not fit in `u32`, or the size does not fit in `usize`.
+    pub fn from_reader_with_chunk_size<R: Read + Send + 'static>(
+        mk: &MasterKey,
+        file_id: &str,
+        file_size: u64,
+        chunk_size_bytes: u64,
+        reader: R,
+    ) -> Result<Self, CoreError> {
+        if chunk_size_bytes == 0 {
+            return Err(CoreError::InvalidInput(
+                "chunk_size_bytes must be positive".into(),
+            ));
+        }
+        let chunk_count = if file_size == 0 {
+            1
+        } else {
+            file_size.div_ceil(chunk_size_bytes)
+        };
+        let plan = ChunkPlan {
+            file_size_bytes: file_size,
+            chunk_size_bytes,
+            chunk_count,
+            strategy: ChunkStrategy::Capped {
+                max_chunk_size_bytes: chunk_size_bytes,
+            },
+            storage_format_version: STORAGE_FORMAT_VERSION_V2,
+        };
+        Self::new(mk, file_id, plan, Source::Pull(Box::new(reader)))
+    }
+
     /// Shared constructor body: validates the plan, derives the key once, sizes
     /// the read buffer (pull only).
     fn new(
@@ -830,6 +865,31 @@ mod tests {
     }
 
     #[test]
+    fn from_reader_with_chunk_size_honors_override() {
+        let m = mk();
+        let data = pattern(40);
+        let mut enc =
+            ChunkEncryptor::from_reader_with_chunk_size(&m, "rdrovr", 40, 16, Cursor::new(data.clone())).unwrap();
+        assert_eq!(enc.chunk_plan().chunk_size_bytes, 16);
+        assert_eq!(enc.chunk_plan().chunk_count, 3); // 16 + 16 + 8
+        let mut frames = Vec::new();
+        while let Some(c) = enc.next_chunk().unwrap() {
+            frames.push(c);
+        }
+        assert_eq!(frames[0].data.len(), 16 + 28);
+        assert_eq!(frames[2].data.len(), 8 + 28);
+        assert_eq!(decrypt_frames(&m, "rdrovr", &frames), data);
+    }
+
+    #[test]
+    fn from_reader_with_chunk_size_rejects_zero() {
+        let m = mk();
+        let err =
+            ChunkEncryptor::from_reader_with_chunk_size(&m, "z2", 40, 0, Cursor::new(Vec::new())).unwrap_err();
+        assert!(matches!(err, CoreError::InvalidInput(_)));
+    }
+
+    #[test]
     fn push_chunk_beyond_plan_errors() {
         let m = mk();
         let mut enc = ChunkEncryptor::for_push_with_chunk_size(&m, "cap", 16, 16).unwrap();
@@ -926,11 +986,14 @@ mod tests {
             max_read: max_read.clone(),
             total_served: total.clone(),
         };
+        // Explicit 16 MiB chunk so this memory-mechanics test is independent of
+        // the chunk-size ladder (the ladder is covered by beebeeb-types' vector
+        // test). The point here is that the read buffer is sized to the chunk,
+        // not to the 8 GiB file.
         let mut enc =
-            ChunkEncryptor::from_reader(&m, "huge", eight_gib, ChunkProfile::Desktop, reader)
+            ChunkEncryptor::from_reader_with_chunk_size(&m, "huge", eight_gib, 16 * MIB as u64, reader)
                 .unwrap();
 
-        // Desktop ladder: 8 GiB is in (1 GiB, 10 GiB] -> 16 MiB chunks.
         let plan = enc.chunk_plan();
         assert_eq!(plan.chunk_size_bytes, 16 * MIB as u64);
         assert_eq!(plan.chunk_count, eight_gib / (16 * MIB as u64)); // 512
