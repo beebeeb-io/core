@@ -910,7 +910,7 @@ impl ChunkEncryptorHandle {
         // Bound the read-ahead buffer to one chunk (≤8 MiB) — the primitive reads
         // one chunk at a time regardless.
         let plan = beebeeb_types::plan_chunks(file_size, chunk_profile);
-        let buf_cap = (plan.chunk_size_bytes as usize).min(8 * 1024 * 1024).max(8 * 1024);
+        let buf_cap = (plan.chunk_size_bytes as usize).clamp(8 * 1024, 8 * 1024 * 1024);
         let reader = std::io::BufReader::with_capacity(buf_cap, file);
         let enc = master_key
             .with_key(|mk| ChunkEncryptor::from_reader(mk, &file_id, file_size, chunk_profile, reader))??;
@@ -1026,8 +1026,7 @@ impl ChunkDecryptorHandle {
         })?;
         let buf_cap = (chunk_size_bytes as usize)
             .saturating_add(28)
-            .min(8 * 1024 * 1024)
-            .max(8 * 1024);
+            .clamp(8 * 1024, 8 * 1024 * 1024);
         let reader = std::io::BufReader::with_capacity(buf_cap, file);
         let dec = master_key
             .with_key(|mk| ChunkDecryptor::from_reader(mk, &file_id, chunk_size_bytes, reader))??;
