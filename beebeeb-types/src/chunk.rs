@@ -143,11 +143,7 @@ pub const fn effective_cap(profile: ChunkProfile, concurrency: u32) -> u64 {
         budget
     };
     let sc = profile.static_cap();
-    if sc < budget {
-        sc
-    } else {
-        budget
-    }
+    if sc < budget { sc } else { budget }
 }
 
 /// Build a plan for `file_size_bytes` using `cap` as the chunk-size ceiling.

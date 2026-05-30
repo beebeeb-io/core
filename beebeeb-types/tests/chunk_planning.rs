@@ -7,8 +7,8 @@
 //! pair produced here.
 
 use beebeeb_types::{
-    ChunkProfile, ChunkStrategy, STORAGE_FORMAT_VERSION_V2, base_chunk_size, effective_cap,
-    max_plaintext_chunk_bytes, plan_chunks, plan_chunks_concurrent,
+    ChunkProfile, ChunkStrategy, STORAGE_FORMAT_VERSION_V2, base_chunk_size, effective_cap, max_plaintext_chunk_bytes,
+    plan_chunks, plan_chunks_concurrent,
 };
 
 const MIB: u64 = 1024 * 1024;
@@ -21,13 +21,13 @@ const LADDER_VECTORS: &[(u64, u64, u64)] = &[
     (1, 4 * MIB, 1),
     (4 * MIB, 4 * MIB, 1),
     (64 * MIB, 4 * MIB, 16),
-    (128 * MIB, 4 * MIB, 32),       // ≤128 MiB stays on 4 MiB
-    (256 * MIB, 8 * MIB, 32),       // >128 MiB → 8 MiB
-    (512 * MIB, 16 * MIB, 32),      // >256 MiB → 16 MiB
-    (2 * GIB, 64 * MIB, 32),        // >1 GiB → 64 MiB
-    (4 * GIB, 128 * MIB, 32),       // >2 GiB → 128 MiB
-    (8 * GIB, 256 * MIB, 32),       // >4 GiB → 256 MiB (clamp)
-    (4 * GIB + 1, 256 * MIB, 17),   // just past 4 GiB → sawtooth floor 17
+    (128 * MIB, 4 * MIB, 32),     // ≤128 MiB stays on 4 MiB
+    (256 * MIB, 8 * MIB, 32),     // >128 MiB → 8 MiB
+    (512 * MIB, 16 * MIB, 32),    // >256 MiB → 16 MiB
+    (2 * GIB, 64 * MIB, 32),      // >1 GiB → 64 MiB
+    (4 * GIB, 128 * MIB, 32),     // >2 GiB → 128 MiB
+    (8 * GIB, 256 * MIB, 32),     // >4 GiB → 256 MiB (clamp)
+    (4 * GIB + 1, 256 * MIB, 17), // just past 4 GiB → sawtooth floor 17
     (100 * GIB, 256 * MIB, 400),
     (100 * GIB + 1, 256 * MIB, 401),
     (u64::MAX, 256 * MIB, 68_719_476_736),
@@ -89,14 +89,21 @@ fn static_caps_per_profile() {
 #[test]
 fn strategy_is_dynamic_only_at_the_256_mib_max() {
     // Cap actively binding (below 256) → Capped; at the 256 max → Dynamic.
-    assert_eq!(plan_chunks(8 * GIB, ChunkProfile::BackupAgent).strategy, ChunkStrategy::Dynamic);
+    assert_eq!(
+        plan_chunks(8 * GIB, ChunkProfile::BackupAgent).strategy,
+        ChunkStrategy::Dynamic
+    );
     assert_eq!(
         plan_chunks(8 * GIB, ChunkProfile::Cli).strategy,
-        ChunkStrategy::Capped { max_chunk_size_bytes: 128 * MIB }
+        ChunkStrategy::Capped {
+            max_chunk_size_bytes: 128 * MIB
+        }
     );
     assert_eq!(
         plan_chunks(8 * GIB, ChunkProfile::Web).strategy,
-        ChunkStrategy::Capped { max_chunk_size_bytes: 32 * MIB }
+        ChunkStrategy::Capped {
+            max_chunk_size_bytes: 32 * MIB
+        }
     );
 }
 
@@ -121,11 +128,23 @@ fn effective_cap_shrinks_with_concurrency() {
 #[test]
 fn concurrent_planning_applies_the_effective_cap() {
     // 8 GiB (base 256 MiB) under the CLI at various concurrencies.
-    assert_eq!(plan_chunks_concurrent(8 * GIB, ChunkProfile::Cli, 1).chunk_size_bytes, 128 * MIB);
-    assert_eq!(plan_chunks_concurrent(8 * GIB, ChunkProfile::Cli, 4).chunk_size_bytes, 64 * MIB);
-    assert_eq!(plan_chunks_concurrent(8 * GIB, ChunkProfile::Cli, 8).chunk_size_bytes, 32 * MIB);
+    assert_eq!(
+        plan_chunks_concurrent(8 * GIB, ChunkProfile::Cli, 1).chunk_size_bytes,
+        128 * MIB
+    );
+    assert_eq!(
+        plan_chunks_concurrent(8 * GIB, ChunkProfile::Cli, 4).chunk_size_bytes,
+        64 * MIB
+    );
+    assert_eq!(
+        plan_chunks_concurrent(8 * GIB, ChunkProfile::Cli, 8).chunk_size_bytes,
+        32 * MIB
+    );
     // bb push (conc=1) on BackupAgent reaches the full 256 MiB rung.
-    assert_eq!(plan_chunks_concurrent(8 * GIB, ChunkProfile::BackupAgent, 1).chunk_size_bytes, 256 * MIB);
+    assert_eq!(
+        plan_chunks_concurrent(8 * GIB, ChunkProfile::BackupAgent, 1).chunk_size_bytes,
+        256 * MIB
+    );
     // conc=1 is identical to the static plan.
     assert_eq!(
         plan_chunks_concurrent(8 * GIB, ChunkProfile::Web, 1).chunk_size_bytes,

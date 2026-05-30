@@ -50,8 +50,7 @@ impl FileProviderCache {
         } else {
             // Ensure parent directory exists
             if let Some(parent) = std::path::Path::new(db_path).parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| CoreError::Io(format!("create cache dir: {e}")))?;
+                std::fs::create_dir_all(parent).map_err(|e| CoreError::Io(format!("create cache dir: {e}")))?;
             }
             rusqlite::Connection::open(db_path)
         }
@@ -88,9 +87,10 @@ impl FileProviderCache {
     ///
     /// Uses `INSERT OR REPLACE` so existing rows are fully overwritten.
     pub fn upsert_entries(&self, entries: &[CachedFileEntry]) -> Result<usize, CoreError> {
-        let conn = self.db.lock().map_err(|e| {
-            CoreError::Io(format!("lock cache db: {e}"))
-        })?;
+        let conn = self
+            .db
+            .lock()
+            .map_err(|e| CoreError::Io(format!("lock cache db: {e}")))?;
 
         let tx = conn
             .unchecked_transaction()
@@ -133,13 +133,11 @@ impl FileProviderCache {
     /// Get all children of a parent folder.
     ///
     /// Pass `None` for root-level items (where `parent_id IS NULL`).
-    pub fn get_children(
-        &self,
-        parent_id: Option<&str>,
-    ) -> Result<Vec<CachedFileEntry>, CoreError> {
-        let conn = self.db.lock().map_err(|e| {
-            CoreError::Io(format!("lock cache db: {e}"))
-        })?;
+    pub fn get_children(&self, parent_id: Option<&str>) -> Result<Vec<CachedFileEntry>, CoreError> {
+        let conn = self
+            .db
+            .lock()
+            .map_err(|e| CoreError::Io(format!("lock cache db: {e}")))?;
 
         let mut stmt = match parent_id {
             Some(_) => conn
@@ -173,17 +171,17 @@ impl FileProviderCache {
 
         let mut entries = Vec::new();
         for row in rows {
-            entries
-                .push(row.map_err(|e| CoreError::Io(format!("read row: {e}")))?);
+            entries.push(row.map_err(|e| CoreError::Io(format!("read row: {e}")))?);
         }
         Ok(entries)
     }
 
     /// Get a single item by ID.
     pub fn get_item(&self, id: &str) -> Result<Option<CachedFileEntry>, CoreError> {
-        let conn = self.db.lock().map_err(|e| {
-            CoreError::Io(format!("lock cache db: {e}"))
-        })?;
+        let conn = self
+            .db
+            .lock()
+            .map_err(|e| CoreError::Io(format!("lock cache db: {e}")))?;
 
         let mut stmt = conn
             .prepare_cached(
@@ -199,18 +197,17 @@ impl FileProviderCache {
             .map_err(|e| CoreError::Io(format!("query item: {e}")))?;
 
         match rows.next() {
-            Some(row) => Ok(Some(
-                row.map_err(|e| CoreError::Io(format!("read row: {e}")))?,
-            )),
+            Some(row) => Ok(Some(row.map_err(|e| CoreError::Io(format!("read row: {e}")))?)),
             None => Ok(None),
         }
     }
 
     /// Delete a single entry by ID. Returns `true` if a row was deleted.
     pub fn delete_item(&self, id: &str) -> Result<bool, CoreError> {
-        let conn = self.db.lock().map_err(|e| {
-            CoreError::Io(format!("lock cache db: {e}"))
-        })?;
+        let conn = self
+            .db
+            .lock()
+            .map_err(|e| CoreError::Io(format!("lock cache db: {e}")))?;
 
         let affected = conn
             .execute("DELETE FROM fp_entries WHERE id = ?1", rusqlite::params![id])
@@ -221,9 +218,10 @@ impl FileProviderCache {
 
     /// Delete all entries. Returns the number of rows deleted.
     pub fn clear(&self) -> Result<usize, CoreError> {
-        let conn = self.db.lock().map_err(|e| {
-            CoreError::Io(format!("lock cache db: {e}"))
-        })?;
+        let conn = self
+            .db
+            .lock()
+            .map_err(|e| CoreError::Io(format!("lock cache db: {e}")))?;
 
         let affected = conn
             .execute("DELETE FROM fp_entries", [])
@@ -234,9 +232,10 @@ impl FileProviderCache {
 
     /// Return the total number of cached entries.
     pub fn count(&self) -> Result<usize, CoreError> {
-        let conn = self.db.lock().map_err(|e| {
-            CoreError::Io(format!("lock cache db: {e}"))
-        })?;
+        let conn = self
+            .db
+            .lock()
+            .map_err(|e| CoreError::Io(format!("lock cache db: {e}")))?;
 
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM fp_entries", [], |row| row.get(0))
@@ -387,9 +386,7 @@ mod tests {
     #[test]
     fn delete_item() {
         let cache = FileProviderCache::open(":memory:").unwrap();
-        cache
-            .upsert_entries(&[make_entry("f1", None, "test", false)])
-            .unwrap();
+        cache.upsert_entries(&[make_entry("f1", None, "test", false)]).unwrap();
         assert_eq!(cache.count().unwrap(), 1);
 
         assert!(cache.delete_item("f1").unwrap());

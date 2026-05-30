@@ -6,8 +6,8 @@
 //! `{"nonce": [12, 34, ...], "ciphertext": [56, 78, ...]}`.
 //! Both formats are accepted on parse; only base64 is emitted on serialize.
 
-use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as B64;
 
 use crate::CoreError;
 
@@ -30,8 +30,7 @@ pub fn serialize_encrypted_metadata(nonce: &[u8], ciphertext: &[u8]) -> String {
 ///
 /// Returns `(nonce_bytes, ciphertext_bytes)`.
 pub fn parse_encrypted_metadata(payload: &str) -> Result<(Vec<u8>, Vec<u8>), CoreError> {
-    let v: serde_json::Value =
-        serde_json::from_str(payload).map_err(|e| CoreError::InvalidInput(e.to_string()))?;
+    let v: serde_json::Value = serde_json::from_str(payload).map_err(|e| CoreError::InvalidInput(e.to_string()))?;
 
     let nonce = parse_field(&v, "nonce")?;
     let ciphertext = parse_field(&v, "ciphertext")?;
@@ -41,26 +40,20 @@ pub fn parse_encrypted_metadata(payload: &str) -> Result<(Vec<u8>, Vec<u8>), Cor
 
 /// Parse a single field that may be either a base64 string or a numeric array.
 fn parse_field(obj: &serde_json::Value, field: &str) -> Result<Vec<u8>, CoreError> {
-    let val = obj.get(field).ok_or_else(|| {
-        CoreError::InvalidInput(format!("missing field \"{field}\" in metadata payload"))
-    })?;
+    let val = obj
+        .get(field)
+        .ok_or_else(|| CoreError::InvalidInput(format!("missing field \"{field}\" in metadata payload")))?;
 
     match val {
-        serde_json::Value::String(s) => B64.decode(s).map_err(|e| {
-            CoreError::InvalidInput(format!(
-                "invalid base64 in field \"{field}\": {e}"
-            ))
-        }),
+        serde_json::Value::String(s) => B64
+            .decode(s)
+            .map_err(|e| CoreError::InvalidInput(format!("invalid base64 in field \"{field}\": {e}"))),
         serde_json::Value::Array(arr) => arr
             .iter()
             .map(|v| {
                 v.as_u64()
                     .and_then(|n| u8::try_from(n).ok())
-                    .ok_or_else(|| {
-                        CoreError::InvalidInput(format!(
-                            "non-byte value in legacy array field \"{field}\""
-                        ))
-                    })
+                    .ok_or_else(|| CoreError::InvalidInput(format!("non-byte value in legacy array field \"{field}\"")))
             })
             .collect(),
         _ => Err(CoreError::InvalidInput(format!(
@@ -97,10 +90,7 @@ mod tests {
     fn parse_mixed_formats() {
         // nonce as base64, ciphertext as legacy array
         let nonce_b64 = B64.encode([1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
-        let payload = format!(
-            r#"{{"nonce":"{}","ciphertext":[100,101,102]}}"#,
-            nonce_b64
-        );
+        let payload = format!(r#"{{"nonce":"{}","ciphertext":[100,101,102]}}"#, nonce_b64);
         let (nonce, ct) = parse_encrypted_metadata(&payload).unwrap();
         assert_eq!(nonce, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
         assert_eq!(ct, vec![100, 101, 102]);

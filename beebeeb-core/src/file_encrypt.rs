@@ -10,10 +10,10 @@ use std::path::{Path, PathBuf};
 
 use beebeeb_types::{ChunkProfile, plan_chunks};
 
+use crate::CoreError;
 use crate::chunk_stream::ChunkEncryptor;
 use crate::encrypt::{NONCE_LEN, TAG_LEN, decrypt_chunk_raw};
 use crate::kdf::{MasterKey, derive_file_key};
-use crate::CoreError;
 
 /// Information about a single encrypted chunk written to disk.
 #[derive(Debug, Clone)]
@@ -77,19 +77,16 @@ pub fn encrypt_file_to_chunks(
     callback: Option<&dyn FileProgressCallback>,
 ) -> Result<EncryptedFileResult, CoreError> {
     // Stat the input file
-    let metadata = fs::metadata(input_path)
-        .map_err(|e| CoreError::Io(format!("stat input: {e}")))?;
+    let metadata = fs::metadata(input_path).map_err(|e| CoreError::Io(format!("stat input: {e}")))?;
     let file_size = metadata.len();
 
     // Ensure output directory exists
-    fs::create_dir_all(output_dir)
-        .map_err(|e| CoreError::Io(format!("create output dir: {e}")))?;
+    fs::create_dir_all(output_dir).map_err(|e| CoreError::Io(format!("create output dir: {e}")))?;
 
     // Open input file. The BufReader capacity is bounded to 8 MiB so a large
     // chunk size does not force a huge buffered-reader allocation; the streaming
     // primitive reads one chunk at a time regardless.
-    let input_file = File::open(input_path)
-        .map_err(|e| CoreError::Io(format!("open input: {e}")))?;
+    let input_file = File::open(input_path).map_err(|e| CoreError::Io(format!("open input: {e}")))?;
     let plan = plan_chunks(file_size, profile);
     let buf_cap = (plan.chunk_size_bytes as usize).min(8 * 1024 * 1024);
     let reader = BufReader::with_capacity(buf_cap, input_file);
@@ -98,8 +95,7 @@ pub fn encrypt_file_to_chunks(
     // exactly ONE chunk-encryption code path across every client. A parity test
     // (tests/chunk_stream_parity.rs) fails the instant this drifts from a direct
     // ChunkEncryptor loop.
-    let mut encryptor =
-        ChunkEncryptor::from_reader(master_key, file_id, file_size, profile, reader)?;
+    let mut encryptor = ChunkEncryptor::from_reader(master_key, file_id, file_size, profile, reader)?;
     let plan = encryptor.chunk_plan();
     // Safe cast: from_reader already validated chunk_count fits in u32.
     let chunk_count = plan.chunk_count as u32;
@@ -119,21 +115,16 @@ pub fn encrypt_file_to_chunks(
         let enc_path = output_dir.join(format!("{chunk_index}.enc"));
         let tmp_path = output_dir.join(format!("{chunk_index}.enc.tmp"));
 
-        let mut writer = BufWriter::new(
-            File::create(&tmp_path)
-                .map_err(|e| CoreError::Io(format!("create chunk file: {e}")))?,
-        );
+        let mut writer =
+            BufWriter::new(File::create(&tmp_path).map_err(|e| CoreError::Io(format!("create chunk file: {e}")))?);
         writer
             .write_all(&encrypted)
             .map_err(|e| CoreError::Io(format!("write chunk: {e}")))?;
-        writer
-            .flush()
-            .map_err(|e| CoreError::Io(format!("flush chunk: {e}")))?;
+        writer.flush().map_err(|e| CoreError::Io(format!("flush chunk: {e}")))?;
         drop(writer);
 
         // Atomic rename
-        fs::rename(&tmp_path, &enc_path)
-            .map_err(|e| CoreError::Io(format!("rename chunk: {e}")))?;
+        fs::rename(&tmp_path, &enc_path).map_err(|e| CoreError::Io(format!("rename chunk: {e}")))?;
 
         total_plaintext += plaintext_size;
         total_ciphertext += ciphertext_size;
@@ -182,12 +173,10 @@ pub fn decrypt_chunks_to_file(
 
     // Ensure parent directory exists
     if let Some(parent) = output_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| CoreError::Io(format!("create output parent dir: {e}")))?;
+        fs::create_dir_all(parent).map_err(|e| CoreError::Io(format!("create output parent dir: {e}")))?;
     }
 
-    let output_file = File::create(&tmp_path)
-        .map_err(|e| CoreError::Io(format!("create output file: {e}")))?;
+    let output_file = File::create(&tmp_path).map_err(|e| CoreError::Io(format!("create output file: {e}")))?;
     let mut writer = BufWriter::new(output_file);
 
     let mut total_bytes: u64 = 0;
@@ -195,8 +184,7 @@ pub fn decrypt_chunks_to_file(
 
     for (i, chunk_path) in chunk_paths.iter().enumerate() {
         // Read the entire chunk file
-        let raw = fs::read(chunk_path)
-            .map_err(|e| CoreError::Io(format!("read chunk {i}: {e}")))?;
+        let raw = fs::read(chunk_path).map_err(|e| CoreError::Io(format!("read chunk {i}: {e}")))?;
 
         // Decrypt: raw is nonce || ciphertext
         let plaintext = decrypt_chunk_raw(&file_key, &raw)?;
@@ -219,8 +207,7 @@ pub fn decrypt_chunks_to_file(
     drop(writer);
 
     // Atomic rename to final path
-    fs::rename(&tmp_path, output_path)
-        .map_err(|e| CoreError::Io(format!("rename output: {e}")))?;
+    fs::rename(&tmp_path, output_path).map_err(|e| CoreError::Io(format!("rename output: {e}")))?;
 
     Ok(DecryptedFileResult {
         output_path: output_path.to_path_buf(),
@@ -276,14 +263,7 @@ mod tests {
         // Decrypt
         let output_path = dir.join("output.bin");
         let chunk_paths: Vec<&Path> = result.chunks.iter().map(|c| c.output_path.as_path()).collect();
-        let dec_result = decrypt_chunks_to_file(
-            &mk,
-            "test-file-001",
-            &chunk_paths,
-            &output_path,
-            None,
-        )
-        .unwrap();
+        let dec_result = decrypt_chunks_to_file(&mk, "test-file-001", &chunk_paths, &output_path, None).unwrap();
 
         assert_eq!(dec_result.total_bytes, content.len() as u64);
         assert_eq!(dec_result.chunks_processed, result.chunks.len() as u32);
@@ -306,15 +286,8 @@ mod tests {
         fs::write(&input_path, b"").unwrap();
 
         let output_dir = dir.join("chunks");
-        let result = encrypt_file_to_chunks(
-            &mk,
-            "empty-file",
-            &input_path,
-            &output_dir,
-            ChunkProfile::Mobile,
-            None,
-        )
-        .unwrap();
+        let result =
+            encrypt_file_to_chunks(&mk, "empty-file", &input_path, &output_dir, ChunkProfile::Mobile, None).unwrap();
 
         assert_eq!(result.total_plaintext_bytes, 0);
         // plan_chunks returns 1 chunk for empty files
@@ -323,14 +296,7 @@ mod tests {
 
         let output_path = dir.join("output.bin");
         let chunk_paths: Vec<&Path> = result.chunks.iter().map(|c| c.output_path.as_path()).collect();
-        let dec_result = decrypt_chunks_to_file(
-            &mk,
-            "empty-file",
-            &chunk_paths,
-            &output_path,
-            None,
-        )
-        .unwrap();
+        let dec_result = decrypt_chunks_to_file(&mk, "empty-file", &chunk_paths, &output_path, None).unwrap();
 
         assert_eq!(dec_result.total_bytes, 0);
         let recovered = fs::read(&output_path).unwrap();
@@ -352,29 +318,15 @@ mod tests {
         fs::write(&input_path, &content).unwrap();
 
         let output_dir = dir.join("chunks");
-        let result = encrypt_file_to_chunks(
-            &mk,
-            "small-file",
-            &input_path,
-            &output_dir,
-            ChunkProfile::Desktop,
-            None,
-        )
-        .unwrap();
+        let result =
+            encrypt_file_to_chunks(&mk, "small-file", &input_path, &output_dir, ChunkProfile::Desktop, None).unwrap();
 
         assert_eq!(result.chunks.len(), 1);
         assert_eq!(result.total_plaintext_bytes, 100);
 
         let output_path = dir.join("output.bin");
         let chunk_paths: Vec<&Path> = result.chunks.iter().map(|c| c.output_path.as_path()).collect();
-        let dec_result = decrypt_chunks_to_file(
-            &mk,
-            "small-file",
-            &chunk_paths,
-            &output_path,
-            None,
-        )
-        .unwrap();
+        let dec_result = decrypt_chunks_to_file(&mk, "small-file", &chunk_paths, &output_path, None).unwrap();
 
         let recovered = fs::read(&output_path).unwrap();
         assert_eq!(recovered, content);
@@ -396,15 +348,8 @@ mod tests {
         fs::write(&input_path, &content).unwrap();
 
         let output_dir = dir.join("chunks");
-        let result = encrypt_file_to_chunks(
-            &mk,
-            "photo-file",
-            &input_path,
-            &output_dir,
-            ChunkProfile::Mobile,
-            None,
-        )
-        .unwrap();
+        let result =
+            encrypt_file_to_chunks(&mk, "photo-file", &input_path, &output_dir, ChunkProfile::Mobile, None).unwrap();
 
         assert_eq!(result.chunks.len(), 2);
         assert_eq!(result.chunk_size_bytes, 4 * 1024 * 1024);
@@ -412,14 +357,7 @@ mod tests {
 
         let output_path = dir.join("output.bin");
         let chunk_paths: Vec<&Path> = result.chunks.iter().map(|c| c.output_path.as_path()).collect();
-        let dec_result = decrypt_chunks_to_file(
-            &mk,
-            "photo-file",
-            &chunk_paths,
-            &output_path,
-            None,
-        )
-        .unwrap();
+        let dec_result = decrypt_chunks_to_file(&mk, "photo-file", &chunk_paths, &output_path, None).unwrap();
 
         let recovered = fs::read(&output_path).unwrap();
         assert_eq!(recovered.len(), content.len());
@@ -441,29 +379,15 @@ mod tests {
         fs::write(&input_path, &content).unwrap();
 
         let output_dir = dir.join("chunks");
-        let result = encrypt_file_to_chunks(
-            &mk,
-            "doc-file",
-            &input_path,
-            &output_dir,
-            ChunkProfile::Desktop,
-            None,
-        )
-        .unwrap();
+        let result =
+            encrypt_file_to_chunks(&mk, "doc-file", &input_path, &output_dir, ChunkProfile::Desktop, None).unwrap();
 
         assert_eq!(result.chunks.len(), 1);
         assert_eq!(result.total_plaintext_bytes, content.len() as u64);
 
         let output_path = dir.join("output.bin");
         let chunk_paths: Vec<&Path> = result.chunks.iter().map(|c| c.output_path.as_path()).collect();
-        let dec_result = decrypt_chunks_to_file(
-            &mk,
-            "doc-file",
-            &chunk_paths,
-            &output_path,
-            None,
-        )
-        .unwrap();
+        let dec_result = decrypt_chunks_to_file(&mk, "doc-file", &chunk_paths, &output_path, None).unwrap();
 
         let recovered = fs::read(&output_path).unwrap();
         assert_eq!(recovered, content);
@@ -474,8 +398,8 @@ mod tests {
 
     #[test]
     fn progress_callback_fires() {
-        use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
 
         struct TestCallback {
             last_completed: AtomicU32,
@@ -536,27 +460,14 @@ mod tests {
         fs::write(&input_path, b"secret data").unwrap();
 
         let output_dir = dir.join("chunks");
-        let result = encrypt_file_to_chunks(
-            &mk,
-            "secret-file",
-            &input_path,
-            &output_dir,
-            ChunkProfile::Mobile,
-            None,
-        )
-        .unwrap();
+        let result =
+            encrypt_file_to_chunks(&mk, "secret-file", &input_path, &output_dir, ChunkProfile::Mobile, None).unwrap();
 
         // Try to decrypt with wrong key
         let wrong_mk = derive_master_key("wrong-password", b"wrong-salt-16byte").unwrap();
         let output_path = dir.join("output.bin");
         let chunk_paths: Vec<&Path> = result.chunks.iter().map(|c| c.output_path.as_path()).collect();
-        let dec_result = decrypt_chunks_to_file(
-            &wrong_mk,
-            "secret-file",
-            &chunk_paths,
-            &output_path,
-            None,
-        );
+        let dec_result = decrypt_chunks_to_file(&wrong_mk, "secret-file", &chunk_paths, &output_path, None);
 
         assert!(dec_result.is_err());
 
@@ -574,26 +485,13 @@ mod tests {
         fs::write(&input_path, b"important data").unwrap();
 
         let output_dir = dir.join("chunks");
-        let result = encrypt_file_to_chunks(
-            &mk,
-            "file-001",
-            &input_path,
-            &output_dir,
-            ChunkProfile::Mobile,
-            None,
-        )
-        .unwrap();
+        let result =
+            encrypt_file_to_chunks(&mk, "file-001", &input_path, &output_dir, ChunkProfile::Mobile, None).unwrap();
 
         // Try to decrypt with wrong file ID (derives different file key)
         let output_path = dir.join("output.bin");
         let chunk_paths: Vec<&Path> = result.chunks.iter().map(|c| c.output_path.as_path()).collect();
-        let dec_result = decrypt_chunks_to_file(
-            &mk,
-            "file-002",
-            &chunk_paths,
-            &output_path,
-            None,
-        );
+        let dec_result = decrypt_chunks_to_file(&mk, "file-002", &chunk_paths, &output_path, None);
 
         assert!(dec_result.is_err());
 
@@ -607,14 +505,7 @@ mod tests {
         let input_path = dir.join("does_not_exist.bin");
         let output_dir = dir.join("chunks");
 
-        let result = encrypt_file_to_chunks(
-            &mk,
-            "no-file",
-            &input_path,
-            &output_dir,
-            ChunkProfile::Mobile,
-            None,
-        );
+        let result = encrypt_file_to_chunks(&mk, "no-file", &input_path, &output_dir, ChunkProfile::Mobile, None);
 
         assert!(matches!(result, Err(CoreError::Io(_))));
     }

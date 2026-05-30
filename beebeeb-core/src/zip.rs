@@ -1,12 +1,12 @@
 use std::io::{Seek, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use zip::write::{SimpleFileOptions, ZipWriter};
 use zip::CompressionMethod;
+use zip::write::{SimpleFileOptions, ZipWriter};
 
-use crate::encrypt::decrypt_chunk_raw;
-use crate::kdf::{derive_file_key, MasterKey};
 use crate::CoreError;
+use crate::encrypt::decrypt_chunk_raw;
+use crate::kdf::{MasterKey, derive_file_key};
 
 pub struct ZipEntry {
     pub path: String,
@@ -60,8 +60,7 @@ pub fn stream_folder_zip<W: Write + Seek>(
             let encrypted = fetch_chunk(&entry.file_id, chunk_idx)?;
             let plaintext = decrypt_chunk_raw(&file_key, &encrypted)?;
 
-            zip.write_all(&plaintext)
-                .map_err(|e| CoreError::Io(e.to_string()))?;
+            zip.write_all(&plaintext).map_err(|e| CoreError::Io(e.to_string()))?;
 
             bytes_done += encrypted.len() as u64;
 

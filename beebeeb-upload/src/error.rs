@@ -27,10 +27,7 @@ pub enum UploadError {
     InvalidInput(String),
 
     /// Maximum retry attempts exhausted.
-    MaxRetriesExhausted {
-        attempts: u32,
-        last_error: String,
-    },
+    MaxRetriesExhausted { attempts: u32, last_error: String },
 }
 
 impl fmt::Display for UploadError {
@@ -49,14 +46,8 @@ impl fmt::Display for UploadError {
             Self::IoError(msg) => write!(f, "I/O error: {msg}"),
             Self::InvalidResponse(msg) => write!(f, "invalid response: {msg}"),
             Self::InvalidInput(msg) => write!(f, "invalid input: {msg}"),
-            Self::MaxRetriesExhausted {
-                attempts,
-                last_error,
-            } => {
-                write!(
-                    f,
-                    "max retries exhausted ({attempts} attempts): {last_error}"
-                )
+            Self::MaxRetriesExhausted { attempts, last_error } => {
+                write!(f, "max retries exhausted ({attempts} attempts): {last_error}")
             }
         }
     }
@@ -76,9 +67,7 @@ impl UploadError {
     /// If this is a rate-limit error, return the retry-after duration.
     pub fn retry_after(&self) -> Option<std::time::Duration> {
         match self {
-            Self::RateLimited { retry_after_secs } => {
-                Some(std::time::Duration::from_secs(*retry_after_secs))
-            }
+            Self::RateLimited { retry_after_secs } => Some(std::time::Duration::from_secs(*retry_after_secs)),
             _ => None,
         }
     }

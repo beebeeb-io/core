@@ -182,8 +182,8 @@ pub fn list_archive(data: &[u8], filename: &str) -> Result<Vec<ArchiveEntry>, Co
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flate2::write::GzEncoder;
     use flate2::Compression;
+    use flate2::write::GzEncoder;
     use std::io::Write;
 
     /// Build a minimal TAR archive in memory with the given entries.
@@ -265,11 +265,7 @@ mod tests {
 
     #[test]
     fn parse_tar_ignores_dot_entries() {
-        let tar = build_tar(&[
-            ("./", b"", true),
-            (".", b"", true),
-            ("real.txt", b"data", false),
-        ]);
+        let tar = build_tar(&[("./", b"", true), (".", b"", true), ("real.txt", b"data", false)]);
         let entries = list_tar_entries(&tar).unwrap();
         // Only "real.txt" should remain
         assert_eq!(entries.len(), 1);
@@ -303,10 +299,7 @@ mod tests {
 
     #[test]
     fn list_archive_tgz() {
-        let tar = build_tar(&[
-            ("README.md", b"# Hello", false),
-            ("src/", b"", true),
-        ]);
+        let tar = build_tar(&[("README.md", b"# Hello", false), ("src/", b"", true)]);
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&tar).unwrap();
         let compressed = encoder.finish().unwrap();

@@ -19,11 +19,7 @@ const GCM_TAG_LEN: usize = 16;
 const GCM_OVERHEAD: u64 = (NONCE_LEN + GCM_TAG_LEN) as u64;
 
 /// Read more body bytes (via `Response::chunk`) until `buf.len() >= want` or EOF.
-async fn fill_to(
-    resp: &mut reqwest::Response,
-    buf: &mut Vec<u8>,
-    want: usize,
-) -> Result<(), UploadError> {
+async fn fill_to(resp: &mut reqwest::Response, buf: &mut Vec<u8>, want: usize) -> Result<(), UploadError> {
     while buf.len() < want {
         match resp
             .chunk()
@@ -232,8 +228,8 @@ impl DownloadClient {
             std::fs::create_dir_all(parent)
                 .map_err(|e| UploadError::IoError(format!("create output parent dir: {e}")))?;
         }
-        let output_file = std::fs::File::create(&tmp_path)
-            .map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
+        let output_file =
+            std::fs::File::create(&tmp_path).map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
         let mut writer = BufWriter::new(output_file);
 
         let mut decryptor = ChunkDecryptor::for_push(master_key, file_id);
@@ -283,8 +279,7 @@ impl DownloadClient {
             .flush()
             .map_err(|e| UploadError::IoError(format!("flush output: {e}")))?;
         drop(writer);
-        std::fs::rename(&tmp_path, output_path)
-            .map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
+        std::fs::rename(&tmp_path, output_path).map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
 
         if let Some(cb) = callback {
             cb.on_complete(output_path);
@@ -332,9 +327,7 @@ pub fn decrypt_downloaded_bytes(
     callback: Option<&dyn DownloadProgressCallback>,
 ) -> Result<DownloadResult, UploadError> {
     if chunk_count == 0 {
-        return Err(UploadError::InvalidInput(
-            "chunk_count must be > 0".into(),
-        ));
+        return Err(UploadError::InvalidInput("chunk_count must be > 0".into()));
     }
 
     let total_len = encrypted_bytes.len();
@@ -349,12 +342,11 @@ pub fn decrypt_downloaded_bytes(
 
     // Ensure parent directory exists
     if let Some(parent) = std::path::Path::new(output_path).parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| UploadError::IoError(format!("create output parent dir: {e}")))?;
+        std::fs::create_dir_all(parent).map_err(|e| UploadError::IoError(format!("create output parent dir: {e}")))?;
     }
 
-    let output_file = std::fs::File::create(&tmp_path)
-        .map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
+    let output_file =
+        std::fs::File::create(&tmp_path).map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
     let mut writer = BufWriter::new(output_file);
 
     let mut total_plaintext: u64 = 0;
@@ -363,13 +355,8 @@ pub fn decrypt_downloaded_bytes(
     for (i, (start, end)) in chunk_boundaries.iter().enumerate() {
         let chunk_data = &encrypted_bytes[*start..*end];
 
-        let plaintext =
-            beebeeb_core::encrypt::decrypt_chunk_raw(file_key, chunk_data)
-                .map_err(|e| {
-                    UploadError::InvalidResponse(format!(
-                        "decryption failed for chunk {i}: {e}"
-                    ))
-                })?;
+        let plaintext = beebeeb_core::encrypt::decrypt_chunk_raw(file_key, chunk_data)
+            .map_err(|e| UploadError::InvalidResponse(format!("decryption failed for chunk {i}: {e}")))?;
 
         writer
             .write_all(&plaintext)
@@ -389,8 +376,7 @@ pub fn decrypt_downloaded_bytes(
     drop(writer);
 
     // Atomic rename
-    std::fs::rename(&tmp_path, output_path)
-        .map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
+    std::fs::rename(&tmp_path, output_path).map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
 
     if let Some(cb) = callback {
         cb.on_complete(output_path);
@@ -414,10 +400,7 @@ pub fn decrypt_downloaded_bytes(
 ///
 /// All chunks except the last have the same size. The last chunk gets the remainder.
 /// Each chunk must be at least `NONCE_LEN + GCM_TAG_LEN` bytes (28 bytes: 12 nonce + 16 tag).
-pub fn compute_chunk_boundaries(
-    total_len: usize,
-    chunk_count: u32,
-) -> Result<Vec<(usize, usize)>, UploadError> {
+pub fn compute_chunk_boundaries(total_len: usize, chunk_count: u32) -> Result<Vec<(usize, usize)>, UploadError> {
     if chunk_count == 0 {
         return Err(UploadError::InvalidInput("chunk_count must be > 0".into()));
     }
@@ -425,9 +408,7 @@ pub fn compute_chunk_boundaries(
     let n = chunk_count as usize;
 
     if total_len == 0 {
-        return Err(UploadError::InvalidResponse(
-            "encrypted payload is empty".into(),
-        ));
+        return Err(UploadError::InvalidResponse("encrypted payload is empty".into()));
     }
 
     // For a single chunk, the entire payload is that chunk.
@@ -501,9 +482,7 @@ pub fn download_and_decrypt_file<'a>(
                 master_key,
                 file_id,
                 output_path,
-                callback
-                    .as_ref()
-                    .map(|b| b.as_ref() as &dyn DownloadProgressCallback),
+                callback.as_ref().map(|b| b.as_ref() as &dyn DownloadProgressCallback),
             )
             .await
     })
@@ -597,8 +576,7 @@ mod tests {
         let output = dir.join("output.bin");
         let output_str = output.to_str().unwrap();
 
-        let result =
-            decrypt_downloaded_bytes(&fk, &encrypted, 1, output_str, None).unwrap();
+        let result = decrypt_downloaded_bytes(&fk, &encrypted, 1, output_str, None).unwrap();
 
         assert_eq!(result.plaintext_size, plaintext.len() as u64);
         assert_eq!(result.chunks_decrypted, 1);
@@ -653,8 +631,7 @@ mod tests {
         let output = dir.join("output.bin");
         let output_str = output.to_str().unwrap();
 
-        let result =
-            decrypt_downloaded_bytes(&fk, &payload, 2, output_str, None).unwrap();
+        let result = decrypt_downloaded_bytes(&fk, &payload, 2, output_str, None).unwrap();
 
         assert_eq!(result.chunks_decrypted, 2);
         assert_eq!(result.plaintext_size, 128); // 64 + 64
@@ -676,8 +653,7 @@ mod tests {
         let fk = derive_file_key(&mk, b"file-003");
         let encrypted = encrypt_chunk_raw(&fk, b"secret").unwrap();
 
-        let wrong_mk =
-            derive_master_key("wrong-password", b"wrong-salt-16byte").unwrap();
+        let wrong_mk = derive_master_key("wrong-password", b"wrong-salt-16byte").unwrap();
         let wrong_fk = derive_file_key(&wrong_mk, b"file-003");
 
         let dir = std::env::temp_dir().join("beebeeb_download_wrongkey");
@@ -686,8 +662,7 @@ mod tests {
         let output = dir.join("output.bin");
         let output_str = output.to_str().unwrap();
 
-        let result =
-            decrypt_downloaded_bytes(&wrong_fk, &encrypted, 1, output_str, None);
+        let result = decrypt_downloaded_bytes(&wrong_fk, &encrypted, 1, output_str, None);
         assert!(result.is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -709,8 +684,7 @@ mod tests {
         let output = dir.join("output.bin");
         let output_str = output.to_str().unwrap();
 
-        let result =
-            decrypt_downloaded_bytes(&fk, &encrypted, 1, output_str, None).unwrap();
+        let result = decrypt_downloaded_bytes(&fk, &encrypted, 1, output_str, None).unwrap();
 
         assert_eq!(result.plaintext_size, 0);
         assert_eq!(result.chunks_decrypted, 1);

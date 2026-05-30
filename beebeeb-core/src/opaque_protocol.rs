@@ -29,14 +29,10 @@ use crate::CoreError;
 pub struct Argon2idKsf;
 
 impl Ksf for Argon2idKsf {
-    fn hash<L: ArrayLength<u8>>(
-        &self,
-        input: GenericArray<u8, L>,
-    ) -> Result<GenericArray<u8, L>, InternalError> {
+    fn hash<L: ArrayLength<u8>>(&self, input: GenericArray<u8, L>) -> Result<GenericArray<u8, L>, InternalError> {
         // 256 MiB, 4 iterations, 2 parallelism, output length = L (the
         // OPAQUE protocol's KSF expects len(output) == len(input)).
-        let params = Params::new(256 * 1024, 4, 2, Some(L::USIZE))
-            .map_err(|_| InternalError::KsfError)?;
+        let params = Params::new(256 * 1024, 4, 2, Some(L::USIZE)).map_err(|_| InternalError::KsfError)?;
         let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
         // OPAQUE feeds the KSF a value that already mixes in per-user OPRF

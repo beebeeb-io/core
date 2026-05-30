@@ -68,9 +68,8 @@ impl PdfBuilder {
         }
         self.buf.extend_from_slice(xref.as_bytes());
 
-        let trailer = format!(
-            "trailer\n<< /Size {num_objects} /Root {catalog_obj} 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n"
-        );
+        let trailer =
+            format!("trailer\n<< /Size {num_objects} /Root {catalog_obj} 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n");
         self.buf.extend_from_slice(trailer.as_bytes());
         self.buf
     }
@@ -118,11 +117,7 @@ const MARGIN: f32 = 60.0;
 /// - `metadata`: key-value pairs displayed below the words (e.g. ("Email", "user@example.com"))
 ///
 /// Returns the raw PDF bytes.
-pub fn generate_recovery_pdf(
-    title: &str,
-    words: &[String],
-    metadata: &[(&str, &str)],
-) -> Vec<u8> {
+pub fn generate_recovery_pdf(title: &str, words: &[String], metadata: &[(&str, &str)]) -> Vec<u8> {
     let mut pdf = PdfBuilder::new();
 
     // --- Object 1: Catalog ---
@@ -150,10 +145,7 @@ pub fn generate_recovery_pdf(
 
     // --- Object 4: Content stream ---
     let _content_obj = pdf.begin_object();
-    pdf.write_str(&format!(
-        "<< /Length {} >>\nstream\n",
-        content.len()
-    ));
+    pdf.write_str(&format!("<< /Length {} >>\nstream\n", content.len()));
     pdf.write(content.as_bytes());
     pdf.write_str("\nendstream");
     pdf.end_object();
@@ -328,9 +320,7 @@ mod tests {
 
     #[test]
     fn pdf_starts_with_magic_bytes() {
-        let words: Vec<String> = (1..=12)
-            .map(|i| format!("word{i}"))
-            .collect();
+        let words: Vec<String> = (1..=12).map(|i| format!("word{i}")).collect();
         let pdf = generate_recovery_pdf("Test Recovery Kit", &words, &[]);
         assert!(pdf.starts_with(b"%PDF-1.4"));
     }
@@ -353,11 +343,7 @@ mod tests {
 
     #[test]
     fn pdf_contains_words() {
-        let words: Vec<String> = vec![
-            "apple".into(),
-            "banana".into(),
-            "cherry".into(),
-        ];
+        let words: Vec<String> = vec!["apple".into(), "banana".into(), "cherry".into()];
         let pdf = generate_recovery_pdf("Test", &words, &[]);
         let text = String::from_utf8_lossy(&pdf);
         assert!(text.contains("apple"));
@@ -368,10 +354,7 @@ mod tests {
     #[test]
     fn pdf_contains_metadata() {
         let words: Vec<String> = vec!["test".into(); 12];
-        let metadata = vec![
-            ("Email", "user@beebeeb.io"),
-            ("Created", "2026-05-18"),
-        ];
+        let metadata = vec![("Email", "user@beebeeb.io"), ("Created", "2026-05-18")];
         let pdf = generate_recovery_pdf("Kit", &words, &metadata);
         let text = String::from_utf8_lossy(&pdf);
         assert!(text.contains("user@beebeeb.io"));

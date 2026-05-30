@@ -1,11 +1,11 @@
 use std::io::{Cursor, Read};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use beebeeb_core::encrypt::encrypt_chunk_raw;
-use beebeeb_core::kdf::{derive_file_key, MasterKey};
-use beebeeb_core::zip::{stream_folder_zip, ZipEntry, ZipProgress};
 use beebeeb_core::CoreError;
+use beebeeb_core::encrypt::encrypt_chunk_raw;
+use beebeeb_core::kdf::{MasterKey, derive_file_key};
+use beebeeb_core::zip::{ZipEntry, ZipProgress, stream_folder_zip};
 
 fn test_master_key() -> MasterKey {
     MasterKey::from_bytes([1u8; 32])
@@ -38,20 +38,10 @@ fn single_file_roundtrip() {
     let mut buf = Vec::new();
 
     let chunks_clone = encrypted_chunks.clone();
-    let mut fetch = |_fid: &str, idx: u32| -> Result<Vec<u8>, CoreError> {
-        Ok(chunks_clone[idx as usize].clone())
-    };
+    let mut fetch = |_fid: &str, idx: u32| -> Result<Vec<u8>, CoreError> { Ok(chunks_clone[idx as usize].clone()) };
 
     let mk2 = test_master_key();
-    stream_folder_zip(
-        &mk2,
-        &entries,
-        &mut fetch,
-        Cursor::new(&mut buf),
-        &|_| {},
-        &cancel,
-    )
-    .unwrap();
+    stream_folder_zip(&mk2, &entries, &mut fetch, Cursor::new(&mut buf), &|_| {}, &cancel).unwrap();
 
     // Verify the zip contents
     let reader = Cursor::new(&buf);
@@ -108,20 +98,10 @@ fn multi_file_with_nested_paths() {
     let mut buf = Vec::new();
     let cancel = AtomicBool::new(false);
 
-    let mut fetch = |fid: &str, idx: u32| -> Result<Vec<u8>, CoreError> {
-        Ok(all_chunks[fid][idx as usize].clone())
-    };
+    let mut fetch = |fid: &str, idx: u32| -> Result<Vec<u8>, CoreError> { Ok(all_chunks[fid][idx as usize].clone()) };
 
     let mk2 = test_master_key();
-    stream_folder_zip(
-        &mk2,
-        &entries,
-        &mut fetch,
-        Cursor::new(&mut buf),
-        &|_| {},
-        &cancel,
-    )
-    .unwrap();
+    stream_folder_zip(&mk2, &entries, &mut fetch, Cursor::new(&mut buf), &|_| {}, &cancel).unwrap();
 
     let reader = Cursor::new(&buf);
     let mut archive = zip::ZipArchive::new(reader).unwrap();
@@ -155,26 +135,14 @@ fn cancellation_returns_cancelled() {
     let cancel = AtomicBool::new(true); // cancelled before start
     let mut buf = Vec::new();
 
-    let mut fetch = |_fid: &str, idx: u32| -> Result<Vec<u8>, CoreError> {
-        Ok(enc[idx as usize].clone())
-    };
+    let mut fetch = |_fid: &str, idx: u32| -> Result<Vec<u8>, CoreError> { Ok(enc[idx as usize].clone()) };
 
     let mk2 = test_master_key();
-    let result = stream_folder_zip(
-        &mk2,
-        &entries,
-        &mut fetch,
-        Cursor::new(&mut buf),
-        &|_| {},
-        &cancel,
-    );
+    let result = stream_folder_zip(&mk2, &entries, &mut fetch, Cursor::new(&mut buf), &|_| {}, &cancel);
 
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(
-        matches!(err, CoreError::Cancelled),
-        "expected Cancelled, got: {err:?}"
-    );
+    assert!(matches!(err, CoreError::Cancelled), "expected Cancelled, got: {err:?}");
 }
 
 #[test]
@@ -184,11 +152,7 @@ fn cancellation_mid_chunks() {
     let enc = encrypt_chunks(
         &mk,
         "file-mid",
-        &[
-            chunk_data.as_slice(),
-            chunk_data.as_slice(),
-            chunk_data.as_slice(),
-        ],
+        &[chunk_data.as_slice(), chunk_data.as_slice(), chunk_data.as_slice()],
     );
 
     let entries = vec![ZipEntry {
@@ -212,14 +176,7 @@ fn cancellation_mid_chunks() {
     };
 
     let mk2 = test_master_key();
-    let result = stream_folder_zip(
-        &mk2,
-        &entries,
-        &mut fetch,
-        Cursor::new(&mut buf),
-        &|_| {},
-        &cancel,
-    );
+    let result = stream_folder_zip(&mk2, &entries, &mut fetch, Cursor::new(&mut buf), &|_| {}, &cancel);
 
     assert!(matches!(result, Err(CoreError::Cancelled)));
 }
@@ -242,9 +199,7 @@ fn progress_callback_fires() {
     let mut buf = Vec::new();
     let progress_reports: Mutex<Vec<(u64, u64, usize, String)>> = Mutex::new(Vec::new());
 
-    let mut fetch = |_fid: &str, idx: u32| -> Result<Vec<u8>, CoreError> {
-        Ok(enc[idx as usize].clone())
-    };
+    let mut fetch = |_fid: &str, idx: u32| -> Result<Vec<u8>, CoreError> { Ok(enc[idx as usize].clone()) };
 
     let mk2 = test_master_key();
     stream_folder_zip(
@@ -253,12 +208,10 @@ fn progress_callback_fires() {
         &mut fetch,
         Cursor::new(&mut buf),
         &|p: &ZipProgress| {
-            progress_reports.lock().unwrap().push((
-                p.bytes_done,
-                p.bytes_total,
-                p.file_index,
-                p.current_file.clone(),
-            ));
+            progress_reports
+                .lock()
+                .unwrap()
+                .push((p.bytes_done, p.bytes_total, p.file_index, p.current_file.clone()));
         },
         &cancel,
     )
@@ -295,20 +248,10 @@ fn empty_file_produces_valid_zip_entry() {
     let cancel = AtomicBool::new(false);
     let mut buf = Vec::new();
 
-    let mut fetch = |_fid: &str, idx: u32| -> Result<Vec<u8>, CoreError> {
-        Ok(enc[idx as usize].clone())
-    };
+    let mut fetch = |_fid: &str, idx: u32| -> Result<Vec<u8>, CoreError> { Ok(enc[idx as usize].clone()) };
 
     let mk2 = test_master_key();
-    stream_folder_zip(
-        &mk2,
-        &entries,
-        &mut fetch,
-        Cursor::new(&mut buf),
-        &|_| {},
-        &cancel,
-    )
-    .unwrap();
+    stream_folder_zip(&mk2, &entries, &mut fetch, Cursor::new(&mut buf), &|_| {}, &cancel).unwrap();
 
     let reader = Cursor::new(&buf);
     let mut archive = zip::ZipArchive::new(reader).unwrap();

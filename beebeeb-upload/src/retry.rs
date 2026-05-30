@@ -58,8 +58,7 @@ where
                     retry_after
                 } else {
                     // Exponential backoff: 500ms, 1s, 2s, 4s, 8s (capped at 30s)
-                    let delay_ms =
-                        (BASE_DELAY_MS * 2u64.saturating_pow(attempt - 1)).min(MAX_DELAY_MS);
+                    let delay_ms = (BASE_DELAY_MS * 2u64.saturating_pow(attempt - 1)).min(MAX_DELAY_MS);
                     tracing::warn!(
                         attempt,
                         delay_ms,
@@ -180,9 +179,7 @@ mod tests {
 
         let result: Result<i32, _> = with_retry(|| {
             attempts.fetch_add(1, Ordering::SeqCst);
-            async {
-                Err(UploadError::IoError("file not found".into()))
-            }
+            async { Err(UploadError::IoError("file not found".into())) }
         })
         .await;
 
