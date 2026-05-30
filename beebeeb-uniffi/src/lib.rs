@@ -669,6 +669,7 @@ impl MasterKeyHandle {
 
         let chunk_profile = match profile.as_str() {
             "desktop" => beebeeb_types::ChunkProfile::Desktop,
+            "cli" => beebeeb_types::ChunkProfile::Cli,
             "web" => beebeeb_types::ChunkProfile::Web,
             "mobile" => beebeeb_types::ChunkProfile::Mobile,
             "backup" => beebeeb_types::ChunkProfile::BackupAgent,
@@ -853,6 +854,7 @@ pub struct ChunkEncryptorSummaryDto {
 fn parse_chunk_profile(profile: &str) -> Result<beebeeb_types::ChunkProfile, CryptoError> {
     match profile {
         "desktop" => Ok(beebeeb_types::ChunkProfile::Desktop),
+        "cli" => Ok(beebeeb_types::ChunkProfile::Cli),
         "web" => Ok(beebeeb_types::ChunkProfile::Web),
         "mobile" => Ok(beebeeb_types::ChunkProfile::Mobile),
         "backup" => Ok(beebeeb_types::ChunkProfile::BackupAgent),
@@ -1469,8 +1471,16 @@ mod tests {
 
     #[test]
     fn plan_chunks_large_file() {
+        // N=32 ladder: 2e9 bytes (~1.86 GiB) → base_chunk_size = 64 MiB.
         let result = plan_chunks(2_000_000_000, "desktop".into()).unwrap();
-        assert_eq!(result.chunk_size_bytes, 16 * 1024 * 1024); // 16 MiB for files <= 10 GiB
+        assert_eq!(result.chunk_size_bytes, 64 * 1024 * 1024);
+    }
+
+    #[test]
+    fn plan_chunks_cli_profile_is_accepted() {
+        // The new "cli" profile parses (128 MiB static cap; not binding here).
+        let result = plan_chunks(2_000_000_000, "cli".into()).unwrap();
+        assert_eq!(result.chunk_size_bytes, 64 * 1024 * 1024);
     }
 
     #[test]
@@ -1793,17 +1803,9 @@ pub struct ChunkPlanResult {
 /// Returns the chunk size and count for the given file size.
 #[uniffi::export]
 pub fn plan_chunks(file_size_bytes: u64, profile: String) -> Result<ChunkPlanResult, CryptoError> {
-    let p = match profile.as_str() {
-        "desktop" => beebeeb_types::ChunkProfile::Desktop,
-        "web" => beebeeb_types::ChunkProfile::Web,
-        "mobile" => beebeeb_types::ChunkProfile::Mobile,
-        "backup" => beebeeb_types::ChunkProfile::BackupAgent,
-        _ => {
-            return Err(CryptoError::InvalidInput {
-                detail: format!("unknown profile: {profile}"),
-            })
-        }
-    };
+    // Single-source the profile vocabulary through parse_chunk_profile so the
+    // "cli" profile (and any future addition) can't drift between call sites.
+    let p = parse_chunk_profile(&profile)?;
     let plan = beebeeb_types::plan_chunks(file_size_bytes, p);
     Ok(ChunkPlanResult {
         chunk_size_bytes: plan.chunk_size_bytes,

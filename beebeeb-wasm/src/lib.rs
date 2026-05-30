@@ -296,6 +296,7 @@ pub fn compute_recovery_check(master_key: &[u8]) -> Result<Vec<u8>, JsError> {
 fn parse_profile(profile: &str) -> Result<beebeeb_types::ChunkProfile, JsError> {
     match profile {
         "desktop" => Ok(beebeeb_types::ChunkProfile::Desktop),
+        "cli" => Ok(beebeeb_types::ChunkProfile::Cli),
         "web" => Ok(beebeeb_types::ChunkProfile::Web),
         "mobile" => Ok(beebeeb_types::ChunkProfile::Mobile),
         "backup" => Ok(beebeeb_types::ChunkProfile::BackupAgent),
