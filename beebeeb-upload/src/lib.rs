@@ -14,10 +14,7 @@ mod retry;
 #[cfg(test)]
 mod tests;
 
-pub use download::{
-    DownloadClient, DownloadProgressCallback, DownloadResult,
-    download_and_decrypt_file,
-};
+pub use download::{download_and_decrypt_file, DownloadClient, DownloadProgressCallback, DownloadResult};
 pub use error::UploadError;
 
 use serde::{Deserialize, Serialize};
@@ -151,29 +148,22 @@ impl UploadClient {
         let total_chunks = chunk_paths.len() as u32;
 
         if total_chunks == 0 {
-            return Err(UploadError::InvalidInput(
-                "chunk_paths must not be empty".into(),
-            ));
+            return Err(UploadError::InvalidInput("chunk_paths must not be empty".into()));
         }
 
         // Compute total ciphertext size from the chunk files on disk.
         let mut total_ciphertext_bytes: u64 = 0;
         for path in chunk_paths {
-            let meta = tokio::fs::metadata(path).await.map_err(|e| {
-                UploadError::IoError(format!("failed to stat chunk file {path}: {e}"))
-            })?;
+            let meta = tokio::fs::metadata(path)
+                .await
+                .map_err(|e| UploadError::IoError(format!("failed to stat chunk file {path}: {e}")))?;
             total_ciphertext_bytes += meta.len();
         }
 
         // Determine chunk size from the first chunk file.
         let first_chunk_size = tokio::fs::metadata(&chunk_paths[0])
             .await
-            .map_err(|e| {
-                UploadError::IoError(format!(
-                    "failed to stat first chunk file {}: {e}",
-                    &chunk_paths[0]
-                ))
-            })?
+            .map_err(|e| UploadError::IoError(format!("failed to stat first chunk file {}: {e}", &chunk_paths[0])))?
             .len();
 
         // --- Step 1: Init upload session ---
@@ -195,12 +185,11 @@ impl UploadClient {
 
         // --- Step 2: Upload each chunk ---
         for (index, chunk_path) in chunk_paths.iter().enumerate() {
-            let chunk_data = tokio::fs::read(chunk_path).await.map_err(|e| {
-                UploadError::IoError(format!("failed to read chunk file {chunk_path}: {e}"))
-            })?;
+            let chunk_data = tokio::fs::read(chunk_path)
+                .await
+                .map_err(|e| UploadError::IoError(format!("failed to read chunk file {chunk_path}: {e}")))?;
 
-            self.upload_chunk(session_id, index as u32, chunk_data)
-                .await?;
+            self.upload_chunk(session_id, index as u32, chunk_data).await?;
 
             if let Some(cb) = callback {
                 cb.on_chunk_uploaded(index as u32, total_chunks);
@@ -281,18 +270,12 @@ impl UploadClient {
 
             if status >= 500 {
                 let text = resp.text().await.unwrap_or_default();
-                return Err(UploadError::ServerError {
-                    status,
-                    message: text,
-                });
+                return Err(UploadError::ServerError { status, message: text });
             }
 
             if status >= 400 {
                 let text = resp.text().await.unwrap_or_default();
-                return Err(UploadError::ClientError {
-                    status,
-                    message: text,
-                });
+                return Err(UploadError::ClientError { status, message: text });
             }
 
             resp.json::<InitUploadResponse>()
@@ -308,10 +291,7 @@ impl UploadClient {
         index: u32,
         data: Vec<u8>,
     ) -> Result<ChunkUploadResponse, UploadError> {
-        let url = format!(
-            "{}/api/v1/uploads/{}/chunks/{}",
-            self.api_url, session_id, index
-        );
+        let url = format!("{}/api/v1/uploads/{}/chunks/{}", self.api_url, session_id, index);
 
         // Clone data for retry. In practice retries are rare so this is
         // acceptable. The chunk data is already in memory from the disk read.
@@ -337,18 +317,12 @@ impl UploadClient {
 
                 if status >= 500 {
                     let text = resp.text().await.unwrap_or_default();
-                    return Err(UploadError::ServerError {
-                        status,
-                        message: text,
-                    });
+                    return Err(UploadError::ServerError { status, message: text });
                 }
 
                 if status >= 400 {
                     let text = resp.text().await.unwrap_or_default();
-                    return Err(UploadError::ClientError {
-                        status,
-                        message: text,
-                    });
+                    return Err(UploadError::ClientError { status, message: text });
                 }
 
                 resp.json::<ChunkUploadResponse>()
@@ -359,14 +333,8 @@ impl UploadClient {
         .await
     }
 
-    async fn complete_upload(
-        &self,
-        session_id: &str,
-    ) -> Result<CompleteUploadResponse, UploadError> {
-        let url = format!(
-            "{}/api/v1/uploads/{}/complete",
-            self.api_url, session_id
-        );
+    async fn complete_upload(&self, session_id: &str) -> Result<CompleteUploadResponse, UploadError> {
+        let url = format!("{}/api/v1/uploads/{}/complete", self.api_url, session_id);
 
         retry::with_retry(|| async {
             let resp = self
@@ -387,18 +355,12 @@ impl UploadClient {
 
             if status >= 500 {
                 let text = resp.text().await.unwrap_or_default();
-                return Err(UploadError::ServerError {
-                    status,
-                    message: text,
-                });
+                return Err(UploadError::ServerError { status, message: text });
             }
 
             if status >= 400 {
                 let text = resp.text().await.unwrap_or_default();
-                return Err(UploadError::ClientError {
-                    status,
-                    message: text,
-                });
+                return Err(UploadError::ClientError { status, message: text });
             }
 
             resp.json::<CompleteUploadResponse>()
@@ -472,9 +434,7 @@ pub fn upload_encrypted_file<'a>(
                 &chunk_paths,
                 original_size,
                 created_at.as_deref(),
-                callback
-                    .as_ref()
-                    .map(|b| b.as_ref() as &dyn UploadProgressCallback),
+                callback.as_ref().map(|b| b.as_ref() as &dyn UploadProgressCallback),
             )
             .await
     })

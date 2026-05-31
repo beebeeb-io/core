@@ -19,11 +19,7 @@ const GCM_TAG_LEN: usize = 16;
 const GCM_OVERHEAD: u64 = (NONCE_LEN + GCM_TAG_LEN) as u64;
 
 /// Read more body bytes (via `Response::chunk`) until `buf.len() >= want` or EOF.
-async fn fill_to(
-    resp: &mut reqwest::Response,
-    buf: &mut Vec<u8>,
-    want: usize,
-) -> Result<(), UploadError> {
+async fn fill_to(resp: &mut reqwest::Response, buf: &mut Vec<u8>, want: usize) -> Result<(), UploadError> {
     while buf.len() < want {
         match resp
             .chunk()
@@ -101,15 +97,21 @@ impl DownloadClient {
     /// constant memory.
     ///
     /// `GET /api/v1/files/{file_id}/download` returns the chunks concatenated
-    /// (`nonce(12) || ciphertext || tag(16)` each) with `X-Chunk-Count` +
-    /// `X-Original-Size` headers (no per-chunk-size header). The body is read
-    /// incrementally with `Response::chunk()`, one logical frame at a time, each
-    /// decrypted through the shared [`ChunkDecryptor`] (single crypto point) and
-    /// written out — never buffering the whole payload.
+    /// (`nonce(12) || ciphertext || tag(16)` each) with `X-Chunk-Count`,
+    /// `X-Original-Size`, and (for V2 files) `X-Chunk-Size` headers. The body is
+    /// read incrementally with `Response::chunk()`, one logical frame at a time,
+    /// each decrypted through the shared [`ChunkDecryptor`] (single crypto
+    /// point) and written out — never buffering the whole payload.
     ///
-    /// Frame sizing matches [`compute_chunk_boundaries`]: the first N-1 frames
-    /// are `total / chunk_count` bytes, the last frame is the remainder. The
-    /// file key is derived via `HKDF(master_key, file_id)`.
+    /// Frame sizing: the server's `X-Chunk-Size` (uniform plaintext chunk size
+    /// for the file's version) is authoritative — each wire frame is
+    /// `chunk_size + GCM_OVERHEAD` for the first N-1 chunks, remainder for the
+    /// last. Streaming uploads make every chunk but the last exactly that size,
+    /// so the old `total / chunk_count` average mis-sized frame 0 whenever the
+    /// file size was not an exact multiple of the chunk size, failing the GCM
+    /// tag. When the header is absent (legacy V1) we fall back to
+    /// `total / chunk_count`, matching [`compute_chunk_boundaries`]. The file
+    /// key is derived via `HKDF(master_key, file_id)`.
     pub async fn download_and_decrypt(
         &self,
         master_key: &beebeeb_core::kdf::MasterKey,
@@ -158,6 +160,15 @@ impl DownloadClient {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
+        // Uniform plaintext chunk size for this file's version (V2 files only).
+        // When present it is authoritative for frame sizing; absent → legacy V1
+        // fallback to the `total / chunk_count` average.
+        let chunk_size: Option<u64> = resp
+            .headers()
+            .get("X-Chunk-Size")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+            .filter(|&v| v > 0);
         // Total encrypted length: prefer Content-Length, else derive from the
         // plaintext size + per-chunk overhead. Only sizes the first N-1 frames;
         // the last frame drains the remainder, so a small estimate error
@@ -167,8 +178,17 @@ impl DownloadClient {
             .filter(|&v| v > 0)
             .unwrap_or(original_size + GCM_OVERHEAD * chunk_count as u64);
 
-        self.stream_decrypt_to_disk(&mut resp, master_key, file_id, chunk_count, total, output_path, callback)
-            .await
+        self.stream_decrypt_to_disk(
+            &mut resp,
+            master_key,
+            file_id,
+            chunk_count,
+            total,
+            chunk_size,
+            output_path,
+            callback,
+        )
+        .await
     }
 
     /// Read the response body incrementally and decrypt frame-by-frame.
@@ -180,6 +200,7 @@ impl DownloadClient {
         file_id: &str,
         chunk_count: u32,
         total: u64,
+        chunk_size: Option<u64>,
         output_path: &str,
         callback: Option<&dyn DownloadProgressCallback>,
     ) -> Result<DownloadResult, UploadError> {
@@ -188,8 +209,15 @@ impl DownloadClient {
         }
         let n = chunk_count as usize;
         // Frame size for the first n-1 frames; the last drains the remainder.
+        // When the server sends `X-Chunk-Size` (V2 files) each wire frame is the
+        // uniform plaintext chunk size + GCM_OVERHEAD (nonce + tag) — exact even
+        // when the file size is not a multiple of the chunk size. Only legacy V1
+        // responses (no header) fall back to the `total / chunk_count` average,
+        // which matches `compute_chunk_boundaries`.
         let frame_size = if n <= 1 {
             usize::MAX // single frame == whole body
+        } else if let Some(cs) = chunk_size {
+            (cs + GCM_OVERHEAD) as usize
         } else {
             (total / chunk_count as u64) as usize
         };
@@ -200,8 +228,8 @@ impl DownloadClient {
             std::fs::create_dir_all(parent)
                 .map_err(|e| UploadError::IoError(format!("create output parent dir: {e}")))?;
         }
-        let output_file = std::fs::File::create(&tmp_path)
-            .map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
+        let output_file =
+            std::fs::File::create(&tmp_path).map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
         let mut writer = BufWriter::new(output_file);
 
         let mut decryptor = ChunkDecryptor::for_push(master_key, file_id);
@@ -251,8 +279,7 @@ impl DownloadClient {
             .flush()
             .map_err(|e| UploadError::IoError(format!("flush output: {e}")))?;
         drop(writer);
-        std::fs::rename(&tmp_path, output_path)
-            .map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
+        std::fs::rename(&tmp_path, output_path).map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
 
         if let Some(cb) = callback {
             cb.on_complete(output_path);
@@ -300,9 +327,7 @@ pub fn decrypt_downloaded_bytes(
     callback: Option<&dyn DownloadProgressCallback>,
 ) -> Result<DownloadResult, UploadError> {
     if chunk_count == 0 {
-        return Err(UploadError::InvalidInput(
-            "chunk_count must be > 0".into(),
-        ));
+        return Err(UploadError::InvalidInput("chunk_count must be > 0".into()));
     }
 
     let total_len = encrypted_bytes.len();
@@ -317,12 +342,11 @@ pub fn decrypt_downloaded_bytes(
 
     // Ensure parent directory exists
     if let Some(parent) = std::path::Path::new(output_path).parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| UploadError::IoError(format!("create output parent dir: {e}")))?;
+        std::fs::create_dir_all(parent).map_err(|e| UploadError::IoError(format!("create output parent dir: {e}")))?;
     }
 
-    let output_file = std::fs::File::create(&tmp_path)
-        .map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
+    let output_file =
+        std::fs::File::create(&tmp_path).map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
     let mut writer = BufWriter::new(output_file);
 
     let mut total_plaintext: u64 = 0;
@@ -331,13 +355,8 @@ pub fn decrypt_downloaded_bytes(
     for (i, (start, end)) in chunk_boundaries.iter().enumerate() {
         let chunk_data = &encrypted_bytes[*start..*end];
 
-        let plaintext =
-            beebeeb_core::encrypt::decrypt_chunk_raw(file_key, chunk_data)
-                .map_err(|e| {
-                    UploadError::InvalidResponse(format!(
-                        "decryption failed for chunk {i}: {e}"
-                    ))
-                })?;
+        let plaintext = beebeeb_core::encrypt::decrypt_chunk_raw(file_key, chunk_data)
+            .map_err(|e| UploadError::InvalidResponse(format!("decryption failed for chunk {i}: {e}")))?;
 
         writer
             .write_all(&plaintext)
@@ -357,8 +376,7 @@ pub fn decrypt_downloaded_bytes(
     drop(writer);
 
     // Atomic rename
-    std::fs::rename(&tmp_path, output_path)
-        .map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
+    std::fs::rename(&tmp_path, output_path).map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
 
     if let Some(cb) = callback {
         cb.on_complete(output_path);
@@ -382,10 +400,7 @@ pub fn decrypt_downloaded_bytes(
 ///
 /// All chunks except the last have the same size. The last chunk gets the remainder.
 /// Each chunk must be at least `NONCE_LEN + GCM_TAG_LEN` bytes (28 bytes: 12 nonce + 16 tag).
-pub fn compute_chunk_boundaries(
-    total_len: usize,
-    chunk_count: u32,
-) -> Result<Vec<(usize, usize)>, UploadError> {
+pub fn compute_chunk_boundaries(total_len: usize, chunk_count: u32) -> Result<Vec<(usize, usize)>, UploadError> {
     if chunk_count == 0 {
         return Err(UploadError::InvalidInput("chunk_count must be > 0".into()));
     }
@@ -393,9 +408,7 @@ pub fn compute_chunk_boundaries(
     let n = chunk_count as usize;
 
     if total_len == 0 {
-        return Err(UploadError::InvalidResponse(
-            "encrypted payload is empty".into(),
-        ));
+        return Err(UploadError::InvalidResponse("encrypted payload is empty".into()));
     }
 
     // For a single chunk, the entire payload is that chunk.
@@ -469,9 +482,7 @@ pub fn download_and_decrypt_file<'a>(
                 master_key,
                 file_id,
                 output_path,
-                callback
-                    .as_ref()
-                    .map(|b| b.as_ref() as &dyn DownloadProgressCallback),
+                callback.as_ref().map(|b| b.as_ref() as &dyn DownloadProgressCallback),
             )
             .await
     })
@@ -565,8 +576,7 @@ mod tests {
         let output = dir.join("output.bin");
         let output_str = output.to_str().unwrap();
 
-        let result =
-            decrypt_downloaded_bytes(&fk, &encrypted, 1, output_str, None).unwrap();
+        let result = decrypt_downloaded_bytes(&fk, &encrypted, 1, output_str, None).unwrap();
 
         assert_eq!(result.plaintext_size, plaintext.len() as u64);
         assert_eq!(result.chunks_decrypted, 1);
@@ -621,8 +631,7 @@ mod tests {
         let output = dir.join("output.bin");
         let output_str = output.to_str().unwrap();
 
-        let result =
-            decrypt_downloaded_bytes(&fk, &payload, 2, output_str, None).unwrap();
+        let result = decrypt_downloaded_bytes(&fk, &payload, 2, output_str, None).unwrap();
 
         assert_eq!(result.chunks_decrypted, 2);
         assert_eq!(result.plaintext_size, 128); // 64 + 64
@@ -644,8 +653,7 @@ mod tests {
         let fk = derive_file_key(&mk, b"file-003");
         let encrypted = encrypt_chunk_raw(&fk, b"secret").unwrap();
 
-        let wrong_mk =
-            derive_master_key("wrong-password", b"wrong-salt-16byte").unwrap();
+        let wrong_mk = derive_master_key("wrong-password", b"wrong-salt-16byte").unwrap();
         let wrong_fk = derive_file_key(&wrong_mk, b"file-003");
 
         let dir = std::env::temp_dir().join("beebeeb_download_wrongkey");
@@ -654,8 +662,7 @@ mod tests {
         let output = dir.join("output.bin");
         let output_str = output.to_str().unwrap();
 
-        let result =
-            decrypt_downloaded_bytes(&wrong_fk, &encrypted, 1, output_str, None);
+        let result = decrypt_downloaded_bytes(&wrong_fk, &encrypted, 1, output_str, None);
         assert!(result.is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -677,8 +684,7 @@ mod tests {
         let output = dir.join("output.bin");
         let output_str = output.to_str().unwrap();
 
-        let result =
-            decrypt_downloaded_bytes(&fk, &encrypted, 1, output_str, None).unwrap();
+        let result = decrypt_downloaded_bytes(&fk, &encrypted, 1, output_str, None).unwrap();
 
         assert_eq!(result.plaintext_size, 0);
         assert_eq!(result.chunks_decrypted, 1);

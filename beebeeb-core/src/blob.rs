@@ -18,8 +18,7 @@ const GCM_TAG_LEN: usize = 16;
 /// Returns `nonce (12 bytes) || ciphertext (plaintext + 16-byte GCM tag)`.
 /// A fresh random nonce is generated for every call.
 pub fn encrypt_blob(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>, CoreError> {
-    let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|e| CoreError::Encryption(e.to_string()))?;
+    let cipher = Aes256Gcm::new_from_slice(key).map_err(|e| CoreError::Encryption(e.to_string()))?;
 
     let mut nonce_bytes = [0u8; NONCE_LEN];
     rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
@@ -44,13 +43,10 @@ pub fn decrypt_blob(key: &[u8; 32], ciphertext: &[u8]) -> Result<Vec<u8>, CoreEr
     }
 
     let (nonce_bytes, ct) = ciphertext.split_at(NONCE_LEN);
-    let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|e| CoreError::Encryption(e.to_string()))?;
+    let cipher = Aes256Gcm::new_from_slice(key).map_err(|e| CoreError::Encryption(e.to_string()))?;
     let nonce = Nonce::from_slice(nonce_bytes);
 
-    cipher
-        .decrypt(nonce, ct)
-        .map_err(|_| CoreError::Decryption)
+    cipher.decrypt(nonce, ct).map_err(|_| CoreError::Decryption)
 }
 
 #[cfg(test)]

@@ -87,7 +87,8 @@ pub fn encrypt_name(
     let plaintext = serde_json::json!({
         "name": filename,
         "mime_type": mime_type,
-    }).to_string();
+    })
+    .to_string();
     let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
     let blob = encrypt_metadata(&file_key, &plaintext)?;
     serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
@@ -103,8 +104,7 @@ pub fn decrypt_name(
     file_id: &str,
     name_encrypted: &str,
 ) -> Result<String, CoreError> {
-    let blob: EncryptedBlob = serde_json::from_str(name_encrypted)
-        .map_err(|_| CoreError::Decryption)?;
+    let blob: EncryptedBlob = serde_json::from_str(name_encrypted).map_err(|_| CoreError::Decryption)?;
     let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
     let decrypted = decrypt_metadata(&file_key, &blob)?;
 
@@ -123,13 +123,16 @@ pub fn decrypt_name_with_mime(
     file_id: &str,
     name_encrypted: &str,
 ) -> Result<(String, Option<String>), CoreError> {
-    let blob: EncryptedBlob = serde_json::from_str(name_encrypted)
-        .map_err(|_| CoreError::Decryption)?;
+    let blob: EncryptedBlob = serde_json::from_str(name_encrypted).map_err(|_| CoreError::Decryption)?;
     let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
     let decrypted = decrypt_metadata(&file_key, &blob)?;
 
     if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&decrypted) {
-        let name = meta.get("name").and_then(|v| v.as_str()).unwrap_or(&decrypted).to_string();
+        let name = meta
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&decrypted)
+            .to_string();
         let mime = meta.get("mime_type").and_then(|v| v.as_str()).map(|s| s.to_string());
         return Ok((name, mime));
     }
@@ -152,8 +155,7 @@ pub fn encrypt_chunk_json(
 /// Encrypt a chunk → raw binary: nonce (12 bytes) || ciphertext (includes GCM tag).
 /// This is the canonical chunk wire format. No JSON, no base64.
 pub fn encrypt_chunk_raw(key: &FileKey, plaintext: &[u8]) -> Result<Vec<u8>, CoreError> {
-    let cipher = Aes256Gcm::new_from_slice(key.as_bytes())
-        .map_err(|e| CoreError::Encryption(e.to_string()))?;
+    let cipher = Aes256Gcm::new_from_slice(key.as_bytes()).map_err(|e| CoreError::Encryption(e.to_string()))?;
     let mut nonce_bytes = [0u8; NONCE_LEN];
     rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
@@ -177,8 +179,7 @@ pub fn decrypt_chunks_to_file(
     use std::fs::File;
     use std::io::Write;
 
-    let mut file = File::create(output_path)
-        .map_err(|e| CoreError::Io(format!("create file: {e}")))?;
+    let mut file = File::create(output_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
     let mut total: u64 = 0;
     for (nonce, ciphertext) in chunks {
         let blob = EncryptedBlob {
@@ -191,8 +192,7 @@ pub fn decrypt_chunks_to_file(
             .map_err(|e| CoreError::Io(format!("write: {e}")))?;
         total += plaintext.len() as u64;
     }
-    file.flush()
-        .map_err(|e| CoreError::Io(format!("flush: {e}")))?;
+    file.flush().map_err(|e| CoreError::Io(format!("flush: {e}")))?;
     Ok(total)
 }
 
@@ -202,12 +202,9 @@ pub fn decrypt_chunk_raw(key: &FileKey, raw: &[u8]) -> Result<Vec<u8>, CoreError
         return Err(CoreError::Decryption);
     }
     let (nonce_bytes, ciphertext) = raw.split_at(NONCE_LEN);
-    let cipher = Aes256Gcm::new_from_slice(key.as_bytes())
-        .map_err(|e| CoreError::Encryption(e.to_string()))?;
+    let cipher = Aes256Gcm::new_from_slice(key.as_bytes()).map_err(|e| CoreError::Encryption(e.to_string()))?;
     let nonce = Nonce::from_slice(nonce_bytes);
-    cipher
-        .decrypt(nonce, ciphertext)
-        .map_err(|_| CoreError::Decryption)
+    cipher.decrypt(nonce, ciphertext).map_err(|_| CoreError::Decryption)
 }
 
 /// Decrypt a contiguous encrypted body into a file.
@@ -234,20 +231,17 @@ pub fn decrypt_contiguous_to_file(
     use std::io::Write;
 
     if chunk_size == 0 {
-        return Err(CoreError::InvalidInput(
-            "chunk_size must be positive".into(),
-        ));
+        return Err(CoreError::InvalidInput("chunk_size must be positive".into()));
     }
-    let chunk_size_usize: usize = chunk_size.try_into().map_err(|_| {
-        CoreError::InvalidInput(format!("chunk_size {chunk_size} exceeds usize range"))
-    })?;
+    let chunk_size_usize: usize = chunk_size
+        .try_into()
+        .map_err(|_| CoreError::InvalidInput(format!("chunk_size {chunk_size} exceeds usize range")))?;
     let encrypted_chunk_len = NONCE_LEN
         .checked_add(chunk_size_usize)
         .and_then(|v| v.checked_add(TAG_LEN))
         .ok_or_else(|| CoreError::InvalidInput("chunk_size overflows".into()))?;
 
-    let mut file =
-        File::create(output_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
+    let mut file = File::create(output_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
     let mut total: u64 = 0;
     let mut offset = 0usize;
 
@@ -265,8 +259,7 @@ pub fn decrypt_contiguous_to_file(
         total += plaintext.len() as u64;
         offset += take;
     }
-    file.flush()
-        .map_err(|e| CoreError::Io(format!("flush: {e}")))?;
+    file.flush().map_err(|e| CoreError::Io(format!("flush: {e}")))?;
     Ok(total)
 }
 
@@ -384,10 +377,7 @@ mod tests {
         let blob1 = encrypt_chunk(&key, chunk1).unwrap();
         let blob2 = encrypt_chunk(&key, chunk2).unwrap();
 
-        let chunks = vec![
-            (blob1.nonce, blob1.ciphertext),
-            (blob2.nonce, blob2.ciphertext),
-        ];
+        let chunks = vec![(blob1.nonce, blob1.ciphertext), (blob2.nonce, blob2.ciphertext)];
 
         let dir = std::env::temp_dir();
         let path = dir.join("beebeeb_test_decrypt_chunks.bin");
@@ -465,8 +455,7 @@ mod tests {
         body.extend(pack_chunk(&blob2));
 
         let path = std::env::temp_dir().join("beebeeb_test_contig_uniform.bin");
-        let total =
-            decrypt_contiguous_to_file(&key, &body, chunk_size, path.to_str().unwrap()).unwrap();
+        let total = decrypt_contiguous_to_file(&key, &body, chunk_size, path.to_str().unwrap()).unwrap();
         assert_eq!(total, 16);
 
         let written = std::fs::read(&path).unwrap();
@@ -486,8 +475,7 @@ mod tests {
         body.extend(pack_chunk(&blob2));
 
         let path = std::env::temp_dir().join("beebeeb_test_contig_remainder.bin");
-        let total =
-            decrypt_contiguous_to_file(&key, &body, chunk_size, path.to_str().unwrap()).unwrap();
+        let total = decrypt_contiguous_to_file(&key, &body, chunk_size, path.to_str().unwrap()).unwrap();
         assert_eq!(total, 11);
 
         let written = std::fs::read(&path).unwrap();
@@ -511,8 +499,7 @@ mod tests {
         let key = test_file_key();
         let body = vec![0u8; NONCE_LEN + 16];
         let path = std::env::temp_dir().join("beebeeb_test_contig_zero.bin");
-        let err =
-            decrypt_contiguous_to_file(&key, &body, 0, path.to_str().unwrap()).unwrap_err();
+        let err = decrypt_contiguous_to_file(&key, &body, 0, path.to_str().unwrap()).unwrap_err();
         match err {
             CoreError::InvalidInput(_) => {}
             other => panic!("expected InvalidInput, got {other:?}"),
@@ -531,8 +518,7 @@ mod tests {
         let blob = encrypt_chunk(&key, b"secrets").unwrap();
         let body = pack_chunk(&blob);
         let path = std::env::temp_dir().join("beebeeb_test_contig_wrong_key.bin");
-        let err =
-            decrypt_contiguous_to_file(&wrong_key, &body, 7, path.to_str().unwrap()).unwrap_err();
+        let err = decrypt_contiguous_to_file(&wrong_key, &body, 7, path.to_str().unwrap()).unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         std::fs::remove_file(&path).ok();
     }
@@ -543,8 +529,7 @@ mod tests {
         // Body shorter than NONCE_LEN + TAG_LEN — cannot even attempt decrypt.
         let body = vec![0u8; NONCE_LEN + 8]; // 8 bytes < 16 byte tag
         let path = std::env::temp_dir().join("beebeeb_test_contig_truncated.bin");
-        let err =
-            decrypt_contiguous_to_file(&key, &body, 64, path.to_str().unwrap()).unwrap_err();
+        let err = decrypt_contiguous_to_file(&key, &body, 64, path.to_str().unwrap()).unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         std::fs::remove_file(&path).ok();
     }

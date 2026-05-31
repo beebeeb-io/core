@@ -31,14 +31,8 @@ fn direct_loop_sizes(
     data: &[u8],
     profile: ChunkProfile,
 ) -> (u32, Vec<(u64, u64)>) {
-    let mut enc = ChunkEncryptor::from_reader(
-        master,
-        file_id,
-        data.len() as u64,
-        profile,
-        Cursor::new(data.to_vec()),
-    )
-    .unwrap();
+    let mut enc =
+        ChunkEncryptor::from_reader(master, file_id, data.len() as u64, profile, Cursor::new(data.to_vec())).unwrap();
     let mut sizes = Vec::new();
     while let Some(c) = enc.next_chunk().unwrap() {
         let ct = c.data.len() as u64;
@@ -65,8 +59,7 @@ fn file_encrypt_matches_direct_chunk_encryptor_loop() {
     let output_dir = dir.join("chunks");
 
     // Path A: disk-to-disk (delegates to ChunkEncryptor).
-    let result =
-        encrypt_file_to_chunks(&master, file_id, &input_path, &output_dir, profile, None).unwrap();
+    let result = encrypt_file_to_chunks(&master, file_id, &input_path, &output_dir, profile, None).unwrap();
     let file_sizes: Vec<(u64, u64)> = result
         .chunks
         .iter()
@@ -110,8 +103,7 @@ fn file_encrypt_empty_file_parity() {
     std::fs::write(&input_path, b"").unwrap();
     let output_dir = dir.join("chunks");
 
-    let result =
-        encrypt_file_to_chunks(&master, file_id, &input_path, &output_dir, profile, None).unwrap();
+    let result = encrypt_file_to_chunks(&master, file_id, &input_path, &output_dir, profile, None).unwrap();
     let (direct_count, direct_sizes) = direct_loop_sizes(&master, file_id, &[], profile);
 
     assert_eq!(result.chunks.len(), 1);

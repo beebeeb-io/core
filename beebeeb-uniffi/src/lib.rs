@@ -282,12 +282,8 @@ pub fn decrypt_chunks_to_file(
     output_path: String,
 ) -> Result<u64, CryptoError> {
     let fk = file_key_from_slice(&key)?;
-    let chunk_pairs: Vec<(Vec<u8>, Vec<u8>)> = chunks
-        .into_iter()
-        .map(|c| (c.nonce, c.ciphertext))
-        .collect();
-    encrypt::decrypt_chunks_to_file(&fk, chunk_pairs, &output_path)
-        .map_err(CryptoError::from)
+    let chunk_pairs: Vec<(Vec<u8>, Vec<u8>)> = chunks.into_iter().map(|c| (c.nonce, c.ciphertext)).collect();
+    encrypt::decrypt_chunks_to_file(&fk, chunk_pairs, &output_path).map_err(CryptoError::from)
 }
 
 /// Decrypt a contiguous encrypted body into a file.
@@ -318,8 +314,7 @@ pub fn decrypt_contiguous_to_file(
     output_path: String,
 ) -> Result<u64, CryptoError> {
     let fk = file_key_from_slice(&file_key)?;
-    encrypt::decrypt_contiguous_to_file(&fk, &body, chunk_size, &output_path)
-        .map_err(CryptoError::from)
+    encrypt::decrypt_contiguous_to_file(&fk, &body, chunk_size, &output_path).map_err(CryptoError::from)
 }
 
 // ---------------------------------------------------------------------------
@@ -360,18 +355,13 @@ pub fn encrypt_name(
     mime_type: Option<String>,
 ) -> Result<String, CryptoError> {
     let mk = master_key_from_slice(&master_key)?;
-    encrypt::encrypt_name(&mk, &file_id, &filename, mime_type.as_deref())
-        .map_err(CryptoError::from)
+    encrypt::encrypt_name(&mk, &file_id, &filename, mime_type.as_deref()).map_err(CryptoError::from)
 }
 
 /// Decrypt a `name_encrypted` JSON envelope back to a plaintext filename.
 /// Handles both new format (`{"name":"...","mime_type":"..."}`) and legacy bare strings.
 #[uniffi::export]
-pub fn decrypt_name(
-    master_key: Vec<u8>,
-    file_id: String,
-    name_encrypted: String,
-) -> Result<String, CryptoError> {
+pub fn decrypt_name(master_key: Vec<u8>, file_id: String, name_encrypted: String) -> Result<String, CryptoError> {
     let mk = master_key_from_slice(&master_key)?;
     encrypt::decrypt_name(&mk, &file_id, &name_encrypted).map_err(CryptoError::from)
 }
@@ -385,12 +375,8 @@ pub fn decrypt_name_with_mime(
     name_encrypted: String,
 ) -> Result<DecryptedNameWithMime, CryptoError> {
     let mk = master_key_from_slice(&master_key)?;
-    let (name, mime) =
-        encrypt::decrypt_name_with_mime(&mk, &file_id, &name_encrypted).map_err(CryptoError::from)?;
-    Ok(DecryptedNameWithMime {
-        name,
-        mime_type: mime,
-    })
+    let (name, mime) = encrypt::decrypt_name_with_mime(&mk, &file_id, &name_encrypted).map_err(CryptoError::from)?;
+    Ok(DecryptedNameWithMime { name, mime_type: mime })
 }
 
 // ---------------------------------------------------------------------------
@@ -535,9 +521,7 @@ pub fn x25519_shared_secret(my_private: Vec<u8>, their_public: Vec<u8>) -> Resul
         detail: "public key must be 32 bytes".into(),
     })?;
     let shared = beebeeb_core::opaque::x25519_shared_secret(&priv_key, &pub_key)
-        .map_err(|e| CryptoError::InvalidInput {
-            detail: e.to_string(),
-        })?;
+        .map_err(|e| CryptoError::InvalidInput { detail: e.to_string() })?;
     Ok(shared.to_vec())
 }
 
@@ -713,18 +697,12 @@ impl MasterKeyHandle {
         filename: String,
         mime_type: Option<String>,
     ) -> Result<String, CryptoError> {
-        self.with_key(|mk| {
-            encrypt::encrypt_name(mk, &file_id, &filename, mime_type.as_deref())
-        })?
-        .map_err(CryptoError::from)
+        self.with_key(|mk| encrypt::encrypt_name(mk, &file_id, &filename, mime_type.as_deref()))?
+            .map_err(CryptoError::from)
     }
 
     /// Decrypt a `name_encrypted` envelope using the handle's master key.
-    pub fn decrypt_name(
-        &self,
-        file_id: String,
-        name_encrypted: String,
-    ) -> Result<String, CryptoError> {
+    pub fn decrypt_name(&self, file_id: String, name_encrypted: String) -> Result<String, CryptoError> {
         self.with_key(|mk| encrypt::decrypt_name(mk, &file_id, &name_encrypted))?
             .map_err(CryptoError::from)
     }
@@ -738,10 +716,7 @@ impl MasterKeyHandle {
         let (name, mime) = self
             .with_key(|mk| encrypt::decrypt_name_with_mime(mk, &file_id, &name_encrypted))?
             .map_err(CryptoError::from)?;
-        Ok(DecryptedNameWithMime {
-            name,
-            mime_type: mime,
-        })
+        Ok(DecryptedNameWithMime { name, mime_type: mime })
     }
 
     /// Encrypt a file from disk, writing each chunk as a `.enc` file.
@@ -763,19 +738,21 @@ impl MasterKeyHandle {
 
         let chunk_profile = match profile.as_str() {
             "desktop" => beebeeb_types::ChunkProfile::Desktop,
+            "cli" => beebeeb_types::ChunkProfile::Cli,
             "web" => beebeeb_types::ChunkProfile::Web,
             "mobile" => beebeeb_types::ChunkProfile::Mobile,
             "backup" => beebeeb_types::ChunkProfile::BackupAgent,
             _ => {
                 return Err(CryptoError::InvalidInput {
                     detail: format!("unknown profile: {profile}"),
-                })
+                });
             }
         };
 
         let adapter = callback.as_ref().map(|cb| ProgressAdapter { inner: cb.as_ref() });
-        let core_cb: Option<&dyn beebeeb_core::file_encrypt::FileProgressCallback> =
-            adapter.as_ref().map(|a| a as &dyn beebeeb_core::file_encrypt::FileProgressCallback);
+        let core_cb: Option<&dyn beebeeb_core::file_encrypt::FileProgressCallback> = adapter
+            .as_ref()
+            .map(|a| a as &dyn beebeeb_core::file_encrypt::FileProgressCallback);
 
         let result = self.with_key(|mk| {
             beebeeb_core::file_encrypt::encrypt_file_to_chunks(
@@ -823,8 +800,9 @@ impl MasterKeyHandle {
         let path_refs: Vec<&Path> = path_bufs.iter().map(|p| p.as_path()).collect();
 
         let adapter = callback.as_ref().map(|cb| ProgressAdapter { inner: cb.as_ref() });
-        let core_cb: Option<&dyn beebeeb_core::file_encrypt::FileProgressCallback> =
-            adapter.as_ref().map(|a| a as &dyn beebeeb_core::file_encrypt::FileProgressCallback);
+        let core_cb: Option<&dyn beebeeb_core::file_encrypt::FileProgressCallback> = adapter
+            .as_ref()
+            .map(|a| a as &dyn beebeeb_core::file_encrypt::FileProgressCallback);
 
         let result = self.with_key(|mk| {
             beebeeb_core::file_encrypt::decrypt_chunks_to_file(
@@ -947,6 +925,7 @@ pub struct ChunkEncryptorSummaryDto {
 fn parse_chunk_profile(profile: &str) -> Result<beebeeb_types::ChunkProfile, CryptoError> {
     match profile {
         "desktop" => Ok(beebeeb_types::ChunkProfile::Desktop),
+        "cli" => Ok(beebeeb_types::ChunkProfile::Cli),
         "web" => Ok(beebeeb_types::ChunkProfile::Web),
         "mobile" => Ok(beebeeb_types::ChunkProfile::Mobile),
         "backup" => Ok(beebeeb_types::ChunkProfile::BackupAgent),
@@ -1002,10 +981,10 @@ impl ChunkEncryptorHandle {
         // Bound the read-ahead buffer to one chunk (≤8 MiB) — the primitive reads
         // one chunk at a time regardless.
         let plan = beebeeb_types::plan_chunks(file_size, chunk_profile);
-        let buf_cap = (plan.chunk_size_bytes as usize).min(8 * 1024 * 1024).max(8 * 1024);
+        let buf_cap = (plan.chunk_size_bytes as usize).clamp(8 * 1024, 8 * 1024 * 1024);
         let reader = std::io::BufReader::with_capacity(buf_cap, file);
-        let enc = master_key
-            .with_key(|mk| ChunkEncryptor::from_reader(mk, &file_id, file_size, chunk_profile, reader))??;
+        let enc =
+            master_key.with_key(|mk| ChunkEncryptor::from_reader(mk, &file_id, file_size, chunk_profile, reader))??;
         Ok(Arc::new(Self {
             inner: Mutex::new(Some(enc)),
         }))
@@ -1021,8 +1000,7 @@ impl ChunkEncryptorHandle {
         profile: String,
     ) -> Result<Arc<Self>, CryptoError> {
         let chunk_profile = parse_chunk_profile(&profile)?;
-        let enc = master_key
-            .with_key(|mk| ChunkEncryptor::for_push(mk, &file_id, file_size, chunk_profile))??;
+        let enc = master_key.with_key(|mk| ChunkEncryptor::for_push(mk, &file_id, file_size, chunk_profile))??;
         Ok(Arc::new(Self {
             inner: Mutex::new(Some(enc)),
         }))
@@ -1111,18 +1089,14 @@ impl ChunkDecryptorHandle {
         chunk_size_bytes: u64,
         input_path: String,
     ) -> Result<Arc<Self>, CryptoError> {
-        let file = std::fs::File::open(std::path::Path::new(&input_path)).map_err(|e| {
-            CryptoError::Io {
-                detail: format!("open input: {e}"),
-            }
+        let file = std::fs::File::open(std::path::Path::new(&input_path)).map_err(|e| CryptoError::Io {
+            detail: format!("open input: {e}"),
         })?;
         let buf_cap = (chunk_size_bytes as usize)
             .saturating_add(28)
-            .min(8 * 1024 * 1024)
-            .max(8 * 1024);
+            .clamp(8 * 1024, 8 * 1024 * 1024);
         let reader = std::io::BufReader::with_capacity(buf_cap, file);
-        let dec = master_key
-            .with_key(|mk| ChunkDecryptor::from_reader(mk, &file_id, chunk_size_bytes, reader))??;
+        let dec = master_key.with_key(|mk| ChunkDecryptor::from_reader(mk, &file_id, chunk_size_bytes, reader))??;
         Ok(Arc::new(Self {
             inner: Mutex::new(Some(dec)),
         }))
@@ -1178,9 +1152,7 @@ mod chunk_stream_handle_tests {
         let file_id = "ffi-push-roundtrip".to_string();
         let data = b"hello via the uniffi chunk-stream handle".to_vec();
 
-        let enc =
-            ChunkEncryptorHandle::for_push(&mk, file_id.clone(), data.len() as u64, "mobile".into())
-                .unwrap();
+        let enc = ChunkEncryptorHandle::for_push(&mk, file_id.clone(), data.len() as u64, "mobile".into()).unwrap();
         assert_eq!(enc.chunk_plan().unwrap().chunk_count, 1);
         let frame = enc.push_chunk(data.clone()).unwrap();
         assert_eq!(frame.index, 0);
@@ -1209,8 +1181,7 @@ mod chunk_stream_handle_tests {
     #[test]
     fn wrong_key_decrypt_errors() {
         let mk = mk_handle();
-        let enc =
-            ChunkEncryptorHandle::for_push(&mk, "secret".into(), 5, "mobile".into()).unwrap();
+        let enc = ChunkEncryptorHandle::for_push(&mk, "secret".into(), 5, "mobile".into()).unwrap();
         let frame = enc.push_chunk(b"hello".to_vec()).unwrap();
         let wrong = MasterKeyHandle::from_keychain_bytes(vec![9u8; 32]).unwrap();
         let dec = ChunkDecryptorHandle::for_push(&wrong, "secret".into()).unwrap();
@@ -1514,8 +1485,7 @@ mod tests {
         let filename = "report.pdf";
         let mime = Some("application/pdf".to_string());
 
-        let encrypted =
-            encrypt_name(mk.key.clone(), file_id.into(), filename.into(), mime.clone()).unwrap();
+        let encrypted = encrypt_name(mk.key.clone(), file_id.into(), filename.into(), mime.clone()).unwrap();
         let result = decrypt_name_with_mime(mk.key, file_id.into(), encrypted).unwrap();
         assert_eq!(result.name, filename);
         assert_eq!(result.mime_type, mime);
@@ -1526,8 +1496,7 @@ mod tests {
         let mk = derive_master_key("password".into(), TEST_SALT.to_vec()).unwrap();
         let file_id = "file-0003";
 
-        let encrypted =
-            encrypt_name(mk.key.clone(), file_id.into(), "notes.txt".into(), None).unwrap();
+        let encrypted = encrypt_name(mk.key.clone(), file_id.into(), "notes.txt".into(), None).unwrap();
         let result = decrypt_name_with_mime(mk.key, file_id.into(), encrypted).unwrap();
         assert_eq!(result.name, "notes.txt");
         assert_eq!(result.mime_type, None);
@@ -1555,9 +1524,7 @@ mod tests {
         let encrypted = handle
             .encrypt_name(file_id.into(), "video.mp4".into(), Some("video/mp4".into()))
             .unwrap();
-        let result = handle
-            .decrypt_name_with_mime(file_id.into(), encrypted)
-            .unwrap();
+        let result = handle.decrypt_name_with_mime(file_id.into(), encrypted).unwrap();
         assert_eq!(result.name, "video.mp4");
         assert_eq!(result.mime_type, Some("video/mp4".into()));
     }
@@ -1592,8 +1559,16 @@ mod tests {
 
     #[test]
     fn plan_chunks_large_file() {
+        // N=32 ladder: 2e9 bytes (~1.86 GiB) → base_chunk_size = 64 MiB.
         let result = plan_chunks(2_000_000_000, "desktop".into()).unwrap();
-        assert_eq!(result.chunk_size_bytes, 16 * 1024 * 1024); // 16 MiB for files <= 10 GiB
+        assert_eq!(result.chunk_size_bytes, 64 * 1024 * 1024);
+    }
+
+    #[test]
+    fn plan_chunks_cli_profile_is_accepted() {
+        // The new "cli" profile parses (128 MiB static cap; not binding here).
+        let result = plan_chunks(2_000_000_000, "cli".into()).unwrap();
+        assert_eq!(result.chunk_size_bytes, 64 * 1024 * 1024);
     }
 
     #[test]
@@ -1754,19 +1729,11 @@ impl From<beebeeb_upload::UploadError> for UploadError {
                 UploadError::RateLimited { retry_after_secs }
             }
             beebeeb_upload::UploadError::IoError(s) => UploadError::UploadIo { detail: s },
-            beebeeb_upload::UploadError::InvalidResponse(s) => {
-                UploadError::InvalidResponse { detail: s }
+            beebeeb_upload::UploadError::InvalidResponse(s) => UploadError::InvalidResponse { detail: s },
+            beebeeb_upload::UploadError::InvalidInput(s) => UploadError::UploadInvalidInput { detail: s },
+            beebeeb_upload::UploadError::MaxRetriesExhausted { attempts, last_error } => {
+                UploadError::MaxRetriesExhausted { attempts, last_error }
             }
-            beebeeb_upload::UploadError::InvalidInput(s) => {
-                UploadError::UploadInvalidInput { detail: s }
-            }
-            beebeeb_upload::UploadError::MaxRetriesExhausted {
-                attempts,
-                last_error,
-            } => UploadError::MaxRetriesExhausted {
-                attempts,
-                last_error,
-            },
         }
     }
 }
@@ -1828,9 +1795,7 @@ pub fn upload_encrypted_file(
     created_at: Option<String>,
     callback: Option<Box<dyn UploadProgressCallback>>,
 ) -> Result<UploadResultData, UploadError> {
-    let bridge = callback
-        .as_ref()
-        .map(|cb| UploadCallbackBridge(cb.as_ref()));
+    let bridge = callback.as_ref().map(|cb| UploadCallbackBridge(cb.as_ref()));
     let core_cb: Option<Box<dyn beebeeb_upload::UploadProgressCallback + '_>> =
         bridge.map(|b| Box::new(b) as Box<dyn beebeeb_upload::UploadProgressCallback>);
 
@@ -1916,17 +1881,9 @@ pub struct ChunkPlanResult {
 /// Returns the chunk size and count for the given file size.
 #[uniffi::export]
 pub fn plan_chunks(file_size_bytes: u64, profile: String) -> Result<ChunkPlanResult, CryptoError> {
-    let p = match profile.as_str() {
-        "desktop" => beebeeb_types::ChunkProfile::Desktop,
-        "web" => beebeeb_types::ChunkProfile::Web,
-        "mobile" => beebeeb_types::ChunkProfile::Mobile,
-        "backup" => beebeeb_types::ChunkProfile::BackupAgent,
-        _ => {
-            return Err(CryptoError::InvalidInput {
-                detail: format!("unknown profile: {profile}"),
-            })
-        }
-    };
+    // Single-source the profile vocabulary through parse_chunk_profile so the
+    // "cli" profile (and any future addition) can't drift between call sites.
+    let p = parse_chunk_profile(&profile)?;
     let plan = beebeeb_types::plan_chunks(file_size_bytes, p);
     Ok(ChunkPlanResult {
         chunk_size_bytes: plan.chunk_size_bytes,
@@ -2168,12 +2125,8 @@ impl From<beebeeb_core::thumbnail::ThumbnailError> for ThumbnailError {
     fn from(e: beebeeb_core::thumbnail::ThumbnailError) -> Self {
         match e {
             beebeeb_core::thumbnail::ThumbnailError::AllStepsFailed => ThumbnailError::AllStepsFailed,
-            beebeeb_core::thumbnail::ThumbnailError::ResizeFailed(s) => {
-                ThumbnailError::ResizeFailed { detail: s }
-            }
-            beebeeb_core::thumbnail::ThumbnailError::EncodeFailed(s) => {
-                ThumbnailError::EncodeFailed { detail: s }
-            }
+            beebeeb_core::thumbnail::ThumbnailError::ResizeFailed(s) => ThumbnailError::ResizeFailed { detail: s },
+            beebeeb_core::thumbnail::ThumbnailError::EncodeFailed(s) => ThumbnailError::EncodeFailed { detail: s },
             beebeeb_core::thumbnail::ThumbnailError::InvalidInput(s) => {
                 ThumbnailError::ThumbnailInvalidInput { detail: s }
             }
@@ -2202,9 +2155,12 @@ pub fn resize_for_thumbnail(
     src_height: u32,
     max_dimension: u32,
 ) -> Result<ResizeResult, ThumbnailError> {
-    let (resized, w, h) =
-        beebeeb_core::thumbnail::resize_for_thumbnail(&rgba, src_width, src_height, max_dimension)?;
-    Ok(ResizeResult { rgba: resized, width: w, height: h })
+    let (resized, w, h) = beebeeb_core::thumbnail::resize_for_thumbnail(&rgba, src_width, src_height, max_dimension)?;
+    Ok(ResizeResult {
+        rgba: resized,
+        width: w,
+        height: h,
+    })
 }
 
 // --- WebP encode path (disabled for iOS) ------------------------------------
@@ -2473,20 +2429,11 @@ pub fn download_and_decrypt_file(
         })?;
     let mk = kdf::MasterKey::from_bytes(mk_bytes);
 
-    let bridge = callback
-        .as_ref()
-        .map(|cb| DownloadCallbackBridge(cb.as_ref()));
+    let bridge = callback.as_ref().map(|cb| DownloadCallbackBridge(cb.as_ref()));
     let core_cb: Option<Box<dyn beebeeb_upload::DownloadProgressCallback + '_>> =
         bridge.map(|b| Box::new(b) as Box<dyn beebeeb_upload::DownloadProgressCallback>);
 
-    let result = beebeeb_upload::download_and_decrypt_file(
-        &api_url,
-        &token,
-        &mk,
-        &file_id,
-        &output_path,
-        core_cb,
-    )?;
+    let result = beebeeb_upload::download_and_decrypt_file(&api_url, &token, &mk, &file_id, &output_path, core_cb)?;
 
     Ok(DownloadResultData {
         output_path: result.output_path,

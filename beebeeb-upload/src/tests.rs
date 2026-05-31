@@ -21,10 +21,7 @@ fn upload_error_is_retryable() {
         message: "unavailable".into(),
     }
     .is_retryable());
-    assert!(UploadError::RateLimited {
-        retry_after_secs: 30,
-    }
-    .is_retryable());
+    assert!(UploadError::RateLimited { retry_after_secs: 30 }.is_retryable());
 }
 
 #[test]
@@ -51,9 +48,7 @@ fn upload_error_not_retryable() {
 
 #[test]
 fn upload_error_retry_after() {
-    let err = UploadError::RateLimited {
-        retry_after_secs: 60,
-    };
+    let err = UploadError::RateLimited { retry_after_secs: 60 };
     let duration = err.retry_after().unwrap();
     assert_eq!(duration.as_secs(), 60);
 }
@@ -76,10 +71,7 @@ fn upload_error_display() {
         status: 500,
         message: "internal server error".into(),
     };
-    assert_eq!(
-        err.to_string(),
-        "server error (HTTP 500): internal server error"
-    );
+    assert_eq!(err.to_string(), "server error (HTTP 500): internal server error");
 
     let err = UploadError::ClientError {
         status: 404,
@@ -87,19 +79,14 @@ fn upload_error_display() {
     };
     assert_eq!(err.to_string(), "client error (HTTP 404): not found");
 
-    let err = UploadError::RateLimited {
-        retry_after_secs: 30,
-    };
+    let err = UploadError::RateLimited { retry_after_secs: 30 };
     assert_eq!(err.to_string(), "rate limited — retry after 30s");
 
     let err = UploadError::MaxRetriesExhausted {
         attempts: 5,
         last_error: "server error".into(),
     };
-    assert_eq!(
-        err.to_string(),
-        "max retries exhausted (5 attempts): server error"
-    );
+    assert_eq!(err.to_string(), "max retries exhausted (5 attempts): server error");
 }
 
 #[test]
@@ -120,17 +107,7 @@ fn upload_result_fields() {
 async fn upload_client_rejects_empty_chunks() {
     let client = crate::UploadClient::new("http://localhost:3001", "test-token");
     let result = client
-        .upload_encrypted_chunks(
-            "file-id",
-            "name_enc",
-            None,
-            None,
-            false,
-            &[],
-            0,
-            None,
-            None,
-        )
+        .upload_encrypted_chunks("file-id", "name_enc", None, None, false, &[], 0, None, None)
         .await;
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -160,10 +137,7 @@ async fn upload_client_rejects_missing_chunk_file() {
     assert!(result.is_err());
     match result.unwrap_err() {
         UploadError::IoError(msg) => {
-            assert!(
-                msg.contains("nonexistent"),
-                "expected path in error: {msg}"
-            );
+            assert!(msg.contains("nonexistent"), "expected path in error: {msg}");
         }
         other => panic!("expected IoError, got: {other}"),
     }

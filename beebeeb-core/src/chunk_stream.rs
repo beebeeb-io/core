@@ -45,9 +45,7 @@ use std::io::Read;
 
 use zeroize::Zeroizing;
 
-use beebeeb_types::{
-    ChunkPlan, ChunkProfile, ChunkStrategy, STORAGE_FORMAT_VERSION_V2, plan_chunks,
-};
+use beebeeb_types::{ChunkPlan, ChunkProfile, ChunkStrategy, STORAGE_FORMAT_VERSION_V2, plan_chunks};
 
 use crate::CoreError;
 use crate::encrypt::{NONCE_LEN, TAG_LEN, decrypt_chunk_raw, encrypt_chunk_raw};
@@ -143,12 +141,7 @@ impl ChunkEncryptor {
     /// **Push** constructor: the caller slices the data and calls
     /// [`push_chunk`](Self::push_chunk). The plan is derived from `file_size` +
     /// `profile`.
-    pub fn for_push(
-        mk: &MasterKey,
-        file_id: &str,
-        file_size: u64,
-        profile: ChunkProfile,
-    ) -> Result<Self, CoreError> {
+    pub fn for_push(mk: &MasterKey, file_id: &str, file_size: u64, profile: ChunkProfile) -> Result<Self, CoreError> {
         let plan = plan_chunks(file_size, profile);
         Self::new(mk, file_id, plan, Source::Push)
     }
@@ -167,9 +160,7 @@ impl ChunkEncryptor {
         chunk_size_bytes: u64,
     ) -> Result<Self, CoreError> {
         if chunk_size_bytes == 0 {
-            return Err(CoreError::InvalidInput(
-                "chunk_size_bytes must be positive".into(),
-            ));
+            return Err(CoreError::InvalidInput("chunk_size_bytes must be positive".into()));
         }
         let chunk_count = if file_size == 0 {
             1
@@ -188,14 +179,42 @@ impl ChunkEncryptor {
         Self::new(mk, file_id, plan, Source::Push)
     }
 
-    /// Shared constructor body: validates the plan, derives the key once, sizes
-    /// the read buffer (pull only).
-    fn new(
+    /// **Pull** constructor with an explicit chunk size — the reader-form analog
+    /// of [`for_push_with_chunk_size`](Self::for_push_with_chunk_size). Lets a
+    /// caller apply a concurrency-aware chunk size (e.g.
+    /// `beebeeb_types::plan_chunks_concurrent`) instead of the profile's static
+    /// ladder. Returns `Err` if `chunk_size_bytes == 0`, the derived
+    /// `chunk_count` does not fit in `u32`, or the size does not fit in `usize`.
+    pub fn from_reader_with_chunk_size<R: Read + Send + 'static>(
         mk: &MasterKey,
         file_id: &str,
-        plan: ChunkPlan,
-        source: Source,
+        file_size: u64,
+        chunk_size_bytes: u64,
+        reader: R,
     ) -> Result<Self, CoreError> {
+        if chunk_size_bytes == 0 {
+            return Err(CoreError::InvalidInput("chunk_size_bytes must be positive".into()));
+        }
+        let chunk_count = if file_size == 0 {
+            1
+        } else {
+            file_size.div_ceil(chunk_size_bytes)
+        };
+        let plan = ChunkPlan {
+            file_size_bytes: file_size,
+            chunk_size_bytes,
+            chunk_count,
+            strategy: ChunkStrategy::Capped {
+                max_chunk_size_bytes: chunk_size_bytes,
+            },
+            storage_format_version: STORAGE_FORMAT_VERSION_V2,
+        };
+        Self::new(mk, file_id, plan, Source::Pull(Box::new(reader)))
+    }
+
+    /// Shared constructor body: validates the plan, derives the key once, sizes
+    /// the read buffer (pull only).
+    fn new(mk: &MasterKey, file_id: &str, plan: ChunkPlan, source: Source) -> Result<Self, CoreError> {
         let chunk_count: u32 = plan.chunk_count.try_into().map_err(|_| {
             CoreError::InvalidInput(format!(
                 "chunk_count {} exceeds u32::MAX; file too large for this chunk size",
@@ -388,21 +407,15 @@ impl ChunkDecryptor {
         reader: R,
     ) -> Result<Self, CoreError> {
         if chunk_size_bytes == 0 {
-            return Err(CoreError::InvalidInput(
-                "chunk_size_bytes must be positive".into(),
-            ));
+            return Err(CoreError::InvalidInput("chunk_size_bytes must be positive".into()));
         }
-        let chunk_size: usize = chunk_size_bytes.try_into().map_err(|_| {
-            CoreError::InvalidInput(format!(
-                "chunk_size_bytes {chunk_size_bytes} exceeds usize range"
-            ))
-        })?;
+        let chunk_size: usize = chunk_size_bytes
+            .try_into()
+            .map_err(|_| CoreError::InvalidInput(format!("chunk_size_bytes {chunk_size_bytes} exceeds usize range")))?;
         let frame_len = NONCE_LEN
             .checked_add(chunk_size)
             .and_then(|v| v.checked_add(TAG_LEN))
-            .ok_or_else(|| {
-                CoreError::InvalidInput("chunk_size_bytes overflows frame length".into())
-            })?;
+            .ok_or_else(|| CoreError::InvalidInput("chunk_size_bytes overflows frame length".into()))?;
 
         let file_key = derive_file_key(mk, file_id.as_bytes());
         Ok(Self {
@@ -480,10 +493,7 @@ impl std::fmt::Debug for ChunkDecryptor {
 ///
 /// `pub(crate)` and defined once here: the single source of truth for the
 /// `chunk_stream` / `file_encrypt` streaming read loop.
-pub(crate) fn read_exact_or_eof(
-    reader: &mut dyn Read,
-    buf: &mut [u8],
-) -> Result<usize, CoreError> {
+pub(crate) fn read_exact_or_eof(reader: &mut dyn Read, buf: &mut [u8]) -> Result<usize, CoreError> {
     let mut total = 0;
     while total < buf.len() {
         match reader.read(&mut buf[total..]) {
@@ -522,14 +532,9 @@ mod tests {
         data: &[u8],
         profile: ChunkProfile,
     ) -> (Vec<EncryptedChunk>, ChunkEncryptorSummary) {
-        let mut enc = ChunkEncryptor::from_reader(
-            master,
-            file_id,
-            data.len() as u64,
-            profile,
-            Cursor::new(data.to_vec()),
-        )
-        .unwrap();
+        let mut enc =
+            ChunkEncryptor::from_reader(master, file_id, data.len() as u64, profile, Cursor::new(data.to_vec()))
+                .unwrap();
         let mut frames = Vec::new();
         while let Some(c) = enc.next_chunk().unwrap() {
             frames.push(c);
@@ -596,9 +601,7 @@ mod tests {
     #[test]
     fn expected_total_ciphertext_for_empty_is_28() {
         let m = mk();
-        let enc =
-            ChunkEncryptor::from_reader(&m, "e", 0, ChunkProfile::Desktop, Cursor::new(Vec::new()))
-                .unwrap();
+        let enc = ChunkEncryptor::from_reader(&m, "e", 0, ChunkProfile::Desktop, Cursor::new(Vec::new())).unwrap();
         assert_eq!(enc.expected_total_ciphertext(), 28);
     }
 
@@ -649,17 +652,11 @@ mod tests {
         // Wrong master key.
         let wrong = derive_master_key("different-password", b"different-salt-16").unwrap();
         let mut dec = ChunkDecryptor::for_push(&wrong, "secret");
-        assert!(matches!(
-            dec.push_frame(&frames[0].data),
-            Err(CoreError::Decryption)
-        ));
+        assert!(matches!(dec.push_frame(&frames[0].data), Err(CoreError::Decryption)));
 
         // Right master key, wrong file_id.
         let mut dec2 = ChunkDecryptor::for_push(&m, "other-file");
-        assert!(matches!(
-            dec2.push_frame(&frames[0].data),
-            Err(CoreError::Decryption)
-        ));
+        assert!(matches!(dec2.push_frame(&frames[0].data), Err(CoreError::Decryption)));
     }
 
     #[test]
@@ -671,8 +668,7 @@ mod tests {
         let (pull_frames, _) = encrypt_all(&m, "pp", &data, ChunkProfile::Desktop);
 
         // Push, caller slicing by the plan's chunk size.
-        let mut push = ChunkEncryptor::for_push(&m, "pp", data.len() as u64, ChunkProfile::Desktop)
-            .unwrap();
+        let mut push = ChunkEncryptor::for_push(&m, "pp", data.len() as u64, ChunkProfile::Desktop).unwrap();
         let chunk_size = push.chunk_plan().chunk_size_bytes as usize;
         let mut push_frames = Vec::new();
         for slice in data.chunks(chunk_size) {
@@ -721,14 +717,8 @@ mod tests {
         // file shrank between stat and read. finish() must reject it.
         let declared = 9 * MIB as u64;
         let actual = pattern(4 * MIB);
-        let mut enc = ChunkEncryptor::from_reader(
-            &m,
-            "shrink",
-            declared,
-            ChunkProfile::Desktop,
-            Cursor::new(actual),
-        )
-        .unwrap();
+        let mut enc =
+            ChunkEncryptor::from_reader(&m, "shrink", declared, ChunkProfile::Desktop, Cursor::new(actual)).unwrap();
         // Pull all planned chunks (later ones come back empty).
         let mut emitted = 0;
         while enc.next_chunk().unwrap().is_some() {
@@ -743,14 +733,9 @@ mod tests {
     fn finish_err_when_caller_stops_early() {
         let m = mk();
         let data = pattern(9 * MIB);
-        let mut enc = ChunkEncryptor::from_reader(
-            &m,
-            "early",
-            data.len() as u64,
-            ChunkProfile::Desktop,
-            Cursor::new(data),
-        )
-        .unwrap();
+        let mut enc =
+            ChunkEncryptor::from_reader(&m, "early", data.len() as u64, ChunkProfile::Desktop, Cursor::new(data))
+                .unwrap();
         // Only pull the first of three planned chunks.
         let _ = enc.next_chunk().unwrap().unwrap();
         let err = enc.finish().unwrap_err();
@@ -766,14 +751,9 @@ mod tests {
         let m = mk();
         let declared = 8 * MIB as u64; // exactly two 4 MiB chunks
         let bigger = pattern(10 * MIB); // grew by 2 MiB after stat
-        let mut enc = ChunkEncryptor::from_reader(
-            &m,
-            "grow",
-            declared,
-            ChunkProfile::Desktop,
-            Cursor::new(bigger.clone()),
-        )
-        .unwrap();
+        let mut enc =
+            ChunkEncryptor::from_reader(&m, "grow", declared, ChunkProfile::Desktop, Cursor::new(bigger.clone()))
+                .unwrap();
         let mut frames = Vec::new();
         while let Some(c) = enc.next_chunk().unwrap() {
             frames.push(c);
@@ -799,8 +779,7 @@ mod tests {
         assert!(matches!(err, CoreError::InvalidInput(_)));
 
         // Same overflow via the profile ladder (256 MiB chunks at u64::MAX size).
-        let err2 = ChunkEncryptor::for_push(&m, "huge", u64::MAX, ChunkProfile::Desktop)
-            .unwrap_err();
+        let err2 = ChunkEncryptor::for_push(&m, "huge", u64::MAX, ChunkProfile::Desktop).unwrap_err();
         assert!(matches!(err2, CoreError::InvalidInput(_)));
     }
 
@@ -827,6 +806,30 @@ mod tests {
         assert_eq!(summary.chunk_size_bytes, 16);
 
         assert_eq!(decrypt_frames(&m, "ovr", &frames), data);
+    }
+
+    #[test]
+    fn from_reader_with_chunk_size_honors_override() {
+        let m = mk();
+        let data = pattern(40);
+        let mut enc =
+            ChunkEncryptor::from_reader_with_chunk_size(&m, "rdrovr", 40, 16, Cursor::new(data.clone())).unwrap();
+        assert_eq!(enc.chunk_plan().chunk_size_bytes, 16);
+        assert_eq!(enc.chunk_plan().chunk_count, 3); // 16 + 16 + 8
+        let mut frames = Vec::new();
+        while let Some(c) = enc.next_chunk().unwrap() {
+            frames.push(c);
+        }
+        assert_eq!(frames[0].data.len(), 16 + 28);
+        assert_eq!(frames[2].data.len(), 8 + 28);
+        assert_eq!(decrypt_frames(&m, "rdrovr", &frames), data);
+    }
+
+    #[test]
+    fn from_reader_with_chunk_size_rejects_zero() {
+        let m = mk();
+        let err = ChunkEncryptor::from_reader_with_chunk_size(&m, "z2", 40, 0, Cursor::new(Vec::new())).unwrap_err();
+        assert!(matches!(err, CoreError::InvalidInput(_)));
     }
 
     #[test]
@@ -861,8 +864,7 @@ mod tests {
         .chunk_plan()
         .chunk_size_bytes;
 
-        let mut dec =
-            ChunkDecryptor::from_reader(&m, "decpull", chunk_size, Cursor::new(body)).unwrap();
+        let mut dec = ChunkDecryptor::from_reader(&m, "decpull", chunk_size, Cursor::new(body)).unwrap();
         let mut out = Vec::new();
         let mut idx = 0u32;
         while let Some(c) = dec.next_chunk().unwrap() {
@@ -926,18 +928,17 @@ mod tests {
             max_read: max_read.clone(),
             total_served: total.clone(),
         };
+        // Explicit 16 MiB chunk so this memory-mechanics test is independent of
+        // the chunk-size ladder (the ladder is covered by beebeeb-types' vector
+        // test). The point here is that the read buffer is sized to the chunk,
+        // not to the 8 GiB file.
         let mut enc =
-            ChunkEncryptor::from_reader(&m, "huge", eight_gib, ChunkProfile::Desktop, reader)
-                .unwrap();
+            ChunkEncryptor::from_reader_with_chunk_size(&m, "huge", eight_gib, 16 * MIB as u64, reader).unwrap();
 
-        // Desktop ladder: 8 GiB is in (1 GiB, 10 GiB] -> 16 MiB chunks.
         let plan = enc.chunk_plan();
         assert_eq!(plan.chunk_size_bytes, 16 * MIB as u64);
         assert_eq!(plan.chunk_count, eight_gib / (16 * MIB as u64)); // 512
-        assert_eq!(
-            enc.expected_total_ciphertext(),
-            eight_gib + 28 * plan.chunk_count
-        );
+        assert_eq!(enc.expected_total_ciphertext(), eight_gib + 28 * plan.chunk_count);
 
         // The read buffer is sized to the chunk, NOT the 8 GiB file.
         let cap_before = enc.buf.capacity();
@@ -948,11 +949,7 @@ mod tests {
         for _ in 0..8 {
             let c = enc.next_chunk().unwrap().unwrap();
             assert_eq!(c.data.len(), 16 * MIB + 28);
-            assert_eq!(
-                enc.buf.capacity(),
-                cap_before,
-                "read buffer capacity must not grow"
-            );
+            assert_eq!(enc.buf.capacity(), cap_before, "read buffer capacity must not grow");
             assert!(
                 max_read.load(Ordering::SeqCst) <= 16 * MIB,
                 "no single read may exceed the chunk size"

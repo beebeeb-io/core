@@ -35,7 +35,8 @@ pub fn is_previewable_by_extension(filename: &str) -> bool {
         Some(e) => e.to_lowercase(),
         None => return false,
     };
-    matches!(ext.as_str(),
+    matches!(
+        ext.as_str(),
         // Images
         "jpg" | "jpeg" | "png" | "gif" | "webp" | "svg" | "bmp" | "ico" | "avif" | "heic" | "heif" | "tiff" | "tif" |
         // Video

@@ -5,16 +5,15 @@
 //! output that breaks these vectors is a cross-client compatibility bug.
 
 use beebeeb_core::encrypt::{
-    decrypt_chunk, decrypt_chunk_raw, decrypt_metadata, encrypt_chunk, encrypt_chunk_raw,
-    encrypt_metadata,
+    decrypt_chunk, decrypt_chunk_raw, decrypt_metadata, encrypt_chunk, encrypt_chunk_raw, encrypt_metadata,
 };
-use beebeeb_core::kdf::{derive_file_key, MasterKey};
+use beebeeb_core::kdf::{MasterKey, derive_file_key};
 use beebeeb_types::{CipherSuite, EncryptedBlob};
 
 /// A known master key for deterministic test vectors.
 const TEST_MASTER_KEY: [u8; 32] = [
-    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12,
-    0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13,
+    0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
 ];
 
 const TEST_FILE_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
@@ -60,7 +59,9 @@ fn key_derivation_uses_string_uuid() {
     // String UUID and binary UUID should produce DIFFERENT keys.
     // The string form "550e8400-..." is 36 bytes; the binary form is 16 bytes.
     // This verifies clients must agree on using the string representation.
-    let uuid_binary: [u8; 16] = [0x55, 0x0e, 0x84, 0x00, 0xe2, 0x9b, 0x41, 0xd4, 0xa7, 0x16, 0x44, 0x66, 0x55, 0x44, 0x00, 0x00];
+    let uuid_binary: [u8; 16] = [
+        0x55, 0x0e, 0x84, 0x00, 0xe2, 0x9b, 0x41, 0xd4, 0xa7, 0x16, 0x44, 0x66, 0x55, 0x44, 0x00, 0x00,
+    ];
     let mk3 = MasterKey::from_bytes(TEST_MASTER_KEY);
     let fk_binary = derive_file_key(&mk3, &uuid_binary);
     assert_ne!(fk.as_bytes(), fk_binary.as_bytes());
@@ -196,8 +197,8 @@ fn unicode_filename_roundtrip() {
 
     let filenames = [
         "Dokumente/Steuererkl\u{00e4}rung 2025.pdf",
-        "\u{1f4c4} notes.txt",  // emoji in filename
-        "\u{4f60}\u{597d}\u{4e16}\u{754c}.txt",  // Chinese characters
+        "\u{1f4c4} notes.txt",                  // emoji in filename
+        "\u{4f60}\u{597d}\u{4e16}\u{754c}.txt", // Chinese characters
         "path/with spaces/and-dashes/file.tar.gz",
     ];
 
@@ -274,8 +275,10 @@ fn plan_chunks_small_file_mobile() {
 
 #[test]
 fn plan_chunks_large_file_desktop() {
+    // N=32 ladder: 2e9 bytes (~1.86 GiB) → base_chunk_size = 64 MiB (Desktop
+    // cap 128 MiB doesn't bind here).
     let plan = beebeeb_types::plan_chunks(2_000_000_000, beebeeb_types::ChunkProfile::Desktop);
-    assert_eq!(plan.chunk_size_bytes, 16 * 1024 * 1024); // 16 MiB for files <= 10 GiB
+    assert_eq!(plan.chunk_size_bytes, 64 * 1024 * 1024);
 }
 
 #[test]
@@ -286,19 +289,18 @@ fn plan_chunks_empty_file() {
 
 #[test]
 fn plan_chunks_web_capped() {
-    // 5 GiB file: base_chunk_size = 16 MiB, but Web caps at 64 MiB
-    // so 16 MiB < 64 MiB => chunk_size = 16 MiB (no capping needed here)
+    // 5 GiB file: N=32 base_chunk_size = 256 MiB; Web caps at 32 MiB.
     let plan = beebeeb_types::plan_chunks(5 * 1024 * 1024 * 1024, beebeeb_types::ChunkProfile::Web);
-    assert_eq!(plan.chunk_size_bytes, 16 * 1024 * 1024);
+    assert_eq!(plan.chunk_size_bytes, 32 * 1024 * 1024);
 
-    // 200 GiB file: base_chunk_size = 256 MiB, but Web caps at 64 MiB
+    // 200 GiB file: base 256 MiB; Web caps at 32 MiB.
     let plan = beebeeb_types::plan_chunks(200 * 1024 * 1024 * 1024, beebeeb_types::ChunkProfile::Web);
-    assert_eq!(plan.chunk_size_bytes, 64 * 1024 * 1024);
+    assert_eq!(plan.chunk_size_bytes, 32 * 1024 * 1024);
 }
 
 #[test]
 fn plan_chunks_mobile_capped() {
-    // 200 GiB file: base_chunk_size = 256 MiB, but Mobile caps at 64 MiB
+    // 200 GiB file: base 256 MiB; Mobile caps at 32 MiB.
     let plan = beebeeb_types::plan_chunks(200 * 1024 * 1024 * 1024, beebeeb_types::ChunkProfile::Mobile);
-    assert_eq!(plan.chunk_size_bytes, 64 * 1024 * 1024);
+    assert_eq!(plan.chunk_size_bytes, 32 * 1024 * 1024);
 }

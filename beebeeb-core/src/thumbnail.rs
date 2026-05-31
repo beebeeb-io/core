@@ -34,14 +34,38 @@ impl ThumbnailConfig {
     pub fn medium() -> Self {
         Self {
             ladder: vec![
-                LadderStep { max_dimension: 768, quality: 82.0 },
-                LadderStep { max_dimension: 768, quality: 74.0 },
-                LadderStep { max_dimension: 768, quality: 66.0 },
-                LadderStep { max_dimension: 768, quality: 58.0 },
-                LadderStep { max_dimension: 768, quality: 50.0 },
-                LadderStep { max_dimension: 640, quality: 58.0 },
-                LadderStep { max_dimension: 512, quality: 56.0 },
-                LadderStep { max_dimension: 384, quality: 54.0 },
+                LadderStep {
+                    max_dimension: 768,
+                    quality: 82.0,
+                },
+                LadderStep {
+                    max_dimension: 768,
+                    quality: 74.0,
+                },
+                LadderStep {
+                    max_dimension: 768,
+                    quality: 66.0,
+                },
+                LadderStep {
+                    max_dimension: 768,
+                    quality: 58.0,
+                },
+                LadderStep {
+                    max_dimension: 768,
+                    quality: 50.0,
+                },
+                LadderStep {
+                    max_dimension: 640,
+                    quality: 58.0,
+                },
+                LadderStep {
+                    max_dimension: 512,
+                    quality: 56.0,
+                },
+                LadderStep {
+                    max_dimension: 384,
+                    quality: 54.0,
+                },
             ],
             target_bytes: 100 * 1024,
             max_bytes: 128 * 1024 - 28, // server cap minus AES-GCM overhead
@@ -52,11 +76,26 @@ impl ThumbnailConfig {
     pub fn small() -> Self {
         Self {
             ladder: vec![
-                LadderStep { max_dimension: 384, quality: 78.0 },
-                LadderStep { max_dimension: 384, quality: 66.0 },
-                LadderStep { max_dimension: 384, quality: 54.0 },
-                LadderStep { max_dimension: 320, quality: 50.0 },
-                LadderStep { max_dimension: 256, quality: 48.0 },
+                LadderStep {
+                    max_dimension: 384,
+                    quality: 78.0,
+                },
+                LadderStep {
+                    max_dimension: 384,
+                    quality: 66.0,
+                },
+                LadderStep {
+                    max_dimension: 384,
+                    quality: 54.0,
+                },
+                LadderStep {
+                    max_dimension: 320,
+                    quality: 50.0,
+                },
+                LadderStep {
+                    max_dimension: 256,
+                    quality: 48.0,
+                },
             ],
             target_bytes: 24 * 1024,
             max_bytes: 32 * 1024 - 28,
@@ -67,12 +106,30 @@ impl ThumbnailConfig {
     pub fn large() -> Self {
         Self {
             ladder: vec![
-                LadderStep { max_dimension: 1600, quality: 90.0 },
-                LadderStep { max_dimension: 1600, quality: 82.0 },
-                LadderStep { max_dimension: 1600, quality: 74.0 },
-                LadderStep { max_dimension: 1600, quality: 66.0 },
-                LadderStep { max_dimension: 1600, quality: 58.0 },
-                LadderStep { max_dimension: 1600, quality: 50.0 },
+                LadderStep {
+                    max_dimension: 1600,
+                    quality: 90.0,
+                },
+                LadderStep {
+                    max_dimension: 1600,
+                    quality: 82.0,
+                },
+                LadderStep {
+                    max_dimension: 1600,
+                    quality: 74.0,
+                },
+                LadderStep {
+                    max_dimension: 1600,
+                    quality: 66.0,
+                },
+                LadderStep {
+                    max_dimension: 1600,
+                    quality: 58.0,
+                },
+                LadderStep {
+                    max_dimension: 1600,
+                    quality: 50.0,
+                },
             ],
             target_bytes: 400 * 1024,
             max_bytes: 480 * 1024,
@@ -204,10 +261,8 @@ fn resize_rgba(
         (w.max(1), max_dimension)
     };
 
-    let src_img: ImageBuffer<Rgba<u8>, Vec<u8>> =
-        ImageBuffer::from_raw(src_width, src_height, rgba.to_vec()).ok_or_else(|| {
-            ThumbnailError::ResizeFailed("failed to create image buffer from RGBA data".into())
-        })?;
+    let src_img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(src_width, src_height, rgba.to_vec())
+        .ok_or_else(|| ThumbnailError::ResizeFailed("failed to create image buffer from RGBA data".into()))?;
 
     let resized = image::imageops::resize(&src_img, dst_width, dst_height, FilterType::Lanczos3);
 
@@ -218,12 +273,7 @@ fn resize_rgba(
 ///
 /// Quality is 0.0..=100.0, passed directly to libwebp.
 #[cfg(feature = "webp-encode")]
-fn encode_webp(
-    rgba: &[u8],
-    width: u32,
-    height: u32,
-    quality: f32,
-) -> Result<Vec<u8>, ThumbnailError> {
+fn encode_webp(rgba: &[u8], width: u32, height: u32, quality: f32) -> Result<Vec<u8>, ThumbnailError> {
     let encoder = webp::Encoder::from_rgba(rgba, width, height);
     let mem = encoder.encode(quality);
     Ok(mem.to_vec())

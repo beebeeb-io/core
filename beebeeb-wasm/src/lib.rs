@@ -398,6 +398,7 @@ pub fn open_request_upload(
 fn parse_profile(profile: &str) -> Result<beebeeb_types::ChunkProfile, JsError> {
     match profile {
         "desktop" => Ok(beebeeb_types::ChunkProfile::Desktop),
+        "cli" => Ok(beebeeb_types::ChunkProfile::Cli),
         "web" => Ok(beebeeb_types::ChunkProfile::Web),
         "mobile" => Ok(beebeeb_types::ChunkProfile::Mobile),
         "backup" => Ok(beebeeb_types::ChunkProfile::BackupAgent),
