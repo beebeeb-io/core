@@ -1582,7 +1582,7 @@ mod tests {
     #[test]
     fn constellation_session_roundtrip() {
         let init = constellation_new_session(300);
-        assert_eq!(init.confirm_code.len(), 6);
+        assert_eq!(init.confirm_code.len(), 8);
 
         let decoder = ConstellationDecoderHandle::new();
         let mut recovered: Option<ConstellationPayloadDto> = None;
