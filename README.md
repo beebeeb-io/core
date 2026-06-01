@@ -1,222 +1,97 @@
-# Beebeeb Core
+<p align="center">
+  <a href="https://beebeeb.io"><img src="https://beebeeb.io/assets/beebeeb-icon.png" alt="beebeeb" width="72" height="72" /></a>
+</p>
+<h1 align="center">beebeeb core</h1>
+<p align="center">The cryptography engine behind beebeeb. Files are sealed on your device — the server only ever sees ciphertext.</p>
+<p align="center"><strong>We can't recover your data. Not even if we wanted to.</strong> That's the point.</p>
+<p align="center">
+  <a href="https://github.com/beebeeb-io/core/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/beebeeb-io/core/ci.yml?branch=main&label=CI" alt="CI" /></a> &nbsp;
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-555.svg" alt="License: AGPL-3.0" /></a> &nbsp;
+  <img src="https://img.shields.io/badge/rust-2024-555.svg" alt="Rust 2024" /> &nbsp;
+  <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-policy-555.svg" alt="Security policy" /></a>
+</p>
+<p align="center"><a href="https://beebeeb.io">Website</a> &nbsp;·&nbsp; <a href="https://beebeeb.io/security">How it works</a> &nbsp;·&nbsp; <a href="SECURITY.md">Report a vulnerability</a></p>
+<p align="center"><sub>End-to-end encrypted cloud storage, built in Europe. Operated by Initlabs B.V., Wijchen, Netherlands.</sub></p>
 
-[![CI](https://github.com/beebeeb-io/core/actions/workflows/ci.yml/badge.svg)](https://github.com/beebeeb-io/core/actions/workflows/ci.yml)
-[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
-![Rust](https://img.shields.io/badge/rust-2024-orange)
-[![Crates](https://img.shields.io/badge/crates-beebeeb--core-orange)](https://github.com/beebeeb-io/core)
+---
 
-Beebeeb Core is the shared Rust cryptography and sync workspace for Beebeeb, an end-to-end encrypted, zero-knowledge cloud storage product made in Europe and operated by Initlabs B.V. (KvK 95157565), Wijchen, Netherlands.
+## Why this exists
 
-This repository is the trust anchor for Beebeeb clients. The same Rust code is used by the web app through WebAssembly, by mobile apps through UniFFI bindings, by the CLI as a native Rust dependency, and by server-side code where shared types or protocol helpers are needed.
+`core` is the one place beebeeb's cryptography lives. Every client depends on it, and none of them re-implement the crypto themselves: the web app consumes it as WebAssembly, the mobile apps through UniFFI bindings, and the CLI, server, and desktop sync engine as a native Rust git dependency. Writing key derivation and chunk encryption once — in audited Rust — means a fix or a hardening lands in every client at once, and there's no second implementation to drift, disagree, or get a corner wrong.
 
-Target launch: September 1, 2026.
+## Usage
 
-## Tech Stack
+The flow is the same everywhere: derive a `MasterKey` from the user's password, derive a per-file `FileKey` from it, then encrypt or decrypt chunks under that file key. Raw key bytes never leave the device.
 
-| Area | Technology |
-| --- | --- |
-| Language | Rust 2024 |
-| Workspace crates | `beebeeb-core`, `beebeeb-types`, `beebeeb-sync`, `beebeeb-wasm`, `beebeeb-uniffi` |
-| File encryption | AES-256-GCM |
-| Key exchange | X25519 |
-| Password KDF | Argon2id |
-| Password-authenticated auth protocol | OPAQUE |
-| Per-file derivation | HKDF-SHA256 |
-| Recovery phrases | BIP39 |
-| WASM bindings | `wasm-bindgen`, `wasm-pack` |
-| Mobile bindings | UniFFI for Swift and Kotlin |
+```rust
+use beebeeb_core::kdf::{derive_master_key, derive_file_key};
+use beebeeb_core::encrypt::{encrypt_chunk, decrypt_chunk};
 
-## Workspace Crates
+// 1. Master key from the password (Argon2id). `salt` is per-user, >= 16 bytes.
+let master = derive_master_key(password, salt)?;
 
-| Crate | Purpose |
-| --- | --- |
-| `beebeeb-core` | Encryption, key derivation, recovery phrases, OPAQUE helpers, key exchange, erasure coding, sync protocol helpers. |
-| `beebeeb-types` | Shared serializable types such as cipher suite identifiers, encrypted blob shapes, KDF parameters, chunk metadata, and storage constants. |
-| `beebeeb-sync` | Desktop sync engine primitives: file watching, conflict handling, selective sync, and sync state. |
-| `beebeeb-wasm` | WebAssembly bindings consumed by the web client as the `beebeeb-wasm` npm package generated under `beebeeb-wasm/pkg`. |
-| `beebeeb-uniffi` | UniFFI library and binding generator for Swift and Kotlin clients. |
+// 2. Per-file key from the master key (HKDF-SHA256), scoped to one file_id.
+let file_key = derive_file_key(&master, file_id);
 
-## Architecture
-
-```mermaid
-flowchart TD
-    Core["beebeeb-core\ncrypto and protocol logic"]
-    Types["beebeeb-types\nshared data contracts"]
-    Sync["beebeeb-sync\ndesktop sync engine"]
-    Wasm["beebeeb-wasm\nwasm-bindgen package"]
-    UniFFI["beebeeb-uniffi\nSwift/Kotlin bindings"]
-    Web["Web client"]
-    Mobile["Mobile clients"]
-    CLI["bb CLI"]
-    Server["API server"]
-
-    Core --> Types
-    Sync --> Core
-    Sync --> Types
-    Wasm --> Core
-    Wasm --> Types
-    UniFFI --> Core
-    UniFFI --> Types
-    Web --> Wasm
-    Mobile --> UniFFI
-    CLI --> Core
-    CLI --> Types
-    Server --> Core
-    Server --> Types
+// 3. Seal a chunk (AES-256-GCM, fresh random nonce) and open it again.
+let sealed = encrypt_chunk(&file_key, plaintext)?;   // -> EncryptedBlob
+let opened = decrypt_chunk(&file_key, &sealed)?;      // -> Vec<u8>
+assert_eq!(opened, plaintext);
 ```
 
-## Cryptographic Primitives
+For streaming whole files chunk-by-chunk (one shared encrypt loop across every client, peak memory ≈ one chunk) see `chunk_stream::ChunkEncryptor` / `ChunkDecryptor`.
+
+## Consumed by
+
+| Client | How it links `core` |
+| --- | --- |
+| web | WebAssembly — the `beebeeb-wasm` crate, built with `wasm-pack` |
+| mobile | UniFFI — Swift + Kotlin bindings from `beebeeb-uniffi` |
+| cli | native Rust git dependency |
+| server | native Rust git dependency (shared types + protocol helpers) |
+| desktop | native Rust git dependency (`beebeeb-sync` sync engine) |
+
+## Cryptographic primitives
 
 | Primitive | Use |
 | --- | --- |
 | AES-256-GCM | File, chunk, metadata, and local wrapping encryption. |
-| X25519 | Key exchange for sharing and client-side key agreement flows. |
+| X25519 | Key exchange for sharing and client-side key agreement. |
 | Argon2id | Password-based key derivation. |
 | HKDF-SHA256 | Per-file key derivation from the master key and file identifiers. |
 | BIP39 | Recovery phrase generation and recovery. |
-| OPAQUE | Password-authenticated key exchange where the server does not learn the password. |
+| OPAQUE | Password-authenticated key exchange where the server never learns the password. |
 
-Important invariants:
-
-- `MasterKey` is 32 bytes, is not `Clone`, and is zeroized on drop.
-- `FileKey` is 32 bytes and is derived per file.
-- Encryption functions return `Result` instead of panicking in normal error paths.
-- The recovery phrase is treated as the master recovery secret; a password wraps access to it.
-
-## Prerequisites
-
-- Rust stable with edition 2024 support.
-- Cargo.
-- `wasm-pack` for browser package builds.
-- UniFFI toolchain support if regenerating Swift or Kotlin bindings.
-
-## Quick Start
+## Build
 
 ```sh
-git clone https://github.com/beebeeb-io/core.git
-cd core
-cargo test --workspace
-```
-
-From the Beebeeb workspace checkout:
-
-```sh
-cd repos/core
-cargo test --workspace
-```
-
-The expected workspace test suite currently covers 53 tests: 26 core tests and 27 sync tests.
-
-## Build for Production
-
-Build native Rust crates:
-
-```sh
-cd repos/core
+cargo test --workspace          # full test suite
 cargo build --workspace --release
+
+wasm-pack build beebeeb-wasm --target web   # web (WASM) package -> beebeeb-wasm/pkg
+./build-ios.sh                              # iOS xcframework + Swift bindings
+./build-android.sh                          # Android .so + Kotlin bindings
 ```
 
-Build the WebAssembly package for the web client:
+Deeper build, binding-regeneration, and environment detail lives in [BUILDING.md](BUILDING.md).
 
-```sh
-cd repos/core
-wasm-pack build beebeeb-wasm --target web
-```
+## Security invariants
 
-The generated npm package is written under:
+- `MasterKey` and `FileKey` are 32 bytes, **not** `Clone`, and zeroized on drop — no accidental key copies in memory.
+- Every file gets its own key via `HKDF(master_key, file_id)` — one compromised file key can't open another.
+- The recovery phrase **is** the master secret; the password wraps access to it, it doesn't replace it.
+- Crypto paths return `Result` and never panic.
+- Don't reimplement any of this per-client. If a client needs a crypto operation, it goes here.
 
-```text
-beebeeb-wasm/pkg
-```
+## Security
 
-Build UniFFI bindings:
+Found a vulnerability? Email **security@beebeeb.io** — see [SECURITY.md](SECURITY.md).
 
-```sh
-cd repos/core
-cargo build -p beebeeb-uniffi
-```
+## Part of beebeeb
 
-Platform helper scripts are available for mobile binding artifacts:
-
-```sh
-./build-ios.sh
-./build-android.sh
-```
-
-The iOS script writes `BeebeebCore.xcframework/` and `BeebeebCore.swift` next
-to itself in `repos/core/`. Both are copied into `repos/mobile/ios/` and
-committed as binary artifacts; the mobile Xcode project links the `.a`
-slices from there.
-
-The size-optimized release profile (`opt-level = "z"`, `codegen-units = 1`,
-`panic = "abort"`, `lto = "off"`, `strip = "symbols"`) plus the
-`cli`-feature gate on `beebeeb-uniffi` keeps the device staticlib around
-22 MB. Regenerating bindings (Swift/Kotlin) uses the `uniffi-bindgen`
-binary, which requires the `cli` feature:
-
-```sh
-cargo run -p beebeeb-uniffi --features cli --bin uniffi-bindgen -- generate ...
-```
-
-`build-android.sh` already passes `--features cli` for the bindgen step;
-`build-ios.sh` does not need it because the Swift bindings are
-pre-generated and copied from `beebeeb-uniffi/bindings/`.
-
-## Environment Variables
-
-Core does not require runtime environment variables. It is a library workspace. Consumers such as the web, CLI, mobile, and server repos own their own runtime configuration.
-
-Build tools may still require platform-specific environment setup. Examples include Rust target installation for mobile builds and local `wasm-pack` availability for WASM output.
-
-## Tests and Checks
-
-Run all tests:
-
-```sh
-cd repos/core
-cargo test --workspace
-```
-
-Run compile checks:
-
-```sh
-cd repos/core
-cargo check --workspace
-```
-
-Lint:
-
-```sh
-cd repos/core
-cargo clippy --workspace -- -D warnings
-```
-
-Format check:
-
-```sh
-cd repos/core
-cargo fmt -- --check
-```
-
-## Repository Layout
-
-| Path | Purpose |
-| --- | --- |
-| `beebeeb-core/` | Core crypto and protocol implementation. |
-| `beebeeb-types/` | Shared serializable type definitions. |
-| `beebeeb-sync/` | Sync engine and selective-sync logic. |
-| `beebeeb-wasm/` | WASM bindings and generated npm package output. |
-| `beebeeb-uniffi/` | UniFFI library, generated bindings, and binding generator. |
-| `build-ios.sh` | iOS static library and Swift binding build helper. |
-| `build-android.sh` | Android shared library and Kotlin binding build helper. |
-
-## Security Notes
-
-- Do not add platform-specific reimplementations of crypto logic in client repos.
-- Keep key material non-cloneable where possible and zeroized on drop.
-- Treat generated bindings as part of the public crypto surface.
-- Security reports should go to `security@beebeeb.io`.
+End-to-end encrypted, zero-knowledge cloud storage — made in Europe.
+[core](https://github.com/beebeeb-io/core) · [cli](https://github.com/beebeeb-io/cli) · [web](https://github.com/beebeeb-io/web) · [mobile](https://github.com/beebeeb-io/mobile) · [desktop](https://github.com/beebeeb-io/desktop) · [website](https://beebeeb.io)
 
 ## License
 
-AGPL-3.0-or-later. See `LICENSE`.
+[AGPL-3.0-or-later](LICENSE) — © Initlabs B.V. (KvK 95157565), Wijchen, Netherlands.
