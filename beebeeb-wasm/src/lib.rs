@@ -202,10 +202,21 @@ pub fn opaque_login_start(password: &[u8]) -> Result<JsValue, JsError> {
 }
 
 /// Finish OPAQUE client login. Returns `{ message: Uint8Array, session_key: Uint8Array, export_key: Uint8Array }`.
+///
+/// `ksf_version` selects the KSF the account's password file was registered
+/// under (0 = legacy Identity KSF, anything else = current Argon2id). The web
+/// client reads it from the login-start response (`server_state` JSON) and
+/// passes it through verbatim. The KSF must match or finish fails.
 #[wasm_bindgen]
-pub fn opaque_login_finish(client_state: &[u8], password: &[u8], server_response: &[u8]) -> Result<JsValue, JsError> {
-    let result = beebeeb_core::opaque_protocol::client_login_finish(client_state, password, server_response)
-        .map_err(|e| JsError::new(&e.to_string()))?;
+pub fn opaque_login_finish(
+    client_state: &[u8],
+    password: &[u8],
+    server_response: &[u8],
+    ksf_version: u32,
+) -> Result<JsValue, JsError> {
+    let result =
+        beebeeb_core::opaque_protocol::client_login_finish(client_state, password, server_response, ksf_version)
+            .map_err(|e| JsError::new(&e.to_string()))?;
     let obj = js_sys::Object::new();
     js_sys::Reflect::set(
         &obj,

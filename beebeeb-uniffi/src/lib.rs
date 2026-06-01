@@ -476,13 +476,20 @@ pub fn opaque_login_start(password: Vec<u8>) -> Result<OpaqueStartResult, Crypto
 
 /// Finish OPAQUE client login. Returns the finalization message, the session
 /// key, and the export key (used to derive the master key envelope).
+///
+/// `ksf_version` selects the KSF the account's password file was registered
+/// under (0 = legacy Identity KSF, anything else = current Argon2id). Mobile
+/// reads it from the login-start response and passes it through verbatim; the
+/// KSF must match or finish fails.
 #[uniffi::export]
 pub fn opaque_login_finish(
     client_state: Vec<u8>,
     password: Vec<u8>,
     server_response: Vec<u8>,
+    ksf_version: u32,
 ) -> Result<OpaqueLoginFinishResult, CryptoError> {
-    let result = beebeeb_core::opaque_protocol::client_login_finish(&client_state, &password, &server_response)?;
+    let result =
+        beebeeb_core::opaque_protocol::client_login_finish(&client_state, &password, &server_response, ksf_version)?;
     Ok(OpaqueLoginFinishResult {
         message: result.message,
         session_key: result.session_key,
