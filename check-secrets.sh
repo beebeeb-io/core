@@ -34,8 +34,17 @@ FORBIDDEN_FILES=(
     'token\.json'
 )
 
+# Filenames that LOOK like secret files by extension but are known-safe,
+# version-controlled config that is meant to be committed. Excluded from the
+# forbidden-file rule above (real `.env`/`.env.local`/`.pem`/etc. still block).
+# - `*.example`            : sample env/config templates.
+# - `**/.xcode.env`        : the standard Expo iOS build-env file. Holds only
+#                            NODE_BINARY / ENTRY_FILE / comments — no secrets —
+#                            and Expo requires it committed. (task 0680)
+SAFE_FILE_ALLOWLIST='\.example$|(^|/)\.xcode\.env$'
+
 for pattern in "${FORBIDDEN_FILES[@]}"; do
-    MATCHES=$(echo "$STAGED" | grep -iE "$pattern" | grep -v '\.example$' || true)
+    MATCHES=$(echo "$STAGED" | grep -iE "$pattern" | grep -vE "$SAFE_FILE_ALLOWLIST" || true)
     if [ -n "$MATCHES" ]; then
         echo -e "${RED}BLOCKED: Secret/key file staged:${NC}"
         echo "$MATCHES"
@@ -79,7 +88,14 @@ done
 
 # 3. Scan file contents for secrets
 SECRET_PATTERNS=(
-    'PRIVATE KEY'
+    # Match real PEM-wrapped private-key material (any key type:
+    # RSA/EC/OPENSSH/ENCRYPTED/DSA/etc.) via its header line. This intentionally
+    # does NOT match the bare prose phrase "private key" or field/column names
+    # like "wrapped_private_key" in markdown, code comments, SQL, or JSON --
+    # those are not secrets and were causing false positives that trained
+    # developers to bypass the hook with --no-verify. (Pattern starts with a
+    # bracket, not a dash, so grep does not parse it as a flag.)
+    '[-]{5}BEGIN [A-Z0-9 ]*PRIVATE KEY[-]{5}'
     'AWS_SECRET_ACCESS_KEY'
     'AWS_ACCESS_KEY_ID'
     'sk_live_'
@@ -111,8 +127,11 @@ for file in $STAGED; do
     for pattern in "${SECRET_PATTERNS[@]}"; do
         MATCH=$(grep -nEi "$pattern" "$file" 2>/dev/null | head -3 || true)
         if [ -n "$MATCH" ]; then
-            # Allow patterns in the check-secrets script itself, test files, examples, and design reference files
-            if [[ "$file" == *"check-secrets"* ]] || [[ "$file" == *"test"* ]] || [[ "$file" == *".example"* ]] || [[ "$file" == *"design/"* ]] || [[ "$file" == *".jsx" ]] || [[ "$file" == *".html" ]]; then
+            # Allow patterns in the check-secrets script itself, test files,
+            # examples, design reference files, and API skill docs (the
+            # `.claude/skills/beebeeb-api.md` file legitimately names public
+            # key fields and key types while describing the API surface).
+            if [[ "$file" == *"check-secrets"* ]] || [[ "$file" == *"test"* ]] || [[ "$file" == *".example"* ]] || [[ "$file" == *"design/"* ]] || [[ "$file" == *".claude/skills/"* ]]; then
                 continue
             fi
             echo -e "${RED}BLOCKED: Possible secret in $file:${NC}"
