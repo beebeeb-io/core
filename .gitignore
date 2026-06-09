@@ -74,3 +74,6 @@ playwright-report/
 # Graphify local files (not committed)
 graphify-out/.graphify_root
 graphify-out/cache/
+
+# Local agent session/worktree state (not source)
+.claude/
