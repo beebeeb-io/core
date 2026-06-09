@@ -22,6 +22,15 @@ pub fn derive_master_key(password: &str, salt: &[u8]) -> Result<JsValue, JsError
     Ok(obj.into())
 }
 
+/// Generate a canonical share token (task 0708): 20 bytes of OS randomness as
+/// URL-safe-no-pad base64 (27 chars). Web mints this for A1 owner-recoverable
+/// shares so the client-supplied `token` matches the server's format exactly
+/// (single canonical impl shared with native/UniFFI via `beebeeb-core`).
+#[wasm_bindgen]
+pub fn generate_share_token() -> String {
+    beebeeb_core::share_token::generate_share_token()
+}
+
 /// Derive a per-file encryption key from a master key and file ID via
 /// HKDF-SHA256. Both `master_key` and `file_id` are raw byte slices.
 /// Returns the 32-byte file key as `Uint8Array`.

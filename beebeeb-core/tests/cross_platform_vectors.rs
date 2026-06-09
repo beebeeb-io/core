@@ -193,6 +193,48 @@ fn vector_x25519_share_key_exchange() {
 }
 
 // ---------------------------------------------------------------------------
+// 5b. Share-key derivation — additional file_id variants (task 0708)
+// ---------------------------------------------------------------------------
+// Locks `derive_share_key` against drift with more pinned (file_id ->
+// share_key) pairs, reusing the shared secret from `x25519_share_key_exchange`.
+// The expected keys were computed with the canonical HKDF-SHA256, salt
+// `b"beebeeb-share"` (see opaque::derive_share_key). ANY change to the share-key
+// derivation — including "normalizing" the salt — breaks these. DO NOT update
+// the expected hex to make a failing test pass: a failure here means a real
+// derivation change that would break every existing share. The salt is immutable.
+#[test]
+fn vector_share_key_additional_file_ids() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "x25519_share_key_exchange");
+    let shared_secret = bytes32(&v, "expected_shared_secret_hex");
+
+    // (file_id ASCII, expected derive_share_key hex). UUID-string file_ids match
+    // real usage; first/last cover the all-zero and all-f extremes.
+    let cases: [(&str, &str); 3] = [
+        (
+            "00000000-0000-0000-0000-000000000001",
+            "f04f12f81b40de29e4e3da1f30a1a5daad63d19b278d5fcc84e8e8ba09b6d47d",
+        ),
+        (
+            "11111111-2222-3333-4444-555555555555",
+            "fe2281a2fa983068292eb0e490ede5908cfb8dcb1c5c45e22cba2c360d3c4ad4",
+        ),
+        (
+            "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            "a0d3665318b4f07745e1d434241580605750a666e2bd99a52005eb65364c7e39",
+        ),
+    ];
+    for (file_id, expected_hex) in cases {
+        let got = derive_share_key(&shared_secret, file_id.as_bytes());
+        assert_eq!(
+            hex::encode(*got),
+            expected_hex,
+            "derive_share_key drift for file_id {file_id} — share-key derivation changed (salt must be immutable)"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 6. Recovery check
 // ---------------------------------------------------------------------------
 

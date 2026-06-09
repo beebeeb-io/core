@@ -238,6 +238,15 @@ pub fn derive_file_key(master_key: Vec<u8>, file_id: Vec<u8>) -> Result<Vec<u8>,
     Ok(fk.as_bytes().to_vec())
 }
 
+/// Generate a canonical share token (task 0708): 20 bytes of OS randomness as
+/// URL-safe-no-pad base64 (27 chars). Mobile mints this for A1 owner-recoverable
+/// shares so the client-supplied `token` matches the server's format exactly
+/// (single canonical impl shared with web/WASM via `beebeeb-core`).
+#[uniffi::export]
+pub fn generate_share_token() -> String {
+    beebeeb_core::share_token::generate_share_token()
+}
+
 // ---------------------------------------------------------------------------
 // Encryption
 // ---------------------------------------------------------------------------

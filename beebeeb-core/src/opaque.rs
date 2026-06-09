@@ -93,6 +93,16 @@ pub fn x25519_shared_secret(my_private: &[u8; 32], their_public: &[u8; 32]) -> R
     Ok(Zeroizing::new(*shared.as_bytes()))
 }
 
+/// Derive the per-share key from an X25519 shared secret and the file id.
+///
+/// **The HKDF salt `b"beebeeb-share"` is INTENTIONAL and IMMUTABLE — do NOT
+/// change or "normalize" it (task 0708).** Every share ever created derives its
+/// key with this exact salt, on every client (web via WASM, mobile via UniFFI,
+/// CLI/server native — all route through this single function). Changing the
+/// salt would silently re-derive a different key and make **every existing
+/// share permanently undecryptable**. The cross-platform share-key vector
+/// (`tests/cross_platform_vectors.rs` → `vectors.json`) pins this derivation
+/// across implementations; if you find yourself editing the salt, stop.
 pub fn derive_share_key(shared_secret: &[u8; 32], file_id: &[u8]) -> Zeroizing<[u8; 32]> {
     let hk = Hkdf::<Sha256>::new(Some(b"beebeeb-share"), shared_secret);
     let mut okm = Zeroizing::new([0u8; 32]);
