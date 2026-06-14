@@ -94,49 +94,153 @@ pub fn encrypt_name(
     serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
 }
 
-/// Decrypt a `name_encrypted` JSON string back to a plaintext filename.
+/// Decrypt a `name_encrypted` value from the server back to a plaintext
+/// filename. **This is the SINGLE source of truth for name decryption across
+/// every client** (CLI, desktop, mobile/UniFFI, web/WASM) — do not re-implement
+/// the format/key-derivation matrix anywhere else.
 ///
-/// Handles both formats:
-/// - New: `{"name":"file.pdf","mime_type":"application/pdf"}` (extracts `name`)
-/// - Legacy: bare filename string `"file.pdf"`
+/// The server stores `name_encrypted` in several shapes depending on which
+/// client wrote the file, and the per-file key may have been derived from two
+/// different byte representations of the same UUID. This function tries every
+/// combination and returns the first that decrypts to valid UTF-8.
+///
+/// ## Blob formats handled (per key)
+///
+/// 1. **Plaintext** — a bare string (not JSON). Legacy entries / server-created
+///    folders that predate client-side name encryption. Returned verbatim.
+/// 2. **Native `EncryptedBlob`** — JSON with `cipher_suite` + `nonce`/`ciphertext`
+///    as numeric byte arrays. Produced by the CLI and any `beebeeb-core` client
+///    serializing [`EncryptedBlob`] via serde.
+/// 3. **Web base64 blob** — JSON `{"nonce":"<base64>","ciphertext":"<base64>"}`
+///    with no `cipher_suite`. Produced by older web builds that base64-encoded
+///    the raw `Uint8Array`s (see `repos/web/src/lib/crypto.ts`). The numeric-array
+///    variant of this shape is also accepted (tolerant
+///    [`crate::metadata_wire::parse_encrypted_metadata`]).
+///
+/// ## Key derivation handled
+///
+/// - **String-UUID** — `derive_file_key(mk, file_id.as_bytes())`. Current web +
+///   current CLI + post-`bb repair` files (`TextEncoder.encode(fileId)` on web).
+/// - **Binary-UUID** — `derive_file_key(mk, uuid.as_bytes())` (the 16-byte form).
+///   Legacy pre-`bb repair` CLI files.
+///
+/// ## Fallback order (matches `repos/cli/src/crypto::decrypt_name`)
+///
+/// string-UUID key first, then binary-UUID key; within each key the native blob
+/// is tried before the web base64 blob. The plaintext fast-path short-circuits
+/// before any key derivation.
+///
+/// Returns `CoreError::Decryption` only when the value looks encrypted but no
+/// combination succeeds (wrong key, corrupt blob).
+///
+/// The decrypted plaintext envelope (`{"name":..,"mime_type":..}`) is unwrapped
+/// to the bare `name`; a legacy bare-filename plaintext is returned as-is.
 pub fn decrypt_name(
     master_key: &crate::kdf::MasterKey,
     file_id: &str,
     name_encrypted: &str,
 ) -> Result<String, CoreError> {
-    let blob: EncryptedBlob = serde_json::from_str(name_encrypted).map_err(|_| CoreError::Decryption)?;
-    let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
-    let decrypted = decrypt_metadata(&file_key, &blob)?;
-
-    // Extract filename from JSON metadata envelope, or return bare string
-    if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&decrypted) {
-        if let Some(name) = meta.get("name").and_then(|v| v.as_str()) {
-            return Ok(name.to_string());
-        }
-    }
-    Ok(decrypted)
+    decrypt_name_with_mime(master_key, file_id, name_encrypted).map(|(name, _)| name)
 }
 
-/// Decrypt a `name_encrypted` JSON string and return both filename and MIME type.
+/// Decrypt a `name_encrypted` value and return both the filename and the MIME
+/// type (if the encrypted payload carried one).
+///
+/// Handles the **exact same** format + key-derivation matrix as [`decrypt_name`]
+/// — they share one implementation. See [`decrypt_name`] for the full list of
+/// blob formats and key derivations covered.
 pub fn decrypt_name_with_mime(
     master_key: &crate::kdf::MasterKey,
     file_id: &str,
     name_encrypted: &str,
 ) -> Result<(String, Option<String>), CoreError> {
-    let blob: EncryptedBlob = serde_json::from_str(name_encrypted).map_err(|_| CoreError::Decryption)?;
-    let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
-    let decrypted = decrypt_metadata(&file_key, &blob)?;
-
-    if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&decrypted) {
-        let name = meta
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or(&decrypted)
-            .to_string();
-        let mime = meta.get("mime_type").and_then(|v| v.as_str()).map(|s| s.to_string());
-        return Ok((name, mime));
+    // Format 1 (fast path): plaintext — not JSON at all. Legacy / folder rows.
+    if !name_encrypted.starts_with('{') {
+        return Ok((name_encrypted.to_string(), None));
     }
-    Ok((decrypted, None))
+
+    // Derive both candidate per-file keys. The web app derives from the UUID
+    // *string* bytes (TextEncoder.encode(fileId)); the legacy CLI derived from
+    // the 16-byte *binary* UUID. Try string-UUID first (the common case), then
+    // binary-UUID. If `file_id` is not a valid UUID we can still try the
+    // string-derived key — only the binary derivation is skipped.
+    let key_from_string = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
+    let key_from_binary = file_id
+        .parse::<uuid::Uuid>()
+        .ok()
+        .map(|u| crate::kdf::derive_file_key(master_key, u.as_bytes()));
+
+    if let Some(result) = decrypt_name_envelope(&key_from_string, name_encrypted) {
+        return Ok(result);
+    }
+    if let Some(key) = key_from_binary {
+        if let Some(result) = decrypt_name_envelope(&key, name_encrypted) {
+            return Ok(result);
+        }
+    }
+
+    Err(CoreError::Decryption)
+}
+
+/// Decrypt a `name_encrypted` envelope with a **known** [`FileKey`], trying the
+/// native `EncryptedBlob` blob first and the web base64 `{nonce,ciphertext}`
+/// blob second, then unwrapping the `{name,mime_type}` metadata JSON.
+///
+/// Used directly by callers that already hold the file key (e.g. file-request
+/// uploads, where the content key `C` is recovered via the request-key path and
+/// the filename is encrypted under `FileKey(C)`, not a master-derived key).
+/// A bare (non-JSON) plaintext name passes straight through; otherwise returns
+/// `None` if neither blob format decrypts under this key.
+pub fn decrypt_name_with_key(file_key: &FileKey, name_encrypted: &str) -> Option<String> {
+    // Plaintext fast path — not JSON at all (legacy / folder rows).
+    if !name_encrypted.starts_with('{') {
+        return Some(name_encrypted.to_string());
+    }
+    decrypt_name_envelope(file_key, name_encrypted).map(|(name, _)| name)
+}
+
+/// Inner worker for [`decrypt_name_with_mime`] / [`decrypt_name_with_key`]:
+/// given one file key, try both supported JSON blob formats and return the
+/// unwrapped `(name, mime_type)` on the first that decrypts to valid UTF-8.
+fn decrypt_name_envelope(file_key: &FileKey, name_encrypted: &str) -> Option<(String, Option<String>)> {
+    // Format 2: native EncryptedBlob (cipher_suite + numeric-array fields).
+    if let Ok(blob) = serde_json::from_str::<EncryptedBlob>(name_encrypted) {
+        if let Ok(plaintext) = decrypt_metadata(file_key, &blob) {
+            return Some(unwrap_metadata_json(&plaintext));
+        }
+    }
+
+    // Format 3: web base64 (or numeric-array) `{nonce, ciphertext}` blob — no
+    // `cipher_suite`. `parse_encrypted_metadata` tolerantly handles both the
+    // base64-string and legacy numeric-array encodings.
+    if let Ok((nonce, ciphertext)) = crate::metadata_wire::parse_encrypted_metadata(name_encrypted) {
+        let blob = EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce,
+            ciphertext,
+        };
+        if let Ok(plaintext) = decrypt_metadata(file_key, &blob) {
+            return Some(unwrap_metadata_json(&plaintext));
+        }
+    }
+
+    None
+}
+
+/// Unwrap a decrypted plaintext into `(name, mime_type)`.
+///
+/// The ZK-safe envelope is `{"name":"report.pdf","mime_type":"application/pdf"}`;
+/// extract `name` (+ optional `mime_type`). A legacy bare-filename plaintext
+/// (not JSON, or JSON without a `name` field) is returned as the name with no
+/// MIME type.
+fn unwrap_metadata_json(decrypted: &str) -> (String, Option<String>) {
+    if let Ok(meta) = serde_json::from_str::<serde_json::Value>(decrypted) {
+        if let Some(name) = meta.get("name").and_then(|v| v.as_str()) {
+            let mime = meta.get("mime_type").and_then(|v| v.as_str()).map(|s| s.to_string());
+            return (name.to_string(), mime);
+        }
+    }
+    (decrypted.to_string(), None)
 }
 
 /// Batch-decrypt many file names in one call (task 0806).
@@ -846,5 +950,150 @@ mod tests {
             .expect("binary-form name should decrypt via 2nd attempt");
         assert_eq!(name, "legacy.bin");
         assert_eq!(mime.as_deref(), Some("application/octet-stream"));
+    }
+
+    // ── decrypt_name: multi-format / multi-key consolidation (the SINGLE
+    //    source of truth shared by CLI / desktop / mobile / web). ──────────────
+
+    use crate::kdf::MasterKey;
+
+    /// A fixed UUID file id used across the name-decryption format tests.
+    const NAME_FID: &str = "3e15382b-1111-2222-3333-444455556666";
+
+    fn name_master_key() -> MasterKey {
+        derive_master_key("test-password", b"test-salt-16bytes").unwrap()
+    }
+
+    /// Encode the plaintext into the **web base64** `{nonce, ciphertext}` blob
+    /// shape that older web builds produced (base64 strings, no `cipher_suite`).
+    /// Mirrors `repos/web/src/lib/crypto.ts` legacy serializer.
+    fn web_base64_blob(file_key: &FileKey, plaintext: &str) -> String {
+        use base64::Engine as _;
+        let blob = encrypt_metadata(file_key, plaintext).unwrap();
+        let b64 = base64::engine::general_purpose::STANDARD;
+        serde_json::json!({
+            "nonce": b64.encode(&blob.nonce),
+            "ciphertext": b64.encode(&blob.ciphertext),
+        })
+        .to_string()
+    }
+
+    /// Format 1: a bare (non-JSON) plaintext name passes straight through. This
+    /// is how server-created folders / pre-encryption rows are stored.
+    #[test]
+    fn decrypt_name_plaintext_passthrough() {
+        let mk = name_master_key();
+        assert_eq!(decrypt_name(&mk, NAME_FID, "Documents").unwrap(), "Documents");
+        let (n, mime) = decrypt_name_with_mime(&mk, NAME_FID, "Documents").unwrap();
+        assert_eq!(n, "Documents");
+        assert_eq!(mime, None);
+    }
+
+    /// Format 2 + string-UUID key: the canonical CLI/core path —
+    /// `encrypt_name` produces a native EncryptedBlob with the `{name,mime}`
+    /// envelope; `decrypt_name` round-trips it.
+    #[test]
+    fn decrypt_name_native_blob_string_uuid_roundtrip() {
+        let mk = name_master_key();
+        let enc = encrypt_name(&mk, NAME_FID, "report.pdf", Some("application/pdf")).unwrap();
+        assert_eq!(decrypt_name(&mk, NAME_FID, &enc).unwrap(), "report.pdf");
+        let (name, mime) = decrypt_name_with_mime(&mk, NAME_FID, &enc).unwrap();
+        assert_eq!(name, "report.pdf");
+        assert_eq!(mime.as_deref(), Some("application/pdf"));
+    }
+
+    /// Format 3 + string-UUID key: the **web app base64 blob** — the format
+    /// that was failing for web-app-created files before this consolidation.
+    /// The web client derives the file key from the UUID *string* bytes, so the
+    /// string-UUID derivation must match.
+    #[test]
+    fn decrypt_name_web_base64_blob_string_uuid() {
+        let mk = name_master_key();
+        let fk = derive_file_key(&mk, NAME_FID.as_bytes());
+        // Web encrypts the `{name,mime_type}` JSON envelope, base64-wrapped.
+        let envelope = serde_json::json!({"name": "vacation.jpg", "mime_type": "image/jpeg"}).to_string();
+        let blob = web_base64_blob(&fk, &envelope);
+        assert!(!blob.contains("cipher_suite"), "web blob has no cipher_suite field");
+
+        assert_eq!(decrypt_name(&mk, NAME_FID, &blob).unwrap(), "vacation.jpg");
+        let (name, mime) = decrypt_name_with_mime(&mk, NAME_FID, &blob).unwrap();
+        assert_eq!(name, "vacation.jpg");
+        assert_eq!(mime.as_deref(), Some("image/jpeg"));
+    }
+
+    /// Format 3 web base64 blob carrying a **bare filename** plaintext (the
+    /// oldest web shape, pre-`{name,mime}` envelope) — returned as-is, no MIME.
+    #[test]
+    fn decrypt_name_web_base64_blob_bare_filename() {
+        let mk = name_master_key();
+        let fk = derive_file_key(&mk, NAME_FID.as_bytes());
+        let blob = web_base64_blob(&fk, "legacy-name.txt");
+        assert_eq!(decrypt_name(&mk, NAME_FID, &blob).unwrap(), "legacy-name.txt");
+        let (_, mime) = decrypt_name_with_mime(&mk, NAME_FID, &blob).unwrap();
+        assert_eq!(mime, None);
+    }
+
+    /// Native blob encrypted under the **binary-UUID** key (legacy pre-`bb
+    /// repair` CLI file): `decrypt_name` must fall back to the binary derivation.
+    #[test]
+    fn decrypt_name_native_blob_binary_uuid_fallback() {
+        let mk = name_master_key();
+        let uuid: uuid::Uuid = NAME_FID.parse().unwrap();
+        let fk = derive_file_key(&mk, uuid.as_bytes());
+        let envelope = serde_json::json!({"name": "old.doc", "mime_type": null}).to_string();
+        let blob = encrypt_metadata(&fk, &envelope).unwrap();
+        let blob_json = serde_json::to_string(&blob).unwrap();
+        assert_eq!(decrypt_name(&mk, NAME_FID, &blob_json).unwrap(), "old.doc");
+    }
+
+    /// Web base64 blob encrypted under the **binary-UUID** key — both legacy
+    /// dimensions at once (web shape + binary derivation).
+    #[test]
+    fn decrypt_name_web_base64_blob_binary_uuid_fallback() {
+        let mk = name_master_key();
+        let uuid: uuid::Uuid = NAME_FID.parse().unwrap();
+        let fk = derive_file_key(&mk, uuid.as_bytes());
+        let blob = web_base64_blob(&fk, "binary-key.png");
+        assert_eq!(decrypt_name(&mk, NAME_FID, &blob).unwrap(), "binary-key.png");
+    }
+
+    /// A wrong master key fails cleanly with `Decryption` after trying every
+    /// (key, format) combination — no panic, no partial result.
+    #[test]
+    fn decrypt_name_wrong_key_fails() {
+        let mk = name_master_key();
+        let enc = encrypt_name(&mk, NAME_FID, "secret.txt", None).unwrap();
+        let wrong = derive_master_key("other-password", b"other-salt-16byte").unwrap();
+        assert!(matches!(
+            decrypt_name(&wrong, NAME_FID, &enc),
+            Err(CoreError::Decryption)
+        ));
+    }
+
+    /// A non-UUID file id still decrypts via the string-UUID key (binary
+    /// derivation is simply skipped when the id won't parse as a UUID).
+    #[test]
+    fn decrypt_name_non_uuid_file_id_uses_string_key() {
+        let mk = name_master_key();
+        let fid = "not-a-uuid-just-a-string";
+        let enc = encrypt_name(&mk, fid, "named.bin", None).unwrap();
+        assert_eq!(decrypt_name(&mk, fid, &enc).unwrap(), "named.bin");
+    }
+
+    /// `decrypt_name_with_key` (the known-file-key entry point used by
+    /// file-request uploads) handles both the native and web base64 blobs.
+    #[test]
+    fn decrypt_name_with_key_handles_both_blob_formats() {
+        let mk = name_master_key();
+        let fk = derive_file_key(&mk, NAME_FID.as_bytes());
+
+        let native = encrypt_name(&mk, NAME_FID, "via-key.pdf", Some("application/pdf")).unwrap();
+        assert_eq!(decrypt_name_with_key(&fk, &native).as_deref(), Some("via-key.pdf"));
+
+        let web = web_base64_blob(&fk, &serde_json::json!({"name": "web-via-key.txt"}).to_string());
+        assert_eq!(decrypt_name_with_key(&fk, &web).as_deref(), Some("web-via-key.txt"));
+
+        // Plaintext fast path also works on the known-key entry point.
+        assert_eq!(decrypt_name_with_key(&fk, "Inbox").as_deref(), Some("Inbox"));
     }
 }
