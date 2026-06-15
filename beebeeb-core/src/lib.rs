@@ -17,6 +17,7 @@ pub mod opaque;
 pub mod opaque_protocol;
 pub mod pdf;
 pub mod recovery;
+pub mod search_index;
 pub mod share_token;
 pub mod sync;
 pub mod thumbnail;

@@ -102,6 +102,35 @@ so mobile/desktop drop their bespoke encrypt loops:
   + `BeebeebCore.swift` + xcframework) / `build-android.sh`. Grep the regenerated header
   for the new symbols before shipping (the 0426 12-symbol drift lesson).
 
+## Encrypted search index (`search_index.rs`)
+
+The shared, client-built, E2E-encrypted file-name search primitive (task 0778 part B).
+The server is zero-knowledge — names are ciphertext there — so the index is built and
+queried **on-device** in core, identically for every client (WASM/web, UniFFI/mobile,
+CLI/desktop). No plaintext token or name ever leaves the device.
+
+- **`tokenize(name) -> Tokenized`**: lowercase + Unicode NFKD + strip combining marks
+  (accent-fold, e.g. `Café` → `cafe`), split on separators (space `_` `-` `.`) and
+  camelCase boundaries, de-dup preserving order. Keeps the full normalized name for the
+  substring fallback (so `"nf"` matches `NF_song.mp3` and `"ong"` matches `song.mp3`).
+- **`SearchIndex`**: `build(&[(file_id, name)], num_shards)`, incremental `upsert(file_id, name)`
+  / `remove(file_id)` (both return the **dirty bucket set** — re-encrypt only those), and
+  `query(term) -> BTreeSet<file_id>` (exact + prefix + substring; flat over the whole vault,
+  so a term in a deeply nested folder is still found).
+- **Sharding**: deterministic `bucket = blake3(key)[..8] % num_shards` (`DEFAULT_NUM_SHARDS = 64`)
+  for both tokens and file_ids; each bucket serializes to one or more **pages ≤ 128 KB after
+  encryption** (a hot token splits across pages; loader unions them). `num_shards` is fixed
+  per index — changing it needs a full rebuild.
+- **Encryption**: per-shard key via `kdf::derive_search_index_key(master_key, bucket)` —
+  HKDF-SHA256 with a domain-separation label (`beebeeb-search-index-shard-v1`) **distinct**
+  from the per-file key label. `encrypt_shards` / `encrypt_buckets(dirty)` →
+  `Vec<EncryptedShard{bucket, page, blob}>` where `blob = nonce||ciphertext||tag` (reuses the
+  `encrypt_chunk_raw` AES-256-GCM primitive); `from_encrypted_shards` rebuilds.
+- **Out of scope (follow-ups)**: server `search_index_shards` storage + list-versions endpoint;
+  WASM/UniFFI bindings + client query integration; Part A (recursive in-app search) is a
+  separate ts-clients task.
+- Adds one dependency: `unicode-normalization` (pure-Rust, wasm-safe) for NFKD.
+
 ## Security invariants
 
 - MasterKey and FileKey are NOT Clone — prevents accidental key copies in memory
