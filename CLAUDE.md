@@ -126,9 +126,22 @@ CLI/desktop). No plaintext token or name ever leaves the device.
   from the per-file key label. `encrypt_shards` / `encrypt_buckets(dirty)` →
   `Vec<EncryptedShard{bucket, page, blob}>` where `blob = nonce||ciphertext||tag` (reuses the
   `encrypt_chunk_raw` AES-256-GCM primitive); `from_encrypted_shards` rebuilds.
-- **Out of scope (follow-ups)**: server `search_index_shards` storage + list-versions endpoint;
-  WASM/UniFFI bindings + client query integration; Part A (recursive in-app search) is a
-  separate ts-clients task.
+- **Client bindings (task 0784).** Exposed through both surfaces — bindings only, the
+  algorithm/crypto above are unchanged:
+  - **UniFFI** (`beebeeb-uniffi`): `SearchIndexHandle` (`#[uniffi::Object]`, `Mutex<SearchIndex>`)
+    with `new`/`build`/`from_encrypted_shards` constructors + `upsert`/`remove` (→ dirty buckets
+    `Vec<u32>`) / `query` (→ `Vec<String>`) / `encrypt_shards` / `encrypt_buckets` / `num_shards`
+    / `file_count`. Records `SearchFileEntry`, `EncryptedShardDto{bucket,page,blob}`. The master
+    key is borrowed as `&MasterKeyHandle` (raw bytes never cross FFI). Regenerate Swift/Kotlin via
+    `build-ios.sh` / `build-android.sh` (the committed `bindings/kotlin/...kt` + the Swift/xcframework
+    artifacts) — run in the canonical toolchain so ktlint/uniffi versions match.
+  - **WASM** (`beebeeb-wasm`): `WasmSearchIndex` (same surface; master key as 32 raw bytes,
+    `EncryptedShard` ↔ `{bucket,page,blob:Uint8Array}` JS objects, `query` → `string[]`).
+  - **Sync helper** (`search_sync::diff_manifest`, also exposed as UniFFI `searchIndexSyncPlan` /
+    WASM `searchIndexSyncPlan`): pure manifest-diff → `{to_put,to_get,to_delete}` shard coords (LWW).
+- **Out of scope (follow-ups)**: client wiring (mobile/web building on unlock, syncing shards via
+  task 0783, querying); migration off the old single-blob `/api/v1/index`; Part A recursive in-app
+  search (ts-clients).
 - Adds one dependency: `unicode-normalization` (pure-Rust, wasm-safe) for NFKD.
 
 ## Security invariants
