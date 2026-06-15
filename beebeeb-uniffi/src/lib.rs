@@ -2559,3 +2559,255 @@ impl FileProviderCacheHandle {
         Ok(count as u32)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Search index (task 0784) — UniFFI binding for beebeeb_core::search_index.
+// Bindings only; the 0778-B algorithm + crypto are unchanged.
+// ---------------------------------------------------------------------------
+
+use beebeeb_core::{search_index, search_sync};
+
+/// One file's (id, name) pair for [`SearchIndexHandle::build`].
+#[derive(uniffi::Record)]
+pub struct SearchFileEntry {
+    pub file_id: String,
+    pub name: String,
+}
+
+/// An encrypted shard page: opaque ciphertext `blob` plus its (non-secret)
+/// `bucket`/`page` coordinates. `blob` is `nonce || ciphertext || tag`.
+#[derive(uniffi::Record)]
+pub struct EncryptedShardDto {
+    pub bucket: u32,
+    pub page: u32,
+    pub blob: Vec<u8>,
+}
+
+fn shard_to_dto(s: search_index::EncryptedShard) -> EncryptedShardDto {
+    EncryptedShardDto {
+        bucket: s.bucket,
+        page: s.page,
+        blob: s.blob,
+    }
+}
+fn dto_to_shard(d: EncryptedShardDto) -> search_index::EncryptedShard {
+    search_index::EncryptedShard {
+        bucket: d.bucket,
+        page: d.page,
+        blob: d.blob,
+    }
+}
+
+/// A mutable client-side search index. Build it from a file list, mutate it
+/// incrementally (`upsert`/`remove` return the dirty bucket set), query it, and
+/// (de)serialize it to encrypted shards for sync. Crypto runs in core against the
+/// borrowed master key — raw key bytes never cross FFI.
+#[derive(uniffi::Object)]
+pub struct SearchIndexHandle {
+    inner: Mutex<search_index::SearchIndex>,
+}
+
+#[uniffi::export]
+impl SearchIndexHandle {
+    /// Empty index with the given shard count (clamped to ≥ 1).
+    #[uniffi::constructor]
+    pub fn new(num_shards: u32) -> Arc<Self> {
+        Arc::new(Self {
+            inner: Mutex::new(search_index::SearchIndex::new(num_shards)),
+        })
+    }
+
+    /// Build from `(file_id, name)` pairs.
+    #[uniffi::constructor]
+    pub fn build(files: Vec<SearchFileEntry>, num_shards: u32) -> Arc<Self> {
+        let pairs: Vec<(String, String)> = files.into_iter().map(|f| (f.file_id, f.name)).collect();
+        Arc::new(Self {
+            inner: Mutex::new(search_index::SearchIndex::build(&pairs, num_shards)),
+        })
+    }
+
+    /// Reconstruct from encrypted shards (decrypts each with the master key).
+    /// `num_shards` must match the value the shards were built with.
+    #[uniffi::constructor]
+    pub fn from_encrypted_shards(
+        master_key: &MasterKeyHandle,
+        shards: Vec<EncryptedShardDto>,
+        num_shards: u32,
+    ) -> Result<Arc<Self>, CryptoError> {
+        let core_shards: Vec<search_index::EncryptedShard> = shards.into_iter().map(dto_to_shard).collect();
+        let idx = master_key
+            .with_key(|mk| search_index::SearchIndex::from_encrypted_shards(mk, &core_shards, num_shards))??;
+        Ok(Arc::new(Self { inner: Mutex::new(idx) }))
+    }
+
+    /// Shard count this index uses.
+    pub fn num_shards(&self) -> u32 {
+        self.inner.lock().unwrap().num_shards()
+    }
+
+    /// Number of indexed files.
+    pub fn file_count(&self) -> u64 {
+        self.inner.lock().unwrap().file_count() as u64
+    }
+
+    /// Insert or update a file (add or rename). Returns the buckets whose shards
+    /// changed — re-encrypt only these for an incremental sync.
+    pub fn upsert(&self, file_id: String, name: String) -> Vec<u32> {
+        self.inner.lock().unwrap().upsert(&file_id, &name).into_iter().collect()
+    }
+
+    /// Remove a file. Returns the dirty bucket set (empty if not indexed).
+    pub fn remove(&self, file_id: String) -> Vec<u32> {
+        self.inner.lock().unwrap().remove(&file_id).into_iter().collect()
+    }
+
+    /// Search; returns the matching `file_id`s.
+    pub fn query(&self, term: String) -> Vec<String> {
+        self.inner.lock().unwrap().query(&term).into_iter().collect()
+    }
+
+    /// Encrypt every non-empty shard page of the index.
+    pub fn encrypt_shards(&self, master_key: &MasterKeyHandle) -> Result<Vec<EncryptedShardDto>, CryptoError> {
+        let idx = self.inner.lock().unwrap();
+        let shards = master_key.with_key(|mk| idx.encrypt_shards(mk))??;
+        Ok(shards.into_iter().map(shard_to_dto).collect())
+    }
+
+    /// Encrypt only the given buckets' shard pages (incremental sync) — pass the
+    /// dirty set from `upsert`/`remove`. An emptied bucket yields no pages.
+    pub fn encrypt_buckets(
+        &self,
+        master_key: &MasterKeyHandle,
+        buckets: Vec<u32>,
+    ) -> Result<Vec<EncryptedShardDto>, CryptoError> {
+        let set: std::collections::BTreeSet<u32> = buckets.into_iter().collect();
+        let idx = self.inner.lock().unwrap();
+        let shards = master_key.with_key(|mk| idx.encrypt_buckets(mk, &set))??;
+        Ok(shards.into_iter().map(shard_to_dto).collect())
+    }
+}
+
+/// A shard reference (coordinate + last-known version) for [`search_index_sync_plan`].
+#[derive(uniffi::Record)]
+pub struct ShardRefDto {
+    pub bucket: u32,
+    pub page: u32,
+    pub version: i64,
+}
+
+/// A shard coordinate — a target in a [`SyncPlanDto`].
+#[derive(uniffi::Record)]
+pub struct ShardCoordDto {
+    pub bucket: u32,
+    pub page: u32,
+}
+
+/// The shard sync plan: coordinates to PUT / GET / DELETE on the server.
+#[derive(uniffi::Record)]
+pub struct SyncPlanDto {
+    pub to_put: Vec<ShardCoordDto>,
+    pub to_get: Vec<ShardCoordDto>,
+    pub to_delete: Vec<ShardCoordDto>,
+}
+
+/// Compute which shards to PUT/GET/DELETE to converge the client's `local` set
+/// with the server `remote` manifest (last-writer-wins). `local_is_authoritative`
+/// = true treats a server-only coordinate as a stale shard to DELETE (use after a
+/// full local rebuild); false treats it as a shard to GET.
+#[uniffi::export]
+pub fn search_index_sync_plan(
+    local: Vec<ShardRefDto>,
+    remote: Vec<ShardRefDto>,
+    local_is_authoritative: bool,
+) -> SyncPlanDto {
+    let to_ref = |r: &ShardRefDto| search_sync::ShardRef {
+        bucket: r.bucket,
+        page: r.page,
+        version: r.version,
+    };
+    let local: Vec<_> = local.iter().map(to_ref).collect();
+    let remote: Vec<_> = remote.iter().map(to_ref).collect();
+    let plan = search_sync::diff_manifest(&local, &remote, local_is_authoritative);
+    let to_coord = |c: &search_sync::ShardCoord| ShardCoordDto {
+        bucket: c.bucket,
+        page: c.page,
+    };
+    SyncPlanDto {
+        to_put: plan.to_put.iter().map(to_coord).collect(),
+        to_get: plan.to_get.iter().map(to_coord).collect(),
+        to_delete: plan.to_delete.iter().map(to_coord).collect(),
+    }
+}
+
+#[cfg(test)]
+mod search_index_binding_tests {
+    use super::*;
+
+    fn test_master_key() -> Arc<MasterKeyHandle> {
+        MasterKeyHandle::from_keychain_bytes(vec![7u8; 32]).unwrap()
+    }
+
+    #[test]
+    fn round_trip_through_binding_finds_nested_term() {
+        let mk = test_master_key();
+        let files = vec![
+            SearchFileEntry {
+                file_id: "top".into(),
+                name: "readme.txt".into(),
+            },
+            SearchFileEntry {
+                file_id: "deep".into(),
+                name: "buried_treasure_xyzzy.txt".into(),
+            },
+        ];
+        let idx = SearchIndexHandle::build(files, search_index::DEFAULT_NUM_SHARDS);
+
+        let shards = idx.encrypt_shards(&mk).unwrap();
+        assert!(!shards.is_empty());
+        let restored = SearchIndexHandle::from_encrypted_shards(&mk, shards, idx.num_shards()).unwrap();
+
+        assert_eq!(restored.query("xyzzy".into()), vec!["deep".to_string()]);
+        assert_eq!(restored.file_count(), 2);
+
+        // Incremental: dirty buckets drive a partial re-encrypt.
+        let dirty = restored.upsert("new".into(), "another_file.pdf".into());
+        assert!(!dirty.is_empty());
+        assert!(!restored.encrypt_buckets(&mk, dirty).unwrap().is_empty());
+        assert_eq!(restored.query("another".into()), vec!["new".to_string()]);
+    }
+
+    #[test]
+    fn wrong_master_key_fails_decrypt_through_binding() {
+        let mk = test_master_key();
+        let idx = SearchIndexHandle::build(
+            vec![SearchFileEntry {
+                file_id: "a".into(),
+                name: "secret.txt".into(),
+            }],
+            search_index::DEFAULT_NUM_SHARDS,
+        );
+        let shards = idx.encrypt_shards(&mk).unwrap();
+        let wrong = MasterKeyHandle::from_keychain_bytes(vec![9u8; 32]).unwrap();
+        assert!(SearchIndexHandle::from_encrypted_shards(&wrong, shards, idx.num_shards()).is_err());
+    }
+
+    #[test]
+    fn sync_plan_through_binding() {
+        let local = vec![ShardRefDto {
+            bucket: 1,
+            page: 0,
+            version: 2,
+        }];
+        let remote = vec![ShardRefDto {
+            bucket: 3,
+            page: 0,
+            version: 1,
+        }];
+        let plan = search_index_sync_plan(local, remote, true);
+        assert_eq!(plan.to_put.len(), 1);
+        assert_eq!(plan.to_put[0].bucket, 1);
+        assert_eq!(plan.to_delete.len(), 1);
+        assert_eq!(plan.to_delete[0].bucket, 3);
+        assert!(plan.to_get.is_empty());
+    }
+}

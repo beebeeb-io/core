@@ -783,6 +783,209 @@ fn encrypted_blob_to_js(blob: &EncryptedBlob) -> Result<JsValue, JsError> {
 }
 
 // ---------------------------------------------------------------------------
+// Search index (task 0784) — wasm-bindgen wrapper for search_index.
+// Bindings only; the 0778-B algorithm + crypto are unchanged.
+// ---------------------------------------------------------------------------
+
+use beebeeb_core::search_index;
+use beebeeb_core::search_sync;
+
+fn reflect_string(item: &JsValue, key: &str) -> Result<String, JsError> {
+    js_sys::Reflect::get(item, &JsValue::from_str(key))
+        .ok()
+        .and_then(|v| v.as_string())
+        .ok_or_else(|| JsError::new(&format!("each entry needs a string `{key}`")))
+}
+
+fn reflect_u32(item: &JsValue, key: &str) -> Result<u32, JsError> {
+    js_sys::Reflect::get(item, &JsValue::from_str(key))
+        .ok()
+        .and_then(|v| v.as_f64())
+        .map(|n| n as u32)
+        .ok_or_else(|| JsError::new(&format!("each shard needs a number `{key}`")))
+}
+
+/// `[{bucket, page, blob: Uint8Array}]` — the JS shape of an encrypted shard list.
+fn shards_to_js(shards: &[search_index::EncryptedShard]) -> JsValue {
+    let arr = js_sys::Array::new();
+    for s in shards {
+        let obj = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(&obj, &"bucket".into(), &JsValue::from_f64(s.bucket as f64));
+        let _ = js_sys::Reflect::set(&obj, &"page".into(), &JsValue::from_f64(s.page as f64));
+        let _ = js_sys::Reflect::set(&obj, &"blob".into(), &js_sys::Uint8Array::from(&s.blob[..]).into());
+        arr.push(&obj);
+    }
+    arr.into()
+}
+
+fn js_to_shards(shards: &JsValue) -> Result<Vec<search_index::EncryptedShard>, JsError> {
+    let arr = js_sys::Array::from(shards);
+    let mut out = Vec::with_capacity(arr.length() as usize);
+    for item in arr.iter() {
+        let bucket = reflect_u32(&item, "bucket")?;
+        let page = reflect_u32(&item, "page")?;
+        let blob_val = js_sys::Reflect::get(&item, &"blob".into()).map_err(|_| JsError::new("shard missing `blob`"))?;
+        let blob = js_sys::Uint8Array::new(&blob_val).to_vec();
+        out.push(search_index::EncryptedShard { bucket, page, blob });
+    }
+    Ok(out)
+}
+
+/// A stateful, client-side search index over a vault's file names.
+///
+/// Build it from a file list, mutate it incrementally (`upsert`/`remove` return
+/// the dirty bucket set as a `Uint32Array`), query it (returns a `string[]` of
+/// file_ids), and (de)serialize it to encrypted shards for sync. The master key
+/// crosses as 32 raw bytes; crypto runs in core.
+#[wasm_bindgen]
+pub struct WasmSearchIndex {
+    inner: search_index::SearchIndex,
+}
+
+#[wasm_bindgen]
+impl WasmSearchIndex {
+    /// Empty index with the given shard count (clamped to ≥ 1).
+    #[wasm_bindgen(constructor)]
+    pub fn new(num_shards: u32) -> WasmSearchIndex {
+        Self {
+            inner: search_index::SearchIndex::new(num_shards),
+        }
+    }
+
+    /// Build from `files` — a JS array of `{ fileId, name }` objects.
+    pub fn build(files: JsValue, num_shards: u32) -> Result<WasmSearchIndex, JsError> {
+        let arr = js_sys::Array::from(&files);
+        let mut pairs: Vec<(String, String)> = Vec::with_capacity(arr.length() as usize);
+        for item in arr.iter() {
+            pairs.push((reflect_string(&item, "fileId")?, reflect_string(&item, "name")?));
+        }
+        Ok(Self {
+            inner: search_index::SearchIndex::build(&pairs, num_shards),
+        })
+    }
+
+    /// Reconstruct from encrypted shards (`[{bucket, page, blob: Uint8Array}]`),
+    /// decrypting each with the 32-byte master key.
+    #[wasm_bindgen(js_name = fromEncryptedShards)]
+    pub fn from_encrypted_shards(
+        master_key: &[u8],
+        shards: JsValue,
+        num_shards: u32,
+    ) -> Result<WasmSearchIndex, JsError> {
+        let mk = master_key_from_slice(master_key)?;
+        let core_shards = js_to_shards(&shards)?;
+        let inner = search_index::SearchIndex::from_encrypted_shards(&mk, &core_shards, num_shards)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    /// Shard count this index uses.
+    #[wasm_bindgen(getter, js_name = numShards)]
+    pub fn num_shards(&self) -> u32 {
+        self.inner.num_shards()
+    }
+
+    /// Number of indexed files.
+    #[wasm_bindgen(getter, js_name = fileCount)]
+    pub fn file_count(&self) -> u32 {
+        self.inner.file_count() as u32
+    }
+
+    /// Insert or update a file. Returns the dirty bucket set (`Uint32Array`).
+    pub fn upsert(&mut self, file_id: String, name: String) -> Vec<u32> {
+        self.inner.upsert(&file_id, &name).into_iter().collect()
+    }
+
+    /// Remove a file. Returns the dirty bucket set (`Uint32Array`).
+    pub fn remove(&mut self, file_id: String) -> Vec<u32> {
+        self.inner.remove(&file_id).into_iter().collect()
+    }
+
+    /// Search; returns the matching file_ids as a `string[]`.
+    pub fn query(&self, term: String) -> Vec<String> {
+        self.inner.query(&term).into_iter().collect()
+    }
+
+    /// Encrypt every non-empty shard page → `[{bucket, page, blob: Uint8Array}]`.
+    #[wasm_bindgen(js_name = encryptShards)]
+    pub fn encrypt_shards(&self, master_key: &[u8]) -> Result<JsValue, JsError> {
+        let mk = master_key_from_slice(master_key)?;
+        let shards = self
+            .inner
+            .encrypt_shards(&mk)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(shards_to_js(&shards))
+    }
+
+    /// Encrypt only the given buckets (incremental sync) — pass the dirty set.
+    #[wasm_bindgen(js_name = encryptBuckets)]
+    pub fn encrypt_buckets(&self, master_key: &[u8], buckets: Vec<u32>) -> Result<JsValue, JsError> {
+        let mk = master_key_from_slice(master_key)?;
+        let set: std::collections::BTreeSet<u32> = buckets.into_iter().collect();
+        let shards = self
+            .inner
+            .encrypt_buckets(&mk, &set)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(shards_to_js(&shards))
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ShardRefJs {
+    bucket: u32,
+    page: u32,
+    version: i64,
+}
+
+#[derive(serde::Serialize)]
+struct ShardCoordJs {
+    bucket: u32,
+    page: u32,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncPlanJs {
+    to_put: Vec<ShardCoordJs>,
+    to_get: Vec<ShardCoordJs>,
+    to_delete: Vec<ShardCoordJs>,
+}
+
+/// Compute the shard sync plan to converge `local` (the client's shard set) with
+/// `remote` (the server manifest from `GET /api/v1/search-index/shards`), LWW.
+/// `local`/`remote` are arrays of `{ bucket, page, version }`; returns
+/// `{ toPut, toGet, toDelete }` arrays of `{ bucket, page }`. See the core
+/// `search_sync::diff_manifest` doc for the `localIsAuthoritative` semantics.
+#[wasm_bindgen(js_name = searchIndexSyncPlan)]
+pub fn search_index_sync_plan(
+    local: JsValue,
+    remote: JsValue,
+    local_is_authoritative: bool,
+) -> Result<JsValue, JsError> {
+    let local: Vec<ShardRefJs> = serde_wasm_bindgen::from_value(local).map_err(|e| JsError::new(&e.to_string()))?;
+    let remote: Vec<ShardRefJs> = serde_wasm_bindgen::from_value(remote).map_err(|e| JsError::new(&e.to_string()))?;
+    let to_ref = |r: &ShardRefJs| search_sync::ShardRef {
+        bucket: r.bucket,
+        page: r.page,
+        version: r.version,
+    };
+    let l: Vec<_> = local.iter().map(to_ref).collect();
+    let rem: Vec<_> = remote.iter().map(to_ref).collect();
+    let plan = search_sync::diff_manifest(&l, &rem, local_is_authoritative);
+    let to_coord = |c: &search_sync::ShardCoord| ShardCoordJs {
+        bucket: c.bucket,
+        page: c.page,
+    };
+    let out = SyncPlanJs {
+        to_put: plan.to_put.iter().map(to_coord).collect(),
+        to_get: plan.to_get.iter().map(to_coord).collect(),
+        to_delete: plan.to_delete.iter().map(to_coord).collect(),
+    };
+    serde_wasm_bindgen::to_value(&out).map_err(|e| JsError::new(&e.to_string()))
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
