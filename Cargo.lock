@@ -230,7 +230,7 @@ dependencies = [
  "hkdf",
  "image",
  "opaque-ke",
- "rand 0.8.6",
+ "rand 0.9.4",
  "reed-solomon-erasure",
  "rusqlite",
  "serde",
