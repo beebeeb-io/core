@@ -111,6 +111,28 @@ pub fn derive_file_key(master_key: &MasterKey, file_id: &[u8]) -> FileKey {
     FileKey { bytes: *okm }
 }
 
+/// Derive a per-shard key for the encrypted search index (task 0778).
+///
+/// Each shard (bucket) of the search index is encrypted under its own key,
+/// derived from the master key via HKDF-SHA256 with a domain-separation label
+/// (`beebeeb-search-index-shard-v1`) distinct from the per-file label. This
+/// keeps the index keyspace cryptographically separate from file keys and
+/// limits the blast radius to a single shard. The returned `FileKey` is the
+/// same 32-byte AEAD key type used by `encrypt_chunk` / `decrypt_chunk`; it is
+/// zeroized on drop.
+pub fn derive_search_index_key(master_key: &MasterKey, bucket: u32) -> FileKey {
+    let hk = Hkdf::<Sha256>::new(None, master_key.as_bytes());
+
+    let mut info = Vec::with_capacity(29 + 4);
+    info.extend_from_slice(b"beebeeb-search-index-shard-v1");
+    info.extend_from_slice(&bucket.to_le_bytes());
+
+    let mut okm = Zeroizing::new([0u8; 32]);
+    hk.expand(&info, &mut *okm)
+        .expect("HKDF-SHA256 expand for 32 bytes cannot fail");
+    FileKey { bytes: *okm }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,5 +206,31 @@ mod tests {
     fn empty_password_is_valid() {
         let result = derive_master_key("", TEST_SALT);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn search_index_key_deterministic() {
+        let mk = derive_master_key("password", TEST_SALT).unwrap();
+        let k1 = derive_search_index_key(&mk, 7);
+        let k2 = derive_search_index_key(&mk, 7);
+        assert_eq!(k1.as_bytes(), k2.as_bytes());
+    }
+
+    #[test]
+    fn search_index_keys_differ_per_bucket() {
+        let mk = derive_master_key("password", TEST_SALT).unwrap();
+        let k1 = derive_search_index_key(&mk, 0);
+        let k2 = derive_search_index_key(&mk, 1);
+        assert_ne!(k1.as_bytes(), k2.as_bytes());
+    }
+
+    #[test]
+    fn search_index_key_is_domain_separated_from_file_key() {
+        // Same master key, and a file_id whose bytes equal the bucket's LE bytes,
+        // must NOT collide with the search-index derivation (distinct HKDF info).
+        let mk = derive_master_key("password", TEST_SALT).unwrap();
+        let sik = derive_search_index_key(&mk, 0);
+        let fk = derive_file_key(&mk, &0u32.to_le_bytes());
+        assert_ne!(sik.as_bytes(), fk.as_bytes());
     }
 }
