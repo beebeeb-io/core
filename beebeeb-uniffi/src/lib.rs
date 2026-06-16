@@ -156,6 +156,25 @@ pub struct DecryptedNameWithMime {
     pub mime_type: Option<String>,
 }
 
+/// One `(file_id, name_encrypted)` input to the batch `decrypt_names` (task 0806).
+#[derive(uniffi::Record)]
+pub struct BatchNameItem {
+    /// Hyphenated-lowercase UUID string (the server-canonical file id).
+    pub file_id: String,
+    /// The `name_encrypted` JSON envelope.
+    pub name_encrypted: String,
+}
+
+/// One result of the batch `decrypt_names` (task 0806). On success `name` is set
+/// (`mime_type` optional) and `error` is None; on failure `error` is set and the
+/// others are None. One failed item never fails the whole batch.
+#[derive(uniffi::Record)]
+pub struct BatchNameResult {
+    pub name: Option<String>,
+    pub mime_type: Option<String>,
+    pub error: Option<String>,
+}
+
 /// Parsed encrypted metadata payload (nonce + ciphertext bytes).
 #[derive(uniffi::Record)]
 pub struct EncryptedMetadataParts {
@@ -733,6 +752,49 @@ impl MasterKeyHandle {
             .with_key(|mk| encrypt::decrypt_name_with_mime(mk, &file_id, &name_encrypted))?
             .map_err(CryptoError::from)?;
         Ok(DecryptedNameWithMime { name, mime_type: mime })
+    }
+
+    /// Batch-decrypt many file names in ONE FFI call (task 0806 — folder-load
+    /// perf). The key never crosses FFI (derived in core from this handle). Each
+    /// result mirrors `decrypt_name_with_mime` + tries both the string-UUID and
+    /// legacy binary-UUID key forms; a bad item yields `error` for that item only.
+    /// Order + length match `items`. An unparseable `file_id` is an item error.
+    pub fn decrypt_names(&self, items: Vec<BatchNameItem>) -> Result<Vec<BatchNameResult>, CryptoError> {
+        // Parse file_ids up front, keeping index alignment with `items`.
+        let parsed: Vec<Option<uuid::Uuid>> = items.iter().map(|it| it.file_id.parse().ok()).collect();
+        let batch_input: Vec<(uuid::Uuid, &str)> = items
+            .iter()
+            .zip(&parsed)
+            .filter_map(|(it, id)| id.map(|u| (u, it.name_encrypted.as_str())))
+            .collect();
+
+        let mut batch = self
+            .with_key(|mk| encrypt::decrypt_names(mk, &batch_input))?
+            .into_iter();
+
+        let out = parsed
+            .iter()
+            .map(|id| match id {
+                None => BatchNameResult {
+                    name: None,
+                    mime_type: None,
+                    error: Some("invalid file_id".to_string()),
+                },
+                Some(_) => match batch.next() {
+                    Some(Ok((name, mime))) => BatchNameResult {
+                        name: Some(name),
+                        mime_type: mime,
+                        error: None,
+                    },
+                    _ => BatchNameResult {
+                        name: None,
+                        mime_type: None,
+                        error: Some("decryption failed".to_string()),
+                    },
+                },
+            })
+            .collect();
+        Ok(out)
     }
 
     /// Encrypt a file from disk, writing each chunk as a `.enc` file.

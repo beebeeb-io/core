@@ -986,6 +986,75 @@ pub fn search_index_sync_plan(
 }
 
 // ---------------------------------------------------------------------------
+// Batch name decryption (task 0806)
+// ---------------------------------------------------------------------------
+
+/// Batch-decrypt file names in ONE WASM call (task 0806 — folder-load perf).
+///
+/// `items` is a JS array of `{ fileId: string, nameEncrypted: string }`.
+/// `master_key` is the 32 raw bytes. Returns a JS array (same order + length as
+/// `items`) of `{ name: string|null, mimeType: string|null, error: string|null }`
+/// — `name` set on success, `error` set on failure (bad blob / unparseable
+/// fileId / wrong key). One bad item never fails the batch. Mirrors core
+/// `decrypt_names` (string-UUID then legacy binary-UUID key attempt).
+#[wasm_bindgen]
+pub fn decrypt_names(master_key: &[u8], items: JsValue) -> Result<JsValue, JsError> {
+    let mk = master_key_from_slice(master_key)?;
+
+    // Parse the JS input. Keep owned Strings so we can borrow &str into the batch.
+    let arr = js_sys::Array::from(&items);
+    let mut parsed: Vec<(Option<uuid::Uuid>, String)> = Vec::with_capacity(arr.length() as usize);
+    for item in arr.iter() {
+        let file_id = js_sys::Reflect::get(&item, &"fileId".into())
+            .ok()
+            .and_then(|v| v.as_string())
+            .ok_or_else(|| JsError::new("each item needs a string `fileId`"))?;
+        let name_encrypted = js_sys::Reflect::get(&item, &"nameEncrypted".into())
+            .ok()
+            .and_then(|v| v.as_string())
+            .ok_or_else(|| JsError::new("each item needs a string `nameEncrypted`"))?;
+        parsed.push((file_id.parse::<uuid::Uuid>().ok(), name_encrypted));
+    }
+
+    // Batch-decrypt the items whose fileId parsed; preserve index alignment.
+    let batch_input: Vec<(uuid::Uuid, &str)> = parsed
+        .iter()
+        .filter_map(|(id, enc)| id.map(|u| (u, enc.as_str())))
+        .collect();
+    let mut batch = encrypt::decrypt_names(&mk, &batch_input).into_iter();
+
+    let out = js_sys::Array::new();
+    for (id, _) in &parsed {
+        let obj = js_sys::Object::new();
+        match id {
+            None => {
+                let _ = js_sys::Reflect::set(&obj, &"name".into(), &JsValue::NULL);
+                let _ = js_sys::Reflect::set(&obj, &"mimeType".into(), &JsValue::NULL);
+                let _ = js_sys::Reflect::set(&obj, &"error".into(), &JsValue::from_str("invalid file_id"));
+            }
+            Some(_) => match batch.next() {
+                Some(Ok((name, mime))) => {
+                    let _ = js_sys::Reflect::set(&obj, &"name".into(), &JsValue::from_str(&name));
+                    let _ = js_sys::Reflect::set(
+                        &obj,
+                        &"mimeType".into(),
+                        &mime.map(|m| JsValue::from_str(&m)).unwrap_or(JsValue::NULL),
+                    );
+                    let _ = js_sys::Reflect::set(&obj, &"error".into(), &JsValue::NULL);
+                }
+                _ => {
+                    let _ = js_sys::Reflect::set(&obj, &"name".into(), &JsValue::NULL);
+                    let _ = js_sys::Reflect::set(&obj, &"mimeType".into(), &JsValue::NULL);
+                    let _ = js_sys::Reflect::set(&obj, &"error".into(), &JsValue::from_str("decryption failed"));
+                }
+            },
+        }
+        out.push(&obj);
+    }
+    Ok(out.into())
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

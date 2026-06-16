@@ -30,6 +30,7 @@ beebeeb-core = { path = "../beebeeb-core", default-features = false }
 beebeeb-types = { path = "../beebeeb-types" }
 beebeeb-upload = { path = "../beebeeb-upload" }
 uniffi = { version = "0.31.1" }
+uuid = { version = "1" }
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["rt"] }
 zeroize = { version = "1", features = ["derive"] }

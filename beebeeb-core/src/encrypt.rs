@@ -139,6 +139,83 @@ pub fn decrypt_name_with_mime(
     Ok((decrypted, None))
 }
 
+/// Batch-decrypt many file names in one call (task 0806).
+///
+/// Every client decrypts folder names one-by-one across the WASM/UniFFI
+/// boundary today — N crossings per folder. This collapses that to ONE crossing
+/// and parallelises natively (rayon, off-wasm).
+///
+/// Per item it mirrors [`decrypt_name_with_mime`] (envelope → `name` + optional
+/// `mime_type`, bare-string fallback), and — like the CLI's `decrypt_name`
+/// compatibility shim — tries **both** file-key derivations a file could have
+/// been created under, returning the first that authenticates: the **string-UUID**
+/// form (`uuid.to_string().as_bytes()` — web/mobile + server-canonical
+/// hyphenated-lowercase, the common case) first, then the legacy **binary-UUID**
+/// form (`uuid.as_bytes()`, 16 raw bytes — CLI/desktop origin).
+///
+/// AES-256-GCM is authenticated, so a wrong-format key fails the tag (never a
+/// false success). A bad/garbage item yields `Err` for THAT item only — it never
+/// fails the whole batch. Order of results matches the input.
+pub fn decrypt_names(
+    master_key: &crate::kdf::MasterKey,
+    items: &[(uuid::Uuid, &str)],
+) -> Vec<Result<(String, Option<String>), CoreError>> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        items
+            .par_iter()
+            .map(|(file_id, name_encrypted)| decrypt_one_name(master_key, file_id, name_encrypted))
+            .collect()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // wasm32 is single-threaded; rayon can't target it. Sequential here; the
+        // win on wasm is collapsing N boundary crossings into one call.
+        items
+            .iter()
+            .map(|(file_id, name_encrypted)| decrypt_one_name(master_key, file_id, name_encrypted))
+            .collect()
+    }
+}
+
+/// Decrypt one `(file_id, name_encrypted)` — the per-item core of [`decrypt_names`].
+fn decrypt_one_name(
+    master_key: &crate::kdf::MasterKey,
+    file_id: &uuid::Uuid,
+    name_encrypted: &str,
+) -> Result<(String, Option<String>), CoreError> {
+    let blob: EncryptedBlob = serde_json::from_str(name_encrypted).map_err(|_| CoreError::Decryption)?;
+
+    // String-UUID form first (the common case: web/mobile/server-canonical).
+    let key_string = crate::kdf::derive_file_key(master_key, file_id.to_string().as_bytes());
+    if let Ok(decrypted) = decrypt_metadata(&key_string, &blob) {
+        return Ok(parse_name_and_mime(decrypted));
+    }
+    // Legacy binary-UUID form (CLI/desktop origin).
+    let key_binary = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
+    if let Ok(decrypted) = decrypt_metadata(&key_binary, &blob) {
+        return Ok(parse_name_and_mime(decrypted));
+    }
+    Err(CoreError::Decryption)
+}
+
+/// Extract `(name, mime_type)` from a decrypted metadata string — the shared
+/// envelope semantics of [`decrypt_name_with_mime`]: a `{"name","mime_type"}`
+/// JSON envelope, or a bare filename string (legacy).
+fn parse_name_and_mime(decrypted: String) -> (String, Option<String>) {
+    if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&decrypted) {
+        let name = meta
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&decrypted)
+            .to_string();
+        let mime = meta.get("mime_type").and_then(|v| v.as_str()).map(|s| s.to_string());
+        return (name, mime);
+    }
+    (decrypted, None)
+}
+
 /// Encrypt a file chunk and return the canonical JSON string.
 ///
 /// This is the **only** way clients should produce chunk data for upload.
@@ -532,5 +609,82 @@ mod tests {
         let err = decrypt_contiguous_to_file(&key, &body, 64, path.to_str().unwrap()).unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         std::fs::remove_file(&path).ok();
+    }
+
+    // ── decrypt_names batch primitive (task 0806) ───────────────────────────
+
+    #[test]
+    fn decrypt_names_batch_matches_single_byte_for_byte() {
+        let master = derive_master_key("batch-test-pw", b"batch-salt-16byte").unwrap();
+        // N names encrypted under the string-UUID form (web/mobile/server form).
+        let owned: Vec<(uuid::Uuid, String)> = (0..50)
+            .map(|i| {
+                let id = uuid::Uuid::new_v4();
+                let enc = encrypt_name(&master, &id.to_string(), &format!("file_{i}.txt"), Some("text/plain")).unwrap();
+                (id, enc)
+            })
+            .collect();
+        let items: Vec<(uuid::Uuid, &str)> = owned.iter().map(|(id, e)| (*id, e.as_str())).collect();
+
+        let batch = decrypt_names(&master, &items);
+        assert_eq!(batch.len(), owned.len());
+        for (i, ((id, enc), res)) in owned.iter().zip(&batch).enumerate() {
+            let single = decrypt_name_with_mime(&master, &id.to_string(), enc).unwrap();
+            let got = res.as_ref().expect("batch item should decrypt");
+            assert_eq!(
+                *got, single,
+                "item {i}: batch must match single decrypt_name_with_mime byte-for-byte"
+            );
+            assert_eq!(got.0, format!("file_{i}.txt"));
+            assert_eq!(got.1.as_deref(), Some("text/plain"));
+        }
+    }
+
+    #[test]
+    fn decrypt_names_isolates_partial_failure() {
+        let master = derive_master_key("pw-partial", b"salt-16-bytes-ok").unwrap();
+        let good_id = uuid::Uuid::new_v4();
+        let good = encrypt_name(&master, &good_id.to_string(), "good.pdf", Some("application/pdf")).unwrap();
+        // Valid blob but encrypted under a DIFFERENT master key → GCM tag fails.
+        let other = derive_master_key("other-pw", b"other-salt-16byt").unwrap();
+        let wrong_id = uuid::Uuid::new_v4();
+        let wrong = encrypt_name(&other, &wrong_id.to_string(), "secret.txt", None).unwrap();
+        let bad_id = uuid::Uuid::new_v4();
+
+        let items: Vec<(uuid::Uuid, &str)> = vec![
+            (good_id, good.as_str()),
+            (bad_id, "{ not a valid blob"), // garbage → parse fails
+            (wrong_id, wrong.as_str()),
+        ];
+        let res = decrypt_names(&master, &items);
+        assert_eq!(res.len(), 3);
+        assert_eq!(res[0].as_ref().unwrap().0, "good.pdf", "good item decrypts");
+        assert!(res[1].is_err(), "garbage blob → Err for that item only");
+        assert!(res[2].is_err(), "wrong-key blob → Err (GCM tag), batch not failed");
+    }
+
+    #[test]
+    fn decrypt_names_empty_input() {
+        let master = derive_master_key("pw-empty", b"salt-16-bytes-ok").unwrap();
+        assert!(decrypt_names(&master, &[]).is_empty());
+    }
+
+    #[test]
+    fn decrypt_names_handles_legacy_binary_uuid_form() {
+        // A file keyed under the legacy binary-UUID form (CLI/desktop origin) must
+        // still decrypt — via the second derivation attempt.
+        let master = derive_master_key("pw-bin", b"salt-16-bytes-ok").unwrap();
+        let id = uuid::Uuid::new_v4();
+        let bin_key = derive_file_key(&master, id.as_bytes());
+        let plaintext = serde_json::json!({"name": "legacy.bin", "mime_type": "application/octet-stream"}).to_string();
+        let blob = encrypt_metadata(&bin_key, &plaintext).unwrap();
+        let enc = serde_json::to_string(&blob).unwrap();
+
+        let res = decrypt_names(&master, &[(id, enc.as_str())]);
+        let (name, mime) = res[0]
+            .as_ref()
+            .expect("binary-form name should decrypt via 2nd attempt");
+        assert_eq!(name, "legacy.bin");
+        assert_eq!(mime.as_deref(), Some("application/octet-stream"));
     }
 }
