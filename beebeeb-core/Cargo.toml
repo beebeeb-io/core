@@ -35,7 +35,7 @@ webp = { version = "0.3", optional = true, default-features = false }
 # rayon (task 0806: parallel `decrypt_names`) is thread-based and likewise can't
 # target wasm32 — `decrypt_names` falls back to a sequential iterator on wasm.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 rayon = "1"
 
 [features]
