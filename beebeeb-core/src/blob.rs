@@ -8,10 +8,8 @@ use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use rand::RngCore;
 
+use crate::encrypt::{NONCE_LEN, TAG_LEN};
 use crate::CoreError;
-
-const NONCE_LEN: usize = 12;
-const GCM_TAG_LEN: usize = 16;
 
 /// Encrypt an arbitrary byte buffer with AES-256-GCM.
 ///
@@ -38,7 +36,7 @@ pub fn encrypt_blob(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>, CoreErr
 ///
 /// Expects `nonce (12 bytes) || ciphertext`. Returns the original plaintext.
 pub fn decrypt_blob(key: &[u8; 32], ciphertext: &[u8]) -> Result<Vec<u8>, CoreError> {
-    if ciphertext.len() < NONCE_LEN + GCM_TAG_LEN {
+    if ciphertext.len() < NONCE_LEN + TAG_LEN {
         return Err(CoreError::Decryption);
     }
 
@@ -62,7 +60,7 @@ mod tests {
         let key = test_key();
         let plaintext = b"search index entry";
         let encrypted = encrypt_blob(&key, plaintext).unwrap();
-        assert!(encrypted.len() > NONCE_LEN + GCM_TAG_LEN);
+        assert!(encrypted.len() > NONCE_LEN + TAG_LEN);
         let decrypted = decrypt_blob(&key, &encrypted).unwrap();
         assert_eq!(decrypted, plaintext);
     }
