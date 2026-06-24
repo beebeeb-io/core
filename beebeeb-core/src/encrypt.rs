@@ -295,18 +295,19 @@ pub fn decrypt_chunk_raw(key: &FileKey, raw: &[u8]) -> Result<Vec<u8>, CoreError
 /// Streams chunk-by-chunk — peak memory is one plaintext chunk, not the
 /// full file. Returns the total number of plaintext bytes written.
 ///
-/// On `Err`, the output file may exist on disk in a partially-written
-/// state; the caller is responsible for deleting it so a downstream
-/// cache layer does not treat the partial file as complete.
+/// **Atomic output:** plaintext is written to `{output_path}.tmp`, flushed, and
+/// `rename`d to `output_path` only on full success. On **any** error the `.tmp`
+/// file is removed, so no partial plaintext ever appears at `output_path`. This
+/// removes the previous caller-cleanup obligation and prevents an
+/// existence-based cache from serving a truncated decrypt as if complete. (Same
+/// `.tmp` + atomic-rename pattern as
+/// [`crate::file_encrypt::decrypt_chunks_to_file`].)
 pub fn decrypt_contiguous_to_file(
     key: &FileKey,
     body: &[u8],
     chunk_size: u64,
     output_path: &str,
 ) -> Result<u64, CoreError> {
-    use std::fs::File;
-    use std::io::Write;
-
     if chunk_size == 0 {
         return Err(CoreError::InvalidInput("chunk_size must be positive".into()));
     }
@@ -318,7 +319,42 @@ pub fn decrypt_contiguous_to_file(
         .and_then(|v| v.checked_add(TAG_LEN))
         .ok_or_else(|| CoreError::InvalidInput("chunk_size overflows".into()))?;
 
-    let mut file = File::create(output_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
+    // Write to a sibling .tmp, then atomically rename on success only.
+    let tmp_path = format!("{output_path}.tmp");
+
+    // Inner closure does the streaming decrypt; on ANY Err the outer code
+    // removes the .tmp so no partial plaintext survives at output_path.
+    let result = decrypt_contiguous_to_tmp(key, body, encrypted_chunk_len, &tmp_path);
+
+    match result {
+        Ok(total) => {
+            std::fs::rename(&tmp_path, output_path).map_err(|e| {
+                // Rename failed: drop the temp so it can't poison a cache.
+                std::fs::remove_file(&tmp_path).ok();
+                CoreError::Io(format!("rename output: {e}"))
+            })?;
+            Ok(total)
+        }
+        Err(e) => {
+            // Remove the partial temp on every failure path.
+            std::fs::remove_file(&tmp_path).ok();
+            Err(e)
+        }
+    }
+}
+
+/// Streaming decrypt body → `tmp_path`. Helper for [`decrypt_contiguous_to_file`]
+/// so the caller can guarantee `.tmp` cleanup on every error path.
+fn decrypt_contiguous_to_tmp(
+    key: &FileKey,
+    body: &[u8],
+    encrypted_chunk_len: usize,
+    tmp_path: &str,
+) -> Result<u64, CoreError> {
+    use std::fs::File;
+    use std::io::Write;
+
+    let mut file = File::create(tmp_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
     let mut total: u64 = 0;
     let mut offset = 0usize;
 
@@ -609,6 +645,61 @@ mod tests {
         let err = decrypt_contiguous_to_file(&key, &body, 64, path.to_str().unwrap()).unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn decrypt_contiguous_leaves_no_partial_file_on_midstream_failure() {
+        // R2: chunk 1 decrypts fine, chunk 2's tag is corrupt. The function must
+        // fail AND leave no partial plaintext at output_path — otherwise an
+        // existence-based cache would serve the truncated first chunk as a
+        // "complete" decrypt on every subsequent open.
+        let key = test_file_key();
+        let chunk_size: u64 = 8;
+        let blob1 = encrypt_chunk(&key, b"AAAAAAAA").unwrap();
+        let blob2 = encrypt_chunk(&key, b"BBBBBBBB").unwrap();
+        let mut body = pack_chunk(&blob1);
+        let mut second = pack_chunk(&blob2);
+        // Corrupt the GCM tag of the second chunk (flip the last byte).
+        let last = second.len() - 1;
+        second[last] ^= 0xFF;
+        body.extend(second);
+
+        let path = std::env::temp_dir().join("beebeeb_test_contig_partial_cleanup.bin");
+        // Ensure a stale file from a prior run does not mask the assertion.
+        std::fs::remove_file(&path).ok();
+
+        let err = decrypt_contiguous_to_file(&key, &body, chunk_size, path.to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, CoreError::Decryption));
+        assert!(
+            !path.exists(),
+            "no partial plaintext file may remain at output_path after a failed decrypt"
+        );
+        // No .tmp artifact may survive either.
+        let tmp = std::env::temp_dir().join("beebeeb_test_contig_partial_cleanup.bin.tmp");
+        assert!(!tmp.exists(), "no .tmp artifact may remain after a failed decrypt");
+    }
+
+    #[test]
+    fn decrypt_contiguous_atomic_no_partial_visible_at_final_path() {
+        // R2: on a wrong key the very first chunk fails. The final output path
+        // must never have been created (atomic .tmp + rename means the final
+        // path only appears on full success).
+        let key = test_file_key();
+        let wrong_key = derive_file_key(
+            &derive_master_key("different-password", b"test-salt-16bytes").unwrap(),
+            b"test-file-id",
+        );
+        let blob = encrypt_chunk(&key, b"secrets!").unwrap();
+        let body = pack_chunk(&blob);
+        let path = std::env::temp_dir().join("beebeeb_test_contig_atomic_firstfail.bin");
+        std::fs::remove_file(&path).ok();
+
+        let err = decrypt_contiguous_to_file(&wrong_key, &body, 8, path.to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, CoreError::Decryption));
+        assert!(
+            !path.exists(),
+            "final output path must not exist after a first-chunk failure"
+        );
     }
 
     // ── decrypt_names batch primitive (task 0806) ───────────────────────────
