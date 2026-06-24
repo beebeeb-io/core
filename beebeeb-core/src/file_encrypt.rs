@@ -142,8 +142,32 @@ pub fn encrypt_file_to_chunks(
         }
     }
 
-    // Integrity guard: detects an input that shrank between stat and read.
+    // Integrity guard #1 (in-core): detects an input that SHRANK between stat
+    // and read (short reads → fewer ciphertext bytes than the plan expected).
     let _summary = encryptor.finish()?;
+
+    // Integrity guard #2 (R1/R6): the in-core `finish()` guard provably cannot
+    // detect a source that GREW when `file_size` is an exact multiple of the
+    // chunk size — the plan-driven loop stops at the original `chunk_count`, so
+    // appended bytes are never read and the totals still match. Close that
+    // symmetric grow case here, where the path is known: re-stat the input and
+    // reject if its size diverged from the value the plan was built on. This is
+    // also the observability signal (R6) — a clear, return-typed error so a
+    // silent truncation becomes a detectable failure across every client.
+    let size_after = fs::metadata(input_path)
+        .map_err(|e| CoreError::Io(format!("re-stat input: {e}")))?
+        .len();
+    if size_after != file_size {
+        // The encrypted chunk set we just wrote no longer matches the file.
+        // Remove it so a partial/stale ciphertext set is not left on disk.
+        for chunk in &chunks {
+            fs::remove_file(&chunk.output_path).ok();
+        }
+        return Err(CoreError::InvalidInput(format!(
+            "input file size changed during encryption: {file_size} bytes at stat, \
+             {size_after} bytes after; encrypted output would be truncated/inconsistent (aborted)"
+        )));
+    }
 
     Ok(EncryptedFileResult {
         chunks,
@@ -508,5 +532,113 @@ mod tests {
         let result = encrypt_file_to_chunks(&mk, "no-file", &input_path, &output_dir, ChunkProfile::Mobile, None);
 
         assert!(matches!(result, Err(CoreError::Io(_))));
+    }
+
+    /// Progress callback that grows the input file the first time it fires —
+    /// a deterministic injection point for the grow-during-encryption race.
+    struct GrowOnFirstChunk {
+        input_path: PathBuf,
+        extra: Vec<u8>,
+        fired: std::sync::atomic::AtomicBool,
+    }
+    impl FileProgressCallback for GrowOnFirstChunk {
+        fn on_progress(&self, _done: u32, _total: u32) {
+            use std::sync::atomic::Ordering;
+            if self
+                .fired
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                // Append to the input file on disk (does not affect the already
+                // open read handle, but does change what a re-stat will see).
+                use std::io::Write;
+                let mut f = fs::OpenOptions::new().append(true).open(&self.input_path).unwrap();
+                f.write_all(&self.extra).unwrap();
+                f.flush().unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn grow_to_exact_multiple_during_encryption_is_detected() {
+        // R1/R6: an 8 MiB file (exactly two 4 MiB Desktop chunks) that GROWS to
+        // 10 MiB mid-encryption is the case the in-core finish() guard provably
+        // cannot catch. The post-finish re-stat in encrypt_file_to_chunks must
+        // catch it and return Err — and clean up the chunk files it wrote.
+        const MIB: usize = 1024 * 1024;
+        let mk = test_master_key();
+        let dir = std::env::temp_dir().join("beebeeb_file_encrypt_grow");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let input_path = dir.join("grow.bin");
+        fs::write(&input_path, vec![0xABu8; 8 * MIB]).unwrap(); // exact 2x4MiB
+
+        let output_dir = dir.join("chunks");
+        let cb = GrowOnFirstChunk {
+            input_path: input_path.clone(),
+            extra: vec![0xCDu8; 2 * MIB], // grows 8 MiB -> 10 MiB
+            fired: std::sync::atomic::AtomicBool::new(false),
+        };
+
+        let result = encrypt_file_to_chunks(
+            &mk,
+            "grow-file",
+            &input_path,
+            &output_dir,
+            ChunkProfile::Desktop,
+            Some(&cb),
+        );
+
+        // Must be a hard error, not a silent Ok with a truncated ciphertext set.
+        assert!(
+            matches!(result, Err(CoreError::InvalidInput(_))),
+            "grow-to-exact-multiple must be detected, got {result:?}"
+        );
+
+        // The partial/stale chunk set must have been cleaned up.
+        if output_dir.exists() {
+            let leftover: Vec<_> = fs::read_dir(&output_dir)
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().map(|x| x == "enc").unwrap_or(false))
+                .collect();
+            assert!(
+                leftover.is_empty(),
+                "no .enc chunk files may remain after an aborted grow: {leftover:?}"
+            );
+        }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stable_exact_multiple_file_encrypts_ok() {
+        // Positive control for R1: a file that does NOT change during encryption,
+        // sized to an exact multiple of the chunk size, must still succeed (the
+        // re-stat guard must not produce false positives).
+        const MIB: usize = 1024 * 1024;
+        let mk = test_master_key();
+        let dir = std::env::temp_dir().join("beebeeb_file_encrypt_stable");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let input_path = dir.join("stable.bin");
+        fs::write(&input_path, vec![0x11u8; 8 * MIB]).unwrap();
+
+        let output_dir = dir.join("chunks");
+        let result = encrypt_file_to_chunks(
+            &mk,
+            "stable-file",
+            &input_path,
+            &output_dir,
+            ChunkProfile::Desktop,
+            None,
+        )
+        .unwrap();
+        assert_eq!(result.total_plaintext_bytes, 8 * MIB as u64);
+        assert_eq!(result.chunks.len(), 2);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
