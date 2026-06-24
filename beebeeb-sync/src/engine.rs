@@ -163,8 +163,18 @@ impl SyncEngine {
                     self.state.files.remove(p);
                 }
                 SyncOp::DeleteLocal(p) => {
-                    info!(path = %p.display(), "would delete locally");
-                    self.state.files.remove(p);
+                    // A file deleted on another device. Mirror the deletion to the
+                    // local copy. `compute_operations` has already proven this is a
+                    // genuine remote delete with NO unsynced local change (an
+                    // unsynced edit is routed to `SyncOp::Conflict` instead and is
+                    // never deleted), so removing the local mirror here cannot
+                    // destroy local work. Best-effort + guarded: only clear the
+                    // state entry once the on-disk file is actually gone, so a
+                    // transient fs error retries next cycle instead of resurrecting.
+                    if self.delete_local_file(p) {
+                        info!(path = %p.display(), "deleted locally (removed remotely)");
+                        self.state.files.remove(p);
+                    }
                 }
                 SyncOp::Conflict(p) => {
                     debug!(path = %p.display(), "conflict queued for resolution");
@@ -284,7 +294,32 @@ impl SyncEngine {
             if conflict_set.contains(local.path.as_path()) {
                 ops.push(SyncOp::Conflict(local.path.clone()));
             } else if !remote_set.contains(local.path.as_path()) {
-                ops.push(SyncOp::Upload(local.path.clone()));
+                // The path is absent from the remote snapshot. This is EITHER a
+                // genuine remote delete (the file was synced before and another
+                // device deleted it) OR a brand-new local file that has never
+                // been uploaded. The `state.files` entry is the discriminator —
+                // exactly the desktop analog of the CLI's manifest-based
+                // `classify_remote_absent` (cli/src/commands/sync.rs):
+                match self.classify_remote_absent(&local.path) {
+                    RemoteAbsent::DeleteLocal => {
+                        // Synced before, clean on disk → server is authoritative
+                        // and the file is recoverable from server trash, so
+                        // mirror the deletion locally.
+                        ops.push(SyncOp::DeleteLocal(local.path.clone()));
+                    }
+                    RemoteAbsent::KeepLocalEdit => {
+                        // DATA-SAFETY GATE: the file was synced before but has an
+                        // unsynced LOCAL change (Modified / Uploading / Conflict).
+                        // NEVER destroy an unsynced local edit on a remote delete —
+                        // surface it as a conflict so the existing `KeepBoth`
+                        // policy keeps the local copy (the upload pass re-adds it).
+                        ops.push(SyncOp::Conflict(local.path.clone()));
+                    }
+                    RemoteAbsent::NewLocalFile => {
+                        // Never synced → genuinely new; upload as before.
+                        ops.push(SyncOp::Upload(local.path.clone()));
+                    }
+                }
             }
         }
 
@@ -292,6 +327,29 @@ impl SyncEngine {
         for remote in remote_files {
             if !local_set.contains(remote.path.as_path()) && !conflict_set.contains(remote.path.as_path()) {
                 ops.push(SyncOp::Download(remote.path.clone()));
+            }
+        }
+
+        // Prior-synced paths that are gone from BOTH disk and the remote snapshot:
+        // a completed remote delete whose local mirror is already gone too. Nothing
+        // to delete on disk, but the stale `state.files` entry must be dropped or it
+        // is silently resurrected on a later round-trip (the CLI's `(None, Some(_))`
+        // arm — task 0806). Emit a `DeleteLocal` so the exec loop clears state; the
+        // best-effort fs unlink is a no-op (already absent).
+        for (rel, st) in &self.state.files {
+            if local_set.contains(rel.as_path()) {
+                continue; // still on disk — handled by the local pass above
+            }
+            if remote_set.contains(rel.as_path()) {
+                continue; // still on the server — not a delete
+            }
+            // Only previously-settled rows. A mid-transfer row (Uploading /
+            // Downloading) or an unresolved Conflict is not a completed delete.
+            // (`Modified` is excluded too: an unsynced-edit row whose file is gone
+            // from disk is ambiguous — leave it for the next cycle rather than
+            // prune it here.)
+            if matches!(st, FileState::Synced | FileState::OnlineOnly) {
+                ops.push(SyncOp::DeleteLocal(rel.clone()));
             }
         }
 
@@ -307,6 +365,78 @@ impl SyncEngine {
 
         ops
     }
+
+    /// Classify a local file whose relative path is absent from the current
+    /// remote snapshot. This is the ONE place the remote-delete vs unsynced-edit
+    /// decision lives for the desktop engine, kept byte-for-byte consistent with
+    /// the CLI's `classify_remote_absent` (cli/src/commands/sync.rs) so every
+    /// client makes the identical call.
+    ///
+    /// The discriminator is the per-file [`FileState`] recorded in
+    /// [`SyncState::files`] — the engine's in-model equivalent of the CLI's
+    /// content-hashed manifest entry:
+    ///
+    /// - `Synced` / `OnlineOnly` → the file matched the remote at the last sync
+    ///   and has no unsynced local change. Its disappearance from the snapshot is
+    ///   a genuine REMOTE DELETE → [`RemoteAbsent::DeleteLocal`].
+    /// - `Modified` / `Uploading` / `Conflict` → there IS an unsynced local change.
+    ///   Deleting would destroy unsynced work, so we KEEP it →
+    ///   [`RemoteAbsent::KeepLocalEdit`] (the CLI's `ReAddLocal`).
+    /// - No state entry → the file was never synced; it is a brand-new local file,
+    ///   not a delete → [`RemoteAbsent::NewLocalFile`] (the CLI's `NotADelete`).
+    fn classify_remote_absent(&self, rel: &Path) -> RemoteAbsent {
+        match self.state.files.get(rel) {
+            // Settled, server-matched, clean on disk → safe to mirror the delete.
+            Some(FileState::Synced) | Some(FileState::OnlineOnly) => RemoteAbsent::DeleteLocal,
+            // Any unsettled state (an unsynced edit, an in-flight transfer, or an
+            // open conflict) carries content we must not destroy on a remote
+            // delete. Keep the local copy; the conflict/upload pass handles it.
+            Some(FileState::Modified)
+            | Some(FileState::Uploading(_))
+            | Some(FileState::Downloading(_))
+            | Some(FileState::Conflict) => RemoteAbsent::KeepLocalEdit,
+            None => RemoteAbsent::NewLocalFile,
+        }
+    }
+
+    /// Best-effort, guarded local filesystem delete for a `DeleteLocal` op.
+    ///
+    /// The engine owns the local fs mutations it performs directly (it already
+    /// reads the vault in `scan_local_files`), so — matching the CLI's
+    /// `reconcile_remote_deletions` — it unlinks `vault_path/rel` here rather than
+    /// delegating to the desktop runtime. Returns `true` when the local mirror is
+    /// gone after the call (either we removed it or it was already absent), so the
+    /// caller may clear it from state; `false` on a real error (e.g. permission),
+    /// so the state entry is preserved and the delete is retried next cycle.
+    ///
+    /// Never panics: a `NotFound` is treated as success (the user may have already
+    /// removed it); any other error is logged and reported as a non-removal.
+    fn delete_local_file(&self, rel: &Path) -> bool {
+        let abs = self.config.vault_path.join(rel);
+        match std::fs::remove_file(&abs) {
+            Ok(()) => true,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+            Err(e) => {
+                warn!(path = %abs.display(), error = %e, "could not remove locally-deleted file; will retry");
+                false
+            }
+        }
+    }
+}
+
+/// What to do with a local file whose relative path is absent from the remote
+/// snapshot. Mirrors the CLI's `RemoteAbsent` (the desktop equivalent of its
+/// `DeleteLocal` / `ReAddLocal` / `NotADelete` arms).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoteAbsent {
+    /// Synced before, no unsynced local change → genuine remote delete; remove
+    /// the local mirror.
+    DeleteLocal,
+    /// Synced before but has an unsynced LOCAL change → never destroy it; keep
+    /// the local copy (surfaced as a conflict so `KeepBoth` re-adds it).
+    KeepLocalEdit,
+    /// Never synced → a brand-new local file, not a delete; upload it.
+    NewLocalFile,
 }
 
 /// Derive a `SelectiveConfig` from the high-level `SyncMode`.
@@ -440,5 +570,185 @@ mod tests {
         assert_eq!(engine.state.files.get(&path), Some(&FileState::Synced));
         // There should be a second entry for the loser.
         assert!(engine.state.files.len() >= 2);
+    }
+
+    // ── Remote-delete reconciliation (task 0865) ────────────────────────────
+    //
+    // `compute_operations` is the producer; these tests drive it directly with
+    // crafted local/remote snapshots + a seeded `state.files` (the discriminator),
+    // which is exactly how the desktop engine knows whether an absent-from-remote
+    // path is a genuine remote delete vs an unsynced local edit vs a new file.
+
+    fn meta(rel: &str) -> FileMeta {
+        FileMeta {
+            path: PathBuf::from(rel),
+            modified: Utc::now(),
+            size: 5,
+        }
+    }
+
+    /// (a) Present locally + absent remotely + CLEAN (previously Synced)
+    ///     → produces `DeleteLocal`, NOT `Upload`.
+    #[test]
+    fn remote_delete_of_clean_synced_file_produces_delete_local() {
+        let dir = TempDir::new().unwrap();
+        let engine = SyncEngine::new(test_config(dir.path()));
+
+        let path = PathBuf::from("notes.txt");
+        let mut engine = engine;
+        // The file was synced on a previous cycle → it is clean.
+        engine.state.files.insert(path.clone(), FileState::Synced);
+
+        // Local has it; remote no longer does (deleted on another device).
+        let local = vec![meta("notes.txt")];
+        let remote: Vec<FileMeta> = vec![];
+
+        let ops = engine.compute_operations(&local, &remote, &[]);
+
+        assert!(
+            ops.contains(&SyncOp::DeleteLocal(path.clone())),
+            "a clean, previously-synced file removed remotely must produce DeleteLocal; got {ops:?}"
+        );
+        assert!(
+            !ops.iter().any(|op| matches!(op, SyncOp::Upload(_))),
+            "a remote delete must NOT be re-uploaded (resurrected); got {ops:?}"
+        );
+    }
+
+    /// (b) Present locally + absent remotely + LOCALLY-MODIFIED
+    ///     → does NOT produce `DeleteLocal`; keeps the file (Conflict).
+    ///     DATA-SAFETY: an unsynced local edit is never destroyed.
+    #[test]
+    fn remote_delete_of_locally_modified_file_is_never_deleted() {
+        let dir = TempDir::new().unwrap();
+        let mut engine = SyncEngine::new(test_config(dir.path()));
+
+        let path = PathBuf::from("draft.md");
+        // The file has an unsynced LOCAL change.
+        engine.state.files.insert(path.clone(), FileState::Modified);
+
+        let local = vec![meta("draft.md")];
+        let remote: Vec<FileMeta> = vec![];
+
+        let ops = engine.compute_operations(&local, &remote, &[]);
+
+        assert!(
+            !ops.contains(&SyncOp::DeleteLocal(path.clone())),
+            "a locally-modified file removed remotely must NEVER produce DeleteLocal; got {ops:?}"
+        );
+        assert!(
+            ops.contains(&SyncOp::Conflict(path.clone())),
+            "a locally-modified file removed remotely must be kept (surfaced as Conflict); got {ops:?}"
+        );
+    }
+
+    /// An in-flight upload removed remotely is likewise never auto-deleted.
+    #[test]
+    fn remote_delete_of_uploading_file_is_never_deleted() {
+        let dir = TempDir::new().unwrap();
+        let mut engine = SyncEngine::new(test_config(dir.path()));
+
+        let path = PathBuf::from("video.mov");
+        engine.state.files.insert(path.clone(), FileState::Uploading(0.4));
+
+        let ops = engine.compute_operations(&[meta("video.mov")], &[], &[]);
+
+        assert!(!ops.contains(&SyncOp::DeleteLocal(path.clone())));
+        assert!(ops.contains(&SyncOp::Conflict(path)));
+    }
+
+    /// A genuinely-new local file (never synced, no state entry) absent from the
+    /// remote is an Upload — NOT a delete.
+    #[test]
+    fn new_local_file_absent_remotely_is_uploaded_not_deleted() {
+        let dir = TempDir::new().unwrap();
+        let engine = SyncEngine::new(test_config(dir.path()));
+
+        let path = PathBuf::from("fresh.txt");
+        // No state entry → never synced.
+
+        let ops = engine.compute_operations(&[meta("fresh.txt")], &[], &[]);
+
+        assert!(ops.contains(&SyncOp::Upload(path.clone())));
+        assert!(!ops.contains(&SyncOp::DeleteLocal(path)));
+    }
+
+    /// (c) The exec path removes the file from disk AND clears it from state.
+    #[test]
+    fn sync_once_delete_local_removes_file_and_state() {
+        let dir = TempDir::new().unwrap();
+        // A previously-synced file that exists on disk.
+        let on_disk = dir.path().join("gone.txt");
+        fs::write(&on_disk, "bye").unwrap();
+
+        let mut cfg = test_config(dir.path());
+        cfg.sync_mode = crate::config::SyncMode::Full;
+        let mut engine = SyncEngine::new(cfg);
+
+        let rel = PathBuf::from("gone.txt");
+        engine.state.files.insert(rel.clone(), FileState::Synced);
+
+        // `list_remote_files` is the placeholder empty snapshot, so the on-disk,
+        // previously-synced file is absent from remote → a remote delete.
+        let ops = engine.sync_once().unwrap();
+
+        assert!(
+            ops.contains(&SyncOp::DeleteLocal(rel.clone())),
+            "expected DeleteLocal for the remotely-removed file; got {ops:?}"
+        );
+        // Exec removed it from disk …
+        assert!(!on_disk.exists(), "the local mirror file must be removed from disk");
+        // … and cleared it from state.
+        assert!(
+            !engine.state().files.contains_key(&rel),
+            "the state entry must be cleared after the local delete"
+        );
+    }
+
+    /// The exec delete is best-effort: an already-gone file is fine (NotFound is
+    /// treated as success), and the state entry is still cleared.
+    #[test]
+    fn sync_once_delete_local_already_gone_clears_state() {
+        let dir = TempDir::new().unwrap();
+        let mut cfg = test_config(dir.path());
+        cfg.sync_mode = crate::config::SyncMode::Full;
+        let mut engine = SyncEngine::new(cfg);
+
+        // Synced row whose on-disk file is already gone (and absent from remote):
+        // a completed remote delete with the local mirror already removed.
+        let rel = PathBuf::from("already-gone.txt");
+        engine.state.files.insert(rel.clone(), FileState::Synced);
+
+        let ops = engine.sync_once().unwrap();
+
+        assert!(ops.contains(&SyncOp::DeleteLocal(rel.clone())));
+        assert!(
+            !engine.state().files.contains_key(&rel),
+            "a stale settled row gone from both disk and remote must be pruned"
+        );
+    }
+
+    /// A locally-modified file whose remote was deleted survives a full
+    /// `sync_once` cycle on disk — end-to-end data-safety guarantee.
+    #[test]
+    fn sync_once_never_deletes_locally_modified_file_on_disk() {
+        let dir = TempDir::new().unwrap();
+        let on_disk = dir.path().join("keep-me.md");
+        fs::write(&on_disk, "unsynced edit").unwrap();
+
+        let mut cfg = test_config(dir.path());
+        cfg.sync_mode = crate::config::SyncMode::Full;
+        let mut engine = SyncEngine::new(cfg);
+
+        let rel = PathBuf::from("keep-me.md");
+        engine.state.files.insert(rel.clone(), FileState::Modified);
+
+        let ops = engine.sync_once().unwrap();
+
+        assert!(!ops.contains(&SyncOp::DeleteLocal(rel.clone())));
+        assert!(
+            on_disk.exists(),
+            "a locally-modified file must NEVER be deleted on a remote delete"
+        );
     }
 }
