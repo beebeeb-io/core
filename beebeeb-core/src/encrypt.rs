@@ -248,15 +248,53 @@ pub fn encrypt_chunk_raw(key: &FileKey, plaintext: &[u8]) -> Result<Vec<u8>, Cor
 /// Decrypt a sequence of encrypted chunks and write the plaintext to a file.
 /// Each chunk is an `EncryptedBlob` (V1Aes256Gcm with 12-byte nonce).
 /// Returns the total number of plaintext bytes written.
+///
+/// **Atomic output:** plaintext is written to `{output_path}.tmp`, flushed, and
+/// `rename`d to `output_path` only on full success. On **any** error (including
+/// a mid-stream decrypt failure) the `.tmp` file is removed, so no partial
+/// plaintext ever appears at `output_path`. (Same `.tmp` + atomic-rename +
+/// remove-on-error pattern as [`decrypt_contiguous_to_file`].)
 pub fn decrypt_chunks_to_file(
     key: &FileKey,
     chunks: Vec<(Vec<u8>, Vec<u8>)>, // Vec of (nonce, ciphertext) pairs
     output_path: &str,
 ) -> Result<u64, CoreError> {
+    // Write to a sibling .tmp, then atomically rename on success only.
+    let tmp_path = format!("{output_path}.tmp");
+
+    // Inner helper does the streaming decrypt into the .tmp; on ANY Err the
+    // outer code removes the .tmp so no partial plaintext survives at output_path.
+    let result = decrypt_chunks_to_tmp(key, chunks, &tmp_path);
+
+    match result {
+        Ok(total) => {
+            std::fs::rename(&tmp_path, output_path).map_err(|e| {
+                // Rename failed: drop the temp so it can't poison a cache.
+                std::fs::remove_file(&tmp_path).ok();
+                CoreError::Io(format!("rename output: {e}"))
+            })?;
+            Ok(total)
+        }
+        Err(e) => {
+            // Remove the partial temp on every failure path.
+            std::fs::remove_file(&tmp_path).ok();
+            Err(e)
+        }
+    }
+}
+
+/// Streaming decrypt of `(nonce, ciphertext)` chunks → `tmp_path`. Helper for
+/// [`decrypt_chunks_to_file`] so the caller can guarantee `.tmp` cleanup on
+/// every error path.
+fn decrypt_chunks_to_tmp(
+    key: &FileKey,
+    chunks: Vec<(Vec<u8>, Vec<u8>)>,
+    tmp_path: &str,
+) -> Result<u64, CoreError> {
     use std::fs::File;
     use std::io::Write;
 
-    let mut file = File::create(output_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
+    let mut file = File::create(tmp_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
     let mut total: u64 = 0;
     for (nonce, ciphertext) in chunks {
         let blob = EncryptedBlob {
@@ -520,6 +558,37 @@ mod tests {
         assert!(written.is_empty());
 
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn decrypt_chunks_to_file_leaves_no_partial_file_on_midstream_failure() {
+        // Mirror of decrypt_contiguous_leaves_no_partial_file_on_midstream_failure:
+        // chunk 1 decrypts fine, chunk 2's GCM tag is corrupt. The function must
+        // fail AND leave no partial plaintext at output_path AND no .tmp artifact.
+        let key = test_file_key();
+        let blob1 = encrypt_chunk(&key, b"AAAAAAAA").unwrap();
+        let mut blob2 = encrypt_chunk(&key, b"BBBBBBBB").unwrap();
+        // Corrupt the GCM tag of the second chunk (flip the last ciphertext byte).
+        let last = blob2.ciphertext.len() - 1;
+        blob2.ciphertext[last] ^= 0xFF;
+        let chunks = vec![
+            (blob1.nonce, blob1.ciphertext),
+            (blob2.nonce, blob2.ciphertext),
+        ];
+
+        let path = std::env::temp_dir().join("beebeeb_test_chunks_partial_cleanup.bin");
+        let tmp = std::path::PathBuf::from(format!("{}.tmp", path.to_str().unwrap()));
+        // Ensure stale artifacts from a prior run do not mask the assertion.
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_file(&tmp).ok();
+
+        let err = decrypt_chunks_to_file(&key, chunks, path.to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, CoreError::Decryption));
+        assert!(
+            !path.exists(),
+            "no partial plaintext file may remain at output_path after a failed decrypt"
+        );
+        assert!(!tmp.exists(), "no .tmp artifact may remain after a failed decrypt");
     }
 
     #[test]
