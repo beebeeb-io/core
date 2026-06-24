@@ -23,7 +23,11 @@ pub fn generate_recovery_phrase() -> Result<(String, MasterKey), CoreError> {
     let mnemonic = Mnemonic::generate_in_with(&mut OsRng, bip39::Language::English, 12)
         .map_err(|e| CoreError::Kdf(format!("mnemonic generation failed: {e}")))?;
 
-    let entropy = mnemonic.to_entropy();
+    // The 128 bits of entropy backing the mnemonic are key-adjacent material:
+    // they derive the master key. Wrap in `Zeroizing` so the buffer is wiped on
+    // Drop along EVERY path (success, the `?` early-return below) — no leftover
+    // key-adjacent bytes linger in memory.
+    let entropy = Zeroizing::new(mnemonic.to_entropy());
     let mk = derive_key_from_entropy(&entropy)?;
 
     Ok((mnemonic.to_string(), mk))
@@ -36,7 +40,10 @@ pub fn generate_recovery_phrase() -> Result<(String, MasterKey), CoreError> {
 pub fn recover_from_phrase(phrase: &str) -> Result<MasterKey, CoreError> {
     let mnemonic: Mnemonic = phrase.parse().map_err(|_| CoreError::InvalidRecoveryPhrase)?;
 
-    let entropy = mnemonic.to_entropy();
+    // Same rationale as `generate_recovery_phrase`: this entropy is the master
+    // secret. `Zeroizing` wipes it on Drop on both the Ok and Err paths of
+    // `derive_key_from_entropy` so no key-adjacent bytes survive.
+    let entropy = Zeroizing::new(mnemonic.to_entropy());
     derive_key_from_entropy(&entropy)
 }
 
@@ -103,5 +110,26 @@ mod tests {
     fn empty_phrase_returns_error() {
         let result = recover_from_phrase("");
         assert!(result.is_err());
+    }
+
+    /// Entropy hygiene: wrapping the BIP39 entropy in `Zeroizing` must not change
+    /// behaviour — generate and recover must still produce the identical master
+    /// key. (The zeroize-on-Drop property itself is a memory invariant that
+    /// cannot be observed from safe Rust without reading freed memory; this test
+    /// pins the round-trip so a future refactor of the wrapper can't silently
+    /// break key derivation.)
+    #[test]
+    fn entropy_zeroizing_preserves_roundtrip() {
+        // Argon2id at 256 MiB is expensive in debug; a few iterations suffice to
+        // pin the invariant without making the suite crawl.
+        for _ in 0..3 {
+            let (phrase, original_key) = generate_recovery_phrase().unwrap();
+            let recovered_key = recover_from_phrase(&phrase).unwrap();
+            assert_eq!(
+                original_key.as_bytes(),
+                recovered_key.as_bytes(),
+                "zeroizing the entropy buffer must not affect derived key"
+            );
+        }
     }
 }
