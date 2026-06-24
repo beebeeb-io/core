@@ -166,6 +166,29 @@ CLI/desktop). No plaintext token or name ever leaves the device.
   search (ts-clients).
 - Adds one dependency: `unicode-normalization` (pure-Rust, wasm-safe) for NFKD.
 
+## CLI login handshake (`cli_auth.rs`)
+
+The crypto behind `bb login`'s browser **device-authorization** flow (task 0861) —
+moved out of the CLI so the handshake is no longer per-client. **Separate from
+OPAQUE**: OPAQUE (`opaque_protocol.rs`) is the password login (web/mobile, server is
+a crypto participant); this is how a `bb` CLI receives an *already-logged-in browser's*
+`{session_token, master_key, email}`. The server (`server/.../cli_auth.rs`) is a blind
+relay — it does no crypto.
+
+- **Curve/KDF/AEAD:** P-256 ECDH (`raw_secret_bytes()` = 32-byte X) → HKDF-SHA256
+  (salt=None, info `beebeeb-cli-auth-v1`) → AES-256-GCM (caller-supplied 12-byte nonce).
+  Byte-identical to the web client's inline WebCrypto (`web/src/pages/cli-auth.tsx`).
+- `CliEphemeralKey::generate()` (prod, OsRng) / `from_secret_bytes()` (deterministic
+  vectors); `shared_secret()` / `decrypt_browser_payload()`. Shared secret + derived key
+  are `Zeroizing<[u8;32]>`. The struct deliberately does NOT derive `Debug` (no key leak).
+- `decrypt_cli_payload()` tries the HKDF key, then falls back to the **raw shared secret**
+  as the AES key (legacy v0.4 web app) — both authenticated GCM decrypts.
+- Adds dep `p256` (features `["ecdh"]`). The CLI dropped its own p256/aes-gcm/hkdf deps.
+- **Wire format is pinned, no protocol change:** `tests/cli_auth_vectors.rs` (ECDH→HKDF
+  drift tripwire) + `cli/tests/ecdh_compat.rs` (a real Node.js WebCrypto vector proving
+  core == browser byte-for-byte). Changing the info string / point encoding breaks live
+  `bb login` — it is a coordinated cross-client migration, never a refactor.
+
 ## Security invariants
 
 - MasterKey and FileKey are NOT Clone — prevents accidental key copies in memory
