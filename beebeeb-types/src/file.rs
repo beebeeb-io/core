@@ -83,12 +83,14 @@ pub struct EncryptedBlob {
 
 /// Metadata for a single chunk within a chunked file upload.
 ///
-/// When a file exceeds [`CHUNK_SIZE`](super::CHUNK_SIZE) (1 MiB), it is split
-/// into sequential chunks. Each chunk is encrypted independently, and a
-/// `ChunkMeta` record is created to track its position, size, and integrity.
+/// Files are split into sequential chunks sized by the dynamic ladder in
+/// [`beebeeb_types::plan_chunks`] (4–256 MiB depending on profile). Each chunk
+/// is encrypted independently, and a `ChunkMeta` record is created to track its
+/// position, size, and integrity.
 ///
-/// The server stores a `Vec<ChunkMeta>` per file so the client knows how many
-/// chunks to download and can verify each one after decryption.
+/// > **Note:** `ChunkMeta` is superseded by [`ChunkPlan`] + the object-version
+/// > model for V2 uploads. Existing V1 metadata may still be encountered on
+/// > legacy files.
 ///
 /// # Fields
 ///
@@ -115,15 +117,16 @@ pub struct EncryptedBlob {
 pub struct ChunkMeta {
     /// Zero-based index of this chunk within the file.
     ///
-    /// Chunk 0 is the first [`CHUNK_SIZE`](super::CHUNK_SIZE) bytes of the
-    /// file, chunk 1 is the next, and so on. The last chunk may be smaller.
+    /// Chunk 0 is the first `chunk_size_bytes` bytes of the file
+    /// (as determined by [`beebeeb_types::plan_chunks`]), chunk 1 is the next,
+    /// and so on. The last chunk may be smaller.
     pub index: u32,
 
     /// Size of the plaintext chunk in bytes, before encryption.
     ///
-    /// For all chunks except the last, this equals [`CHUNK_SIZE`](super::CHUNK_SIZE)
-    /// (1,048,576 bytes). The final chunk holds the remainder:
-    /// `file_size % CHUNK_SIZE` (or `CHUNK_SIZE` if the file is an exact multiple).
+    /// For all chunks except the last, this equals the `chunk_size_bytes` from
+    /// the [`ChunkPlan`]. The final chunk holds the remainder (or the full chunk
+    /// size if the file is an exact multiple).
     pub size: u64,
 
     /// SHA-256 hash of the plaintext chunk content.
