@@ -179,9 +179,16 @@ pub fn encrypt_file_to_chunks(
 
 /// Decrypt chunk files back to a single output file.
 ///
-/// Reads each chunk file (which contains `nonce || ciphertext`), decrypts it,
-/// and appends the plaintext to the output. The output is first written to a
-/// `.tmp` file, then atomically renamed to the final path.
+/// Reads each chunk file (which contains `nonce || ciphertext || tag`),
+/// decrypts it, and appends the plaintext to the output.
+///
+/// **Atomic output:** plaintext is written to `{output_path}.tmp`, flushed, and
+/// `rename`d to `output_path` only on full success. On **any** error (including
+/// a mid-stream decrypt failure) the `.tmp` file is removed, so no partial
+/// plaintext ever appears at `output_path` and no `.tmp` artifact survives —
+/// an existence-based cache cannot serve a truncated decrypt as if complete.
+/// (Same `.tmp` + atomic-rename + remove-on-error pattern as
+/// [`crate::encrypt::decrypt_contiguous_to_file`].)
 pub fn decrypt_chunks_to_file(
     master_key: &MasterKey,
     file_id: &str,
@@ -190,17 +197,52 @@ pub fn decrypt_chunks_to_file(
     callback: Option<&dyn FileProgressCallback>,
 ) -> Result<DecryptedFileResult, CoreError> {
     let file_key = derive_file_key(master_key, file_id.as_bytes());
-    let chunks_total = chunk_paths.len() as u32;
 
-    // Write to .tmp then atomic rename
-    let tmp_path = output_path.with_extension("tmp");
-
-    // Ensure parent directory exists
+    // Ensure parent directory exists before creating the .tmp inside it.
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent).map_err(|e| CoreError::Io(format!("create output parent dir: {e}")))?;
     }
 
-    let output_file = File::create(&tmp_path).map_err(|e| CoreError::Io(format!("create output file: {e}")))?;
+    // Write to a sibling .tmp, then atomically rename on success only.
+    let tmp_path = output_path.with_extension("tmp");
+
+    // Inner helper does the streaming decrypt into the .tmp; on ANY Err the
+    // outer code removes the .tmp so no partial plaintext survives at output_path.
+    let result = decrypt_chunks_to_tmp(&file_key, chunk_paths, &tmp_path, callback);
+
+    match result {
+        Ok((total_bytes, chunks_processed)) => {
+            fs::rename(&tmp_path, output_path).map_err(|e| {
+                // Rename failed: drop the temp so it can't poison a cache.
+                fs::remove_file(&tmp_path).ok();
+                CoreError::Io(format!("rename output: {e}"))
+            })?;
+            Ok(DecryptedFileResult {
+                output_path: output_path.to_path_buf(),
+                total_bytes,
+                chunks_processed,
+            })
+        }
+        Err(e) => {
+            // Remove the partial temp on every failure path.
+            fs::remove_file(&tmp_path).ok();
+            Err(e)
+        }
+    }
+}
+
+/// Streaming decrypt of chunk files → `tmp_path`. Helper for
+/// [`decrypt_chunks_to_file`] so the caller can guarantee `.tmp` cleanup on
+/// every error path. Returns `(total_bytes, chunks_processed)` on success.
+fn decrypt_chunks_to_tmp(
+    file_key: &crate::kdf::FileKey,
+    chunk_paths: &[&Path],
+    tmp_path: &Path,
+    callback: Option<&dyn FileProgressCallback>,
+) -> Result<(u64, u32), CoreError> {
+    let chunks_total = chunk_paths.len() as u32;
+
+    let output_file = File::create(tmp_path).map_err(|e| CoreError::Io(format!("create output file: {e}")))?;
     let mut writer = BufWriter::new(output_file);
 
     let mut total_bytes: u64 = 0;
@@ -210,8 +252,8 @@ pub fn decrypt_chunks_to_file(
         // Read the entire chunk file
         let raw = fs::read(chunk_path).map_err(|e| CoreError::Io(format!("read chunk {i}: {e}")))?;
 
-        // Decrypt: raw is nonce || ciphertext
-        let plaintext = decrypt_chunk_raw(&file_key, &raw)?;
+        // Decrypt: raw is nonce || ciphertext || tag
+        let plaintext = decrypt_chunk_raw(file_key, &raw)?;
 
         writer
             .write_all(&plaintext)
@@ -230,14 +272,7 @@ pub fn decrypt_chunks_to_file(
         .map_err(|e| CoreError::Io(format!("flush output: {e}")))?;
     drop(writer);
 
-    // Atomic rename to final path
-    fs::rename(&tmp_path, output_path).map_err(|e| CoreError::Io(format!("rename output: {e}")))?;
-
-    Ok(DecryptedFileResult {
-        output_path: output_path.to_path_buf(),
-        total_bytes,
-        chunks_processed,
-    })
+    Ok((total_bytes, chunks_processed))
 }
 
 #[cfg(test)]
@@ -608,6 +643,65 @@ mod tests {
                 "no .enc chunk files may remain after an aborted grow: {leftover:?}"
             );
         }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn decrypt_chunks_leaves_no_partial_file_on_midstream_failure() {
+        // Mirror of encrypt.rs::decrypt_contiguous_leaves_no_partial_file_on_midstream_failure:
+        // chunk 1 decrypts fine, chunk 2's GCM tag is corrupt. The function must
+        // fail AND leave no partial plaintext at output_path AND no .tmp artifact —
+        // otherwise an existence-based cache would serve the truncated first chunk
+        // as a "complete" decrypt on every subsequent open.
+        let mk = test_master_key();
+        let dir = std::env::temp_dir().join("beebeeb_file_encrypt_partial_cleanup");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        // Encrypt a 5 MiB file -> 2 chunks under the Mobile (4 MiB) profile.
+        let input_path = dir.join("input.bin");
+        let content = vec![0x7Eu8; 5 * 1024 * 1024];
+        fs::write(&input_path, &content).unwrap();
+
+        let output_dir = dir.join("chunks");
+        let enc = encrypt_file_to_chunks(
+            &mk,
+            "partial-file",
+            &input_path,
+            &output_dir,
+            ChunkProfile::Mobile,
+            None,
+        )
+        .unwrap();
+        assert_eq!(enc.chunks.len(), 2, "need 2 chunks for a mid-stream failure");
+
+        // Corrupt the GCM tag of the SECOND chunk on disk (flip its last byte) so
+        // chunk 1 decrypts and writes, then chunk 2 fails mid-stream.
+        let second_chunk = &enc.chunks[1].output_path;
+        let mut raw = fs::read(second_chunk).unwrap();
+        let last = raw.len() - 1;
+        raw[last] ^= 0xFF;
+        fs::write(second_chunk, &raw).unwrap();
+
+        let output_path = dir.join("output.bin");
+        let tmp_path = output_path.with_extension("tmp");
+        // Ensure no stale artifacts mask the assertion.
+        let _ = fs::remove_file(&output_path);
+        let _ = fs::remove_file(&tmp_path);
+
+        let chunk_paths: Vec<&Path> = enc.chunks.iter().map(|c| c.output_path.as_path()).collect();
+        let res = decrypt_chunks_to_file(&mk, "partial-file", &chunk_paths, &output_path, None);
+
+        assert!(res.is_err(), "mid-stream decrypt failure must return Err");
+        assert!(
+            !output_path.exists(),
+            "no partial plaintext file may remain at output_path after a failed decrypt"
+        );
+        assert!(
+            !tmp_path.exists(),
+            "no .tmp artifact may remain after a failed decrypt"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
