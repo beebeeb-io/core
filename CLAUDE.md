@@ -41,11 +41,21 @@ CLI can move them into `spawn_blocking`. Core stays synchronous — no tokio.
   `for_push_with_chunk_size` lets a v2 server dictate the chunk size.
 - The single crypto point is the private `encrypt_next` → `encrypt_chunk_raw`.
   `file_key` is derived ONCE in the constructor and is `ZeroizeOnDrop`.
+- **Explicit chunk-size cap (`MAX_CHUNK_SIZE = 256 MiB`):** both
+  `*_with_chunk_size` constructors reject `chunk_size_bytes` above the top of the
+  profile ladder (256 MiB) via `check_explicit_chunk_size`, so a hostile/
+  misconfigured server-dictated size can't drive a multi-GB allocation → client
+  OOM. The WASM `withChunkSize` inherits this (it delegates to the core
+  constructor). Resilience fix R3.
 - `finish()` integrity guard: requires `emitted == chunk_count` AND
   `running_ciphertext == file_size + 28*chunk_count`. This **detects a source
-  that SHRANK** mid-stream; it provably **cannot detect a source that GREW** when
+  that SHRANK** mid-stream. It provably **cannot detect a source that GREW** when
   `file_size` is an exact multiple of the chunk size (the loop stops at the
-  original `chunk_count`) — documented on the method.
+  original `chunk_count`) — so the **grow case is caught one level up** in
+  `file_encrypt::encrypt_file_to_chunks`, which **re-stats the input after
+  `finish()`** and returns `Err` (cleaning up the chunk files it wrote) if the
+  size diverged from the value the plan was built on. Resilience fix R1/R6 — a
+  silent truncation is now a detectable, return-typed error across every client.
 - **Wire format UNCHANGED:** `nonce(12) || ciphertext || tag(16)`, fresh random
   nonce per chunk. Output is roundtrip-compatible with existing files but NOT
   byte-identical (random nonce) — intentional. `vectors.json` stays v2.
@@ -58,7 +68,12 @@ CLI can move them into `spawn_blocking`. Core stays synchronous — no tokio.
 - The three legacy decrypt functions — `encrypt::decrypt_chunks_to_file`,
   `encrypt::decrypt_contiguous_to_file`, `file_encrypt::decrypt_chunks_to_file` —
   are the disk/legacy paths and are **NOT superseded** by `ChunkDecryptor` this
-  round (a later cleanup may route them through it).
+  round (a later cleanup may route them through it). All three are now **atomic**:
+  they write to a sibling `.tmp` and `rename` onto the final path only on full
+  success; on any error the `.tmp` is removed so no partial plaintext survives at
+  `output_path` (an existence-based cache cannot serve a truncated decrypt).
+  `decrypt_contiguous_to_file` gained this in resilience fix R2 — its UniFFI
+  export signature is unchanged (`Result<u64>`).
 - **WASM binding (`beebeeb-wasm`):** `WasmChunkEncryptor` wraps the **push** form
   for the web client (single-threaded WASM can't `Read` a browser `File`, so JS
   slices the `Blob`). Constructor `new(master_key, file_id, file_size, profile)`

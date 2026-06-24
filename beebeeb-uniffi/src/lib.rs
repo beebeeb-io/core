@@ -331,9 +331,11 @@ pub fn decrypt_chunks_to_file(
 /// Streams chunk-by-chunk — peak memory is one plaintext chunk, not the
 /// full file. Returns the total number of plaintext bytes written.
 ///
-/// On `Err`, the output file may exist on disk in a partially-written
-/// state — the caller is responsible for deleting it so a downstream
-/// cache layer does not treat the partial file as complete.
+/// **Atomic output:** core writes plaintext to a sibling `.tmp` and renames it
+/// to `output_path` only on full success; on any error the `.tmp` is removed and
+/// `output_path` is never created/overwritten. Callers no longer need to clean
+/// up a partial file on `Err`, and an existence-based cache cannot serve a
+/// truncated decrypt.
 #[uniffi::export]
 pub fn decrypt_contiguous_to_file(
     file_key: Vec<u8>,
