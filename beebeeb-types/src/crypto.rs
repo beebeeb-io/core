@@ -123,18 +123,14 @@ impl Default for KdfParams {
 
 /// Default chunk size for splitting files before encryption: 1 MiB (1,048,576 bytes).
 ///
-/// Files larger than this are split into chunks of this size (the last chunk
-/// may be smaller). Each chunk is encrypted independently with its own random
-/// nonce, which enables:
-///
-/// - **Parallel upload/download** — chunks can be transferred concurrently.
-/// - **Resumable transfers** — only incomplete chunks need retransmission.
-/// - **Streaming decryption** — the client can begin decrypting as soon as the
-///   first chunk arrives rather than waiting for the entire file.
-///
-/// The 1 MiB value balances overhead (nonce + tag per chunk = 28 bytes) against
-/// parallelism. For a 1 GiB file this produces ~1024 chunks with < 0.003%
-/// overhead.
+/// **Deprecated.** The system now uses a dynamic 4–256 MiB chunk-size ladder
+/// driven by [`beebeeb_types::ChunkProfile`] and [`beebeeb_types::plan_chunks`].
+/// This constant is retained for historical compatibility but is no longer used
+/// anywhere in the codebase — use the `chunk.rs` planning functions instead.
+#[deprecated(
+    since = "0.2.0",
+    note = "Use beebeeb_types::plan_chunks / ChunkProfile instead; the system uses a 4-256 MiB dynamic ladder."
+)]
 pub const CHUNK_SIZE: usize = 1024 * 1024; // 1 MiB
 
 /// Number of words in a BIP39 recovery phrase: 12.

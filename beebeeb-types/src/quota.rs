@@ -16,6 +16,15 @@ pub const BUSINESS_QUOTA: i64 = 10 * ONE_TB;
 pub const STORAGE_ADDON_CENTS_PER_TB: i64 = 1099;
 pub const USER_ADDON_CENTS: i64 = 499;
 
+/// Base monthly price in cents for each paid plan.
+pub const BASIC_PRICE_CENTS: i64 = 1099;
+pub const PRO_PRICE_CENTS: i64 = 5495;
+pub const BUSINESS_PRICE_CENTS: i64 = 10990;
+
+/// Maximum number of extra users that can be added to a Business plan.
+/// Single source of truth — server imports this rather than redefining it.
+pub const MAX_EXTRA_USERS_BUSINESS: i64 = 47;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Plan {
     Free,
@@ -69,7 +78,7 @@ impl Plan {
     }
 
     pub fn max_extra_users(&self) -> i64 {
-        if self.can_add_users() { 47 } else { 0 }
+        if self.can_add_users() { MAX_EXTRA_USERS_BUSINESS } else { 0 }
     }
 }
 
@@ -84,11 +93,14 @@ pub fn effective_quota(plan: Plan, extra_tb: i64, bonus_bytes: i64) -> i64 {
 pub fn monthly_cost_cents(plan: Plan, extra_tb: i64, extra_users: i64) -> i64 {
     let base = match plan {
         Plan::Free => 0,
-        Plan::Basic => 1099,
-        Plan::Pro => 5495,
-        Plan::Business => 10990,
+        Plan::Basic => BASIC_PRICE_CENTS,
+        Plan::Pro => PRO_PRICE_CENTS,
+        Plan::Business => BUSINESS_PRICE_CENTS,
     };
-    base + (extra_tb * STORAGE_ADDON_CENTS_PER_TB) + (extra_users * USER_ADDON_CENTS)
+    // Only Business plans support extra users; clamp to 0 for all other plans
+    // so callers passing a non-zero extra_users value don't accidentally inflate the cost.
+    let billable_users = if plan.can_add_users() { extra_users } else { 0 };
+    base + (extra_tb * STORAGE_ADDON_CENTS_PER_TB) + (billable_users * USER_ADDON_CENTS)
 }
 
 pub fn format_storage_si(bytes: i64) -> String {

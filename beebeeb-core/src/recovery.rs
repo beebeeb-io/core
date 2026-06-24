@@ -1,4 +1,5 @@
 use bip39::Mnemonic;
+use beebeeb_types::RECOVERY_WORD_COUNT;
 use rand::rngs::OsRng;
 use zeroize::Zeroizing;
 
@@ -20,7 +21,7 @@ const RECOVERY_SALT: &[u8] = b"beebeeb-recovery-v1x";
 /// the recovery-phrase-derived key for convenience. If the user loses both
 /// their password and recovery phrase, the data is gone.
 pub fn generate_recovery_phrase() -> Result<(String, MasterKey), CoreError> {
-    let mnemonic = Mnemonic::generate_in_with(&mut OsRng, bip39::Language::English, 12)
+    let mnemonic = Mnemonic::generate_in_with(&mut OsRng, bip39::Language::English, RECOVERY_WORD_COUNT)
         .map_err(|e| CoreError::Kdf(format!("mnemonic generation failed: {e}")))?;
 
     // The 128 bits of entropy backing the mnemonic are key-adjacent material:
@@ -71,7 +72,7 @@ mod tests {
         let (phrase, original_key) = generate_recovery_phrase().unwrap();
 
         let words: Vec<&str> = phrase.split_whitespace().collect();
-        assert_eq!(words.len(), 12, "phrase must be 12 words");
+        assert_eq!(words.len(), RECOVERY_WORD_COUNT, "phrase must be {RECOVERY_WORD_COUNT} words");
 
         let recovered_key = recover_from_phrase(&phrase).unwrap();
         assert_eq!(original_key.as_bytes(), recovered_key.as_bytes());
