@@ -21,9 +21,11 @@ pub const BASIC_PRICE_CENTS: i64 = 1099;
 pub const PRO_PRICE_CENTS: i64 = 5495;
 pub const BUSINESS_PRICE_CENTS: i64 = 10990;
 
-/// Maximum number of extra users that can be added to a Business plan.
-/// Single source of truth — server imports this rather than redefining it.
-pub const MAX_EXTRA_USERS_BUSINESS: i64 = 47;
+/// Maximum number of extra users that can be added to a Business plan via
+/// self-service. Single source of truth — server imports this rather than
+/// redefining it. (The admin portal will eventually allow more than this
+/// self-service default; that is future work, not wired up here.)
+pub const MAX_EXTRA_USERS_BUSINESS: i64 = 49;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Plan {
@@ -225,7 +227,7 @@ mod tests {
         assert_eq!(Plan::Free.max_extra_users(), 0);
         assert_eq!(Plan::Basic.max_extra_users(), 0);
         assert_eq!(Plan::Pro.max_extra_users(), 0);
-        assert_eq!(Plan::Business.max_extra_users(), 47);
+        assert_eq!(Plan::Business.max_extra_users(), 49);
     }
 
     #[test]
