@@ -62,11 +62,24 @@ impl FileKey {
 
 const MIN_SALT_LEN: usize = 16;
 
+/// Canonical Argon2id master-key parameters: 256 MiB memory, 4 iterations,
+/// 2 lanes, 32-byte output. These are the project-wide strong defaults — they
+/// match `beebeeb_types::KdfParams::default()` and the recovery-phrase
+/// derivation in `recovery::derive_key_from_entropy`. **Do not lower them:**
+/// `derive_master_key` is a prod-callable export (web via WASM
+/// `derive_master_key`, mobile via UniFFI `deriveMasterKey`), so any weakening
+/// here weakens a real client-reachable master-key derivation.
+const MK_MEMORY_KIB: u32 = 256 * 1024; // 256 MiB
+const MK_ITERATIONS: u32 = 4;
+const MK_PARALLELISM: u32 = 2;
+
 /// Derive a master key from a user password and salt using Argon2id.
 ///
-/// Parameters: memory = 4 MiB, iterations = 1, parallelism = 1, output = 32 bytes.
-/// DEV-ONLY: near-instant for WASM testing. Production uses OPAQUE where the server
-/// does native Argon2id (256MB/4iter) — client never needs heavy KDF.
+/// Parameters: memory = 256 MiB, iterations = 4, parallelism = 2, output = 32
+/// bytes — the canonical strong derivation (≈0.5–1s on a modern laptop), shared
+/// with `KdfParams::default()` and the recovery-phrase path. This is a
+/// prod-callable export reachable from web (WASM) and mobile (UniFFI), so it
+/// uses the full memory-hard cost rather than any "fast" dev profile.
 /// Salt must be at least 16 bytes (128 bits) per NIST SP 800-132.
 pub fn derive_master_key(password: &str, salt: &[u8]) -> Result<MasterKey, CoreError> {
     if salt.len() < MIN_SALT_LEN {
@@ -76,8 +89,8 @@ pub fn derive_master_key(password: &str, salt: &[u8]) -> Result<MasterKey, CoreE
         )));
     }
 
-    let params =
-        Params::new(4 * 1024, 1, 1, Some(32)).map_err(|e| CoreError::Kdf(format!("invalid argon2 params: {e}")))?;
+    let params = Params::new(MK_MEMORY_KIB, MK_ITERATIONS, MK_PARALLELISM, Some(32))
+        .map_err(|e| CoreError::Kdf(format!("invalid argon2 params: {e}")))?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
     let mut output = Zeroizing::new([0u8; 32]);
@@ -139,6 +152,22 @@ mod tests {
 
     const TEST_SALT: &[u8] = b"test-salt-16bytes";
     const TEST_FILE_ID: &[u8] = b"file-0001";
+
+    #[test]
+    fn master_key_params_are_the_canonical_strong_set() {
+        // Guard against a regression that re-introduces weak (fast) Argon2
+        // params. `derive_master_key` is a prod-callable export (WASM/UniFFI),
+        // so these MUST stay at the canonical 256 MiB / 4 iter / 2 par — the
+        // same set as KdfParams::default() and the recovery-phrase derivation.
+        assert_eq!(MK_MEMORY_KIB, 256 * 1024, "memory must be 256 MiB");
+        assert_eq!(MK_ITERATIONS, 4, "iterations must be 4");
+        assert_eq!(MK_PARALLELISM, 2, "parallelism must be 2");
+        // The defaults type in beebeeb-types must agree (single source of truth).
+        let canonical = beebeeb_types::KdfParams::default();
+        assert_eq!(MK_MEMORY_KIB, canonical.memory_kib);
+        assert_eq!(MK_ITERATIONS, canonical.iterations);
+        assert_eq!(MK_PARALLELISM, canonical.parallelism);
+    }
 
     #[test]
     fn derive_master_key_produces_32_bytes() {
