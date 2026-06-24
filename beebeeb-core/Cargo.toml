@@ -18,6 +18,10 @@ bip39 = { version = "2", features = ["rand"] }
 thiserror = { workspace = true }
 opaque-ke = { version = "4.0.1", features = ["ristretto255", "argon2"] }
 x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
+# P-256 ECDH for the CLI device-authorization handshake (cli_auth.rs). Matches the
+# CLI's prior `p256` dep and the web client's WebCrypto P-256 ECDH so the wire format
+# is identical across clients.
+p256 = { version = "0.13", features = ["ecdh"] }
 reed-solomon-erasure = "6"
 serde.workspace = true
 serde_json.workspace = true
