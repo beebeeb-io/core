@@ -68,17 +68,19 @@ CLI can move them into `spawn_blocking`. Core stays synchronous — no tokio.
 - The three legacy decrypt functions — `encrypt::decrypt_chunks_to_file`,
   `encrypt::decrypt_contiguous_to_file`, `file_encrypt::decrypt_chunks_to_file` —
   are the disk/legacy paths and are **NOT superseded** by `ChunkDecryptor` this
-  round (a later cleanup may route them through it). **Atomicity status differs
-  per function (do not assume all three are atomic):**
-  `encrypt::decrypt_contiguous_to_file` is fully atomic — it writes to a sibling
-  `.tmp`, `rename`s onto the final path only on full success, and removes the
-  `.tmp` on **any** error, so no partial plaintext survives at `output_path` (an
-  existence-based cache cannot serve a truncated decrypt). It gained this in
-  resilience fix R2; its UniFFI export signature is unchanged (`Result<u64>`).
-  `file_encrypt::decrypt_chunks_to_file` writes via `.tmp`+rename but does **not
-  yet** remove the `.tmp` on a mid-stream decrypt error (follow-up needed).
-  `encrypt::decrypt_chunks_to_file` still writes **directly** to `output_path`
-  (no `.tmp`, not atomic) — follow-up to route it through the R2 pattern.
+  round (a later cleanup may route them through it). **All three are now fully
+  atomic** (crypto-hygiene follow-up to R2): each writes plaintext to a sibling
+  `.tmp`, `rename`s onto the final path **only on full success**, and removes the
+  `.tmp` on **any** error — including a mid-stream decrypt failure — so no partial
+  plaintext ever survives at `output_path` and an existence-based cache cannot
+  serve a truncated decrypt as if complete. `encrypt::decrypt_contiguous_to_file`
+  gained this in resilience fix R2 (`decrypt_contiguous_to_tmp` helper);
+  `file_encrypt::decrypt_chunks_to_file` (`decrypt_chunks_to_tmp` helper) and
+  `encrypt::decrypt_chunks_to_file` (`decrypt_chunks_to_tmp` helper) gained it in
+  the crypto-hygiene round. No signature change to any of them (UniFFI exports
+  unchanged: `Result<u64>` / `DecryptedFileResult`). Each has a
+  `..._leaves_no_partial_file_on_midstream_failure` test asserting neither the
+  output file nor the `.tmp` survives a failed decrypt.
 - **WASM binding (`beebeeb-wasm`):** `WasmChunkEncryptor` wraps the **push** form
   for the web client (single-threaded WASM can't `Read` a browser `File`, so JS
   slices the `Blob`). Constructor `new(master_key, file_id, file_size, profile)`
