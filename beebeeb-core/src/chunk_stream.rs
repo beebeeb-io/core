@@ -54,6 +54,17 @@ use crate::kdf::{FileKey, MasterKey, derive_file_key};
 /// Per-chunk AEAD overhead on the wire: `nonce(12) + tag(16)`.
 const CHUNK_OVERHEAD: u64 = (NONCE_LEN + TAG_LEN) as u64;
 
+/// Hard upper bound on an explicit (server-dictated or concurrency-derived)
+/// `chunk_size_bytes`. Matches the top of the `ChunkProfile` ladder (256 MiB,
+/// the most permissive profile cap), so every legitimate plan is well under it.
+///
+/// This is a resource-exhaustion guard: the push/pull `*_with_chunk_size`
+/// constructors size their read buffer / data slicing to this value, so an
+/// unbounded value supplied by a compromised or misconfigured server would
+/// drive a multi-GB allocation → client OOM (WASM tab kill / mobile crash)
+/// before a single byte is processed. Reject above the cap instead.
+pub const MAX_CHUNK_SIZE: u64 = 256 * 1024 * 1024;
+
 /// One encrypted chunk produced by [`ChunkEncryptor`].
 ///
 /// `data` is the full wire frame: `nonce(12) || ciphertext || tag(16)`.
@@ -151,17 +162,16 @@ impl ChunkEncryptor {
     /// Closes the plan-divergence gap when a v2 server overrides `chunk_size` at
     /// init: the caller passes the exact size the server expects rather than
     /// relying on the client ladder. Returns `Err` if `chunk_size_bytes == 0`,
-    /// the derived `chunk_count` does not fit in `u32`, or the size does not fit
-    /// in `usize`.
+    /// `chunk_size_bytes` exceeds [`MAX_CHUNK_SIZE`] (resource-exhaustion guard
+    /// against a hostile/misconfigured server value), the derived `chunk_count`
+    /// does not fit in `u32`, or the size does not fit in `usize`.
     pub fn for_push_with_chunk_size(
         mk: &MasterKey,
         file_id: &str,
         file_size: u64,
         chunk_size_bytes: u64,
     ) -> Result<Self, CoreError> {
-        if chunk_size_bytes == 0 {
-            return Err(CoreError::InvalidInput("chunk_size_bytes must be positive".into()));
-        }
+        check_explicit_chunk_size(chunk_size_bytes)?;
         let chunk_count = if file_size == 0 {
             1
         } else {
@@ -183,7 +193,8 @@ impl ChunkEncryptor {
     /// of [`for_push_with_chunk_size`](Self::for_push_with_chunk_size). Lets a
     /// caller apply a concurrency-aware chunk size (e.g.
     /// `beebeeb_types::plan_chunks_concurrent`) instead of the profile's static
-    /// ladder. Returns `Err` if `chunk_size_bytes == 0`, the derived
+    /// ladder. Returns `Err` if `chunk_size_bytes == 0`, `chunk_size_bytes`
+    /// exceeds [`MAX_CHUNK_SIZE`] (resource-exhaustion guard), the derived
     /// `chunk_count` does not fit in `u32`, or the size does not fit in `usize`.
     pub fn from_reader_with_chunk_size<R: Read + Send + 'static>(
         mk: &MasterKey,
@@ -192,9 +203,7 @@ impl ChunkEncryptor {
         chunk_size_bytes: u64,
         reader: R,
     ) -> Result<Self, CoreError> {
-        if chunk_size_bytes == 0 {
-            return Err(CoreError::InvalidInput("chunk_size_bytes must be positive".into()));
-        }
+        check_explicit_chunk_size(chunk_size_bytes)?;
         let chunk_count = if file_size == 0 {
             1
         } else {
@@ -486,6 +495,23 @@ impl std::fmt::Debug for ChunkDecryptor {
             .field("next_index", &self.next_index)
             .finish_non_exhaustive()
     }
+}
+
+/// Validate an explicit, caller/server-supplied `chunk_size_bytes` before it is
+/// used to size any allocation. Rejects `0` (no progress) and anything above
+/// [`MAX_CHUNK_SIZE`] (resource-exhaustion / OOM guard). Single source of truth
+/// for the two `*_with_chunk_size` constructors.
+fn check_explicit_chunk_size(chunk_size_bytes: u64) -> Result<(), CoreError> {
+    if chunk_size_bytes == 0 {
+        return Err(CoreError::InvalidInput("chunk_size_bytes must be positive".into()));
+    }
+    if chunk_size_bytes > MAX_CHUNK_SIZE {
+        return Err(CoreError::InvalidInput(format!(
+            "chunk_size_bytes {chunk_size_bytes} exceeds MAX_CHUNK_SIZE {MAX_CHUNK_SIZE} \
+             (rejected to prevent client OOM from an oversized server-dictated value)"
+        )));
+    }
+    Ok(())
 }
 
 /// Read exactly `buf.len()` bytes, or fewer if EOF is reached first.
@@ -781,6 +807,31 @@ mod tests {
         // Same overflow via the profile ladder (256 MiB chunks at u64::MAX size).
         let err2 = ChunkEncryptor::for_push(&m, "huge", u64::MAX, ChunkProfile::Desktop).unwrap_err();
         assert!(matches!(err2, CoreError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn for_push_with_chunk_size_rejects_above_max() {
+        // R3: a hostile/misconfigured server returning an oversized chunk size
+        // must be rejected before it can drive a multi-GB allocation.
+        let m = mk();
+        let too_big = MAX_CHUNK_SIZE + 1;
+        let err = ChunkEncryptor::for_push_with_chunk_size(&m, "oom", 10 * MIB as u64, too_big).unwrap_err();
+        assert!(matches!(err, CoreError::InvalidInput(_)));
+
+        // The exact cap is accepted (boundary is inclusive).
+        let ok = ChunkEncryptor::for_push_with_chunk_size(&m, "edge", 10 * MIB as u64, MAX_CHUNK_SIZE);
+        assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn from_reader_with_chunk_size_rejects_above_max() {
+        // R3: same cap on the pull-form override constructor.
+        let m = mk();
+        let too_big = MAX_CHUNK_SIZE + 1;
+        let err =
+            ChunkEncryptor::from_reader_with_chunk_size(&m, "oom2", 10 * MIB as u64, too_big, Cursor::new(Vec::new()))
+                .unwrap_err();
+        assert!(matches!(err, CoreError::InvalidInput(_)));
     }
 
     #[test]
