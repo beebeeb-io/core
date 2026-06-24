@@ -68,12 +68,17 @@ CLI can move them into `spawn_blocking`. Core stays synchronous — no tokio.
 - The three legacy decrypt functions — `encrypt::decrypt_chunks_to_file`,
   `encrypt::decrypt_contiguous_to_file`, `file_encrypt::decrypt_chunks_to_file` —
   are the disk/legacy paths and are **NOT superseded** by `ChunkDecryptor` this
-  round (a later cleanup may route them through it). All three are now **atomic**:
-  they write to a sibling `.tmp` and `rename` onto the final path only on full
-  success; on any error the `.tmp` is removed so no partial plaintext survives at
-  `output_path` (an existence-based cache cannot serve a truncated decrypt).
-  `decrypt_contiguous_to_file` gained this in resilience fix R2 — its UniFFI
-  export signature is unchanged (`Result<u64>`).
+  round (a later cleanup may route them through it). **Atomicity status differs
+  per function (do not assume all three are atomic):**
+  `encrypt::decrypt_contiguous_to_file` is fully atomic — it writes to a sibling
+  `.tmp`, `rename`s onto the final path only on full success, and removes the
+  `.tmp` on **any** error, so no partial plaintext survives at `output_path` (an
+  existence-based cache cannot serve a truncated decrypt). It gained this in
+  resilience fix R2; its UniFFI export signature is unchanged (`Result<u64>`).
+  `file_encrypt::decrypt_chunks_to_file` writes via `.tmp`+rename but does **not
+  yet** remove the `.tmp` on a mid-stream decrypt error (follow-up needed).
+  `encrypt::decrypt_chunks_to_file` still writes **directly** to `output_path`
+  (no `.tmp`, not atomic) — follow-up to route it through the R2 pattern.
 - **WASM binding (`beebeeb-wasm`):** `WasmChunkEncryptor` wraps the **push** form
   for the web client (single-threaded WASM can't `Read` a browser `File`, so JS
   slices the `Blob`). Constructor `new(master_key, file_id, file_size, profile)`
