@@ -1430,6 +1430,88 @@ mod tests {
         assert_eq!(sk.len(), 32);
     }
 
+    // --- Constellation transfer tests ---
+
+    // Same fixed vector as beebeeb-core/tests/transfer_vectors.rs — the
+    // salt-mismatch guard. If the UniFFI wrapper ever routed through the
+    // salt-less derivation, these byte assertions would fail.
+    const TRANSFER_FIXED_SHARED: [u8; 32] = [
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12,
+        0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
+    ];
+    const TRANSFER_FIXED_SESSION_ID: [u8; 16] = [
+        0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf,
+    ];
+    // hex 47e363480624b26317cc25882f5274a1464cf44ac7658c792cbae33c0c0a62d1
+    const TRANSFER_EXPECTED_KEY: [u8; 32] = [
+        0x47, 0xe3, 0x63, 0x48, 0x06, 0x24, 0xb2, 0x63, 0x17, 0xcc, 0x25, 0x88, 0x2f, 0x52, 0x74, 0xa1, 0x46, 0x4c,
+        0xf4, 0x4a, 0xc7, 0x65, 0x8c, 0x79, 0x2c, 0xba, 0xe3, 0x3c, 0x0c, 0x0a, 0x62, 0xd1,
+    ];
+    // hex 8ef0155a
+    const TRANSFER_EXPECTED_SAS: [u8; 4] = [0x8e, 0xf0, 0x15, 0x5a];
+
+    #[test]
+    fn transfer_derive_key_matches_fixed_vector() {
+        let tk = transfer_derive_key(
+            TRANSFER_FIXED_SHARED.to_vec(),
+            TRANSFER_FIXED_SESSION_ID.to_vec(),
+        )
+        .unwrap();
+        assert_eq!(tk, TRANSFER_EXPECTED_KEY.to_vec());
+    }
+
+    #[test]
+    fn transfer_derive_sas_bytes_matches_fixed_vector_and_is_salted() {
+        let sas = transfer_derive_sas_bytes(
+            TRANSFER_FIXED_SHARED.to_vec(),
+            TRANSFER_FIXED_SESSION_ID.to_vec(),
+        )
+        .unwrap();
+        assert_eq!(sas, TRANSFER_EXPECTED_SAS.to_vec());
+
+        // SALTED (transfer) must differ from the salt-less helper for the same inputs.
+        let saltless = derive_sas_bytes(TRANSFER_FIXED_SHARED.to_vec(), b"beebeeb-sas-v1".to_vec(), 4);
+        assert_ne!(sas, saltless, "transfer SAS must be salted, not salt-less");
+    }
+
+    #[test]
+    fn transfer_roundtrip_via_existing_blob_and_x25519_exports() {
+        // Exercises the exact exports a mobile sender/receiver composes:
+        // random private -> derive_x25519_public -> x25519_shared_secret ->
+        // transfer_derive_key -> encrypt_blob / decrypt_blob.
+        let sender_priv = vec![0x11u8; 32];
+        let receiver_priv = vec![0x22u8; 32];
+        let sender_pub = derive_x25519_public(sender_priv.clone()).unwrap();
+        let receiver_pub = derive_x25519_public(receiver_priv.clone()).unwrap();
+
+        let sender_shared = x25519_shared_secret(sender_priv, receiver_pub).unwrap();
+        let receiver_shared = x25519_shared_secret(receiver_priv, sender_pub).unwrap();
+        assert_eq!(sender_shared, receiver_shared);
+
+        let session_id = TRANSFER_FIXED_SESSION_ID.to_vec();
+        let sender_key = transfer_derive_key(sender_shared, session_id.clone()).unwrap();
+        let receiver_key = transfer_derive_key(receiver_shared, session_id).unwrap();
+        assert_eq!(sender_key, receiver_key);
+
+        let payload = b"mobile constellation payload".to_vec();
+        let blob = encrypt_blob(sender_key, payload.clone()).unwrap();
+        let recovered = decrypt_blob(receiver_key, blob).unwrap();
+        assert_eq!(recovered, payload);
+    }
+
+    #[test]
+    fn transfer_sas_to_words_returns_four_words() {
+        let words = transfer_sas_to_words(vec![0u8, 1, 2, 3]).unwrap();
+        assert_eq!(words.len(), 4);
+        assert!(words.iter().all(|w| !w.is_empty()));
+    }
+
+    #[test]
+    fn transfer_derive_key_rejects_bad_lengths() {
+        assert!(transfer_derive_key(vec![0u8; 16], TRANSFER_FIXED_SESSION_ID.to_vec()).is_err());
+        assert!(transfer_derive_key(TRANSFER_FIXED_SHARED.to_vec(), vec![0u8; 8]).is_err());
+    }
+
     #[test]
     fn compute_recovery_check_works() {
         let mk = derive_master_key("password".into(), TEST_SALT.to_vec()).unwrap();
@@ -1756,9 +1838,77 @@ pub fn sha256(data: Vec<u8>) -> Vec<u8> {
 ///
 /// Used for SAS word derivation — the word list lookup stays in JS/Swift.
 /// `info` is typically `b"beebeeb-sas-v1"` or similar context string.
+///
+/// NOTE: this is the SALT-LESS (salt = None) helper. For the Constellation
+/// transfer channel use `transfer_derive_sas_bytes` below, which is SALTED with
+/// the session id — the two are NOT interchangeable.
 #[uniffi::export]
 pub fn derive_sas_bytes(shared_secret: Vec<u8>, info: Vec<u8>, length: u32) -> Vec<u8> {
     beebeeb_core::hash::derive_sas_bytes(&shared_secret, &info, length as usize)
+}
+
+// ---------------------------------------------------------------------------
+// Constellation transfer (ephemeral device-to-device E2E channel)
+// ---------------------------------------------------------------------------
+//
+// The transfer key + SAS are HKDF-SHA256 expansions of the X25519 ECDH shared
+// secret SALTED with the 16-byte session id (info = "beebeeb-transfer-v1" /
+// "beebeeb-sas-v1"). These two exports are the salted derivations; they are
+// deliberately DISTINCT from the salt-less `derive_sas_bytes` above.
+//
+// For the rest of the mobile sender/receiver flow, REUSE the existing exports
+// (no new symbols needed):
+//   - keypair:  generate 32 random bytes (Swift/Kotlin SecRandom) as the
+//               private scalar, then `derive_x25519_public(private)` — matches
+//               the WASM `transfer_generate_keypair` precedent (EphemeralSecret
+//               can't cross FFI).
+//   - ECDH:     `x25519_shared_secret(my_private, their_public)`.
+//   - AES-GCM:  `encrypt_blob(key, plaintext)` / `decrypt_blob(key, ciphertext)`
+//               — identical `nonce(12) || ciphertext+tag` wire format as
+//               `transfer::encrypt_transfer`/`decrypt_transfer`.
+//   - SAS words: `transfer_sas_to_words` (below) keeps the wordlist single-sourced.
+
+/// Derive the 32-byte AES-256 transfer key from a shared secret + session id.
+///
+/// `HKDF-SHA256(ikm = shared_secret, salt = session_id, info = "beebeeb-transfer-v1")`.
+/// SALTED with `session_id`. `shared_secret` must be 32 bytes, `session_id` 16.
+#[uniffi::export]
+pub fn transfer_derive_key(shared_secret: Vec<u8>, session_id: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
+    let ss: [u8; 32] = shared_secret.try_into().map_err(|_| CryptoError::InvalidInput {
+        detail: "shared_secret must be 32 bytes".into(),
+    })?;
+    let sid: [u8; 16] = session_id.try_into().map_err(|_| CryptoError::InvalidInput {
+        detail: "session_id must be 16 bytes".into(),
+    })?;
+    Ok(beebeeb_core::transfer::derive_transfer_key(&ss, &sid).to_vec())
+}
+
+/// Derive the 4-byte SAS material from a shared secret + session id.
+///
+/// `HKDF-SHA256(ikm = shared_secret, salt = session_id, info = "beebeeb-sas-v1")`.
+/// SALTED with `session_id` — distinct from the salt-less `derive_sas_bytes`.
+/// Both devices computing the same 4 bytes (4 SAS words) is the MITM check.
+#[uniffi::export]
+pub fn transfer_derive_sas_bytes(shared_secret: Vec<u8>, session_id: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
+    let ss: [u8; 32] = shared_secret.try_into().map_err(|_| CryptoError::InvalidInput {
+        detail: "shared_secret must be 32 bytes".into(),
+    })?;
+    let sid: [u8; 16] = session_id.try_into().map_err(|_| CryptoError::InvalidInput {
+        detail: "session_id must be 16 bytes".into(),
+    })?;
+    Ok(beebeeb_core::transfer::derive_sas(&ss, &sid).to_vec())
+}
+
+/// Map 4 SAS bytes to the 4 canonical transfer words.
+///
+/// Keeps the 256-word transfer wordlist single-sourced in core so Swift/Kotlin
+/// and web render identical words for the same SAS bytes. Input must be 4 bytes.
+#[uniffi::export]
+pub fn transfer_sas_to_words(sas_bytes: Vec<u8>) -> Result<Vec<String>, CryptoError> {
+    let sas: [u8; 4] = sas_bytes.try_into().map_err(|_| CryptoError::InvalidInput {
+        detail: "sas_bytes must be exactly 4 bytes".into(),
+    })?;
+    Ok(beebeeb_core::transfer::sas_to_words(&sas).to_vec())
 }
 
 // ---------------------------------------------------------------------------

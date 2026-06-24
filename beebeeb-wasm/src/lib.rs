@@ -305,6 +305,116 @@ pub fn compute_recovery_check(master_key: &[u8]) -> Result<Vec<u8>, JsError> {
 }
 
 // ---------------------------------------------------------------------------
+// Constellation transfer (ephemeral device-to-device E2E channel)
+// ---------------------------------------------------------------------------
+//
+// Thin wrappers over `beebeeb_core::transfer` (+ `blob` for AES-GCM). Both
+// devices generate an ephemeral X25519 keypair, ECDH to a 32-byte shared
+// secret, then HKDF-expand it — SALTED with the 16-byte session id — into the
+// transfer key (`info = beebeeb-transfer-v1`) and the 4-byte SAS material
+// (`info = beebeeb-sas-v1`). The salt is what makes this DISTINCT from the
+// salt-less `derive_sas_bytes` (which must NOT be used for transfer).
+
+/// Generate a fresh ephemeral X25519 keypair for a transfer.
+///
+/// Returns `{ public: Uint8Array(32), private: Uint8Array(32) }`. `core`'s
+/// `transfer::generate_keypair` returns an `EphemeralSecret` that cannot cross
+/// the FFI boundary, so — matching the `createRequestKeypair` web precedent —
+/// the private scalar is 32 bytes of OS randomness and the public point is the
+/// X25519 base-point multiplication (`opaque::derive_x25519_public`). The two
+/// produce the same shared secret as the core's `EphemeralSecret` path because
+/// X25519 clamps the scalar identically (`StaticSecret::from`).
+#[wasm_bindgen]
+pub fn transfer_generate_keypair() -> Result<JsValue, JsError> {
+    let mut private = [0u8; 32];
+    getrandom::getrandom(&mut private).map_err(|e| JsError::new(&format!("getrandom failed: {e}")))?;
+    let public = beebeeb_core::opaque::derive_x25519_public(&private);
+
+    let obj = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &obj,
+        &"public".into(),
+        &js_sys::Uint8Array::from(&public[..]).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(
+        &obj,
+        &"private".into(),
+        &js_sys::Uint8Array::from(&private[..]).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    Ok(obj.into())
+}
+
+/// Derive the 32-byte AES-256 transfer key from a shared secret + session id.
+///
+/// `HKDF-SHA256(ikm = shared_secret, salt = session_id, info = "beebeeb-transfer-v1")`.
+/// SALTED with `session_id` — NOT the salt-less `derive_sas_bytes` derivation.
+#[wasm_bindgen]
+pub fn transfer_derive_key(shared_secret: &[u8], session_id: &[u8]) -> Result<Vec<u8>, JsError> {
+    let ss: [u8; 32] = shared_secret
+        .try_into()
+        .map_err(|_| JsError::new("shared_secret must be 32 bytes"))?;
+    let sid: [u8; 16] = session_id
+        .try_into()
+        .map_err(|_| JsError::new("session_id must be 16 bytes"))?;
+    Ok(beebeeb_core::transfer::derive_transfer_key(&ss, &sid).to_vec())
+}
+
+/// Derive the 4-byte SAS material from a shared secret + session id.
+///
+/// `HKDF-SHA256(ikm = shared_secret, salt = session_id, info = "beebeeb-sas-v1")`.
+/// SALTED with `session_id`. Both devices computing the same 4 bytes (and thus
+/// the same 4 SAS words) is the MITM check. This is intentionally distinct from
+/// the salt-less `derive_sas_bytes` exported elsewhere.
+#[wasm_bindgen]
+pub fn transfer_derive_sas_bytes(shared_secret: &[u8], session_id: &[u8]) -> Result<Vec<u8>, JsError> {
+    let ss: [u8; 32] = shared_secret
+        .try_into()
+        .map_err(|_| JsError::new("shared_secret must be 32 bytes"))?;
+    let sid: [u8; 16] = session_id
+        .try_into()
+        .map_err(|_| JsError::new("session_id must be 16 bytes"))?;
+    Ok(beebeeb_core::transfer::derive_sas(&ss, &sid).to_vec())
+}
+
+/// Map 4 SAS bytes to 4 words from the canonical 256-word transfer wordlist.
+///
+/// Returns a JS array of 4 strings. Keeps the wordlist as one source of truth
+/// (core) so web and Swift render identical words for the same SAS bytes.
+#[wasm_bindgen]
+pub fn transfer_sas_to_words(sas_bytes: &[u8]) -> Result<JsValue, JsError> {
+    let sas: [u8; 4] = sas_bytes
+        .try_into()
+        .map_err(|_| JsError::new("sas_bytes must be exactly 4 bytes"))?;
+    let words = beebeeb_core::transfer::sas_to_words(&sas);
+    let arr = js_sys::Array::new();
+    for w in &words {
+        arr.push(&JsValue::from_str(w));
+    }
+    Ok(arr.into())
+}
+
+/// Encrypt a transfer payload under the transfer key.
+///
+/// Returns `nonce(12) || AES-256-GCM ciphertext+tag` — the same wire format as
+/// `encrypt_blob`. Delegates to `transfer::encrypt_transfer`.
+#[wasm_bindgen]
+pub fn transfer_encrypt(key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, JsError> {
+    let k: [u8; 32] = key.try_into().map_err(|_| JsError::new("key must be 32 bytes"))?;
+    beebeeb_core::transfer::encrypt_transfer(&k, plaintext).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Decrypt a `nonce(12) || ciphertext` blob produced by `transfer_encrypt`.
+///
+/// Delegates to `transfer::decrypt_transfer`.
+#[wasm_bindgen]
+pub fn transfer_decrypt(key: &[u8], blob: &[u8]) -> Result<Vec<u8>, JsError> {
+    let k: [u8; 32] = key.try_into().map_err(|_| JsError::new("key must be 32 bytes"))?;
+    beebeeb_core::transfer::decrypt_transfer(&k, blob).map_err(|e| JsError::new(&e.to_string()))
+}
+
+// ---------------------------------------------------------------------------
 // File requests (sealed-box / ECIES per request)
 // ---------------------------------------------------------------------------
 
