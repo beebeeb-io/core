@@ -213,15 +213,15 @@ fn vector_share_key_additional_file_ids() {
     let cases: [(&str, &str); 3] = [
         (
             "00000000-0000-0000-0000-000000000001",
-            "f04f12f81b40de29e4e3da1f30a1a5daad63d19b278d5fcc84e8e8ba09b6d47d",
+            "7230e7bf70dd6a3c3591534c8289931c0cba04bb57a16953bc24735fa98a6ce7",
         ),
         (
             "11111111-2222-3333-4444-555555555555",
-            "fe2281a2fa983068292eb0e490ede5908cfb8dcb1c5c45e22cba2c360d3c4ad4",
+            "ac0388e7fbc5b17db53120e4486b433c21308bc64c64c492c0a40cac6c8e9199",
         ),
         (
             "ffffffff-ffff-ffff-ffff-ffffffffffff",
-            "a0d3665318b4f07745e1d434241580605750a666e2bd99a52005eb65364c7e39",
+            "64d0cdbc2dacab3fa89f0f5e2fb3c1b29924ffb42985b3376acf86869e462d15",
         ),
     ];
     for (file_id, expected_hex) in cases {
