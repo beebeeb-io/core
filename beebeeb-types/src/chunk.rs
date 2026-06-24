@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 /// Storage metadata format used by the launch upload protocol.
+///
+/// V1 used a fixed 1 MiB chunk size and is superseded by V2 (dynamic ladder).
+/// This constant is retained for historical reference and legacy-file detection
+/// but is no longer produced by any new upload path. All new uploads use
+/// [`STORAGE_FORMAT_VERSION_V2`].
+#[allow(dead_code)]
 pub const STORAGE_FORMAT_VERSION_V1: u16 = 1;
 
 /// Storage metadata format used by dynamic chunk planning and object versions.
