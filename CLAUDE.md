@@ -161,9 +161,13 @@ CLI/desktop). No plaintext token or name ever leaves the device.
     `EncryptedShard` ↔ `{bucket,page,blob:Uint8Array}` JS objects, `query` → `string[]`).
   - **Sync helper** (`search_sync::diff_manifest`, also exposed as UniFFI `searchIndexSyncPlan` /
     WASM `searchIndexSyncPlan`): pure manifest-diff → `{to_put,to_get,to_delete}` shard coords (LWW).
-- **Out of scope (follow-ups)**: client wiring (mobile/web building on unlock, syncing shards via
-  task 0783, querying); migration off the old single-blob `/api/v1/index`; Part A recursive in-app
-  search (ts-clients).
+- **Client wiring status**: **WEB is wired (B4, task 0871)** — the web client builds on unlock,
+  syncs shards via `/api/v1/search-index/shards`, and queries through `WasmSearchIndex`
+  (`repos/web/src/lib/search-index-{core,shards,context}.tsx`); KAT-verified byte-identical to
+  core. **Out of scope (follow-ups)**: MOBILE wiring (UniFFI `SearchIndexHandle` is built but not
+  yet surfaced in `BeebeebCrypto.ts` — device-gated follow-up onto the SAME contract); retiring
+  the old single-blob `/api/v1/index` (Guus-gated, only after BOTH web + mobile cut over); Part A
+  recursive in-app search (ts-clients).
 - Adds one dependency: `unicode-normalization` (pure-Rust, wasm-safe) for NFKD.
 
 ## CLI login handshake (`cli_auth.rs`)
