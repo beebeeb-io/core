@@ -262,4 +262,60 @@ mod tests {
         let fk = derive_file_key(&mk, &0u32.to_le_bytes());
         assert_ne!(sik.as_bytes(), fk.as_bytes());
     }
+
+    // ---------------------------------------------------------------------
+    // Cross-client KAT (known-answer test) for the search-index shard key.
+    //
+    // `derive_search_index_key` is the ONE definition of the search-index
+    // shard-key derivation for EVERY client: web consumes it via WASM
+    // (`WasmSearchIndex`) and mobile via UniFFI (`SearchIndexHandle`), both of
+    // which call `search_index::SearchIndex::{encrypt_shards,
+    // from_encrypted_shards}` — which in turn call THIS function. Neither
+    // binding re-implements the derivation, so the single vector below is the
+    // cross-client contract for all of them.
+    //
+    // The expected bytes are PINNED. HKDF-SHA256 is deterministic, so for the
+    // fixed 32-byte master key and bucket index below the output can never
+    // change unless the derivation itself changes (the HKDF salt, the
+    // `beebeeb-search-index-shard-v1` domain-separation label, the bucket
+    // encoding, or the hash). If you change this function and this test fails,
+    // that is NOT a test to "just update": a changed vector means every client's
+    // already-uploaded, server-side encrypted search index becomes
+    // undecryptable and MUST be re-derived/rebuilt under the new key — a
+    // coordinated cross-client migration, never a silent refactor.
+    //
+    // Master key: 32 bytes all 0x01. Vectors cover bucket 0, an interior
+    // bucket (7), and the last bucket of the default 64-shard layout (63).
+    const KAT_MASTER_KEY: [u8; 32] = [0x01u8; 32];
+
+    #[test]
+    fn search_index_key_known_answer_vectors() {
+        let mk = MasterKey::from_bytes(KAT_MASTER_KEY);
+
+        // bucket -> pinned 32-byte HKDF-SHA256 output, lowercase hex.
+        let vectors: [(u32, &str); 3] = [
+            (
+                0,
+                "08c1676ae10ef9b8cfb4993db59bb7f899885b9364e54c466e80b4ca1047c364",
+            ),
+            (
+                7,
+                "352c86bacad05a8e681ae66080c1b79b304c5e8451672dc9a62f85ee2a29b920",
+            ),
+            (
+                63,
+                "d1e0ac588ec8a495e527f9b80364bbac628f97dc782d08cde4897603dddd1e27",
+            ),
+        ];
+
+        for (bucket, expected_hex) in vectors {
+            let key = derive_search_index_key(&mk, bucket);
+            assert_eq!(
+                hex::encode(key.as_bytes()),
+                expected_hex,
+                "search-index KAT diverged for bucket {bucket} — this breaks every \
+                 client's stored search index; see comment above this test"
+            );
+        }
+    }
 }
