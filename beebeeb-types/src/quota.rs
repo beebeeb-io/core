@@ -9,6 +9,7 @@ pub const ONE_TB: i64 = 1_000_000_000_000;
 pub const MAX_TOTAL_STORAGE: i64 = 99 * ONE_TB;
 
 pub const FREE_QUOTA: i64 = 5_000_000_000;
+pub const STARTER_QUOTA: i64 = 100_000_000_000;
 pub const BASIC_QUOTA: i64 = 200_000_000_000;
 pub const PRO_QUOTA: i64 = ONE_TB;
 pub const BUSINESS_QUOTA: i64 = 5 * ONE_TB;
@@ -17,6 +18,8 @@ pub const STORAGE_ADDON_CENTS_PER_TB: i64 = 1099;
 pub const USER_ADDON_CENTS: i64 = 499;
 
 /// Base monthly price in cents for each paid plan.
+/// Starter: 100 GB entry tier, €1.99 incl VAT. No add-ons.
+pub const STARTER_PRICE_CENTS: i64 = 199;
 pub const BASIC_PRICE_CENTS: i64 = 399;
 pub const PRO_PRICE_CENTS: i64 = 1099;
 /// Business marketed as "Teams" (slug stays `business`): 5 TB base, €54.95 —
@@ -43,6 +46,7 @@ pub const BUSINESS_INCLUDED_SEATS: i64 = 2;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Plan {
     Free,
+    Starter,
     Basic,
     Pro,
     Business,
@@ -51,6 +55,7 @@ pub enum Plan {
 impl Plan {
     pub fn from_slug(slug: &str) -> Self {
         match slug {
+            "starter" => Plan::Starter,
             "basic" | "personal" => Plan::Basic,
             "pro" => Plan::Pro,
             "business" | "data_hoarder" => Plan::Business,
@@ -61,6 +66,7 @@ impl Plan {
     pub fn slug(&self) -> &'static str {
         match self {
             Plan::Free => "free",
+            Plan::Starter => "starter",
             Plan::Basic => "basic",
             Plan::Pro => "pro",
             Plan::Business => "business",
@@ -70,6 +76,7 @@ impl Plan {
     pub fn base_storage_bytes(&self) -> i64 {
         match self {
             Plan::Free => FREE_QUOTA,
+            Plan::Starter => STARTER_QUOTA,
             Plan::Basic => BASIC_QUOTA,
             Plan::Pro => PRO_QUOTA,
             Plan::Business => BUSINESS_QUOTA,
@@ -108,6 +115,7 @@ pub fn effective_quota(plan: Plan, extra_tb: i64, bonus_bytes: i64) -> i64 {
 pub fn monthly_cost_cents(plan: Plan, extra_tb: i64, extra_users: i64) -> i64 {
     let base = match plan {
         Plan::Free => 0,
+        Plan::Starter => STARTER_PRICE_CENTS,
         Plan::Basic => BASIC_PRICE_CENTS,
         Plan::Pro => PRO_PRICE_CENTS,
         Plan::Business => BUSINESS_PRICE_CENTS,
@@ -142,6 +150,7 @@ mod tests {
     #[test]
     fn effective_quota_zero_extra() {
         assert_eq!(effective_quota(Plan::Free, 0, 0), FREE_QUOTA);
+        assert_eq!(effective_quota(Plan::Starter, 0, 0), STARTER_QUOTA);
         assert_eq!(effective_quota(Plan::Basic, 0, 0), BASIC_QUOTA);
         assert_eq!(effective_quota(Plan::Pro, 0, 0), PRO_QUOTA);
         assert_eq!(effective_quota(Plan::Business, 0, 0), BUSINESS_QUOTA);
@@ -150,6 +159,7 @@ mod tests {
     #[test]
     fn base_storage_bytes_pricing_v2() {
         // Pricing v2 bases (locked to literal byte values, not just the consts).
+        assert_eq!(Plan::Starter.base_storage_bytes(), 100_000_000_000); // 100 GB
         assert_eq!(Plan::Basic.base_storage_bytes(), 200_000_000_000); // 200 GB
         assert_eq!(Plan::Pro.base_storage_bytes(), ONE_TB); // 1 TB
         assert_eq!(Plan::Business.base_storage_bytes(), 5 * ONE_TB); // 5 TB
@@ -169,6 +179,8 @@ mod tests {
     fn effective_quota_ignores_extra_tb_for_free_and_basic() {
         // Free plan ignores extra_tb
         assert_eq!(effective_quota(Plan::Free, 5, 0), FREE_QUOTA);
+        // Starter plan ignores extra_tb (no add-ons)
+        assert_eq!(effective_quota(Plan::Starter, 5, 0), STARTER_QUOTA);
         // Basic plan ignores extra_tb
         assert_eq!(effective_quota(Plan::Basic, 5, 0), BASIC_QUOTA);
     }
@@ -184,6 +196,8 @@ mod tests {
     #[test]
     fn monthly_cost_cents_all_plans() {
         assert_eq!(monthly_cost_cents(Plan::Free, 0, 0), 0);
+        // Starter: 100 GB, €1.99 incl VAT.
+        assert_eq!(monthly_cost_cents(Plan::Starter, 0, 0), 199);
         assert_eq!(monthly_cost_cents(Plan::Basic, 0, 0), 399);
         assert_eq!(monthly_cost_cents(Plan::Pro, 0, 0), 1099);
         // Business ("Teams"): €54.95, 5 TB base, 2 seats included.
@@ -197,10 +211,7 @@ mod tests {
         // 0 extra users (2 included) → just the base.
         assert_eq!(monthly_cost_cents(Plan::Business, 0, 0), 5495);
         // A 3rd user (1 beyond the included 2) adds one seat add-on.
-        assert_eq!(
-            monthly_cost_cents(Plan::Business, 0, 1),
-            5495 + USER_ADDON_CENTS
-        );
+        assert_eq!(monthly_cost_cents(Plan::Business, 0, 1), 5495 + USER_ADDON_CENTS);
     }
 
     #[test]
@@ -230,6 +241,7 @@ mod tests {
     #[test]
     fn plan_from_slug_all_variants() {
         assert_eq!(Plan::from_slug("free"), Plan::Free);
+        assert_eq!(Plan::from_slug("starter"), Plan::Starter);
         assert_eq!(Plan::from_slug("basic"), Plan::Basic);
         assert_eq!(Plan::from_slug("personal"), Plan::Basic);
         assert_eq!(Plan::from_slug("pro"), Plan::Pro);
@@ -242,7 +254,7 @@ mod tests {
 
     #[test]
     fn plan_slug_roundtrip() {
-        for plan in [Plan::Free, Plan::Basic, Plan::Pro, Plan::Business] {
+        for plan in [Plan::Free, Plan::Starter, Plan::Basic, Plan::Pro, Plan::Business] {
             assert_eq!(Plan::from_slug(plan.slug()), plan);
         }
     }
@@ -262,6 +274,7 @@ mod tests {
     #[test]
     fn max_extra_tb_per_plan() {
         assert_eq!(Plan::Free.max_extra_tb(), 0);
+        assert_eq!(Plan::Starter.max_extra_tb(), 0);
         assert_eq!(Plan::Basic.max_extra_tb(), 0);
         assert_eq!(Plan::Pro.max_extra_tb(), 98); // 99 - 1
         assert_eq!(Plan::Business.max_extra_tb(), 94); // 99 - 5
@@ -270,6 +283,7 @@ mod tests {
     #[test]
     fn max_extra_users_per_plan() {
         assert_eq!(Plan::Free.max_extra_users(), 0);
+        assert_eq!(Plan::Starter.max_extra_users(), 0);
         assert_eq!(Plan::Basic.max_extra_users(), 0);
         assert_eq!(Plan::Pro.max_extra_users(), 0);
         assert_eq!(Plan::Business.max_extra_users(), 49);
@@ -278,6 +292,7 @@ mod tests {
     #[test]
     fn can_add_storage_per_plan() {
         assert!(!Plan::Free.can_add_storage());
+        assert!(!Plan::Starter.can_add_storage());
         assert!(!Plan::Basic.can_add_storage());
         assert!(Plan::Pro.can_add_storage());
         assert!(Plan::Business.can_add_storage());
@@ -286,6 +301,7 @@ mod tests {
     #[test]
     fn can_add_users_per_plan() {
         assert!(!Plan::Free.can_add_users());
+        assert!(!Plan::Starter.can_add_users());
         assert!(!Plan::Basic.can_add_users());
         assert!(!Plan::Pro.can_add_users());
         assert!(Plan::Business.can_add_users());
