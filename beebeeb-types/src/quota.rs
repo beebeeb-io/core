@@ -17,7 +17,7 @@ pub const STORAGE_ADDON_CENTS_PER_TB: i64 = 1099;
 pub const USER_ADDON_CENTS: i64 = 499;
 
 /// Base monthly price in cents for each paid plan.
-pub const BASIC_PRICE_CENTS: i64 = 299;
+pub const BASIC_PRICE_CENTS: i64 = 399;
 pub const PRO_PRICE_CENTS: i64 = 1099;
 /// Business price parked at the old 5 TB figure — open decision 1042/D3.
 pub const BUSINESS_PRICE_CENTS: i64 = 10990;
@@ -172,7 +172,7 @@ mod tests {
     #[test]
     fn monthly_cost_cents_all_plans() {
         assert_eq!(monthly_cost_cents(Plan::Free, 0, 0), 0);
-        assert_eq!(monthly_cost_cents(Plan::Basic, 0, 0), 299);
+        assert_eq!(monthly_cost_cents(Plan::Basic, 0, 0), 399);
         assert_eq!(monthly_cost_cents(Plan::Pro, 0, 0), 1099);
         // Business price parked (decision 1042/D3).
         assert_eq!(monthly_cost_cents(Plan::Business, 0, 0), 10990);
@@ -198,8 +198,8 @@ mod tests {
         assert_eq!(monthly_cost_cents(Plan::Pro, 0, 0), 1099);
         // Old Pro (5 TB, €54.95) → new Pro 1 TB base + 4 TB add-on.
         assert_eq!(monthly_cost_cents(Plan::Pro, 4, 0), 5495);
-        // New Basic entry tier (200 GB, €2.99).
-        assert_eq!(monthly_cost_cents(Plan::Basic, 0, 0), 299);
+        // New Basic entry tier (200 GB, €3.99).
+        assert_eq!(monthly_cost_cents(Plan::Basic, 0, 0), 399);
     }
 
     #[test]
