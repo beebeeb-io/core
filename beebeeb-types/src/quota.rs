@@ -19,14 +19,26 @@ pub const USER_ADDON_CENTS: i64 = 499;
 /// Base monthly price in cents for each paid plan.
 pub const BASIC_PRICE_CENTS: i64 = 399;
 pub const PRO_PRICE_CENTS: i64 = 1099;
-/// Business price parked at the old 5 TB figure — open decision 1042/D3.
-pub const BUSINESS_PRICE_CENTS: i64 = 10990;
+/// Business marketed as "Teams" (slug stays `business`): 5 TB base, €54.95 —
+/// what Pro cost before. Base INCLUDES `BUSINESS_INCLUDED_SEATS` (2) seats;
+/// `extra_users` passed to [`monthly_cost_cents`] means users BEYOND the
+/// included 2.
+pub const BUSINESS_PRICE_CENTS: i64 = 5495;
 
 /// Maximum number of extra users that can be added to a Business plan via
 /// self-service. Single source of truth — server imports this rather than
 /// redefining it. (The admin portal will eventually allow more than this
 /// self-service default; that is future work, not wired up here.)
 pub const MAX_EXTRA_USERS_BUSINESS: i64 = 49;
+
+/// Seats included in the Business ("Teams") base price.
+///
+/// The €54.95 (`5495`) Business base INCLUDES 2 seats. The per-user add-on
+/// (`USER_ADDON_CENTS`) is charged ONLY for users beyond these 2 — the
+/// `extra_users` argument to [`monthly_cost_cents`] is therefore the count of
+/// users *beyond* the included seats, and seat entitlement is applied at the
+/// entitlement layer (server/UI) which reads this constant.
+pub const BUSINESS_INCLUDED_SEATS: i64 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Plan {
@@ -174,8 +186,21 @@ mod tests {
         assert_eq!(monthly_cost_cents(Plan::Free, 0, 0), 0);
         assert_eq!(monthly_cost_cents(Plan::Basic, 0, 0), 399);
         assert_eq!(monthly_cost_cents(Plan::Pro, 0, 0), 1099);
-        // Business price parked (decision 1042/D3).
-        assert_eq!(monthly_cost_cents(Plan::Business, 0, 0), 10990);
+        // Business ("Teams"): €54.95, 5 TB base, 2 seats included.
+        assert_eq!(monthly_cost_cents(Plan::Business, 0, 0), 5495);
+    }
+
+    #[test]
+    fn business_includes_two_seats() {
+        // The 5495 base price includes 2 seats; extra_users is charged beyond.
+        assert_eq!(BUSINESS_INCLUDED_SEATS, 2);
+        // 0 extra users (2 included) → just the base.
+        assert_eq!(monthly_cost_cents(Plan::Business, 0, 0), 5495);
+        // A 3rd user (1 beyond the included 2) adds one seat add-on.
+        assert_eq!(
+            monthly_cost_cents(Plan::Business, 0, 1),
+            5495 + USER_ADDON_CENTS
+        );
     }
 
     #[test]
@@ -185,10 +210,10 @@ mod tests {
             monthly_cost_cents(Plan::Pro, 2, 0),
             1099 + 2 * STORAGE_ADDON_CENTS_PER_TB
         );
-        // Business + 3 extra TB + 5 extra users
+        // Business + 3 extra TB + 5 extra users (beyond the 2 included seats)
         assert_eq!(
             monthly_cost_cents(Plan::Business, 3, 5),
-            10990 + 3 * STORAGE_ADDON_CENTS_PER_TB + 5 * USER_ADDON_CENTS
+            5495 + 3 * STORAGE_ADDON_CENTS_PER_TB + 5 * USER_ADDON_CENTS
         );
     }
 
