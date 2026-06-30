@@ -9,16 +9,17 @@ pub const ONE_TB: i64 = 1_000_000_000_000;
 pub const MAX_TOTAL_STORAGE: i64 = 99 * ONE_TB;
 
 pub const FREE_QUOTA: i64 = 5_000_000_000;
-pub const BASIC_QUOTA: i64 = ONE_TB;
-pub const PRO_QUOTA: i64 = 5 * ONE_TB;
-pub const BUSINESS_QUOTA: i64 = 10 * ONE_TB;
+pub const BASIC_QUOTA: i64 = 200_000_000_000;
+pub const PRO_QUOTA: i64 = ONE_TB;
+pub const BUSINESS_QUOTA: i64 = 5 * ONE_TB;
 
 pub const STORAGE_ADDON_CENTS_PER_TB: i64 = 1099;
 pub const USER_ADDON_CENTS: i64 = 499;
 
 /// Base monthly price in cents for each paid plan.
-pub const BASIC_PRICE_CENTS: i64 = 1099;
-pub const PRO_PRICE_CENTS: i64 = 5495;
+pub const BASIC_PRICE_CENTS: i64 = 299;
+pub const PRO_PRICE_CENTS: i64 = 1099;
+/// Business price parked at the old 5 TB figure — open decision 1042/D3.
 pub const BUSINESS_PRICE_CENTS: i64 = 10990;
 
 /// Maximum number of extra users that can be added to a Business plan via
@@ -135,6 +136,14 @@ mod tests {
     }
 
     #[test]
+    fn base_storage_bytes_pricing_v2() {
+        // Pricing v2 bases (locked to literal byte values, not just the consts).
+        assert_eq!(Plan::Basic.base_storage_bytes(), 200_000_000_000); // 200 GB
+        assert_eq!(Plan::Pro.base_storage_bytes(), ONE_TB); // 1 TB
+        assert_eq!(Plan::Business.base_storage_bytes(), 5 * ONE_TB); // 5 TB
+    }
+
+    #[test]
     fn effective_quota_extra_tb_on_pro() {
         assert_eq!(effective_quota(Plan::Pro, 3, 0), PRO_QUOTA + 3 * ONE_TB);
     }
@@ -163,8 +172,9 @@ mod tests {
     #[test]
     fn monthly_cost_cents_all_plans() {
         assert_eq!(monthly_cost_cents(Plan::Free, 0, 0), 0);
-        assert_eq!(monthly_cost_cents(Plan::Basic, 0, 0), 1099);
-        assert_eq!(monthly_cost_cents(Plan::Pro, 0, 0), 5495);
+        assert_eq!(monthly_cost_cents(Plan::Basic, 0, 0), 299);
+        assert_eq!(monthly_cost_cents(Plan::Pro, 0, 0), 1099);
+        // Business price parked (decision 1042/D3).
         assert_eq!(monthly_cost_cents(Plan::Business, 0, 0), 10990);
     }
 
@@ -173,13 +183,23 @@ mod tests {
         // Pro + 2 extra TB
         assert_eq!(
             monthly_cost_cents(Plan::Pro, 2, 0),
-            5495 + 2 * STORAGE_ADDON_CENTS_PER_TB
+            1099 + 2 * STORAGE_ADDON_CENTS_PER_TB
         );
         // Business + 3 extra TB + 5 extra users
         assert_eq!(
             monthly_cost_cents(Plan::Business, 3, 5),
             10990 + 3 * STORAGE_ADDON_CENTS_PER_TB + 5 * USER_ADDON_CENTS
         );
+    }
+
+    #[test]
+    fn pricing_v2_migration_is_price_neutral() {
+        // Old Basic (1 TB, €10.99) → new Pro 1 TB base, 0 add-on.
+        assert_eq!(monthly_cost_cents(Plan::Pro, 0, 0), 1099);
+        // Old Pro (5 TB, €54.95) → new Pro 1 TB base + 4 TB add-on.
+        assert_eq!(monthly_cost_cents(Plan::Pro, 4, 0), 5495);
+        // New Basic entry tier (200 GB, €2.99).
+        assert_eq!(monthly_cost_cents(Plan::Basic, 0, 0), 299);
     }
 
     #[test]
@@ -218,8 +238,8 @@ mod tests {
     fn max_extra_tb_per_plan() {
         assert_eq!(Plan::Free.max_extra_tb(), 0);
         assert_eq!(Plan::Basic.max_extra_tb(), 0);
-        assert_eq!(Plan::Pro.max_extra_tb(), 94); // 99 - 5
-        assert_eq!(Plan::Business.max_extra_tb(), 89); // 99 - 10
+        assert_eq!(Plan::Pro.max_extra_tb(), 98); // 99 - 1
+        assert_eq!(Plan::Business.max_extra_tb(), 94); // 99 - 5
     }
 
     #[test]
