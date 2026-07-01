@@ -284,40 +284,23 @@ pub fn decrypt_names(
 }
 
 /// Decrypt one `(file_id, name_encrypted)` — the per-item core of [`decrypt_names`].
+///
+/// Delegates to [`decrypt_name_with_mime`] so the batch path shares EXACTLY the
+/// same format/key-derivation matrix as every single-item caller (plaintext
+/// fast-path, native `EncryptedBlob`, and the legacy web base64
+/// `{nonce,ciphertext}` blob). This used to re-implement a narrower subset
+/// (native blob only, no plaintext fast-path, no web base64 format) which
+/// silently failed to batch-decrypt a name encrypted in either of those two
+/// formats. Fixed 2026-07-01, found while reviewing this rebase — present on
+/// `origin/main` too (a smaller, self-contained fix landed there separately,
+/// since `origin/main`'s own `decrypt_name_with_mime` doesn't yet have this
+/// branch's full multi-format consolidation to delegate to).
 fn decrypt_one_name(
     master_key: &crate::kdf::MasterKey,
     file_id: &uuid::Uuid,
     name_encrypted: &str,
 ) -> Result<(String, Option<String>), CoreError> {
-    let blob: EncryptedBlob = serde_json::from_str(name_encrypted).map_err(|_| CoreError::Decryption)?;
-
-    // String-UUID form first (the common case: web/mobile/server-canonical).
-    let key_string = crate::kdf::derive_file_key(master_key, file_id.to_string().as_bytes());
-    if let Ok(decrypted) = decrypt_metadata(&key_string, &blob) {
-        return Ok(parse_name_and_mime(decrypted));
-    }
-    // Legacy binary-UUID form (CLI/desktop origin).
-    let key_binary = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
-    if let Ok(decrypted) = decrypt_metadata(&key_binary, &blob) {
-        return Ok(parse_name_and_mime(decrypted));
-    }
-    Err(CoreError::Decryption)
-}
-
-/// Extract `(name, mime_type)` from a decrypted metadata string — the shared
-/// envelope semantics of [`decrypt_name_with_mime`]: a `{"name","mime_type"}`
-/// JSON envelope, or a bare filename string (legacy).
-fn parse_name_and_mime(decrypted: String) -> (String, Option<String>) {
-    if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&decrypted) {
-        let name = meta
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or(&decrypted)
-            .to_string();
-        let mime = meta.get("mime_type").and_then(|v| v.as_str()).map(|s| s.to_string());
-        return (name, mime);
-    }
-    (decrypted, None)
+    decrypt_name_with_mime(master_key, &file_id.to_string(), name_encrypted)
 }
 
 /// Encrypt a file chunk and return the canonical JSON string.
@@ -950,6 +933,45 @@ mod tests {
             .expect("binary-form name should decrypt via 2nd attempt");
         assert_eq!(name, "legacy.bin");
         assert_eq!(mime.as_deref(), Some("application/octet-stream"));
+    }
+
+    /// Regression test (found 2026-07-01): `decrypt_one_name` used to
+    /// re-implement a NARROWER parser than `decrypt_name_with_mime` — only the
+    /// native `EncryptedBlob` direct-deserialize path, no plaintext fast-path,
+    /// no legacy web base64 `{nonce,ciphertext}` format. `decrypt_one_name` now
+    /// delegates to `decrypt_name_with_mime` so the two paths can never drift.
+    #[test]
+    fn decrypt_names_batch_handles_web_base64_format() {
+        let master = derive_master_key("pw-web-format", b"salt-16-bytes-ok").unwrap();
+        let id = uuid::Uuid::new_v4();
+        // Web derives the file key from the UUID STRING bytes (the common case).
+        let key = derive_file_key(&master, id.to_string().as_bytes());
+        let plaintext = serde_json::json!({"name": "web-upload.png", "mime_type": "image/png"}).to_string();
+        let blob = encrypt_metadata(&key, &plaintext).unwrap();
+        // Legacy web wire format: base64 {"nonce":"...","ciphertext":"..."} — NO
+        // `cipher_suite` field, unlike the native `EncryptedBlob` JSON shape.
+        let web_enc = crate::metadata_wire::serialize_encrypted_metadata(&blob.nonce, &blob.ciphertext);
+
+        // Sanity: the single-item path already handles this format correctly.
+        let single = decrypt_name_with_mime(&master, &id.to_string(), &web_enc).unwrap();
+        assert_eq!(single, ("web-upload.png".to_string(), Some("image/png".to_string())));
+
+        // The batch path must match it byte-for-byte, not silently fail.
+        let res = decrypt_names(&master, &[(id, web_enc.as_str())]);
+        let got = res[0].as_ref().expect("batch must decrypt the web base64 blob format");
+        assert_eq!(*got, single);
+    }
+
+    /// Companion regression test: a bare (non-JSON) legacy plaintext filename
+    /// must also survive the batch path — the same gap this fix closes.
+    #[test]
+    fn decrypt_names_batch_handles_plaintext_fast_path() {
+        let master = derive_master_key("pw-plaintext", b"salt-16-bytes-ok").unwrap();
+        let id = uuid::Uuid::new_v4();
+        let res = decrypt_names(&master, &[(id, "legacy-plain-name.txt")]);
+        let (name, mime) = res[0].as_ref().expect("bare plaintext name must pass through the batch path");
+        assert_eq!(name, "legacy-plain-name.txt");
+        assert_eq!(*mime, None);
     }
 
     // ── decrypt_name: multi-format / multi-key consolidation (the SINGLE
