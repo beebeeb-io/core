@@ -1454,21 +1454,14 @@ mod tests {
 
     #[test]
     fn transfer_derive_key_matches_fixed_vector() {
-        let tk = transfer_derive_key(
-            TRANSFER_FIXED_SHARED.to_vec(),
-            TRANSFER_FIXED_SESSION_ID.to_vec(),
-        )
-        .unwrap();
+        let tk = transfer_derive_key(TRANSFER_FIXED_SHARED.to_vec(), TRANSFER_FIXED_SESSION_ID.to_vec()).unwrap();
         assert_eq!(tk, TRANSFER_EXPECTED_KEY.to_vec());
     }
 
     #[test]
     fn transfer_derive_sas_bytes_matches_fixed_vector_and_is_salted() {
-        let sas = transfer_derive_sas_bytes(
-            TRANSFER_FIXED_SHARED.to_vec(),
-            TRANSFER_FIXED_SESSION_ID.to_vec(),
-        )
-        .unwrap();
+        let sas =
+            transfer_derive_sas_bytes(TRANSFER_FIXED_SHARED.to_vec(), TRANSFER_FIXED_SESSION_ID.to_vec()).unwrap();
         assert_eq!(sas, TRANSFER_EXPECTED_SAS.to_vec());
 
         // SALTED (transfer) must differ from the salt-less helper for the same inputs.

@@ -81,7 +81,10 @@ fn full_transfer_roundtrip_both_sides_agree() {
 
     let sender_shared = derive_shared_secret(sender.secret, &receiver_pub);
     let receiver_shared = derive_shared_secret(receiver.secret, &sender_pub);
-    assert_eq!(sender_shared, receiver_shared, "ECDH shared secret must match both ways");
+    assert_eq!(
+        sender_shared, receiver_shared,
+        "ECDH shared secret must match both ways"
+    );
 
     let sender_key = derive_transfer_key(&sender_shared, &session_id);
     let receiver_key = derive_transfer_key(&receiver_shared, &session_id);
@@ -114,7 +117,10 @@ fn sas_agrees_both_sides_and_detects_mitm() {
 
     let sender_sas = derive_sas(&sender_shared, &session_id);
     let receiver_sas = derive_sas(&receiver_shared, &session_id);
-    assert_eq!(sender_sas, receiver_sas, "honest channel: both sides derive the same SAS");
+    assert_eq!(
+        sender_sas, receiver_sas,
+        "honest channel: both sides derive the same SAS"
+    );
     assert_eq!(
         sas_to_words(&sender_sas),
         sas_to_words(&receiver_sas),

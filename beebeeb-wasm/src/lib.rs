@@ -331,18 +331,10 @@ pub fn transfer_generate_keypair() -> Result<JsValue, JsError> {
     let public = beebeeb_core::opaque::derive_x25519_public(&private);
 
     let obj = js_sys::Object::new();
-    js_sys::Reflect::set(
-        &obj,
-        &"public".into(),
-        &js_sys::Uint8Array::from(&public[..]).into(),
-    )
-    .map_err(|e| JsError::new(&format!("{e:?}")))?;
-    js_sys::Reflect::set(
-        &obj,
-        &"private".into(),
-        &js_sys::Uint8Array::from(&private[..]).into(),
-    )
-    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(&obj, &"public".into(), &js_sys::Uint8Array::from(&public[..]).into())
+        .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(&obj, &"private".into(), &js_sys::Uint8Array::from(&private[..]).into())
+        .map_err(|e| JsError::new(&format!("{e:?}")))?;
     Ok(obj.into())
 }
 

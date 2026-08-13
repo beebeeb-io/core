@@ -373,11 +373,7 @@ pub fn decrypt_chunks_to_file(
 /// Streaming decrypt of `(nonce, ciphertext)` chunks → `tmp_path`. Helper for
 /// [`decrypt_chunks_to_file`] so the caller can guarantee `.tmp` cleanup on
 /// every error path.
-fn decrypt_chunks_to_tmp(
-    key: &FileKey,
-    chunks: Vec<(Vec<u8>, Vec<u8>)>,
-    tmp_path: &str,
-) -> Result<u64, CoreError> {
+fn decrypt_chunks_to_tmp(key: &FileKey, chunks: Vec<(Vec<u8>, Vec<u8>)>, tmp_path: &str) -> Result<u64, CoreError> {
     use std::fs::File;
     use std::io::Write;
 
@@ -658,10 +654,7 @@ mod tests {
         // Corrupt the GCM tag of the second chunk (flip the last ciphertext byte).
         let last = blob2.ciphertext.len() - 1;
         blob2.ciphertext[last] ^= 0xFF;
-        let chunks = vec![
-            (blob1.nonce, blob1.ciphertext),
-            (blob2.nonce, blob2.ciphertext),
-        ];
+        let chunks = vec![(blob1.nonce, blob1.ciphertext), (blob2.nonce, blob2.ciphertext)];
 
         let path = std::env::temp_dir().join("beebeeb_test_chunks_partial_cleanup.bin");
         let tmp = std::path::PathBuf::from(format!("{}.tmp", path.to_str().unwrap()));
@@ -969,7 +962,9 @@ mod tests {
         let master = derive_master_key("pw-plaintext", b"salt-16-bytes-ok").unwrap();
         let id = uuid::Uuid::new_v4();
         let res = decrypt_names(&master, &[(id, "legacy-plain-name.txt")]);
-        let (name, mime) = res[0].as_ref().expect("bare plaintext name must pass through the batch path");
+        let (name, mime) = res[0]
+            .as_ref()
+            .expect("bare plaintext name must pass through the batch path");
         assert_eq!(name, "legacy-plain-name.txt");
         assert_eq!(*mime, None);
     }

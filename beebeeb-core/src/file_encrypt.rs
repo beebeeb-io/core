@@ -698,10 +698,7 @@ mod tests {
             !output_path.exists(),
             "no partial plaintext file may remain at output_path after a failed decrypt"
         );
-        assert!(
-            !tmp_path.exists(),
-            "no .tmp artifact may remain after a failed decrypt"
-        );
+        assert!(!tmp_path.exists(), "no .tmp artifact may remain after a failed decrypt");
 
         let _ = fs::remove_dir_all(&dir);
     }

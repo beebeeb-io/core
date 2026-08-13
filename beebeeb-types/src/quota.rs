@@ -100,7 +100,11 @@ impl Plan {
     }
 
     pub fn max_extra_users(&self) -> i64 {
-        if self.can_add_users() { MAX_EXTRA_USERS_BUSINESS } else { 0 }
+        if self.can_add_users() {
+            MAX_EXTRA_USERS_BUSINESS
+        } else {
+            0
+        }
     }
 }
 

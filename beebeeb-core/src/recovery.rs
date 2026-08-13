@@ -1,5 +1,5 @@
-use bip39::Mnemonic;
 use beebeeb_types::RECOVERY_WORD_COUNT;
+use bip39::Mnemonic;
 use rand::rngs::OsRng;
 use zeroize::Zeroizing;
 
@@ -72,7 +72,11 @@ mod tests {
         let (phrase, original_key) = generate_recovery_phrase().unwrap();
 
         let words: Vec<&str> = phrase.split_whitespace().collect();
-        assert_eq!(words.len(), RECOVERY_WORD_COUNT, "phrase must be {RECOVERY_WORD_COUNT} words");
+        assert_eq!(
+            words.len(),
+            RECOVERY_WORD_COUNT,
+            "phrase must be {RECOVERY_WORD_COUNT} words"
+        );
 
         let recovered_key = recover_from_phrase(&phrase).unwrap();
         assert_eq!(original_key.as_bytes(), recovered_key.as_bytes());

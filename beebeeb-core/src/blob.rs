@@ -8,8 +8,8 @@ use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use rand::RngCore;
 
-use crate::encrypt::{NONCE_LEN, TAG_LEN};
 use crate::CoreError;
+use crate::encrypt::{NONCE_LEN, TAG_LEN};
 
 /// Encrypt an arbitrary byte buffer with AES-256-GCM.
 ///

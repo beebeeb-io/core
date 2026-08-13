@@ -294,18 +294,9 @@ mod tests {
 
         // bucket -> pinned 32-byte HKDF-SHA256 output, lowercase hex.
         let vectors: [(u32, &str); 3] = [
-            (
-                0,
-                "08c1676ae10ef9b8cfb4993db59bb7f899885b9364e54c466e80b4ca1047c364",
-            ),
-            (
-                7,
-                "352c86bacad05a8e681ae66080c1b79b304c5e8451672dc9a62f85ee2a29b920",
-            ),
-            (
-                63,
-                "d1e0ac588ec8a495e527f9b80364bbac628f97dc782d08cde4897603dddd1e27",
-            ),
+            (0, "08c1676ae10ef9b8cfb4993db59bb7f899885b9364e54c466e80b4ca1047c364"),
+            (7, "352c86bacad05a8e681ae66080c1b79b304c5e8451672dc9a62f85ee2a29b920"),
+            (63, "d1e0ac588ec8a495e527f9b80364bbac628f97dc782d08cde4897603dddd1e27"),
         ];
 
         for (bucket, expected_hex) in vectors {
