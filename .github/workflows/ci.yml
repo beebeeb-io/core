@@ -31,7 +31,13 @@ jobs:
       - name: cargo fmt
         run: cargo fmt -- --check
 
+      # if: always() so a fmt failure doesn't silently skip clippy — this repo's
+      # main was red on fmt alone for ~2 months (2026-06-24 to 2026-08-14) and
+      # clippy never ran once in that window, purely because it was a later
+      # step in the same job. Both checks now always report; the job still
+      # correctly fails if either does.
       - name: cargo clippy
+        if: always()
         run: cargo clippy --workspace -- -D warnings
 
   test:
