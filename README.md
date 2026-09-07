@@ -95,13 +95,6 @@ will publish the findings — good and bad. Until then the honest word is *audit
 the code is public, the primitives are standard (AES-256-GCM, Argon2id, HKDF, X25519), and the
 cross-platform test vectors are in this repository.
 
-### How this is built
-
-beebeeb is built by two founders working with AI coding agents. The agents write most of the code;
-we specify the work, review every diff, and merge it ourselves — which is why the public history
-shows one human author and some very large days. See
-[how we build beebeeb](https://github.com/beebeeb-io) for the full note.
-
 ## Part of beebeeb
 
 End-to-end encrypted, zero-knowledge cloud storage — made in Europe.
