@@ -87,6 +87,13 @@ Deeper build, binding-regeneration, and environment detail lives in [BUILDING.md
 
 Found a vulnerability? Email **security@beebeeb.io** — see [SECURITY.md](SECURITY.md).
 
+### How this is built
+
+beebeeb is built by two founders working with AI coding agents. The agents write most of the code;
+we specify the work, review every diff, and merge it ourselves — which is why the public history
+shows one human author and some very large days. See
+[how we build beebeeb](https://github.com/beebeeb-io) for the full note.
+
 ## Part of beebeeb
 
 End-to-end encrypted, zero-knowledge cloud storage — made in Europe.
