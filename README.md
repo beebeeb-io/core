@@ -17,7 +17,7 @@
 
 ## Why this exists
 
-`core` is the one place beebeeb's cryptography lives. Every client depends on it, and none of them re-implement the crypto themselves: the web app consumes it as WebAssembly, the mobile apps through UniFFI bindings, and the CLI, server, and desktop sync engine as a native Rust git dependency. Writing key derivation and chunk encryption once — in audited Rust — means a fix or a hardening lands in every client at once, and there's no second implementation to drift, disagree, or get a corner wrong.
+`core` is the one place beebeeb's cryptography lives. Every client depends on it, and none of them re-implement the crypto themselves: the web app consumes it as WebAssembly, the mobile apps through UniFFI bindings, and the CLI, server, and desktop sync engine as a native Rust git dependency. Writing key derivation and chunk encryption once — in one open, auditable Rust core — means a fix or a hardening lands in every client at once, and there's no second implementation to drift, disagree, or get a corner wrong.
 
 ## Usage
 
@@ -86,6 +86,21 @@ Deeper build, binding-regeneration, and environment detail lives in [BUILDING.md
 ## Security
 
 Found a vulnerability? Email **security@beebeeb.io** — see [SECURITY.md](SECURITY.md).
+
+### Audit status
+
+`core` has **not** undergone an external audit. Its cryptography has been reviewed in house
+against the beebeeb audit-readiness scope; an independent audit is planned, and when it happens we
+will publish the findings — good and bad. Until then the honest word is *auditable*, not *audited*:
+the code is public, the primitives are standard (AES-256-GCM, Argon2id, HKDF, X25519), and the
+cross-platform test vectors are in this repository.
+
+### How this is built
+
+beebeeb is built by two founders working with AI coding agents. The agents write most of the code;
+we specify the work, review every diff, and merge it ourselves — which is why the public history
+shows one human author and some very large days. See
+[how we build beebeeb](https://github.com/beebeeb-io) for the full note.
 
 ## Part of beebeeb
 
