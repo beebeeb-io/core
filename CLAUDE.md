@@ -210,6 +210,21 @@ Design files are in the workspace root: `../../design/hifi/`
 AGPL-3.0-or-later
 
 
+## How we work (evidence, design, done, parallel agents)
+
+The full rules live in the workspace `CLAUDE.md` → "How we work" (also summarised in the workspace `AGENTS.md`). Read them; they apply here. The repo-specific instantiation:
+
+- **The count-shaped truth line:** `cargo test --workspace 2>&1 | tee /tmp/bb-core-test.log` →
+  one `test result: ok. N passed; 0 failed` per crate/suite (the CLAUDE.md numbers above — 255 for
+  `beebeeb-core` — are the baseline to compare against). Assert the Ns; a suite that did not run is
+  a red, not a pass.
+- **Crypto tests are trusted only after they have been seen to fail.** Mutate a KAT vector or a
+  derivation label, paste WHICH assertion failed, revert. A KAT that cannot fail proves nothing.
+- **Bindings drift is an instrument problem:** after `build-ios.sh` / `build-android.sh`, grep the
+  regenerated header for every new symbol before shipping (the 0426 12-symbol lesson) — count them.
+- **Design before code** here means the spec/decision note (`docs/`, the cross-client KDF context
+  notes) changes before the primitive; a wire-format change is a coordinated migration, never a refactor.
+
 ## Graphify
 
 This repo has a knowledge graph at graphify-out/.
