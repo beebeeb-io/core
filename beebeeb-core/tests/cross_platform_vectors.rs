@@ -552,7 +552,110 @@ fn vector_file_request_seal_open() {
 }
 
 // ---------------------------------------------------------------------------
-// 17. Version guard — fail loudly if vectors.json format changes unexpectedly
+// 18. Share-key wrap (audit item K3) — pins the wire format web's
+//     wrapKeyForShare/unwrapKeyFromShare (repos/web/src/lib/crypto.ts)
+//     independently implements: nonce(12) || AES-256-GCM ciphertext (32-byte
+//     key + 16-byte tag) = 60 bytes, no AAD, raw 32-byte key (no KDF).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn vector_share_key_wrap_decrypt() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "share_key_wrap");
+
+    let wrap_key = FileKey::from_bytes(bytes32(&v, "wrap_key_hex"));
+    let nonce = decode_hex(&v, "nonce_hex");
+    let ciphertext = decode_hex(&v, "ciphertext_hex");
+    let expected_key_to_wrap = decode_hex(&v, "key_to_wrap_hex");
+
+    assert_eq!(
+        nonce.len() + ciphertext.len(),
+        60,
+        "share_key_wrap: nonce(12) || ciphertext(48) must total 60 bytes (the K3 wire format)"
+    );
+
+    let blob = EncryptedBlob {
+        cipher_suite: CipherSuite::V1Aes256Gcm,
+        nonce,
+        ciphertext,
+    };
+
+    let decrypted = decrypt_chunk(&wrap_key, &blob).unwrap();
+    assert_eq!(
+        decrypted, expected_key_to_wrap,
+        "share_key_wrap: decrypted key does not match vector — this is the interop contract \
+         web's unwrapKeyFromShare must also satisfy against this exact ciphertext"
+    );
+}
+
+#[test]
+fn vector_share_key_wrap_encrypt_roundtrip() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "share_key_wrap");
+
+    let wrap_key = FileKey::from_bytes(bytes32(&v, "wrap_key_hex"));
+    let expected_key_to_wrap = decode_hex(&v, "key_to_wrap_hex");
+
+    // Encrypt with a fresh random nonce, then decrypt — must reproduce the
+    // original 32-byte key. Mirrors what web's wrapKeyForShare ->
+    // unwrapKeyFromShare round trip must also do.
+    let blob = beebeeb_core::encrypt::encrypt_chunk(&wrap_key, &expected_key_to_wrap).unwrap();
+    let decrypted = decrypt_chunk(&wrap_key, &blob).unwrap();
+    assert_eq!(
+        decrypted, expected_key_to_wrap,
+        "share_key_wrap roundtrip: encrypt->decrypt must reproduce the original key"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 19. Thumbnail encryption (audit item K3) — pins the wire format web's
+//     thumbnail.ts (encryptThumbnailBlob / fetchAndDecryptThumbnail /
+//     fetchAndDecryptLargeThumbnail) independently implements: nonce(12) ||
+//     AES-256-GCM ciphertext, no AAD, over arbitrary-length plaintext.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn vector_thumbnail_encrypt_decrypt() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "thumbnail_encrypt");
+
+    let file_key = FileKey::from_bytes(bytes32(&v, "file_key_hex"));
+    let nonce = decode_hex(&v, "nonce_hex");
+    let ciphertext = decode_hex(&v, "ciphertext_hex");
+    let expected_plaintext = decode_hex(&v, "plaintext_hex");
+
+    let blob = EncryptedBlob {
+        cipher_suite: CipherSuite::V1Aes256Gcm,
+        nonce,
+        ciphertext,
+    };
+
+    let decrypted = decrypt_chunk(&file_key, &blob).unwrap();
+    assert_eq!(
+        decrypted, expected_plaintext,
+        "thumbnail_encrypt: decrypted plaintext does not match vector — this is the interop \
+         contract web's thumbnail decrypt path must also satisfy against this exact ciphertext"
+    );
+}
+
+#[test]
+fn vector_thumbnail_encrypt_roundtrip() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "thumbnail_encrypt");
+
+    let file_key = FileKey::from_bytes(bytes32(&v, "file_key_hex"));
+    let expected_plaintext = decode_hex(&v, "plaintext_hex");
+
+    let blob = beebeeb_core::encrypt::encrypt_chunk(&file_key, &expected_plaintext).unwrap();
+    let decrypted = decrypt_chunk(&file_key, &blob).unwrap();
+    assert_eq!(
+        decrypted, expected_plaintext,
+        "thumbnail_encrypt roundtrip: encrypt->decrypt must reproduce the original plaintext"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 20. Version guard — fail loudly if vectors.json format changes unexpectedly
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -565,8 +668,8 @@ fn vector_file_version_check() {
         .as_u64()
         .expect("vectors.json must have a 'version' field");
     assert_eq!(
-        version, 3,
-        "vectors.json version mismatch — expected 3, got {version}. \
+        version, 4,
+        "vectors.json version mismatch — expected 4, got {version}. \
          Update this test if you intentionally bumped the version."
     );
 
@@ -585,6 +688,8 @@ fn vector_file_version_check() {
         "recovery_phrase_roundtrip",
         "metadata_encrypt_decrypt",
         "file_request_seal_open",
+        "share_key_wrap",
+        "thumbnail_encrypt",
     ];
     for name in &required {
         assert!(names.contains(name), "vectors.json is missing required vector '{name}'");

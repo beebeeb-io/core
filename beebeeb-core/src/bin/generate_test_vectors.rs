@@ -2,7 +2,7 @@ use beebeeb_core::encrypt::{decrypt_chunk, decrypt_metadata, encrypt_chunk, encr
 use beebeeb_core::file_request::{
     derive_request_wrap_key, open_request_upload, seal_to_request, unwrap_request_private, wrap_request_private,
 };
-use beebeeb_core::kdf::{derive_file_key, derive_master_key};
+use beebeeb_core::kdf::{FileKey, derive_file_key, derive_master_key};
 use beebeeb_core::opaque::{
     OpaqueEnvelope, compute_recovery_check, derive_share_key, derive_x25519_private, derive_x25519_public,
     x25519_shared_secret,
@@ -167,8 +167,52 @@ fn main() {
         "note": "wrap_key is deterministic. e_pub/wrapped_key (random ephemeral+nonce) verify open_request_upload(r_priv,e_pub,file_id,wrapped_key)==content_key; wrapped_private/wrap_nonce (random nonce) verify unwrap_request_private==r_priv."
     }));
 
+    // Vector 11: Share-key wrap (audit item K3) — web's wrapKeyForShare /
+    // unwrapKeyFromShare (repos/web/src/lib/crypto.ts) independently
+    // implements this exact wire format in WebCrypto: nonce(12) ||
+    // AES-256-GCM-ciphertext(32-byte key + 16-byte tag) = 60 bytes. It is
+    // functionally `encrypt_chunk`/`decrypt_chunk` with a raw 32-byte "wrap
+    // key" standing in for a FileKey — no KDF, no AAD. Fixed key/plaintext
+    // here pin the format so a web-side KAT can assert byte-identical decrypt
+    // against core's AES-256-GCM.
+    let share_wrap_key = FileKey::from_bytes([0xA5u8; 32]);
+    let share_key_to_wrap = [0x5Au8; 32];
+    let share_wrapped = encrypt_chunk(&share_wrap_key, &share_key_to_wrap).unwrap();
+    let share_decrypted = decrypt_chunk(&share_wrap_key, &share_wrapped).unwrap();
+    assert_eq!(share_decrypted, share_key_to_wrap);
+    vectors.push(json!({
+        "name": "share_key_wrap",
+        "wrap_key_hex": hex(share_wrap_key.as_bytes()),
+        "key_to_wrap_hex": hex(&share_key_to_wrap),
+        "nonce_hex": hex(&share_wrapped.nonce),
+        "ciphertext_hex": hex(&share_wrapped.ciphertext),
+        "note": "K3: pins web's wrapKeyForShare/unwrapKeyFromShare wire format — nonce(12) || AES-256-GCM ciphertext with 16-byte tag = 60 bytes for a 32-byte wrapped key, no AAD. nonce is random — use this vector for decrypt-only testing. To verify encrypt, check that decrypt(encrypt(key_to_wrap)) == key_to_wrap."
+    }));
+
+    // Vector 12: Thumbnail encryption (audit item K3) — web's thumbnail.ts
+    // (encryptThumbnailBlob / fetchAndDecryptThumbnail /
+    // fetchAndDecryptLargeThumbnail) independently implements the SAME
+    // nonce(12) || ciphertext wire format over arbitrary-length bytes, keyed
+    // by the file's FileKey, no AAD. `plaintext_hex` here is a placeholder
+    // byte sequence standing in for encoded WebP thumbnail bytes — the
+    // AES-256-GCM wire format is codec-agnostic, so a real WebP encoding adds
+    // nothing to the KAT.
+    let thumb_key = FileKey::from_bytes([0xC3u8; 32]);
+    let thumb_plaintext: Vec<u8> = (0u8..128).collect();
+    let thumb_encrypted = encrypt_chunk(&thumb_key, &thumb_plaintext).unwrap();
+    let thumb_decrypted = decrypt_chunk(&thumb_key, &thumb_encrypted).unwrap();
+    assert_eq!(thumb_decrypted, thumb_plaintext);
+    vectors.push(json!({
+        "name": "thumbnail_encrypt",
+        "file_key_hex": hex(thumb_key.as_bytes()),
+        "plaintext_hex": hex(&thumb_plaintext),
+        "nonce_hex": hex(&thumb_encrypted.nonce),
+        "ciphertext_hex": hex(&thumb_encrypted.ciphertext),
+        "note": "K3: pins web's thumbnail.ts encrypt/decrypt wire format — nonce(12) || AES-256-GCM ciphertext, no AAD, over arbitrary-length plaintext. plaintext is a placeholder byte sequence, not a real WebP — the format is codec-agnostic. nonce is random — use this vector for decrypt-only testing. To verify encrypt, check that decrypt(encrypt(plaintext)) == plaintext."
+    }));
+
     let output = json!({
-        "version": 3,
+        "version": 4,
         "generated_by": "beebeeb-core test vector generator",
         "vectors": vectors,
     });
