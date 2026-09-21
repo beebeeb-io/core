@@ -215,8 +215,8 @@ AGPL-3.0-or-later
 The full rules live in the workspace `CLAUDE.md` → "How we work" (also summarised in the workspace `AGENTS.md`). Read them; they apply here. The repo-specific instantiation:
 
 - **The count-shaped truth line:** `cargo test --workspace 2>&1 | tee /tmp/bb-core-test.log` →
-  one `test result: ok. N passed; 0 failed` per crate/suite (the CLAUDE.md numbers above — 255 for
-  `beebeeb-core` — are the baseline to compare against). Assert the Ns; a suite that did not run is
+  one `test result: ok. N passed; 0 failed` per crate/suite (the CLAUDE.md numbers above — 358 across
+  9 binaries for `beebeeb-core`, measured 2026-09-22 — are the baseline to compare against). Assert the Ns; a suite that did not run is
   a red, not a pass.
 - **Crypto tests are trusted only after they have been seen to fail.** Mutate a KAT vector or a
   derivation label, paste WHICH assertion failed, revert. A KAT that cannot fail proves nothing.
