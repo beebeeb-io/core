@@ -11,7 +11,7 @@ Cryptographic core, shared types, and sync engine. This is the trust anchor — 
 ## Build & test
 
 ```sh
-cargo test -p beebeeb-core   # 255 tests (8 suites), incl. the chunk_stream streaming primitive
+cargo test -p beebeeb-core   # 358 tests across 9 binaries (unit 285, chunk_stream_parity 2, cli_auth_vectors 4 + 1 ignored, cross_client_vectors 21, cross_platform_vectors 22, integration 13, transfer_vectors 5, zip_tests 6) — measured 2026-09-22 at 95da81b; the truth line is per binary: `test result: ok. N passed`
 cargo test --workspace       # full workspace (core + sync + types + upload + uniffi + wasm)
 cargo clippy --workspace -- -D warnings
 cargo fmt -- --check
@@ -215,8 +215,8 @@ AGPL-3.0-or-later
 The full rules live in the workspace `CLAUDE.md` → "How we work" (also summarised in the workspace `AGENTS.md`). Read them; they apply here. The repo-specific instantiation:
 
 - **The count-shaped truth line:** `cargo test --workspace 2>&1 | tee /tmp/bb-core-test.log` →
-  one `test result: ok. N passed; 0 failed` per crate/suite (the CLAUDE.md numbers above — 255 for
-  `beebeeb-core` — are the baseline to compare against). Assert the Ns; a suite that did not run is
+  one `test result: ok. N passed; 0 failed` per crate/suite (the CLAUDE.md numbers above — 358 across
+  9 binaries for `beebeeb-core`, measured 2026-09-22 — are the baseline to compare against). Assert the Ns; a suite that did not run is
   a red, not a pass.
 - **Crypto tests are trusted only after they have been seen to fail.** Mutate a KAT vector or a
   derivation label, paste WHICH assertion failed, revert. A KAT that cannot fail proves nothing.
