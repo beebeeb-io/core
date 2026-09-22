@@ -14,7 +14,8 @@ pub const BASIC_QUOTA: i64 = 200_000_000_000;
 pub const PRO_QUOTA: i64 = ONE_TB;
 pub const BUSINESS_QUOTA: i64 = 5 * ONE_TB;
 
-pub const STORAGE_ADDON_CENTS_PER_TB: i64 = 1099;
+/// €14.99/TB/mo since 2026-09-22 (task 1463, Guus ruling).
+pub const STORAGE_ADDON_CENTS_PER_TB: i64 = 1499;
 pub const USER_ADDON_CENTS: i64 = 499;
 
 /// Base monthly price in cents for each paid plan.
@@ -220,24 +221,33 @@ mod tests {
 
     #[test]
     fn monthly_cost_cents_with_addons() {
-        // Pro + 2 extra TB
+        // STORAGE_ADDON_CENTS_PER_TB is €14.99/TB/mo since 2026-09-22 (task 1463).
+        assert_eq!(STORAGE_ADDON_CENTS_PER_TB, 1499);
+        // Pro + 2 extra TB = 1099 + 2 * 1499 = 4097
         assert_eq!(
             monthly_cost_cents(Plan::Pro, 2, 0),
             1099 + 2 * STORAGE_ADDON_CENTS_PER_TB
         );
+        assert_eq!(monthly_cost_cents(Plan::Pro, 2, 0), 4097);
         // Business + 3 extra TB + 5 extra users (beyond the 2 included seats)
+        // = 5495 + 3 * 1499 + 5 * 499 = 12487
         assert_eq!(
             monthly_cost_cents(Plan::Business, 3, 5),
             5495 + 3 * STORAGE_ADDON_CENTS_PER_TB + 5 * USER_ADDON_CENTS
         );
+        assert_eq!(monthly_cost_cents(Plan::Business, 3, 5), 12487);
     }
 
     #[test]
     fn pricing_v2_migration_is_price_neutral() {
+        // Historical check, frozen at the pricing-v2 launch rate (STORAGE_ADDON_CENTS_PER_TB
+        // was 1099 / €10.99 then; it became 1499 / €14.99 on 2026-09-22, task 1463). Uses
+        // literal 1099 rather than the now-live STORAGE_ADDON_CENTS_PER_TB so this keeps
+        // asserting the historical relationship instead of silently going stale/red.
         // Old Basic (1 TB, €10.99) → new Pro 1 TB base, 0 add-on.
         assert_eq!(monthly_cost_cents(Plan::Pro, 0, 0), 1099);
-        // Old Pro (5 TB, €54.95) → new Pro 1 TB base + 4 TB add-on.
-        assert_eq!(monthly_cost_cents(Plan::Pro, 4, 0), 5495);
+        // Old Pro (5 TB, €54.95) → new Pro 1 TB base + 4 TB add-on, at the 1099 launch rate.
+        assert_eq!(PRO_PRICE_CENTS + 4 * 1099, 5495);
         // New Basic entry tier (200 GB, €3.99).
         assert_eq!(monthly_cost_cents(Plan::Basic, 0, 0), 399);
     }
