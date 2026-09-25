@@ -56,3 +56,28 @@ jobs:
 
       - name: cargo test
         run: cargo test --workspace
+
+  claims-guard:
+    name: Claims guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # Shared engine (vendored verbatim from the workspace canonical): banned
+      # origins, host allow-list, provider names, banned claims, regions.
+      - name: Run claims guard
+        run: bash scripts/claims-guard/claims-guard.sh
+
+      # The canon CLAIM_SWEEP (docs/canon/public-claims.md) over the WHOLE tree.
+      # The engine above scans user-facing paths only; design/hifi/ mockups
+      # sat outside them and published a false external-audit claim for
+      # months. The self-test runs first so a sweep that cannot go red never
+      # reports green.
+      - name: Canon sweep self-test
+        if: always()
+        run: bash scripts/claims-guard/canon-sweep.sh --self-test
+      - name: Canon sweep (whole tree, must be 0 rows)
+        if: always()
+        run: bash scripts/claims-guard/canon-sweep.sh

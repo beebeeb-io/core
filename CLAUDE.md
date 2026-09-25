@@ -203,7 +203,19 @@ relay — it does no crypto.
 
 ## Design references
 
-Design files are in the workspace root: `../../design/hifi/`
+Design files are in the workspace root: `../../design/hifi/` — never copy them into this
+public repo. A snapshot that lived here until 2026-09-25 published a false external-audit
+claim (firm + date) and Digital Operational Resilience Act copy; the `Claims guard` CI job
+(`scripts/claims-guard/canon-sweep.sh`) now fails on those strings anywhere in the tree.
+
+## Claims guard
+
+- `bash scripts/claims-guard/claims-guard.sh` — shared engine + `policy.conf`, vendored verbatim
+  from the workspace `scripts/claims-guard/` (do not edit the copies here; edit the workspace
+  canonical and re-copy). Reviewed exceptions: `.claims-allow` (`path|token|evidence`).
+- `bash scripts/claims-guard/canon-sweep.sh` — the canon CLAIM_SWEEP from
+  `docs/canon/public-claims.md` over the WHOLE tree; must print `clean (0 rows)`.
+  `--self-test` proves it goes red on a throwaway repo.
 
 ## License
 

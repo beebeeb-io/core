@@ -1,0 +1,6 @@
+# path|token|evidence (evidence is mandatory and is what a reviewer reads)
+
+# ── host-allowlist ──────────────────────────────────────────────────────────
+# rustdoc intra-doc links to this crate's own published API docs — a
+# doc-comment citation, never a runtime fetch (core makes no network calls).
+beebeeb-types/src/file.rs|docs.rs|rustdoc link to beebeeb-core's own API docs in a doc-comment; not a runtime call
