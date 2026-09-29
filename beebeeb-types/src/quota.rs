@@ -14,8 +14,10 @@ pub const BASIC_QUOTA: i64 = 200_000_000_000;
 pub const PRO_QUOTA: i64 = ONE_TB;
 pub const BUSINESS_QUOTA: i64 = 5 * ONE_TB;
 
-/// €14.99/TB/mo since 2026-09-22 (task 1463, Guus ruling).
-pub const STORAGE_ADDON_CENTS_PER_TB: i64 = 1499;
+/// €10.99/TB/mo since 2026-09-29 (task 1607, Guus ruling — reverses the €14.99
+/// rate set 2026-09-22 by task 1463; see that task file's Notes for the
+/// original change and this one's for the reversal).
+pub const STORAGE_ADDON_CENTS_PER_TB: i64 = 1099;
 pub const USER_ADDON_CENTS: i64 = 499;
 
 /// Base monthly price in cents for each paid plan.
@@ -221,29 +223,32 @@ mod tests {
 
     #[test]
     fn monthly_cost_cents_with_addons() {
-        // STORAGE_ADDON_CENTS_PER_TB is €14.99/TB/mo since 2026-09-22 (task 1463).
-        assert_eq!(STORAGE_ADDON_CENTS_PER_TB, 1499);
-        // Pro + 2 extra TB = 1099 + 2 * 1499 = 4097
+        // STORAGE_ADDON_CENTS_PER_TB is €10.99/TB/mo since 2026-09-29 (task 1607,
+        // reversing the €14.99 rate set 2026-09-22 by task 1463).
+        assert_eq!(STORAGE_ADDON_CENTS_PER_TB, 1099);
+        // Pro + 2 extra TB = 1099 + 2 * 1099 = 3297
         assert_eq!(
             monthly_cost_cents(Plan::Pro, 2, 0),
             1099 + 2 * STORAGE_ADDON_CENTS_PER_TB
         );
-        assert_eq!(monthly_cost_cents(Plan::Pro, 2, 0), 4097);
+        assert_eq!(monthly_cost_cents(Plan::Pro, 2, 0), 3297);
         // Business + 3 extra TB + 5 extra users (beyond the 2 included seats)
-        // = 5495 + 3 * 1499 + 5 * 499 = 12487
+        // = 5495 + 3 * 1099 + 5 * 499 = 11287
         assert_eq!(
             monthly_cost_cents(Plan::Business, 3, 5),
             5495 + 3 * STORAGE_ADDON_CENTS_PER_TB + 5 * USER_ADDON_CENTS
         );
-        assert_eq!(monthly_cost_cents(Plan::Business, 3, 5), 12487);
+        assert_eq!(monthly_cost_cents(Plan::Business, 3, 5), 11287);
     }
 
     #[test]
     fn pricing_v2_migration_is_price_neutral() {
         // Historical check, frozen at the pricing-v2 launch rate (STORAGE_ADDON_CENTS_PER_TB
-        // was 1099 / €10.99 then; it became 1499 / €14.99 on 2026-09-22, task 1463). Uses
-        // literal 1099 rather than the now-live STORAGE_ADDON_CENTS_PER_TB so this keeps
-        // asserting the historical relationship instead of silently going stale/red.
+        // was 1099 / €10.99 at launch; it became 1499 / €14.99 on 2026-09-22 via task 1463,
+        // then moved back to 1099 / €10.99 on 2026-09-29 via task 1607 — currently the live
+        // value again, by coincidence of the reversal). Uses literal 1099 rather than the
+        // live STORAGE_ADDON_CENTS_PER_TB so this keeps asserting the historical relationship
+        // instead of silently going stale/red if the rate ever changes again.
         // Old Basic (1 TB, €10.99) → new Pro 1 TB base, 0 add-on.
         assert_eq!(monthly_cost_cents(Plan::Pro, 0, 0), 1099);
         // Old Pro (5 TB, €54.95) → new Pro 1 TB base + 4 TB add-on, at the 1099 launch rate.
