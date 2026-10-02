@@ -122,18 +122,12 @@ mod tests {
 
     #[test]
     fn effective_quota_extra_tb_on_pro() {
-        assert_eq!(
-            effective_quota(Plan::Pro, 3, 0),
-            PRO_QUOTA + 3 * ONE_TB
-        );
+        assert_eq!(effective_quota(Plan::Pro, 3, 0), PRO_QUOTA + 3 * ONE_TB);
     }
 
     #[test]
     fn effective_quota_capped_at_99_tb() {
-        assert_eq!(
-            effective_quota(Plan::Pro, 200, 0),
-            MAX_TOTAL_STORAGE
-        );
+        assert_eq!(effective_quota(Plan::Pro, 200, 0), MAX_TOTAL_STORAGE);
     }
 
     #[test]
@@ -147,15 +141,9 @@ mod tests {
     #[test]
     fn effective_quota_with_bonus_bytes() {
         let bonus = 500_000_000; // 500 MB bonus
-        assert_eq!(
-            effective_quota(Plan::Pro, 0, bonus),
-            PRO_QUOTA + bonus
-        );
+        assert_eq!(effective_quota(Plan::Pro, 0, bonus), PRO_QUOTA + bonus);
         // Free plan with bonus but extra_tb=0 still gets bonus
-        assert_eq!(
-            effective_quota(Plan::Free, 0, bonus),
-            FREE_QUOTA + bonus
-        );
+        assert_eq!(effective_quota(Plan::Free, 0, bonus), FREE_QUOTA + bonus);
     }
 
     #[test]
@@ -216,7 +204,7 @@ mod tests {
     fn max_extra_tb_per_plan() {
         assert_eq!(Plan::Free.max_extra_tb(), 0);
         assert_eq!(Plan::Basic.max_extra_tb(), 0);
-        assert_eq!(Plan::Pro.max_extra_tb(), 94);   // 99 - 5
+        assert_eq!(Plan::Pro.max_extra_tb(), 94); // 99 - 5
         assert_eq!(Plan::Business.max_extra_tb(), 89); // 99 - 10
     }
 
