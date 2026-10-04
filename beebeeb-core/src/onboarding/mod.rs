@@ -17,9 +17,9 @@ pub mod breach;
 pub mod ceremony;
 pub mod password;
 
-pub use breach::{BreachQuery, BreachResponse, BreachVerdict, evaluate_breach_response};
+pub use breach::{BreachCheck, BreachQuery, BreachResponse, BreachVerdict, MAX_BODY_BYTES, evaluate_breach_response};
 pub use ceremony::{
-    CeremonyConfig, CeremonyError, CeremonyStep, RegistrationFinish, RegistrationStart, SignupCeremony,
+    BreachPolicy, CeremonyConfig, CeremonyError, CeremonyStep, RegistrationFinish, RegistrationStart, SignupCeremony,
     VERIFY_WORD_COUNT_FLOOR,
 };
 pub use password::{

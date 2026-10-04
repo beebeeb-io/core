@@ -210,23 +210,34 @@ only to address the breach corpus (it is the corpus' key), never for integrity.
   `PasswordHint`). Ports the web heuristic (length gate, then mixed case, then number or
   symbol). Copy stays in clients. Differences from the TypeScript it replaces: length is
   Unicode scalar values (JS counted UTF-16 units) and case/symbol detection is Unicode aware.
-  `MIN_LENGTH_FLOOR = 8` is a documented **safe floor** applied inside `from_server`, not the
-  policy: the shipped number (12) comes from the server, and a hostile document cannot go
-  below the floor. There is deliberately no hard-coded fallback policy.
+  `MIN_LENGTH_FLOOR = 12` (lead decision 2026-10-04, review L5) is a **floor** applied inside
+  `from_server`, not the policy: the server may raise the number, never lower it below the 12
+  the product ships with, so a hostile onboarding document cannot weaken what clients enforce.
+  There is deliberately no hard-coded fallback policy. The evaluator is advisory UX plus a
+  client-side gate, not a guessing-cost estimator: whitespace-only or repeated-character strings
+  that meet the length score Fair or Good (the web heuristic, unchanged); the breach check is
+  the backstop (review L6).
 - **`onboarding::breach`** — k-anonymity helper, hashing and matching only.
   `BreachQuery::from_password` (SHA-1, upper-case hex, 5-char `prefix()` to send, 35-char
   `suffix()` that never leaves the device; zeroized on drop), then
   `evaluate_breach_response(&query, BreachResponse::Body(text) | Unavailable, fail_open)
   -> BreachVerdict` (`Clean`, `Breached{count}`, `CheckFailedAllowed`, `CheckFailedBlocked`,
-  `NotRequired`). **The HTTP call stays in each client and goes to Beebeeb's own endpoint**
-  (server `GET /api/v1/auth/pwned-range/{prefix}`, node-local corpus; the onboarding document
-  declares it as `policy.password.breach_check.endpoint`). The helper names no third-party
-  service: the public HaveIBeenPwned API is behind a US CDN and violates the no-US-systems
-  rule (task 0995). Outage policy: transport failure, non-2xx, or a body with any line that is
-  not `SUFFIX[:COUNT]` is an outage (a captive-portal page returned as 200 must not read as
-  clean); `fail_open` (from the document) picks `CheckFailedAllowed` vs `CheckFailedBlocked`.
-  An empty body is `Clean` (the server answers empty for an absent prefix or an unseeded node).
-  Count 0 is range padding and means not present.
+  `NotRequired`) for display. **`BreachCheck`** is what the ceremony accepts: a query bound to
+  its password plus the recorded answer (`new(password)`, `prefix()`, `record(response)`,
+  `verdict(fail_open)`, `matches_password(pw)`). **The HTTP call stays in each client and goes
+  to Beebeeb's own endpoint** (server `GET /api/v1/auth/pwned-range/{prefix}`, node-local
+  corpus; the onboarding document declares it as `policy.password.breach_check.endpoint`).
+  The helper names no third-party service: the public HaveIBeenPwned API is behind a US CDN
+  and violates the no-US-systems rule (task 0995). Outage policy: transport failure, non-2xx,
+  an **empty or whitespace-only body**, a body over `MAX_BODY_BYTES` (256 KiB; clients stop
+  reading there), or any line that is not `SUFFIX[:COUNT]` is an outage (a captive-portal page
+  returned as 200 must not read as clean); `fail_open` (from the document) picks
+  `CheckFailedAllowed` vs `CheckFailedBlocked`. Why empty is an outage (review M2): the server
+  route answers `200` + empty body for an unseeded corpus, a failed corpus read, AND an absent
+  prefix (`routes/auth.rs::pwned_range` unwraps all three), and a seeded corpus never has an
+  empty block, so empty means "not consulted". Count 0 is range padding and means not present.
+  Known limit (review L1): `sha1` 0.10 cannot be zeroized, so the hasher's block buffer (up to
+  63 password bytes) is freed unwiped; the digest and hex are wiped.
 - **`onboarding::ceremony`** — `SignupCeremony`, one per signup attempt. Steps (canonical
   order): `VerifyEmail` (only if the document requires it), `SetPassword`, `SavePhrase`,
   `ConfirmPhrase`, `CreateAccount`, `Done`; `spec_step_id()` maps the two phrase parts to the
@@ -235,29 +246,55 @@ only to address the breach corpus (it is the corpus' key), never for integrity.
   `set_password` and the phrase steps is deliberately not enforced (the shipped web client
   shows the phrase first; the spec's example document lists the password first; the server's
   `steps` array orders the UI). Flow: `email_verified()`, `set_password(pw, confirmation,
-  BreachVerdict)`, `begin_phrase()` (Argon2id, about 1 s, idempotent), `phrase()`,
+  Option<&BreachCheck>)`, `begin_phrase()` (Argon2id, about 1 s, idempotent), `phrase()`,
   `acknowledge_phrase()`, `challenge_positions()` (1-based, stable, count from
   `policy.recovery_phrase.verify_word_count`, floored at `VERIFY_WORD_COUNT_FLOOR = 3`),
   `confirm_phrase(answers)`, `start_registration()` -> OPAQUE request,
   `finish_registration(server_message)` -> `{upload, x25519_public, recovery_check}`,
   `account_created()` -> the `MasterKey`. Recovery paths: `registration_failed()` (retry with
-  a fresh OPAQUE exchange) and `email_ticket_invalidated()` (back to the code step, spec 5.9).
+  a fresh OPAQUE exchange), `email_ticket_invalidated()` (back to the code step, spec 5.9) and
+  `email_changed()` (the user edited the verified email: verification withdrawn, secrets kept).
+  **The breach gate is enforced here, once** (review M1, Codex P1): `CeremonyConfig.breach` is
+  `BreachPolicy::NotRequired | Required { fail_open }` from the document. When required,
+  `set_password` demands a `BreachCheck`, re-derives the digest from the password it stores and
+  refuses a check made for another password (`BreachCheckStale`, code `breach_check_stale`) or
+  one with no recorded answer (`BreachCheckMissing`, `breach_check_missing`), then computes the
+  verdict itself with the document's `fail_open`. A bare verdict is not accepted anywhere, so a
+  stale or forged "clean" cannot pass, and a client cannot pick `fail_open`. The ceremony has no
+  notion of the email address: the server's signup-ticket binding is what ties a verified email
+  to the created account and is mandatory server side.
   Memory: password and phrase are `Zeroizing`; the phrase string is wiped the moment it is
   confirmed, the master key derived from it and the password are kept until
   `account_created()` so a rejected `register-finish` does not force a different phrase on the
-  user; dropping the ceremony wipes everything.
+  user; dropping the ceremony wipes everything, **but a binding handle is freed on the host's
+  schedule (JS finalizer, ARC, GC), so clients must call `wipe()` (`abandon()` in the bindings)
+  on back, cancel and error exits** (review M3). `wipe()` returns the ceremony to a fresh state
+  with the same config. The `phrase()` copy handed to a UI cannot be wiped by Rust (review L4):
+  call it only while rendering and drop the reference.
 - **Bindings.** WASM (`beebeeb-wasm`): free fn `evaluate_password(password, min_length)`;
-  `WasmBreachCheck` (`new`, `prefix`, `evaluate(body|null, failOpen)`); `WasmSignupCeremony`
-  (camelCase methods mirroring the list above). Enum-like values cross as lowercase string
+  `WasmBreachCheck` (`new(password)`, `prefix`, `evaluate(body|null, failOpen)` which records the
+  answer and returns the display verdict); `WasmSignupCeremony(minLength, emailVerificationRequired,
+  verifyWordCount, breachCheckRequired, breachFailOpen)` (camelCase methods mirroring the list
+  above, plus `abandon()` and `emailChanged()`; `setPassword(password, confirmation,
+  breachCheck)` borrows the `WasmBreachCheck` object, not a verdict, and
+  `setPasswordUnchecked(password, confirmation)` is for documents with no breach check (it
+  throws `breach_check_missing` when the ceremony was built with `breachCheckRequired`);
+  `accountCreated()` copies the key through a `Zeroizing` temporary into a
+  `Uint8Array`, so no plain Rust-side copy outlives the call). Enum-like values cross as lowercase string
   tokens (`as_str()` in core), objects are plain JS objects (typed `Serialize` structs, 0655),
   counts are `f64`, ceremony errors are thrown `Error`s with a stable `code`
-  (`CeremonyError::code`). A `BreachVerdict` object is accepted back by `setPassword` but only
-  its `kind`/`count` are read: `allows_proceeding` is recomputed in core, never trusted from JS.
+  (`CeremonyError::code`). The verdict object `evaluate` returns is output only; nothing a JS
+  caller builds by hand can satisfy the gate.
   UniFFI (`beebeeb-uniffi`): `evaluate_password`, `breach_verdict_allows_proceeding`,
   `breach_verdict_check_failed`, `ceremony_step_spec_id`, handles `BreachCheckHandle` and
-  `SignupCeremonyHandle` (`account_created()` returns a `MasterKeyHandle`, so the key never
-  crosses FFI as bytes), enums `PasswordStrengthDto`, `PasswordHintDto`, `BreachVerdictDto`,
-  `CeremonyStepDto`, record `PasswordEvaluationDto`, `RegistrationFinishDto`, and a separate
+  `SignupCeremonyHandle(min_length, email_verification_required, verify_word_count,
+  breach_check_required, breach_fail_open)` (`set_password(password, confirmation,
+  Option<BreachCheckHandle>)`, `abandon()`, `email_changed()`; `account_created()` returns a
+  `MasterKeyHandle`, so the key does not cross FFI as bytes on this path. The handle is not a
+  sandbox: it still offers `export_for_keychain()` and `derive_x25519_private()` for keychain
+  storage, review L8. Owned `String` arguments are wrapped in `Zeroizing`; the handle lock
+  recovers from poisoning), enums `PasswordStrengthDto`, `PasswordHintDto`, `BreachVerdictDto`,
+  `CeremonyStepDto`, record `PasswordEvaluationDto`, `RegistrationFinishDto` (no `Debug`), and a separate
   `OnboardingError` (so the UI branches on cause, not on text). Swift: `evaluatePassword`,
   `BreachCheckHandle`, `SignupCeremonyHandle`, `OnboardingError`. The committed Swift
   bindings and header (`beebeeb-uniffi/bindings/`) were regenerated: 26 new `uniffi_beebeeb_uniffi_fn_*`
@@ -267,6 +304,10 @@ only to address the breach corpus (it is the corpus' key), never for integrity.
   `min_length_is_enforced_at_the_boundary`; flipping `fail_open` fails four breach tests;
   removing the floor fails `floor_clamps_a_hostile_server_value`; ignoring the
   `ConfirmPhrase` prerequisite fails `create_account_is_refused_until_every_prerequisite_is_done`.
+  Round 2 (review): ignoring the password binding fails
+  `a_breach_check_for_another_password_is_refused`; an empty body read as clean fails
+  `empty_body_is_an_outage_not_clean`; a no-op `wipe()` fails
+  `wipe_abandons_everything_and_the_ceremony_starts_over`.
 
 ## Security invariants
 

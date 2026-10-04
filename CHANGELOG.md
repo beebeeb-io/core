@@ -9,12 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `onboarding` module (task 1744): password-policy evaluator driven by the server's numbers
-  (with a documented safe floor), k-anonymity breached-password helper (hashing and matching
+  (floored at the shipped 12), k-anonymity breached-password helper (hashing and matching
   only; no I/O, no third-party endpoint, fail-open or fail-closed as the server declares), and
   the signup ceremony state machine over the existing recovery-phrase and OPAQUE primitives.
   Exposed through native Rust, WASM (`WasmBreachCheck`, `WasmSignupCeremony`,
   `evaluate_password`) and UniFFI (`BreachCheckHandle`, `SignupCeremonyHandle`,
-  `evaluate_password`). New dependency: `sha1` (corpus addressing only).
+  `evaluate_password`). New dependency: `sha1` (corpus addressing only). The ceremony takes a
+  `BreachCheck` bound to the password (never a bare verdict), treats an empty or oversized
+  breach-endpoint body as an outage, exposes `wipe()` (`abandon()` in the bindings) and
+  `email_changed()`, and floors the password minimum at the shipped 12.
 - CI `Claims guard` job: runs the shared claims-guard engine plus
   `scripts/claims-guard/canon-sweep.sh`, the canon CLAIM_SWEEP over the whole tree
   (including any `design/` folder), so a false audit or compliance claim fails the build.

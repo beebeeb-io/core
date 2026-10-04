@@ -16,7 +16,7 @@
 //!
 //! ```text
 //!   verify_email_code (only if the server requires it)
-//!   set_password            policy evaluation + breach verdict + confirmation
+//!   set_password            policy evaluation + bound breach check + confirmation
 //!   save_recovery_phrase    SavePhrase (shown + acknowledged)
 //!                           ConfirmPhrase (N words typed back)
 //!   create_account          registration_start -> [server] -> registration_finish
@@ -38,14 +38,26 @@
 //! after a rejected `register-finish` does not force the user to write down a
 //! different phrase) until [`SignupCeremony::account_created`] hands it to the
 //! caller. The password is kept until then for the same retry reason, because
-//! OPAQUE needs it again at the next `registration_start`. Dropping the
-//! ceremony at any point wipes everything.
+//! OPAQUE needs it again at the next `registration_start`.
+//!
+//! Dropping the ceremony wipes everything, but a binding's handle is freed on
+//! the host's schedule (a JS finalizer, ARC, a GC), which can be minutes after
+//! the user left the flow. Clients must therefore call
+//! [`SignupCeremony::wipe`] (`abandon()` in the bindings) on back, cancel and
+//! error exits instead of waiting for the handle to be collected.
+//!
+//! # The email address
+//!
+//! The ceremony has no notion of the email address; the server's signup ticket
+//! is what binds a verified email to the account that gets created, and that
+//! binding is mandatory server side. If the UI lets the user change the email
+//! after verification, the client must call [`SignupCeremony::email_changed`].
 
 use rand::rngs::OsRng;
 use thiserror::Error;
 use zeroize::Zeroizing;
 
-use super::breach::BreachVerdict;
+use super::breach::{BreachCheck, BreachVerdict};
 use super::password::{PasswordEvaluation, PasswordPolicy, evaluate_password};
 use crate::CoreError;
 use crate::kdf::MasterKey;
@@ -100,6 +112,18 @@ impl CeremonyStep {
     }
 }
 
+/// Whether the server's document requires a breach check, and what to do when
+/// the check cannot run. From `policy.password.breach_check`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BreachPolicy {
+    /// The document declares no breach check. A supplied check is ignored.
+    NotRequired,
+    /// A [`BreachCheck`] bound to the password and holding the endpoint's
+    /// answer is required. `fail_open` is applied by the ceremony itself when
+    /// the check could not complete, so a client cannot choose it.
+    Required { fail_open: bool },
+}
+
 /// Numbers and switches the server declares, applied once at construction.
 #[derive(Clone, Copy, Debug)]
 pub struct CeremonyConfig {
@@ -110,6 +134,8 @@ pub struct CeremonyConfig {
     /// From `policy.recovery_phrase.verify_word_count`; clamped to
     /// `[VERIFY_WORD_COUNT_FLOOR, phrase word count]`.
     pub verify_word_count: u32,
+    /// From `policy.password.breach_check`.
+    pub breach: BreachPolicy,
 }
 
 #[derive(Debug, Error)]
@@ -131,6 +157,10 @@ pub enum CeremonyError {
     PasswordBreached { count: u64 },
     #[error("the breach check could not run and the server requires it")]
     BreachCheckBlocked,
+    #[error("the breach check is required and has not been answered")]
+    BreachCheckMissing,
+    #[error("the breach check was run for a different password")]
+    BreachCheckStale,
     #[error("the recovery phrase is not available (not generated, or already confirmed)")]
     PhraseUnavailable,
     #[error("expected {expected} words, got {got}")]
@@ -152,6 +182,8 @@ impl CeremonyError {
             Self::PasswordTooShort { .. } => "password_too_short",
             Self::PasswordBreached { .. } => "password_breached",
             Self::BreachCheckBlocked => "breach_check_blocked",
+            Self::BreachCheckMissing => "breach_check_missing",
+            Self::BreachCheckStale => "breach_check_stale",
             Self::PhraseUnavailable => "phrase_unavailable",
             Self::PhraseAnswerCount { .. } => "phrase_answer_count",
             Self::PhraseWordMismatch => "phrase_word_mismatch",
@@ -266,14 +298,39 @@ impl SignupCeremony {
         self.registration = Registration::NotStarted;
     }
 
+    /// The user changed the email address after it was verified. The
+    /// verification belonged to the old address, so it is withdrawn; the
+    /// password and the confirmed phrase are kept. Also resets any in-flight
+    /// OPAQUE registration. (The server's signup ticket binding is what
+    /// actually prevents a mismatch; this keeps the client honest.)
+    pub fn email_changed(&mut self) {
+        self.email_verified = false;
+        self.registration = Registration::NotStarted;
+    }
+
+    /// Abandon the signup: wipe the password, the phrase, the master key and
+    /// every step already done, and return to the state of a fresh ceremony
+    /// with the same config. Call on back, cancel and error exits; do not rely
+    /// on the host freeing the handle promptly.
+    pub fn wipe(&mut self) {
+        // Assigning drops the old value, and every secret field zeroizes on drop.
+        *self = Self::new(self.config);
+    }
+
     // -- set_password -----------------------------------------------------
 
     /// Evaluate and store the password.
     ///
-    /// `breach` is the verdict the client obtained from the (client-side) HTTP
-    /// call plus [`super::breach::evaluate_breach_response`]. Rejections, in
-    /// order: mismatch with `confirmation`, below the policy minimum, found in
-    /// a breach corpus, breach check required but unavailable.
+    /// `breach` is the client's [`BreachCheck`]: made for this password, with
+    /// the endpoint's answer recorded. When the config requires a breach check
+    /// the ceremony re-derives the digest from `password`, refuses a check made
+    /// for a different one, and computes the verdict itself with the server's
+    /// `fail_open`. A bare verdict is deliberately not accepted: it could be
+    /// stale after the user edited the field, or forged.
+    ///
+    /// Rejections, in order: mismatch with `confirmation`, below the policy
+    /// minimum, breach check missing, breach check for another password, found
+    /// in a breach corpus, breach check required but could not run.
     ///
     /// Changing the password discards any in-flight OPAQUE registration, which
     /// is bound to the old one.
@@ -281,7 +338,7 @@ impl SignupCeremony {
         &mut self,
         password: &str,
         confirmation: &str,
-        breach: BreachVerdict,
+        breach: Option<&BreachCheck>,
     ) -> Result<PasswordEvaluation, CeremonyError> {
         if password != confirmation {
             return Err(CeremonyError::PasswordMismatch);
@@ -293,7 +350,17 @@ impl SignupCeremony {
                 min_length: eval.min_length,
             });
         }
-        match breach {
+        let verdict = match self.config.breach {
+            BreachPolicy::NotRequired => BreachVerdict::NotRequired,
+            BreachPolicy::Required { fail_open } => {
+                let check = breach.ok_or(CeremonyError::BreachCheckMissing)?;
+                if !check.matches_password(password) {
+                    return Err(CeremonyError::BreachCheckStale);
+                }
+                check.verdict(fail_open).ok_or(CeremonyError::BreachCheckMissing)?
+            }
+        };
+        match verdict {
             BreachVerdict::Breached { count } => return Err(CeremonyError::PasswordBreached { count }),
             BreachVerdict::CheckFailedBlocked => return Err(CeremonyError::BreachCheckBlocked),
             BreachVerdict::Clean | BreachVerdict::CheckFailedAllowed | BreachVerdict::NotRequired => {}
@@ -378,7 +445,11 @@ impl SignupCeremony {
         }
         let words: Vec<&str> = phrase.split_whitespace().collect();
         let all_correct = self.challenge.iter().zip(answers).fold(true, |ok, (idx, answer)| {
-            // No short-circuit: every answer is compared whatever the earlier ones were.
+            // Every position is compared whatever the earlier ones were (`&`, not
+            // `&&`). This is not a constant-time claim: `eq_ignore_ascii_case`
+            // still exits early on a length mismatch, which does not matter
+            // because the user is checking their own typed words on their own
+            // device, not authenticating to anyone.
             ok & words[*idx].eq_ignore_ascii_case(answer.trim())
         });
         if !all_correct {
@@ -486,7 +557,7 @@ impl SignupCeremony {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::onboarding::breach::BreachVerdict;
+    use crate::onboarding::breach::{BreachCheck, BreachResponse};
 
     const GOOD_PW: &str = "correct horse battery staple";
 
@@ -495,7 +566,30 @@ mod tests {
             password_policy: PasswordPolicy::from_server(12),
             email_verification_required: email,
             verify_word_count: 3,
+            breach: BreachPolicy::NotRequired,
         }
+    }
+
+    fn cfg_breach(fail_open: bool) -> CeremonyConfig {
+        CeremonyConfig {
+            breach: BreachPolicy::Required { fail_open },
+            ..cfg(false)
+        }
+    }
+
+    // SHA-1("correct horse battery staple") suffix is not needed: bodies below
+    // either carry an unrelated suffix (clean) or the suffix of the password.
+    const OTHER_SUFFIX: &str = "0018A45C4D1DEF81644B54AB7F969B88D65";
+
+    /// A check for `password` with the endpoint's answer recorded.
+    fn answered(password: &str, response: BreachResponse<'_>) -> BreachCheck {
+        let mut c = BreachCheck::new(password);
+        c.record(response);
+        c
+    }
+
+    fn clean_body() -> String {
+        format!("{OTHER_SUFFIX}:3\r\n")
     }
 
     /// A phrase with distinct words so wrong-position answers are detectable,
@@ -517,7 +611,7 @@ mod tests {
 
     fn ready_for_registration(c: &mut SignupCeremony) {
         c.email_verified();
-        c.set_password(GOOD_PW, GOOD_PW, BreachVerdict::Clean).unwrap();
+        c.set_password(GOOD_PW, GOOD_PW, None).unwrap();
         with_fixed_phrase(c);
         c.acknowledge_phrase().unwrap();
         let a = answers_for(c);
@@ -573,7 +667,7 @@ mod tests {
                 ..
             })
         ));
-        c.set_password(GOOD_PW, GOOD_PW, BreachVerdict::Clean).unwrap();
+        c.set_password(GOOD_PW, GOOD_PW, None).unwrap();
         assert!(matches!(
             c.start_registration(),
             Err(CeremonyError::StepNotDone {
@@ -605,11 +699,11 @@ mod tests {
         let ans = answers_for(&a);
         a.confirm_phrase(&ans).unwrap();
         assert_eq!(a.step(), CeremonyStep::SetPassword);
-        a.set_password(GOOD_PW, GOOD_PW, BreachVerdict::Clean).unwrap();
+        a.set_password(GOOD_PW, GOOD_PW, None).unwrap();
         assert_eq!(a.step(), CeremonyStep::CreateAccount);
         // ...and password first (the spec's example order) end in the same place.
         let mut b = SignupCeremony::new(cfg(false));
-        b.set_password(GOOD_PW, GOOD_PW, BreachVerdict::Clean).unwrap();
+        b.set_password(GOOD_PW, GOOD_PW, None).unwrap();
         with_fixed_phrase(&mut b);
         b.acknowledge_phrase().unwrap();
         let ans = answers_for(&b);
@@ -621,34 +715,108 @@ mod tests {
     fn set_password_rejections() {
         let mut c = SignupCeremony::new(cfg(false));
         assert!(matches!(
-            c.set_password(GOOD_PW, "different", BreachVerdict::Clean),
+            c.set_password(GOOD_PW, "different", None),
             Err(CeremonyError::PasswordMismatch)
         ));
         assert!(matches!(
-            c.set_password("short", "short", BreachVerdict::Clean),
+            c.set_password("short", "short", None),
             Err(CeremonyError::PasswordTooShort {
                 length: 5,
                 min_length: 12
             })
-        ));
-        assert!(matches!(
-            c.set_password(GOOD_PW, GOOD_PW, BreachVerdict::Breached { count: 42 }),
-            Err(CeremonyError::PasswordBreached { count: 42 })
-        ));
-        assert!(matches!(
-            c.set_password(GOOD_PW, GOOD_PW, BreachVerdict::CheckFailedBlocked),
-            Err(CeremonyError::BreachCheckBlocked)
         ));
         assert_eq!(
             c.step(),
             CeremonyStep::SetPassword,
             "no rejection may store the password"
         );
-        // Fail-open outage is allowed through.
-        assert!(
-            c.set_password(GOOD_PW, GOOD_PW, BreachVerdict::CheckFailedAllowed)
-                .is_ok()
+        assert!(c.set_password(GOOD_PW, GOOD_PW, None).is_ok());
+    }
+
+    #[test]
+    fn a_required_breach_check_gates_the_password() {
+        let body = clean_body();
+        let breached_body = format!(
+            "{}:42\n",
+            crate::onboarding::breach::BreachQuery::from_password(GOOD_PW)
+                .suffix()
+                .to_owned()
         );
+
+        // Clean answer passes.
+        let mut c = SignupCeremony::new(cfg_breach(false));
+        let ok = answered(GOOD_PW, BreachResponse::Body(&body));
+        assert!(c.set_password(GOOD_PW, GOOD_PW, Some(&ok)).is_ok());
+
+        // Breached is refused with the count.
+        let mut c = SignupCeremony::new(cfg_breach(true));
+        let hit = answered(GOOD_PW, BreachResponse::Body(&breached_body));
+        assert!(matches!(
+            c.set_password(GOOD_PW, GOOD_PW, Some(&hit)),
+            Err(CeremonyError::PasswordBreached { count: 42 })
+        ));
+        assert_eq!(c.step(), CeremonyStep::SetPassword, "a rejection stores nothing");
+
+        // Outage: the SERVER's fail_open decides, via the config.
+        let down = answered(GOOD_PW, BreachResponse::Unavailable);
+        let mut open = SignupCeremony::new(cfg_breach(true));
+        assert!(open.set_password(GOOD_PW, GOOD_PW, Some(&down)).is_ok());
+        let mut closed = SignupCeremony::new(cfg_breach(false));
+        assert!(matches!(
+            closed.set_password(GOOD_PW, GOOD_PW, Some(&down)),
+            Err(CeremonyError::BreachCheckBlocked)
+        ));
+        assert_eq!(closed.step(), CeremonyStep::SetPassword);
+    }
+
+    #[test]
+    fn a_breach_check_for_another_password_is_refused() {
+        // Task 1744 review M1 / Codex P1: the user edits the field while the
+        // request is in flight; the old password's "clean" must not pass.
+        let body = clean_body();
+        let mut c = SignupCeremony::new(cfg_breach(true));
+        let for_old = answered("an older password!", BreachResponse::Body(&body));
+        let err = c.set_password(GOOD_PW, GOOD_PW, Some(&for_old)).unwrap_err();
+        assert!(matches!(err, CeremonyError::BreachCheckStale), "{err}");
+        assert_eq!(err.code(), "breach_check_stale");
+        assert_eq!(c.step(), CeremonyStep::SetPassword, "nothing stored");
+    }
+
+    #[test]
+    fn a_missing_or_unanswered_breach_check_is_refused_when_required() {
+        let mut c = SignupCeremony::new(cfg_breach(true));
+        let err = c.set_password(GOOD_PW, GOOD_PW, None).unwrap_err();
+        assert!(matches!(err, CeremonyError::BreachCheckMissing), "{err}");
+        assert_eq!(err.code(), "breach_check_missing");
+        // Created for the right password but never answered: the same refusal,
+        // even though fail_open is true (no answer is not an outage).
+        let unanswered = BreachCheck::new(GOOD_PW);
+        assert!(matches!(
+            c.set_password(GOOD_PW, GOOD_PW, Some(&unanswered)),
+            Err(CeremonyError::BreachCheckMissing)
+        ));
+        assert_eq!(c.step(), CeremonyStep::SetPassword);
+    }
+
+    #[test]
+    fn an_empty_endpoint_body_does_not_satisfy_a_fail_closed_gate() {
+        // Task 1744 review M2 through the ceremony: an unseeded server node.
+        let mut c = SignupCeremony::new(cfg_breach(false));
+        let empty = answered(GOOD_PW, BreachResponse::Body(""));
+        assert!(matches!(
+            c.set_password(GOOD_PW, GOOD_PW, Some(&empty)),
+            Err(CeremonyError::BreachCheckBlocked)
+        ));
+    }
+
+    #[test]
+    fn a_supplied_breach_check_is_ignored_when_the_document_requires_none() {
+        let mut c = SignupCeremony::new(cfg(false));
+        let hit = answered(
+            "something else entirely",
+            BreachResponse::Body(&format!("{OTHER_SUFFIX}:1")),
+        );
+        assert!(c.set_password(GOOD_PW, GOOD_PW, Some(&hit)).is_ok());
     }
 
     #[test]
@@ -658,7 +826,7 @@ mod tests {
             ..cfg(false)
         });
         assert!(matches!(
-            c.set_password(GOOD_PW, GOOD_PW, BreachVerdict::Clean),
+            c.set_password(GOOD_PW, GOOD_PW, None),
             Err(CeremonyError::PasswordTooShort { min_length: 40, .. })
         ));
     }
@@ -806,7 +974,7 @@ mod tests {
         ready_for_registration(&mut c);
         c.start_registration().unwrap();
         assert!(matches!(c.registration, Registration::Started(_)));
-        c.set_password("another long password!", "another long password!", BreachVerdict::Clean)
+        c.set_password("another long password!", "another long password!", None)
             .unwrap();
         assert!(matches!(c.registration, Registration::NotStarted));
     }
@@ -839,6 +1007,63 @@ mod tests {
         assert!(c.start_registration().is_ok());
     }
 
+    #[test]
+    fn email_changed_withdraws_the_verification_but_keeps_secrets() {
+        let mut c = SignupCeremony::new(cfg(true));
+        ready_for_registration(&mut c);
+        c.start_registration().unwrap();
+        c.email_changed();
+        assert_eq!(c.step(), CeremonyStep::VerifyEmail);
+        assert!(matches!(c.registration, Registration::NotStarted));
+        assert!(c.password.is_some() && c.master_key.is_some());
+        assert!(matches!(
+            c.start_registration(),
+            Err(CeremonyError::StepNotDone {
+                blocking: CeremonyStep::VerifyEmail,
+                ..
+            })
+        ));
+        c.email_verified();
+        assert_eq!(c.step(), CeremonyStep::CreateAccount);
+    }
+
+    #[test]
+    fn wipe_abandons_everything_and_the_ceremony_starts_over() {
+        let mut c = SignupCeremony::new(cfg(true));
+        ready_for_registration(&mut c);
+        c.start_registration().unwrap();
+        c.wipe();
+        assert!(c.password.is_none(), "password gone");
+        assert!(c.phrase.is_none(), "phrase gone");
+        assert!(c.master_key.is_none(), "master key gone");
+        assert!(c.challenge.is_empty());
+        assert!(matches!(c.registration, Registration::NotStarted));
+        assert_eq!(
+            c.pending_steps(),
+            SignupCeremony::new(cfg(true)).pending_steps(),
+            "every step is pending again"
+        );
+        assert!(matches!(c.phrase(), Err(CeremonyError::PhraseUnavailable)));
+        assert!(matches!(c.start_registration(), Err(CeremonyError::StepNotDone { .. })));
+        // And the same object is usable for a fresh attempt with the same config.
+        c.email_verified();
+        c.set_password(GOOD_PW, GOOD_PW, None).unwrap();
+        with_fixed_phrase(&mut c);
+        c.acknowledge_phrase().unwrap();
+        let a = answers_for(&c);
+        c.confirm_phrase(&a).unwrap();
+        assert_eq!(c.step(), CeremonyStep::CreateAccount);
+    }
+
+    #[test]
+    fn wipe_after_completion_resets_the_done_state_too() {
+        let mut c = SignupCeremony::new(cfg(false));
+        c.done = true;
+        c.wipe();
+        assert!(!c.done);
+        assert_eq!(c.step(), CeremonyStep::SetPassword);
+    }
+
     /// The whole ceremony against a real server-side OPAQUE implementation,
     /// with the real phrase generator (two 256 MiB Argon2id runs plus one login).
     #[test]
@@ -848,7 +1073,7 @@ mod tests {
 
         let mut c = SignupCeremony::new(cfg(true));
         c.email_verified();
-        c.set_password(GOOD_PW, GOOD_PW, BreachVerdict::Clean).unwrap();
+        c.set_password(GOOD_PW, GOOD_PW, None).unwrap();
         c.begin_phrase().unwrap();
         let shown = c.phrase().unwrap();
         c.acknowledge_phrase().unwrap();

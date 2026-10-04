@@ -25,13 +25,37 @@
 //!
 //! # Failure policy
 //!
-//! A transport failure, a non-2xx status, or a body that is not in the
-//! `SUFFIX:COUNT` format is an *outage*, not "clean". With `fail_open = true`
-//! the verdict is [`BreachVerdict::CheckFailedAllowed`]: the client proceeds
-//! but can say honestly that the check did not run. With `fail_open = false`
-//! it is [`BreachVerdict::CheckFailedBlocked`]. An empty body is **not** an
-//! outage: the server answers an empty body for a prefix that is not in the
-//! corpus (and for an unseeded node), which is the same as "no match".
+//! A transport failure, a non-2xx status, an **empty** body, a body larger than
+//! [`MAX_BODY_BYTES`], or a body that is not in the `SUFFIX:COUNT` format is an
+//! *outage*, not "clean". With `fail_open = true` the verdict is
+//! [`BreachVerdict::CheckFailedAllowed`]: the client proceeds but can say
+//! honestly that the check did not run. With `fail_open = false` it is
+//! [`BreachVerdict::CheckFailedBlocked`].
+//!
+//! Why an empty body is an outage (task 1744 review M2): the server route
+//! answers `200` with an empty body when its node-local corpus is unseeded,
+//! when the corpus read fails, and when the prefix is absent
+//! (`routes/auth.rs::pwned_range` unwraps all three to an empty string). A
+//! seeded corpus has hundreds of suffixes behind every prefix, so an empty
+//! block means the corpus was not consulted, and reporting "clean" would tell
+//! the user a check ran when it did not. Server follow-up: answer `503` for an
+//! unseeded node so the outage is explicit rather than inferred.
+//!
+//! # Binding a verdict to its password
+//!
+//! [`BreachQuery`] / [`evaluate_breach_response`] give a verdict a UI can show.
+//! The signup ceremony does **not** accept a bare verdict (it could be stale,
+//! for a different password, or forged by a caller). It takes a
+//! [`BreachCheck`]: the query plus the recorded response, which the ceremony
+//! re-derives from the password it stores and evaluates itself with the
+//! server's `fail_open`.
+//!
+//! # Hashing hygiene (task 1744 review L1)
+//!
+//! `sha1` 0.10 has no `zeroize` support, so the hasher's internal block buffer
+//! (up to 63 bytes of the password) is freed unwiped. The digest and hex are
+//! wiped. The password is already present in the caller's string and the FFI
+//! copies, so this is accepted rather than worked around.
 //!
 //! SHA-1 here only addresses the corpus (it is the key of the public dataset).
 //! It is not used for integrity or authentication.
@@ -45,6 +69,12 @@ pub const BREACH_PREFIX_LEN: usize = 5;
 
 /// Characters of the digest kept on the client for matching (40 - 5).
 pub const BREACH_SUFFIX_LEN: usize = 35;
+
+/// Largest response body core will read, in bytes. A real range block is tens
+/// of KiB (a few hundred `SUFFIX:COUNT` lines); anything bigger is a hostile or
+/// broken endpoint and counts as an outage. Clients should stop reading the
+/// response at this many bytes rather than buffer an unbounded stream.
+pub const MAX_BODY_BYTES: usize = 256 * 1024;
 
 /// The two halves of an upper-case hex SHA-1 digest of a password.
 ///
@@ -84,6 +114,86 @@ impl BreachQuery {
     /// The 35 characters that must never leave the device.
     pub fn suffix(&self) -> &str {
         &self.suffix
+    }
+}
+
+/// A breach check bound to the password it was computed for, with the
+/// endpoint's recorded answer. This is what the signup ceremony accepts
+/// (task 1744 review M1): the ceremony re-derives the digest from the password
+/// it stores and refuses a check made for a different one, so a stale or
+/// forged "clean" cannot satisfy the gate.
+///
+/// Flow: [`BreachCheck::new`], send [`prefix`](Self::prefix), then
+/// [`record`](Self::record) what came back (or that the call failed).
+pub struct BreachCheck {
+    query: BreachQuery,
+    recorded: Option<Recorded>,
+}
+
+enum Recorded {
+    Body(String),
+    Unavailable,
+}
+
+impl BreachCheck {
+    /// Hash `password` and split the digest. No answer is recorded yet.
+    pub fn new(password: &str) -> Self {
+        Self {
+            query: BreachQuery::from_password(password),
+            recorded: None,
+        }
+    }
+
+    /// The 5 characters to send to the server (upper-case hex).
+    pub fn prefix(&self) -> &str {
+        self.query.prefix()
+    }
+
+    /// Record what the endpoint returned, replacing any earlier answer. A body
+    /// over [`MAX_BODY_BYTES`] is recorded as an outage and not retained.
+    pub fn record(&mut self, response: BreachResponse<'_>) {
+        self.recorded = Some(match response {
+            BreachResponse::Body(b) if b.len() <= MAX_BODY_BYTES => Recorded::Body(b.to_owned()),
+            BreachResponse::Body(_) | BreachResponse::Unavailable => Recorded::Unavailable,
+        });
+    }
+
+    /// Whether an answer (including "the call failed") has been recorded.
+    pub fn is_answered(&self) -> bool {
+        self.recorded.is_some()
+    }
+
+    /// The verdict for the recorded answer, or `None` before [`record`](Self::record).
+    pub fn verdict(&self, fail_open: bool) -> Option<BreachVerdict> {
+        let response = match self.recorded.as_ref()? {
+            Recorded::Body(b) => BreachResponse::Body(b),
+            Recorded::Unavailable => BreachResponse::Unavailable,
+        };
+        Some(evaluate_breach_response(&self.query, response, fail_open))
+    }
+
+    /// Record `response` and return its verdict in one step (what the bindings'
+    /// `evaluate` does, so the UI shows the verdict the ceremony will compute).
+    pub fn record_and_evaluate(&mut self, response: BreachResponse<'_>, fail_open: bool) -> BreachVerdict {
+        self.record(response);
+        self.verdict(fail_open).unwrap_or(BreachVerdict::CheckFailedBlocked)
+    }
+
+    /// Whether this check was computed for exactly `password`.
+    pub fn matches_password(&self, password: &str) -> bool {
+        let other = BreachQuery::from_password(password);
+        let mut diff =
+            (self.query.prefix().len() ^ other.prefix().len()) | (self.query.suffix().len() ^ other.suffix().len());
+        for (a, b) in self
+            .query
+            .prefix()
+            .bytes()
+            .zip(other.prefix().bytes())
+            .chain(self.query.suffix().bytes().zip(other.suffix().bytes()))
+        {
+            diff |= usize::from(a ^ b);
+        }
+        diff == 0
     }
 }
 
@@ -154,6 +264,13 @@ pub fn evaluate_breach_response(query: &BreachQuery, response: BreachResponse<'_
         BreachResponse::Body(b) => b,
         BreachResponse::Unavailable => return outage,
     };
+
+    // A hostile endpoint must not make the client chew an unbounded body, and
+    // an empty body is not an answer: the server returns one when its corpus is
+    // missing or unreadable, and a seeded corpus never has an empty block.
+    if body.len() > MAX_BODY_BYTES || body.trim().is_empty() {
+        return outage;
+    }
 
     // Parse the whole body first so one malformed line anywhere marks the
     // answer untrustworthy (a captive-portal page returned with status 200
@@ -283,15 +400,51 @@ mod tests {
     }
 
     #[test]
-    fn empty_body_is_clean_not_an_outage() {
-        // The server answers an empty body for an unseeded node or an absent prefix.
+    fn empty_body_is_an_outage_not_clean() {
+        // Task 1744 review M2. The server answers 200 with an EMPTY body when
+        // its corpus is unseeded, when the SQLite read errors, and when the
+        // prefix is absent (`routes/auth.rs::pwned_range` unwraps all three to
+        // an empty string). A seeded corpus has hundreds of suffixes behind
+        // every 5-hex prefix, so an empty body means the corpus was not
+        // consulted. Reading it as "clean" would tell the user a check ran
+        // when it did not, even under `fail_open = false`.
         let q = BreachQuery::from_password(PW);
-        for fail_open in [true, false] {
+        for body in ["", "\n", "  \r\n \t"] {
             assert_eq!(
-                evaluate_breach_response(&q, BreachResponse::Body(""), fail_open),
-                BreachVerdict::Clean
+                evaluate_breach_response(&q, BreachResponse::Body(body), true),
+                BreachVerdict::CheckFailedAllowed,
+                "{body:?}"
+            );
+            assert_eq!(
+                evaluate_breach_response(&q, BreachResponse::Body(body), false),
+                BreachVerdict::CheckFailedBlocked,
+                "{body:?}"
             );
         }
+    }
+
+    #[test]
+    fn oversized_body_is_an_outage_even_if_it_contains_the_match() {
+        // Task 1744 review L2.
+        let q = BreachQuery::from_password(PW);
+        let line = "0018A45C4D1DEF81644B54AB7F969B88D65:1\n"; // 38 bytes
+        let fits = line.repeat(MAX_BODY_BYTES / line.len());
+        assert!(fits.len() <= MAX_BODY_BYTES);
+        assert_eq!(
+            evaluate_breach_response(&q, BreachResponse::Body(&fits), true),
+            BreachVerdict::Clean,
+            "a body at the cap is still read"
+        );
+        let too_big = format!("{fits}{PW_SUFFIX}:5\n{}", line.repeat(8));
+        assert!(too_big.len() > MAX_BODY_BYTES);
+        assert_eq!(
+            evaluate_breach_response(&q, BreachResponse::Body(&too_big), true),
+            BreachVerdict::CheckFailedAllowed
+        );
+        assert_eq!(
+            evaluate_breach_response(&q, BreachResponse::Body(&too_big), false),
+            BreachVerdict::CheckFailedBlocked
+        );
     }
 
     #[test]
@@ -374,5 +527,40 @@ mod tests {
             evaluate_breach_response(&q, BreachResponse::Body(&body), true),
             BreachVerdict::Breached { count: 7 }
         );
+    }
+
+    #[test]
+    fn breach_check_is_bound_to_its_password() {
+        let c = BreachCheck::new(PW);
+        assert_eq!(c.prefix(), PW_PREFIX);
+        assert!(c.matches_password(PW));
+        assert!(!c.matches_password("passwore"));
+        assert!(!c.matches_password(""));
+        assert!(!c.matches_password("Password"));
+    }
+
+    #[test]
+    fn breach_check_has_no_verdict_until_an_answer_is_recorded() {
+        let mut c = BreachCheck::new(PW);
+        assert!(!c.is_answered());
+        assert_eq!(c.verdict(true), None);
+        c.record(BreachResponse::Unavailable);
+        assert!(c.is_answered());
+        assert_eq!(c.verdict(true), Some(BreachVerdict::CheckFailedAllowed));
+        assert_eq!(c.verdict(false), Some(BreachVerdict::CheckFailedBlocked));
+        // The same recorded answer is re-evaluated under whichever fail_open is asked.
+        let body = body_with(PW_SUFFIX, "4");
+        let v = c.record_and_evaluate(BreachResponse::Body(&body), false);
+        assert_eq!(v, BreachVerdict::Breached { count: 4 });
+        assert_eq!(c.verdict(true), Some(v), "the later answer replaced the earlier one");
+    }
+
+    #[test]
+    fn breach_check_does_not_retain_an_oversized_body() {
+        let mut c = BreachCheck::new(PW);
+        let huge = format!("{PW_SUFFIX}:5\n{}", "x".repeat(MAX_BODY_BYTES));
+        c.record(BreachResponse::Body(&huge));
+        assert_eq!(c.verdict(true), Some(BreachVerdict::CheckFailedAllowed));
+        assert!(matches!(c.recorded, Some(Recorded::Unavailable)));
     }
 }

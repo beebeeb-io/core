@@ -12,6 +12,11 @@
 //! shipped (length gate, then one point each for mixed case and for a digit or
 //! symbol) so behaviour does not change while the logic moves.
 //!
+//! Known limit (review L6): a string of spaces or of one repeated character
+//! that reaches the minimum length passes the gate and scores Fair or Good,
+//! exactly as it did in the web heuristic. The breach check is the backstop for
+//! the worst of them, and this evaluator makes no guessing-cost claim.
+//!
 //! Copy (labels, sentences, colours) stays in each client. The evaluator returns
 //! facts and enums only.
 //!
@@ -20,12 +25,13 @@
 
 /// Absolute floor for `min_length`, in Unicode scalar values.
 ///
-/// **This is a safe floor, not the policy.** The policy number comes from the
-/// server. The floor exists only so that a misconfigured or hostile server
-/// document (`min_length: 0`, `1`) cannot talk a client into accepting a
-/// trivially short password. 8 is the NIST SP 800-63B minimum for a
-/// memorised secret. The shipped server value is 12.
-pub const MIN_LENGTH_FLOOR: u32 = 8;
+/// **A floor, not the policy.** The policy number comes from the server, and
+/// the server may raise it. It may never lower it: the floor is the 12 the
+/// product ships with (lead decision 2026-10-04, task 1744 review L5), so a
+/// misconfigured or hostile onboarding document (`min_length: 0`, `8`) cannot
+/// weaken what every client enforces. A server that raises the value to an
+/// absurd number only denies service to itself.
+pub const MIN_LENGTH_FLOOR: u32 = 12;
 
 /// Password policy numbers as declared by the server.
 ///
@@ -204,6 +210,18 @@ mod tests {
             PasswordPolicy::from_server(MIN_LENGTH_FLOOR).min_length(),
             MIN_LENGTH_FLOOR
         );
+    }
+
+    #[test]
+    fn the_floor_is_the_shipped_policy_so_a_hostile_document_cannot_weaken_it() {
+        // Lead decision 2026-10-04 (task 1744 review L5): the server may raise
+        // the minimum, never lower it below the 12 the product ships with.
+        assert_eq!(MIN_LENGTH_FLOOR, 12);
+        for hostile in [0, 1, 8, 11] {
+            assert_eq!(PasswordPolicy::from_server(hostile).min_length(), 12, "asked {hostile}");
+        }
+        let eleven = "a".repeat(11);
+        assert!(!evaluate_password(&eleven, &PasswordPolicy::from_server(8)).meets_minimum);
     }
 
     #[test]

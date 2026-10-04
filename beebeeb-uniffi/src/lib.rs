@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor};
 use beebeeb_core::constellation;
@@ -3019,9 +3019,11 @@ impl From<onb::PasswordEvaluation> for PasswordEvaluationDto {
 }
 
 /// Evaluate a password against the server's `policy.password.min_length`
-/// (clamped up to the core safe floor of 8).
+/// (clamped up to the core floor of 12).
 #[uniffi::export]
 pub fn evaluate_password(password: String, min_length: u32) -> PasswordEvaluationDto {
+    // UniFFI hands over an owned String; wipe that allocation when we are done.
+    let password = Zeroizing::new(password);
     let policy = onb::PasswordPolicy::from_server(min_length);
     onb::evaluate_password(&password, &policy).into()
 }
@@ -3079,35 +3081,53 @@ pub fn breach_verdict_check_failed(verdict: BreachVerdictDto) -> bool {
 /// `policy.password.breach_check.endpoint` (Beebeeb's own API, never a third
 /// party). Only `prefix()` (5 hex chars) may be sent. The rest of the digest
 /// stays in this handle and is zeroized when it is released.
+///
+/// The handle is bound to the password it was made from and remembers the
+/// answer: pass it to `SignupCeremonyHandle.set_password`, which refuses a
+/// check made for a different password. A response body over 262144 bytes is
+/// treated as an outage, so stop reading the response at that size.
 #[derive(uniffi::Object)]
 pub struct BreachCheckHandle {
-    query: onb::BreachQuery,
+    check: Mutex<onb::BreachCheck>,
 }
 
 #[uniffi::export]
 impl BreachCheckHandle {
     #[uniffi::constructor]
     pub fn new(password: String) -> Arc<Self> {
+        let password = Zeroizing::new(password);
         Arc::new(Self {
-            query: onb::BreachQuery::from_password(&password),
+            check: Mutex::new(onb::BreachCheck::new(&password)),
         })
     }
 
     /// The 5 upper-case hex characters to send to the server.
     pub fn prefix(&self) -> String {
-        self.query.prefix().to_owned()
+        lock_tolerant(&self.check).prefix().to_owned()
     }
 
-    /// `body` is the response text of a 2xx answer, or `None` when the request
-    /// failed (network error, timeout, non-2xx). `fail_open` is
-    /// `policy.password.breach_check.fail_open`.
+    /// Record the answer and return the verdict for display. `body` is the
+    /// response text of a 2xx answer, or `None` when the request failed
+    /// (network error, timeout, non-2xx). An empty body counts as a failed
+    /// request. `fail_open` is `policy.password.breach_check.fail_open` and
+    /// only shapes this display value: the ceremony applies the value it was
+    /// constructed with.
     pub fn evaluate(&self, body: Option<String>, fail_open: bool) -> BreachVerdictDto {
         let response = match body.as_deref() {
             Some(b) => onb::BreachResponse::Body(b),
             None => onb::BreachResponse::Unavailable,
         };
-        self.query.evaluate(response, fail_open).into()
+        lock_tolerant(&self.check)
+            .record_and_evaluate(response, fail_open)
+            .into()
     }
+}
+
+/// Lock a mutex, recovering the data if a panic in another call poisoned it:
+/// one panicking call must not turn every later call on the handle into a
+/// panic across the FFI boundary.
+fn lock_tolerant<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
@@ -3170,6 +3190,12 @@ pub enum OnboardingError {
     #[error("the breach check could not run and the server requires it")]
     BreachCheckBlocked,
 
+    #[error("the breach check is required and has not been answered")]
+    BreachCheckMissing,
+
+    #[error("the breach check was run for a different password")]
+    BreachCheckStale,
+
     #[error("the recovery phrase is not available")]
     PhraseUnavailable,
 
@@ -3200,6 +3226,8 @@ impl From<onb::CeremonyError> for OnboardingError {
             }
             onb::CeremonyError::PasswordBreached { count } => Self::PasswordBreached { count },
             onb::CeremonyError::BreachCheckBlocked => Self::BreachCheckBlocked,
+            onb::CeremonyError::BreachCheckMissing => Self::BreachCheckMissing,
+            onb::CeremonyError::BreachCheckStale => Self::BreachCheckStale,
             onb::CeremonyError::PhraseUnavailable => Self::PhraseUnavailable,
             onb::CeremonyError::PhraseAnswerCount { expected, got } => Self::PhraseAnswerCount {
                 expected: expected as u32,
@@ -3211,8 +3239,9 @@ impl From<onb::CeremonyError> for OnboardingError {
     }
 }
 
-/// What `opaque/register-finish` takes from the client.
-#[derive(Clone, Debug, uniffi::Record)]
+/// What `opaque/register-finish` takes from the client. No `Debug`: the
+/// recovery binding must not end up in a log line by accident.
+#[derive(Clone, uniffi::Record)]
 pub struct RegistrationFinishDto {
     pub upload: Vec<u8>,
     pub x25519_public: Vec<u8>,
@@ -3221,8 +3250,9 @@ pub struct RegistrationFinishDto {
 
 /// The signup ceremony state machine, one per signup attempt. Single-consumer:
 /// drive it from one sequence (the `Mutex` is only the `Send + Sync` backstop
-/// UniFFI requires). Release the handle when the flow is left; that wipes the
-/// password, phrase and master key it holds.
+/// UniFFI requires). Call `abandon()` when the flow is left (back, cancel,
+/// error): releasing the handle also wipes the password, phrase and master key
+/// it holds, but only when ARC or the GC gets round to it.
 #[derive(uniffi::Object)]
 pub struct SignupCeremonyHandle {
     inner: Mutex<onb::SignupCeremony>,
@@ -3230,7 +3260,7 @@ pub struct SignupCeremonyHandle {
 
 impl SignupCeremonyHandle {
     fn with<T>(&self, f: impl FnOnce(&mut onb::SignupCeremony) -> T) -> T {
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = lock_tolerant(&self.inner);
         f(&mut guard)
     }
 }
@@ -3239,16 +3269,38 @@ impl SignupCeremonyHandle {
 impl SignupCeremonyHandle {
     /// `min_length` = `policy.password.min_length`; `email_verification_required`
     /// = the document lists a required `verify_email_code`; `verify_word_count`
-    /// = `policy.recovery_phrase.verify_word_count`.
+    /// = `policy.recovery_phrase.verify_word_count`; `breach_check_required` =
+    /// the document declares a breach check, with `breach_fail_open` =
+    /// `policy.password.breach_check.fail_open` (applied by the ceremony, not
+    /// by the caller).
     #[uniffi::constructor]
-    pub fn new(min_length: u32, email_verification_required: bool, verify_word_count: u32) -> Arc<Self> {
+    pub fn new(
+        min_length: u32,
+        email_verification_required: bool,
+        verify_word_count: u32,
+        breach_check_required: bool,
+        breach_fail_open: bool,
+    ) -> Arc<Self> {
         Arc::new(Self {
             inner: Mutex::new(onb::SignupCeremony::new(onb::CeremonyConfig {
                 password_policy: onb::PasswordPolicy::from_server(min_length),
                 email_verification_required,
                 verify_word_count,
+                breach: if breach_check_required {
+                    onb::BreachPolicy::Required {
+                        fail_open: breach_fail_open,
+                    }
+                } else {
+                    onb::BreachPolicy::NotRequired
+                },
             })),
         })
+    }
+
+    /// Abandon the signup: wipe the password, phrase and master key and return
+    /// to a fresh ceremony. Call on back, cancel and error exits.
+    pub fn abandon(&self) {
+        self.with(|c| c.wipe());
     }
 
     /// First pending step, or `Done`.
@@ -3272,16 +3324,33 @@ impl SignupCeremonyHandle {
         self.with(|c| c.email_ticket_invalidated());
     }
 
-    /// Validate and store the password. Throws `PasswordMismatch`,
-    /// `PasswordTooShort`, `PasswordBreached` or `BreachCheckBlocked`.
+    /// The user changed the email address after it was verified: back to the
+    /// code step, password and confirmed phrase kept.
+    pub fn email_changed(&self) {
+        self.with(|c| c.email_changed());
+    }
+
+    /// Validate and store the password. `breach` is the `BreachCheckHandle`
+    /// made for **this** password, after `evaluate` recorded the endpoint's
+    /// answer; pass `None` when the document declares no breach check. Throws
+    /// `PasswordMismatch`, `PasswordTooShort`, `BreachCheckMissing`,
+    /// `BreachCheckStale`, `PasswordBreached` or `BreachCheckBlocked`.
     pub fn set_password(
         &self,
         password: String,
         confirmation: String,
-        breach: BreachVerdictDto,
+        breach: Option<Arc<BreachCheckHandle>>,
     ) -> Result<PasswordEvaluationDto, OnboardingError> {
+        let password = Zeroizing::new(password);
+        let confirmation = Zeroizing::new(confirmation);
         Ok(self
-            .with(|c| c.set_password(&password, &confirmation, breach.into()))?
+            .with(|c| match &breach {
+                Some(handle) => {
+                    let guard = lock_tolerant(&handle.check);
+                    c.set_password(&password, &confirmation, Some(&guard))
+                }
+                None => c.set_password(&password, &confirmation, None),
+            })?
             .into())
     }
 
@@ -3292,7 +3361,9 @@ impl SignupCeremonyHandle {
     }
 
     /// The phrase to show. Throws `PhraseUnavailable` before `begin_phrase` or
-    /// after the phrase was confirmed (it is wiped then).
+    /// after the phrase was confirmed (it is wiped then). The returned string
+    /// is a plain copy owned by the host runtime and cannot be wiped: call this
+    /// only while rendering the phrase and drop the reference afterwards.
     pub fn phrase(&self) -> Result<String, OnboardingError> {
         Ok(self.with(|c| c.phrase().map(|p| p.as_str().to_owned()))?)
     }
@@ -3424,7 +3495,7 @@ mod onboarding_binding_tests {
     #[test]
     fn evaluate_password_maps_policy_and_floor() {
         let e = evaluate_password("aaaaaaa".into(), 1); // hostile min_length 1
-        assert_eq!(e.min_length, 8, "core safe floor applies through the binding");
+        assert_eq!(e.min_length, 12, "core floor of 12 applies through the binding");
         assert!(!e.meets_minimum);
         assert_eq!(e.strength, PasswordStrengthDto::TooShort);
         assert_eq!(e.hint, PasswordHintDto::NeedMoreCharacters);
@@ -3447,11 +3518,16 @@ mod onboarding_binding_tests {
         let hit = h.evaluate(Some("1E4C9B93F3F0682250B6CF8331B7EE68FD8:9\r\n".into()), true);
         assert_eq!(hit, BreachVerdictDto::Breached { count: 9 });
         assert!(!breach_verdict_allows_proceeding(hit));
+        // An empty body is an outage (review M2), not clean.
+        assert_eq!(
+            h.evaluate(Some(String::new()), false),
+            BreachVerdictDto::CheckFailedBlocked
+        );
     }
 
     #[test]
     fn ceremony_errors_map_to_distinct_variants() {
-        let c = SignupCeremonyHandle::new(12, true, 3);
+        let c = SignupCeremonyHandle::new(12, true, 3, false, true);
         assert_eq!(c.step(), CeremonyStepDto::VerifyEmail);
         assert!(matches!(
             c.start_registration(),
@@ -3462,18 +3538,14 @@ mod onboarding_binding_tests {
         ));
         c.email_verified();
         assert!(matches!(
-            c.set_password("short".into(), "short".into(), BreachVerdictDto::Clean),
+            c.set_password("short".into(), "short".into(), None),
             Err(OnboardingError::PasswordTooShort {
                 length: 5,
                 min_length: 12
             })
         ));
         assert!(matches!(
-            c.set_password(GOOD_PW.into(), GOOD_PW.into(), BreachVerdictDto::Breached { count: 4 }),
-            Err(OnboardingError::PasswordBreached { count: 4 })
-        ));
-        assert!(matches!(
-            c.set_password(GOOD_PW.into(), "other".into(), BreachVerdictDto::Clean),
+            c.set_password(GOOD_PW.into(), "other".into(), None),
             Err(OnboardingError::PasswordMismatch)
         ));
         assert!(matches!(c.phrase(), Err(OnboardingError::PhraseUnavailable)));
@@ -3483,6 +3555,67 @@ mod onboarding_binding_tests {
         );
     }
 
+    #[test]
+    fn breach_gate_is_bound_to_the_handle_and_the_ceremonys_own_policy() {
+        let clean = "0018A45C4D1DEF81644B54AB7F969B88D65:1\r\n".to_string();
+        let c = SignupCeremonyHandle::new(12, false, 3, true, false);
+
+        // Required and absent.
+        assert!(matches!(
+            c.set_password(GOOD_PW.into(), GOOD_PW.into(), None),
+            Err(OnboardingError::BreachCheckMissing)
+        ));
+        // A clean answer recorded for another password is stale.
+        let other = BreachCheckHandle::new("an older password!".into());
+        other.evaluate(Some(clean.clone()), true);
+        assert!(matches!(
+            c.set_password(GOOD_PW.into(), GOOD_PW.into(), Some(other)),
+            Err(OnboardingError::BreachCheckStale)
+        ));
+        // Outage: the ceremony's fail_open (false) wins over what the caller showed the user.
+        let down = BreachCheckHandle::new(GOOD_PW.into());
+        assert_eq!(down.evaluate(None, true), BreachVerdictDto::CheckFailedAllowed);
+        assert!(matches!(
+            c.set_password(GOOD_PW.into(), GOOD_PW.into(), Some(down)),
+            Err(OnboardingError::BreachCheckBlocked)
+        ));
+        // Breached.
+        let suffix = onb::BreachQuery::from_password(GOOD_PW).suffix().to_owned();
+        let hit = BreachCheckHandle::new(GOOD_PW.into());
+        hit.evaluate(Some(format!("{suffix}:4\r\n")), true);
+        assert!(matches!(
+            c.set_password(GOOD_PW.into(), GOOD_PW.into(), Some(hit)),
+            Err(OnboardingError::PasswordBreached { count: 4 })
+        ));
+        assert_eq!(
+            c.step(),
+            CeremonyStepDto::SetPassword,
+            "no rejection stored the password"
+        );
+        // Clean passes.
+        let ok = BreachCheckHandle::new(GOOD_PW.into());
+        ok.evaluate(Some(clean), false);
+        assert!(c.set_password(GOOD_PW.into(), GOOD_PW.into(), Some(ok)).is_ok());
+    }
+
+    #[test]
+    fn abandon_wipes_and_a_poisoned_lock_does_not_brick_the_handle() {
+        let c = SignupCeremonyHandle::new(12, false, 3, false, true);
+        c.set_password(GOOD_PW.into(), GOOD_PW.into(), None).unwrap();
+        assert_ne!(c.step(), CeremonyStepDto::SetPassword);
+        c.abandon();
+        assert_eq!(c.step(), CeremonyStepDto::SetPassword);
+        assert!(matches!(c.phrase(), Err(OnboardingError::PhraseUnavailable)));
+
+        // Poison the mutex with a panicking closure; later calls still work (review L10).
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.with(|_| panic!("boom"));
+        }));
+        assert!(poisoned.is_err());
+        assert_eq!(c.step(), CeremonyStepDto::SetPassword);
+        c.email_changed();
+    }
+
     /// Whole ceremony through the binding against a real server-side OPAQUE,
     /// ending in a `MasterKeyHandle` whose key equals what the phrase recovers.
     #[test]
@@ -3490,9 +3623,8 @@ mod onboarding_binding_tests {
         let server_setup = beebeeb_core::opaque_protocol::create_server_setup();
         let username = b"binding@beebeeb.io";
 
-        let c = SignupCeremonyHandle::new(12, false, 3);
-        c.set_password(GOOD_PW.into(), GOOD_PW.into(), BreachVerdictDto::NotRequired)
-            .unwrap();
+        let c = SignupCeremonyHandle::new(12, false, 3, false, true);
+        c.set_password(GOOD_PW.into(), GOOD_PW.into(), None).unwrap();
         c.begin_phrase().unwrap();
         let phrase = c.phrase().unwrap();
         c.acknowledge_phrase().unwrap();
