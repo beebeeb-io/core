@@ -223,8 +223,11 @@ only to address the breach corpus (it is the corpus' key), never for integrity.
   `evaluate_breach_response(&query, BreachResponse::Body(text) | Unavailable, fail_open)
   -> BreachVerdict` (`Clean`, `Breached{count}`, `CheckFailedAllowed`, `CheckFailedBlocked`,
   `NotRequired`) for display. **`BreachCheck`** is what the ceremony accepts: a query bound to
-  its password plus the recorded answer (`new(password)`, `prefix()`, `record(response)`,
-  `verdict(fail_open)`, `matches_password(pw)`). **The HTTP call stays in each client and goes
+  its password plus the recorded answer (`new(password)`, `prefix()`, `record(requested_prefix, response)`
+  (task 1767: refuses with `BreachError::PrefixMismatch`, code `breach_prefix_mismatch`, and records
+  nothing when `requested_prefix` is not this password's prefix, case-insensitively, because a
+  body for another prefix would evaluate as clean; pass the prefix the request URL or cache entry
+  actually used), `verdict(fail_open)`, `matches_password(pw)`). **The HTTP call stays in each client and goes
   to Beebeeb's own endpoint** (server `GET /api/v1/auth/pwned-range/{prefix}`, node-local
   corpus; the onboarding document declares it as `policy.password.breach_check.endpoint`).
   The helper names no third-party service: the public HaveIBeenPwned API is behind a US CDN
@@ -272,8 +275,11 @@ only to address the breach corpus (it is the corpus' key), never for integrity.
   with the same config. The `phrase()` copy handed to a UI cannot be wiped by Rust (review L4):
   call it only while rendering and drop the reference.
 - **Bindings.** WASM (`beebeeb-wasm`): free fn `evaluate_password(password, min_length)`;
-  `WasmBreachCheck` (`new(password)`, `prefix`, `evaluate(body|null, failOpen)` which records the
-  answer and returns the display verdict); `WasmSignupCeremony(minLength, emailVerificationRequired,
+  `WasmBreachCheck` (`new(password)`, `prefix`, `evaluate(requestedPrefix, body|null, failOpen)` which
+  records the answer and returns the display verdict, throwing `breach_prefix_mismatch` on a wrong
+  prefix). Password parameters (`evaluate_password`, `WasmBreachCheck.new`, `setPassword`,
+  `setPasswordUnchecked`) take an owned `String` held in `Zeroizing` (task 1767), and `confirmPhrase`
+  answers are held as `Zeroizing<String>`; the JS-side string itself cannot be wiped; `WasmSignupCeremony(minLength, emailVerificationRequired,
   verifyWordCount, breachCheckRequired, breachFailOpen)` (camelCase methods mirroring the list
   above, plus `abandon()` and `emailChanged()`; `setPassword(password, confirmation,
   breachCheck)` borrows the `WasmBreachCheck` object, not a verdict, and
@@ -289,7 +295,8 @@ only to address the breach corpus (it is the corpus' key), never for integrity.
   `breach_verdict_check_failed`, `ceremony_step_spec_id`, handles `BreachCheckHandle` and
   `SignupCeremonyHandle(min_length, email_verification_required, verify_word_count,
   breach_check_required, breach_fail_open)` (`set_password(password, confirmation,
-  Option<BreachCheckHandle>)`, `abandon()`, `email_changed()`; `account_created()` returns a
+  Option<BreachCheckHandle>)`, `BreachCheckHandle.evaluate(requested_prefix, body, fail_open)` (throws
+  `OnboardingError.BreachPrefixMismatch`), `confirm_phrase` answers held as `Zeroizing`, `abandon()`, `email_changed()`; `account_created()` returns a
   `MasterKeyHandle`, so the key does not cross FFI as bytes on this path. The handle is not a
   sandbox: it still offers `export_for_keychain()` and `derive_x25519_private()` for keychain
   storage, review L8. Owned `String` arguments are wrapped in `Zeroizing`; the handle lock

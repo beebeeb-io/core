@@ -625,8 +625,13 @@ public protocol BreachCheckHandleProtocol: AnyObject, Sendable {
      * request. `fail_open` is `policy.password.breach_check.fail_open` and
      * only shapes this display value: the ceremony applies the value it was
      * constructed with.
+     *
+     * `requested_prefix` is the prefix the request URL (or the cache entry)
+     * actually used. If it is not this password's prefix this throws
+     * `BreachPrefixMismatch` and records nothing: a body for another prefix
+     * would otherwise evaluate as clean.
      */
-    func evaluate(body: String?, failOpen: Bool)  -> BreachVerdictDto
+    func evaluate(requestedPrefix: String, body: String?, failOpen: Bool) throws  -> BreachVerdictDto
     
     /**
      * The 5 upper-case hex characters to send to the server.
@@ -714,11 +719,17 @@ public convenience init(password: String) {
      * request. `fail_open` is `policy.password.breach_check.fail_open` and
      * only shapes this display value: the ceremony applies the value it was
      * constructed with.
+     *
+     * `requested_prefix` is the prefix the request URL (or the cache entry)
+     * actually used. If it is not this password's prefix this throws
+     * `BreachPrefixMismatch` and records nothing: a body for another prefix
+     * would otherwise evaluate as clean.
      */
-open func evaluate(body: String?, failOpen: Bool) -> BreachVerdictDto  {
-    return try!  FfiConverterTypeBreachVerdictDto_lift(try! rustCall() {
+open func evaluate(requestedPrefix: String, body: String?, failOpen: Bool)throws  -> BreachVerdictDto  {
+    return try  FfiConverterTypeBreachVerdictDto_lift(try rustCallWithError(FfiConverterTypeOnboardingError_lift) {
     uniffi_beebeeb_uniffi_fn_method_breachcheckhandle_evaluate(
             self.uniffiCloneHandle(),
+        FfiConverterString.lower(requestedPrefix),
         FfiConverterOptionString.lower(body),
         FfiConverterBool.lower(failOpen),$0
     )
@@ -5470,6 +5481,7 @@ public enum OnboardingError: Swift.Error, Equatable, Hashable, Foundation.Locali
     case BreachCheckBlocked
     case BreachCheckMissing
     case BreachCheckStale
+    case BreachPrefixMismatch
     case PhraseUnavailable
     case PhraseAnswerCount(expected: UInt32, got: UInt32
     )
@@ -5524,13 +5536,14 @@ public struct FfiConverterTypeOnboardingError: FfiConverterRustBuffer {
         case 6: return .BreachCheckBlocked
         case 7: return .BreachCheckMissing
         case 8: return .BreachCheckStale
-        case 9: return .PhraseUnavailable
-        case 10: return .PhraseAnswerCount(
+        case 9: return .BreachPrefixMismatch
+        case 10: return .PhraseUnavailable
+        case 11: return .PhraseAnswerCount(
             expected: try FfiConverterUInt32.read(from: &buf), 
             got: try FfiConverterUInt32.read(from: &buf)
             )
-        case 11: return .PhraseWordMismatch
-        case 12: return .Crypto(
+        case 12: return .PhraseWordMismatch
+        case 13: return .Crypto(
             detail: try FfiConverterString.read(from: &buf)
             )
 
@@ -5584,22 +5597,26 @@ public struct FfiConverterTypeOnboardingError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(8))
         
         
-        case .PhraseUnavailable:
+        case .BreachPrefixMismatch:
             writeInt(&buf, Int32(9))
         
         
-        case let .PhraseAnswerCount(expected,got):
+        case .PhraseUnavailable:
             writeInt(&buf, Int32(10))
+        
+        
+        case let .PhraseAnswerCount(expected,got):
+            writeInt(&buf, Int32(11))
             FfiConverterUInt32.write(expected, into: &buf)
             FfiConverterUInt32.write(got, into: &buf)
             
         
         case .PhraseWordMismatch:
-            writeInt(&buf, Int32(11))
+            writeInt(&buf, Int32(12))
         
         
         case let .Crypto(detail):
-            writeInt(&buf, Int32(12))
+            writeInt(&buf, Int32(13))
             FfiConverterString.write(detail, into: &buf)
             
         }
@@ -8186,7 +8203,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_x25519_shared_secret() != 52845) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_breachcheckhandle_evaluate() != 3103) {
+    if (uniffi_beebeeb_uniffi_checksum_method_breachcheckhandle_evaluate() != 6329) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_breachcheckhandle_prefix() != 34418) {

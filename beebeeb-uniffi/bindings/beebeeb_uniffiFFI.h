@@ -340,7 +340,7 @@ uint64_t uniffi_beebeeb_uniffi_fn_constructor_breachcheckhandle_new(RustBuffer p
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BREACHCHECKHANDLE_EVALUATE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BREACHCHECKHANDLE_EVALUATE
-RustBuffer uniffi_beebeeb_uniffi_fn_method_breachcheckhandle_evaluate(uint64_t ptr, RustBuffer body, int8_t fail_open, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_beebeeb_uniffi_fn_method_breachcheckhandle_evaluate(uint64_t ptr, RustBuffer requested_prefix, RustBuffer body, int8_t fail_open, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BREACHCHECKHANDLE_PREFIX

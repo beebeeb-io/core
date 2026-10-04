@@ -130,6 +130,25 @@ pub struct BreachCheck {
     recorded: Option<Recorded>,
 }
 
+/// Why [`BreachCheck::record`] refused an answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum BreachError {
+    /// The prefix the client says it requested is not this password's prefix,
+    /// so the body is the corpus block for some other password and would
+    /// evaluate as "not present" (clean). Nothing is recorded.
+    #[error("the breach lookup was made for a different prefix than this password's")]
+    PrefixMismatch,
+}
+
+impl BreachError {
+    /// Stable machine-readable code (same style as `CeremonyError::code`).
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::PrefixMismatch => "breach_prefix_mismatch",
+        }
+    }
+}
+
 enum Recorded {
     Body(String),
     Unavailable,
@@ -149,13 +168,23 @@ impl BreachCheck {
         self.query.prefix()
     }
 
-    /// Record what the endpoint returned, replacing any earlier answer. A body
-    /// over [`MAX_BODY_BYTES`] is recorded as an outage and not retained.
-    pub fn record(&mut self, response: BreachResponse<'_>) {
+    /// Record what the endpoint returned, replacing any earlier answer.
+    /// `requested_prefix` is the prefix the client actually put in the request
+    /// URL (or read the cached entry for). If it is not this password's prefix
+    /// (compared case-insensitively) the answer is refused, any earlier answer
+    /// is discarded, and nothing is recorded: a body for another prefix would
+    /// otherwise evaluate as "not present". A body over [`MAX_BODY_BYTES`] is
+    /// recorded as an outage and not retained.
+    pub fn record(&mut self, requested_prefix: &str, response: BreachResponse<'_>) -> Result<(), BreachError> {
+        if !requested_prefix.eq_ignore_ascii_case(self.query.prefix()) {
+            self.recorded = None;
+            return Err(BreachError::PrefixMismatch);
+        }
         self.recorded = Some(match response {
             BreachResponse::Body(b) if b.len() <= MAX_BODY_BYTES => Recorded::Body(b.to_owned()),
             BreachResponse::Body(_) | BreachResponse::Unavailable => Recorded::Unavailable,
         });
+        Ok(())
     }
 
     /// Whether an answer (including "the call failed") has been recorded.
@@ -174,9 +203,14 @@ impl BreachCheck {
 
     /// Record `response` and return its verdict in one step (what the bindings'
     /// `evaluate` does, so the UI shows the verdict the ceremony will compute).
-    pub fn record_and_evaluate(&mut self, response: BreachResponse<'_>, fail_open: bool) -> BreachVerdict {
-        self.record(response);
-        self.verdict(fail_open).unwrap_or(BreachVerdict::CheckFailedBlocked)
+    pub fn record_and_evaluate(
+        &mut self,
+        requested_prefix: &str,
+        response: BreachResponse<'_>,
+        fail_open: bool,
+    ) -> Result<BreachVerdict, BreachError> {
+        self.record(requested_prefix, response)?;
+        Ok(self.verdict(fail_open).unwrap_or(BreachVerdict::CheckFailedBlocked))
     }
 
     /// Whether this check was computed for exactly `password`.
@@ -544,13 +578,15 @@ mod tests {
         let mut c = BreachCheck::new(PW);
         assert!(!c.is_answered());
         assert_eq!(c.verdict(true), None);
-        c.record(BreachResponse::Unavailable);
+        c.record(PW_PREFIX, BreachResponse::Unavailable).unwrap();
         assert!(c.is_answered());
         assert_eq!(c.verdict(true), Some(BreachVerdict::CheckFailedAllowed));
         assert_eq!(c.verdict(false), Some(BreachVerdict::CheckFailedBlocked));
         // The same recorded answer is re-evaluated under whichever fail_open is asked.
         let body = body_with(PW_SUFFIX, "4");
-        let v = c.record_and_evaluate(BreachResponse::Body(&body), false);
+        let v = c
+            .record_and_evaluate(PW_PREFIX, BreachResponse::Body(&body), false)
+            .unwrap();
         assert_eq!(v, BreachVerdict::Breached { count: 4 });
         assert_eq!(c.verdict(true), Some(v), "the later answer replaced the earlier one");
     }
@@ -559,8 +595,53 @@ mod tests {
     fn breach_check_does_not_retain_an_oversized_body() {
         let mut c = BreachCheck::new(PW);
         let huge = format!("{PW_SUFFIX}:5\n{}", "x".repeat(MAX_BODY_BYTES));
-        c.record(BreachResponse::Body(&huge));
+        c.record(PW_PREFIX, BreachResponse::Body(&huge)).unwrap();
         assert_eq!(c.verdict(true), Some(BreachVerdict::CheckFailedAllowed));
         assert!(matches!(c.recorded, Some(Recorded::Unavailable)));
+    }
+
+    #[test]
+    fn record_refuses_a_body_requested_for_another_prefix() {
+        let mut c = BreachCheck::new(PW);
+        // A block for a different prefix that does not contain our suffix would read as Clean.
+        let other_block = body_with("0000000000000000000000000000000000A", "3");
+        let err = c
+            .record("ABCDE", BreachResponse::Body(&other_block))
+            .expect_err("a mismatched prefix must be refused");
+        assert_eq!(err, BreachError::PrefixMismatch);
+        assert_eq!(err.code(), "breach_prefix_mismatch");
+        assert!(!c.is_answered(), "nothing is recorded on a mismatch");
+        assert_eq!(c.verdict(true), None);
+        // An outage report for the wrong prefix is refused the same way.
+        assert_eq!(
+            c.record("ABCDE", BreachResponse::Unavailable),
+            Err(BreachError::PrefixMismatch)
+        );
+        assert!(!c.is_answered());
+        assert_eq!(
+            c.record_and_evaluate("ABCDE", BreachResponse::Body(&other_block), true),
+            Err(BreachError::PrefixMismatch)
+        );
+    }
+
+    #[test]
+    fn a_mismatch_clears_an_earlier_answer() {
+        let mut c = BreachCheck::new(PW);
+        c.record(PW_PREFIX, BreachResponse::Unavailable).unwrap();
+        assert!(c.is_answered());
+        assert!(c.record("00000", BreachResponse::Body("X:1")).is_err());
+        assert!(!c.is_answered(), "a refused record leaves no stale answer behind");
+    }
+
+    #[test]
+    fn record_accepts_the_matching_prefix_in_either_case() {
+        let mut c = BreachCheck::new(PW);
+        let body = body_with(PW_SUFFIX, "4");
+        c.record(PW_PREFIX, BreachResponse::Body(&body)).unwrap();
+        assert_eq!(c.verdict(true), Some(BreachVerdict::Breached { count: 4 }));
+        let mut d = BreachCheck::new(PW);
+        d.record(&PW_PREFIX.to_ascii_lowercase(), BreachResponse::Body(&body))
+            .unwrap();
+        assert_eq!(d.verdict(true), Some(BreachVerdict::Breached { count: 4 }));
     }
 }
