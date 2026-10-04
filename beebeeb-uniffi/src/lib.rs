@@ -2946,6 +2946,402 @@ pub fn search_index_sync_plan(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Onboarding (task 1744): password policy, breach check, signup ceremony
+// ---------------------------------------------------------------------------
+//
+// Thin wrappers over `beebeeb_core::onboarding`. All logic lives in core; this
+// section only converts types. The ceremony and the breach check are handles
+// (`#[uniffi::Object]`) so the password, phrase and master key stay in Rust
+// memory in zeroizing buffers; the master key leaves the ceremony as a
+// `MasterKeyHandle`, never as bytes.
+
+use beebeeb_core::onboarding as onb;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum PasswordStrengthDto {
+    TooShort,
+    Fair,
+    Good,
+    Strong,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum PasswordHintDto {
+    None,
+    NeedMoreCharacters,
+    MixCaseAndAddNumberOrSymbol,
+    MixCase,
+    AddNumberOrSymbol,
+}
+
+/// Result of evaluating a password against the server's policy. Contains no
+/// part of the password.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct PasswordEvaluationDto {
+    pub length: u32,
+    pub min_length: u32,
+    pub missing_characters: u32,
+    pub meets_minimum: bool,
+    pub has_mixed_case: bool,
+    pub has_number_or_symbol: bool,
+    pub strength: PasswordStrengthDto,
+    /// Meter level 1 (too short) to 4 (strong).
+    pub level: u8,
+    pub hint: PasswordHintDto,
+}
+
+impl From<onb::PasswordEvaluation> for PasswordEvaluationDto {
+    fn from(e: onb::PasswordEvaluation) -> Self {
+        Self {
+            length: e.length,
+            min_length: e.min_length,
+            missing_characters: e.missing_characters,
+            meets_minimum: e.meets_minimum,
+            has_mixed_case: e.has_mixed_case,
+            has_number_or_symbol: e.has_number_or_symbol,
+            strength: match e.strength {
+                onb::PasswordStrength::TooShort => PasswordStrengthDto::TooShort,
+                onb::PasswordStrength::Fair => PasswordStrengthDto::Fair,
+                onb::PasswordStrength::Good => PasswordStrengthDto::Good,
+                onb::PasswordStrength::Strong => PasswordStrengthDto::Strong,
+            },
+            level: e.strength.level(),
+            hint: match e.hint {
+                onb::PasswordHint::None => PasswordHintDto::None,
+                onb::PasswordHint::NeedMoreCharacters => PasswordHintDto::NeedMoreCharacters,
+                onb::PasswordHint::MixCaseAndAddNumberOrSymbol => PasswordHintDto::MixCaseAndAddNumberOrSymbol,
+                onb::PasswordHint::MixCase => PasswordHintDto::MixCase,
+                onb::PasswordHint::AddNumberOrSymbol => PasswordHintDto::AddNumberOrSymbol,
+            },
+        }
+    }
+}
+
+/// Evaluate a password against the server's `policy.password.min_length`
+/// (clamped up to the core safe floor of 8).
+#[uniffi::export]
+pub fn evaluate_password(password: String, min_length: u32) -> PasswordEvaluationDto {
+    let policy = onb::PasswordPolicy::from_server(min_length);
+    onb::evaluate_password(&password, &policy).into()
+}
+
+/// Verdict of a breach check. `NotRequired` is constructed by the app when the
+/// onboarding document declares no breach check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum BreachVerdictDto {
+    Clean,
+    Breached { count: u64 },
+    CheckFailedAllowed,
+    CheckFailedBlocked,
+    NotRequired,
+}
+
+impl From<onb::BreachVerdict> for BreachVerdictDto {
+    fn from(v: onb::BreachVerdict) -> Self {
+        match v {
+            onb::BreachVerdict::Clean => Self::Clean,
+            onb::BreachVerdict::Breached { count } => Self::Breached { count },
+            onb::BreachVerdict::CheckFailedAllowed => Self::CheckFailedAllowed,
+            onb::BreachVerdict::CheckFailedBlocked => Self::CheckFailedBlocked,
+            onb::BreachVerdict::NotRequired => Self::NotRequired,
+        }
+    }
+}
+
+impl From<BreachVerdictDto> for onb::BreachVerdict {
+    fn from(v: BreachVerdictDto) -> Self {
+        match v {
+            BreachVerdictDto::Clean => Self::Clean,
+            BreachVerdictDto::Breached { count } => Self::Breached { count },
+            BreachVerdictDto::CheckFailedAllowed => Self::CheckFailedAllowed,
+            BreachVerdictDto::CheckFailedBlocked => Self::CheckFailedBlocked,
+            BreachVerdictDto::NotRequired => Self::NotRequired,
+        }
+    }
+}
+
+/// Whether the app may let the user continue with this password. `Breached`
+/// and `CheckFailedBlocked` stop it. Kept in core so apps do not re-derive it.
+#[uniffi::export]
+pub fn breach_verdict_allows_proceeding(verdict: BreachVerdictDto) -> bool {
+    onb::BreachVerdict::from(verdict).allows_proceeding()
+}
+
+/// True when the corpus was not actually consulted (outage, either policy).
+#[uniffi::export]
+pub fn breach_verdict_check_failed(verdict: BreachVerdictDto) -> bool {
+    onb::BreachVerdict::from(verdict).check_failed()
+}
+
+/// k-anonymity breach check for one password. Core hashes and matches; **the app
+/// makes the HTTP call**, to the endpoint the onboarding document declares in
+/// `policy.password.breach_check.endpoint` (Beebeeb's own API, never a third
+/// party). Only `prefix()` (5 hex chars) may be sent. The rest of the digest
+/// stays in this handle and is zeroized when it is released.
+#[derive(uniffi::Object)]
+pub struct BreachCheckHandle {
+    query: onb::BreachQuery,
+}
+
+#[uniffi::export]
+impl BreachCheckHandle {
+    #[uniffi::constructor]
+    pub fn new(password: String) -> Arc<Self> {
+        Arc::new(Self {
+            query: onb::BreachQuery::from_password(&password),
+        })
+    }
+
+    /// The 5 upper-case hex characters to send to the server.
+    pub fn prefix(&self) -> String {
+        self.query.prefix().to_owned()
+    }
+
+    /// `body` is the response text of a 2xx answer, or `None` when the request
+    /// failed (network error, timeout, non-2xx). `fail_open` is
+    /// `policy.password.breach_check.fail_open`.
+    pub fn evaluate(&self, body: Option<String>, fail_open: bool) -> BreachVerdictDto {
+        let response = match body.as_deref() {
+            Some(b) => onb::BreachResponse::Body(b),
+            None => onb::BreachResponse::Unavailable,
+        };
+        self.query.evaluate(response, fail_open).into()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum CeremonyStepDto {
+    VerifyEmail,
+    SetPassword,
+    SavePhrase,
+    ConfirmPhrase,
+    CreateAccount,
+    Done,
+}
+
+impl From<onb::CeremonyStep> for CeremonyStepDto {
+    fn from(s: onb::CeremonyStep) -> Self {
+        match s {
+            onb::CeremonyStep::VerifyEmail => Self::VerifyEmail,
+            onb::CeremonyStep::SetPassword => Self::SetPassword,
+            onb::CeremonyStep::SavePhrase => Self::SavePhrase,
+            onb::CeremonyStep::ConfirmPhrase => Self::ConfirmPhrase,
+            onb::CeremonyStep::CreateAccount => Self::CreateAccount,
+            onb::CeremonyStep::Done => Self::Done,
+        }
+    }
+}
+
+/// The server step id a ceremony step belongs to (`save_recovery_phrase` for
+/// both phrase parts).
+#[uniffi::export]
+pub fn ceremony_step_spec_id(step: CeremonyStepDto) -> String {
+    let core = match step {
+        CeremonyStepDto::VerifyEmail => onb::CeremonyStep::VerifyEmail,
+        CeremonyStepDto::SetPassword => onb::CeremonyStep::SetPassword,
+        CeremonyStepDto::SavePhrase => onb::CeremonyStep::SavePhrase,
+        CeremonyStepDto::ConfirmPhrase => onb::CeremonyStep::ConfirmPhrase,
+        CeremonyStepDto::CreateAccount => onb::CeremonyStep::CreateAccount,
+        CeremonyStepDto::Done => onb::CeremonyStep::Done,
+    };
+    core.spec_step_id().to_owned()
+}
+
+/// Errors from the signup ceremony. Distinct from [`CryptoError`] so the UI can
+/// branch on the cause (too short, breached, wrong word) without parsing text.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum OnboardingError {
+    #[error("cannot {action} yet: step {blocking:?} is not done")]
+    StepNotDone { action: String, blocking: CeremonyStepDto },
+
+    #[error("cannot {action}: {reason}")]
+    InvalidState { action: String, reason: String },
+
+    #[error("passwords do not match")]
+    PasswordMismatch,
+
+    #[error("password is too short: {length} characters, minimum {min_length}")]
+    PasswordTooShort { length: u32, min_length: u32 },
+
+    #[error("password appears in {count} known breaches")]
+    PasswordBreached { count: u64 },
+
+    #[error("the breach check could not run and the server requires it")]
+    BreachCheckBlocked,
+
+    #[error("the recovery phrase is not available")]
+    PhraseUnavailable,
+
+    #[error("expected {expected} words, got {got}")]
+    PhraseAnswerCount { expected: u32, got: u32 },
+
+    #[error("one or more words are incorrect")]
+    PhraseWordMismatch,
+
+    #[error("crypto error: {detail}")]
+    Crypto { detail: String },
+}
+
+impl From<onb::CeremonyError> for OnboardingError {
+    fn from(e: onb::CeremonyError) -> Self {
+        match e {
+            onb::CeremonyError::StepNotDone { action, blocking } => Self::StepNotDone {
+                action: action.to_owned(),
+                blocking: blocking.into(),
+            },
+            onb::CeremonyError::InvalidState { action, reason } => Self::InvalidState {
+                action: action.to_owned(),
+                reason: reason.to_owned(),
+            },
+            onb::CeremonyError::PasswordMismatch => Self::PasswordMismatch,
+            onb::CeremonyError::PasswordTooShort { length, min_length } => {
+                Self::PasswordTooShort { length, min_length }
+            }
+            onb::CeremonyError::PasswordBreached { count } => Self::PasswordBreached { count },
+            onb::CeremonyError::BreachCheckBlocked => Self::BreachCheckBlocked,
+            onb::CeremonyError::PhraseUnavailable => Self::PhraseUnavailable,
+            onb::CeremonyError::PhraseAnswerCount { expected, got } => Self::PhraseAnswerCount {
+                expected: expected as u32,
+                got: got as u32,
+            },
+            onb::CeremonyError::PhraseWordMismatch => Self::PhraseWordMismatch,
+            onb::CeremonyError::Crypto(c) => Self::Crypto { detail: c.to_string() },
+        }
+    }
+}
+
+/// What `opaque/register-finish` takes from the client.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct RegistrationFinishDto {
+    pub upload: Vec<u8>,
+    pub x25519_public: Vec<u8>,
+    pub recovery_check: Vec<u8>,
+}
+
+/// The signup ceremony state machine, one per signup attempt. Single-consumer:
+/// drive it from one sequence (the `Mutex` is only the `Send + Sync` backstop
+/// UniFFI requires). Release the handle when the flow is left; that wipes the
+/// password, phrase and master key it holds.
+#[derive(uniffi::Object)]
+pub struct SignupCeremonyHandle {
+    inner: Mutex<onb::SignupCeremony>,
+}
+
+impl SignupCeremonyHandle {
+    fn with<T>(&self, f: impl FnOnce(&mut onb::SignupCeremony) -> T) -> T {
+        let mut guard = self.inner.lock().unwrap();
+        f(&mut guard)
+    }
+}
+
+#[uniffi::export]
+impl SignupCeremonyHandle {
+    /// `min_length` = `policy.password.min_length`; `email_verification_required`
+    /// = the document lists a required `verify_email_code`; `verify_word_count`
+    /// = `policy.recovery_phrase.verify_word_count`.
+    #[uniffi::constructor]
+    pub fn new(min_length: u32, email_verification_required: bool, verify_word_count: u32) -> Arc<Self> {
+        Arc::new(Self {
+            inner: Mutex::new(onb::SignupCeremony::new(onb::CeremonyConfig {
+                password_policy: onb::PasswordPolicy::from_server(min_length),
+                email_verification_required,
+                verify_word_count,
+            })),
+        })
+    }
+
+    /// First pending step, or `Done`.
+    pub fn step(&self) -> CeremonyStepDto {
+        self.with(|c| c.step()).into()
+    }
+
+    /// Every pending step in canonical order.
+    pub fn pending_steps(&self) -> Vec<CeremonyStepDto> {
+        self.with(|c| c.pending_steps()).into_iter().map(Into::into).collect()
+    }
+
+    /// The server accepted the email code.
+    pub fn email_verified(&self) {
+        self.with(|c| c.email_verified());
+    }
+
+    /// The server reported the signup ticket expired: back to the code step,
+    /// password and confirmed phrase kept.
+    pub fn email_ticket_invalidated(&self) {
+        self.with(|c| c.email_ticket_invalidated());
+    }
+
+    /// Validate and store the password. Throws `PasswordMismatch`,
+    /// `PasswordTooShort`, `PasswordBreached` or `BreachCheckBlocked`.
+    pub fn set_password(
+        &self,
+        password: String,
+        confirmation: String,
+        breach: BreachVerdictDto,
+    ) -> Result<PasswordEvaluationDto, OnboardingError> {
+        Ok(self
+            .with(|c| c.set_password(&password, &confirmation, breach.into()))?
+            .into())
+    }
+
+    /// Generate the recovery phrase and master key (Argon2id, about a second).
+    /// Idempotent.
+    pub fn begin_phrase(&self) -> Result<(), OnboardingError> {
+        Ok(self.with(|c| c.begin_phrase())?)
+    }
+
+    /// The phrase to show. Throws `PhraseUnavailable` before `begin_phrase` or
+    /// after the phrase was confirmed (it is wiped then).
+    pub fn phrase(&self) -> Result<String, OnboardingError> {
+        Ok(self.with(|c| c.phrase().map(|p| p.as_str().to_owned()))?)
+    }
+
+    /// The user confirms they saved the phrase.
+    pub fn acknowledge_phrase(&self) -> Result<(), OnboardingError> {
+        Ok(self.with(|c| c.acknowledge_phrase())?)
+    }
+
+    /// 1-based word positions to ask for, ascending, stable for this phrase.
+    pub fn challenge_positions(&self) -> Result<Vec<u32>, OnboardingError> {
+        Ok(self.with(|c| c.challenge_positions())?)
+    }
+
+    /// `answers` in `challenge_positions` order. Throws `PhraseWordMismatch` /
+    /// `PhraseAnswerCount`; retryable.
+    pub fn confirm_phrase(&self, answers: Vec<String>) -> Result<(), OnboardingError> {
+        Ok(self.with(|c| c.confirm_phrase(&answers))?)
+    }
+
+    /// OPAQUE step 1: the `RegistrationRequest` for `opaque/register-start`.
+    /// Throws `StepNotDone` until every other required step is done.
+    pub fn start_registration(&self) -> Result<Vec<u8>, OnboardingError> {
+        Ok(self.with(|c| c.start_registration().map(|r| r.message))?)
+    }
+
+    /// OPAQUE step 2, from the server's `register-start` response.
+    pub fn finish_registration(&self, server_message: Vec<u8>) -> Result<RegistrationFinishDto, OnboardingError> {
+        let r = self.with(|c| c.finish_registration(&server_message))?;
+        Ok(RegistrationFinishDto {
+            upload: r.upload,
+            x25519_public: r.x25519_public.to_vec(),
+            recovery_check: r.recovery_check.to_vec(),
+        })
+    }
+
+    /// The server rejected `register-finish` in a retryable way.
+    pub fn registration_failed(&self) {
+        self.with(|c| c.registration_failed());
+    }
+
+    /// The server accepted `register-finish`. Returns the master key as a
+    /// handle (the bytes never cross FFI); the ceremony wipes everything else.
+    pub fn account_created(&self) -> Result<Arc<MasterKeyHandle>, OnboardingError> {
+        let key = self.with(|c| c.account_created())?;
+        Ok(MasterKeyHandle::new(key))
+    }
+}
+
 #[cfg(test)]
 mod search_index_binding_tests {
     use super::*;
@@ -3016,5 +3412,116 @@ mod search_index_binding_tests {
         assert_eq!(plan.to_delete.len(), 1);
         assert_eq!(plan.to_delete[0].bucket, 3);
         assert!(plan.to_get.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod onboarding_binding_tests {
+    use super::*;
+
+    const GOOD_PW: &str = "correct horse battery staple";
+
+    #[test]
+    fn evaluate_password_maps_policy_and_floor() {
+        let e = evaluate_password("aaaaaaa".into(), 1); // hostile min_length 1
+        assert_eq!(e.min_length, 8, "core safe floor applies through the binding");
+        assert!(!e.meets_minimum);
+        assert_eq!(e.strength, PasswordStrengthDto::TooShort);
+        assert_eq!(e.hint, PasswordHintDto::NeedMoreCharacters);
+        let strong = evaluate_password("aaaaaaaaaaA1".into(), 12);
+        assert_eq!(
+            (strong.strength, strong.level, strong.hint),
+            (PasswordStrengthDto::Strong, 4, PasswordHintDto::None)
+        );
+    }
+
+    #[test]
+    fn breach_handle_prefix_and_outage_policy() {
+        let h = BreachCheckHandle::new("password".into());
+        assert_eq!(h.prefix(), "5BAA6");
+        assert_eq!(h.evaluate(None, true), BreachVerdictDto::CheckFailedAllowed);
+        assert_eq!(h.evaluate(None, false), BreachVerdictDto::CheckFailedBlocked);
+        assert!(breach_verdict_allows_proceeding(BreachVerdictDto::CheckFailedAllowed));
+        assert!(!breach_verdict_allows_proceeding(BreachVerdictDto::CheckFailedBlocked));
+        assert!(breach_verdict_check_failed(BreachVerdictDto::CheckFailedAllowed));
+        let hit = h.evaluate(Some("1E4C9B93F3F0682250B6CF8331B7EE68FD8:9\r\n".into()), true);
+        assert_eq!(hit, BreachVerdictDto::Breached { count: 9 });
+        assert!(!breach_verdict_allows_proceeding(hit));
+    }
+
+    #[test]
+    fn ceremony_errors_map_to_distinct_variants() {
+        let c = SignupCeremonyHandle::new(12, true, 3);
+        assert_eq!(c.step(), CeremonyStepDto::VerifyEmail);
+        assert!(matches!(
+            c.start_registration(),
+            Err(OnboardingError::StepNotDone {
+                blocking: CeremonyStepDto::VerifyEmail,
+                ..
+            })
+        ));
+        c.email_verified();
+        assert!(matches!(
+            c.set_password("short".into(), "short".into(), BreachVerdictDto::Clean),
+            Err(OnboardingError::PasswordTooShort {
+                length: 5,
+                min_length: 12
+            })
+        ));
+        assert!(matches!(
+            c.set_password(GOOD_PW.into(), GOOD_PW.into(), BreachVerdictDto::Breached { count: 4 }),
+            Err(OnboardingError::PasswordBreached { count: 4 })
+        ));
+        assert!(matches!(
+            c.set_password(GOOD_PW.into(), "other".into(), BreachVerdictDto::Clean),
+            Err(OnboardingError::PasswordMismatch)
+        ));
+        assert!(matches!(c.phrase(), Err(OnboardingError::PhraseUnavailable)));
+        assert_eq!(
+            ceremony_step_spec_id(CeremonyStepDto::ConfirmPhrase),
+            "save_recovery_phrase"
+        );
+    }
+
+    /// Whole ceremony through the binding against a real server-side OPAQUE,
+    /// ending in a `MasterKeyHandle` whose key equals what the phrase recovers.
+    #[test]
+    fn full_ceremony_through_the_binding_hands_back_a_key_handle() {
+        let server_setup = beebeeb_core::opaque_protocol::create_server_setup();
+        let username = b"binding@beebeeb.io";
+
+        let c = SignupCeremonyHandle::new(12, false, 3);
+        c.set_password(GOOD_PW.into(), GOOD_PW.into(), BreachVerdictDto::NotRequired)
+            .unwrap();
+        c.begin_phrase().unwrap();
+        let phrase = c.phrase().unwrap();
+        c.acknowledge_phrase().unwrap();
+        let words: Vec<&str> = phrase.split_whitespace().collect();
+        let answers: Vec<String> = c
+            .challenge_positions()
+            .unwrap()
+            .iter()
+            .map(|p| words[*p as usize - 1].to_owned())
+            .collect();
+        c.confirm_phrase(answers).unwrap();
+        assert_eq!(c.step(), CeremonyStepDto::CreateAccount);
+
+        let msg = c.start_registration().unwrap();
+        let server_msg =
+            beebeeb_core::opaque_protocol::server_registration_start(&server_setup, &msg, username).unwrap();
+        let fin = c.finish_registration(server_msg).unwrap();
+        assert_eq!(fin.x25519_public.len(), 32);
+        assert_eq!(fin.recovery_check.len(), 32);
+        assert!(!fin.upload.is_empty());
+
+        let handle = c.account_created().unwrap();
+        let from_handle = handle.with_key(|mk| mk.to_bytes()).unwrap();
+        let from_phrase = recovery::recover_from_phrase(&phrase).unwrap().to_bytes();
+        assert_eq!(from_handle, from_phrase);
+        assert_eq!(c.step(), CeremonyStepDto::Done);
+        assert!(
+            matches!(c.phrase(), Err(OnboardingError::PhraseUnavailable)),
+            "phrase wiped"
+        );
     }
 }
