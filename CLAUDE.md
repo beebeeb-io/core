@@ -4,14 +4,14 @@ Cryptographic core, shared types, and sync engine. This is the trust anchor — 
 
 ## Crates
 
-- `beebeeb-core` — AES-256-GCM encryption, Argon2id KDF (256MiB/4iter/2par), BIP39 recovery phrases, HKDF per-file key derivation
+- `beebeeb-core` — AES-256-GCM encryption, Argon2id KDF (256MiB/4iter/2par), BIP39 recovery phrases, HKDF per-file key derivation, onboarding (password policy evaluator, breach-check helper, signup ceremony state machine)
 - `beebeeb-types` — CipherSuite, EncryptedBlob, KdfParams, ChunkMeta (shared across all repos)
 - `beebeeb-sync` — Desktop sync engine: file watcher (notify), conflict resolution (KeepBoth default), selective sync
 
 ## Build & test
 
 ```sh
-cargo test -p beebeeb-core   # 358 tests across 9 binaries (unit 285, chunk_stream_parity 2, cli_auth_vectors 4 + 1 ignored, cross_client_vectors 21, cross_platform_vectors 22, integration 13, transfer_vectors 5, zip_tests 6) — measured 2026-09-22 at 95da81b; the truth line is per binary: `test result: ok. N passed`
+cargo test -p beebeeb-core   # 405 tests across 9 binaries (unit 332, chunk_stream_parity 2, cli_auth_vectors 4 + 1 ignored, cross_client_vectors 21, cross_platform_vectors 22, integration 13, transfer_vectors 5, zip_tests 6) — measured 2026-10-04 on feat/1744-onboarding-module (base d18b336; baseline before the onboarding module was 358 = unit 285 + the same eight other binaries); the truth line is per binary: `test result: ok. N passed`
 cargo test --workspace       # full workspace (core + sync + types + upload + uniffi + wasm)
 cargo clippy --workspace -- -D warnings
 cargo fmt -- --check
@@ -193,6 +193,122 @@ relay — it does no crypto.
   core == browser byte-for-byte). Changing the info string / point encoding breaks live
   `bb login` — it is a coordinated cross-client migration, never a refactor.
 
+## Onboarding module (`onboarding/`) — task 1744
+
+The logic every client must run identically during signup, driven by numbers the
+server declares in the backend-driven onboarding document
+(`docs/specs/2026-10-04-backend-driven-onboarding.md` in the workspace, sections 5.5
+and 5.12). **No new cryptographic primitive:** the ceremony is a state machine over
+the existing `recovery::generate_recovery_phrase`, `opaque_protocol::client_registration_*`
+and `opaque::{derive_x25519_private, derive_x25519_public, compute_recovery_check}`.
+No I/O (core stays synchronous and WASM-clean). The one dependency added is `sha1`,
+only to address the breach corpus (it is the corpus' key), never for integrity.
+
+- **`onboarding::password`** — `PasswordPolicy::from_server(min_length)` +
+  `evaluate_password(&str, &PasswordPolicy) -> PasswordEvaluation` (length, `meets_minimum`,
+  `missing_characters`, `PasswordStrength` TooShort/Fair/Good/Strong = meter level 1 to 4,
+  `PasswordHint`). Ports the web heuristic (length gate, then mixed case, then number or
+  symbol). Copy stays in clients. Differences from the TypeScript it replaces: length is
+  Unicode scalar values (JS counted UTF-16 units) and case/symbol detection is Unicode aware.
+  `MIN_LENGTH_FLOOR = 12` (lead decision 2026-10-04, review L5) is a **floor** applied inside
+  `from_server`, not the policy: the server may raise the number, never lower it below the 12
+  the product ships with, so a hostile onboarding document cannot weaken what clients enforce.
+  There is deliberately no hard-coded fallback policy. The evaluator is advisory UX plus a
+  client-side gate, not a guessing-cost estimator: whitespace-only or repeated-character strings
+  that meet the length score Fair or Good (the web heuristic, unchanged); the breach check is
+  the backstop (review L6).
+- **`onboarding::breach`** — k-anonymity helper, hashing and matching only.
+  `BreachQuery::from_password` (SHA-1, upper-case hex, 5-char `prefix()` to send, 35-char
+  `suffix()` that never leaves the device; zeroized on drop), then
+  `evaluate_breach_response(&query, BreachResponse::Body(text) | Unavailable, fail_open)
+  -> BreachVerdict` (`Clean`, `Breached{count}`, `CheckFailedAllowed`, `CheckFailedBlocked`,
+  `NotRequired`) for display. **`BreachCheck`** is what the ceremony accepts: a query bound to
+  its password plus the recorded answer (`new(password)`, `prefix()`, `record(response)`,
+  `verdict(fail_open)`, `matches_password(pw)`). **The HTTP call stays in each client and goes
+  to Beebeeb's own endpoint** (server `GET /api/v1/auth/pwned-range/{prefix}`, node-local
+  corpus; the onboarding document declares it as `policy.password.breach_check.endpoint`).
+  The helper names no third-party service: the public HaveIBeenPwned API is behind a US CDN
+  and violates the no-US-systems rule (task 0995). Outage policy: transport failure, non-2xx,
+  an **empty or whitespace-only body**, a body over `MAX_BODY_BYTES` (256 KiB; clients stop
+  reading there), or any line that is not `SUFFIX[:COUNT]` is an outage (a captive-portal page
+  returned as 200 must not read as clean); `fail_open` (from the document) picks
+  `CheckFailedAllowed` vs `CheckFailedBlocked`. Why empty is an outage (review M2): the server
+  route answers `200` + empty body for an unseeded corpus, a failed corpus read, AND an absent
+  prefix (`routes/auth.rs::pwned_range` unwraps all three), and a seeded corpus never has an
+  empty block, so empty means "not consulted". Count 0 is range padding and means not present.
+  Known limit (review L1): `sha1` 0.10 cannot be zeroized, so the hasher's block buffer (up to
+  63 password bytes) is freed unwiped; the digest and hex are wiped.
+- **`onboarding::ceremony`** — `SignupCeremony`, one per signup attempt. Steps (canonical
+  order): `VerifyEmail` (only if the document requires it), `SetPassword`, `SavePhrase`,
+  `ConfirmPhrase`, `CreateAccount`, `Done`; `spec_step_id()` maps the two phrase parts to the
+  server's single `save_recovery_phrase`. **Only `create_account` is gated**: it refuses
+  (`StepNotDone`) until every other required step is done. The relative order of
+  `set_password` and the phrase steps is deliberately not enforced (the shipped web client
+  shows the phrase first; the spec's example document lists the password first; the server's
+  `steps` array orders the UI). Flow: `email_verified()`, `set_password(pw, confirmation,
+  Option<&BreachCheck>)`, `begin_phrase()` (Argon2id, about 1 s, idempotent), `phrase()`,
+  `acknowledge_phrase()`, `challenge_positions()` (1-based, stable, count from
+  `policy.recovery_phrase.verify_word_count`, floored at `VERIFY_WORD_COUNT_FLOOR = 3`),
+  `confirm_phrase(answers)`, `start_registration()` -> OPAQUE request,
+  `finish_registration(server_message)` -> `{upload, x25519_public, recovery_check}`,
+  `account_created()` -> the `MasterKey`. Recovery paths: `registration_failed()` (retry with
+  a fresh OPAQUE exchange), `email_ticket_invalidated()` (back to the code step, spec 5.9) and
+  `email_changed()` (the user edited the verified email: verification withdrawn, secrets kept).
+  **The breach gate is enforced here, once** (review M1, Codex P1): `CeremonyConfig.breach` is
+  `BreachPolicy::NotRequired | Required { fail_open }` from the document. When required,
+  `set_password` demands a `BreachCheck`, re-derives the digest from the password it stores and
+  refuses a check made for another password (`BreachCheckStale`, code `breach_check_stale`) or
+  one with no recorded answer (`BreachCheckMissing`, `breach_check_missing`), then computes the
+  verdict itself with the document's `fail_open`. A bare verdict is not accepted anywhere, so a
+  stale or forged "clean" cannot pass, and a client cannot pick `fail_open`. The ceremony has no
+  notion of the email address: the server's signup-ticket binding is what ties a verified email
+  to the created account and is mandatory server side.
+  Memory: password and phrase are `Zeroizing`; the phrase string is wiped the moment it is
+  confirmed, the master key derived from it and the password are kept until
+  `account_created()` so a rejected `register-finish` does not force a different phrase on the
+  user; dropping the ceremony wipes everything, **but a binding handle is freed on the host's
+  schedule (JS finalizer, ARC, GC), so clients must call `wipe()` (`abandon()` in the bindings)
+  on back, cancel and error exits** (review M3). `wipe()` returns the ceremony to a fresh state
+  with the same config. The `phrase()` copy handed to a UI cannot be wiped by Rust (review L4):
+  call it only while rendering and drop the reference.
+- **Bindings.** WASM (`beebeeb-wasm`): free fn `evaluate_password(password, min_length)`;
+  `WasmBreachCheck` (`new(password)`, `prefix`, `evaluate(body|null, failOpen)` which records the
+  answer and returns the display verdict); `WasmSignupCeremony(minLength, emailVerificationRequired,
+  verifyWordCount, breachCheckRequired, breachFailOpen)` (camelCase methods mirroring the list
+  above, plus `abandon()` and `emailChanged()`; `setPassword(password, confirmation,
+  breachCheck)` borrows the `WasmBreachCheck` object, not a verdict, and
+  `setPasswordUnchecked(password, confirmation)` is for documents with no breach check (it
+  throws `breach_check_missing` when the ceremony was built with `breachCheckRequired`);
+  `accountCreated()` copies the key through a `Zeroizing` temporary into a
+  `Uint8Array`, so no plain Rust-side copy outlives the call). Enum-like values cross as lowercase string
+  tokens (`as_str()` in core), objects are plain JS objects (typed `Serialize` structs, 0655),
+  counts are `f64`, ceremony errors are thrown `Error`s with a stable `code`
+  (`CeremonyError::code`). The verdict object `evaluate` returns is output only; nothing a JS
+  caller builds by hand can satisfy the gate.
+  UniFFI (`beebeeb-uniffi`): `evaluate_password`, `breach_verdict_allows_proceeding`,
+  `breach_verdict_check_failed`, `ceremony_step_spec_id`, handles `BreachCheckHandle` and
+  `SignupCeremonyHandle(min_length, email_verification_required, verify_word_count,
+  breach_check_required, breach_fail_open)` (`set_password(password, confirmation,
+  Option<BreachCheckHandle>)`, `abandon()`, `email_changed()`; `account_created()` returns a
+  `MasterKeyHandle`, so the key does not cross FFI as bytes on this path. The handle is not a
+  sandbox: it still offers `export_for_keychain()` and `derive_x25519_private()` for keychain
+  storage, review L8. Owned `String` arguments are wrapped in `Zeroizing`; the handle lock
+  recovers from poisoning), enums `PasswordStrengthDto`, `PasswordHintDto`, `BreachVerdictDto`,
+  `CeremonyStepDto`, record `PasswordEvaluationDto`, `RegistrationFinishDto` (no `Debug`), and a separate
+  `OnboardingError` (so the UI branches on cause, not on text). Swift: `evaluatePassword`,
+  `BreachCheckHandle`, `SignupCeremonyHandle`, `OnboardingError`. The committed Swift
+  bindings and header (`beebeeb-uniffi/bindings/`) were regenerated: 26 new `uniffi_beebeeb_uniffi_fn_*`
+  symbols, no existing declaration lost. The committed Kotlin file is stale for reasons
+  unrelated to this task and was not touched (`build-android.sh` regenerates it).
+- **Tests are trusted only after mutation:** weakening the length check fails
+  `min_length_is_enforced_at_the_boundary`; flipping `fail_open` fails four breach tests;
+  removing the floor fails `floor_clamps_a_hostile_server_value`; ignoring the
+  `ConfirmPhrase` prerequisite fails `create_account_is_refused_until_every_prerequisite_is_done`.
+  Round 2 (review): ignoring the password binding fails
+  `a_breach_check_for_another_password_is_refused`; an empty body read as clean fails
+  `empty_body_is_an_outage_not_clean`; a no-op `wipe()` fails
+  `wipe_abandons_everything_and_the_ceremony_starts_over`.
+
 ## Security invariants
 
 - MasterKey and FileKey are NOT Clone — prevents accidental key copies in memory
@@ -227,8 +343,8 @@ AGPL-3.0-or-later
 The full rules live in the workspace `CLAUDE.md` → "How we work" (also summarised in the workspace `AGENTS.md`). Read them; they apply here. The repo-specific instantiation:
 
 - **The count-shaped truth line:** `cargo test --workspace 2>&1 | tee /tmp/bb-core-test.log` →
-  one `test result: ok. N passed; 0 failed` per crate/suite (the CLAUDE.md numbers above — 358 across
-  9 binaries for `beebeeb-core`, measured 2026-09-22 — are the baseline to compare against). Assert the Ns; a suite that did not run is
+  one `test result: ok. N passed; 0 failed` per crate/suite (the CLAUDE.md numbers above — 405 across
+  9 binaries for `beebeeb-core`, measured 2026-10-04 (358 before task 1744) — are the baseline to compare against). Assert the Ns; a suite that did not run is
   a red, not a pass.
 - **Crypto tests are trusted only after they have been seen to fail.** Mutate a KAT vector or a
   derivation label, paste WHICH assertion failed, revert. A KAT that cannot fail proves nothing.

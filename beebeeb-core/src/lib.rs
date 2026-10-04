@@ -14,6 +14,7 @@ pub mod hash;
 pub mod kdf;
 pub mod media;
 pub mod metadata_wire;
+pub mod onboarding;
 pub mod opaque;
 pub mod opaque_protocol;
 pub mod pdf;

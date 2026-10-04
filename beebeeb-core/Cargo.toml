@@ -13,6 +13,9 @@ argon2 = "0.5"
 rand = "0.8"
 hkdf = "0.12"
 sha2 = "0.10"
+# SHA-1 ONLY to address the k-anonymity breach corpus (onboarding::breach): the corpus is
+# keyed by SHA-1 prefix. Never used for integrity or authentication.
+sha1 = "0.10"
 zeroize = { version = "1", features = ["derive"] }
 bip39 = { version = "2", features = ["rand"] }
 thiserror = { workspace = true }
