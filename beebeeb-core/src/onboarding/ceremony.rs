@@ -426,7 +426,7 @@ impl SignupCeremony {
     /// whitespace are ignored. On success the phrase string is wiped; the
     /// master key it produced is kept for registration. A wrong answer changes
     /// nothing and may be retried.
-    pub fn confirm_phrase(&mut self, answers: &[String]) -> Result<(), CeremonyError> {
+    pub fn confirm_phrase<S: AsRef<str>>(&mut self, answers: &[S]) -> Result<(), CeremonyError> {
         if !self.phrase_acknowledged {
             return Err(CeremonyError::StepNotDone {
                 action: "confirm the recovery phrase",
@@ -450,7 +450,7 @@ impl SignupCeremony {
             // still exits early on a length mismatch, which does not matter
             // because the user is checking their own typed words on their own
             // device, not authenticating to anyone.
-            ok & words[*idx].eq_ignore_ascii_case(answer.trim())
+            ok & words[*idx].eq_ignore_ascii_case(answer.as_ref().trim())
         });
         if !all_correct {
             return Err(CeremonyError::PhraseWordMismatch);
@@ -557,7 +557,7 @@ impl SignupCeremony {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::onboarding::breach::{BreachCheck, BreachResponse};
+    use crate::onboarding::breach::{BreachCheck, BreachQuery, BreachResponse};
 
     const GOOD_PW: &str = "correct horse battery staple";
 
@@ -584,7 +584,8 @@ mod tests {
     /// A check for `password` with the endpoint's answer recorded.
     fn answered(password: &str, response: BreachResponse<'_>) -> BreachCheck {
         let mut c = BreachCheck::new(password);
-        c.record(response);
+        c.record(BreachQuery::from_password(password).prefix(), response)
+            .unwrap();
         c
     }
 
@@ -890,7 +891,10 @@ mod tests {
             c.master_key.is_some(),
             "the key derived from the phrase is kept for registration"
         );
-        assert!(c.confirm_phrase(&[]).is_ok(), "confirming again is a harmless no-op");
+        assert!(
+            c.confirm_phrase(&[] as &[String]).is_ok(),
+            "confirming again is a harmless no-op"
+        );
     }
 
     #[test]

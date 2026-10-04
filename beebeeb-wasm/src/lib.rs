@@ -739,9 +739,12 @@ fn password_evaluation_js(e: &onb::PasswordEvaluation) -> PasswordEvaluationJs {
 /// `{ length, min_length, missing_characters, meets_minimum, has_mixed_case,
 /// has_number_or_symbol, strength, level, hint }`. Contains no part of the password.
 #[wasm_bindgen]
-pub fn evaluate_password(password: &str, min_length: u32) -> Result<JsValue, JsError> {
+pub fn evaluate_password(password: String, min_length: u32) -> Result<JsValue, JsError> {
+    // Owned `String` so this copy is wiped when we are done (wasm-bindgen's
+    // `&str` path would leave the decoded bytes in freed WASM memory).
+    let password = zeroize::Zeroizing::new(password);
     let policy = onb::PasswordPolicy::from_server(min_length);
-    let e = onb::evaluate_password(password, &policy);
+    let e = onb::evaluate_password(&password, &policy);
     Ok(serde_wasm_bindgen::to_value(&password_evaluation_js(&e))?)
 }
 
@@ -785,9 +788,10 @@ impl BreachVerdictJs {
 ///
 /// ```js
 /// const q = new WasmBreachCheck(password)
+/// const prefix = q.prefix               // send exactly this, and pass exactly what you sent back
 /// let body = null
-/// try { const r = await fetch(endpoint.replace('{prefix}', q.prefix)); if (r.ok) body = await r.text() } catch {}
-/// const verdict = q.evaluate(body, failOpen)   // for the UI; body === null means the call failed
+/// try { const r = await fetch(endpoint.replace('{prefix}', prefix)); if (r.ok) body = await r.text() } catch {}
+/// const verdict = q.evaluate(prefix, body, failOpen)   // body === null means the call failed
 /// ceremony.setPassword(password, confirmation, q)   // borrows q; omit-the-check cannot bypass a required gate
 /// q.free()
 /// ```
@@ -799,9 +803,10 @@ pub struct WasmBreachCheck {
 #[wasm_bindgen]
 impl WasmBreachCheck {
     #[wasm_bindgen(constructor)]
-    pub fn new(password: &str) -> WasmBreachCheck {
+    pub fn new(password: String) -> WasmBreachCheck {
+        let password = zeroize::Zeroizing::new(password);
         Self {
-            check: onb::BreachCheck::new(password),
+            check: onb::BreachCheck::new(&password),
         }
     }
 
@@ -811,26 +816,43 @@ impl WasmBreachCheck {
         self.check.prefix().to_owned()
     }
 
-    /// Record the answer and return the verdict for display. `body` is the
+    /// Record the answer and return the verdict for display. `requested_prefix`
+    /// is the prefix the request URL (or the cache entry read) actually used;
+    /// if it is not this password's prefix this throws an `Error` with code
+    /// `breach_prefix_mismatch` and records nothing (a body for another prefix
+    /// would otherwise read as clean). `body` is the
     /// response text of a 2xx answer, or `null`/`undefined` when the request
     /// failed (network error, timeout, non-2xx). An empty body counts as a
     /// failed request. `fail_open` is `policy.password.breach_check.fail_open`
     /// and only shapes this display value: the ceremony applies the value it
     /// was constructed with. Returns `{ kind, count, allows_proceeding, check_failed }`.
-    pub fn evaluate(&mut self, body: Option<String>, fail_open: bool) -> Result<JsValue, JsError> {
-        let v = self.record(body.as_deref(), fail_open);
-        Ok(serde_wasm_bindgen::to_value(&BreachVerdictJs::from_core(v))?)
+    pub fn evaluate(
+        &mut self,
+        requested_prefix: &str,
+        body: Option<String>,
+        fail_open: bool,
+    ) -> Result<JsValue, JsValue> {
+        let v = self
+            .record(requested_prefix, body.as_deref(), fail_open)
+            .map_err(breach_error)?;
+        serde_wasm_bindgen::to_value(&BreachVerdictJs::from_core(v))
+            .map_err(|e| JsValue::from(JsError::new(&e.to_string())))
     }
 }
 
 impl WasmBreachCheck {
     /// Testable seam: record and evaluate without crossing the JS boundary.
-    fn record(&mut self, body: Option<&str>, fail_open: bool) -> onb::BreachVerdict {
+    fn record(
+        &mut self,
+        requested_prefix: &str,
+        body: Option<&str>,
+        fail_open: bool,
+    ) -> Result<onb::BreachVerdict, onb::BreachError> {
         let response = match body {
             Some(b) => onb::BreachResponse::Body(b),
             None => onb::BreachResponse::Unavailable,
         };
-        self.check.record_and_evaluate(response, fail_open)
+        self.check.record_and_evaluate(requested_prefix, response, fail_open)
     }
 }
 
@@ -850,6 +872,13 @@ impl CeremonyStepJs {
             spec_step_id: s.spec_step_id(),
         }
     }
+}
+
+/// Thrown as an `Error` with a stable string `code` (see `BreachError::code`).
+fn breach_error(e: onb::BreachError) -> JsValue {
+    let err = js_sys::Error::new(&e.to_string());
+    let _ = js_sys::Reflect::set(&err, &"code".into(), &JsValue::from_str(e.code()));
+    err.into()
 }
 
 /// Thrown as an `Error` with a stable string `code` (see `CeremonyError::code`).
@@ -959,19 +988,21 @@ impl WasmSignupCeremony {
     #[wasm_bindgen(js_name = setPassword)]
     pub fn set_password(
         &mut self,
-        password: &str,
-        confirmation: &str,
+        password: String,
+        confirmation: String,
         breach_check: &WasmBreachCheck,
     ) -> Result<JsValue, JsValue> {
-        self.set_password_js(password, confirmation, Some(&breach_check.check))
+        let (password, confirmation) = (zeroize::Zeroizing::new(password), zeroize::Zeroizing::new(confirmation));
+        self.set_password_js(&password, &confirmation, Some(&breach_check.check))
     }
 
     /// `setPassword` for a document that declares no breach check. If the
     /// ceremony was constructed with `breachCheckRequired = true` this throws
     /// `breach_check_missing`: omitting the check cannot bypass the gate.
     #[wasm_bindgen(js_name = setPasswordUnchecked)]
-    pub fn set_password_unchecked(&mut self, password: &str, confirmation: &str) -> Result<JsValue, JsValue> {
-        self.set_password_js(password, confirmation, None)
+    pub fn set_password_unchecked(&mut self, password: String, confirmation: String) -> Result<JsValue, JsValue> {
+        let (password, confirmation) = (zeroize::Zeroizing::new(password), zeroize::Zeroizing::new(confirmation));
+        self.set_password_js(&password, &confirmation, None)
     }
 
     /// Generate the recovery phrase and master key (Argon2id, about a second).
@@ -1008,7 +1039,12 @@ impl WasmSignupCeremony {
     /// `phrase_word_mismatch` / `phrase_answer_count`; retryable.
     #[wasm_bindgen(js_name = confirmPhrase)]
     pub fn confirm_phrase(&mut self, answers: js_sys::Array) -> Result<(), JsValue> {
-        let answers: Vec<String> = answers.iter().map(|v| v.as_string().unwrap_or_default()).collect();
+        // Each answer is a word of the recovery phrase: hold the Rust copies in
+        // `Zeroizing` so they are wiped when this call returns.
+        let answers: Vec<zeroize::Zeroizing<String>> = answers
+            .iter()
+            .map(|v| zeroize::Zeroizing::new(v.as_string().unwrap_or_default()))
+            .collect();
         self.inner.confirm_phrase(&answers).map_err(ceremony_error)
     }
 
@@ -1660,14 +1696,16 @@ mod tests {
 
     #[test]
     fn onboarding_breach_check_seam_prefix_and_outage_policy() {
-        let mut q = WasmBreachCheck::new("password");
+        let mut q = WasmBreachCheck::new("password".to_owned());
         assert_eq!(q.prefix(), "5BAA6");
         // Request failed (body = None): fail_open decides.
-        let open = q.record(None, true);
-        let closed = q.record(None, false);
+        let open = q.record(&q.prefix(), None, true).unwrap();
+        let closed = q.record(&q.prefix(), None, false).unwrap();
         assert_eq!(open, onb::BreachVerdict::CheckFailedAllowed);
         assert_eq!(closed, onb::BreachVerdict::CheckFailedBlocked);
-        let hit = q.record(Some("1E4C9B93F3F0682250B6CF8331B7EE68FD8:12\r\n"), true);
+        let hit = q
+            .record(&q.prefix(), Some("1E4C9B93F3F0682250B6CF8331B7EE68FD8:12\r\n"), true)
+            .unwrap();
         assert_eq!(hit, onb::BreachVerdict::Breached { count: 12 });
         let js = BreachVerdictJs::from_core(hit);
         assert_eq!(
@@ -1675,7 +1713,20 @@ mod tests {
             ("breached", 12.0, false)
         );
         // An empty body is an outage (review M2), not clean.
-        assert_eq!(q.record(Some(""), true), onb::BreachVerdict::CheckFailedAllowed);
+        assert_eq!(
+            q.record(&q.prefix(), Some(""), true).unwrap(),
+            onb::BreachVerdict::CheckFailedAllowed
+        );
+    }
+
+    #[test]
+    fn onboarding_breach_check_seam_refuses_another_prefix() {
+        let mut q = WasmBreachCheck::new("password".to_owned());
+        let err = q
+            .record("ABCDE", Some("0018A45C4D1DEF81644B54AB7F969B88D65:1\r\n"), true)
+            .expect_err("a body for another prefix must be refused");
+        assert_eq!(err.code(), "breach_prefix_mismatch");
+        assert!(!q.check.is_answered());
     }
 
     #[test]
@@ -1692,24 +1743,33 @@ mod tests {
         let missing = c.try_set_password(PW, PW, None);
         assert_eq!(missing.expect_err("missing").code(), "breach_check_missing");
         // A clean verdict for ANOTHER password does not carry over.
-        let mut other = WasmBreachCheck::new("some other password!");
-        other.record(Some("0018A45C4D1DEF81644B54AB7F969B88D65:1\r\n"), true);
+        let mut other = WasmBreachCheck::new("some other password!".to_owned());
+        other
+            .record(&other.prefix(), Some("0018A45C4D1DEF81644B54AB7F969B88D65:1\r\n"), true)
+            .unwrap();
         let stale = c.try_set_password(PW, PW, Some(&other.check));
         assert_eq!(stale.expect_err("stale").code(), "breach_check_stale");
         // Breached.
         let suffix = onb::BreachQuery::from_password(PW).suffix().to_owned();
-        let mut hit = WasmBreachCheck::new(PW);
-        hit.record(Some(&format!("{suffix}:3\r\n")), true);
+        let mut hit = WasmBreachCheck::new(PW.to_owned());
+        hit.record(&hit.prefix(), Some(&format!("{suffix}:3\r\n")), true)
+            .unwrap();
         let breached = c.try_set_password(PW, PW, Some(&hit.check));
         assert_eq!(breached.expect_err("breached").code(), "password_breached");
         // Outage under the ceremony's own fail_open=false, whatever JS passed to evaluate().
-        let mut down = WasmBreachCheck::new(PW);
-        down.record(None, true);
+        let mut down = WasmBreachCheck::new(PW.to_owned());
+        down.record(&down.prefix(), None, true).unwrap();
         let blocked = c.try_set_password(PW, PW, Some(&down.check));
         assert_eq!(blocked.expect_err("blocked").code(), "breach_check_blocked");
         // Clean.
-        let mut clean = WasmBreachCheck::new(PW);
-        clean.record(Some("0018A45C4D1DEF81644B54AB7F969B88D65:1\r\n"), false);
+        let mut clean = WasmBreachCheck::new(PW.to_owned());
+        clean
+            .record(
+                &clean.prefix(),
+                Some("0018A45C4D1DEF81644B54AB7F969B88D65:1\r\n"),
+                false,
+            )
+            .unwrap();
         assert!(c.try_set_password(PW, PW, Some(&clean.check)).is_ok());
         // create_account is still gated on the phrase steps.
         let early = c.inner.start_registration();

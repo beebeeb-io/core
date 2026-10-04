@@ -3112,14 +3112,25 @@ impl BreachCheckHandle {
     /// request. `fail_open` is `policy.password.breach_check.fail_open` and
     /// only shapes this display value: the ceremony applies the value it was
     /// constructed with.
-    pub fn evaluate(&self, body: Option<String>, fail_open: bool) -> BreachVerdictDto {
+    ///
+    /// `requested_prefix` is the prefix the request URL (or the cache entry)
+    /// actually used. If it is not this password's prefix this throws
+    /// `BreachPrefixMismatch` and records nothing: a body for another prefix
+    /// would otherwise evaluate as clean.
+    pub fn evaluate(
+        &self,
+        requested_prefix: String,
+        body: Option<String>,
+        fail_open: bool,
+    ) -> Result<BreachVerdictDto, OnboardingError> {
         let response = match body.as_deref() {
             Some(b) => onb::BreachResponse::Body(b),
             None => onb::BreachResponse::Unavailable,
         };
         lock_tolerant(&self.check)
-            .record_and_evaluate(response, fail_open)
-            .into()
+            .record_and_evaluate(&requested_prefix, response, fail_open)
+            .map(Into::into)
+            .map_err(Into::into)
     }
 }
 
@@ -3196,6 +3207,9 @@ pub enum OnboardingError {
     #[error("the breach check was run for a different password")]
     BreachCheckStale,
 
+    #[error("the breach lookup was made for a different prefix than this password's")]
+    BreachPrefixMismatch,
+
     #[error("the recovery phrase is not available")]
     PhraseUnavailable,
 
@@ -3207,6 +3221,14 @@ pub enum OnboardingError {
 
     #[error("crypto error: {detail}")]
     Crypto { detail: String },
+}
+
+impl From<onb::BreachError> for OnboardingError {
+    fn from(e: onb::BreachError) -> Self {
+        match e {
+            onb::BreachError::PrefixMismatch => Self::BreachPrefixMismatch,
+        }
+    }
 }
 
 impl From<onb::CeremonyError> for OnboardingError {
@@ -3381,6 +3403,8 @@ impl SignupCeremonyHandle {
     /// `answers` in `challenge_positions` order. Throws `PhraseWordMismatch` /
     /// `PhraseAnswerCount`; retryable.
     pub fn confirm_phrase(&self, answers: Vec<String>) -> Result<(), OnboardingError> {
+        // Each answer is a word of the recovery phrase: wipe our copies on return.
+        let answers: Vec<Zeroizing<String>> = answers.into_iter().map(Zeroizing::new).collect();
         Ok(self.with(|c| c.confirm_phrase(&answers))?)
     }
 
@@ -3510,19 +3534,44 @@ mod onboarding_binding_tests {
     fn breach_handle_prefix_and_outage_policy() {
         let h = BreachCheckHandle::new("password".into());
         assert_eq!(h.prefix(), "5BAA6");
-        assert_eq!(h.evaluate(None, true), BreachVerdictDto::CheckFailedAllowed);
-        assert_eq!(h.evaluate(None, false), BreachVerdictDto::CheckFailedBlocked);
+        assert_eq!(
+            h.evaluate(h.prefix(), None, true).unwrap(),
+            BreachVerdictDto::CheckFailedAllowed
+        );
+        assert_eq!(
+            h.evaluate(h.prefix(), None, false).unwrap(),
+            BreachVerdictDto::CheckFailedBlocked
+        );
         assert!(breach_verdict_allows_proceeding(BreachVerdictDto::CheckFailedAllowed));
         assert!(!breach_verdict_allows_proceeding(BreachVerdictDto::CheckFailedBlocked));
         assert!(breach_verdict_check_failed(BreachVerdictDto::CheckFailedAllowed));
-        let hit = h.evaluate(Some("1E4C9B93F3F0682250B6CF8331B7EE68FD8:9\r\n".into()), true);
+        let hit = h
+            .evaluate(
+                h.prefix(),
+                Some("1E4C9B93F3F0682250B6CF8331B7EE68FD8:9\r\n".into()),
+                true,
+            )
+            .unwrap();
         assert_eq!(hit, BreachVerdictDto::Breached { count: 9 });
         assert!(!breach_verdict_allows_proceeding(hit));
         // An empty body is an outage (review M2), not clean.
         assert_eq!(
-            h.evaluate(Some(String::new()), false),
+            h.evaluate(h.prefix(), Some(String::new()), false).unwrap(),
             BreachVerdictDto::CheckFailedBlocked
         );
+    }
+
+    #[test]
+    fn breach_handle_refuses_another_prefix() {
+        let h = BreachCheckHandle::new("password".into());
+        let err = h
+            .evaluate(
+                "ABCDE".into(),
+                Some("0018A45C4D1DEF81644B54AB7F969B88D65:1\r\n".into()),
+                true,
+            )
+            .expect_err("mismatched prefix must be refused");
+        assert!(matches!(err, OnboardingError::BreachPrefixMismatch), "{err}");
     }
 
     #[test]
@@ -3567,14 +3616,17 @@ mod onboarding_binding_tests {
         ));
         // A clean answer recorded for another password is stale.
         let other = BreachCheckHandle::new("an older password!".into());
-        other.evaluate(Some(clean.clone()), true);
+        other.evaluate(other.prefix(), Some(clean.clone()), true).unwrap();
         assert!(matches!(
             c.set_password(GOOD_PW.into(), GOOD_PW.into(), Some(other)),
             Err(OnboardingError::BreachCheckStale)
         ));
         // Outage: the ceremony's fail_open (false) wins over what the caller showed the user.
         let down = BreachCheckHandle::new(GOOD_PW.into());
-        assert_eq!(down.evaluate(None, true), BreachVerdictDto::CheckFailedAllowed);
+        assert_eq!(
+            down.evaluate(down.prefix(), None, true).unwrap(),
+            BreachVerdictDto::CheckFailedAllowed
+        );
         assert!(matches!(
             c.set_password(GOOD_PW.into(), GOOD_PW.into(), Some(down)),
             Err(OnboardingError::BreachCheckBlocked)
@@ -3582,7 +3634,8 @@ mod onboarding_binding_tests {
         // Breached.
         let suffix = onb::BreachQuery::from_password(GOOD_PW).suffix().to_owned();
         let hit = BreachCheckHandle::new(GOOD_PW.into());
-        hit.evaluate(Some(format!("{suffix}:4\r\n")), true);
+        hit.evaluate(hit.prefix(), Some(format!("{suffix}:4\r\n")), true)
+            .unwrap();
         assert!(matches!(
             c.set_password(GOOD_PW.into(), GOOD_PW.into(), Some(hit)),
             Err(OnboardingError::PasswordBreached { count: 4 })
@@ -3594,7 +3647,7 @@ mod onboarding_binding_tests {
         );
         // Clean passes.
         let ok = BreachCheckHandle::new(GOOD_PW.into());
-        ok.evaluate(Some(clean), false);
+        ok.evaluate(ok.prefix(), Some(clean), false).unwrap();
         assert!(c.set_password(GOOD_PW.into(), GOOD_PW.into(), Some(ok)).is_ok());
     }
 
