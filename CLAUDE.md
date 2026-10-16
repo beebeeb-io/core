@@ -11,7 +11,7 @@ Cryptographic core, shared types, and sync engine. This is the trust anchor — 
 ## Build & test
 
 ```sh
-cargo test -p beebeeb-core   # 405 tests across 9 binaries (unit 332, chunk_stream_parity 2, cli_auth_vectors 4 + 1 ignored, cross_client_vectors 21, cross_platform_vectors 22, integration 13, transfer_vectors 5, zip_tests 6) — measured 2026-10-04 on feat/1744-onboarding-module (base d18b336; baseline before the onboarding module was 358 = unit 285 + the same eight other binaries); the truth line is per binary: `test result: ok. N passed`
+cargo test -p beebeeb-core   # 445 tests across 9 binaries (unit 372, chunk_stream_parity 2, cli_auth_vectors 4 + 1 ignored, cross_client_vectors 21, cross_platform_vectors 22, integration 13, transfer_vectors 5, zip_tests 6) — measured 2026-10-16 on fix/1908-chunk-aead-binding (base cbd941b, where unit was 349); the truth line is per binary: `test result: ok. N passed`
 cargo test --workspace       # full workspace (core + sync + types + upload + uniffi + wasm)
 cargo clippy --workspace -- -D warnings
 cargo fmt -- --check
@@ -22,7 +22,7 @@ cargo fmt -- --check
 - `MasterKey` — 32 bytes, NOT Clone, zeroized on drop. Created from password (Argon2id) or recovery phrase.
 - `FileKey` — 32 bytes, per-file via HKDF. `derive_file_key(master_key, file_id)`.
 - `EncryptedBlob` — cipher_suite + nonce (Vec<u8>) + ciphertext (Vec<u8>).
-- `encrypt_chunk(key: &FileKey, plaintext)` / `decrypt_chunk(key: &FileKey, blob)` — AES-256-GCM.
+- `encrypt_chunk(key: &FileKey, plaintext)` / `decrypt_chunk(key: &FileKey, blob)` — generic AES-256-GCM, NO associated data (metadata, key wrap, thumbnails). **Not for file content** — file chunks go through `chunk_stream` (chunk format v2, task 1908).
 
 ## Streaming chunk primitive (`chunk_stream.rs`)
 
@@ -56,12 +56,13 @@ CLI can move them into `spawn_blocking`. Core stays synchronous — no tokio.
   `finish()`** and returns `Err` (cleaning up the chunk files it wrote) if the
   size diverged from the value the plan was built on. Resilience fix R1/R6 — a
   silent truncation is now a detectable, return-typed error across every client.
-- **Wire format UNCHANGED:** `nonce(12) || ciphertext || tag(16)`, fresh random
-  nonce per chunk. Output is roundtrip-compatible with existing files but NOT
-  byte-identical (random nonce) — intentional. `vectors.json` stays v2.
+- **Wire format:** `nonce(12) || ciphertext || tag(16)`, fresh random nonce per
+  chunk; same layout and sizes in both chunk formats (see "Chunk format v2" below).
+  New files are written as **v2** (task 1908); v1 files stay readable.
 - `file_encrypt::encrypt_file_to_chunks` now **DELEGATES** to `ChunkEncryptor`
   (one encrypt loop, no drift); `tests/chunk_stream_parity.rs` enforces an
-  identical chunk plan + that new output decrypts via the legacy `decrypt_chunk_raw`.
+  identical chunk plan + that new output is a v2 stream (decrypts via
+  `ChunkDecryptor`, and is REJECTED by the legacy no-AAD `decrypt_chunk_raw`).
 - `NONCE_LEN` / `TAG_LEN` (defined in `encrypt`) and `read_exact_or_eof` (defined
   in `chunk_stream`) are `pub(crate)` — a single definition shared by the
   `encrypt` / `file_encrypt` / `chunk_stream` cluster (no duplication).
@@ -88,7 +89,81 @@ CLI can move them into `spawn_blocking`. Core stays synchronous — no tokio.
   `pushChunk(plaintext) -> Uint8Array` returns the full `nonce||ct||tag` frame
   (no JS recombine); consuming `finish()` runs the integrity guard. Getters:
   `chunkCount` / `chunkSize` / `chunksEmitted` / `expectedTotalCiphertext`. It is
-  the first stateful `#[wasm_bindgen]` struct in the crate.
+  the first stateful `#[wasm_bindgen]` struct in the crate. `WasmChunkDecryptor`
+  (task 1908) is the matching push decryptor; web file content must use it (or
+  `decrypt_chunk_frame` for random access), not the generic `decrypt_chunk`.
+
+### Chunk format v2 — position binding (task 1908)
+
+**Problem (v1):** every frame was AES-256-GCM under the one per-file key with NO
+associated data. Cross-file swaps failed (different keys), but WITHIN a file a
+malicious server could reorder, duplicate, drop, or truncate frames undetected.
+
+**v2 = same frame layout, AAD = position (STREAM, Hoang–Reyhanitabar–Rogaway–Vizár; as in age / Tink):**
+
+```text
+AAD = "beebeeb/chunk/v2"         16 bytes: domain tag + version
+   || u32_be(len(file_id))       length prefix (injective encoding)
+   || file_id                    exact bytes fed to derive_file_key (string UUID)
+   || u32_be(chunk_index)        0-based
+   || u8(is_last)                1 on the final chunk only
+```
+
+- `chunk_stream::chunk_aad_v2` builds it; `CHUNK_AAD_DOMAIN_V2`, `ChunkFormat`
+  (`V1Legacy` = 1, `V2` = 2), `WRITE_FORMAT` (= `V2`) are public. A KAT
+  (`chunk_aad_v2_known_answer`) pins the bytes.
+- **No total count in the AAD (decided):** the last flag gives the same
+  truncation/extension guarantee without the decryptor knowing the count up
+  front — the push decryptor (web, mobile) does not know it, and a count taken
+  from the server is unauthenticated. With the flag, a server lie about the
+  count is detected anyway: the frame it makes the client treat as last (or not
+  last) fails the tag.
+- **file_id is in the AAD although the key is already HKDF(master, file_id):**
+  defence in depth for any two files that ever share a key (unwrapped content
+  keys, reused/mis-derived keys). Consequence: every decrypt path for file
+  content needs the file id (signature changes below).
+- **Where the decryptor learns the format:** from the AAD itself, never a server
+  field. Frame 0 is tried as v2 (last = 0, then 1), then as v1; whichever
+  authenticates decides the format, which is then LOCKED for the file. Optional
+  pin from authenticated metadata: `ChunkDecryptor::expect_format`.
+- **Downgrade:** the AAD is never transmitted, so it cannot be stripped: a v2
+  frame opened with the empty v1 AAD fails the tag (test
+  `v2_frame_decrypted_as_v1_fails`; `decrypt_chunk_raw` rejects every v2
+  frame). A v1 frame spliced into a v2 file fails the lock. Residual: a file
+  that EXISTS as v1 under some file id stays v1 (that is the legacy file); a
+  whole-file substitution by v1 frames is possible only if v1 frames under the
+  same key exist (same file id written pre-1908). Pinning via encrypted metadata
+  closes that — client follow-up, decision for Guus.
+- **Decrypt rules (`StreamOpener`, crate-private, used by every file-content
+  decrypt path):** frame i opens only at index i; nothing may follow the
+  frame sealed as last; `finish()` (push) / EOF (pull) fails unless a v2 stream
+  saw its last frame; zero frames is always an error. Trial opens are safe and
+  cheap: aes-gcm 0.10.3 checks the tag before applying the keystream (a failed
+  trial never produces plaintext), and only frame 0 / the last frame pay a
+  second GHASH.
+- **Random access** (seeking readers): `chunk_stream::open_chunk(file_key,
+  file_id, index, is_last, format, frame)` — format must come from authenticated
+  data (a decryptor that opened chunk 0, or encrypted metadata).
+- **Public API changes:** `encrypt::decrypt_chunks_to_file` and
+  `encrypt::decrypt_contiguous_to_file` gained `file_id: &str`;
+  `ChunkDecryptor` gained `for_push_with_file_key`, `expect_format`, `format`,
+  `chunks_decrypted`, `finish`; `ChunkEncryptor::format`;
+  `beebeeb_upload::decrypt_downloaded_bytes` gained `file_id`. UniFFI:
+  `decrypt_chunks_to_file` / `decrypt_contiguous_to_file` gained `file_id`;
+  new `ChunkDecryptorHandle.for_push_with_file_key / expect_format /
+  chunk_format / finish`, `ChunkEncryptorHandle.chunk_format`,
+  `FileKeyHandle.decrypt_chunk_frame`. WASM: new `WasmChunkDecryptor`
+  (`new`, `fromFileKey`, `expectFormat`, `pushFrame`, `format`,
+  `chunksDecrypted`, `finish`), `decrypt_chunk_frame`, `WasmChunkEncryptor.format`.
+- **Not v2 (unchanged, generic no-AAD):** `encrypt_chunk` / `decrypt_chunk` /
+  `encrypt_chunk_raw` / `decrypt_chunk_raw` / `encrypt_chunk_json` — metadata,
+  key wrap, thumbnails, search shards. They must not be used for file content.
+- **Rollout hazard:** a client on this core WRITES v2; a client still on an
+  older core (or still decrypting file content with the generic
+  `decrypt_chunk(fileKey, nonce, ct)` / `decryptChunk`) cannot read v2 files.
+  Every client's read path must move to the v2-aware APIs before any client
+  ships v2 writes. A read-only phase is `WRITE_FORMAT = ChunkFormat::V1Legacy`
+  (one line).
 
 ### WASM target gating (0653)
 
@@ -350,8 +425,8 @@ AGPL-3.0-or-later
 The full rules live in the workspace `CLAUDE.md` → "How we work" (also summarised in the workspace `AGENTS.md`). Read them; they apply here. The repo-specific instantiation:
 
 - **The count-shaped truth line:** `cargo test --workspace 2>&1 | tee /tmp/bb-core-test.log` →
-  one `test result: ok. N passed; 0 failed` per crate/suite (the CLAUDE.md numbers above — 405 across
-  9 binaries for `beebeeb-core`, measured 2026-10-04 (358 before task 1744) — are the baseline to compare against). Assert the Ns; a suite that did not run is
+  one `test result: ok. N passed; 0 failed` per crate/suite (the CLAUDE.md numbers above — 445 across
+  9 binaries for `beebeeb-core`, measured 2026-10-16 (405 before task 1908, 358 before task 1744) — are the baseline to compare against). Assert the Ns; a suite that did not run is
   a red, not a pass.
 - **Crypto tests are trusted only after they have been seen to fail.** Mutate a KAT vector or a
   derivation label, paste WHICH assertion failed, revert. A KAT that cannot fail proves nothing.

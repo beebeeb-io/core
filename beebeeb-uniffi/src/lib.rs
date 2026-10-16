@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use zeroize::{Zeroize, Zeroizing};
 
-use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor};
+use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor, ChunkFormat};
 use beebeeb_core::constellation;
 use beebeeb_core::encrypt;
 use beebeeb_core::kdf;
@@ -303,15 +303,21 @@ pub fn decrypt_chunk(key: Vec<u8>, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Resul
 /// cache layer does not treat the partial file as complete.
 ///
 /// Returns the total number of plaintext bytes written.
+///
+/// **Task 1908:** `file_id` (the id the file was uploaded under) is required:
+/// the chunks are opened as one file's ordered stream — v2 frames are bound to
+/// (file id, index, last), v1 files still open. Reordered, duplicated, dropped
+/// or truncated v2 chunks fail. The output is atomic (core `.tmp` + rename).
 #[uniffi::export]
 pub fn decrypt_chunks_to_file(
     key: Vec<u8>,
+    file_id: String,
     chunks: Vec<EncryptedChunkData>,
     output_path: String,
 ) -> Result<u64, CryptoError> {
     let fk = file_key_from_slice(&key)?;
     let chunk_pairs: Vec<(Vec<u8>, Vec<u8>)> = chunks.into_iter().map(|c| (c.nonce, c.ciphertext)).collect();
-    encrypt::decrypt_chunks_to_file(&fk, chunk_pairs, &output_path).map_err(CryptoError::from)
+    encrypt::decrypt_chunks_to_file(&fk, &file_id, chunk_pairs, &output_path).map_err(CryptoError::from)
 }
 
 /// Decrypt a contiguous encrypted body into a file.
@@ -336,15 +342,21 @@ pub fn decrypt_chunks_to_file(
 /// `output_path` is never created/overwritten. Callers no longer need to clean
 /// up a partial file on `Err`, and an existence-based cache cannot serve a
 /// truncated decrypt.
+///
+/// **Task 1908:** `file_id` (the id the file was uploaded under) is required —
+/// it is bound into every v2 frame together with the chunk index and the
+/// last-chunk flag. v1 files still open. A reordered/spliced/truncated v2 body
+/// fails.
 #[uniffi::export]
 pub fn decrypt_contiguous_to_file(
     file_key: Vec<u8>,
+    file_id: String,
     body: Vec<u8>,
     chunk_size: u64,
     output_path: String,
 ) -> Result<u64, CryptoError> {
     let fk = file_key_from_slice(&file_key)?;
-    encrypt::decrypt_contiguous_to_file(&fk, &body, chunk_size, &output_path).map_err(CryptoError::from)
+    encrypt::decrypt_contiguous_to_file(&fk, &file_id, &body, chunk_size, &output_path).map_err(CryptoError::from)
 }
 
 // ---------------------------------------------------------------------------
@@ -941,6 +953,28 @@ impl FileKeyHandle {
             .map_err(Into::into)
     }
 
+    /// Random-access open of ONE file-content frame (`nonce || ct || tag`) at a
+    /// known position — for seeking readers (video streaming) that cannot use
+    /// the sequential [`ChunkDecryptorHandle`]. `index` is the chunk the caller
+    /// asked for and `is_last` is `index == chunk_count - 1`; a server that
+    /// serves another chunk or lies about the count fails the tag.
+    ///
+    /// `format` (1 = v1 legacy, 2 = v2) must come from authenticated data — the
+    /// `chunk_format()` of a decryptor that opened chunk 0, or a version stored
+    /// in the encrypted file metadata — never from a server field.
+    pub fn decrypt_chunk_frame(
+        &self,
+        file_id: String,
+        index: u32,
+        is_last: bool,
+        format: u8,
+        frame: Vec<u8>,
+    ) -> Result<Vec<u8>, CryptoError> {
+        let format = ChunkFormat::from_u8(format)?;
+        self.with_key(|fk| beebeeb_core::chunk_stream::open_chunk(fk, &file_id, index, is_last, format, &frame))?
+            .map_err(Into::into)
+    }
+
     pub fn encrypt_metadata(&self, metadata: String) -> Result<EncryptedData, CryptoError> {
         self.with_key(|fk| encrypt::encrypt_metadata(fk, &metadata))?
             .map(|blob| encrypted_blob_to_data(&blob))
@@ -991,6 +1025,15 @@ pub struct EncryptedChunkDto {
 pub struct DecryptedChunkDto {
     pub index: u32,
     pub data: Vec<u8>,
+}
+
+/// Summary returned by [`ChunkDecryptorHandle::finish`] after the end-of-stream
+/// check (task 1908).
+#[derive(uniffi::Record)]
+pub struct ChunkDecryptorSummaryDto {
+    pub chunk_count: u32,
+    /// 1 = v1 legacy, 2 = v2 (position-bound).
+    pub format: u8,
 }
 
 /// Summary returned by [`ChunkEncryptorHandle::finish`] after the integrity guard.
@@ -1124,6 +1167,12 @@ impl ChunkEncryptorHandle {
         self.with_inner(|e| e.chunks_emitted())
     }
 
+    /// The chunk format this encryptor writes (2 = v2 for every new file since
+    /// task 1908). Record it in the encrypted file metadata to let readers pin it.
+    pub fn chunk_format(&self) -> Result<u8, CryptoError> {
+        self.with_inner(|e| e.format().as_u8())
+    }
+
     /// Consume the encryptor (by value) and return the summary after the integrity
     /// guard (detects a source that shrank). The handle is unusable afterwards.
     pub fn finish(&self) -> Result<ChunkEncryptorSummaryDto, CryptoError> {
@@ -1193,6 +1242,49 @@ impl ChunkDecryptorHandle {
         }))
     }
 
+    /// PUSH constructor from a raw 32-byte file key — for callers that hold the
+    /// file key but not the owner's master key (share / shared-link recipients).
+    /// `file_id` must be the id the file was uploaded under (bound into every v2
+    /// frame). The key bytes are copied into a zeroize-on-drop key in core.
+    #[uniffi::constructor]
+    pub fn for_push_with_file_key(file_key: Vec<u8>, file_id: String) -> Result<Arc<Self>, CryptoError> {
+        let fk = file_key_from_slice(&file_key)?;
+        let dec = ChunkDecryptor::for_push_with_file_key(fk, &file_id);
+        Ok(Arc::new(Self {
+            inner: Mutex::new(Some(dec)),
+        }))
+    }
+
+    /// Pin the file's chunk format (1 = v1 legacy, 2 = v2) from authenticated
+    /// data (a version recorded in the encrypted file metadata). Must be called
+    /// before the first frame.
+    pub fn expect_format(&self, format: u8) -> Result<(), CryptoError> {
+        let format = ChunkFormat::from_u8(format)?;
+        Ok(self.with_inner(|d| d.expect_format(format))??)
+    }
+
+    /// The file's chunk format (1 = v1 legacy, 2 = v2) once chunk 0 has been
+    /// opened; `None` before.
+    pub fn chunk_format(&self) -> Result<Option<u8>, CryptoError> {
+        self.with_inner(|d| d.format().map(ChunkFormat::as_u8))
+    }
+
+    /// End-of-stream check, consuming the decryptor. MUST be called after the
+    /// last pushed frame: it fails if no frame was pushed or if a v2 file ended
+    /// before its last chunk (truncation). Treat an `Err` as a failed download
+    /// and discard the plaintext. The pull form runs the same check at EOF.
+    pub fn finish(&self) -> Result<ChunkDecryptorSummaryDto, CryptoError> {
+        let mut guard = self.inner.lock().unwrap();
+        let dec = guard.take().ok_or(CryptoError::InvalidInput {
+            detail: "chunk decryptor handle has been finished or cleared".into(),
+        })?;
+        let summary = dec.finish().map_err(CryptoError::from)?;
+        Ok(ChunkDecryptorSummaryDto {
+            chunk_count: summary.chunk_count,
+            format: summary.format.as_u8(),
+        })
+    }
+
     /// PULL: emit the next decrypted chunk, or `None` at clean EOF.
     pub fn next_chunk(&self) -> Result<Option<DecryptedChunkDto>, CryptoError> {
         let chunk = self.with_inner(|d| d.next_chunk())??;
@@ -1245,6 +1337,133 @@ mod chunk_stream_handle_tests {
         let out = dec.push_frame(frame.data).unwrap();
         assert_eq!(out.index, 0);
         assert_eq!(out.data, data);
+        assert_eq!(dec.chunk_format().unwrap(), Some(2));
+        let s = dec.finish().unwrap();
+        assert_eq!((s.chunk_count, s.format), (1, 2));
+    }
+
+    /// Task 1908: two equal-size v2 chunks through the FFI handles.
+    fn two_v2_frames(mk: &MasterKeyHandle, file_id: &str) -> (Vec<u8>, Vec<Vec<u8>>) {
+        // 5 MiB on the "mobile" ladder (4 MiB chunks) => 2 chunks.
+        let data: Vec<u8> = (0..5 * 1024 * 1024).map(|i| (i % 253) as u8).collect();
+        let enc = ChunkEncryptorHandle::for_push(mk, file_id.into(), data.len() as u64, "mobile".into()).unwrap();
+        assert_eq!(enc.chunk_format().unwrap(), 2, "new uploads are v2");
+        let cs = enc.chunk_plan().unwrap().chunk_size_bytes as usize;
+        let frames: Vec<Vec<u8>> = data
+            .chunks(cs)
+            .map(|c| enc.push_chunk(c.to_vec()).unwrap().data)
+            .collect();
+        enc.finish().unwrap();
+        assert_eq!(frames.len(), 2);
+        (data, frames)
+    }
+
+    #[test]
+    fn handle_rejects_reorder_and_truncation() {
+        let mk = mk_handle();
+        let (_, frames) = two_v2_frames(&mk, "ffi-v2");
+
+        // Out of order: chunk 1 pushed first.
+        let dec = ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into()).unwrap();
+        assert!(dec.push_frame(frames[1].clone()).is_err());
+
+        // Truncated: only chunk 0, then finish.
+        let dec = ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into()).unwrap();
+        dec.push_frame(frames[0].clone()).unwrap();
+        assert!(
+            dec.finish().is_err(),
+            "finish must reject a v2 stream without its last chunk"
+        );
+    }
+
+    #[test]
+    fn handle_with_file_key_and_random_access_frame_open() {
+        let mk = mk_handle();
+        let (data, frames) = two_v2_frames(&mk, "ffi-fk");
+        let fk = mk.derive_file_key(b"ffi-fk".to_vec()).unwrap();
+        let fk_bytes = mk
+            .with_key(|m| kdf::derive_file_key(m, b"ffi-fk").as_bytes().to_vec())
+            .unwrap();
+
+        // File-key decryptor (share recipient path).
+        let dec = ChunkDecryptorHandle::for_push_with_file_key(fk_bytes.clone(), "ffi-fk".into()).unwrap();
+        dec.expect_format(2).unwrap();
+        let mut out = Vec::new();
+        for f in &frames {
+            out.extend(dec.push_frame(f.clone()).unwrap().data);
+        }
+        dec.finish().unwrap();
+        assert_eq!(out, data);
+
+        // Wrong file id with the right key fails.
+        let dec = ChunkDecryptorHandle::for_push_with_file_key(fk_bytes, "other".into()).unwrap();
+        assert!(dec.push_frame(frames[0].clone()).is_err());
+
+        // Random access: right position opens, wrong position / last flag fails.
+        assert_eq!(
+            fk.decrypt_chunk_frame("ffi-fk".into(), 1, true, 2, frames[1].clone())
+                .unwrap(),
+            data[4 * 1024 * 1024..]
+        );
+        assert!(
+            fk.decrypt_chunk_frame("ffi-fk".into(), 0, false, 2, frames[1].clone())
+                .is_err()
+        );
+        assert!(
+            fk.decrypt_chunk_frame("ffi-fk".into(), 1, false, 2, frames[1].clone())
+                .is_err()
+        );
+        assert!(
+            fk.decrypt_chunk_frame("ffi-fk".into(), 1, true, 1, frames[1].clone())
+                .is_err()
+        );
+        assert!(
+            fk.decrypt_chunk_frame("ffi-fk".into(), 1, true, 9, frames[1].clone())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn contiguous_to_file_binds_file_id_and_rejects_swap() {
+        let mk = mk_handle();
+        let (data, frames) = two_v2_frames(&mk, "ffi-contig");
+        let fk_bytes = mk
+            .with_key(|m| kdf::derive_file_key(m, b"ffi-contig").as_bytes().to_vec())
+            .unwrap();
+        let dir = std::env::temp_dir().join("bb_uniffi_contig_1908");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("out.bin").to_string_lossy().into_owned();
+        let cs = 4 * 1024 * 1024u64;
+
+        let n = decrypt_contiguous_to_file(fk_bytes.clone(), "ffi-contig".into(), frames.concat(), cs, out.clone())
+            .unwrap();
+        assert_eq!(n, data.len() as u64);
+        std::fs::remove_file(&out).unwrap();
+
+        // Truncated to chunk 0: rejected, nothing written.
+        assert!(
+            decrypt_contiguous_to_file(
+                fk_bytes.clone(),
+                "ffi-contig".into(),
+                frames[0].clone(),
+                cs,
+                out.clone()
+            )
+            .is_err()
+        );
+        assert!(!std::path::Path::new(&out).exists());
+
+        // Pre-sliced variant: wrong file id rejected.
+        let pairs: Vec<EncryptedChunkData> = frames
+            .iter()
+            .map(|f| EncryptedChunkData {
+                nonce: f[..12].to_vec(),
+                ciphertext: f[12..].to_vec(),
+            })
+            .collect();
+        assert!(decrypt_chunks_to_file(fk_bytes, "not-the-id".into(), pairs, out.clone()).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

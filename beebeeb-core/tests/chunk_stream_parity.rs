@@ -7,12 +7,16 @@
 //!    ciphertext sizes — as a direct `ChunkEncryptor` loop over the same bytes.
 //!    Since `file_encrypt` now delegates to `ChunkEncryptor`, this fails the
 //!    instant someone re-introduces a hand-rolled chunk loop that drifts.
-//! 2. Output written by the new primitive decrypts with the pre-existing
-//!    low-level `encrypt::decrypt_chunk_raw` — i.e. the wire format is unchanged.
+//! 2. Output written by the new primitive is a valid ordered stream for the
+//!    shared `ChunkDecryptor`. Since task 1908 that output is chunk format v2
+//!    (position-bound AAD): the frame LAYOUT is unchanged (same sizes, asserted
+//!    above), but the frames deliberately no longer open with the legacy no-AAD
+//!    `encrypt::decrypt_chunk_raw` — that is the downgrade guarantee, asserted
+//!    here. (Until 1908 this test asserted the opposite: legacy-decryptable.)
 
 use std::io::Cursor;
 
-use beebeeb_core::chunk_stream::ChunkEncryptor;
+use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor, ChunkFormat};
 use beebeeb_core::encrypt::decrypt_chunk_raw;
 use beebeeb_core::file_encrypt::encrypt_file_to_chunks;
 use beebeeb_core::kdf::{derive_file_key, derive_master_key};
@@ -78,13 +82,20 @@ fn file_encrypt_matches_direct_chunk_encryptor_loop() {
         content.len() as u64 + 28 * direct_count as u64
     );
 
-    // The on-disk frames decrypt with the legacy low-level function.
+    // The on-disk frames are a v2 stream: they decrypt in order through the
+    // shared decryptor, and NOT through the legacy no-AAD open (task 1908).
     let file_key = derive_file_key(&master, file_id.as_bytes());
+    let mut dec = ChunkDecryptor::for_push(&master, file_id);
     let mut recovered = Vec::new();
     for chunk in &result.chunks {
         let raw = std::fs::read(&chunk.output_path).unwrap();
-        recovered.extend_from_slice(&decrypt_chunk_raw(&file_key, &raw).unwrap());
+        assert!(
+            decrypt_chunk_raw(&file_key, &raw).is_err(),
+            "a v2 frame must not open as a v1 frame"
+        );
+        recovered.extend_from_slice(&dec.push_frame(&raw).unwrap().data);
     }
+    assert_eq!(dec.finish().unwrap().format, ChunkFormat::V2);
     assert_eq!(recovered, content);
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -111,10 +122,15 @@ fn file_encrypt_empty_file_parity() {
     assert_eq!(direct_sizes, vec![(0, 28)]);
     assert_eq!(result.chunks[0].ciphertext_size, 28);
 
-    // Decrypt-back via the legacy path yields empty plaintext.
+    // Decrypt-back yields empty plaintext; the single frame is sealed as the
+    // last chunk (v2), so it is a complete stream on its own, and it does not
+    // open via the legacy no-AAD path (task 1908).
     let file_key = derive_file_key(&master, file_id.as_bytes());
     let raw = std::fs::read(&result.chunks[0].output_path).unwrap();
-    assert!(decrypt_chunk_raw(&file_key, &raw).unwrap().is_empty());
+    assert!(decrypt_chunk_raw(&file_key, &raw).is_err());
+    let mut dec = ChunkDecryptor::for_push(&master, file_id);
+    assert!(dec.push_frame(&raw).unwrap().data.is_empty());
+    assert_eq!(dec.finish().unwrap().chunk_count, 1);
 
     let _ = std::fs::remove_dir_all(&dir);
 }

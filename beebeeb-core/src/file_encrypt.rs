@@ -12,7 +12,8 @@ use beebeeb_types::{ChunkProfile, plan_chunks};
 
 use crate::CoreError;
 use crate::chunk_stream::ChunkEncryptor;
-use crate::encrypt::{NONCE_LEN, TAG_LEN, decrypt_chunk_raw};
+use crate::chunk_stream::StreamOpener;
+use crate::encrypt::{NONCE_LEN, TAG_LEN};
 use crate::kdf::{MasterKey, derive_file_key};
 
 /// Information about a single encrypted chunk written to disk.
@@ -208,7 +209,7 @@ pub fn decrypt_chunks_to_file(
 
     // Inner helper does the streaming decrypt into the .tmp; on ANY Err the
     // outer code removes the .tmp so no partial plaintext survives at output_path.
-    let result = decrypt_chunks_to_tmp(&file_key, chunk_paths, &tmp_path, callback);
+    let result = decrypt_chunks_to_tmp(&file_key, file_id, chunk_paths, &tmp_path, callback);
 
     match result {
         Ok((total_bytes, chunks_processed)) => {
@@ -236,6 +237,7 @@ pub fn decrypt_chunks_to_file(
 /// every error path. Returns `(total_bytes, chunks_processed)` on success.
 fn decrypt_chunks_to_tmp(
     file_key: &crate::kdf::FileKey,
+    file_id: &str,
     chunk_paths: &[&Path],
     tmp_path: &Path,
     callback: Option<&dyn FileProgressCallback>,
@@ -247,13 +249,17 @@ fn decrypt_chunks_to_tmp(
 
     let mut total_bytes: u64 = 0;
     let mut chunks_processed: u32 = 0;
+    // Task 1908: the chunk files are one file's ordered stream. v2 binds each
+    // frame to (file_id, index, last), so a reordered/duplicated/missing chunk
+    // file, or a list that stops before the last chunk, fails here.
+    let mut opener = StreamOpener::new(file_id);
 
     for (i, chunk_path) in chunk_paths.iter().enumerate() {
         // Read the entire chunk file
         let raw = fs::read(chunk_path).map_err(|e| CoreError::Io(format!("read chunk {i}: {e}")))?;
 
         // Decrypt: raw is nonce || ciphertext || tag
-        let plaintext = decrypt_chunk_raw(file_key, &raw)?;
+        let plaintext = opener.open_next(file_key, &raw)?.data;
 
         writer
             .write_all(&plaintext)
@@ -266,6 +272,9 @@ fn decrypt_chunks_to_tmp(
             cb.on_progress(chunks_processed, chunks_total);
         }
     }
+
+    // Truncation check (v2: the last chunk must have been seen).
+    opener.finish()?;
 
     writer
         .flush()

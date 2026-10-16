@@ -59,6 +59,10 @@ pub fn encrypt_chunk(key: &[u8], plaintext: &[u8]) -> Result<JsValue, JsError> {
 
 /// Decrypt a ciphertext chunk that was produced by `encrypt_chunk`.
 /// `key`, `nonce`, and `ciphertext` are raw byte slices.
+///
+/// Generic no-AAD AEAD open (key unwrap, share keys, v1 blobs). It does NOT
+/// open v2 file-content frames — use `WasmChunkDecryptor` (sequential) or
+/// `decrypt_chunk_frame` (random access) for file content (task 1908).
 #[wasm_bindgen]
 pub fn decrypt_chunk(key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, JsError> {
     let fk = file_key_from_slice(key)?;
@@ -658,6 +662,13 @@ impl WasmChunkEncryptor {
         self.inner.chunks_emitted()
     }
 
+    /// The chunk format this encryptor writes (2 = v2 for every new file since
+    /// task 1908). Record it in the encrypted file metadata to let readers pin it.
+    #[wasm_bindgen(getter)]
+    pub fn format(&self) -> u8 {
+        self.inner.format().as_u8()
+    }
+
     /// Consume the encryptor, run the integrity guard (all planned chunks
     /// emitted and the ciphertext total matches), and return the summary
     /// `{ chunk_count, total_plaintext, total_ciphertext, chunk_size_bytes }`.
@@ -680,6 +691,121 @@ impl WasmChunkEncryptor {
             chunk_size_bytes: summary.chunk_size_bytes,
         })?)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Streaming chunk decryption (push form) — task 1908
+// ---------------------------------------------------------------------------
+
+/// Stateful, single-file streaming decryptor for the web client — the ONE way
+/// web should decrypt file content (downloads, previews, shared links).
+///
+/// Reads v2 (position-bound) and v1 (legacy) files: the format is decided by
+/// what chunk 0 authenticates under and locked. In v2 every frame must be the
+/// next chunk in order and nothing may follow the last one; [`finish`] fails if
+/// the file ended before its last chunk (truncation). JS must treat any thrown
+/// error — from `pushFrame` or `finish` — as a failed download and discard the
+/// plaintext it has buffered.
+///
+/// Replaces the per-chunk `decrypt_chunk(fileKey, nonce, ciphertext)` loop for
+/// file content: that generic function has no position and can only open v1
+/// frames (it stays for key unwrapping).
+///
+/// [`finish`]: Self::finish
+#[wasm_bindgen]
+pub struct WasmChunkDecryptor {
+    inner: beebeeb_core::chunk_stream::ChunkDecryptor,
+}
+
+#[wasm_bindgen]
+impl WasmChunkDecryptor {
+    /// Decryptor for the owner: the file key is derived in core from the
+    /// 32-byte master key and `file_id`.
+    #[wasm_bindgen(constructor)]
+    pub fn new(master_key: &[u8], file_id: String) -> Result<WasmChunkDecryptor, JsError> {
+        let mk = master_key_from_slice(master_key)?;
+        Ok(Self {
+            inner: beebeeb_core::chunk_stream::ChunkDecryptor::for_push(&mk, &file_id),
+        })
+    }
+
+    /// Decryptor from an already-unwrapped 32-byte file key (share / shared-link
+    /// recipients). `file_id` must be the id the file was uploaded under.
+    #[wasm_bindgen(js_name = fromFileKey)]
+    pub fn from_file_key(file_key: &[u8], file_id: String) -> Result<WasmChunkDecryptor, JsError> {
+        let fk = file_key_from_slice(file_key)?;
+        Ok(Self {
+            inner: beebeeb_core::chunk_stream::ChunkDecryptor::for_push_with_file_key(fk, &file_id),
+        })
+    }
+
+    /// Pin the file's chunk format (1 = v1 legacy, 2 = v2) from authenticated
+    /// data (a version in the encrypted file metadata). Before the first frame.
+    #[wasm_bindgen(js_name = expectFormat)]
+    pub fn expect_format(&mut self, format: u8) -> Result<(), JsError> {
+        let f = beebeeb_core::chunk_stream::ChunkFormat::from_u8(format).map_err(|e| JsError::new(&e.to_string()))?;
+        self.inner.expect_format(f).map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Decrypt the next wire frame (`nonce(12) || ciphertext || tag(16)`),
+    /// returning its plaintext. Frames must be pushed in order from chunk 0.
+    #[wasm_bindgen(js_name = pushFrame)]
+    pub fn push_frame(&mut self, frame: &[u8]) -> Result<Vec<u8>, JsError> {
+        self.inner
+            .push_frame(frame)
+            .map(|c| c.data)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// The file's chunk format once chunk 0 has been opened: 1 = v1, 2 = v2;
+    /// 0 before the first frame.
+    #[wasm_bindgen(getter)]
+    pub fn format(&self) -> u8 {
+        self.inner.format().map(|f| f.as_u8()).unwrap_or(0)
+    }
+
+    /// How many frames have been decrypted so far.
+    #[wasm_bindgen(getter, js_name = chunksDecrypted)]
+    pub fn chunks_decrypted(&self) -> u32 {
+        self.inner.chunks_decrypted()
+    }
+
+    /// Consume the decryptor and run the end-of-stream check. Throws if no frame
+    /// was pushed or a v2 file ended before its last chunk. Returns
+    /// `{ chunk_count, format }`.
+    pub fn finish(self) -> Result<JsValue, JsError> {
+        let summary = self.inner.finish().map_err(|e| JsError::new(&e.to_string()))?;
+        #[derive(serde::Serialize)]
+        struct DecryptSummaryJs {
+            chunk_count: u32,
+            format: u8,
+        }
+        Ok(serde_wasm_bindgen::to_value(&DecryptSummaryJs {
+            chunk_count: summary.chunk_count,
+            format: summary.format.as_u8(),
+        })?)
+    }
+}
+
+/// Random-access open of ONE file-content frame at a known position (seeking
+/// readers: video, range previews). `index` is the chunk requested and
+/// `is_last = index == chunk_count - 1`; a server that serves another chunk or
+/// lies about the count fails the tag. `format` (1 = v1, 2 = v2) must come from
+/// authenticated data (a `WasmChunkDecryptor.format` after chunk 0, or the
+/// encrypted file metadata), never from a server field.
+#[wasm_bindgen]
+pub fn decrypt_chunk_frame(
+    file_key: &[u8],
+    file_id: &str,
+    index: u32,
+    is_last: bool,
+    format: u8,
+    frame: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    let f = beebeeb_core::chunk_stream::ChunkFormat::from_u8(format).map_err(|e| JsError::new(&e.to_string()))?;
+    beebeeb_core::chunk_stream::open_chunk(&fk, file_id, index, is_last, f, frame)
+        .map_err(|e| JsError::new(&e.to_string()))
 }
 
 impl WasmChunkEncryptor {
@@ -1664,6 +1790,46 @@ mod tests {
         }
         enc.finish_summary().unwrap();
         assert_eq!(decrypt_frames(&mk, file_id, &frames), data);
+    }
+
+    #[test]
+    fn wasm_decryptor_roundtrip_and_v2_format() {
+        // Task 1908: the web encryptor writes v2 and the web decryptor (both
+        // constructors) reads it back in order. Error paths throw JsError, which
+        // cannot be constructed off-wasm (see NOTE below), so only the success
+        // seams are exercised here; the rejection cases live in core.
+        let mk = kdf::derive_master_key("test-password", b"test-salt-16bytes").unwrap();
+        let mk_bytes = mk.to_bytes();
+        let file_id = "wasm-dec-1";
+        let data = pattern(40);
+        let mut enc =
+            WasmChunkEncryptor::with_chunk_size(&mk_bytes, file_id.to_string(), data.len() as u64, 16).unwrap();
+        assert_eq!(enc.format(), 2, "new web uploads are v2");
+        let frames: Vec<Vec<u8>> = data.chunks(16).map(|c| enc.push_chunk(c).unwrap()).collect();
+        enc.finish_summary().unwrap();
+
+        let mut dec = WasmChunkDecryptor::new(&mk_bytes, file_id.to_string()).unwrap();
+        assert_eq!(dec.format(), 0);
+        let mut out = Vec::new();
+        for f in &frames {
+            out.extend(dec.push_frame(f).unwrap());
+        }
+        assert_eq!(out, data);
+        assert_eq!(dec.format(), 2);
+        assert_eq!(dec.chunks_decrypted(), 3);
+        let summary = dec.inner.finish().unwrap();
+        assert_eq!(summary.chunk_count, 3);
+
+        let fk = kdf::derive_file_key(&mk, file_id.as_bytes());
+        let mut dec = WasmChunkDecryptor::from_file_key(fk.as_bytes(), file_id.to_string()).unwrap();
+        for f in &frames {
+            dec.push_frame(f).unwrap();
+        }
+        dec.inner.finish().unwrap();
+
+        // Random-access open at the right position.
+        let last = decrypt_chunk_frame(fk.as_bytes(), file_id, 2, true, 2, &frames[2]).unwrap();
+        assert_eq!(last, data[32..]);
     }
 
     // NOTE: error-path coverage (bad key length, unknown profile, push beyond

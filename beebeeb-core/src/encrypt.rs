@@ -1,4 +1,4 @@
-use aes_gcm::aead::Aead;
+use aes_gcm::aead::{Aead, Payload};
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use rand::RngCore;
 
@@ -317,19 +317,47 @@ pub fn encrypt_chunk_json(
 }
 
 /// Encrypt a chunk → raw binary: nonce (12 bytes) || ciphertext (includes GCM tag).
-/// This is the canonical chunk wire format. No JSON, no base64.
+///
+/// This is the **v1 (legacy) frame**: AES-256-GCM with NO associated data, so
+/// nothing binds the frame to its position in a file. It remains the generic
+/// raw AEAD seal (search-index shards, file-request key wrap, thumbnails), but
+/// file content goes through [`crate::chunk_stream::ChunkEncryptor`], which
+/// writes position-bound v2 frames (task 1908).
 pub fn encrypt_chunk_raw(key: &FileKey, plaintext: &[u8]) -> Result<Vec<u8>, CoreError> {
+    seal_raw_with_aad(key, plaintext, &[])
+}
+
+/// Shared raw seal: `nonce(12) || AES-256-GCM(key, nonce, plaintext, aad)`.
+/// An empty `aad` is byte-identical to the v1 (no-AAD) frame.
+pub(crate) fn seal_raw_with_aad(key: &FileKey, plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, CoreError> {
     let cipher = Aes256Gcm::new_from_slice(key.as_bytes()).map_err(|e| CoreError::Encryption(e.to_string()))?;
     let mut nonce_bytes = [0u8; NONCE_LEN];
     rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
-        .encrypt(nonce, plaintext)
+        .encrypt(nonce, Payload { msg: plaintext, aad })
         .map_err(|e| CoreError::Encryption(e.to_string()))?;
     let mut out = Vec::with_capacity(NONCE_LEN + ciphertext.len());
     out.extend_from_slice(&nonce_bytes);
     out.extend_from_slice(&ciphertext);
     Ok(out)
+}
+
+/// Shared raw open of a `nonce(12) || ciphertext || tag(16)` frame under `aad`.
+///
+/// aes-gcm 0.10.3 verifies the tag BEFORE applying the keystream, so a failed
+/// open (wrong key, wrong AAD, tampered bytes) never materialises plaintext —
+/// which is what makes trial opens (v2 then v1, last=0 then last=1) safe.
+pub(crate) fn open_raw_with_aad(key: &FileKey, raw: &[u8], aad: &[u8]) -> Result<Vec<u8>, CoreError> {
+    if raw.len() < NONCE_LEN + TAG_LEN {
+        return Err(CoreError::Decryption);
+    }
+    let (nonce_bytes, ciphertext) = raw.split_at(NONCE_LEN);
+    let cipher = Aes256Gcm::new_from_slice(key.as_bytes()).map_err(|e| CoreError::Encryption(e.to_string()))?;
+    let nonce = Nonce::from_slice(nonce_bytes);
+    cipher
+        .decrypt(nonce, Payload { msg: ciphertext, aad })
+        .map_err(|_| CoreError::Decryption)
 }
 
 /// Decrypt a sequence of encrypted chunks and write the plaintext to a file.
@@ -341,8 +369,15 @@ pub fn encrypt_chunk_raw(key: &FileKey, plaintext: &[u8]) -> Result<Vec<u8>, Cor
 /// a mid-stream decrypt failure) the `.tmp` file is removed, so no partial
 /// plaintext ever appears at `output_path`. (Same `.tmp` + atomic-rename +
 /// remove-on-error pattern as [`decrypt_contiguous_to_file`].)
+///
+/// **Chunk format (task 1908):** the chunks are opened in order as one file's
+/// stream — v2 (position-bound) or v1 (legacy), decided by chunk 0 and locked.
+/// `file_id` is the id the file was uploaded under (bound into every v2 frame).
+/// A v2 file that is reordered, has a chunk duplicated/dropped/appended, or
+/// ends before its last chunk is rejected.
 pub fn decrypt_chunks_to_file(
     key: &FileKey,
+    file_id: &str,
     chunks: Vec<(Vec<u8>, Vec<u8>)>, // Vec of (nonce, ciphertext) pairs
     output_path: &str,
 ) -> Result<u64, CoreError> {
@@ -351,7 +386,7 @@ pub fn decrypt_chunks_to_file(
 
     // Inner helper does the streaming decrypt into the .tmp; on ANY Err the
     // outer code removes the .tmp so no partial plaintext survives at output_path.
-    let result = decrypt_chunks_to_tmp(key, chunks, &tmp_path);
+    let result = decrypt_chunks_to_tmp(key, file_id, chunks, &tmp_path);
 
     match result {
         Ok(total) => {
@@ -373,36 +408,45 @@ pub fn decrypt_chunks_to_file(
 /// Streaming decrypt of `(nonce, ciphertext)` chunks → `tmp_path`. Helper for
 /// [`decrypt_chunks_to_file`] so the caller can guarantee `.tmp` cleanup on
 /// every error path.
-fn decrypt_chunks_to_tmp(key: &FileKey, chunks: Vec<(Vec<u8>, Vec<u8>)>, tmp_path: &str) -> Result<u64, CoreError> {
+fn decrypt_chunks_to_tmp(
+    key: &FileKey,
+    file_id: &str,
+    chunks: Vec<(Vec<u8>, Vec<u8>)>,
+    tmp_path: &str,
+) -> Result<u64, CoreError> {
     use std::fs::File;
     use std::io::Write;
 
     let mut file = File::create(tmp_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
+    let mut opener = crate::chunk_stream::StreamOpener::new(file_id);
     let mut total: u64 = 0;
     for (nonce, ciphertext) in chunks {
-        let blob = EncryptedBlob {
-            cipher_suite: CipherSuite::V1Aes256Gcm,
-            nonce,
-            ciphertext,
-        };
-        let plaintext = decrypt_chunk(key, &blob)?;
-        file.write_all(&plaintext)
+        if nonce.len() != NONCE_LEN {
+            return Err(CoreError::Decryption);
+        }
+        let mut frame = Vec::with_capacity(NONCE_LEN + ciphertext.len());
+        frame.extend_from_slice(&nonce);
+        frame.extend_from_slice(&ciphertext);
+        let chunk = opener.open_next(key, &frame)?;
+        file.write_all(&chunk.data)
             .map_err(|e| CoreError::Io(format!("write: {e}")))?;
-        total += plaintext.len() as u64;
+        total += chunk.data.len() as u64;
     }
+    // Truncation check: a v2 file must have reached its last chunk.
+    opener.finish()?;
     file.flush().map_err(|e| CoreError::Io(format!("flush: {e}")))?;
     Ok(total)
 }
 
-/// Decrypt a raw binary chunk: nonce (12 bytes) || ciphertext.
+/// Decrypt a raw binary **v1** frame: nonce (12 bytes) || ciphertext, no AAD.
+///
+/// This opens ONLY legacy v1 frames (and the other no-AAD raw blobs: search
+/// shards, file-request key wrap). It rejects every v2 file-content frame by
+/// construction — that is the downgrade guarantee of task 1908. To read file
+/// content (v1 or v2) use [`crate::chunk_stream::ChunkDecryptor`] or
+/// [`crate::chunk_stream::open_chunk`].
 pub fn decrypt_chunk_raw(key: &FileKey, raw: &[u8]) -> Result<Vec<u8>, CoreError> {
-    if raw.len() < NONCE_LEN + 16 {
-        return Err(CoreError::Decryption);
-    }
-    let (nonce_bytes, ciphertext) = raw.split_at(NONCE_LEN);
-    let cipher = Aes256Gcm::new_from_slice(key.as_bytes()).map_err(|e| CoreError::Encryption(e.to_string()))?;
-    let nonce = Nonce::from_slice(nonce_bytes);
-    cipher.decrypt(nonce, ciphertext).map_err(|_| CoreError::Decryption)
+    open_raw_with_aad(key, raw, &[])
 }
 
 /// Decrypt a contiguous encrypted body into a file.
@@ -423,8 +467,15 @@ pub fn decrypt_chunk_raw(key: &FileKey, raw: &[u8]) -> Result<Vec<u8>, CoreError
 /// existence-based cache from serving a truncated decrypt as if complete. (Same
 /// `.tmp` + atomic-rename pattern as
 /// [`crate::file_encrypt::decrypt_chunks_to_file`].)
+///
+/// **Chunk format (task 1908):** the body is opened as one file's stream — v2
+/// (position-bound) or v1 (legacy), decided by chunk 0 and locked. `file_id`
+/// is the id the file was uploaded under (bound into every v2 frame). A v2 body
+/// that is reordered, spliced, has trailing frames, or ends before its last
+/// chunk is rejected.
 pub fn decrypt_contiguous_to_file(
     key: &FileKey,
+    file_id: &str,
     body: &[u8],
     chunk_size: u64,
     output_path: &str,
@@ -445,7 +496,7 @@ pub fn decrypt_contiguous_to_file(
 
     // Inner closure does the streaming decrypt; on ANY Err the outer code
     // removes the .tmp so no partial plaintext survives at output_path.
-    let result = decrypt_contiguous_to_tmp(key, body, encrypted_chunk_len, &tmp_path);
+    let result = decrypt_contiguous_to_tmp(key, file_id, body, encrypted_chunk_len, &tmp_path);
 
     match result {
         Ok(total) => {
@@ -468,6 +519,7 @@ pub fn decrypt_contiguous_to_file(
 /// so the caller can guarantee `.tmp` cleanup on every error path.
 fn decrypt_contiguous_to_tmp(
     key: &FileKey,
+    file_id: &str,
     body: &[u8],
     encrypted_chunk_len: usize,
     tmp_path: &str,
@@ -476,6 +528,7 @@ fn decrypt_contiguous_to_tmp(
     use std::io::Write;
 
     let mut file = File::create(tmp_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
+    let mut opener = crate::chunk_stream::StreamOpener::new(file_id);
     let mut total: u64 = 0;
     let mut offset = 0usize;
 
@@ -487,12 +540,15 @@ fn decrypt_contiguous_to_tmp(
             return Err(CoreError::Decryption);
         }
         let raw_chunk = &body[offset..offset + take];
-        let plaintext = decrypt_chunk_raw(key, raw_chunk)?;
-        file.write_all(&plaintext)
+        let chunk = opener.open_next(key, raw_chunk)?;
+        file.write_all(&chunk.data)
             .map_err(|e| CoreError::Io(format!("write: {e}")))?;
-        total += plaintext.len() as u64;
+        total += chunk.data.len() as u64;
         offset += take;
     }
+    // Truncation check: a v2 file must have reached its last chunk (and an
+    // empty body is never a valid file).
+    opener.finish()?;
     file.flush().map_err(|e| CoreError::Io(format!("flush: {e}")))?;
     Ok(total)
 }
@@ -617,7 +673,7 @@ mod tests {
         let path = dir.join("beebeeb_test_decrypt_chunks.bin");
         let path_str = path.to_str().unwrap();
 
-        let total = decrypt_chunks_to_file(&key, chunks, path_str).unwrap();
+        let total = decrypt_chunks_to_file(&key, "test-file-id", chunks, path_str).unwrap();
         assert_eq!(total, (chunk1.len() + chunk2.len()) as u64);
 
         let written = std::fs::read(&path).unwrap();
@@ -627,20 +683,22 @@ mod tests {
     }
 
     #[test]
-    fn decrypt_chunks_to_file_empty() {
+    fn decrypt_chunks_to_file_empty_is_rejected() {
+        // Task 1908 (justified behaviour change): this used to return Ok(0) and
+        // write an empty file. No real file has zero frames — even an empty file
+        // is one 28-byte frame in v1 and v2 — so a zero-frame list is a server
+        // that withheld every chunk: total truncation. It must be an error, and
+        // no output may appear.
         let key = test_file_key();
 
         let dir = std::env::temp_dir();
         let path = dir.join("beebeeb_test_decrypt_empty.bin");
         let path_str = path.to_str().unwrap();
-
-        let total = decrypt_chunks_to_file(&key, vec![], path_str).unwrap();
-        assert_eq!(total, 0);
-
-        let written = std::fs::read(&path).unwrap();
-        assert!(written.is_empty());
-
         std::fs::remove_file(&path).ok();
+
+        let err = decrypt_chunks_to_file(&key, "test-file-id", vec![], path_str).unwrap_err();
+        assert!(matches!(err, CoreError::Decryption));
+        assert!(!path.exists(), "no output may appear for a zero-frame file");
     }
 
     #[test]
@@ -662,7 +720,7 @@ mod tests {
         std::fs::remove_file(&path).ok();
         std::fs::remove_file(&tmp).ok();
 
-        let err = decrypt_chunks_to_file(&key, chunks, path.to_str().unwrap()).unwrap_err();
+        let err = decrypt_chunks_to_file(&key, "test-file-id", chunks, path.to_str().unwrap()).unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         assert!(
             !path.exists(),
@@ -684,7 +742,7 @@ mod tests {
         let path = dir.join("beebeeb_test_decrypt_wrong_key.bin");
         let path_str = path.to_str().unwrap();
 
-        assert!(decrypt_chunks_to_file(&wrong_key, chunks, path_str).is_err());
+        assert!(decrypt_chunks_to_file(&wrong_key, "test-file-id", chunks, path_str).is_err());
 
         std::fs::remove_file(&path).ok();
     }
@@ -717,7 +775,8 @@ mod tests {
         body.extend(pack_chunk(&blob2));
 
         let path = std::env::temp_dir().join("beebeeb_test_contig_uniform.bin");
-        let total = decrypt_contiguous_to_file(&key, &body, chunk_size, path.to_str().unwrap()).unwrap();
+        let total =
+            decrypt_contiguous_to_file(&key, "test-file-id", &body, chunk_size, path.to_str().unwrap()).unwrap();
         assert_eq!(total, 16);
 
         let written = std::fs::read(&path).unwrap();
@@ -737,7 +796,8 @@ mod tests {
         body.extend(pack_chunk(&blob2));
 
         let path = std::env::temp_dir().join("beebeeb_test_contig_remainder.bin");
-        let total = decrypt_contiguous_to_file(&key, &body, chunk_size, path.to_str().unwrap()).unwrap();
+        let total =
+            decrypt_contiguous_to_file(&key, "test-file-id", &body, chunk_size, path.to_str().unwrap()).unwrap();
         assert_eq!(total, 11);
 
         let written = std::fs::read(&path).unwrap();
@@ -746,14 +806,80 @@ mod tests {
     }
 
     #[test]
-    fn decrypt_contiguous_empty_body() {
+    fn decrypt_contiguous_empty_body_is_rejected() {
+        // Task 1908 (justified behaviour change, same reasoning as
+        // decrypt_chunks_to_file_empty_is_rejected): an empty body is never a
+        // valid encrypted file, so it is total truncation, not an empty file.
         let key = test_file_key();
         let path = std::env::temp_dir().join("beebeeb_test_contig_empty.bin");
-        let total = decrypt_contiguous_to_file(&key, &[], 8, path.to_str().unwrap()).unwrap();
-        assert_eq!(total, 0);
-        let written = std::fs::read(&path).unwrap();
-        assert!(written.is_empty());
         std::fs::remove_file(&path).ok();
+        let err = decrypt_contiguous_to_file(&key, "test-file-id", &[], 8, path.to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, CoreError::Decryption));
+        assert!(!path.exists(), "no output may appear for an empty body");
+    }
+
+    /// v2 frames for `data` split into `cs`-byte chunks, via the shared encryptor.
+    fn v2_body(file_id: &str, data: &[u8], cs: u64) -> (crate::kdf::MasterKey, Vec<Vec<u8>>) {
+        use crate::chunk_stream::{ChunkEncryptor, ChunkFormat};
+        let mk = derive_master_key("test-password", b"test-salt-16bytes").unwrap();
+        let mut enc = ChunkEncryptor::for_push_with_chunk_size(&mk, file_id, data.len() as u64, cs)
+            .unwrap()
+            .with_format(ChunkFormat::V2)
+            .unwrap();
+        let frames: Vec<Vec<u8>> = data
+            .chunks(cs as usize)
+            .map(|c| enc.push_chunk(c).unwrap().data)
+            .collect();
+        enc.finish().unwrap();
+        (mk, frames)
+    }
+
+    #[test]
+    fn decrypt_contiguous_v2_roundtrip_and_swap_rejected() {
+        let data = b"AAAAAAAABBBBBBBBCCC";
+        let (mk, frames) = v2_body("contig-v2", data, 8);
+        let key = derive_file_key(&mk, b"contig-v2");
+        let path = std::env::temp_dir().join("beebeeb_test_contig_v2.bin");
+
+        let total = decrypt_contiguous_to_file(&key, "contig-v2", &frames.concat(), 8, path.to_str().unwrap()).unwrap();
+        assert_eq!(total, data.len() as u64);
+        assert_eq!(std::fs::read(&path).unwrap(), data);
+        std::fs::remove_file(&path).ok();
+
+        // Equal-size chunks 0 and 1 swapped: must fail, and leave no output.
+        let swapped = [frames[1].clone(), frames[0].clone(), frames[2].clone()].concat();
+        let err = decrypt_contiguous_to_file(&key, "contig-v2", &swapped, 8, path.to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, CoreError::Decryption));
+        assert!(!path.exists());
+
+        // Last chunk withheld: truncation must fail.
+        let truncated = [frames[0].clone(), frames[1].clone()].concat();
+        let err = decrypt_contiguous_to_file(&key, "contig-v2", &truncated, 8, path.to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, CoreError::Decryption));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn decrypt_chunks_to_file_v2_roundtrip_and_drop_rejected() {
+        let data = b"AAAAAAAABBBBBBBBCCCCCCCC";
+        let (mk, frames) = v2_body("pairs-v2", data, 8);
+        let key = derive_file_key(&mk, b"pairs-v2");
+        let pairs = |fs: &[Vec<u8>]| -> Vec<(Vec<u8>, Vec<u8>)> {
+            fs.iter()
+                .map(|f| (f[..NONCE_LEN].to_vec(), f[NONCE_LEN..].to_vec()))
+                .collect()
+        };
+        let path = std::env::temp_dir().join("beebeeb_test_pairs_v2.bin");
+
+        let total = decrypt_chunks_to_file(&key, "pairs-v2", pairs(&frames), path.to_str().unwrap()).unwrap();
+        assert_eq!(total, data.len() as u64);
+        std::fs::remove_file(&path).ok();
+
+        // Middle chunk dropped: must fail.
+        let dropped = [frames[0].clone(), frames[2].clone()];
+        let err = decrypt_chunks_to_file(&key, "pairs-v2", pairs(&dropped), path.to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, CoreError::Decryption));
+        assert!(!path.exists());
     }
 
     #[test]
@@ -761,7 +887,7 @@ mod tests {
         let key = test_file_key();
         let body = vec![0u8; NONCE_LEN + 16];
         let path = std::env::temp_dir().join("beebeeb_test_contig_zero.bin");
-        let err = decrypt_contiguous_to_file(&key, &body, 0, path.to_str().unwrap()).unwrap_err();
+        let err = decrypt_contiguous_to_file(&key, "test-file-id", &body, 0, path.to_str().unwrap()).unwrap_err();
         match err {
             CoreError::InvalidInput(_) => {}
             other => panic!("expected InvalidInput, got {other:?}"),
@@ -780,7 +906,7 @@ mod tests {
         let blob = encrypt_chunk(&key, b"secrets").unwrap();
         let body = pack_chunk(&blob);
         let path = std::env::temp_dir().join("beebeeb_test_contig_wrong_key.bin");
-        let err = decrypt_contiguous_to_file(&wrong_key, &body, 7, path.to_str().unwrap()).unwrap_err();
+        let err = decrypt_contiguous_to_file(&wrong_key, "test-file-id", &body, 7, path.to_str().unwrap()).unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         std::fs::remove_file(&path).ok();
     }
@@ -791,7 +917,7 @@ mod tests {
         // Body shorter than NONCE_LEN + TAG_LEN — cannot even attempt decrypt.
         let body = vec![0u8; NONCE_LEN + 8]; // 8 bytes < 16 byte tag
         let path = std::env::temp_dir().join("beebeeb_test_contig_truncated.bin");
-        let err = decrypt_contiguous_to_file(&key, &body, 64, path.to_str().unwrap()).unwrap_err();
+        let err = decrypt_contiguous_to_file(&key, "test-file-id", &body, 64, path.to_str().unwrap()).unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         std::fs::remove_file(&path).ok();
     }
@@ -817,7 +943,8 @@ mod tests {
         // Ensure a stale file from a prior run does not mask the assertion.
         std::fs::remove_file(&path).ok();
 
-        let err = decrypt_contiguous_to_file(&key, &body, chunk_size, path.to_str().unwrap()).unwrap_err();
+        let err =
+            decrypt_contiguous_to_file(&key, "test-file-id", &body, chunk_size, path.to_str().unwrap()).unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         assert!(
             !path.exists(),
@@ -843,7 +970,7 @@ mod tests {
         let path = std::env::temp_dir().join("beebeeb_test_contig_atomic_firstfail.bin");
         std::fs::remove_file(&path).ok();
 
-        let err = decrypt_contiguous_to_file(&wrong_key, &body, 8, path.to_str().unwrap()).unwrap_err();
+        let err = decrypt_contiguous_to_file(&wrong_key, "test-file-id", &body, 8, path.to_str().unwrap()).unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         assert!(
             !path.exists(),

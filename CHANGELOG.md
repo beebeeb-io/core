@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Chunk format v2 (task 1908): file-content frames now authenticate their position as AES-GCM
+  associated data — `"beebeeb/chunk/v2" || len(file_id) || file_id || chunk_index || is_last`
+  (STREAM construction). Previously (v1) frames carried no associated data, so a malicious
+  server could reorder, duplicate, drop or truncate chunks within a file undetected. Same frame
+  layout and sizes; the server is unaffected. `ChunkEncryptor` writes v2; `ChunkDecryptor` and
+  every file-content decrypt path read v2 and v1, decide the format from what chunk 0
+  authenticates under (never a server field) and lock it, reject out-of-order frames and frames
+  after the last chunk, and fail at `finish()`/EOF when a v2 file ended early. A zero-frame body
+  is now an error (it used to decrypt to an empty file).
+- Breaking: `encrypt::decrypt_chunks_to_file`, `encrypt::decrypt_contiguous_to_file`,
+  `beebeeb_upload::decrypt_downloaded_bytes` and the UniFFI `decrypt_chunks_to_file` /
+  `decrypt_contiguous_to_file` take the file id. New: `ChunkDecryptor::{for_push_with_file_key,
+  expect_format, format, chunks_decrypted, finish}`, `chunk_stream::{open_chunk, chunk_aad_v2,
+  ChunkFormat, WRITE_FORMAT}`, WASM `WasmChunkDecryptor` + `decrypt_chunk_frame`, UniFFI
+  `ChunkDecryptorHandle.{for_push_with_file_key, expect_format, chunk_format, finish}` and
+  `FileKeyHandle.decrypt_chunk_frame`. Clients must move every file-content read to these before
+  any client ships v2 writes.
+
 ### Added
 - `onboarding` module (task 1744): password-policy evaluator driven by the server's numbers
   (floored at the shipped 12), k-anonymity breached-password helper (hashing and matching

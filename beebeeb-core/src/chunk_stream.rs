@@ -27,13 +27,22 @@
 //! it is wiped when the encryptor/decryptor drops. The reused plaintext read
 //! buffer is wrapped in [`Zeroizing`] so residual plaintext is wiped too.
 //!
-//! ## Wire format (unchanged)
+//! ## Wire format
 //!
 //! Every frame is `nonce(12) || ciphertext || tag(16)` with a fresh random
-//! nonce per chunk — byte-for-byte the format produced by
-//! [`crate::encrypt::encrypt_chunk_raw`]. Output is therefore roundtrip
-//! compatible with every existing file; it is **not** byte-identical to a
-//! previous encryption because the nonce is random, which is intentional.
+//! nonce per chunk. The layout and sizes are the same in both formats; they
+//! differ only in the AES-GCM associated data (task 1908):
+//!
+//! - **v1 (legacy)**: no AAD — byte-for-byte [`crate::encrypt::encrypt_chunk_raw`].
+//!   Frames are not bound to a position: a server could reorder, duplicate,
+//!   drop or truncate them undetected. Still readable for existing files.
+//! - **v2**: AAD = `"beebeeb/chunk/v2" || u32_be(len(file_id)) || file_id ||
+//!   u32_be(index) || u8(is_last)` (STREAM construction). See
+//!   [`chunk_aad_v2`] and the crate-private `StreamOpener` for the binding and the decrypt rules.
+//!
+//! [`ChunkEncryptor`] writes [`WRITE_FORMAT`]; [`ChunkDecryptor`] reads both,
+//! deciding the format from what frame 0 authenticates under (never from a
+//! server field) and locking it for the rest of the file.
 //!
 //! ## Sync, reactor-agnostic
 //!
@@ -48,7 +57,7 @@ use zeroize::Zeroizing;
 use beebeeb_types::{ChunkPlan, ChunkProfile, ChunkStrategy, STORAGE_FORMAT_VERSION_V2, plan_chunks};
 
 use crate::CoreError;
-use crate::encrypt::{NONCE_LEN, TAG_LEN, decrypt_chunk_raw, encrypt_chunk_raw};
+use crate::encrypt::{NONCE_LEN, TAG_LEN, open_raw_with_aad, seal_raw_with_aad};
 use crate::kdf::{FileKey, MasterKey, derive_file_key};
 
 /// Per-chunk AEAD overhead on the wire: `nonce(12) + tag(16)`.
@@ -64,6 +73,247 @@ const CHUNK_OVERHEAD: u64 = (NONCE_LEN + TAG_LEN) as u64;
 /// drive a multi-GB allocation → client OOM (WASM tab kill / mobile crash)
 /// before a single byte is processed. Reject above the cap instead.
 pub const MAX_CHUNK_SIZE: u64 = 256 * 1024 * 1024;
+
+// ─── Chunk format v2: position binding (task 1908) ──────────────────────────
+//
+// v1 frames are AES-256-GCM with NO associated data: every frame of a file is
+// sealed independently under the one per-file key, so a server can reorder,
+// duplicate, drop or truncate frames within a file undetected.
+//
+// v2 keeps the frame layout byte-for-byte (`nonce(12) || ct || tag(16)`, same
+// sizes, so the server, the upload protocol and every size computation are
+// unchanged) and authenticates the frame's position as GCM associated data,
+// STREAM-style (Hoang–Reyhanitabar–Rogaway–Vizár; as in age / Tink):
+//
+//   AAD = "beebeeb/chunk/v2"            16 bytes, domain tag incl. version
+//      || u32_be(len(file_id))          length prefix, keeps the AAD injective
+//      || file_id                       the exact bytes fed to derive_file_key
+//      || u32_be(chunk_index)           0-based
+//      || u8(is_last)                   1 on the final chunk, else 0
+//
+// The AAD is never transmitted: the decryptor rebuilds it from what it already
+// knows (the file id it asked for, the index it expects next). So it cannot be
+// "stripped": opening a v2 frame with the empty v1 AAD fails the tag.
+
+/// Domain-separation tag (and format version) at the start of every v2 AAD.
+pub const CHUNK_AAD_DOMAIN_V2: &[u8; 16] = b"beebeeb/chunk/v2";
+
+/// The on-the-wire chunk format of a file. The frame layout is identical; the
+/// formats differ only in the AES-GCM associated data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChunkFormat {
+    /// Legacy: no associated data, no position binding. Readable forever for
+    /// files written before task 1908; no longer written by default.
+    V1Legacy,
+    /// Position-bound: AAD = domain tag || file id || chunk index || last flag.
+    V2,
+}
+
+impl ChunkFormat {
+    /// Stable numeric code for the FFI/WASM boundary and encrypted metadata.
+    pub fn as_u8(self) -> u8 {
+        match self {
+            ChunkFormat::V1Legacy => 1,
+            ChunkFormat::V2 => 2,
+        }
+    }
+
+    /// Inverse of [`as_u8`](Self::as_u8). Unknown codes are an error, never a
+    /// silent fallback to v1.
+    pub fn from_u8(code: u8) -> Result<Self, CoreError> {
+        match code {
+            1 => Ok(ChunkFormat::V1Legacy),
+            2 => Ok(ChunkFormat::V2),
+            other => Err(CoreError::InvalidInput(format!("unknown chunk format {other}"))),
+        }
+    }
+}
+
+/// The format [`ChunkEncryptor`] writes for every new file.
+pub const WRITE_FORMAT: ChunkFormat = ChunkFormat::V2;
+
+/// Build the v2 associated data for one chunk. Public so the layout can be
+/// pinned by a known-answer test and inspected by reviewers; clients never need
+/// to call it (seal/open happen in core).
+pub fn chunk_aad_v2(file_id: &[u8], index: u32, is_last: bool) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(CHUNK_AAD_DOMAIN_V2.len() + 4 + file_id.len() + 4 + 1);
+    aad.extend_from_slice(CHUNK_AAD_DOMAIN_V2);
+    // File ids are UUID strings (36 bytes); anything near u32::MAX is absurd,
+    // and saturating keeps this infallible without making the encoding ambiguous
+    // for any id that could actually exist.
+    aad.extend_from_slice(&u32::try_from(file_id.len()).unwrap_or(u32::MAX).to_be_bytes());
+    aad.extend_from_slice(file_id);
+    aad.extend_from_slice(&index.to_be_bytes());
+    aad.push(u8::from(is_last));
+    aad
+}
+
+/// Seal one chunk in `format`. v1 ignores `file_id` / `index` / `is_last`.
+fn seal_chunk(
+    file_key: &FileKey,
+    format: ChunkFormat,
+    file_id: &[u8],
+    index: u32,
+    is_last: bool,
+    plaintext: &[u8],
+) -> Result<Vec<u8>, CoreError> {
+    match format {
+        ChunkFormat::V1Legacy => seal_raw_with_aad(file_key, plaintext, &[]),
+        ChunkFormat::V2 => seal_raw_with_aad(file_key, plaintext, &chunk_aad_v2(file_id, index, is_last)),
+    }
+}
+
+/// **Stateless, random-access open** of one chunk frame at a known position.
+///
+/// For callers that seek (video streaming, range previews) instead of reading
+/// the file front to back. The caller supplies what it *expects*: the chunk
+/// `index` it requested and `is_last = (index == chunk_count - 1)`. A server
+/// that serves a different chunk, or lies about `chunk_count` (and therefore
+/// about which chunk is last), fails the tag — so even an unauthenticated
+/// chunk count cannot be used to truncate or extend a v2 file.
+///
+/// `format` must be the file's format as already established from
+/// authenticated data (a [`ChunkDecryptor`] that opened chunk 0, or a version
+/// recorded in the encrypted file metadata) — never from a server field.
+/// For [`ChunkFormat::V1Legacy`] the position arguments are ignored (v1 binds
+/// nothing).
+pub fn open_chunk(
+    file_key: &FileKey,
+    file_id: &str,
+    index: u32,
+    is_last: bool,
+    format: ChunkFormat,
+    frame: &[u8],
+) -> Result<Vec<u8>, CoreError> {
+    match format {
+        ChunkFormat::V1Legacy => open_raw_with_aad(file_key, frame, &[]),
+        ChunkFormat::V2 => open_raw_with_aad(file_key, frame, &chunk_aad_v2(file_id.as_bytes(), index, is_last)),
+    }
+}
+
+/// Sequential STREAM-open state, shared by [`ChunkDecryptor`] (which owns its
+/// key) and the legacy borrowed-key disk helpers in `encrypt` (which do not).
+///
+/// Rules, in order:
+/// 1. Nothing may follow the frame that authenticated as last.
+/// 2. Frame `i` is opened ONLY at index `i` (the next expected index).
+/// 3. The file's format is decided by frame 0 and then locked: v2 if frame 0
+///    authenticates under the v2 AAD, else v1 if it authenticates with none
+///    (unless the caller pinned a format). A v2 file can never continue as v1
+///    and vice versa.
+/// 4. In v2, [`finish`](Self::finish) fails unless the last frame was seen —
+///    truncation detection. v1 has no last marker; it cannot detect truncation
+///    (the legacy weakness this task fixes for new files).
+pub(crate) struct StreamOpener {
+    file_id: Vec<u8>,
+    next_index: u32,
+    pinned: Option<ChunkFormat>,
+    format: Option<ChunkFormat>,
+    seen_last: bool,
+}
+
+impl StreamOpener {
+    pub(crate) fn new(file_id: &str) -> Self {
+        Self {
+            file_id: file_id.as_bytes().to_vec(),
+            next_index: 0,
+            pinned: None,
+            format: None,
+            seen_last: false,
+        }
+    }
+
+    /// Pin the expected format (from authenticated metadata). Only before the
+    /// first frame — the lock must not change mid-stream.
+    pub(crate) fn expect_format(&mut self, format: ChunkFormat) -> Result<(), CoreError> {
+        if self.next_index != 0 {
+            return Err(CoreError::InvalidInput(
+                "expect_format must be called before the first frame".into(),
+            ));
+        }
+        self.pinned = Some(format);
+        Ok(())
+    }
+
+    pub(crate) fn format(&self) -> Option<ChunkFormat> {
+        self.format
+    }
+
+    pub(crate) fn frames_opened(&self) -> u32 {
+        self.next_index
+    }
+
+    /// Try the v2 AAD at the expected index: `is_last = false` first (every
+    /// frame but one), then `is_last = true`. Returns `(plaintext, is_last)`.
+    fn try_v2(&self, key: &FileKey, frame: &[u8]) -> Option<(Vec<u8>, bool)> {
+        for is_last in [false, true] {
+            let aad = chunk_aad_v2(&self.file_id, self.next_index, is_last);
+            if let Ok(pt) = open_raw_with_aad(key, frame, &aad) {
+                return Some((pt, is_last));
+            }
+        }
+        None
+    }
+
+    /// Open the next frame in sequence. Returns its (authenticated) index.
+    pub(crate) fn open_next(&mut self, key: &FileKey, frame: &[u8]) -> Result<DecryptedChunk, CoreError> {
+        if self.seen_last {
+            // Rule 1: a frame after the authenticated last chunk.
+            return Err(CoreError::Decryption);
+        }
+        if frame.len() < NONCE_LEN + TAG_LEN {
+            return Err(CoreError::Decryption);
+        }
+        let index = self.next_index;
+        let next = index.checked_add(1).ok_or(CoreError::Decryption)?;
+
+        let (data, format, is_last) = match self.format.or(self.pinned) {
+            Some(ChunkFormat::V2) => {
+                let (pt, last) = self.try_v2(key, frame).ok_or(CoreError::Decryption)?;
+                (pt, ChunkFormat::V2, last)
+            }
+            Some(ChunkFormat::V1Legacy) => (open_raw_with_aad(key, frame, &[])?, ChunkFormat::V1Legacy, false),
+            None => {
+                // Frame 0, nothing pinned: detect. v2 first — a v2 frame never
+                // opens as v1 (its tag covers the AAD), and a v1 frame never
+                // opens as v2, so the answer is unambiguous.
+                if let Some((pt, last)) = self.try_v2(key, frame) {
+                    (pt, ChunkFormat::V2, last)
+                } else {
+                    (open_raw_with_aad(key, frame, &[])?, ChunkFormat::V1Legacy, false)
+                }
+            }
+        };
+
+        self.format = Some(format);
+        self.seen_last = is_last;
+        self.next_index = next;
+        Ok(DecryptedChunk { index, data })
+    }
+
+    /// End-of-stream check. Errors if no frame was opened at all (every file,
+    /// even an empty one, has one frame) or if a v2 stream ended before its
+    /// last chunk (truncation).
+    pub(crate) fn finish(&self) -> Result<ChunkDecryptorSummary, CoreError> {
+        match self.format {
+            None => Err(CoreError::Decryption),
+            Some(ChunkFormat::V2) if !self.seen_last => Err(CoreError::Decryption),
+            Some(format) => Ok(ChunkDecryptorSummary {
+                chunk_count: self.next_index,
+                format,
+            }),
+        }
+    }
+}
+
+/// Summary returned by [`ChunkDecryptor::finish`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChunkDecryptorSummary {
+    /// Number of frames opened.
+    pub chunk_count: u32,
+    /// The file's format, as authenticated by its frames.
+    pub format: ChunkFormat,
+}
 
 /// One encrypted chunk produced by [`ChunkEncryptor`].
 ///
@@ -130,6 +380,11 @@ pub struct ChunkEncryptor {
     source: Source,
     /// Reused plaintext read buffer (pull mode only); zeroized on drop.
     buf: Zeroizing<Vec<u8>>,
+    /// Format of every frame this encryptor writes ([`WRITE_FORMAT`] unless a
+    /// crate-internal caller overrides it before the first chunk).
+    format: ChunkFormat,
+    /// The exact bytes the file key was derived from (bound into the v2 AAD).
+    file_id: Vec<u8>,
 }
 
 impl ChunkEncryptor {
@@ -256,7 +511,29 @@ impl ChunkEncryptor {
             running_plaintext: 0,
             source,
             buf,
+            format: WRITE_FORMAT,
+            file_id: file_id.as_bytes().to_vec(),
         })
+    }
+
+    /// Override the written format — test-only (v1 fixtures, v2 attack tests
+    /// independent of [`WRITE_FORMAT`]). Clients always get [`WRITE_FORMAT`].
+    /// Only before the first chunk, so a file can never mix formats.
+    #[cfg(test)]
+    pub(crate) fn with_format(mut self, format: ChunkFormat) -> Result<Self, CoreError> {
+        if self.emitted_chunks != 0 {
+            return Err(CoreError::InvalidInput(
+                "with_format must be called before the first chunk".into(),
+            ));
+        }
+        self.format = format;
+        Ok(self)
+    }
+
+    /// The format this encryptor writes. Clients that record the format in the
+    /// encrypted file metadata (to pin it on read) take it from here.
+    pub fn format(&self) -> ChunkFormat {
+        self.format
     }
 
     /// The chunk plan this encryptor follows.
@@ -277,8 +554,12 @@ impl ChunkEncryptor {
     /// The single crypto point shared by pull and push. Encrypts `plaintext`
     /// and advances the running counters.
     fn encrypt_next(&mut self, plaintext: &[u8]) -> Result<EncryptedChunk, CoreError> {
-        let data = encrypt_chunk_raw(&self.file_key, plaintext)?;
         let index = self.next_index;
+        // The plan fixes the count up front, so the last chunk is known when it
+        // is sealed (STREAM's last flag). Both callers check
+        // `next_index < chunk_count` first, so `index + 1` cannot overflow.
+        let is_last = index + 1 == self.chunk_count;
+        let data = seal_chunk(&self.file_key, self.format, &self.file_id, index, is_last, plaintext)?;
         self.next_index += 1;
         self.emitted_chunks += 1;
         self.running_plaintext += plaintext.len() as u64;
@@ -372,6 +653,7 @@ impl std::fmt::Debug for ChunkEncryptor {
     /// material or plaintext.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ChunkEncryptor")
+            .field("format", &self.format)
             .field("chunk_count", &self.chunk_count)
             .field("chunk_size", &self.chunk_size)
             .field("next_index", &self.next_index)
@@ -392,11 +674,18 @@ enum DecSource {
 }
 
 /// Streaming chunk decryptor — the symmetric counterpart to [`ChunkEncryptor`].
+///
+/// Reads v2 (position-bound) and v1 (legacy) files. The format is decided by
+/// the first frame — whichever AAD it authenticates under — and locked for the
+/// rest of the stream; see `StreamOpener` for the full rules. In v2 every frame
+/// must be the next index in order, nothing may follow the last chunk, and the
+/// stream must reach its last chunk: call [`finish`](Self::finish) (push form)
+/// or read to `Ok(None)` (pull form, which runs the same check at EOF).
 pub struct ChunkDecryptor {
     /// Derived once; `ZeroizeOnDrop` wipes it when this struct drops.
     file_key: FileKey,
-    /// Index of the next chunk to emit.
-    next_index: u32,
+    /// Position/format state (STREAM open).
+    opener: StreamOpener,
     /// Where ciphertext frames come from.
     source: DecSource,
     /// Reused encrypted-frame read buffer (pull mode only).
@@ -429,7 +718,7 @@ impl ChunkDecryptor {
         let file_key = derive_file_key(mk, file_id.as_bytes());
         Ok(Self {
             file_key,
-            next_index: 0,
+            opener: StreamOpener::new(file_id),
             source: DecSource::Pull(Box::new(reader)),
             buf: Zeroizing::new(vec![0u8; frame_len]),
         })
@@ -439,29 +728,46 @@ impl ChunkDecryptor {
     /// [`push_frame`](Self::push_frame). Infallible — no buffer is allocated and
     /// no chunk size is needed (each frame is self-describing).
     pub fn for_push(mk: &MasterKey, file_id: &str) -> Self {
-        let file_key = derive_file_key(mk, file_id.as_bytes());
+        Self::for_push_with_file_key(derive_file_key(mk, file_id.as_bytes()), file_id)
+    }
+
+    /// **Push** constructor from an already-derived/unwrapped [`FileKey`] — for
+    /// callers that hold the file key but not the owner's master key (shared-link
+    /// and share recipients, file-request content keys). `file_id` must be the
+    /// id the file was uploaded under (it is bound into every v2 frame).
+    pub fn for_push_with_file_key(file_key: FileKey, file_id: &str) -> Self {
         Self {
             file_key,
-            next_index: 0,
+            opener: StreamOpener::new(file_id),
             source: DecSource::Push,
             buf: Zeroizing::new(Vec::new()),
         }
     }
 
-    /// The single crypto point shared by pull and push. Decrypts one wire frame.
-    fn decrypt_frame_internal(&mut self, frame: &[u8]) -> Result<DecryptedChunk, CoreError> {
-        if frame.len() < NONCE_LEN + TAG_LEN {
-            return Err(CoreError::Decryption);
-        }
-        let data = decrypt_chunk_raw(&self.file_key, frame)?;
-        let index = self.next_index;
-        self.next_index += 1;
-        Ok(DecryptedChunk { index, data })
+    /// Pin the format the file must have, taken from authenticated data (e.g. a
+    /// version recorded in the encrypted file metadata). With a pin, a v2 file
+    /// cannot be served as v1 even if v1 frames exist under the same key.
+    /// Must be called before the first frame.
+    pub fn expect_format(&mut self, format: ChunkFormat) -> Result<(), CoreError> {
+        self.opener.expect_format(format)
     }
 
-    /// **Pull** the next decrypted chunk. Reads up to one full frame; returns
-    /// `Ok(None)` at clean EOF. A trailing partial frame (the last chunk) is
-    /// decrypted normally; a frame shorter than `nonce + tag` is rejected.
+    /// The file's format once frame 0 has been opened (`None` before).
+    pub fn format(&self) -> Option<ChunkFormat> {
+        self.opener.format()
+    }
+
+    /// How many frames have been opened so far.
+    pub fn chunks_decrypted(&self) -> u32 {
+        self.opener.frames_opened()
+    }
+
+    /// **Pull** the next decrypted chunk. Reads up to one full frame. At EOF
+    /// returns `Ok(None)` only if the stream is complete (v2: the last chunk
+    /// was seen; v1: at least one frame) — a truncated v2 body is `Err`. A
+    /// trailing partial frame (the last chunk) is decrypted normally; a frame
+    /// shorter than `nonce + tag` is rejected; any bytes after the v2 last
+    /// chunk are rejected.
     ///
     /// Returns `Err` if called on a push-mode decryptor.
     pub fn next_chunk(&mut self) -> Result<Option<DecryptedChunk>, CoreError> {
@@ -473,8 +779,9 @@ impl ChunkDecryptor {
             )),
         };
         let result = match read_result {
-            Ok(0) => Ok(None), // clean EOF
-            Ok(n) => self.decrypt_frame_internal(&buf[..n]).map(Some),
+            // EOF: legitimate only if the stream is complete.
+            Ok(0) => self.opener.finish().map(|_| None),
+            Ok(n) => self.opener.open_next(&self.file_key, &buf[..n]).map(Some),
             Err(e) => Err(e),
         };
         self.buf = buf; // restore (capacity retained for reuse)
@@ -482,8 +789,17 @@ impl ChunkDecryptor {
     }
 
     /// **Push** one wire frame (`nonce || ciphertext || tag`) for decryption.
+    /// Frames must be pushed in order, starting at chunk 0.
     pub fn push_frame(&mut self, frame: &[u8]) -> Result<DecryptedChunk, CoreError> {
-        self.decrypt_frame_internal(frame)
+        self.opener.open_next(&self.file_key, frame)
+    }
+
+    /// End-of-stream check (push form; the pull form runs it at EOF). Errors if
+    /// no frame was pushed, or if a v2 file ended before its last chunk
+    /// (truncation). Callers MUST treat an `Err` here as a failed download and
+    /// discard the plaintext they wrote.
+    pub fn finish(self) -> Result<ChunkDecryptorSummary, CoreError> {
+        self.opener.finish()
     }
 }
 
@@ -492,7 +808,8 @@ impl std::fmt::Debug for ChunkDecryptor {
     /// material or plaintext.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ChunkDecryptor")
-            .field("next_index", &self.next_index)
+            .field("next_index", &self.opener.frames_opened())
+            .field("format", &self.opener.format())
             .finish_non_exhaustive()
     }
 }
@@ -535,6 +852,7 @@ pub(crate) fn read_exact_or_eof(reader: &mut dyn Read, buf: &mut [u8]) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::encrypt::decrypt_chunk_raw;
     use crate::kdf::derive_master_key;
     use std::io::Cursor;
     use std::sync::Arc;
@@ -1012,17 +1330,456 @@ mod tests {
     }
 
     #[test]
-    fn new_output_decrypts_via_legacy_decrypt_chunk_raw() {
-        // Frames from the new primitive must decrypt with the pre-existing
-        // low-level decrypt_chunk_raw (proves the wire format is unchanged).
+    fn new_output_is_v2_and_does_not_open_via_legacy_decrypt_chunk_raw() {
+        // Task 1908 (justified inversion): until 1908 this asserted that new
+        // frames open with the legacy no-AAD `decrypt_chunk_raw` ("wire format
+        // unchanged"). New frames are now v2 — same layout and sizes, but the
+        // position is in the GCM AAD — so the legacy open MUST fail (downgrade
+        // resistance) while the shared decryptor reads them.
         let m = mk();
         let data = pattern(9 * MIB);
         let (frames, _) = encrypt_all(&m, "legacy", &data, ChunkProfile::Desktop);
         let file_key = derive_file_key(&m, b"legacy");
-        let mut out = Vec::new();
         for f in &frames {
-            out.extend_from_slice(&decrypt_chunk_raw(&file_key, &f.data).unwrap());
+            assert!(decrypt_chunk_raw(&file_key, &f.data).is_err());
+            assert_eq!(f.data.len(), frames_len_for(&data, f.index));
         }
-        assert_eq!(out, data);
+        assert_eq!(decrypt_frames(&m, "legacy", &frames), data);
+    }
+
+    /// Frame length is plaintext + 28 in both formats (layout unchanged).
+    fn frames_len_for(data: &[u8], index: u32) -> usize {
+        let start = index as usize * 4 * MIB;
+        (data.len() - start).min(4 * MIB) + NONCE_LEN + TAG_LEN
+    }
+
+    #[test]
+    fn default_write_format_is_v2() {
+        assert_eq!(WRITE_FORMAT, ChunkFormat::V2);
+        let m = mk();
+        let enc = ChunkEncryptor::for_push(&m, "fmt", 10, ChunkProfile::Web).unwrap();
+        assert_eq!(enc.format(), ChunkFormat::V2);
+    }
+}
+
+/// Task 1908: chunk-position binding. Each test models one thing a malicious
+/// server can do to the opaque frames of a single file. Written red-first
+/// against origin/main (where frames carry no AAD), see the task Notes.
+#[cfg(test)]
+mod binding_tests {
+    use super::*;
+    use crate::encrypt::decrypt_chunk_raw;
+    use crate::kdf::derive_master_key;
+    use std::io::Cursor;
+
+    fn mk() -> MasterKey {
+        derive_master_key("binding-password", b"binding-salt-16b").unwrap()
+    }
+
+    /// 16-byte chunks so every frame of a 64-byte file is the same size —
+    /// the case where a reorder/duplicate is invisible to a length check.
+    const CS: u64 = 16;
+
+    fn pattern(len: usize, seed: u8) -> Vec<u8> {
+        (0..len)
+            .map(|i| (i as u8).wrapping_mul(31).wrapping_add(seed))
+            .collect()
+    }
+
+    /// The writer under test: a v2 (position-bound) encryptor.
+    fn v2_encryptor(m: &MasterKey, file_id: &str, size: u64) -> ChunkEncryptor {
+        ChunkEncryptor::for_push_with_chunk_size(m, file_id, size, CS)
+            .unwrap()
+            .with_format(ChunkFormat::V2)
+            .unwrap()
+    }
+
+    fn v2_frames(m: &MasterKey, file_id: &str, data: &[u8]) -> Vec<Vec<u8>> {
+        let mut enc = v2_encryptor(m, file_id, data.len() as u64);
+        let frames = if data.is_empty() {
+            vec![enc.push_chunk(&[]).unwrap().data]
+        } else {
+            data.chunks(CS as usize)
+                .map(|c| enc.push_chunk(c).unwrap().data)
+                .collect()
+        };
+        enc.finish().unwrap();
+        frames
+    }
+
+    /// Push every frame in order; the stream is accepted only if every frame
+    /// decrypts AND the decryptor's end-of-stream check passes.
+    fn push_all(m: &MasterKey, file_id: &str, frames: &[Vec<u8>]) -> Result<Vec<u8>, CoreError> {
+        let mut dec = ChunkDecryptor::for_push(m, file_id);
+        let mut out = Vec::new();
+        for f in frames {
+            out.extend_from_slice(&dec.push_frame(f)?.data);
+        }
+        dec.finish()?;
+        Ok(out)
+    }
+
+    /// Pull-form decrypt of a contiguous body (the download path).
+    fn pull_all(m: &MasterKey, file_id: &str, frames: &[Vec<u8>]) -> Result<Vec<u8>, CoreError> {
+        let body: Vec<u8> = frames.concat();
+        let mut dec = ChunkDecryptor::from_reader(m, file_id, CS, Cursor::new(body))?;
+        let mut out = Vec::new();
+        while let Some(c) = dec.next_chunk()? {
+            out.extend_from_slice(&c.data);
+        }
+        Ok(out)
+    }
+
+    #[test]
+    fn v2_roundtrip_push_and_pull() {
+        let m = mk();
+        let data = pattern(64, 1);
+        let frames = v2_frames(&m, "rt", &data);
+        assert_eq!(frames.len(), 4);
+        assert_eq!(push_all(&m, "rt", &frames).unwrap(), data);
+        assert_eq!(pull_all(&m, "rt", &frames).unwrap(), data);
+    }
+
+    #[test]
+    fn v2_two_chunk_swap_fails() {
+        let m = mk();
+        let data = pattern(64, 2);
+        let mut frames = v2_frames(&m, "swap", &data);
+        frames.swap(1, 2);
+        assert!(
+            push_all(&m, "swap", &frames).is_err(),
+            "swapped chunks must not decrypt"
+        );
+        assert!(pull_all(&m, "swap", &frames).is_err());
+    }
+
+    #[test]
+    fn v2_duplicated_chunk_fails() {
+        let m = mk();
+        let data = pattern(64, 3);
+        let mut frames = v2_frames(&m, "dup", &data);
+        // Replace chunk 2 by a copy of chunk 1 (same size, valid tag).
+        frames[2] = frames[1].clone();
+        assert!(
+            push_all(&m, "dup", &frames).is_err(),
+            "a duplicated chunk must not decrypt"
+        );
+        assert!(pull_all(&m, "dup", &frames).is_err());
+    }
+
+    #[test]
+    fn v2_dropped_middle_chunk_fails() {
+        let m = mk();
+        let data = pattern(64, 4);
+        let mut frames = v2_frames(&m, "drop", &data);
+        frames.remove(1);
+        assert!(
+            push_all(&m, "drop", &frames).is_err(),
+            "dropping a middle chunk must not decrypt"
+        );
+        assert!(pull_all(&m, "drop", &frames).is_err());
+    }
+
+    #[test]
+    fn v2_truncated_missing_last_fails() {
+        let m = mk();
+        let data = pattern(64, 5);
+        let mut frames = v2_frames(&m, "trunc", &data);
+        frames.pop(); // the server withholds the final chunk
+        assert!(
+            pull_all(&m, "trunc", &frames).is_err(),
+            "a stream that ends before the last chunk must be rejected (pull)"
+        );
+        assert!(
+            push_all(&m, "trunc", &frames).is_err(),
+            "a stream that ends before the last chunk must be rejected (push finish)"
+        );
+    }
+
+    #[test]
+    fn v2_extra_chunk_after_last_fails() {
+        let m = mk();
+        let data = pattern(64, 6);
+        let mut frames = v2_frames(&m, "extra", &data);
+        let again = frames[0].clone();
+        frames.push(again); // a valid frame appended after the last one
+        assert!(
+            push_all(&m, "extra", &frames).is_err(),
+            "nothing may follow the last chunk"
+        );
+        assert!(pull_all(&m, "extra", &frames).is_err());
+    }
+
+    #[test]
+    fn v2_chunk_from_another_file_fails() {
+        let m = mk();
+        let a = pattern(64, 7);
+        let b = pattern(64, 8);
+        let mut fa = v2_frames(&m, "file-a", &a);
+        let fb = v2_frames(&m, "file-b", &b);
+        fa[1] = fb[1].clone(); // same index, same size, other file
+        assert!(push_all(&m, "file-a", &fa).is_err());
+    }
+
+    #[test]
+    fn v2_extension_with_frame_from_longer_same_id_fails() {
+        // A longer earlier file under the SAME id (same key) has valid frames at
+        // indices 4 (not last) and 5 (last). Appending them after this file's
+        // last chunk would yield a complete-looking v2 stream (indices 0..5,
+        // ending on a last-sealed frame) — only the "nothing after the last
+        // chunk" rule stops this splice.
+        let m = mk();
+        let short = v2_frames(&m, "same-id", &pattern(64, 10)); // 4 chunks
+        let long = v2_frames(&m, "same-id", &pattern(96, 11)); // 6 chunks
+
+        let mut one_more = short.clone();
+        one_more.push(long[4].clone());
+        assert!(push_all(&m, "same-id", &one_more).is_err());
+        assert!(pull_all(&m, "same-id", &one_more).is_err());
+
+        let mut whole_tail = short.clone();
+        whole_tail.extend_from_slice(&long[4..]);
+        assert!(
+            push_all(&m, "same-id", &whole_tail).is_err(),
+            "frames after the authenticated last chunk must be rejected"
+        );
+        assert!(pull_all(&m, "same-id", &whole_tail).is_err());
+
+        // Control: the short file alone is fine.
+        assert_eq!(push_all(&m, "same-id", &short).unwrap(), pattern(64, 10));
+    }
+
+    #[test]
+    fn v2_truncation_to_a_shorter_same_id_prefix_fails() {
+        // The first 4 frames of a 6-chunk file under the same id: indices all
+        // match, but frame 3 is not sealed as last — finish must reject.
+        let m = mk();
+        let long = v2_frames(&m, "same-id-2", &pattern(96, 12));
+        assert!(push_all(&m, "same-id-2", &long[..4]).is_err());
+        assert!(pull_all(&m, "same-id-2", &long[..4]).is_err());
+    }
+
+    #[test]
+    fn same_key_other_file_id_fails() {
+        // Defence in depth: even if two files ever shared a key (a reused or
+        // mis-derived key, an unwrapped content key), the file id in the AAD
+        // keeps their frames apart.
+        let m = mk();
+        let data = pattern(64, 13);
+        let frames = v2_frames(&m, "owner-id", &data);
+        let key_bytes = *derive_file_key(&m, b"owner-id").as_bytes();
+
+        let mut right = ChunkDecryptor::for_push_with_file_key(FileKey::from_bytes(key_bytes), "owner-id");
+        for f in &frames {
+            right.push_frame(f).unwrap();
+        }
+        right.finish().unwrap();
+
+        let mut wrong = ChunkDecryptor::for_push_with_file_key(FileKey::from_bytes(key_bytes), "other-id");
+        assert!(
+            wrong.push_frame(&frames[0]).is_err(),
+            "same key, other file id must not open"
+        );
+    }
+
+    #[test]
+    fn v1_frame_spliced_into_v2_stream_fails() {
+        // Format lock: chunk 0 decides. A legacy (no-AAD) frame under the same
+        // key at position 1 of a v2 file must be rejected.
+        let m = mk();
+        let data = pattern(64, 14);
+        let mut frames = v2_frames(&m, "mixed", &data);
+        let fk = derive_file_key(&m, b"mixed");
+        frames[1] = crate::encrypt::encrypt_chunk_raw(&fk, &data[16..32]).unwrap();
+        assert!(push_all(&m, "mixed", &frames).is_err());
+        assert!(pull_all(&m, "mixed", &frames).is_err());
+    }
+
+    /// v1 (legacy) frames, as every client wrote them before task 1908.
+    fn v1_frames(m: &MasterKey, file_id: &str, data: &[u8]) -> Vec<Vec<u8>> {
+        let mut enc = ChunkEncryptor::for_push_with_chunk_size(m, file_id, data.len() as u64, CS)
+            .unwrap()
+            .with_format(ChunkFormat::V1Legacy)
+            .unwrap();
+        let frames: Vec<Vec<u8>> = if data.is_empty() {
+            vec![enc.push_chunk(&[]).unwrap().data]
+        } else {
+            data.chunks(CS as usize)
+                .map(|c| enc.push_chunk(c).unwrap().data)
+                .collect()
+        };
+        enc.finish().unwrap();
+        frames
+    }
+
+    #[test]
+    fn v1_frames_still_decrypt_push_and_pull() {
+        let m = mk();
+        for len in [0usize, 1, 16, 40, 64] {
+            let data = pattern(len, 15);
+            let frames = v1_frames(&m, "legacy", &data);
+            // Byte-compatible with the pre-1908 primitive.
+            let fk = derive_file_key(&m, b"legacy");
+            for f in &frames {
+                decrypt_chunk_raw(&fk, f).unwrap();
+            }
+            assert_eq!(push_all(&m, "legacy", &frames).unwrap(), data, "push len {len}");
+            assert_eq!(pull_all(&m, "legacy", &frames).unwrap(), data, "pull len {len}");
+            let mut dec = ChunkDecryptor::for_push(&m, "legacy");
+            for f in &frames {
+                dec.push_frame(f).unwrap();
+            }
+            assert_eq!(dec.format(), Some(ChunkFormat::V1Legacy));
+        }
+    }
+
+    #[test]
+    fn v1_fixture_from_vectors_json_still_decrypts() {
+        // The committed cross-client fixture (test-vectors/vectors.json,
+        // `chunk_encrypt_decrypt`) is a real v1 frame. It must keep opening via
+        // the file-key decryptor; v1 binds no file id, so any id works.
+        let v: serde_json::Value = serde_json::from_str(include_str!("../../test-vectors/vectors.json")).unwrap();
+        let vec = v["vectors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["name"] == "chunk_encrypt_decrypt")
+            .unwrap();
+        let hex = |k: &str| hex::decode(vec[k].as_str().unwrap()).unwrap();
+        let key: [u8; 32] = hex("file_key_hex").try_into().unwrap();
+        let frame = [hex("nonce_hex"), hex("ciphertext_hex")].concat();
+
+        let mut dec = ChunkDecryptor::for_push_with_file_key(FileKey::from_bytes(key), "any-id");
+        let pt = dec.push_frame(&frame).unwrap().data;
+        assert_eq!(pt, hex("plaintext_hex"));
+        let summary = dec.finish().unwrap();
+        assert_eq!(summary.format, ChunkFormat::V1Legacy);
+        assert_eq!(summary.chunk_count, 1);
+    }
+
+    #[test]
+    fn pinned_format_rejects_the_other_format() {
+        let m = mk();
+        let data = pattern(40, 16);
+        let v1 = v1_frames(&m, "pin", &data);
+        let v2 = v2_frames(&m, "pin", &data);
+
+        // Pinned v2 (from authenticated metadata): a v1 copy is refused.
+        let mut dec = ChunkDecryptor::for_push(&m, "pin");
+        dec.expect_format(ChunkFormat::V2).unwrap();
+        assert!(dec.push_frame(&v1[0]).is_err());
+
+        // Pinned v1: a v2 file is refused (no silent cross-format open).
+        let mut dec = ChunkDecryptor::for_push(&m, "pin");
+        dec.expect_format(ChunkFormat::V1Legacy).unwrap();
+        assert!(dec.push_frame(&v2[0]).is_err());
+
+        // Pinned correctly: both open.
+        let mut dec = ChunkDecryptor::for_push(&m, "pin");
+        dec.expect_format(ChunkFormat::V2).unwrap();
+        for f in &v2 {
+            dec.push_frame(f).unwrap();
+        }
+        assert_eq!(dec.finish().unwrap().format, ChunkFormat::V2);
+
+        // The pin cannot move mid-stream.
+        let mut dec = ChunkDecryptor::for_push(&m, "pin");
+        dec.push_frame(&v2[0]).unwrap();
+        assert!(dec.expect_format(ChunkFormat::V1Legacy).is_err());
+    }
+
+    #[test]
+    fn v2_roundtrip_all_sizes_incl_empty_and_exactly_one_chunk() {
+        let m = mk();
+        // 0 = empty file (one frame, sealed as last); 16 = exactly one chunk;
+        // 17 = one full + one 1-byte chunk; 64 = exact multiple.
+        for len in [0usize, 1, 15, 16, 17, 31, 32, 33, 64, 65] {
+            let data = pattern(len, 17);
+            let frames = v2_frames(&m, "sizes", &data);
+            let expect_frames = if len == 0 { 1 } else { len.div_ceil(CS as usize) };
+            assert_eq!(frames.len(), expect_frames, "len {len}");
+            assert_eq!(push_all(&m, "sizes", &frames).unwrap(), data, "push len {len}");
+            assert_eq!(pull_all(&m, "sizes", &frames).unwrap(), data, "pull len {len}");
+        }
+    }
+
+    #[test]
+    fn empty_stream_is_rejected() {
+        // Zero frames is never a file (an empty file is one frame).
+        let m = mk();
+        assert!(push_all(&m, "none", &[]).is_err());
+        assert!(pull_all(&m, "none", &[]).is_err());
+        // An empty v2 file truncated to nothing.
+        let frames = v2_frames(&m, "empty", &[]);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].len(), NONCE_LEN + TAG_LEN);
+        assert!(push_all(&m, "empty", &frames[..0]).is_err());
+    }
+
+    #[test]
+    fn chunk_aad_v2_known_answer() {
+        // Pins the exact AAD layout (a wire-format change must show up here).
+        let aad = chunk_aad_v2(b"abc", 0x0102_0304, true);
+        let mut expect = b"beebeeb/chunk/v2".to_vec();
+        expect.extend_from_slice(&[0, 0, 0, 3]);
+        expect.extend_from_slice(b"abc");
+        expect.extend_from_slice(&[1, 2, 3, 4]);
+        expect.push(1);
+        assert_eq!(aad, expect);
+        assert_eq!(chunk_aad_v2(b"abc", 0x0102_0304, false).last(), Some(&0));
+        assert_eq!(aad.len(), 16 + 4 + 3 + 4 + 1);
+    }
+
+    #[test]
+    fn open_chunk_random_access() {
+        let m = mk();
+        let data = pattern(64, 18);
+        let frames = v2_frames(&m, "seek", &data);
+        let fk = derive_file_key(&m, b"seek");
+        // Correct position: opens, in any order (seeking).
+        for i in [2u32, 0, 3, 1] {
+            let last = i == 3;
+            let pt = open_chunk(&fk, "seek", i, last, ChunkFormat::V2, &frames[i as usize]).unwrap();
+            assert_eq!(pt, data[i as usize * 16..(i as usize + 1) * 16]);
+        }
+        // Server answers a request for chunk 1 with chunk 2: fails.
+        assert!(open_chunk(&fk, "seek", 1, false, ChunkFormat::V2, &frames[2]).is_err());
+        // Server under-reports the count so the client thinks 2 is last: fails.
+        assert!(open_chunk(&fk, "seek", 2, true, ChunkFormat::V2, &frames[2]).is_err());
+        // Server over-reports: the real last chunk is not accepted as non-last.
+        assert!(open_chunk(&fk, "seek", 3, false, ChunkFormat::V2, &frames[3]).is_err());
+        // Wrong format argument: a v2 frame never opens as v1.
+        assert!(open_chunk(&fk, "seek", 0, false, ChunkFormat::V1Legacy, &frames[0]).is_err());
+        // v1 files: position arguments are ignored.
+        let v1 = v1_frames(&m, "seek", &data);
+        assert_eq!(
+            open_chunk(&fk, "seek", 99, true, ChunkFormat::V1Legacy, &v1[1]).unwrap(),
+            data[16..32]
+        );
+    }
+
+    #[test]
+    fn chunk_format_codes() {
+        assert_eq!(ChunkFormat::from_u8(1).unwrap(), ChunkFormat::V1Legacy);
+        assert_eq!(ChunkFormat::from_u8(2).unwrap(), ChunkFormat::V2);
+        assert!(ChunkFormat::from_u8(0).is_err());
+        assert!(ChunkFormat::from_u8(3).is_err());
+        assert_eq!(ChunkFormat::V2.as_u8(), 2);
+    }
+
+    #[test]
+    fn v2_frame_decrypted_as_v1_fails() {
+        // Downgrade: the legacy (no-AAD) open must reject every v2 frame, so the
+        // binding cannot be stripped by asking for the old format.
+        let m = mk();
+        let data = pattern(64, 9);
+        let frames = v2_frames(&m, "down", &data);
+        let fk = derive_file_key(&m, b"down");
+        for (i, f) in frames.iter().enumerate() {
+            assert!(
+                decrypt_chunk_raw(&fk, f).is_err(),
+                "v2 frame {i} must not open as a v1 frame"
+            );
+        }
     }
 }

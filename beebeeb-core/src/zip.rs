@@ -5,8 +5,8 @@ use zip::CompressionMethod;
 use zip::write::{SimpleFileOptions, ZipWriter};
 
 use crate::CoreError;
-use crate::encrypt::decrypt_chunk_raw;
-use crate::kdf::{MasterKey, derive_file_key};
+use crate::chunk_stream::ChunkDecryptor;
+use crate::kdf::MasterKey;
 
 pub struct ZipEntry {
     pub path: String,
@@ -47,7 +47,9 @@ pub fn stream_folder_zip<W: Write + Seek>(
             return Err(CoreError::Cancelled);
         }
 
-        let file_key = derive_file_key(master_key, entry.file_id.as_bytes());
+        // Task 1908: one ordered decrypt stream per entry, so a reordered,
+        // spliced or truncated chunk list fails instead of zipping garbage.
+        let mut decryptor = ChunkDecryptor::for_push(master_key, &entry.file_id);
 
         zip.start_file(&entry.path, options)
             .map_err(|e| CoreError::Io(e.to_string()))?;
@@ -58,7 +60,7 @@ pub fn stream_folder_zip<W: Write + Seek>(
             }
 
             let encrypted = fetch_chunk(&entry.file_id, chunk_idx)?;
-            let plaintext = decrypt_chunk_raw(&file_key, &encrypted)?;
+            let plaintext = decryptor.push_frame(&encrypted)?.data;
 
             zip.write_all(&plaintext).map_err(|e| CoreError::Io(e.to_string()))?;
 
@@ -72,6 +74,9 @@ pub fn stream_folder_zip<W: Write + Seek>(
                 current_file: entry.path.clone(),
             });
         }
+        // `chunk_count` comes from the server; a v2 file whose count was
+        // understated ends before its last chunk and is rejected here.
+        decryptor.finish()?;
     }
 
     zip.finish().map_err(|e| CoreError::Io(e.to_string()))?;
