@@ -5,7 +5,7 @@ use zip::CompressionMethod;
 use zip::write::{SimpleFileOptions, ZipWriter};
 
 use crate::CoreError;
-use crate::chunk_stream::ChunkDecryptor;
+use crate::chunk_stream::{ChunkDecryptor, ExpectedChunkFormat};
 use crate::kdf::MasterKey;
 
 pub struct ZipEntry {
@@ -13,6 +13,10 @@ pub struct ZipEntry {
     pub file_id: String,
     pub chunk_count: u32,
     pub size_bytes: u64,
+    /// From the entry's encrypted metadata
+    /// ([`crate::encrypt::decrypt_name_metadata`]) — task 1908. `V2` accepts
+    /// only v2 frames; `Unrecorded` (legacy metadata) lets chunk 0 decide.
+    pub chunk_format: ExpectedChunkFormat,
 }
 
 pub struct ZipProgress {
@@ -49,7 +53,7 @@ pub fn stream_folder_zip<W: Write + Seek>(
 
         // Task 1908: one ordered decrypt stream per entry, so a reordered,
         // spliced or truncated chunk list fails instead of zipping garbage.
-        let mut decryptor = ChunkDecryptor::for_push(master_key, &entry.file_id);
+        let mut decryptor = ChunkDecryptor::for_push(master_key, &entry.file_id, entry.chunk_format);
 
         zip.start_file(&entry.path, options)
             .map_err(|e| CoreError::Io(e.to_string()))?;

@@ -7,7 +7,7 @@
 
 use std::io::{BufWriter, Write};
 
-use beebeeb_core::chunk_stream::ChunkDecryptor;
+use beebeeb_core::chunk_stream::{ChunkDecryptor, ExpectedChunkFormat};
 
 use crate::error::UploadError;
 use crate::retry;
@@ -112,10 +112,16 @@ impl DownloadClient {
     /// tag. When the header is absent (legacy V1) we fall back to
     /// `total / chunk_count`, matching [`compute_chunk_boundaries`]. The file
     /// key is derived via `HKDF(master_key, file_id)`.
+    ///
+    /// `expected` (task 1908) comes from the file's encrypted metadata
+    /// ([`beebeeb_core::encrypt::decrypt_name_metadata`]), never from a server
+    /// field: `V2` accepts only v2 frames; `Unrecorded` (legacy metadata) lets
+    /// chunk 0 decide.
     pub async fn download_and_decrypt(
         &self,
         master_key: &beebeeb_core::kdf::MasterKey,
         file_id: &str,
+        expected: ExpectedChunkFormat,
         output_path: &str,
         callback: Option<&dyn DownloadProgressCallback>,
     ) -> Result<DownloadResult, UploadError> {
@@ -182,6 +188,7 @@ impl DownloadClient {
             &mut resp,
             master_key,
             file_id,
+            expected,
             chunk_count,
             total,
             chunk_size,
@@ -198,6 +205,7 @@ impl DownloadClient {
         resp: &mut reqwest::Response,
         master_key: &beebeeb_core::kdf::MasterKey,
         file_id: &str,
+        expected: ExpectedChunkFormat,
         chunk_count: u32,
         total: u64,
         chunk_size: Option<u64>,
@@ -232,7 +240,7 @@ impl DownloadClient {
             std::fs::File::create(&tmp_path).map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
         let mut writer = BufWriter::new(output_file);
 
-        let mut decryptor = ChunkDecryptor::for_push(master_key, file_id);
+        let mut decryptor = ChunkDecryptor::for_push(master_key, file_id, expected);
         let mut carry: Vec<u8> = Vec::new();
         let mut total_plaintext: u64 = 0;
         let mut chunks_decrypted: u32 = 0;
@@ -334,10 +342,12 @@ impl DownloadClient {
 ///
 /// Task 1908: the chunks are opened as one file's ordered stream (v2
 /// position-bound or v1 legacy, decided by chunk 0). `file_id` is the id the
-/// file was uploaded under; it is bound into every v2 frame.
+/// file was uploaded under; it is bound into every v2 frame. `expected` comes
+/// from the file's encrypted metadata (see [`DownloadClient::download_and_decrypt`]).
 pub fn decrypt_downloaded_bytes(
     file_key: &beebeeb_core::kdf::FileKey,
     file_id: &str,
+    expected: ExpectedChunkFormat,
     encrypted_bytes: &[u8],
     chunk_count: u32,
     output_path: &str,
@@ -370,8 +380,11 @@ pub fn decrypt_downloaded_bytes(
     let mut chunks_decrypted: u32 = 0;
     // The decryptor owns its key; copy the borrowed one into a fresh
     // zeroize-on-drop FileKey (from_bytes wipes its by-value input).
-    let mut decryptor =
-        ChunkDecryptor::for_push_with_file_key(beebeeb_core::kdf::FileKey::from_bytes(*file_key.as_bytes()), file_id);
+    let mut decryptor = ChunkDecryptor::for_push_with_file_key(
+        beebeeb_core::kdf::FileKey::from_bytes(*file_key.as_bytes()),
+        file_id,
+        expected,
+    );
 
     for (i, (start, end)) in chunk_boundaries.iter().enumerate() {
         let chunk_data = &encrypted_bytes[*start..*end];
@@ -505,6 +518,7 @@ pub fn download_and_decrypt_file<'a>(
     token: &str,
     master_key: &beebeeb_core::kdf::MasterKey,
     file_id: &str,
+    expected: ExpectedChunkFormat,
     output_path: &str,
     callback: Option<Box<dyn DownloadProgressCallback + 'a>>,
 ) -> Result<DownloadResult, UploadError> {
@@ -519,6 +533,7 @@ pub fn download_and_decrypt_file<'a>(
             .download_and_decrypt(
                 master_key,
                 file_id,
+                expected,
                 output_path,
                 callback.as_ref().map(|b| b.as_ref() as &dyn DownloadProgressCallback),
             )
@@ -614,7 +629,16 @@ mod tests {
         let output = dir.join("output.bin");
         let output_str = output.to_str().unwrap();
 
-        let result = decrypt_downloaded_bytes(&fk, "file-001", &encrypted, 1, output_str, None).unwrap();
+        let result = decrypt_downloaded_bytes(
+            &fk,
+            "file-001",
+            ExpectedChunkFormat::Unrecorded,
+            &encrypted,
+            1,
+            output_str,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(result.plaintext_size, plaintext.len() as u64);
         assert_eq!(result.chunks_decrypted, 1);
@@ -669,7 +693,16 @@ mod tests {
         let output = dir.join("output.bin");
         let output_str = output.to_str().unwrap();
 
-        let result = decrypt_downloaded_bytes(&fk, "file-002", &payload, 2, output_str, None).unwrap();
+        let result = decrypt_downloaded_bytes(
+            &fk,
+            "file-002",
+            ExpectedChunkFormat::Unrecorded,
+            &payload,
+            2,
+            output_str,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(result.chunks_decrypted, 2);
         assert_eq!(result.plaintext_size, 128); // 64 + 64
@@ -700,7 +733,15 @@ mod tests {
         let output = dir.join("output.bin");
         let output_str = output.to_str().unwrap();
 
-        let result = decrypt_downloaded_bytes(&wrong_fk, "file-003", &encrypted, 1, output_str, None);
+        let result = decrypt_downloaded_bytes(
+            &wrong_fk,
+            "file-003",
+            ExpectedChunkFormat::Unrecorded,
+            &encrypted,
+            1,
+            output_str,
+            None,
+        );
         assert!(result.is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -722,7 +763,16 @@ mod tests {
         let output = dir.join("output.bin");
         let output_str = output.to_str().unwrap();
 
-        let result = decrypt_downloaded_bytes(&fk, "file-empty", &encrypted, 1, output_str, None).unwrap();
+        let result = decrypt_downloaded_bytes(
+            &fk,
+            "file-empty",
+            ExpectedChunkFormat::Unrecorded,
+            &encrypted,
+            1,
+            output_str,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(result.plaintext_size, 0);
         assert_eq!(result.chunks_decrypted, 1);
@@ -744,7 +794,15 @@ mod tests {
         let mk = derive_master_key("test-password", b"test-salt-16bytes").unwrap();
         let fk = derive_file_key(&mk, b"file-zero");
 
-        let result = decrypt_downloaded_bytes(&fk, "file-zero", &[0u8; 100], 0, output_str, None);
+        let result = decrypt_downloaded_bytes(
+            &fk,
+            "file-zero",
+            ExpectedChunkFormat::Unrecorded,
+            &[0u8; 100],
+            0,
+            output_str,
+            None,
+        );
         assert!(result.is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -753,10 +811,13 @@ mod tests {
     /// v2 frames as every client writes them after task 1908 (32-byte chunks).
     fn v2_payload(mk: &beebeeb_core::kdf::MasterKey, file_id: &str, data: &[u8]) -> Vec<Vec<u8>> {
         use beebeeb_core::chunk_stream::{ChunkEncryptor, ChunkFormat};
-        let mut enc = ChunkEncryptor::for_push_with_chunk_size(mk, file_id, data.len() as u64, 32).unwrap();
+        // WRITE_FORMAT is still v1 (read-only rollout phase), so these tests
+        // ask for v2 explicitly via the dev-only `test-support` feature.
+        let mut enc = ChunkEncryptor::for_push_with_chunk_size(mk, file_id, data.len() as u64, 32)
+            .unwrap()
+            .with_format(ChunkFormat::V2)
+            .unwrap();
         let frames: Vec<Vec<u8>> = data.chunks(32).map(|c| enc.push_chunk(c).unwrap().data).collect();
-        // These tests are about the v2 binding; skip silently would hide a
-        // regression, so assert the writer really produced v2.
         assert_eq!(enc.format(), ChunkFormat::V2, "v2_payload requires a v2 writer");
         enc.finish().unwrap();
         frames
@@ -776,19 +837,20 @@ mod tests {
         let output = dir.join("output.bin");
         let out = output.to_str().unwrap();
 
-        let ok = decrypt_downloaded_bytes(&fk, "file-v2", &frames.concat(), 3, out, None).unwrap();
+        let ok =
+            decrypt_downloaded_bytes(&fk, "file-v2", ExpectedChunkFormat::V2, &frames.concat(), 3, out, None).unwrap();
         assert_eq!(ok.plaintext_size, 96);
         assert_eq!(std::fs::read(&output).unwrap(), data);
         std::fs::remove_file(&output).unwrap();
 
         // Server swaps two equal-size chunks.
         let swapped = [frames[1].clone(), frames[0].clone(), frames[2].clone()].concat();
-        assert!(decrypt_downloaded_bytes(&fk, "file-v2", &swapped, 3, out, None).is_err());
+        assert!(decrypt_downloaded_bytes(&fk, "file-v2", ExpectedChunkFormat::V2, &swapped, 3, out, None).is_err());
         assert!(!output.exists());
 
         // Server withholds the last chunk and reports chunk_count = 2.
         let truncated = [frames[0].clone(), frames[1].clone()].concat();
-        assert!(decrypt_downloaded_bytes(&fk, "file-v2", &truncated, 2, out, None).is_err());
+        assert!(decrypt_downloaded_bytes(&fk, "file-v2", ExpectedChunkFormat::V2, &truncated, 2, out, None).is_err());
         assert!(!output.exists(), "a truncated download must not be renamed into place");
         assert!(!dir.join("output.bin.tmp").exists());
 

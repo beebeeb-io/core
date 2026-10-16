@@ -8,23 +8,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
-- Chunk format v2 (task 1908): file-content frames now authenticate their position as AES-GCM
-  associated data — `"beebeeb/chunk/v2" || len(file_id) || file_id || chunk_index || is_last`
-  (STREAM construction). Previously (v1) frames carried no associated data, so a malicious
-  server could reorder, duplicate, drop or truncate chunks within a file undetected. Same frame
-  layout and sizes; the server is unaffected. `ChunkEncryptor` writes v2; `ChunkDecryptor` and
-  every file-content decrypt path read v2 and v1, decide the format from what chunk 0
-  authenticates under (never a server field) and lock it, reject out-of-order frames and frames
-  after the last chunk, and fail at `finish()`/EOF when a v2 file ended early. A zero-frame body
-  is now an error (it used to decrypt to an empty file).
-- Breaking: `encrypt::decrypt_chunks_to_file`, `encrypt::decrypt_contiguous_to_file`,
-  `beebeeb_upload::decrypt_downloaded_bytes` and the UniFFI `decrypt_chunks_to_file` /
-  `decrypt_contiguous_to_file` take the file id. New: `ChunkDecryptor::{for_push_with_file_key,
-  expect_format, format, chunks_decrypted, finish}`, `chunk_stream::{open_chunk, chunk_aad_v2,
-  ChunkFormat, WRITE_FORMAT}`, WASM `WasmChunkDecryptor` + `decrypt_chunk_frame`, UniFFI
-  `ChunkDecryptorHandle.{for_push_with_file_key, expect_format, chunk_format, finish}` and
-  `FileKeyHandle.decrypt_chunk_frame`. Clients must move every file-content read to these before
-  any client ships v2 writes.
+- Chunk format v2 (task 1908): file-content frames authenticate their position as AES-GCM
+  associated data — `"beebeeb/chunk/v2" || len(file_id) || file_id || version_id(12) ||
+  chunk_index || is_last` (STREAM construction) — and are sealed under a dedicated chunk subkey
+  `HKDF-SHA256(file_key, "beebeeb/chunk/v2/key")` that no other blob type uses. `version_id` is
+  the random nonce of the upload's frame 0, so frames of two uploads (versions) of one file id
+  cannot be mixed. Previously (v1) frames carried no associated data, so a malicious server could
+  reorder, duplicate, drop, truncate or splice chunks undetected. Same frame layout and sizes;
+  the server is unaffected.
+- Every file-content reader now REQUIRES an `ExpectedChunkFormat` taken from the file's
+  encrypted metadata (`encrypt::decrypt_name_metadata[_with_key]`): `V2` accepts only v2 frames,
+  so a server can no longer pass a same-key no-AAD blob (encrypted name, thumbnail) off as a
+  one-frame v1 file; `Unrecorded` (metadata without a format: files from before the switch) lets
+  frame 0 decide. Readers reject out-of-order frames, frames from another upload, frames after
+  the last chunk, and fail at `finish()`/EOF when a v2 file ended early. A zero-frame body is now
+  an error (it used to decrypt to an empty file). Uploads record the format with
+  `encrypt::encrypt_name_with_chunk_format` (`"chunk_format": 2`); `encrypt_name` output is
+  unchanged.
+- Read-only rollout phase: `chunk_stream::WRITE_FORMAT` stays `V1Legacy`. Clients on this core
+  read v2 but keep writing v1 until every client's read path is on this core; flipping it is a
+  separate, gated release (task 1908).
+- Breaking: `ChunkDecryptor::{from_reader, for_push, for_push_with_file_key}`,
+  `encrypt::decrypt_chunks_to_file`, `encrypt::decrypt_contiguous_to_file`,
+  `file_encrypt::decrypt_chunks_to_file`, `zip::ZipEntry` (new `chunk_format` field),
+  `beebeeb_upload::{decrypt_downloaded_bytes, download_and_decrypt_file,
+  DownloadClient::download_and_decrypt}` take the file id and/or the expected format;
+  `chunk_stream::open_chunk` takes the version id. UniFFI: `decrypt_chunks_to_file`,
+  `decrypt_contiguous_to_file`, `download_and_decrypt_file`, `MasterKeyHandle.decrypt_file`,
+  `ChunkDecryptorHandle.{from_file, for_push, for_push_with_file_key}` take
+  `expected_chunk_format` (0 = unrecorded, 2 = v2); `FileKeyHandle.decrypt_chunk_frame` takes
+  `version_id`. WASM: `WasmChunkDecryptor` constructors take `expectedChunkFormat`;
+  `decrypt_chunk_frame` takes `version_id`. New: `ExpectedChunkFormat`,
+  `ChunkDecryptor::{version_id, format, chunks_decrypted, finish}`, `encrypt::{NameMetadata,
+  decrypt_name_metadata, decrypt_name_metadata_with_key, encrypt_name_with_chunk_format}`,
+  UniFFI `ChunkDecryptorHandle.{for_push_with_file_key_handle, version_id, chunk_format,
+  finish}`, `MasterKeyHandle.{encrypt_name_with_chunk_format, decrypt_name_metadata}`,
+  `FileKeyHandle.decrypt_name_metadata`, WASM `encrypt_name_with_chunk_format`,
+  `decrypt_name_metadata[_with_key]`, `WasmChunkDecryptor.versionId`. Feature `test-support`
+  (dev-dependencies only) exposes `ChunkEncryptor::with_format` to tests.
 
 ### Added
 - `onboarding` module (task 1744): password-policy evaluator driven by the server's numbers

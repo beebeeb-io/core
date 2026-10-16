@@ -84,14 +84,148 @@ pub fn encrypt_name(
     filename: &str,
     mime_type: Option<&str>,
 ) -> Result<String, CoreError> {
-    let plaintext = serde_json::json!({
+    encrypt_name_with_chunk_format(
+        master_key,
+        file_id,
+        filename,
+        mime_type,
+        crate::chunk_stream::ExpectedChunkFormat::Unrecorded,
+    )
+}
+
+/// JSON field in the encrypted name metadata that records the file's chunk
+/// format (task 1908). Present only as `2` (v2); absent = unrecorded.
+pub const METADATA_CHUNK_FORMAT_FIELD: &str = "chunk_format";
+
+/// [`encrypt_name`] that also records the file's chunk format **inside the
+/// encrypted metadata** (task 1908 review round 2, P1-1), so readers can pin
+/// it: `{"name":..,"mime_type":..,"chunk_format":2}`. With
+/// [`ExpectedChunkFormat::Unrecorded`] the output is exactly [`encrypt_name`]'s.
+///
+/// `chunk_format: 2` asserts that **every upload (version) of this file id is
+/// v2**, because the server keeps one metadata blob per file and readers of
+/// older versions pin with it too. So:
+/// - new file id: pass [`ExpectedChunkFormat::recorded_for`] of the encryptor's
+///   [`format`](crate::chunk_stream::ChunkEncryptor::format);
+/// - rename / replace of an existing file: pass the value you decrypted from
+///   its current metadata ([`decrypt_name_metadata`]) — never upgrade a file id
+///   with v1 history to `V2` (its old versions would stop opening), and never
+///   drop a recorded `V2` (that silently re-enables detection for the file).
+///
+/// [`ExpectedChunkFormat::Unrecorded`]: crate::chunk_stream::ExpectedChunkFormat::Unrecorded
+/// [`ExpectedChunkFormat::recorded_for`]: crate::chunk_stream::ExpectedChunkFormat::recorded_for
+pub fn encrypt_name_with_chunk_format(
+    master_key: &crate::kdf::MasterKey,
+    file_id: &str,
+    filename: &str,
+    mime_type: Option<&str>,
+    chunk_format: crate::chunk_stream::ExpectedChunkFormat,
+) -> Result<String, CoreError> {
+    let mut meta = serde_json::json!({
         "name": filename,
         "mime_type": mime_type,
-    })
-    .to_string();
+    });
+    if chunk_format == crate::chunk_stream::ExpectedChunkFormat::V2 {
+        meta[METADATA_CHUNK_FORMAT_FIELD] = serde_json::json!(chunk_format.as_u8());
+    }
+    let plaintext = meta.to_string();
     let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
     let blob = encrypt_metadata(&file_key, &plaintext)?;
     serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
+}
+
+/// The decrypted name metadata of a file, including the chunk format its
+/// content must be read with (task 1908).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NameMetadata {
+    /// The filename.
+    pub name: String,
+    /// The MIME type, when the metadata carries one.
+    pub mime_type: Option<String>,
+    /// What to pass to every file-content reader. `V2` only when an
+    /// **encrypted** metadata envelope that authenticated under this file's key
+    /// records it; a plaintext legacy name, or an envelope without the field,
+    /// is `Unrecorded`.
+    pub chunk_format: crate::chunk_stream::ExpectedChunkFormat,
+}
+
+/// Decrypt `name_encrypted` (same format + key matrix as [`decrypt_name`]) and
+/// return the name, MIME type and the [`ExpectedChunkFormat`] the file's
+/// content must be read with. Fails if the envelope records a chunk format
+/// this core does not know (never a silent fallback to detection).
+///
+/// [`ExpectedChunkFormat`]: crate::chunk_stream::ExpectedChunkFormat
+pub fn decrypt_name_metadata(
+    master_key: &crate::kdf::MasterKey,
+    file_id: &str,
+    name_encrypted: &str,
+) -> Result<NameMetadata, CoreError> {
+    if !name_encrypted.starts_with('{') {
+        return Ok(legacy_plaintext_metadata(name_encrypted));
+    }
+    let key_from_string = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
+    if let Some(pt) = decrypt_envelope_plaintext(&key_from_string, name_encrypted) {
+        return parse_name_metadata(&pt);
+    }
+    if let Some(key) = file_id
+        .parse::<uuid::Uuid>()
+        .ok()
+        .map(|u| crate::kdf::derive_file_key(master_key, u.as_bytes()))
+    {
+        if let Some(pt) = decrypt_envelope_plaintext(&key, name_encrypted) {
+            return parse_name_metadata(&pt);
+        }
+    }
+    Err(CoreError::Decryption)
+}
+
+/// [`decrypt_name_metadata`] with a **known** file key (share recipients,
+/// file-request content keys) — mirrors [`decrypt_name_with_key`].
+pub fn decrypt_name_metadata_with_key(file_key: &FileKey, name_encrypted: &str) -> Result<NameMetadata, CoreError> {
+    if !name_encrypted.starts_with('{') {
+        return Ok(legacy_plaintext_metadata(name_encrypted));
+    }
+    let pt = decrypt_envelope_plaintext(file_key, name_encrypted).ok_or(CoreError::Decryption)?;
+    parse_name_metadata(&pt)
+}
+
+fn legacy_plaintext_metadata(name: &str) -> NameMetadata {
+    NameMetadata {
+        name: name.to_string(),
+        mime_type: None,
+        chunk_format: crate::chunk_stream::ExpectedChunkFormat::Unrecorded,
+    }
+}
+
+/// Parse a decrypted metadata plaintext into [`NameMetadata`].
+fn parse_name_metadata(decrypted: &str) -> Result<NameMetadata, CoreError> {
+    let (name, mime_type) = unwrap_metadata_json(decrypted);
+    let recorded = serde_json::from_str::<serde_json::Value>(decrypted)
+        .ok()
+        .and_then(|v| v.get(METADATA_CHUNK_FORMAT_FIELD).cloned());
+    let chunk_format = match recorded {
+        None => crate::chunk_stream::ExpectedChunkFormat::Unrecorded,
+        Some(v) => {
+            let code = v
+                .as_u64()
+                .and_then(|c| u8::try_from(c).ok())
+                .ok_or_else(|| CoreError::InvalidInput("metadata chunk_format is not a format code".into()))?;
+            match crate::chunk_stream::ExpectedChunkFormat::from_u8(code)? {
+                // `0` is never written; an envelope that spells it out is malformed.
+                crate::chunk_stream::ExpectedChunkFormat::Unrecorded => {
+                    return Err(CoreError::InvalidInput(
+                        "metadata chunk_format 0 is not a recorded format".into(),
+                    ));
+                }
+                f => f,
+            }
+        }
+    };
+    Ok(NameMetadata {
+        name,
+        mime_type,
+        chunk_format,
+    })
 }
 
 /// Decrypt a `name_encrypted` value from the server back to a plaintext
@@ -203,10 +337,17 @@ pub fn decrypt_name_with_key(file_key: &FileKey, name_encrypted: &str) -> Option
 /// given one file key, try both supported JSON blob formats and return the
 /// unwrapped `(name, mime_type)` on the first that decrypts to valid UTF-8.
 fn decrypt_name_envelope(file_key: &FileKey, name_encrypted: &str) -> Option<(String, Option<String>)> {
+    decrypt_envelope_plaintext(file_key, name_encrypted).map(|pt| unwrap_metadata_json(&pt))
+}
+
+/// Decrypt one `name_encrypted` JSON envelope under one key, trying the native
+/// `EncryptedBlob` shape then the web `{nonce, ciphertext}` shape, and return
+/// the metadata plaintext (usually the `{name, mime_type[, chunk_format]}` JSON).
+fn decrypt_envelope_plaintext(file_key: &FileKey, name_encrypted: &str) -> Option<String> {
     // Format 2: native EncryptedBlob (cipher_suite + numeric-array fields).
     if let Ok(blob) = serde_json::from_str::<EncryptedBlob>(name_encrypted) {
         if let Ok(plaintext) = decrypt_metadata(file_key, &blob) {
-            return Some(unwrap_metadata_json(&plaintext));
+            return Some(plaintext);
         }
     }
 
@@ -220,7 +361,7 @@ fn decrypt_name_envelope(file_key: &FileKey, name_encrypted: &str) -> Option<(St
             ciphertext,
         };
         if let Ok(plaintext) = decrypt_metadata(file_key, &blob) {
-            return Some(unwrap_metadata_json(&plaintext));
+            return Some(plaintext);
         }
     }
 
@@ -330,15 +471,34 @@ pub fn encrypt_chunk_raw(key: &FileKey, plaintext: &[u8]) -> Result<Vec<u8>, Cor
 /// Shared raw seal: `nonce(12) || AES-256-GCM(key, nonce, plaintext, aad)`.
 /// An empty `aad` is byte-identical to the v1 (no-AAD) frame.
 pub(crate) fn seal_raw_with_aad(key: &FileKey, plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, CoreError> {
-    let cipher = Aes256Gcm::new_from_slice(key.as_bytes()).map_err(|e| CoreError::Encryption(e.to_string()))?;
+    seal_raw_with_nonce(key, &random_nonce(), plaintext, aad)
+}
+
+/// A fresh random 96-bit AES-GCM nonce from the OS RNG.
+pub(crate) fn random_nonce() -> [u8; NONCE_LEN] {
     let mut nonce_bytes = [0u8; NONCE_LEN];
     rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    nonce_bytes
+}
+
+/// Raw seal with a caller-chosen nonce: `nonce(12) || AES-256-GCM(key, nonce,
+/// plaintext, aad)`. Callers MUST pass a fresh [`random_nonce`] — the only
+/// reason this exists is that chunk format v2 binds frame 0's nonce (the
+/// per-upload version id) into frame 0's own AAD, so the nonce has to be known
+/// before the AAD is built.
+pub(crate) fn seal_raw_with_nonce(
+    key: &FileKey,
+    nonce_bytes: &[u8; NONCE_LEN],
+    plaintext: &[u8],
+    aad: &[u8],
+) -> Result<Vec<u8>, CoreError> {
+    let cipher = Aes256Gcm::new_from_slice(key.as_bytes()).map_err(|e| CoreError::Encryption(e.to_string()))?;
+    let nonce = Nonce::from_slice(nonce_bytes);
     let ciphertext = cipher
         .encrypt(nonce, Payload { msg: plaintext, aad })
         .map_err(|e| CoreError::Encryption(e.to_string()))?;
     let mut out = Vec::with_capacity(NONCE_LEN + ciphertext.len());
-    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(nonce_bytes);
     out.extend_from_slice(&ciphertext);
     Ok(out)
 }
@@ -371,13 +531,16 @@ pub(crate) fn open_raw_with_aad(key: &FileKey, raw: &[u8], aad: &[u8]) -> Result
 /// remove-on-error pattern as [`decrypt_contiguous_to_file`].)
 ///
 /// **Chunk format (task 1908):** the chunks are opened in order as one file's
-/// stream — v2 (position-bound) or v1 (legacy), decided by chunk 0 and locked.
-/// `file_id` is the id the file was uploaded under (bound into every v2 frame).
-/// A v2 file that is reordered, has a chunk duplicated/dropped/appended, or
-/// ends before its last chunk is rejected.
+/// stream. `file_id` is the id the file was uploaded under (bound into every
+/// v2 frame); `expected` comes from the file's encrypted metadata
+/// ([`decrypt_name_metadata`]): `V2` accepts only v2 frames, `Unrecorded`
+/// (legacy metadata) lets chunk 0 decide. A v2 file that is reordered, mixes
+/// frames of two uploads, has a chunk duplicated/dropped/appended, or ends
+/// before its last chunk is rejected.
 pub fn decrypt_chunks_to_file(
     key: &FileKey,
     file_id: &str,
+    expected: crate::chunk_stream::ExpectedChunkFormat,
     chunks: Vec<(Vec<u8>, Vec<u8>)>, // Vec of (nonce, ciphertext) pairs
     output_path: &str,
 ) -> Result<u64, CoreError> {
@@ -386,7 +549,7 @@ pub fn decrypt_chunks_to_file(
 
     // Inner helper does the streaming decrypt into the .tmp; on ANY Err the
     // outer code removes the .tmp so no partial plaintext survives at output_path.
-    let result = decrypt_chunks_to_tmp(key, file_id, chunks, &tmp_path);
+    let result = decrypt_chunks_to_tmp(key, file_id, expected, chunks, &tmp_path);
 
     match result {
         Ok(total) => {
@@ -411,6 +574,7 @@ pub fn decrypt_chunks_to_file(
 fn decrypt_chunks_to_tmp(
     key: &FileKey,
     file_id: &str,
+    expected: crate::chunk_stream::ExpectedChunkFormat,
     chunks: Vec<(Vec<u8>, Vec<u8>)>,
     tmp_path: &str,
 ) -> Result<u64, CoreError> {
@@ -418,7 +582,7 @@ fn decrypt_chunks_to_tmp(
     use std::io::Write;
 
     let mut file = File::create(tmp_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
-    let mut opener = crate::chunk_stream::StreamOpener::new(file_id);
+    let mut opener = crate::chunk_stream::StreamOpener::new(key, file_id, expected);
     let mut total: u64 = 0;
     for (nonce, ciphertext) in chunks {
         if nonce.len() != NONCE_LEN {
@@ -468,14 +632,17 @@ pub fn decrypt_chunk_raw(key: &FileKey, raw: &[u8]) -> Result<Vec<u8>, CoreError
 /// `.tmp` + atomic-rename pattern as
 /// [`crate::file_encrypt::decrypt_chunks_to_file`].)
 ///
-/// **Chunk format (task 1908):** the body is opened as one file's stream — v2
-/// (position-bound) or v1 (legacy), decided by chunk 0 and locked. `file_id`
-/// is the id the file was uploaded under (bound into every v2 frame). A v2 body
-/// that is reordered, spliced, has trailing frames, or ends before its last
+/// **Chunk format (task 1908):** the body is opened as one file's stream.
+/// `file_id` is the id the file was uploaded under (bound into every v2 frame);
+/// `expected` comes from the file's encrypted metadata
+/// ([`decrypt_name_metadata`]): `V2` accepts only v2 frames, `Unrecorded`
+/// (legacy metadata) lets chunk 0 decide. A v2 body that is reordered, spliced
+/// (within or across uploads), has trailing frames, or ends before its last
 /// chunk is rejected.
 pub fn decrypt_contiguous_to_file(
     key: &FileKey,
     file_id: &str,
+    expected: crate::chunk_stream::ExpectedChunkFormat,
     body: &[u8],
     chunk_size: u64,
     output_path: &str,
@@ -496,7 +663,7 @@ pub fn decrypt_contiguous_to_file(
 
     // Inner closure does the streaming decrypt; on ANY Err the outer code
     // removes the .tmp so no partial plaintext survives at output_path.
-    let result = decrypt_contiguous_to_tmp(key, file_id, body, encrypted_chunk_len, &tmp_path);
+    let result = decrypt_contiguous_to_tmp(key, file_id, expected, body, encrypted_chunk_len, &tmp_path);
 
     match result {
         Ok(total) => {
@@ -520,6 +687,7 @@ pub fn decrypt_contiguous_to_file(
 fn decrypt_contiguous_to_tmp(
     key: &FileKey,
     file_id: &str,
+    expected: crate::chunk_stream::ExpectedChunkFormat,
     body: &[u8],
     encrypted_chunk_len: usize,
     tmp_path: &str,
@@ -528,7 +696,7 @@ fn decrypt_contiguous_to_tmp(
     use std::io::Write;
 
     let mut file = File::create(tmp_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
-    let mut opener = crate::chunk_stream::StreamOpener::new(file_id);
+    let mut opener = crate::chunk_stream::StreamOpener::new(key, file_id, expected);
     let mut total: u64 = 0;
     let mut offset = 0usize;
 
@@ -556,6 +724,7 @@ fn decrypt_contiguous_to_tmp(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chunk_stream::ExpectedChunkFormat::{Unrecorded, V2};
     use crate::kdf::{derive_file_key, derive_master_key};
 
     fn test_file_key() -> FileKey {
@@ -673,7 +842,7 @@ mod tests {
         let path = dir.join("beebeeb_test_decrypt_chunks.bin");
         let path_str = path.to_str().unwrap();
 
-        let total = decrypt_chunks_to_file(&key, "test-file-id", chunks, path_str).unwrap();
+        let total = decrypt_chunks_to_file(&key, "test-file-id", Unrecorded, chunks, path_str).unwrap();
         assert_eq!(total, (chunk1.len() + chunk2.len()) as u64);
 
         let written = std::fs::read(&path).unwrap();
@@ -696,7 +865,7 @@ mod tests {
         let path_str = path.to_str().unwrap();
         std::fs::remove_file(&path).ok();
 
-        let err = decrypt_chunks_to_file(&key, "test-file-id", vec![], path_str).unwrap_err();
+        let err = decrypt_chunks_to_file(&key, "test-file-id", Unrecorded, vec![], path_str).unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         assert!(!path.exists(), "no output may appear for a zero-frame file");
     }
@@ -720,7 +889,7 @@ mod tests {
         std::fs::remove_file(&path).ok();
         std::fs::remove_file(&tmp).ok();
 
-        let err = decrypt_chunks_to_file(&key, "test-file-id", chunks, path.to_str().unwrap()).unwrap_err();
+        let err = decrypt_chunks_to_file(&key, "test-file-id", Unrecorded, chunks, path.to_str().unwrap()).unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         assert!(
             !path.exists(),
@@ -742,7 +911,7 @@ mod tests {
         let path = dir.join("beebeeb_test_decrypt_wrong_key.bin");
         let path_str = path.to_str().unwrap();
 
-        assert!(decrypt_chunks_to_file(&wrong_key, "test-file-id", chunks, path_str).is_err());
+        assert!(decrypt_chunks_to_file(&wrong_key, "test-file-id", Unrecorded, chunks, path_str).is_err());
 
         std::fs::remove_file(&path).ok();
     }
@@ -775,8 +944,15 @@ mod tests {
         body.extend(pack_chunk(&blob2));
 
         let path = std::env::temp_dir().join("beebeeb_test_contig_uniform.bin");
-        let total =
-            decrypt_contiguous_to_file(&key, "test-file-id", &body, chunk_size, path.to_str().unwrap()).unwrap();
+        let total = decrypt_contiguous_to_file(
+            &key,
+            "test-file-id",
+            Unrecorded,
+            &body,
+            chunk_size,
+            path.to_str().unwrap(),
+        )
+        .unwrap();
         assert_eq!(total, 16);
 
         let written = std::fs::read(&path).unwrap();
@@ -796,8 +972,15 @@ mod tests {
         body.extend(pack_chunk(&blob2));
 
         let path = std::env::temp_dir().join("beebeeb_test_contig_remainder.bin");
-        let total =
-            decrypt_contiguous_to_file(&key, "test-file-id", &body, chunk_size, path.to_str().unwrap()).unwrap();
+        let total = decrypt_contiguous_to_file(
+            &key,
+            "test-file-id",
+            Unrecorded,
+            &body,
+            chunk_size,
+            path.to_str().unwrap(),
+        )
+        .unwrap();
         assert_eq!(total, 11);
 
         let written = std::fs::read(&path).unwrap();
@@ -813,7 +996,8 @@ mod tests {
         let key = test_file_key();
         let path = std::env::temp_dir().join("beebeeb_test_contig_empty.bin");
         std::fs::remove_file(&path).ok();
-        let err = decrypt_contiguous_to_file(&key, "test-file-id", &[], 8, path.to_str().unwrap()).unwrap_err();
+        let err =
+            decrypt_contiguous_to_file(&key, "test-file-id", Unrecorded, &[], 8, path.to_str().unwrap()).unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         assert!(!path.exists(), "no output may appear for an empty body");
     }
@@ -841,20 +1025,21 @@ mod tests {
         let key = derive_file_key(&mk, b"contig-v2");
         let path = std::env::temp_dir().join("beebeeb_test_contig_v2.bin");
 
-        let total = decrypt_contiguous_to_file(&key, "contig-v2", &frames.concat(), 8, path.to_str().unwrap()).unwrap();
+        let total =
+            decrypt_contiguous_to_file(&key, "contig-v2", V2, &frames.concat(), 8, path.to_str().unwrap()).unwrap();
         assert_eq!(total, data.len() as u64);
         assert_eq!(std::fs::read(&path).unwrap(), data);
         std::fs::remove_file(&path).ok();
 
         // Equal-size chunks 0 and 1 swapped: must fail, and leave no output.
         let swapped = [frames[1].clone(), frames[0].clone(), frames[2].clone()].concat();
-        let err = decrypt_contiguous_to_file(&key, "contig-v2", &swapped, 8, path.to_str().unwrap()).unwrap_err();
+        let err = decrypt_contiguous_to_file(&key, "contig-v2", V2, &swapped, 8, path.to_str().unwrap()).unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         assert!(!path.exists());
 
         // Last chunk withheld: truncation must fail.
         let truncated = [frames[0].clone(), frames[1].clone()].concat();
-        let err = decrypt_contiguous_to_file(&key, "contig-v2", &truncated, 8, path.to_str().unwrap()).unwrap_err();
+        let err = decrypt_contiguous_to_file(&key, "contig-v2", V2, &truncated, 8, path.to_str().unwrap()).unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         assert!(!path.exists());
     }
@@ -871,13 +1056,13 @@ mod tests {
         };
         let path = std::env::temp_dir().join("beebeeb_test_pairs_v2.bin");
 
-        let total = decrypt_chunks_to_file(&key, "pairs-v2", pairs(&frames), path.to_str().unwrap()).unwrap();
+        let total = decrypt_chunks_to_file(&key, "pairs-v2", V2, pairs(&frames), path.to_str().unwrap()).unwrap();
         assert_eq!(total, data.len() as u64);
         std::fs::remove_file(&path).ok();
 
         // Middle chunk dropped: must fail.
         let dropped = [frames[0].clone(), frames[2].clone()];
-        let err = decrypt_chunks_to_file(&key, "pairs-v2", pairs(&dropped), path.to_str().unwrap()).unwrap_err();
+        let err = decrypt_chunks_to_file(&key, "pairs-v2", V2, pairs(&dropped), path.to_str().unwrap()).unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         assert!(!path.exists());
     }
@@ -887,7 +1072,8 @@ mod tests {
         let key = test_file_key();
         let body = vec![0u8; NONCE_LEN + 16];
         let path = std::env::temp_dir().join("beebeeb_test_contig_zero.bin");
-        let err = decrypt_contiguous_to_file(&key, "test-file-id", &body, 0, path.to_str().unwrap()).unwrap_err();
+        let err =
+            decrypt_contiguous_to_file(&key, "test-file-id", Unrecorded, &body, 0, path.to_str().unwrap()).unwrap_err();
         match err {
             CoreError::InvalidInput(_) => {}
             other => panic!("expected InvalidInput, got {other:?}"),
@@ -906,7 +1092,8 @@ mod tests {
         let blob = encrypt_chunk(&key, b"secrets").unwrap();
         let body = pack_chunk(&blob);
         let path = std::env::temp_dir().join("beebeeb_test_contig_wrong_key.bin");
-        let err = decrypt_contiguous_to_file(&wrong_key, "test-file-id", &body, 7, path.to_str().unwrap()).unwrap_err();
+        let err = decrypt_contiguous_to_file(&wrong_key, "test-file-id", Unrecorded, &body, 7, path.to_str().unwrap())
+            .unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         std::fs::remove_file(&path).ok();
     }
@@ -917,7 +1104,8 @@ mod tests {
         // Body shorter than NONCE_LEN + TAG_LEN — cannot even attempt decrypt.
         let body = vec![0u8; NONCE_LEN + 8]; // 8 bytes < 16 byte tag
         let path = std::env::temp_dir().join("beebeeb_test_contig_truncated.bin");
-        let err = decrypt_contiguous_to_file(&key, "test-file-id", &body, 64, path.to_str().unwrap()).unwrap_err();
+        let err = decrypt_contiguous_to_file(&key, "test-file-id", Unrecorded, &body, 64, path.to_str().unwrap())
+            .unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         std::fs::remove_file(&path).ok();
     }
@@ -943,8 +1131,15 @@ mod tests {
         // Ensure a stale file from a prior run does not mask the assertion.
         std::fs::remove_file(&path).ok();
 
-        let err =
-            decrypt_contiguous_to_file(&key, "test-file-id", &body, chunk_size, path.to_str().unwrap()).unwrap_err();
+        let err = decrypt_contiguous_to_file(
+            &key,
+            "test-file-id",
+            Unrecorded,
+            &body,
+            chunk_size,
+            path.to_str().unwrap(),
+        )
+        .unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         assert!(
             !path.exists(),
@@ -970,7 +1165,8 @@ mod tests {
         let path = std::env::temp_dir().join("beebeeb_test_contig_atomic_firstfail.bin");
         std::fs::remove_file(&path).ok();
 
-        let err = decrypt_contiguous_to_file(&wrong_key, "test-file-id", &body, 8, path.to_str().unwrap()).unwrap_err();
+        let err = decrypt_contiguous_to_file(&wrong_key, "test-file-id", Unrecorded, &body, 8, path.to_str().unwrap())
+            .unwrap_err();
         assert!(matches!(err, CoreError::Decryption));
         assert!(
             !path.exists(),
@@ -1239,5 +1435,97 @@ mod tests {
 
         // Plaintext fast path also works on the known-key entry point.
         assert_eq!(decrypt_name_with_key(&fk, "Inbox").as_deref(), Some("Inbox"));
+    }
+
+    // ── Task 1908: chunk format recorded in the encrypted name metadata ──────
+
+    /// Decrypt the raw metadata plaintext of a native-blob `name_encrypted`.
+    fn metadata_plaintext(mk: &MasterKey, file_id: &str, name_encrypted: &str) -> String {
+        let fk = derive_file_key(mk, file_id.as_bytes());
+        decrypt_envelope_plaintext(&fk, name_encrypted).unwrap()
+    }
+
+    /// Seal an arbitrary metadata plaintext as a native `name_encrypted`.
+    fn seal_metadata(mk: &MasterKey, file_id: &str, plaintext: &str) -> String {
+        let fk = derive_file_key(mk, file_id.as_bytes());
+        serde_json::to_string(&encrypt_metadata(&fk, plaintext).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn name_metadata_records_v2_and_reads_it_back() {
+        let mk = name_master_key();
+        let ne = encrypt_name_with_chunk_format(&mk, NAME_FID, "a.pdf", Some("application/pdf"), V2).unwrap();
+        let meta = decrypt_name_metadata(&mk, NAME_FID, &ne).unwrap();
+        assert_eq!(meta.name, "a.pdf");
+        assert_eq!(meta.mime_type.as_deref(), Some("application/pdf"));
+        assert_eq!(meta.chunk_format, V2);
+        // The existing readers still see the same name/MIME.
+        assert_eq!(decrypt_name(&mk, NAME_FID, &ne).unwrap(), "a.pdf");
+        // Known-key reader (share recipients) agrees.
+        let fk = derive_file_key(&mk, NAME_FID.as_bytes());
+        assert_eq!(decrypt_name_metadata_with_key(&fk, &ne).unwrap().chunk_format, V2);
+    }
+
+    #[test]
+    fn encrypt_name_writes_no_chunk_format_field() {
+        // Unrecorded = byte-for-byte the pre-1908 plaintext shape, so every
+        // existing reader and every pre-1908 client sees what it always saw.
+        let mk = name_master_key();
+        let ne = encrypt_name(&mk, NAME_FID, "b.txt", None).unwrap();
+        assert_eq!(
+            metadata_plaintext(&mk, NAME_FID, &ne),
+            r#"{"mime_type":null,"name":"b.txt"}"#
+        );
+        assert_eq!(
+            decrypt_name_metadata(&mk, NAME_FID, &ne).unwrap().chunk_format,
+            Unrecorded
+        );
+        let ne2 = encrypt_name_with_chunk_format(&mk, NAME_FID, "b.txt", None, Unrecorded).unwrap();
+        assert_eq!(
+            metadata_plaintext(&mk, NAME_FID, &ne2),
+            r#"{"mime_type":null,"name":"b.txt"}"#
+        );
+        let ne3 = encrypt_name_with_chunk_format(&mk, NAME_FID, "b.txt", None, V2).unwrap();
+        assert_eq!(
+            metadata_plaintext(&mk, NAME_FID, &ne3),
+            r#"{"chunk_format":2,"mime_type":null,"name":"b.txt"}"#
+        );
+    }
+
+    #[test]
+    fn name_metadata_legacy_shapes_are_unrecorded() {
+        let mk = name_master_key();
+        // Plaintext legacy name.
+        let meta = decrypt_name_metadata(&mk, NAME_FID, "Inbox").unwrap();
+        assert_eq!((meta.name.as_str(), meta.chunk_format), ("Inbox", Unrecorded));
+        // Bare-filename plaintext inside an envelope.
+        let ne = seal_metadata(&mk, NAME_FID, "old-name.txt");
+        let meta = decrypt_name_metadata(&mk, NAME_FID, &ne).unwrap();
+        assert_eq!((meta.name.as_str(), meta.chunk_format), ("old-name.txt", Unrecorded));
+    }
+
+    #[test]
+    fn name_metadata_unknown_chunk_format_is_an_error_not_detection() {
+        let mk = name_master_key();
+        for bad in [
+            r#"{"name":"x","chunk_format":1}"#,
+            r#"{"name":"x","chunk_format":0}"#,
+            r#"{"name":"x","chunk_format":3}"#,
+            r#"{"name":"x","chunk_format":"2"}"#,
+            r#"{"name":"x","chunk_format":null}"#,
+        ] {
+            let ne = seal_metadata(&mk, NAME_FID, bad);
+            assert!(decrypt_name_metadata(&mk, NAME_FID, &ne).is_err(), "{bad}");
+        }
+        let ne = seal_metadata(&mk, NAME_FID, r#"{"name":"x","chunk_format":2}"#);
+        assert_eq!(decrypt_name_metadata(&mk, NAME_FID, &ne).unwrap().chunk_format, V2);
+    }
+
+    #[test]
+    fn name_metadata_wrong_key_fails() {
+        let mk = name_master_key();
+        let ne = encrypt_name_with_chunk_format(&mk, NAME_FID, "a", None, V2).unwrap();
+        let other = derive_master_key("other-password", b"test-salt-16bytes").unwrap();
+        assert!(decrypt_name_metadata(&other, NAME_FID, &ne).is_err());
     }
 }
