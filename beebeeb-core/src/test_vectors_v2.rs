@@ -174,6 +174,24 @@ mod tests {
         }
     }
 
+    /// Every content vector derives the SAME chunk key (one master key, one
+    /// file id), so their fixed nonces must never repeat across vectors either
+    /// (`with_vector_nonces` only sees one stream). E.g. `0xc0 | i` would reach
+    /// the single-frame vector's `0xd0` at i = 16.
+    #[test]
+    fn fixed_nonces_never_repeat_under_one_key() {
+        let mut seen = std::collections::HashSet::new();
+        let mut frames = 0;
+        for v in v2_vectors().iter().filter(|v| v.get("frames").is_some()) {
+            for f in v["frames"].as_array().unwrap() {
+                frames += 1;
+                let n = f["nonce_hex"].as_str().unwrap().to_string();
+                assert!(seen.insert(n.clone()), "nonce {n} repeats under the shared chunk key");
+            }
+        }
+        assert_eq!(frames, 4, "3 stream frames + 1 single frame");
+    }
+
     /// Writes the v2 vectors (and version 5) into `test-vectors/vectors.json`,
     /// leaving every other vector as it is. Run on purpose only.
     #[test]

@@ -151,7 +151,9 @@ pub(crate) fn encrypt_name_sealed(
     chunk_format: crate::chunk_stream::ExpectedChunkFormat,
     seal: MetadataSeal,
 ) -> Result<String, CoreError> {
-    encrypt_name_sealed_with_nonce(master_key, file_id, filename, mime_type, chunk_format, seal, None)
+    let (key, plaintext) = name_envelope(master_key, file_id, filename, mime_type, chunk_format, seal);
+    let blob = encrypt_metadata(&key, &plaintext)?;
+    serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
 }
 
 /// [`encrypt_name_with_chunk_format`] with a FIXED nonce — for the published
@@ -170,28 +172,29 @@ pub fn encrypt_name_with_chunk_format_and_nonce(
     nonce: [u8; NONCE_LEN],
 ) -> Result<String, CoreError> {
     let seal = metadata_seal_for(crate::chunk_stream::chunk_format_for_pin(chunk_format));
-    encrypt_name_sealed_with_nonce(
-        master_key,
-        file_id,
-        filename,
-        mime_type,
-        chunk_format,
-        seal,
-        Some(nonce),
-    )
+    let (key, plaintext) = name_envelope(master_key, file_id, filename, mime_type, chunk_format, seal);
+    // The same blob `encrypt_metadata` builds (no AAD), with the given nonce.
+    let frame = seal_raw_with_nonce(&key, &nonce, plaintext.as_bytes(), &[])?;
+    let blob = EncryptedBlob {
+        cipher_suite: CipherSuite::V1Aes256Gcm,
+        nonce: frame[..NONCE_LEN].to_vec(),
+        ciphertext: frame[NONCE_LEN..].to_vec(),
+    };
+    serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
 }
 
-/// [`encrypt_name_sealed`] whose nonce is random (`None`, every real writer) or
-/// fixed (`Some`, known-answer vectors only).
-fn encrypt_name_sealed_with_nonce(
+/// The name/MIME envelope plaintext and the key it is sealed under — shared by
+/// the real writer ([`encrypt_name_sealed`], random nonce) and the vector seam
+/// ([`encrypt_name_with_chunk_format_and_nonce`]), so a fixed nonce is never a
+/// parameter of any code a shipped build compiles.
+fn name_envelope(
     master_key: &crate::kdf::MasterKey,
     file_id: &str,
     filename: &str,
     mime_type: Option<&str>,
     chunk_format: crate::chunk_stream::ExpectedChunkFormat,
     seal: MetadataSeal,
-    nonce: Option<[u8; NONCE_LEN]>,
-) -> Result<String, CoreError> {
+) -> (FileKey, String) {
     let mut meta = serde_json::json!({
         "name": filename,
         "mime_type": mime_type,
@@ -205,19 +208,7 @@ fn encrypt_name_sealed_with_nonce(
         MetadataSeal::Legacy => file_key,
         MetadataSeal::Subkey => derive_name_key(&file_key),
     };
-    let blob = match nonce {
-        None => encrypt_metadata(&key, &plaintext)?,
-        // The same blob `encrypt_metadata` builds (no AAD), with the given nonce.
-        Some(n) => {
-            let frame = seal_raw_with_nonce(&key, &n, plaintext.as_bytes(), &[])?;
-            EncryptedBlob {
-                cipher_suite: CipherSuite::V1Aes256Gcm,
-                nonce: frame[..NONCE_LEN].to_vec(),
-                ciphertext: frame[NONCE_LEN..].to_vec(),
-            }
-        }
-    };
-    serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
+    (key, plaintext)
 }
 
 // ── Metadata sealing: name/MIME envelope + thumbnails (task 1908 round 3, P1-B) ──
@@ -804,10 +795,13 @@ pub(crate) fn random_nonce() -> [u8; NONCE_LEN] {
 }
 
 /// Raw seal with a caller-chosen nonce: `nonce(12) || AES-256-GCM(key, nonce,
-/// plaintext, aad)`. Callers MUST pass a fresh [`random_nonce`] — the only
-/// reason this exists is that chunk format v2 binds frame 0's nonce (the
-/// per-upload version id) into frame 0's own AAD, so the nonce has to be known
-/// before the AAD is built.
+/// plaintext, aad)`. Callers MUST pass a fresh [`random_nonce`], except the
+/// `cfg(test)` / `test-support` known-answer vector seams
+/// ([`ChunkEncryptor::with_vector_nonces`](crate::chunk_stream::ChunkEncryptor::with_vector_nonces),
+/// [`encrypt_name_with_chunk_format_and_nonce`]), which no shipped build
+/// compiles. The only reason this exists is that chunk format v2 binds frame
+/// 0's nonce (the per-upload version id) into frame 0's own AAD, so the nonce
+/// has to be known before the AAD is built.
 pub(crate) fn seal_raw_with_nonce(
     key: &FileKey,
     nonce_bytes: &[u8; NONCE_LEN],
