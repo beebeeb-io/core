@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use zeroize::{Zeroize, Zeroizing};
 
-use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor, ChunkFormat, ExpectedChunkFormat};
+use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor, ChunkFormat, ExpectedChunkFormat, SessionResume};
 use beebeeb_core::constellation;
 use beebeeb_core::encrypt;
 use beebeeb_core::kdf;
@@ -306,7 +306,7 @@ pub fn decrypt_chunk(key: Vec<u8>, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Resul
 ///
 /// **Task 1908:** `file_id` (the id the file was uploaded under) and
 /// `expected_chunk_format` (from the file's encrypted metadata,
-/// `decrypt_name_metadata`: 0 = unrecorded, 2 = v2) are required: the chunks
+/// `decrypt_file_metadata`: 0 = unrecorded, 2 = v2) are required: the chunks
 /// are opened as one file's ordered stream — v2 frames are bound to (file id,
 /// upload, index, last), v1 files still open when the metadata records no
 /// format. Reordered, spliced, duplicated, dropped or truncated v2 chunks fail.
@@ -766,7 +766,7 @@ impl MasterKeyHandle {
     /// format in the encrypted metadata (task 1908): `chunk_format` 2 = every
     /// upload of this file id is v2, 0 = record nothing (identical to
     /// `encrypt_name`). New file: the encryptor's format (2 only if it wrote
-    /// v2). Rename / replace: the value `decrypt_name_metadata` returned for the
+    /// v2). Rename / replace: the value `decrypt_file_metadata` returned for the
     /// file — never upgrade a file with v1 history, never drop a recorded 2.
     pub fn encrypt_name_with_chunk_format(
         &self,
@@ -792,6 +792,23 @@ impl MasterKeyHandle {
     ) -> Result<NameMetadataDto, CryptoError> {
         let meta = self
             .with_key(|mk| encrypt::decrypt_name_metadata(mk, &file_id, &name_encrypted))?
+            .map_err(CryptoError::from)?;
+        Ok(NameMetadataDto::from(meta))
+    }
+
+    /// The metadata reader for FILES (task 1908 round 3): exactly
+    /// `decrypt_name_metadata`, except that a plaintext (non-JSON)
+    /// `name_encrypted` is refused. A plaintext name carries no chunk-format
+    /// pin, so accepting it for a file lets a server re-enable frame-0
+    /// detection. Take the content reader's `chunk_format` from THIS for every
+    /// file; `decrypt_name_metadata` stays for folders / display.
+    pub fn decrypt_file_metadata(
+        &self,
+        file_id: String,
+        name_encrypted: String,
+    ) -> Result<NameMetadataDto, CryptoError> {
+        let meta = self
+            .with_key(|mk| encrypt::decrypt_file_metadata(mk, &file_id, &name_encrypted))?
             .map_err(CryptoError::from)?;
         Ok(NameMetadataDto::from(meta))
     }
@@ -927,7 +944,7 @@ impl MasterKeyHandle {
     /// and writes plaintext to output. Atomic rename at end.
     ///
     /// `expected_chunk_format` (task 1908) comes from the file's encrypted
-    /// metadata (`decrypt_name_metadata`): 0 = unrecorded, 2 = v2.
+    /// metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
     pub fn decrypt_file(
         &self,
         file_id: String,
@@ -1014,6 +1031,34 @@ impl FileKeyHandle {
         Ok(NameMetadataDto::from(meta))
     }
 
+    /// [`MasterKeyHandle::decrypt_file_metadata`] with this file key: refuses a
+    /// plaintext `name_encrypted` (task 1908 round 3). Use it for files.
+    pub fn decrypt_file_metadata(&self, name_encrypted: String) -> Result<NameMetadataDto, CryptoError> {
+        let meta = self
+            .with_key(|fk| encrypt::decrypt_file_metadata_with_key(fk, &name_encrypted))?
+            .map_err(CryptoError::from)?;
+        Ok(NameMetadataDto::from(meta))
+    }
+
+    /// Seal a thumbnail (already-encoded image bytes) for upload: `nonce(12) ||
+    /// ciphertext || tag(16)`, the wire format thumbnails already use. The ONLY
+    /// way to seal a thumbnail (task 1908 round 3) — not `encrypt_chunk`: after
+    /// the gated seal switch it uses the thumbnail subkey, so a thumbnail can
+    /// never be served as file content.
+    pub fn encrypt_thumbnail(&self, plaintext: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
+        let plaintext = Zeroizing::new(plaintext);
+        self.with_key(|fk| encrypt::encrypt_thumbnail(fk, &plaintext))?
+            .map_err(Into::into)
+    }
+
+    /// Open a thumbnail frame (`nonce || ct || tag`): the thumbnail subkey
+    /// first, then the legacy raw file key (every thumbnail stored before the
+    /// switch). The ONLY way to open a thumbnail — not `decrypt_chunk`.
+    pub fn decrypt_thumbnail(&self, frame: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
+        self.with_key(|fk| encrypt::decrypt_thumbnail(fk, &frame))?
+            .map_err(Into::into)
+    }
+
     /// Random-access open of ONE file-content frame (`nonce || ct || tag`) at a
     /// known position — for seeking readers (video streaming) that cannot use
     /// the sequential [`ChunkDecryptorHandle`]. `index` is the chunk the caller
@@ -1092,6 +1137,25 @@ pub struct EncryptedChunkDto {
 pub struct DecryptedChunkDto {
     pub index: u32,
     pub data: Vec<u8>,
+}
+
+/// What to do with an interrupted upload session — see
+/// [`ChunkEncryptorHandle::resume_policy`] (task 1908 round 3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum SessionResumeAction {
+    /// Keep the session; re-PUT from chunk 0 (the server skips stored frames).
+    ContinueSession,
+    /// Never PUT to the old session again; upload from chunk 0 into a new one.
+    RestartWithFreshSession,
+}
+
+impl From<SessionResume> for SessionResumeAction {
+    fn from(r: SessionResume) -> Self {
+        match r {
+            SessionResume::ContinueSession => SessionResumeAction::ContinueSession,
+            SessionResume::RestartWithFreshSession => SessionResumeAction::RestartWithFreshSession,
+        }
+    }
 }
 
 /// Decrypted name metadata (task 1908): `chunk_format` is what every content
@@ -1261,6 +1325,19 @@ impl ChunkEncryptorHandle {
         self.with_inner(|e| e.format().as_u8())
     }
 
+    /// Resuming an interrupted upload (task 1908 round 3): may THIS (new)
+    /// encryptor continue the old server upload session? `stored_format` is the
+    /// `chunk_format()` the client persisted next to the session id when it
+    /// opened the session (1 = v1, 2 = v2), or `None` when the resume record
+    /// does not say. Only a v1 session resumed by a v1 encryptor may continue;
+    /// everything else (always for v2) must abandon the session and upload
+    /// from chunk 0 into a FRESH session — a v2 upload's frames all bind one
+    /// version id, and a new encryptor has a new one.
+    pub fn resume_policy(&self, stored_format: Option<u8>) -> Result<SessionResumeAction, CryptoError> {
+        let stored = stored_format.map(ChunkFormat::from_u8).transpose()?;
+        self.with_inner(|e| SessionResumeAction::from(e.resume_policy(stored)))
+    }
+
     /// Consume the encryptor (by value) and return the summary after the integrity
     /// guard (detects a source that shrank). The handle is unusable afterwards.
     pub fn finish(&self) -> Result<ChunkEncryptorSummaryDto, CryptoError> {
@@ -1301,7 +1378,7 @@ impl ChunkDecryptorHandle {
     /// frame is `nonce(12) + chunk_size + tag(16)`). Errors if it is 0.
     ///
     /// `expected_chunk_format` (task 1908) comes from the file's encrypted
-    /// metadata (`decrypt_name_metadata`): 0 = unrecorded, 2 = v2.
+    /// metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
     #[uniffi::constructor]
     pub fn from_file(
         master_key: &MasterKeyHandle,
@@ -1330,7 +1407,7 @@ impl ChunkDecryptorHandle {
     /// size is needed.
     ///
     /// `expected_chunk_format` (task 1908) comes from the file's encrypted
-    /// metadata (`decrypt_name_metadata`): 0 = unrecorded, 2 = v2.
+    /// metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
     #[uniffi::constructor]
     pub fn for_push(
         master_key: &MasterKeyHandle,
@@ -1549,6 +1626,48 @@ mod chunk_stream_handle_tests {
             mk.encrypt_name_with_chunk_format(id.into(), "a".into(), None, 1)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn handle_file_metadata_refuses_plaintext_folder_reader_keeps_it() {
+        // Round 3 P1-B through the FFI: files refuse a plaintext name.
+        let mk = mk_handle();
+        let id = "ffi-plaintext";
+        assert!(mk.decrypt_file_metadata(id.into(), "innocent.txt".into()).is_err());
+        assert_eq!(
+            mk.decrypt_name_metadata(id.into(), "Photos".into()).unwrap().name,
+            "Photos"
+        );
+        let fk = mk.derive_file_key(id.as_bytes().to_vec()).unwrap();
+        assert!(fk.decrypt_file_metadata("innocent.txt".into()).is_err());
+        // A real envelope reads through both file readers.
+        let ne = mk.encrypt_name(id.into(), "a.pdf".into(), None).unwrap();
+        assert_eq!(mk.decrypt_file_metadata(id.into(), ne.clone()).unwrap().name, "a.pdf");
+        assert_eq!(fk.decrypt_file_metadata(ne).unwrap().chunk_format, 0);
+    }
+
+    #[test]
+    fn handle_thumbnail_roundtrip_and_resume_policy() {
+        let mk = mk_handle();
+        let fk = mk.derive_file_key(b"ffi-thumb".to_vec()).unwrap();
+        let sealed = fk.encrypt_thumbnail(b"webp bytes".to_vec()).unwrap();
+        assert_eq!(fk.decrypt_thumbnail(sealed).unwrap(), b"webp bytes");
+
+        // Round 3 P1-A through the FFI: the default (v1) encryptor may continue
+        // a v1 session; an unrecorded record restarts; unknown codes are errors.
+        let enc = ChunkEncryptorHandle::for_push(&mk, "ffi-resume".into(), 10, "mobile".into()).unwrap();
+        assert_eq!(
+            enc.resume_policy(Some(1)).unwrap(),
+            SessionResumeAction::ContinueSession
+        );
+        for stored in [None, Some(2)] {
+            assert_eq!(
+                enc.resume_policy(stored).unwrap(),
+                SessionResumeAction::RestartWithFreshSession,
+                "stored {stored:?}"
+            );
+        }
+        assert!(enc.resume_policy(Some(3)).is_err());
     }
 
     /// Parse a native `name_encrypted` envelope (numeric-array JSON).
@@ -3058,7 +3177,7 @@ impl beebeeb_upload::DownloadProgressCallback for DownloadCallbackBridge<'_> {
 /// decrypts each with AES-256-GCM, and writes to `output_path`.
 ///
 /// `expected_chunk_format` (task 1908) comes from the file's encrypted
-/// metadata (`decrypt_name_metadata`): 0 = unrecorded, 2 = v2.
+/// metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
 #[uniffi::export]
 pub fn download_and_decrypt_file(
     api_url: String,

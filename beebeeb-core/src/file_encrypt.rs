@@ -192,7 +192,7 @@ pub fn encrypt_file_to_chunks(
 /// [`crate::encrypt::decrypt_contiguous_to_file`].)
 ///
 /// `expected` comes from the file's encrypted metadata
-/// ([`crate::encrypt::decrypt_name_metadata`]) — task 1908.
+/// ([`crate::encrypt::decrypt_file_metadata`]) — task 1908.
 pub fn decrypt_chunks_to_file(
     master_key: &MasterKey,
     file_id: &str,

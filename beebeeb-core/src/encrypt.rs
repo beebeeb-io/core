@@ -108,7 +108,7 @@ pub const METADATA_CHUNK_FORMAT_FIELD: &str = "chunk_format";
 /// - new file id: pass [`ExpectedChunkFormat::recorded_for`] of the encryptor's
 ///   [`format`](crate::chunk_stream::ChunkEncryptor::format);
 /// - rename / replace of an existing file: pass the value you decrypted from
-///   its current metadata ([`decrypt_name_metadata`]) — never upgrade a file id
+///   its current metadata ([`decrypt_file_metadata`]) — never upgrade a file id
 ///   with v1 history to `V2` (its old versions would stop opening), and never
 ///   drop a recorded `V2` (that silently re-enables detection for the file).
 ///
@@ -121,6 +121,30 @@ pub fn encrypt_name_with_chunk_format(
     mime_type: Option<&str>,
     chunk_format: crate::chunk_stream::ExpectedChunkFormat,
 ) -> Result<String, CoreError> {
+    // A v2 file's metadata is ALWAYS sealed under the name subkey: only a
+    // reader on this core can open v2 content anyway, so nothing breaks, and a
+    // v2 file then has no blob under its raw file key at all. Everything else
+    // follows the write switch (legacy during the read-only phase, so clients
+    // not yet on this core keep reading the names this core writes).
+    let seal = if chunk_format == crate::chunk_stream::ExpectedChunkFormat::V2 {
+        MetadataSeal::Subkey
+    } else {
+        METADATA_SEAL_WRITE
+    };
+    encrypt_name_sealed(master_key, file_id, filename, mime_type, chunk_format, seal)
+}
+
+/// [`encrypt_name_with_chunk_format`] with an explicit seal — crate-internal,
+/// so no shipped client can write subkey-sealed names for a v1 file ahead of
+/// the [`METADATA_SEAL_WRITE`] switch.
+pub(crate) fn encrypt_name_sealed(
+    master_key: &crate::kdf::MasterKey,
+    file_id: &str,
+    filename: &str,
+    mime_type: Option<&str>,
+    chunk_format: crate::chunk_stream::ExpectedChunkFormat,
+    seal: MetadataSeal,
+) -> Result<String, CoreError> {
     let mut meta = serde_json::json!({
         "name": filename,
         "mime_type": mime_type,
@@ -130,8 +154,87 @@ pub fn encrypt_name_with_chunk_format(
     }
     let plaintext = meta.to_string();
     let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
-    let blob = encrypt_metadata(&file_key, &plaintext)?;
+    let blob = match seal {
+        MetadataSeal::Legacy => encrypt_metadata(&file_key, &plaintext)?,
+        MetadataSeal::Subkey => encrypt_metadata(&derive_name_key(&file_key), &plaintext)?,
+    };
     serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
+}
+
+// ── Metadata sealing: name/MIME envelope + thumbnails (task 1908 round 3, P1-B) ──
+//
+// Before this, the name/MIME envelope and the thumbnails were AES-256-GCM with
+// no AAD under the RAW per-file key — the same key and the same (empty) AAD as
+// a v1 content frame. So a server could serve a file's own name envelope or
+// thumbnail as a one-frame "v1 file" wherever a reader detects the format
+// (metadata that records none). New blobs are sealed under purpose-bound
+// subkeys instead, so they can never open as content (v1: raw key; v2: chunk
+// subkey) or as each other. Readers try the subkey first, then the legacy raw
+// key, so every blob already stored keeps opening.
+
+/// HKDF-SHA256 `info` of the name/MIME-envelope subkey (ikm = the per-file key).
+pub const NAME_KEY_INFO: &[u8; 15] = b"beebeeb/name/v1";
+
+/// HKDF-SHA256 `info` of the thumbnail subkey (ikm = the per-file key).
+pub const THUMBNAIL_KEY_INFO: &[u8; 16] = b"beebeeb/thumb/v1";
+
+/// How a name envelope or thumbnail is sealed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MetadataSeal {
+    /// The raw per-file key, no AAD — every blob written before task 1908
+    /// round 3, and what clients not yet on this core can read.
+    Legacy,
+    /// The purpose subkey ([`NAME_KEY_INFO`] / [`THUMBNAIL_KEY_INFO`]).
+    Subkey,
+}
+
+/// How new name envelopes (of files whose metadata records no v2 format) and
+/// new thumbnails are sealed. Tied to [`crate::chunk_stream::WRITE_FORMAT`] so
+/// the two flip in ONE gated release: while content is still written as v1,
+/// a subkey-sealed name would be unreadable by every client not yet on this
+/// core, and there is no v2 file for it to protect. A name that records
+/// `chunk_format: 2` is subkey-sealed regardless.
+pub const METADATA_SEAL_WRITE: MetadataSeal = match crate::chunk_stream::WRITE_FORMAT {
+    crate::chunk_stream::ChunkFormat::V1Legacy => MetadataSeal::Legacy,
+    crate::chunk_stream::ChunkFormat::V2 => MetadataSeal::Subkey,
+};
+
+/// Name/MIME-envelope subkey of a per-file key.
+pub(crate) fn derive_name_key(file_key: &FileKey) -> FileKey {
+    crate::kdf::derive_file_subkey(file_key, NAME_KEY_INFO)
+}
+
+/// Thumbnail subkey of a per-file key.
+pub(crate) fn derive_thumbnail_key(file_key: &FileKey) -> FileKey {
+    crate::kdf::derive_file_subkey(file_key, THUMBNAIL_KEY_INFO)
+}
+
+/// Encrypt a thumbnail (already-encoded image bytes) for upload. Wire format
+/// unchanged: `nonce(12) || ciphertext || tag(16)` (web `thumbnail.ts`). Sealed
+/// per [`METADATA_SEAL_WRITE`]; read it back with [`decrypt_thumbnail`]. This
+/// is the only way clients should seal a thumbnail — not
+/// [`encrypt_chunk_raw`] / `encrypt_chunk`.
+pub fn encrypt_thumbnail(file_key: &FileKey, plaintext: &[u8]) -> Result<Vec<u8>, CoreError> {
+    encrypt_thumbnail_sealed(file_key, plaintext, METADATA_SEAL_WRITE)
+}
+
+/// [`encrypt_thumbnail`] with an explicit seal — crate-internal (tests), so no
+/// client can write subkey-sealed thumbnails ahead of the switch.
+pub(crate) fn encrypt_thumbnail_sealed(
+    file_key: &FileKey,
+    plaintext: &[u8],
+    seal: MetadataSeal,
+) -> Result<Vec<u8>, CoreError> {
+    match seal {
+        MetadataSeal::Legacy => seal_raw_with_aad(file_key, plaintext, &[]),
+        MetadataSeal::Subkey => seal_raw_with_aad(&derive_thumbnail_key(file_key), plaintext, &[]),
+    }
+}
+
+/// Decrypt a thumbnail frame (`nonce || ct || tag`): the thumbnail subkey
+/// first, then the legacy raw file key (thumbnails stored before the switch).
+pub fn decrypt_thumbnail(file_key: &FileKey, frame: &[u8]) -> Result<Vec<u8>, CoreError> {
+    open_raw_with_aad(&derive_thumbnail_key(file_key), frame, &[]).or_else(|_| open_raw_with_aad(file_key, frame, &[]))
 }
 
 /// The decrypted name metadata of a file, including the chunk format its
@@ -150,9 +253,13 @@ pub struct NameMetadata {
 }
 
 /// Decrypt `name_encrypted` (same format + key matrix as [`decrypt_name`]) and
-/// return the name, MIME type and the [`ExpectedChunkFormat`] the file's
-/// content must be read with. Fails if the envelope records a chunk format
-/// this core does not know (never a silent fallback to detection).
+/// return the name, MIME type and the recorded [`ExpectedChunkFormat`]. Fails
+/// if the envelope records a chunk format this core does not know (never a
+/// silent fallback to detection).
+///
+/// **Folders and display only.** A plaintext (non-JSON) value is accepted as a
+/// legacy name here. To get the pin for reading a FILE's content use
+/// [`decrypt_file_metadata`], which refuses plaintext (task 1908 round 3).
 ///
 /// [`ExpectedChunkFormat`]: crate::chunk_stream::ExpectedChunkFormat
 pub fn decrypt_name_metadata(
@@ -187,6 +294,45 @@ pub fn decrypt_name_metadata_with_key(file_key: &FileKey, name_encrypted: &str) 
     }
     let pt = decrypt_envelope_plaintext(file_key, name_encrypted).ok_or(CoreError::Decryption)?;
     parse_name_metadata(&pt)
+}
+
+/// The metadata reader for **files** (task 1908 round 3, P1-B): exactly
+/// [`decrypt_name_metadata`], except that a plaintext (non-JSON)
+/// `name_encrypted` is REFUSED instead of read as a legacy name.
+///
+/// Why: a plaintext name carries no authenticated chunk format, so it reads as
+/// [`ExpectedChunkFormat::Unrecorded`] and re-enables frame-0 detection. A
+/// server could replace a v2 file's metadata with a plaintext name and then
+/// serve some no-AAD blob under the file's key as a one-frame v1 "file".
+/// Every client must use this reader to get the pin for file content; the
+/// plaintext form stays accepted for folders ([`decrypt_name_metadata`]).
+///
+/// [`ExpectedChunkFormat::Unrecorded`]: crate::chunk_stream::ExpectedChunkFormat::Unrecorded
+pub fn decrypt_file_metadata(
+    master_key: &crate::kdf::MasterKey,
+    file_id: &str,
+    name_encrypted: &str,
+) -> Result<NameMetadata, CoreError> {
+    refuse_plaintext_file_name(name_encrypted)?;
+    decrypt_name_metadata(master_key, file_id, name_encrypted)
+}
+
+/// [`decrypt_file_metadata`] with a known file key (share recipients,
+/// file-request content keys).
+pub fn decrypt_file_metadata_with_key(file_key: &FileKey, name_encrypted: &str) -> Result<NameMetadata, CoreError> {
+    refuse_plaintext_file_name(name_encrypted)?;
+    decrypt_name_metadata_with_key(file_key, name_encrypted)
+}
+
+/// A file's `name_encrypted` must be an encrypted JSON envelope.
+fn refuse_plaintext_file_name(name_encrypted: &str) -> Result<(), CoreError> {
+    if name_encrypted.starts_with('{') {
+        Ok(())
+    } else {
+        Err(CoreError::InvalidInput(
+            "file metadata is plaintext, not an encrypted envelope; refusing to read the file (task 1908)".into(),
+        ))
+    }
 }
 
 fn legacy_plaintext_metadata(name: &str) -> NameMetadata {
@@ -344,6 +490,14 @@ fn decrypt_name_envelope(file_key: &FileKey, name_encrypted: &str) -> Option<(St
 /// `EncryptedBlob` shape then the web `{nonce, ciphertext}` shape, and return
 /// the metadata plaintext (usually the `{name, mime_type[, chunk_format]}` JSON).
 fn decrypt_envelope_plaintext(file_key: &FileKey, name_encrypted: &str) -> Option<String> {
+    // Name subkey first (envelopes written since task 1908 round 3), then the
+    // legacy raw file key (every envelope written before).
+    decrypt_envelope_plaintext_under(&derive_name_key(file_key), name_encrypted)
+        .or_else(|| decrypt_envelope_plaintext_under(file_key, name_encrypted))
+}
+
+/// [`decrypt_envelope_plaintext`] under exactly one key.
+fn decrypt_envelope_plaintext_under(file_key: &FileKey, name_encrypted: &str) -> Option<String> {
     // Format 2: native EncryptedBlob (cipher_suite + numeric-array fields).
     if let Ok(blob) = serde_json::from_str::<EncryptedBlob>(name_encrypted) {
         if let Ok(plaintext) = decrypt_metadata(file_key, &blob) {
@@ -461,9 +615,11 @@ pub fn encrypt_chunk_json(
 ///
 /// This is the **v1 (legacy) frame**: AES-256-GCM with NO associated data, so
 /// nothing binds the frame to its position in a file. It remains the generic
-/// raw AEAD seal (search-index shards, file-request key wrap, thumbnails), but
-/// file content goes through [`crate::chunk_stream::ChunkEncryptor`], which
-/// writes position-bound v2 frames (task 1908).
+/// raw AEAD seal (search-index shards, file-request key wrap), but file content
+/// goes through [`crate::chunk_stream::ChunkEncryptor`] (position-bound v2
+/// frames) and thumbnails through [`encrypt_thumbnail`] (task 1908). Never
+/// call it with a per-file key: a no-AAD blob under that key is
+/// indistinguishable from a v1 content frame.
 pub fn encrypt_chunk_raw(key: &FileKey, plaintext: &[u8]) -> Result<Vec<u8>, CoreError> {
     seal_raw_with_aad(key, plaintext, &[])
 }
@@ -533,7 +689,7 @@ pub(crate) fn open_raw_with_aad(key: &FileKey, raw: &[u8], aad: &[u8]) -> Result
 /// **Chunk format (task 1908):** the chunks are opened in order as one file's
 /// stream. `file_id` is the id the file was uploaded under (bound into every
 /// v2 frame); `expected` comes from the file's encrypted metadata
-/// ([`decrypt_name_metadata`]): `V2` accepts only v2 frames, `Unrecorded`
+/// ([`decrypt_file_metadata`]): `V2` accepts only v2 frames, `Unrecorded`
 /// (legacy metadata) lets chunk 0 decide. A v2 file that is reordered, mixes
 /// frames of two uploads, has a chunk duplicated/dropped/appended, or ends
 /// before its last chunk is rejected.
@@ -635,7 +791,7 @@ pub fn decrypt_chunk_raw(key: &FileKey, raw: &[u8]) -> Result<Vec<u8>, CoreError
 /// **Chunk format (task 1908):** the body is opened as one file's stream.
 /// `file_id` is the id the file was uploaded under (bound into every v2 frame);
 /// `expected` comes from the file's encrypted metadata
-/// ([`decrypt_name_metadata`]): `V2` accepts only v2 frames, `Unrecorded`
+/// ([`decrypt_file_metadata`]): `V2` accepts only v2 frames, `Unrecorded`
 /// (legacy metadata) lets chunk 0 decide. A v2 body that is reordered, spliced
 /// (within or across uploads), has trailing frames, or ends before its last
 /// chunk is rejected.

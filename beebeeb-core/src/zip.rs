@@ -14,7 +14,7 @@ pub struct ZipEntry {
     pub chunk_count: u32,
     pub size_bytes: u64,
     /// From the entry's encrypted metadata
-    /// ([`crate::encrypt::decrypt_name_metadata`]) — task 1908. `V2` accepts
+    /// ([`crate::encrypt::decrypt_file_metadata`]) — task 1908. `V2` accepts
     /// only v2 frames; `Unrecorded` (legacy metadata) lets chunk 0 decide.
     pub chunk_format: ExpectedChunkFormat,
 }

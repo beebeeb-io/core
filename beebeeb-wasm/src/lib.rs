@@ -671,6 +671,18 @@ impl WasmChunkEncryptor {
         self.inner.format().as_u8()
     }
 
+    /// Resuming an interrupted upload (task 1908 round 3): may this (new)
+    /// encryptor continue the old server upload session? `storedFormat` = the
+    /// `format` persisted next to the session id when the session was opened
+    /// (1 = v1, 2 = v2), or `undefined` if the resume record does not say.
+    /// Returns `"continue"` (keep the session, re-PUT from chunk 0) only for a
+    /// v1 session resumed by a v1 encryptor, else `"restart"`: never PUT to the
+    /// old session again, upload from chunk 0 into a fresh session.
+    #[wasm_bindgen(js_name = resumePolicy)]
+    pub fn resume_policy(&self, stored_format: Option<u8>) -> Result<String, JsError> {
+        resume_policy_str(&self.inner, stored_format).map_err(|e| JsError::new(&e.to_string()))
+    }
+
     /// Consume the encryptor, run the integrity guard (all planned chunks
     /// emitted and the ciphertext total matches), and return the summary
     /// `{ chunk_count, total_plaintext, total_ciphertext, chunk_size_bytes }`.
@@ -704,7 +716,7 @@ impl WasmChunkEncryptor {
 ///
 /// Reads v2 (position-bound) and v1 (legacy) files. Both constructors take
 /// `expectedChunkFormat` from the file's encrypted metadata
-/// (`decrypt_name_metadata(...).chunk_format`; 0 = unrecorded, 2 = v2): with
+/// (`decrypt_file_metadata(...).chunk_format`; 0 = unrecorded, 2 = v2): with
 /// 2 only v2 frames open; with 0 (legacy metadata) chunk 0 decides. In v2 every
 /// frame must be the next chunk in order and from the same upload as chunk 0,
 /// and nothing may follow the last one; [`finish`] fails if the file ended
@@ -830,7 +842,7 @@ fn expected_from_u8(code: u8) -> Result<beebeeb_core::chunk_stream::ExpectedChun
 /// records the file's chunk format (task 1908): `chunk_format` 2 = every upload
 /// of this file id is v2, 0 = record nothing (the pre-1908 shape). New file:
 /// 2 only if its content was written as v2. Rename / replace: pass the value
-/// `decrypt_name_metadata` returned — never upgrade a file with v1 history,
+/// `decrypt_file_metadata` returned — never upgrade a file with v1 history,
 /// never drop a recorded 2.
 #[wasm_bindgen]
 pub fn encrypt_name_with_chunk_format(
@@ -876,6 +888,47 @@ pub fn decrypt_name_metadata(master_key: &[u8], file_id: &str, name_encrypted: &
     Ok(serde_wasm_bindgen::to_value(&NameMetadataJs::from(meta))?)
 }
 
+/// The metadata reader for FILES (task 1908 round 3): exactly
+/// [`decrypt_name_metadata`], except that a plaintext (non-JSON)
+/// `name_encrypted` is refused — a plaintext name carries no chunk-format pin.
+/// Take every file-content reader's `chunk_format` from THIS;
+/// `decrypt_name_metadata` stays for folders / display.
+#[wasm_bindgen]
+pub fn decrypt_file_metadata(master_key: &[u8], file_id: &str, name_encrypted: &str) -> Result<JsValue, JsError> {
+    let mk = master_key_from_slice(master_key)?;
+    let meta =
+        encrypt::decrypt_file_metadata(&mk, file_id, name_encrypted).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(serde_wasm_bindgen::to_value(&NameMetadataJs::from(meta))?)
+}
+
+/// [`decrypt_file_metadata`] with an already-unwrapped 32-byte file key.
+#[wasm_bindgen]
+pub fn decrypt_file_metadata_with_key(file_key: &[u8], name_encrypted: &str) -> Result<JsValue, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    let meta =
+        encrypt::decrypt_file_metadata_with_key(&fk, name_encrypted).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(serde_wasm_bindgen::to_value(&NameMetadataJs::from(meta))?)
+}
+
+/// Seal a thumbnail (already-encoded image bytes) under a 32-byte file key:
+/// `nonce(12) || ciphertext || tag(16)` (the existing thumbnail wire format).
+/// The ONLY way to seal a thumbnail (task 1908 round 3) — after the gated seal
+/// switch it uses the thumbnail subkey, so a thumbnail can never be served as
+/// file content.
+#[wasm_bindgen]
+pub fn encrypt_thumbnail(file_key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    encrypt::encrypt_thumbnail(&fk, plaintext).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Open a thumbnail frame: the thumbnail subkey first, then the legacy raw
+/// file key (thumbnails stored before the switch).
+#[wasm_bindgen]
+pub fn decrypt_thumbnail(file_key: &[u8], frame: &[u8]) -> Result<Vec<u8>, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    encrypt::decrypt_thumbnail(&fk, frame).map_err(|e| JsError::new(&e.to_string()))
+}
+
 /// [`decrypt_name_metadata`] with an already-unwrapped 32-byte file key (share
 /// / shared-link recipients, file-request content keys).
 #[wasm_bindgen]
@@ -884,6 +937,17 @@ pub fn decrypt_name_metadata_with_key(file_key: &[u8], name_encrypted: &str) -> 
     let meta =
         encrypt::decrypt_name_metadata_with_key(&fk, name_encrypted).map_err(|e| JsError::new(&e.to_string()))?;
     Ok(serde_wasm_bindgen::to_value(&NameMetadataJs::from(meta))?)
+}
+
+/// Native seam of [`WasmChunkEncryptor::resume_policy`] (testable off-wasm).
+fn resume_policy_str(
+    enc: &beebeeb_core::chunk_stream::ChunkEncryptor,
+    stored_format: Option<u8>,
+) -> Result<String, beebeeb_core::CoreError> {
+    let stored = stored_format
+        .map(beebeeb_core::chunk_stream::ChunkFormat::from_u8)
+        .transpose()?;
+    Ok(enc.resume_policy(stored).as_str().to_string())
 }
 
 impl WasmChunkEncryptor {
@@ -2044,5 +2108,22 @@ mod tests {
         // abandon() returns to a fresh ceremony.
         c.abandon();
         assert_eq!(c.inner.step().as_str(), "verify_email");
+    }
+
+    #[test]
+    fn resume_policy_and_thumbnail_wrappers() {
+        // Task 1908 round 3: the resume rule and the thumbnail seal through the
+        // WASM wrappers (native seams; the JsError paths need a JS runtime).
+        let mk = kdf::derive_master_key("test-password", b"test-salt-16bytes").unwrap();
+        let enc =
+            beebeeb_core::chunk_stream::ChunkEncryptor::for_push_with_chunk_size(&mk, "wasm-resume", 10, 16).unwrap();
+        assert_eq!(resume_policy_str(&enc, Some(1)).unwrap(), "continue");
+        assert_eq!(resume_policy_str(&enc, None).unwrap(), "restart");
+        assert_eq!(resume_policy_str(&enc, Some(2)).unwrap(), "restart");
+        assert!(resume_policy_str(&enc, Some(9)).is_err());
+
+        let fk = kdf::derive_file_key(&mk, b"wasm-thumb");
+        let sealed = encrypt_thumbnail(fk.as_bytes(), b"thumb").unwrap();
+        assert_eq!(decrypt_thumbnail(fk.as_bytes(), &sealed).unwrap(), b"thumb");
     }
 }

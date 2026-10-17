@@ -47,9 +47,14 @@
 //! [`ChunkEncryptor`] writes [`WRITE_FORMAT`] (still v1 during the read-only
 //! rollout phase). [`ChunkDecryptor`] reads both, but only under an
 //! [`ExpectedChunkFormat`] that the caller MUST take from the file's
-//! authenticated (encrypted) metadata: a file whose metadata records v2 opens
-//! ONLY as v2. Detection from frame 0 is used only for files whose metadata
-//! records no format (written before the v2 write switch).
+//! authenticated (encrypted) metadata via
+//! [`crate::encrypt::decrypt_file_metadata`]: a file whose metadata records v2
+//! opens ONLY as v2. Detection from frame 0 is used only for files whose
+//! metadata records no format (written before the v2 write switch).
+//!
+//! A resumed upload asks [`ChunkEncryptor::resume_policy`] whether it may
+//! continue its old server session: a v2 upload never may (see
+//! [`SessionResume`]).
 //!
 //! ## Sync, reactor-agnostic
 //!
@@ -62,9 +67,6 @@ use std::io::Read;
 use zeroize::Zeroizing;
 
 use beebeeb_types::{ChunkPlan, ChunkProfile, ChunkStrategy, STORAGE_FORMAT_VERSION_V2, plan_chunks};
-
-use hkdf::Hkdf;
-use sha2::Sha256;
 
 use crate::CoreError;
 use crate::encrypt::{NONCE_LEN, TAG_LEN, open_raw_with_aad, random_nonce, seal_raw_with_aad, seal_raw_with_nonce};
@@ -135,11 +137,7 @@ pub const VERSION_ID_LEN: usize = NONCE_LEN;
 /// other use of the file key (name/MIME metadata, thumbnails, v1 frames), so no
 /// blob sealed for another purpose can ever open as a v2 frame.
 pub(crate) fn derive_chunk_key_v2(file_key: &FileKey) -> FileKey {
-    let hk = Hkdf::<Sha256>::new(None, file_key.as_bytes());
-    let mut okm = Zeroizing::new([0u8; 32]);
-    hk.expand(CHUNK_KEY_INFO_V2, &mut *okm)
-        .expect("HKDF-SHA256 expand for 32 bytes cannot fail");
-    FileKey::from_bytes(*okm)
+    crate::kdf::derive_file_subkey(file_key, CHUNK_KEY_INFO_V2)
 }
 
 /// The on-the-wire chunk format of a file. The frame layout is identical; the
@@ -149,7 +147,10 @@ pub enum ChunkFormat {
     /// Legacy: no associated data, no position binding. Readable forever for
     /// files written before task 1908; no longer written by default.
     V1Legacy,
-    /// Position-bound: AAD = domain tag || file id || chunk index || last flag.
+    /// Position-bound: sealed under the chunk subkey
+    /// `HKDF-SHA256(file_key, "beebeeb/chunk/v2/key")` with AAD = domain tag ||
+    /// len(file id) || file id || version id (frame 0's nonce, one per upload) ||
+    /// chunk index || last flag. See [`chunk_aad_v2`].
     V2,
 }
 
@@ -202,8 +203,11 @@ pub const WRITE_FORMAT: ChunkFormat = ChunkFormat::V1Legacy;
 ///   possible, and only for such files — the residual risk of keeping v1 files
 ///   readable.
 ///
-/// Read it with [`crate::encrypt::decrypt_name_metadata`] (or
-/// `decrypt_name_metadata_with_key`), never from a server field.
+/// Read it with [`crate::encrypt::decrypt_file_metadata`] (or
+/// `decrypt_file_metadata_with_key`), never from a server field. The file
+/// reader refuses a plaintext (non-JSON) name: a plaintext name carries no
+/// pin, so accepting one for a file would let a server re-enable detection
+/// (review round 3, P1-B).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExpectedChunkFormat {
     /// Metadata records no chunk format: detect from frame 0 (legacy files).
@@ -241,6 +245,53 @@ impl ExpectedChunkFormat {
             ChunkFormat::V1Legacy => ExpectedChunkFormat::Unrecorded,
             ChunkFormat::V2 => ExpectedChunkFormat::V2,
         }
+    }
+}
+
+/// What a client must do when it resumes an interrupted upload whose server
+/// session already holds some frames (task 1908 review round 3, P1-A).
+///
+/// The server keeps the frames it already stored and skips re-PUTs of those
+/// indices (`{skipped: true}`). That is harmless for v1 (every frame stands
+/// alone), but a v2 upload's frames all bind ONE version id — the random nonce
+/// of that encryptor's frame 0. A resumed upload builds a new encryptor, which
+/// has a new version id, so continuing the old session would store frames of
+/// two version ids side by side: a file that completes and can never be read.
+/// Re-creating the old version id is not an option either: it IS a nonce, and
+/// re-sealing chunk 0 under it would reuse a nonce.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SessionResume {
+    /// Keep the session and re-PUT from chunk 0 (the server skips the frames it
+    /// holds). Only for a v1 session resumed by a v1 writer.
+    ContinueSession,
+    /// Abandon the session (never PUT to it again) and upload from chunk 0
+    /// into a FRESH upload session with this new encryptor.
+    RestartWithFreshSession,
+}
+
+impl SessionResume {
+    /// Stable lowercase token for the WASM boundary.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SessionResume::ContinueSession => "continue",
+            SessionResume::RestartWithFreshSession => "restart",
+        }
+    }
+}
+
+/// The resume rule — see [`SessionResume`].
+///
+/// - `stored`: the chunk format of the frames the session already holds, as the
+///   client recorded it when it opened the session (persist
+///   [`ChunkEncryptor::format`] next to the session id). `None` = the resume
+///   record does not say (written before this rule existed): restart.
+/// - `writing`: the format of the encryptor that would continue the upload.
+///
+/// Only `(Some(V1Legacy), V1Legacy)` may continue; everything else restarts.
+pub fn resume_policy(stored: Option<ChunkFormat>, writing: ChunkFormat) -> SessionResume {
+    match (stored, writing) {
+        (Some(ChunkFormat::V1Legacy), ChunkFormat::V1Legacy) => SessionResume::ContinueSession,
+        _ => SessionResume::RestartWithFreshSession,
     }
 }
 
@@ -695,6 +746,15 @@ impl ChunkEncryptor {
     /// so readers can pin it.
     pub fn format(&self) -> ChunkFormat {
         self.format
+    }
+
+    /// Whether this (new) encryptor may continue an interrupted upload session
+    /// whose stored frames are in format `stored` — [`resume_policy`]`(stored,
+    /// self.format())`. For a v2 encryptor the answer is always
+    /// [`SessionResume::RestartWithFreshSession`]: its version id differs from
+    /// the one the stored frames bind.
+    pub fn resume_policy(&self, stored: Option<ChunkFormat>) -> SessionResume {
+        resume_policy(stored, self.format)
     }
 
     /// The chunk plan this encryptor follows.
@@ -2155,10 +2215,11 @@ mod review_round2_tests {
         .unwrap()
     }
 
-    /// A client reading a file: the pin comes from the decrypted metadata,
-    /// then frames are opened in order and the stream must finish.
+    /// A client reading a file: the pin comes from the decrypted metadata (the
+    /// FILE reader, which refuses plaintext names — round 3), then frames are
+    /// opened in order and the stream must finish.
     fn read_file(m: &MasterKey, file_id: &str, name_encrypted: &str, frames: &[Vec<u8>]) -> Result<Vec<u8>, CoreError> {
-        let meta = crate::encrypt::decrypt_name_metadata(m, file_id, name_encrypted)?;
+        let meta = crate::encrypt::decrypt_file_metadata(m, file_id, name_encrypted)?;
         let mut dec = ChunkDecryptor::for_push(m, file_id, meta.chunk_format);
         let mut out = Vec::new();
         for f in frames {
@@ -2219,6 +2280,11 @@ mod review_round2_tests {
         // genuine one-frame v1 file from another no-AAD blob under the same
         // key. This is why every v2 upload records `chunk_format: 2` and why
         // renames must carry it forward (see encrypt_name_with_chunk_format).
+        // Round 3 narrows it to LEGACY-sealed blobs (names/thumbnails sealed
+        // under the raw file key: every one written before the metadata seal
+        // switch); subkey-sealed ones never open as content
+        // (`review_round3_tests::p1b_*`). Decision on the rest: workspace task
+        // 1912.
         let m = mk();
         let id = "legacy-metadata-file";
         let legacy_name = crate::encrypt::encrypt_name(&m, id, "old.txt", None).unwrap();
@@ -2273,6 +2339,412 @@ mod review_round2_tests {
         assert!(
             read_v2(&m, id, &forged).is_err(),
             "B's head with A's tail must be rejected"
+        );
+    }
+}
+
+/// Task 1908 review round 3: P1-A (a resumed v2 upload must never complete as
+/// a mix of two version ids) and P1-B (a name/thumbnail blob must never open as
+/// content; files must not accept a plaintext name). Red first.
+#[cfg(test)]
+mod review_round3_tests {
+    use super::*;
+    use crate::encrypt::{
+        MetadataSeal, decrypt_file_metadata, decrypt_file_metadata_with_key, decrypt_name_metadata,
+        decrypt_name_metadata_with_key, decrypt_thumbnail, encrypt_name, encrypt_name_sealed,
+        encrypt_name_with_chunk_format, encrypt_thumbnail, encrypt_thumbnail_sealed,
+    };
+    use crate::kdf::derive_master_key;
+    use std::collections::BTreeMap;
+
+    fn mk() -> MasterKey {
+        derive_master_key("round3-password", b"round3-salt-16by").unwrap()
+    }
+
+    const CS: u64 = 16;
+
+    fn pattern(len: usize, seed: u8) -> Vec<u8> {
+        (0..len)
+            .map(|i| (i as u8).wrapping_mul(29).wrapping_add(seed))
+            .collect()
+    }
+
+    fn encryptor(m: &MasterKey, file_id: &str, size: u64, format: ChunkFormat) -> ChunkEncryptor {
+        ChunkEncryptor::for_push_with_chunk_size(m, file_id, size, CS)
+            .unwrap()
+            .with_format(format)
+            .unwrap()
+    }
+
+    /// A server upload session: PUT of an index it already holds is skipped
+    /// (`{skipped: true}`) — the server keeps the FIRST frame stored there.
+    #[derive(Default)]
+    struct FakeSession {
+        frames: BTreeMap<u32, Vec<u8>>,
+    }
+
+    impl FakeSession {
+        fn put(&mut self, index: u32, frame: Vec<u8>) {
+            self.frames.entry(index).or_insert(frame);
+        }
+        fn body(&self) -> Vec<Vec<u8>> {
+            self.frames.values().cloned().collect()
+        }
+    }
+
+    /// The client's resume record: session + the format of the frames it holds.
+    struct ResumeRecord {
+        session: FakeSession,
+        stored_format: Option<ChunkFormat>,
+    }
+
+    /// Attempt 1: open a session, record its format, PUT the first `upto`
+    /// frames, then get interrupted.
+    fn interrupted_upload(m: &MasterKey, id: &str, data: &[u8], format: ChunkFormat, upto: usize) -> ResumeRecord {
+        let mut enc = encryptor(m, id, data.len() as u64, format);
+        let mut rec = ResumeRecord {
+            session: FakeSession::default(),
+            stored_format: Some(enc.format()),
+        };
+        for c in data.chunks(CS as usize).take(upto) {
+            let f = enc.push_chunk(c).unwrap();
+            rec.session.put(f.index, f.data);
+        }
+        rec
+    }
+
+    /// Attempt 2, the way a client must resume: a NEW encryptor (the file key
+    /// derives from the file id, nothing else survives a restart), then what
+    /// core's resume policy says. Returns the stored body after `complete`.
+    fn resume_following_policy(
+        m: &MasterKey,
+        id: &str,
+        data: &[u8],
+        format: ChunkFormat,
+        rec: ResumeRecord,
+    ) -> (SessionResume, Vec<Vec<u8>>) {
+        let mut enc = encryptor(m, id, data.len() as u64, format);
+        let policy = enc.resume_policy(rec.stored_format);
+        let mut session = match policy {
+            SessionResume::ContinueSession => rec.session,
+            SessionResume::RestartWithFreshSession => FakeSession::default(),
+        };
+        for c in data.chunks(CS as usize) {
+            let f = enc.push_chunk(c).unwrap();
+            session.put(f.index, f.data);
+        }
+        enc.finish().unwrap();
+        (policy, session.body())
+    }
+
+    fn read(m: &MasterKey, id: &str, expected: ExpectedChunkFormat, frames: &[Vec<u8>]) -> Result<Vec<u8>, CoreError> {
+        let mut dec = ChunkDecryptor::for_push(m, id, expected);
+        let mut out = Vec::new();
+        for f in frames {
+            out.extend_from_slice(&dec.push_frame(f)?.data);
+        }
+        dec.finish()?;
+        Ok(out)
+    }
+
+    // ── P1-A: resume ────────────────────────────────────────────────────────
+
+    #[test]
+    fn p1a_probe_b_resumed_v2_upload_following_core_policy_is_readable() {
+        // Probe B from the round-3 review: interrupt a v2 upload after 2 of 4
+        // chunks, resume with a new encryptor. Following core's policy must
+        // yield a readable file — never a stored-but-unreadable one.
+        let m = mk();
+        let id = "resumed-v2";
+        let data = pattern(64, 1);
+        let rec = interrupted_upload(&m, id, &data, ChunkFormat::V2, 2);
+        let (policy, body) = resume_following_policy(&m, id, &data, ChunkFormat::V2, rec);
+        let got = read(&m, id, ExpectedChunkFormat::V2, &body);
+        assert!(
+            got.is_ok(),
+            "a resumed v2 upload that follows core's resume policy ({policy:?}) must be readable; got {got:?}"
+        );
+        assert_eq!(got.unwrap(), data);
+        assert_eq!(policy, SessionResume::RestartWithFreshSession);
+    }
+
+    #[test]
+    fn p1a_continuing_the_old_session_with_a_new_v2_encryptor_is_unreadable_documented() {
+        // Why the policy exists: what a client that ignores it would store.
+        let m = mk();
+        let id = "mixed-v2";
+        let data = pattern(64, 2);
+        let mut rec = interrupted_upload(&m, id, &data, ChunkFormat::V2, 2);
+        let mut enc = encryptor(&m, id, data.len() as u64, ChunkFormat::V2);
+        for c in data.chunks(CS as usize) {
+            let f = enc.push_chunk(c).unwrap();
+            rec.session.put(f.index, f.data);
+        }
+        assert_eq!(rec.session.frames.len(), 4, "the mixed upload completes server-side");
+        assert!(
+            read(&m, id, ExpectedChunkFormat::V2, &rec.session.body()).is_err(),
+            "frames of two version ids must not open as one file"
+        );
+    }
+
+    #[test]
+    fn p1a_v1_resume_still_continues_the_session_and_reads() {
+        let m = mk();
+        let id = "resumed-v1";
+        let data = pattern(64, 3);
+        let rec = interrupted_upload(&m, id, &data, ChunkFormat::V1Legacy, 2);
+        let (policy, body) = resume_following_policy(&m, id, &data, ChunkFormat::V1Legacy, rec);
+        assert_eq!(policy, SessionResume::ContinueSession);
+        assert_eq!(read(&m, id, ExpectedChunkFormat::Unrecorded, &body).unwrap(), data);
+    }
+
+    #[test]
+    fn p1a_resume_policy_matrix() {
+        use ChunkFormat::{V1Legacy, V2};
+        use SessionResume::{ContinueSession as C, RestartWithFreshSession as R};
+        let cases = [
+            (Some(V1Legacy), V1Legacy, C),
+            (Some(V1Legacy), V2, R),
+            (Some(V2), V2, R),
+            (Some(V2), V1Legacy, R),
+            (None, V1Legacy, R),
+            (None, V2, R),
+        ];
+        for (stored, writing, want) in cases {
+            assert_eq!(
+                resume_policy(stored, writing),
+                want,
+                "stored {stored:?}, writing {writing:?}"
+            );
+        }
+        assert_eq!(C.as_str(), "continue");
+        assert_eq!(R.as_str(), "restart");
+    }
+
+    // ── P1-B (1): domain separation of names and thumbnails ─────────────────
+
+    fn blob_frame(name_encrypted: &str) -> Vec<u8> {
+        let blob: beebeeb_types::EncryptedBlob = serde_json::from_str(name_encrypted).unwrap();
+        [blob.nonce, blob.ciphertext].concat()
+    }
+
+    #[test]
+    fn p1b_subkey_sealed_name_never_opens_as_content() {
+        // Even where a reader detects the format (metadata that records none),
+        // a name envelope sealed the new way must not open as frame 0 — not as
+        // v1 (raw key, no AAD) and not as v2 (chunk subkey).
+        let m = mk();
+        for (id, fmt) in [
+            ("v2-file", ExpectedChunkFormat::V2),
+            ("v1-file", ExpectedChunkFormat::Unrecorded),
+        ] {
+            let name =
+                encrypt_name_sealed(&m, id, "report.pdf", Some("application/pdf"), fmt, MetadataSeal::Subkey).unwrap();
+            let got = read(&m, id, ExpectedChunkFormat::Unrecorded, &[blob_frame(&name)]);
+            assert!(
+                got.is_err(),
+                "a subkey-sealed name envelope ({id}) must not open as a one-frame file (got {} bytes)",
+                got.map(|p| p.len()).unwrap_or(0)
+            );
+        }
+    }
+
+    #[test]
+    fn p1b_v2_name_is_always_subkey_sealed() {
+        // The public writer: a name that records chunk_format 2 never sits under
+        // the raw file key, whatever the write switch says.
+        let m = mk();
+        let id = "v2-file-public-writer";
+        let name = encrypt_name_with_chunk_format(&m, id, "a.pdf", None, ExpectedChunkFormat::V2).unwrap();
+        let got = read(&m, id, ExpectedChunkFormat::Unrecorded, &[blob_frame(&name)]);
+        assert!(got.is_err(), "a v2 file's own name must not open as its content");
+        assert_eq!(
+            decrypt_file_metadata(&m, id, &name).unwrap().chunk_format,
+            ExpectedChunkFormat::V2
+        );
+    }
+
+    #[test]
+    fn p1b_subkey_sealed_thumbnail_never_opens_as_content() {
+        let m = mk();
+        let id = "photo";
+        let fk = derive_file_key(&m, id.as_bytes());
+        let thumb = encrypt_thumbnail_sealed(&fk, b"\xff\xd8\xff\xe0 thumbnail", MetadataSeal::Subkey).unwrap();
+        assert_eq!(decrypt_thumbnail(&fk, &thumb).unwrap(), b"\xff\xd8\xff\xe0 thumbnail");
+        let got = read(&m, id, ExpectedChunkFormat::Unrecorded, &[thumb]);
+        assert!(
+            got.is_err(),
+            "a subkey-sealed thumbnail must not open as a one-frame file (got {} bytes)",
+            got.map(|p| p.len()).unwrap_or(0)
+        );
+    }
+
+    #[test]
+    fn p1b_name_and_thumbnail_subkeys_are_distinct_from_each_other_and_from_content() {
+        let fk = FileKey::from_bytes(std::array::from_fn(|i| (i as u8) ^ 0x5a));
+        let name = crate::encrypt::derive_name_key(&fk);
+        let thumb = crate::encrypt::derive_thumbnail_key(&fk);
+        let chunk = derive_chunk_key_v2(&fk);
+        let keys = [fk.as_bytes(), name.as_bytes(), thumb.as_bytes(), chunk.as_bytes()];
+        for i in 0..keys.len() {
+            for j in i + 1..keys.len() {
+                assert_ne!(keys[i], keys[j], "subkeys {i} and {j} must differ");
+            }
+        }
+        // A thumbnail never opens as a name and vice versa.
+        let t = encrypt_thumbnail_sealed(&fk, b"{\"name\":\"x\"}", MetadataSeal::Subkey).unwrap();
+        assert!(open_raw_with_aad(&name, &t, &[]).is_err());
+    }
+
+    #[test]
+    fn name_subkey_known_answer() {
+        // HKDF-SHA256(salt = none, ikm = file key, info = "beebeeb/name/v1"),
+        // computed independently (Python hmac/hashlib, RFC 5869 by hand).
+        let fk = FileKey::from_bytes(std::array::from_fn(|i| i as u8));
+        assert_eq!(
+            hex::encode(crate::encrypt::derive_name_key(&fk).as_bytes()),
+            "c7ca9a948dc4137a6574435914b69199e575c795c24099eea8b41679bebbfe59"
+        );
+    }
+
+    #[test]
+    fn thumbnail_subkey_known_answer() {
+        // HKDF-SHA256(salt = none, ikm = file key, info = "beebeeb/thumb/v1").
+        let fk = FileKey::from_bytes(std::array::from_fn(|i| i as u8));
+        assert_eq!(
+            hex::encode(crate::encrypt::derive_thumbnail_key(&fk).as_bytes()),
+            "796c11cf5c05ecff6c3a03facfd5c8f53aea6b1a64b4cc3b00b517c27e10b808"
+        );
+    }
+
+    #[test]
+    fn p1b_legacy_sealed_names_and_thumbnails_still_open() {
+        // Everything stored before the switch: raw-key name envelopes (also the
+        // legacy web base64 shape) and raw-key thumbnails.
+        let m = mk();
+        let id = "legacy-file";
+        let legacy = encrypt_name_sealed(
+            &m,
+            id,
+            "old.txt",
+            None,
+            ExpectedChunkFormat::Unrecorded,
+            MetadataSeal::Legacy,
+        )
+        .unwrap();
+        let meta = decrypt_file_metadata(&m, id, &legacy).unwrap();
+        assert_eq!(
+            (meta.name.as_str(), meta.chunk_format),
+            ("old.txt", ExpectedChunkFormat::Unrecorded)
+        );
+        assert_eq!(crate::encrypt::decrypt_name(&m, id, &legacy).unwrap(), "old.txt");
+        let fk = derive_file_key(&m, id.as_bytes());
+        let blob: beebeeb_types::EncryptedBlob = serde_json::from_str(&legacy).unwrap();
+        let web = crate::metadata_wire::serialize_encrypted_metadata(&blob.nonce, &blob.ciphertext);
+        assert_eq!(decrypt_file_metadata_with_key(&fk, &web).unwrap().name, "old.txt");
+        let thumb = crate::encrypt::encrypt_chunk_raw(&fk, b"old thumbnail").unwrap();
+        assert_eq!(decrypt_thumbnail(&fk, &thumb).unwrap(), b"old thumbnail");
+    }
+
+    #[test]
+    fn p1b_subkey_sealed_names_read_through_every_name_reader() {
+        // Once the seal switch flips, every existing name reader (single, with
+        // MIME, known key, batch, web base64 shape) must open the new envelopes
+        // — otherwise flipping it silently blanks names in every client.
+        let m = mk();
+        let id = "6f9619ff-8b86-d011-b42d-00cf4fc964ff";
+        let sealed = encrypt_name_sealed(
+            &m,
+            id,
+            "plan.txt",
+            Some("text/plain"),
+            ExpectedChunkFormat::Unrecorded,
+            MetadataSeal::Subkey,
+        )
+        .unwrap();
+        let fk = derive_file_key(&m, id.as_bytes());
+        let blob: beebeeb_types::EncryptedBlob = serde_json::from_str(&sealed).unwrap();
+        assert!(
+            crate::encrypt::decrypt_metadata(&fk, &blob).is_err(),
+            "a subkey-sealed envelope must not open under the raw file key"
+        );
+        let web = crate::metadata_wire::serialize_encrypted_metadata(&blob.nonce, &blob.ciphertext);
+        for env in [sealed.as_str(), web.as_str()] {
+            assert_eq!(crate::encrypt::decrypt_name(&m, id, env).unwrap(), "plan.txt");
+            assert_eq!(
+                crate::encrypt::decrypt_name_with_mime(&m, id, env).unwrap(),
+                ("plan.txt".to_string(), Some("text/plain".to_string()))
+            );
+            assert_eq!(
+                crate::encrypt::decrypt_name_with_key(&fk, env).as_deref(),
+                Some("plan.txt")
+            );
+            assert_eq!(decrypt_name_metadata(&m, id, env).unwrap().name, "plan.txt");
+            assert_eq!(decrypt_file_metadata(&m, id, env).unwrap().name, "plan.txt");
+            assert_eq!(decrypt_file_metadata_with_key(&fk, env).unwrap().name, "plan.txt");
+            let uuid: uuid::Uuid = id.parse().unwrap();
+            let batch = crate::encrypt::decrypt_names(&m, &[(uuid, env)]);
+            assert_eq!(batch[0].as_ref().unwrap().0, "plan.txt");
+        }
+    }
+
+    #[test]
+    fn p1b_write_switch_keeps_legacy_sealing_during_the_read_only_phase() {
+        // Read-only rollout phase: what this core writes for v1 files must stay
+        // readable by clients NOT on this core (raw file key, no AAD).
+        assert_eq!(WRITE_FORMAT, ChunkFormat::V1Legacy);
+        assert_eq!(crate::encrypt::METADATA_SEAL_WRITE, MetadataSeal::Legacy);
+        let m = mk();
+        let id = "read-only-phase";
+        let fk = derive_file_key(&m, id.as_bytes());
+        let name = encrypt_name(&m, id, "n.txt", None).unwrap();
+        let blob: beebeeb_types::EncryptedBlob = serde_json::from_str(&name).unwrap();
+        assert!(
+            crate::encrypt::decrypt_metadata(&fk, &blob).is_ok(),
+            "old clients must read new v1 names"
+        );
+        let thumb = encrypt_thumbnail(&fk, b"t").unwrap();
+        assert!(
+            open_raw_with_aad(&fk, &thumb, &[]).is_ok(),
+            "old clients must read new thumbnails"
+        );
+    }
+
+    // ── P1-B (2): files refuse plaintext names ──────────────────────────────
+
+    #[test]
+    fn p1b_file_reader_refuses_a_plaintext_name_folder_reader_keeps_it() {
+        let m = mk();
+        let fk = derive_file_key(&m, b"f");
+        assert!(
+            decrypt_file_metadata(&m, "f", "report.pdf").is_err(),
+            "a file's metadata must not be accepted as a plaintext name"
+        );
+        assert!(
+            decrypt_file_metadata_with_key(&fk, "report.pdf").is_err(),
+            "a file's metadata must not be accepted as a plaintext name (known key)"
+        );
+        // Folders keep the legacy plaintext form.
+        assert_eq!(decrypt_name_metadata(&m, "f", "Photos").unwrap().name, "Photos");
+        assert_eq!(decrypt_name_metadata_with_key(&fk, "Photos").unwrap().name, "Photos");
+    }
+
+    #[test]
+    fn p1b_plaintext_name_substitution_on_a_v2_file_is_refused() {
+        // The attack end to end: the server replaces a v2 file's metadata with
+        // a plaintext name (no pin) and serves a same-key no-AAD blob (a legacy
+        // thumbnail) as a one-frame file. A client reading files the way core
+        // prescribes (decrypt_file_metadata -> pin -> decryptor) must refuse.
+        let m = mk();
+        let id = "v2-file-renamed-by-server";
+        let fk = derive_file_key(&m, id.as_bytes());
+        let forged_frame = crate::encrypt::encrypt_chunk_raw(&fk, b"legacy thumbnail bytes").unwrap();
+        let got = decrypt_file_metadata(&m, id, "innocent.txt")
+            .and_then(|meta| read(&m, id, meta.chunk_format, std::slice::from_ref(&forged_frame)));
+        assert!(
+            got.is_err(),
+            "plaintext metadata + a same-key blob must not read as a file (got {} bytes)",
+            got.map(|p| p.len()).unwrap_or(0)
         );
     }
 }

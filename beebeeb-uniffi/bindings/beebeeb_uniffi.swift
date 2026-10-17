@@ -894,7 +894,7 @@ open class ChunkDecryptorHandle: ChunkDecryptorHandleProtocol, @unchecked Sendab
      * size is needed.
      *
      * `expected_chunk_format` (task 1908) comes from the file's encrypted
-     * metadata (`decrypt_name_metadata`): 0 = unrecorded, 2 = v2.
+     * metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
      */
 public static func forPush(masterKey: MasterKeyHandle, fileId: String, expectedChunkFormat: UInt8)throws  -> ChunkDecryptorHandle  {
     return try  FfiConverterTypeChunkDecryptorHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
@@ -945,7 +945,7 @@ public static func forPushWithFileKeyHandle(fileKey: FileKeyHandle, fileId: Stri
      * frame is `nonce(12) + chunk_size + tag(16)`). Errors if it is 0.
      *
      * `expected_chunk_format` (task 1908) comes from the file's encrypted
-     * metadata (`decrypt_name_metadata`): 0 = unrecorded, 2 = v2.
+     * metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
      */
 public static func fromFile(masterKey: MasterKeyHandle, fileId: String, expectedChunkFormat: UInt8, chunkSizeBytes: UInt64, inputPath: String)throws  -> ChunkDecryptorHandle  {
     return try  FfiConverterTypeChunkDecryptorHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
@@ -1121,6 +1121,18 @@ public protocol ChunkEncryptorHandleProtocol: AnyObject, Sendable {
      */
     func pushChunk(plaintext: Data) throws  -> EncryptedChunkDto
     
+    /**
+     * Resuming an interrupted upload (task 1908 round 3): may THIS (new)
+     * encryptor continue the old server upload session? `stored_format` is the
+     * `chunk_format()` the client persisted next to the session id when it
+     * opened the session (1 = v1, 2 = v2), or `None` when the resume record
+     * does not say. Only a v1 session resumed by a v1 encryptor may continue;
+     * everything else (always for v2) must abandon the session and upload
+     * from chunk 0 into a FRESH session — a v2 upload's frames all bind one
+     * version id, and a new encryptor has a new one.
+     */
+    func resumePolicy(storedFormat: UInt8?) throws  -> SessionResumeAction
+    
 }
 /**
  * Stateful streaming encryptor handle. Single-consumer (see module note).
@@ -1293,6 +1305,25 @@ open func pushChunk(plaintext: Data)throws  -> EncryptedChunkDto  {
     uniffi_beebeeb_uniffi_fn_method_chunkencryptorhandle_push_chunk(
             self.uniffiCloneHandle(),
         FfiConverterData.lower(plaintext),$0
+    )
+})
+}
+    
+    /**
+     * Resuming an interrupted upload (task 1908 round 3): may THIS (new)
+     * encryptor continue the old server upload session? `stored_format` is the
+     * `chunk_format()` the client persisted next to the session id when it
+     * opened the session (1 = v1, 2 = v2), or `None` when the resume record
+     * does not say. Only a v1 session resumed by a v1 encryptor may continue;
+     * everything else (always for v2) must abandon the session and upload
+     * from chunk 0 into a FRESH session — a v2 upload's frames all bind one
+     * version id, and a new encryptor has a new one.
+     */
+open func resumePolicy(storedFormat: UInt8?)throws  -> SessionResumeAction  {
+    return try  FfiConverterTypeSessionResumeAction_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_chunkencryptorhandle_resume_policy(
+            self.uniffiCloneHandle(),
+        FfiConverterOptionUInt8.lower(storedFormat),$0
     )
 })
 }
@@ -1547,6 +1578,12 @@ public protocol FileKeyHandleProtocol: AnyObject, Sendable {
      */
     func decryptChunkFrame(fileId: String, versionId: Data, index: UInt32, isLast: Bool, format: UInt8, frame: Data) throws  -> Data
     
+    /**
+     * [`MasterKeyHandle::decrypt_file_metadata`] with this file key: refuses a
+     * plaintext `name_encrypted` (task 1908 round 3). Use it for files.
+     */
+    func decryptFileMetadata(nameEncrypted: String) throws  -> NameMetadataDto
+    
     func decryptMetadata(nonce: Data, ciphertext: Data) throws  -> String
     
     /**
@@ -1555,9 +1592,25 @@ public protocol FileKeyHandleProtocol: AnyObject, Sendable {
      */
     func decryptNameMetadata(nameEncrypted: String) throws  -> NameMetadataDto
     
+    /**
+     * Open a thumbnail frame (`nonce || ct || tag`): the thumbnail subkey
+     * first, then the legacy raw file key (every thumbnail stored before the
+     * switch). The ONLY way to open a thumbnail — not `decrypt_chunk`.
+     */
+    func decryptThumbnail(frame: Data) throws  -> Data
+    
     func encryptChunk(plaintext: Data) throws  -> EncryptedData
     
     func encryptMetadata(metadata: String) throws  -> EncryptedData
+    
+    /**
+     * Seal a thumbnail (already-encoded image bytes) for upload: `nonce(12) ||
+     * ciphertext || tag(16)`, the wire format thumbnails already use. The ONLY
+     * way to seal a thumbnail (task 1908 round 3) — not `encrypt_chunk`: after
+     * the gated seal switch it uses the thumbnail subkey, so a thumbnail can
+     * never be served as file content.
+     */
+    func encryptThumbnail(plaintext: Data) throws  -> Data
     
 }
 /**
@@ -1654,6 +1707,19 @@ open func decryptChunkFrame(fileId: String, versionId: Data, index: UInt32, isLa
 })
 }
     
+    /**
+     * [`MasterKeyHandle::decrypt_file_metadata`] with this file key: refuses a
+     * plaintext `name_encrypted` (task 1908 round 3). Use it for files.
+     */
+open func decryptFileMetadata(nameEncrypted: String)throws  -> NameMetadataDto  {
+    return try  FfiConverterTypeNameMetadataDto_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_file_metadata(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(nameEncrypted),$0
+    )
+})
+}
+    
 open func decryptMetadata(nonce: Data, ciphertext: Data)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_metadata(
@@ -1677,6 +1743,20 @@ open func decryptNameMetadata(nameEncrypted: String)throws  -> NameMetadataDto  
 })
 }
     
+    /**
+     * Open a thumbnail frame (`nonce || ct || tag`): the thumbnail subkey
+     * first, then the legacy raw file key (every thumbnail stored before the
+     * switch). The ONLY way to open a thumbnail — not `decrypt_chunk`.
+     */
+open func decryptThumbnail(frame: Data)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_thumbnail(
+            self.uniffiCloneHandle(),
+        FfiConverterData.lower(frame),$0
+    )
+})
+}
+    
 open func encryptChunk(plaintext: Data)throws  -> EncryptedData  {
     return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_chunk(
@@ -1691,6 +1771,22 @@ open func encryptMetadata(metadata: String)throws  -> EncryptedData  {
     uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_metadata(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(metadata),$0
+    )
+})
+}
+    
+    /**
+     * Seal a thumbnail (already-encoded image bytes) for upload: `nonce(12) ||
+     * ciphertext || tag(16)`, the wire format thumbnails already use. The ONLY
+     * way to seal a thumbnail (task 1908 round 3) — not `encrypt_chunk`: after
+     * the gated seal switch it uses the thumbnail subkey, so a thumbnail can
+     * never be served as file content.
+     */
+open func encryptThumbnail(plaintext: Data)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_thumbnail(
+            self.uniffiCloneHandle(),
+        FfiConverterData.lower(plaintext),$0
     )
 })
 }
@@ -1991,9 +2087,19 @@ public protocol MasterKeyHandleProtocol: AnyObject, Sendable {
      * and writes plaintext to output. Atomic rename at end.
      *
      * `expected_chunk_format` (task 1908) comes from the file's encrypted
-     * metadata (`decrypt_name_metadata`): 0 = unrecorded, 2 = v2.
+     * metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
      */
     func decryptFile(fileId: String, expectedChunkFormat: UInt8, chunkPaths: [String], outputPath: String, callback: FileProgressCallback?) throws  -> DecryptedFileInfo
+    
+    /**
+     * The metadata reader for FILES (task 1908 round 3): exactly
+     * `decrypt_name_metadata`, except that a plaintext (non-JSON)
+     * `name_encrypted` is refused. A plaintext name carries no chunk-format
+     * pin, so accepting it for a file lets a server re-enable frame-0
+     * detection. Take the content reader's `chunk_format` from THIS for every
+     * file; `decrypt_name_metadata` stays for folders / display.
+     */
+    func decryptFileMetadata(fileId: String, nameEncrypted: String) throws  -> NameMetadataDto
     
     /**
      * Decrypt a `name_encrypted` envelope using the handle's master key.
@@ -2052,7 +2158,7 @@ public protocol MasterKeyHandleProtocol: AnyObject, Sendable {
      * format in the encrypted metadata (task 1908): `chunk_format` 2 = every
      * upload of this file id is v2, 0 = record nothing (identical to
      * `encrypt_name`). New file: the encryptor's format (2 only if it wrote
-     * v2). Rename / replace: the value `decrypt_name_metadata` returned for the
+     * v2). Rename / replace: the value `decrypt_file_metadata` returned for the
      * file — never upgrade a file with v1 history, never drop a recorded 2.
      */
     func encryptNameWithChunkFormat(fileId: String, filename: String, mimeType: String?, chunkFormat: UInt8) throws  -> String
@@ -2161,7 +2267,7 @@ open func computeRecoveryCheck()throws  -> Data  {
      * and writes plaintext to output. Atomic rename at end.
      *
      * `expected_chunk_format` (task 1908) comes from the file's encrypted
-     * metadata (`decrypt_name_metadata`): 0 = unrecorded, 2 = v2.
+     * metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
      */
 open func decryptFile(fileId: String, expectedChunkFormat: UInt8, chunkPaths: [String], outputPath: String, callback: FileProgressCallback?)throws  -> DecryptedFileInfo  {
     return try  FfiConverterTypeDecryptedFileInfo_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
@@ -2172,6 +2278,24 @@ open func decryptFile(fileId: String, expectedChunkFormat: UInt8, chunkPaths: [S
         FfiConverterSequenceString.lower(chunkPaths),
         FfiConverterString.lower(outputPath),
         FfiConverterOptionCallbackInterfaceFileProgressCallback.lower(callback),$0
+    )
+})
+}
+    
+    /**
+     * The metadata reader for FILES (task 1908 round 3): exactly
+     * `decrypt_name_metadata`, except that a plaintext (non-JSON)
+     * `name_encrypted` is refused. A plaintext name carries no chunk-format
+     * pin, so accepting it for a file lets a server re-enable frame-0
+     * detection. Take the content reader's `chunk_format` from THIS for every
+     * file; `decrypt_name_metadata` stays for folders / display.
+     */
+open func decryptFileMetadata(fileId: String, nameEncrypted: String)throws  -> NameMetadataDto  {
+    return try  FfiConverterTypeNameMetadataDto_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_decrypt_file_metadata(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(fileId),
+        FfiConverterString.lower(nameEncrypted),$0
     )
 })
 }
@@ -2297,7 +2421,7 @@ open func encryptName(fileId: String, filename: String, mimeType: String?)throws
      * format in the encrypted metadata (task 1908): `chunk_format` 2 = every
      * upload of this file id is v2, 0 = record nothing (identical to
      * `encrypt_name`). New file: the encryptor's format (2 only if it wrote
-     * v2). Rename / replace: the value `decrypt_name_metadata` returned for the
+     * v2). Rename / replace: the value `decrypt_file_metadata` returned for the
      * file — never upgrade a file with v1 history, never drop a recorded 2.
      */
 open func encryptNameWithChunkFormat(fileId: String, filename: String, mimeType: String?, chunkFormat: UInt8)throws  -> String  {
@@ -6178,6 +6302,83 @@ public func FfiConverterTypePasswordStrengthDto_lower(_ value: PasswordStrengthD
 }
 
 
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * What to do with an interrupted upload session — see
+ * [`ChunkEncryptorHandle::resume_policy`] (task 1908 round 3).
+ */
+
+public enum SessionResumeAction: Equatable, Hashable {
+    
+    /**
+     * Keep the session; re-PUT from chunk 0 (the server skips stored frames).
+     */
+    case continueSession
+    /**
+     * Never PUT to the old session again; upload from chunk 0 into a new one.
+     */
+    case restartWithFreshSession
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension SessionResumeAction: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSessionResumeAction: FfiConverterRustBuffer {
+    typealias SwiftType = SessionResumeAction
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SessionResumeAction {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .continueSession
+        
+        case 2: return .restartWithFreshSession
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: SessionResumeAction, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .continueSession:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .restartWithFreshSession:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSessionResumeAction_lift(_ buf: RustBuffer) throws -> SessionResumeAction {
+    return try FfiConverterTypeSessionResumeAction.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSessionResumeAction_lower(_ value: SessionResumeAction) -> RustBuffer {
+    return FfiConverterTypeSessionResumeAction.lower(value)
+}
+
+
 
 /**
  * Error from thumbnail generation (UniFFI-compatible enum).
@@ -7736,7 +7937,7 @@ public func decryptChunk(key: Data, nonce: Data, ciphertext: Data)throws  -> Dat
  *
  * **Task 1908:** `file_id` (the id the file was uploaded under) and
  * `expected_chunk_format` (from the file's encrypted metadata,
- * `decrypt_name_metadata`: 0 = unrecorded, 2 = v2) are required: the chunks
+ * `decrypt_file_metadata`: 0 = unrecorded, 2 = v2) are required: the chunks
  * are opened as one file's ordered stream — v2 frames are bound to (file id,
  * upload, index, last), v1 files still open when the metadata records no
  * format. Reordered, spliced, duplicated, dropped or truncated v2 chunks fail.
@@ -7929,7 +8130,7 @@ public func deriveX25519Public(privateKey: Data)throws  -> Data  {
  * decrypts each with AES-256-GCM, and writes to `output_path`.
  *
  * `expected_chunk_format` (task 1908) comes from the file's encrypted
- * metadata (`decrypt_name_metadata`): 0 = unrecorded, 2 = v2.
+ * metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
  */
 public func downloadAndDecryptFile(apiUrl: String, token: String, masterKeyHandle: MasterKeyHandle, fileId: String, expectedChunkFormat: UInt8, outputPath: String, callback: DownloadProgressCallback?)throws  -> DownloadResultData  {
     return try  FfiConverterTypeDownloadResultData_lift(try rustCallWithError(FfiConverterTypeUploadError_lift) {
@@ -8486,7 +8687,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_decrypt_chunk() != 1418) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_func_decrypt_chunks_to_file() != 34681) {
+    if (uniffi_beebeeb_uniffi_checksum_func_decrypt_chunks_to_file() != 35278) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_decrypt_contiguous_to_file() != 29182) {
@@ -8522,7 +8723,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_derive_x25519_public() != 3860) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_func_download_and_decrypt_file() != 34912) {
+    if (uniffi_beebeeb_uniffi_checksum_func_download_and_decrypt_file() != 13725) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_encrypt_blob() != 15197) {
@@ -8687,6 +8888,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_chunkencryptorhandle_push_chunk() != 41028) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_chunkencryptorhandle_resume_policy() != 33727) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_constellationdecoderhandle_frames_ingested() != 10893) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -8708,16 +8912,25 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk_frame() != 11989) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_file_metadata() != 61159) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_metadata() != 41867) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_name_metadata() != 61502) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_thumbnail() != 51244) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_chunk() != 10384) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_metadata() != 60336) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_thumbnail() != 50799) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_fileprovidercachehandle_clear() != 34269) {
@@ -8741,7 +8954,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_compute_recovery_check() != 4155) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_decrypt_file() != 12609) {
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_decrypt_file() != 46481) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_decrypt_file_metadata() != 11722) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_decrypt_name() != 40318) {
@@ -8768,7 +8984,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_encrypt_name() != 53513) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_encrypt_name_with_chunk_format() != 15026) {
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_encrypt_name_with_chunk_format() != 26947) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_export_for_keychain() != 50366) {
@@ -8846,7 +9062,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_constructor_breachcheckhandle_new() != 51691) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push() != 55991) {
+    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push() != 49279) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push_with_file_key() != 53433) {
@@ -8855,7 +9071,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push_with_file_key_handle() != 50643) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_from_file() != 19226) {
+    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_from_file() != 38225) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_chunkencryptorhandle_for_push() != 9385) {

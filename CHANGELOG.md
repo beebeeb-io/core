@@ -46,6 +46,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FileKeyHandle.decrypt_name_metadata`, WASM `encrypt_name_with_chunk_format`,
   `decrypt_name_metadata[_with_key]`, `WasmChunkDecryptor.versionId`. Feature `test-support`
   (dev-dependencies only) exposes `ChunkEncryptor::with_format` to tests.
+- Metadata domain separation (task 1908 review round 3): name/MIME envelopes and thumbnails can
+  now be sealed under their own subkeys, `HKDF-SHA256(file_key, "beebeeb/name/v1")` and
+  `HKDF-SHA256(file_key, "beebeeb/thumb/v1")`, so neither can ever open as file content (v1 or
+  v2) or as each other. Every name reader (`decrypt_name*`, `decrypt_names`,
+  `decrypt_*_metadata*`) and the new `encrypt::decrypt_thumbnail` try the subkey first, then the
+  legacy raw file key, so every stored blob keeps opening. Writing: a name that records
+  `chunk_format: 2` is always subkey-sealed; everything else follows
+  `encrypt::METADATA_SEAL_WRITE`, which is tied to `WRITE_FORMAT` and stays `Legacy` during the
+  read-only phase (clients not yet on this core must keep reading the names this core writes).
+- `encrypt::decrypt_file_metadata[_with_key]` (task 1908 review round 3): the metadata reader for
+  FILES. Same as `decrypt_name_metadata`, but a plaintext (non-JSON) `name_encrypted` is refused:
+  a plaintext name carries no chunk-format pin, so a server could otherwise swap a v2 file's
+  metadata for a plaintext name and re-enable frame-0 detection. Folders keep using
+  `decrypt_name_metadata`.
+- Resumed uploads (task 1908 review round 3): `chunk_stream::{SessionResume, resume_policy}` and
+  `ChunkEncryptor::resume_policy`. A v2 upload's frames all bind one version id (frame 0's
+  nonce), and a resumed upload builds a new encryptor with a new one, so continuing the old
+  server session would store an unreadable mix. Only a v1 session resumed by a v1 encryptor may
+  continue; anything else, including a resume record that does not say which format it holds,
+  must restart from chunk 0 in a fresh session. Clients persist `ChunkEncryptor::format` next to
+  the session id.
+- New bindings: UniFFI `MasterKeyHandle.decrypt_file_metadata`,
+  `FileKeyHandle.{decrypt_file_metadata, encrypt_thumbnail, decrypt_thumbnail}`,
+  `ChunkEncryptorHandle.resume_policy` + enum `SessionResumeAction`; WASM
+  `decrypt_file_metadata[_with_key]`, `encrypt_thumbnail`, `decrypt_thumbnail`,
+  `WasmChunkEncryptor.resumePolicy`. `kdf::derive_file_subkey` is public.
 
 ### Added
 - `onboarding` module (task 1744): password-policy evaluator driven by the server's numbers
