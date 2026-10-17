@@ -83,6 +83,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FileKeyHandle.encrypt_thumbnail_for`; WASM `WasmChunkEncryptor.withRecordedPin`,
   `encrypt_thumbnail_for`. Restart path for resumed v2 uploads documented (abandon or lease
   expiry before re-init; never the old session on a 409).
+- File notes get their own subkey (task 1908 review round 5): web sealed `note_encrypted` with
+  `encrypt_metadata` under the raw file key, in the same envelope shape as a legacy name, so a
+  server could serve a note as a v2 file's `name_encrypted` (read as a name with no pin) and then
+  as its only frame (a one-frame v1 file), undoing the v2 pin. New
+  `encrypt::{NOTE_KEY_INFO, encrypt_note, encrypt_note_for, decrypt_note}`: notes are sealed under
+  `HKDF-SHA256(file_key, "beebeeb/note/v1")` with the same rule as names and thumbnails (a v2 pin
+  is always subkey-sealed; `Unrecorded` follows `METADATA_SEAL_WRITE`), returned as the canonical
+  `EncryptedBlob` JSON; `decrypt_note` tries the note subkey, then the legacy raw key. Bindings:
+  UniFFI `FileKeyHandle.{encrypt_note, encrypt_note_for, decrypt_note}`; WASM `encrypt_note`,
+  `encrypt_note_for`, `decrypt_note`. Clients must write and read notes through these (web
+  `file-details-panel.tsx` follow-up).
+- `with_recorded_pin` / `apply_recorded_pin` / `withRecordedPin` docs: `V2` only with the pin
+  read from an existing file's authenticated metadata; a new file uses `WRITE_FORMAT` (doctest).
 
 ### Added
 - `onboarding` module (task 1744): password-policy evaluator driven by the server's numbers

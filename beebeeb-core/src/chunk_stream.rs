@@ -795,10 +795,59 @@ impl ChunkEncryptor {
     /// a server field). A v2 pin forces v2 frames even while [`WRITE_FORMAT`]
     /// is still v1; `Unrecorded` keeps [`WRITE_FORMAT`].
     ///
-    /// For a NEW file id there is no pin: use the plain constructor (same as
-    /// passing `Unrecorded`). Only before the first chunk, so a file can never
-    /// mix formats. Pair it with `encrypt::encrypt_thumbnail_for(.., pin)` and,
-    /// when the name is rewritten, `encrypt_name_with_chunk_format(.., pin)`.
+    /// **New-file rule (lead ruling 2026-10-17, round 5).** Pass `V2` ONLY
+    /// with the pin read from an EXISTING file's authenticated metadata. A
+    /// brand-new file id has no pin: use the plain constructor, which writes
+    /// [`WRITE_FORMAT`], and record [`ExpectedChunkFormat::recorded_for`] of
+    /// [`format`](Self::format). Never pass `V2` for a new file — before the
+    /// switch that would create a v2 file that clients not yet on this core
+    /// cannot read. Core cannot tell the two cases apart; it is a client rule
+    /// (adoption checklist in `CLAUDE.md`). Only before the first chunk, so a
+    /// file can never mix formats. Pair it with
+    /// `encrypt::encrypt_thumbnail_for(.., pin)`,
+    /// `encrypt::encrypt_note_for(.., pin)` and, when the name is rewritten,
+    /// `encrypt_name_with_chunk_format(.., pin)`.
+    ///
+    /// ```
+    /// use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor, ExpectedChunkFormat, WRITE_FORMAT};
+    /// use beebeeb_core::encrypt::{decrypt_file_metadata, encrypt_name_with_chunk_format};
+    /// use beebeeb_core::kdf::MasterKey;
+    ///
+    /// let mk = MasterKey::from_bytes([7u8; 32]);
+    /// let id = "3f1c0e7a-0000-4000-8000-000000000001";
+    /// let v1 = b"first version".to_vec();
+    ///
+    /// // NEW file: no pin exists. Plain constructor (= WRITE_FORMAT), then
+    /// // record what the encryptor actually wrote. Never `with_recorded_pin(V2)`.
+    /// let mut enc = ChunkEncryptor::for_push_with_chunk_size(&mk, id, v1.len() as u64, 16).unwrap();
+    /// assert_eq!(enc.format(), WRITE_FORMAT);
+    /// let frames: Vec<Vec<u8>> = v1.chunks(16).map(|c| enc.push_chunk(c).unwrap().data).collect();
+    /// let recorded = ExpectedChunkFormat::recorded_for(enc.format());
+    /// enc.finish().unwrap();
+    /// let name_encrypted = encrypt_name_with_chunk_format(&mk, id, "a.txt", None, recorded).unwrap();
+    ///
+    /// // REPLACE (new version of that file): the pin comes from the file's own
+    /// // authenticated metadata (never a server field), and the writer obeys it.
+    /// let pin = decrypt_file_metadata(&mk, id, &name_encrypted).unwrap().chunk_format;
+    /// let v2 = b"second version".to_vec();
+    /// let mut enc = ChunkEncryptor::for_push_with_chunk_size(&mk, id, v2.len() as u64, 16)
+    ///     .unwrap()
+    ///     .with_recorded_pin(pin)
+    ///     .unwrap();
+    /// let frames2: Vec<Vec<u8>> = v2.chunks(16).map(|c| enc.push_chunk(c).unwrap().data).collect();
+    /// enc.finish().unwrap();
+    ///
+    /// // Both versions read back under the one metadata blob the server keeps.
+    /// for (frames, want) in [(frames, v1), (frames2, v2)] {
+    ///     let mut dec = ChunkDecryptor::for_push(&mk, id, pin);
+    ///     let mut out = Vec::new();
+    ///     for f in &frames {
+    ///         out.extend_from_slice(&dec.push_frame(f).unwrap().data);
+    ///     }
+    ///     dec.finish().unwrap();
+    ///     assert_eq!(out, want);
+    /// }
+    /// ```
     pub fn with_recorded_pin(mut self, pin: ExpectedChunkFormat) -> Result<Self, CoreError> {
         if self.emitted_chunks != 0 {
             return Err(CoreError::InvalidInput(
@@ -3090,5 +3139,339 @@ mod review_round4_tests {
         let raw_opens = open_raw_with_aad(&fk, &t, &[]).is_ok();
         assert_eq!(raw_opens, METADATA_SEAL_WRITE == MetadataSeal::Legacy);
         assert_eq!(decrypt_thumbnail(&fk, &t).unwrap(), b"thumb");
+    }
+}
+
+/// Task 1908 review round 5 — file notes (spec 2026-10-17-1912 §6, lead
+/// ruling 2026-10-17). Web sealed notes with `encrypt_metadata` under the RAW
+/// file key, in the same envelope shape as a legacy name; a server could serve
+/// such a note as a v2 file's metadata (it reads as a pin-less name) and then
+/// as its only frame (a one-frame v1 "file"). Notes now have their own
+/// subkey under the same seal rule as names and thumbnails.
+#[cfg(test)]
+mod review_round5_tests {
+    use super::*;
+    use crate::encrypt::{
+        METADATA_SEAL_WRITE, MetadataSeal, NOTE_KEY_INFO, decrypt_file_metadata, decrypt_file_metadata_with_key,
+        decrypt_metadata, decrypt_name, decrypt_name_metadata, decrypt_name_metadata_with_key, decrypt_name_with_key,
+        decrypt_names, decrypt_note, decrypt_thumbnail, encrypt_metadata, encrypt_name_with_chunk_format, encrypt_note,
+        encrypt_note_for, encrypt_note_sealed, encrypt_thumbnail_for,
+    };
+    use beebeeb_types::{CipherSuite, EncryptedBlob};
+
+    const CS: u64 = 16;
+
+    fn mk() -> MasterKey {
+        // Fixed bytes instead of Argon2id: the attack does not depend on how
+        // the master key was derived, and this keeps the module fast.
+        MasterKey::from_bytes(std::array::from_fn(|i| (i as u8).wrapping_mul(7) ^ 0xa5))
+    }
+
+    fn pattern(len: usize, seed: u8) -> Vec<u8> {
+        (0..len)
+            .map(|i| (i as u8).wrapping_mul(37).wrapping_add(seed))
+            .collect()
+    }
+
+    fn read(m: &MasterKey, id: &str, expected: ExpectedChunkFormat, frames: &[Vec<u8>]) -> Result<Vec<u8>, CoreError> {
+        let mut dec = ChunkDecryptor::for_push(m, id, expected);
+        let mut out = Vec::new();
+        for f in frames {
+            out.extend_from_slice(&dec.push_frame(f)?.data);
+        }
+        dec.finish()?;
+        Ok(out)
+    }
+
+    /// A client reading a file: pin from the FILE metadata reader, then frames.
+    fn read_file(m: &MasterKey, id: &str, name_encrypted: &str, frames: &[Vec<u8>]) -> Result<Vec<u8>, CoreError> {
+        let meta = decrypt_file_metadata(m, id, name_encrypted)?;
+        read(m, id, meta.chunk_format, frames)
+    }
+
+    /// A v2 file as a client on this core writes it: v2 frames + a name that
+    /// records `chunk_format: 2`.
+    fn v2_file(m: &MasterKey, id: &str, data: &[u8]) -> (String, Vec<Vec<u8>>) {
+        let mut enc = ChunkEncryptor::for_push_with_chunk_size(m, id, data.len() as u64, CS)
+            .unwrap()
+            .with_format(ChunkFormat::V2)
+            .unwrap();
+        let frames: Vec<Vec<u8>> = data
+            .chunks(CS as usize)
+            .map(|c| enc.push_chunk(c).unwrap().data)
+            .collect();
+        let summary_format = enc.format();
+        enc.finish().unwrap();
+        let name = encrypt_name_with_chunk_format(
+            m,
+            id,
+            "report.pdf",
+            Some("application/pdf"),
+            ExpectedChunkFormat::recorded_for(summary_format),
+        )
+        .unwrap();
+        (name, frames)
+    }
+
+    /// The note web writes on c089a27 and today (`file-details-panel.tsx`
+    /// ~247): `encrypt_metadata` under the RAW file key, serialized as the
+    /// canonical envelope (`serializeEncryptedBlob`).
+    fn web_raw_key_note(fk: &FileKey, text: &str) -> String {
+        serde_json::to_string(&encrypt_metadata(fk, text).unwrap()).unwrap()
+    }
+
+    /// `nonce || ct || tag` inside a native envelope.
+    fn envelope_as_frame(envelope: &str) -> Vec<u8> {
+        let blob: EncryptedBlob = serde_json::from_str(envelope).unwrap();
+        [blob.nonce, blob.ciphertext].concat()
+    }
+
+    /// A `nonce || ct || tag` frame wrapped as a native envelope.
+    fn frame_as_envelope(frame: &[u8]) -> String {
+        serde_json::to_string(&EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce: frame[..NONCE_LEN].to_vec(),
+            ciphertext: frame[NONCE_LEN..].to_vec(),
+        })
+        .unwrap()
+    }
+
+    /// HKDF-SHA256 with the hkdf crate directly — not through
+    /// `kdf::derive_file_subkey` / `derive_note_key`, so a mutation of those
+    /// cannot also move this reference key.
+    fn independent_subkey(fk: &FileKey, info: &[u8]) -> FileKey {
+        let hk = hkdf::Hkdf::<sha2::Sha256>::new(None, fk.as_bytes());
+        let mut okm = [0u8; 32];
+        hk.expand(info, &mut okm).unwrap();
+        FileKey::from_bytes(okm)
+    }
+
+    /// The downgrade: the server serves `note` as the file's `name_encrypted`
+    /// AND the same blob as the file's only frame; the client reads it the way
+    /// every client reads a file.
+    fn serve_note_as_file(m: &MasterKey, id: &str, note: &str) -> Result<Vec<u8>, CoreError> {
+        read_file(m, id, note, &[envelope_as_frame(note)])
+    }
+
+    #[test]
+    fn raw_key_note_served_as_name_downgrades_v2_file() {
+        let m = mk();
+        let id = "v2-file-with-a-note";
+        let data = pattern(40, 7);
+        let (name, frames) = v2_file(&m, id, &data);
+        assert_eq!(read_file(&m, id, &name, &frames).unwrap(), data);
+        let fk = derive_file_key(&m, id.as_bytes());
+
+        // Control (proves the instrument): a note sealed the way web seals it
+        // (raw key) DOES downgrade this v2 file — the metadata reads as a
+        // pin-less name and the note opens as a one-frame v1 file.
+        let raw = web_raw_key_note(&fk, "meeting notes");
+        assert_eq!(
+            decrypt_file_metadata(&m, id, &raw).unwrap().chunk_format,
+            ExpectedChunkFormat::Unrecorded
+        );
+        assert_eq!(
+            serve_note_as_file(&m, id, &raw).expect("control: a raw-key note must reproduce the downgrade"),
+            b"meeting notes"
+        );
+
+        // The fix: the note a client writes THROUGH CORE for this file, with
+        // the pin read from the file's own authenticated metadata.
+        let pin = decrypt_file_metadata(&m, id, &name).unwrap().chunk_format;
+        assert_eq!(pin, ExpectedChunkFormat::V2);
+        let note = encrypt_note_for(&fk, "meeting notes", pin).unwrap();
+        assert_eq!(decrypt_note(&fk, &note).unwrap(), "meeting notes");
+        let got = serve_note_as_file(&m, id, &note);
+        assert!(
+            got.is_err(),
+            "a v2 file's note must not stand in for its metadata and content (got {} plaintext bytes)",
+            got.map(|p| p.len()).unwrap_or(0)
+        );
+        // Share recipients (known file key) are covered too.
+        assert!(decrypt_file_metadata_with_key(&fk, &note).is_err());
+    }
+
+    #[test]
+    fn v2_note_never_opens_through_any_name_reader() {
+        let m = mk();
+        let id = "note-as-name";
+        let fk = derive_file_key(&m, id.as_bytes());
+        let name_shaped = r#"{"name":"evil.exe","mime_type":null,"chunk_format":2}"#;
+
+        // Control: the legacy raw-key note with the same text DOES open as a
+        // name (the pre-switch residual, decision 1912) — the wrapping is valid.
+        assert_eq!(
+            decrypt_name(&m, id, &web_raw_key_note(&fk, name_shaped)).unwrap(),
+            "evil.exe"
+        );
+
+        let note = encrypt_note_for(&fk, name_shaped, ExpectedChunkFormat::V2).unwrap();
+        assert!(decrypt_file_metadata(&m, id, &note).is_err(), "decrypt_file_metadata");
+        assert!(
+            decrypt_file_metadata_with_key(&fk, &note).is_err(),
+            "decrypt_file_metadata_with_key"
+        );
+        assert!(decrypt_name_metadata(&m, id, &note).is_err(), "decrypt_name_metadata");
+        assert!(
+            decrypt_name_metadata_with_key(&fk, &note).is_err(),
+            "decrypt_name_metadata_with_key"
+        );
+        assert!(decrypt_name(&m, id, &note).is_err(), "decrypt_name");
+        assert!(decrypt_name_with_key(&fk, &note).is_none(), "decrypt_name_with_key");
+        let uuid_id = uuid::Uuid::from_bytes([9; 16]);
+        let fk_u = derive_file_key(&m, uuid_id.to_string().as_bytes());
+        let note_u = encrypt_note_for(&fk_u, name_shaped, ExpectedChunkFormat::V2).unwrap();
+        assert!(
+            decrypt_names(&m, &[(uuid_id, note_u.as_str())])[0].is_err(),
+            "decrypt_names"
+        );
+    }
+
+    #[test]
+    fn v2_note_never_opens_as_content() {
+        let m = mk();
+        let id = "note-as-content";
+        let fk = derive_file_key(&m, id.as_bytes());
+        let note = encrypt_note_for(&fk, "a note", ExpectedChunkFormat::V2).unwrap();
+        let frame = envelope_as_frame(&note);
+        for expected in [ExpectedChunkFormat::Unrecorded, ExpectedChunkFormat::V2] {
+            let got = read(&m, id, expected, std::slice::from_ref(&frame));
+            assert!(
+                got.is_err(),
+                "a v2 note must not open as a one-frame file under {expected:?} (got {} bytes)",
+                got.map(|p| p.len()).unwrap_or(0)
+            );
+        }
+        // Nor as the first frame of a real v2 file's stream.
+        let (_, mut frames) = v2_file(&m, id, &pattern(32, 3));
+        frames[0] = frame;
+        assert!(read(&m, id, ExpectedChunkFormat::Unrecorded, &frames).is_err());
+    }
+
+    #[test]
+    fn notes_names_and_thumbnails_never_open_as_each_other() {
+        let m = mk();
+        let id = "note-name-thumb";
+        let fk = derive_file_key(&m, id.as_bytes());
+        let note = encrypt_note_for(&fk, "a note", ExpectedChunkFormat::V2).unwrap();
+        assert!(
+            decrypt_thumbnail(&fk, &envelope_as_frame(&note)).is_err(),
+            "a v2 note must not open as a thumbnail"
+        );
+        let name = encrypt_name_with_chunk_format(&m, id, "a.pdf", None, ExpectedChunkFormat::V2).unwrap();
+        assert!(decrypt_note(&fk, &name).is_err(), "a v2 name must not open as a note");
+        let thumb = encrypt_thumbnail_for(&fk, b"thumb", ExpectedChunkFormat::V2).unwrap();
+        assert!(
+            decrypt_note(&fk, &frame_as_envelope(&thumb)).is_err(),
+            "a v2 thumbnail must not open as a note"
+        );
+        let (_, frames) = v2_file(&m, id, &pattern(20, 9));
+        assert!(
+            decrypt_note(&fk, &frame_as_envelope(&frames[0])).is_err(),
+            "a v2 content frame must not open as a note"
+        );
+    }
+
+    #[test]
+    fn v2_note_opens_only_under_an_independently_derived_note_key() {
+        let fk = derive_file_key(&mk(), b"note-key-independent");
+        let note = encrypt_note_for(&fk, "only under the note key", ExpectedChunkFormat::V2).unwrap();
+        let blob: EncryptedBlob = serde_json::from_str(&note).unwrap();
+        assert_eq!(
+            decrypt_metadata(&independent_subkey(&fk, b"beebeeb/note/v1"), &blob)
+                .expect("a v2 note must be sealed under HKDF(file_key, \"beebeeb/note/v1\")"),
+            "only under the note key"
+        );
+        assert_eq!(NOTE_KEY_INFO, b"beebeeb/note/v1");
+        for other in [
+            independent_subkey(&fk, b"beebeeb/name/v1"),
+            independent_subkey(&fk, b"beebeeb/thumb/v1"),
+            independent_subkey(&fk, b"beebeeb/chunk/v2/key"),
+            FileKey::from_bytes(*fk.as_bytes()),
+        ] {
+            assert!(decrypt_metadata(&other, &blob).is_err());
+        }
+    }
+
+    #[test]
+    fn note_subkey_known_answer() {
+        // HKDF-SHA256(salt = none, ikm = 00..1f, info = "beebeeb/note/v1"),
+        // computed independently (Python hmac/hashlib, RFC 5869 by hand; the
+        // same script reproduces the name and thumbnail KATs).
+        let fk = FileKey::from_bytes(std::array::from_fn(|i| i as u8));
+        assert_eq!(
+            hex::encode(crate::encrypt::derive_note_key(&fk).as_bytes()),
+            "763d4d38632f509d75366d1262cb35b1c999339e0ce03c54403ed9ed4fdfe247"
+        );
+    }
+
+    #[test]
+    fn note_subkey_is_distinct_from_every_other_file_key() {
+        let fk = FileKey::from_bytes(std::array::from_fn(|i| (i as u8) ^ 0x3c));
+        let note = crate::encrypt::derive_note_key(&fk);
+        for (what, other) in [
+            ("raw", FileKey::from_bytes(*fk.as_bytes())),
+            ("name", crate::encrypt::derive_name_key(&fk)),
+            ("thumb", crate::encrypt::derive_thumbnail_key(&fk)),
+            ("chunk", derive_chunk_key_v2(&fk)),
+        ] {
+            assert_ne!(note.as_bytes(), other.as_bytes(), "note key == {what} key");
+        }
+    }
+
+    #[test]
+    fn legacy_raw_key_notes_still_open() {
+        let fk = derive_file_key(&mk(), b"legacy-note");
+        // Canonical shape, exactly what web stores today.
+        assert_eq!(
+            decrypt_note(&fk, &web_raw_key_note(&fk, "old note")).unwrap(),
+            "old note"
+        );
+        // Older web base64 `{nonce, ciphertext}` shape.
+        let blob = encrypt_metadata(&fk, "older note").unwrap();
+        let b64 = crate::metadata_wire::serialize_encrypted_metadata(&blob.nonce, &blob.ciphertext);
+        assert_eq!(decrypt_note(&fk, &b64).unwrap(), "older note");
+        // Crate-internal Legacy seal = the same bytes shape.
+        let legacy = encrypt_note_sealed(&fk, "x", MetadataSeal::Legacy).unwrap();
+        assert_eq!(decrypt_note(&fk, &legacy).unwrap(), "x");
+        // Wrong key, plaintext and garbage are errors, never a note.
+        let other = derive_file_key(&mk(), b"another-file");
+        assert!(decrypt_note(&other, &web_raw_key_note(&fk, "old note")).is_err());
+        assert!(decrypt_note(&fk, "a plaintext note").is_err());
+        assert!(decrypt_note(&fk, "{\"nonce\":1}").is_err());
+    }
+
+    #[test]
+    fn note_roundtrip_and_wire_shape_for_both_pins() {
+        let fk = derive_file_key(&mk(), b"note-roundtrip");
+        let text = "Notitie — 会議 \u{1F41D} \"quoted\"\nline 2";
+        for pin in [ExpectedChunkFormat::Unrecorded, ExpectedChunkFormat::V2] {
+            let note = encrypt_note_for(&fk, text, pin).unwrap();
+            assert_eq!(decrypt_note(&fk, &note).unwrap(), text, "{pin:?}");
+            // The canonical envelope web's parseEncryptedBlob already reads.
+            let v: serde_json::Value = serde_json::from_str(&note).unwrap();
+            assert_eq!(v["cipher_suite"], "V1Aes256Gcm");
+            assert!(v["nonce"].is_array() && v["ciphertext"].is_array());
+        }
+        assert_eq!(decrypt_note(&fk, &encrypt_note(&fk, text).unwrap()).unwrap(), text);
+    }
+
+    #[test]
+    fn note_for_an_unrecorded_pin_follows_the_write_switch() {
+        let fk = derive_file_key(&mk(), b"note-unrecorded");
+        let raw_opens = |note: &str| {
+            let blob: EncryptedBlob = serde_json::from_str(note).unwrap();
+            decrypt_metadata(&fk, &blob).is_ok()
+        };
+        let legacy_now = METADATA_SEAL_WRITE == MetadataSeal::Legacy;
+        assert_eq!(
+            raw_opens(&encrypt_note_for(&fk, "n", ExpectedChunkFormat::Unrecorded).unwrap()),
+            legacy_now
+        );
+        assert_eq!(raw_opens(&encrypt_note(&fk, "n").unwrap()), legacy_now);
+        assert!(
+            !raw_opens(&encrypt_note_for(&fk, "n", ExpectedChunkFormat::V2).unwrap()),
+            "a v2-pinned file's note must not be sealed under the raw file key"
+        );
     }
 }

@@ -677,7 +677,14 @@ impl WasmChunkEncryptor {
     /// `decrypt_file_metadata` (0 = unrecorded, 2 = v2), never a server field.
     /// A v2 pin forces v2 frames even during the read-only phase; 0 keeps the
     /// default. Before the first `pushChunk` only; other codes throw. Consumes
-    /// the old JS object — use the returned one. A new file needs no call.
+    /// the old JS object — use the returned one.
+    ///
+    /// **New-file rule (lead ruling 2026-10-17):** pass 2 ONLY when it was
+    /// read from an EXISTING file's authenticated metadata. A brand-new file
+    /// makes NO call (the default write format applies) and records `format`
+    /// in its name; passing 2 for a new file would create a v2 file before the
+    /// switch. Core cannot enforce this; the web client keeps a test that its
+    /// new-file path never calls this with 2.
     #[wasm_bindgen(js_name = withRecordedPin)]
     pub fn with_recorded_pin(self, recorded_pin: u8) -> Result<WasmChunkEncryptor, JsError> {
         let inner = recorded_pin_core(self.inner, recorded_pin).map_err(|e| JsError::new(&e.to_string()))?;
@@ -953,6 +960,46 @@ pub fn encrypt_thumbnail_for(file_key: &[u8], plaintext: &[u8], recorded_pin: u8
 pub fn decrypt_thumbnail(file_key: &[u8], frame: &[u8]) -> Result<Vec<u8>, JsError> {
     let fk = file_key_from_slice(file_key)?;
     encrypt::decrypt_thumbnail(&fk, frame).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Seal a file note for a file with no recorded pin yet (task 1908 round 5):
+/// returns the canonical `EncryptedBlob` JSON to store in `note_encrypted` (the
+/// shape `serializeEncryptedBlob` writes). Follows the gated seal switch, like
+/// `encrypt_thumbnail`. For a note on an EXISTING file (the details panel) use
+/// `encrypt_note_for` with the file's recorded pin. The ONLY way to seal a
+/// note — not `encryptFilename` / `encrypt_metadata` under the file key (a
+/// raw-key note can stand in for a v2 file's name and content).
+#[wasm_bindgen]
+pub fn encrypt_note(file_key: &[u8], note: &str) -> Result<String, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    encrypt::encrypt_note(&fk, note).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Seal a note of an EXISTING file under the rule of its recorded pin (task
+/// 1908 round 5): `recordedPin` = the `chunk_format` from
+/// `decrypt_file_metadata` of THIS file (0 = unrecorded, 2 = v2), never a
+/// server field. A v2 pin is always sealed under the note subkey; 0 behaves
+/// like `encrypt_note`.
+#[wasm_bindgen]
+pub fn encrypt_note_for(file_key: &[u8], note: &str, recorded_pin: u8) -> Result<String, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    note_for_core(&fk, note, recorded_pin).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Native seam of [`encrypt_note_for`] (testable off-wasm, incl. the
+/// unknown-pin error path).
+fn note_for_core(fk: &kdf::FileKey, note: &str, recorded_pin: u8) -> Result<String, beebeeb_core::CoreError> {
+    let pin = beebeeb_core::chunk_stream::ExpectedChunkFormat::from_u8(recorded_pin)?;
+    encrypt::encrypt_note_for(fk, note, pin)
+}
+
+/// Open a `note_encrypted` envelope: the note subkey first, then the legacy
+/// raw file key (notes stored before the switch). A plaintext value is an
+/// error. The ONLY way to open a note — not `decryptFilename`.
+#[wasm_bindgen]
+pub fn decrypt_note(file_key: &[u8], note_encrypted: &str) -> Result<String, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    encrypt::decrypt_note(&fk, note_encrypted).map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// [`decrypt_name_metadata`] with an already-unwrapped 32-byte file key (share
@@ -2203,5 +2250,44 @@ mod tests {
         let fk = kdf::derive_file_key(&mk, b"wasm-thumb");
         let sealed = encrypt_thumbnail(fk.as_bytes(), b"thumb").unwrap();
         assert_eq!(decrypt_thumbnail(fk.as_bytes(), &sealed).unwrap(), b"thumb");
+    }
+
+    #[test]
+    fn note_wrappers_follow_the_pin() {
+        // Task 1908 round 5 through the WASM wrappers: a note for a v2-pinned
+        // file never sits under the raw file key and never opens as the
+        // file's metadata; unrecorded follows the write switch.
+        let mk = kdf::derive_master_key("test-password", b"test-salt-16bytes").unwrap();
+        let id = "wasm-note-v2";
+        let name = beebeeb_core::encrypt::encrypt_name_with_chunk_format(
+            &mk,
+            id,
+            "a.pdf",
+            None,
+            beebeeb_core::chunk_stream::ExpectedChunkFormat::V2,
+        )
+        .unwrap();
+        let pin = beebeeb_core::encrypt::decrypt_file_metadata(&mk, id, &name)
+            .unwrap()
+            .chunk_format;
+        let fk = kdf::derive_file_key(&mk, id.as_bytes());
+        let note = encrypt_note_for(fk.as_bytes(), "wasm note", pin.as_u8()).unwrap();
+        assert_eq!(decrypt_note(fk.as_bytes(), &note).unwrap(), "wasm note");
+        let blob: EncryptedBlob = serde_json::from_str(&note).unwrap();
+        assert!(
+            beebeeb_core::encrypt::decrypt_metadata(&fk, &blob).is_err(),
+            "a v2-pinned note must not open under the raw file key"
+        );
+        assert!(
+            beebeeb_core::encrypt::decrypt_file_metadata(&mk, id, &note).is_err(),
+            "a v2 note must not open as the file's metadata"
+        );
+
+        let n0 = encrypt_note_for(fk.as_bytes(), "n0", 0).unwrap();
+        assert_eq!(decrypt_note(fk.as_bytes(), &n0).unwrap(), "n0");
+        let n = encrypt_note(fk.as_bytes(), "n").unwrap();
+        assert_eq!(decrypt_note(fk.as_bytes(), &n).unwrap(), "n");
+        assert!(note_for_core(&fk, "x", 1).is_err());
+        assert!(note_for_core(&fk, "x", 7).is_err());
     }
 }

@@ -54,6 +54,12 @@ pub fn decrypt_chunk(key: &FileKey, blob: &EncryptedBlob) -> Result<Vec<u8>, Cor
 }
 
 /// Encrypt a UTF-8 metadata string (e.g. filename / path) with AES-256-GCM.
+///
+/// Generic, no AAD. Never call it with a per-file key to seal a file's name,
+/// thumbnail or note: use [`encrypt_name_with_chunk_format`],
+/// [`encrypt_thumbnail_for`] and [`encrypt_note_for`] (task 1908). A no-AAD
+/// blob under the raw file key opens as a v1 content frame and, in envelope
+/// shape, as a pin-less name.
 pub fn encrypt_metadata(key: &FileKey, metadata: &str) -> Result<EncryptedBlob, CoreError> {
     encrypt_chunk(key, metadata.as_bytes())
 }
@@ -184,20 +190,22 @@ pub enum MetadataSeal {
     /// The raw per-file key, no AAD — every blob written before task 1908
     /// round 3, and what clients not yet on this core can read.
     Legacy,
-    /// The purpose subkey ([`NAME_KEY_INFO`] / [`THUMBNAIL_KEY_INFO`]).
+    /// The purpose subkey ([`NAME_KEY_INFO`] / [`THUMBNAIL_KEY_INFO`] /
+    /// [`NOTE_KEY_INFO`]).
     Subkey,
 }
 
-/// How new name envelopes (of files whose metadata records no v2 format) and
-/// new thumbnails are sealed. Tied to [`crate::chunk_stream::WRITE_FORMAT`] so
+/// How new name envelopes (of files whose metadata records no v2 format), new
+/// thumbnails and new file notes are sealed. Tied to [`crate::chunk_stream::WRITE_FORMAT`] so
 /// the two flip in ONE gated release: while content is still written as v1,
 /// a subkey-sealed name would be unreadable by every client not yet on this
 /// core, and there is no v2 file for it to protect. A name that records
 /// `chunk_format: 2` (and a thumbnail written with [`encrypt_thumbnail_for`] a
-/// v2 pin) is subkey-sealed regardless. `= metadata_seal_for(WRITE_FORMAT)`.
+/// v2 pin, and a note written with [`encrypt_note_for`] a v2 pin) is
+/// subkey-sealed regardless. `= metadata_seal_for(WRITE_FORMAT)`.
 pub const METADATA_SEAL_WRITE: MetadataSeal = metadata_seal_for(crate::chunk_stream::WRITE_FORMAT);
 
-/// How names and thumbnails are sealed for content written in `format`
+/// How names, thumbnails and file notes are sealed for content written in `format`
 /// (task 1908 review round 4, P2-1): v1 content → [`MetadataSeal::Legacy`]
 /// (readable by clients not yet on this core), v2 content →
 /// [`MetadataSeal::Subkey`] (only a reader on this core opens v2 content
@@ -263,6 +271,83 @@ pub(crate) fn encrypt_thumbnail_sealed(
 /// first, then the legacy raw file key (thumbnails stored before the switch).
 pub fn decrypt_thumbnail(file_key: &FileKey, frame: &[u8]) -> Result<Vec<u8>, CoreError> {
     open_raw_with_aad(&derive_thumbnail_key(file_key), frame, &[]).or_else(|_| open_raw_with_aad(file_key, frame, &[]))
+}
+
+// ── File notes (task 1908 review round 5) ──────────────────────────────────
+//
+// Web sealed a file's note with `encrypt_metadata` under the RAW per-file key
+// (`file-details-panel.tsx`), stored as an `EncryptedBlob` JSON in
+// `files.note_encrypted` — the same key, the same (empty) AAD and the same
+// envelope shape as a legacy name. A server could serve that note as a v2
+// file's `name_encrypted`: the name reader's legacy fallback opens it, the
+// non-JSON text reads as a name with NO pin (`Unrecorded`), detection is back
+// on, and the same note bytes then open as a one-frame v1 "file". So a raw-key
+// note undid the v2 pin. Notes now have their own purpose subkey, under the
+// same seal rule as names and thumbnails (`chunk_format_for_pin` +
+// `metadata_seal_for`), so a note sealed for a v2 file never opens as a name,
+// a thumbnail or content (test `raw_key_note_served_as_name_downgrades_v2_file`).
+
+/// HKDF-SHA256 `info` of the file-note subkey (ikm = the per-file key).
+pub const NOTE_KEY_INFO: &[u8; 15] = b"beebeeb/note/v1";
+
+/// File-note subkey of a per-file key.
+pub(crate) fn derive_note_key(file_key: &FileKey) -> FileKey {
+    crate::kdf::derive_file_subkey(file_key, NOTE_KEY_INFO)
+}
+
+/// Seal a file note for a file with no recorded pin yet (a note written in the
+/// same flow that creates the file). Follows [`METADATA_SEAL_WRITE`], exactly
+/// like [`encrypt_thumbnail`]. For a note on an EXISTING file (the usual case:
+/// the details panel) use [`encrypt_note_for`] with the file's recorded pin.
+///
+/// Returns the canonical `EncryptedBlob` JSON (`{"cipher_suite":"V1Aes256Gcm",
+/// "nonce":[..],"ciphertext":[..]}`) — the shape web stores in
+/// `note_encrypted` today, so readers not yet on this core still open notes
+/// this core writes during the read-only phase. Read it back with
+/// [`decrypt_note`]. These two writers are the only way clients should seal a
+/// note — never `encrypt_metadata` / `encrypt_chunk` under the file key.
+pub fn encrypt_note(file_key: &FileKey, note: &str) -> Result<String, CoreError> {
+    encrypt_note_sealed(file_key, note, METADATA_SEAL_WRITE)
+}
+
+/// Seal a note of an EXISTING file whose encrypted metadata records `pin` (from
+/// [`decrypt_file_metadata`], never a server field). The same rule as names
+/// and thumbnails: a v2 pin is ALWAYS sealed under the note subkey (the note
+/// can then never stand in for the file's name or content); `Unrecorded`
+/// follows [`METADATA_SEAL_WRITE`] (legacy during the read-only phase).
+pub fn encrypt_note_for(
+    file_key: &FileKey,
+    note: &str,
+    pin: crate::chunk_stream::ExpectedChunkFormat,
+) -> Result<String, CoreError> {
+    let seal = metadata_seal_for(crate::chunk_stream::chunk_format_for_pin(pin));
+    encrypt_note_sealed(file_key, note, seal)
+}
+
+/// [`encrypt_note`] with an explicit seal — crate-internal (tests), so no
+/// client can write subkey-sealed notes for a v1 file ahead of the switch.
+pub(crate) fn encrypt_note_sealed(file_key: &FileKey, note: &str, seal: MetadataSeal) -> Result<String, CoreError> {
+    let blob = match seal {
+        MetadataSeal::Legacy => encrypt_metadata(file_key, note)?,
+        MetadataSeal::Subkey => encrypt_metadata(&derive_note_key(file_key), note)?,
+    };
+    serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
+}
+
+/// Open a `note_encrypted` envelope (native `EncryptedBlob` JSON or the legacy
+/// web `{nonce, ciphertext}` shape): the note subkey first, then the legacy raw
+/// file key (every note stored before the switch). A plaintext (non-JSON)
+/// value, or one that opens under neither key, is an error — the caller shows
+/// no note. Never open a note with `decrypt_metadata` / `decrypt_name*`.
+pub fn decrypt_note(file_key: &FileKey, note_encrypted: &str) -> Result<String, CoreError> {
+    if !note_encrypted.starts_with('{') {
+        return Err(CoreError::InvalidInput(
+            "note is not an encrypted envelope (task 1908)".into(),
+        ));
+    }
+    decrypt_envelope_plaintext_under(&derive_note_key(file_key), note_encrypted)
+        .or_else(|| decrypt_envelope_plaintext_under(file_key, note_encrypted))
+        .ok_or(CoreError::Decryption)
 }
 
 /// The decrypted name metadata of a file, including the chunk format its

@@ -126,8 +126,8 @@ pub fn derive_file_key(master_key: &MasterKey, file_id: &[u8]) -> FileKey {
 
 /// Derive a purpose-bound subkey of a per-file key: `HKDF-SHA256(salt = none,
 /// ikm = file_key, info)`. Each purpose (v2 content frames, the name/MIME
-/// envelope, thumbnails) uses its own `info`, so a blob sealed for one purpose
-/// can never authenticate as another (task 1908).
+/// envelope, thumbnails, file notes) uses its own `info`, so a blob sealed for
+/// one purpose can never authenticate as another (task 1908).
 pub fn derive_file_subkey(file_key: &FileKey, info: &[u8]) -> FileKey {
     let hk = Hkdf::<Sha256>::new(None, file_key.as_bytes());
     let mut okm = Zeroizing::new([0u8; 32]);

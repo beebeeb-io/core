@@ -1072,6 +1072,40 @@ impl FileKeyHandle {
             .map_err(Into::into)
     }
 
+    /// Seal a file note for a file with no recorded pin yet (task 1908 round
+    /// 5): returns the canonical `EncryptedBlob` JSON to store in
+    /// `note_encrypted`. Follows the gated seal switch, like
+    /// `encrypt_thumbnail`. For a note on an EXISTING file use
+    /// `encrypt_note_for` with the file's recorded pin. The ONLY way to seal a
+    /// note — not `encrypt_chunk` / an `encrypt_metadata`-style call under the
+    /// file key (a raw-key note can stand in for a v2 file's name and content).
+    pub fn encrypt_note(&self, note: String) -> Result<String, CryptoError> {
+        let note = Zeroizing::new(note);
+        self.with_key(|fk| encrypt::encrypt_note(fk, &note))?
+            .map_err(Into::into)
+    }
+
+    /// Seal a note of an EXISTING file under the rule of its recorded pin
+    /// (task 1908 round 5): `recorded_pin` = the `chunk_format` that
+    /// `decrypt_file_metadata` returned for this file (0 = unrecorded, 2 = v2),
+    /// never a server field. A v2 pin is always sealed under the note subkey;
+    /// 0 behaves like `encrypt_note`. Any other code is an error.
+    pub fn encrypt_note_for(&self, note: String, recorded_pin: u8) -> Result<String, CryptoError> {
+        let pin = ExpectedChunkFormat::from_u8(recorded_pin)?;
+        let note = Zeroizing::new(note);
+        self.with_key(|fk| encrypt::encrypt_note_for(fk, &note, pin))?
+            .map_err(Into::into)
+    }
+
+    /// Open a `note_encrypted` envelope: the note subkey first, then the
+    /// legacy raw file key (notes stored before the switch). A plaintext value
+    /// is an error. The ONLY way to open a note — not `decrypt_chunk` or the
+    /// name readers.
+    pub fn decrypt_note(&self, note_encrypted: String) -> Result<String, CryptoError> {
+        self.with_key(|fk| encrypt::decrypt_note(fk, &note_encrypted))?
+            .map_err(Into::into)
+    }
+
     /// Random-access open of ONE file-content frame (`nonce || ct || tag`) at a
     /// known position — for seeking readers (video streaming) that cannot use
     /// the sequential [`ChunkDecryptorHandle`]. `index` is the chunk the caller
@@ -1346,7 +1380,14 @@ impl ChunkEncryptorHandle {
     /// metadata on replace, so v1 frames would never open); 0 keeps the default
     /// write format. Call it right after the constructor, before the first
     /// chunk (afterwards it errors and the handle stays usable as it was). Any
-    /// other code is an error. A new file needs no call.
+    /// other code is an error.
+    ///
+    /// **New-file rule (lead ruling 2026-10-17):** pass 2 ONLY when it was
+    /// read from an EXISTING file's authenticated metadata. A brand-new file
+    /// makes NO call (the default write format applies) and records
+    /// `chunk_format()` in its name; passing 2 for a new file would create a
+    /// v2 file before the switch. Core cannot enforce this; each client keeps
+    /// a test that its new-file path never calls this with 2.
     pub fn apply_recorded_pin(&self, recorded_pin: u8) -> Result<(), CryptoError> {
         let pin = ExpectedChunkFormat::from_u8(recorded_pin)?;
         let mut guard = self.inner.lock().unwrap();
@@ -1754,6 +1795,42 @@ mod chunk_stream_handle_tests {
             "a v2-pinned thumbnail must not open under the raw file key"
         );
         assert!(fk.encrypt_thumbnail_for(b"webp".to_vec(), 7).is_err());
+    }
+
+    #[test]
+    fn handle_note_for_a_v2_pin_is_subkey_sealed_and_not_a_name() {
+        // Task 1908 round 5 through the FFI: a note written for a v2-pinned
+        // file never sits under the raw file key and never opens as the
+        // file's metadata (the downgrade a raw-key note allowed).
+        let mk = mk_handle();
+        let id = "ffi-note-v2";
+        let name = mk
+            .encrypt_name_with_chunk_format(id.into(), "a.pdf".into(), None, 2)
+            .unwrap();
+        let pin = mk.decrypt_file_metadata(id.into(), name).unwrap().chunk_format;
+        assert_eq!(pin, 2);
+        let fk = mk.derive_file_key(id.as_bytes().to_vec()).unwrap();
+        let note = fk.encrypt_note_for("ffi note".into(), pin).unwrap();
+        assert_eq!(fk.decrypt_note(note.clone()).unwrap(), "ffi note");
+        let blob = parse_name_blob(&note);
+        assert!(
+            fk.decrypt_chunk(blob.nonce.clone(), blob.ciphertext.clone()).is_err(),
+            "a v2-pinned note must not open under the raw file key"
+        );
+        assert!(
+            fk.decrypt_file_metadata(note.clone()).is_err(),
+            "a v2 note must not open as the file's metadata"
+        );
+        assert!(mk.decrypt_file_metadata(id.into(), note).is_err());
+
+        // Unrecorded follows the write switch; unknown codes are errors.
+        let n0 = fk.encrypt_note_for("n0".into(), 0).unwrap();
+        assert_eq!(fk.decrypt_note(n0).unwrap(), "n0");
+        assert_eq!(fk.decrypt_note(fk.encrypt_note("n".into()).unwrap()).unwrap(), "n");
+        for bad in [1u8, 7] {
+            assert!(fk.encrypt_note_for("x".into(), bad).is_err(), "pin code {bad}");
+        }
+        assert!(fk.decrypt_note("a plaintext note".into()).is_err());
     }
 
     /// The default write format's code (1 during the read-only phase).

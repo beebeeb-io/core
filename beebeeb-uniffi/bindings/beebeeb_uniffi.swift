@@ -1090,7 +1090,14 @@ public protocol ChunkEncryptorHandleProtocol: AnyObject, Sendable {
      * metadata on replace, so v1 frames would never open); 0 keeps the default
      * write format. Call it right after the constructor, before the first
      * chunk (afterwards it errors and the handle stays usable as it was). Any
-     * other code is an error. A new file needs no call.
+     * other code is an error.
+     *
+     * **New-file rule (lead ruling 2026-10-17):** pass 2 ONLY when it was
+     * read from an EXISTING file's authenticated metadata. A brand-new file
+     * makes NO call (the default write format applies) and records
+     * `chunk_format()` in its name; passing 2 for a new file would create a
+     * v2 file before the switch. Core cannot enforce this; each client keeps
+     * a test that its new-file path never calls this with 2.
      */
     func applyRecordedPin(recordedPin: UInt8) throws 
     
@@ -1250,7 +1257,14 @@ public static func fromFile(masterKey: MasterKeyHandle, fileId: String, inputPat
      * metadata on replace, so v1 frames would never open); 0 keeps the default
      * write format. Call it right after the constructor, before the first
      * chunk (afterwards it errors and the handle stays usable as it was). Any
-     * other code is an error. A new file needs no call.
+     * other code is an error.
+     *
+     * **New-file rule (lead ruling 2026-10-17):** pass 2 ONLY when it was
+     * read from an EXISTING file's authenticated metadata. A brand-new file
+     * makes NO call (the default write format applies) and records
+     * `chunk_format()` in its name; passing 2 for a new file would create a
+     * v2 file before the switch. Core cannot enforce this; each client keeps
+     * a test that its new-file path never calls this with 2.
      */
 open func applyRecordedPin(recordedPin: UInt8)throws   {try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_method_chunkencryptorhandle_apply_recorded_pin(
@@ -1629,6 +1643,14 @@ public protocol FileKeyHandleProtocol: AnyObject, Sendable {
     func decryptNameMetadata(nameEncrypted: String) throws  -> NameMetadataDto
     
     /**
+     * Open a `note_encrypted` envelope: the note subkey first, then the
+     * legacy raw file key (notes stored before the switch). A plaintext value
+     * is an error. The ONLY way to open a note — not `decrypt_chunk` or the
+     * name readers.
+     */
+    func decryptNote(noteEncrypted: String) throws  -> String
+    
+    /**
      * Open a thumbnail frame (`nonce || ct || tag`): the thumbnail subkey
      * first, then the legacy raw file key (every thumbnail stored before the
      * switch). The ONLY way to open a thumbnail — not `decrypt_chunk`.
@@ -1638,6 +1660,26 @@ public protocol FileKeyHandleProtocol: AnyObject, Sendable {
     func encryptChunk(plaintext: Data) throws  -> EncryptedData
     
     func encryptMetadata(metadata: String) throws  -> EncryptedData
+    
+    /**
+     * Seal a file note for a file with no recorded pin yet (task 1908 round
+     * 5): returns the canonical `EncryptedBlob` JSON to store in
+     * `note_encrypted`. Follows the gated seal switch, like
+     * `encrypt_thumbnail`. For a note on an EXISTING file use
+     * `encrypt_note_for` with the file's recorded pin. The ONLY way to seal a
+     * note — not `encrypt_chunk` / an `encrypt_metadata`-style call under the
+     * file key (a raw-key note can stand in for a v2 file's name and content).
+     */
+    func encryptNote(note: String) throws  -> String
+    
+    /**
+     * Seal a note of an EXISTING file under the rule of its recorded pin
+     * (task 1908 round 5): `recorded_pin` = the `chunk_format` that
+     * `decrypt_file_metadata` returned for this file (0 = unrecorded, 2 = v2),
+     * never a server field. A v2 pin is always sealed under the note subkey;
+     * 0 behaves like `encrypt_note`. Any other code is an error.
+     */
+    func encryptNoteFor(note: String, recordedPin: UInt8) throws  -> String
     
     /**
      * Seal a thumbnail (already-encoded image bytes) for upload: `nonce(12) ||
@@ -1790,6 +1832,21 @@ open func decryptNameMetadata(nameEncrypted: String)throws  -> NameMetadataDto  
 }
     
     /**
+     * Open a `note_encrypted` envelope: the note subkey first, then the
+     * legacy raw file key (notes stored before the switch). A plaintext value
+     * is an error. The ONLY way to open a note — not `decrypt_chunk` or the
+     * name readers.
+     */
+open func decryptNote(noteEncrypted: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_note(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(noteEncrypted),$0
+    )
+})
+}
+    
+    /**
      * Open a thumbnail frame (`nonce || ct || tag`): the thumbnail subkey
      * first, then the legacy raw file key (every thumbnail stored before the
      * switch). The ONLY way to open a thumbnail — not `decrypt_chunk`.
@@ -1817,6 +1874,41 @@ open func encryptMetadata(metadata: String)throws  -> EncryptedData  {
     uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_metadata(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(metadata),$0
+    )
+})
+}
+    
+    /**
+     * Seal a file note for a file with no recorded pin yet (task 1908 round
+     * 5): returns the canonical `EncryptedBlob` JSON to store in
+     * `note_encrypted`. Follows the gated seal switch, like
+     * `encrypt_thumbnail`. For a note on an EXISTING file use
+     * `encrypt_note_for` with the file's recorded pin. The ONLY way to seal a
+     * note — not `encrypt_chunk` / an `encrypt_metadata`-style call under the
+     * file key (a raw-key note can stand in for a v2 file's name and content).
+     */
+open func encryptNote(note: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_note(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(note),$0
+    )
+})
+}
+    
+    /**
+     * Seal a note of an EXISTING file under the rule of its recorded pin
+     * (task 1908 round 5): `recorded_pin` = the `chunk_format` that
+     * `decrypt_file_metadata` returned for this file (0 = unrecorded, 2 = v2),
+     * never a server field. A v2 pin is always sealed under the note subkey;
+     * 0 behaves like `encrypt_note`. Any other code is an error.
+     */
+open func encryptNoteFor(note: String, recordedPin: UInt8)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_note_for(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(note),
+        FfiConverterUInt8.lower(recordedPin),$0
     )
 })
 }
@@ -8931,7 +9023,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_version_id() != 23865) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_chunkencryptorhandle_apply_recorded_pin() != 7352) {
+    if (uniffi_beebeeb_uniffi_checksum_method_chunkencryptorhandle_apply_recorded_pin() != 19376) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_chunkencryptorhandle_chunk_format() != 59364) {
@@ -8988,6 +9080,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_name_metadata() != 61502) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_note() != 63135) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_thumbnail() != 51244) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -8995,6 +9090,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_metadata() != 60336) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_note() != 32953) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_note_for() != 26115) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_thumbnail() != 50799) {
