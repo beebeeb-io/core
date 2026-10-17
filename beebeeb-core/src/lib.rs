@@ -23,6 +23,8 @@ pub mod search_index;
 pub mod search_sync;
 pub mod share_token;
 pub mod sync;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_vectors_v2;
 pub mod thumbnail;
 pub mod transfer;
 pub mod zip;

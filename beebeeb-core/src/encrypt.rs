@@ -151,6 +151,47 @@ pub(crate) fn encrypt_name_sealed(
     chunk_format: crate::chunk_stream::ExpectedChunkFormat,
     seal: MetadataSeal,
 ) -> Result<String, CoreError> {
+    encrypt_name_sealed_with_nonce(master_key, file_id, filename, mime_type, chunk_format, seal, None)
+}
+
+/// [`encrypt_name_with_chunk_format`] with a FIXED nonce — for the published
+/// known-answer vectors only (`test-vectors/vectors.json`, task 1943). Compiled
+/// only under `cfg(test)` or the `test-support` feature, never in a shipped
+/// client: a fixed nonce reused under one key breaks AES-GCM. Same rule as the
+/// real writer (the pin picks the seal), so the vector IS what the writer emits
+/// apart from the nonce.
+#[cfg(any(test, feature = "test-support"))]
+pub fn encrypt_name_with_chunk_format_and_nonce(
+    master_key: &crate::kdf::MasterKey,
+    file_id: &str,
+    filename: &str,
+    mime_type: Option<&str>,
+    chunk_format: crate::chunk_stream::ExpectedChunkFormat,
+    nonce: [u8; NONCE_LEN],
+) -> Result<String, CoreError> {
+    let seal = metadata_seal_for(crate::chunk_stream::chunk_format_for_pin(chunk_format));
+    encrypt_name_sealed_with_nonce(
+        master_key,
+        file_id,
+        filename,
+        mime_type,
+        chunk_format,
+        seal,
+        Some(nonce),
+    )
+}
+
+/// [`encrypt_name_sealed`] whose nonce is random (`None`, every real writer) or
+/// fixed (`Some`, known-answer vectors only).
+fn encrypt_name_sealed_with_nonce(
+    master_key: &crate::kdf::MasterKey,
+    file_id: &str,
+    filename: &str,
+    mime_type: Option<&str>,
+    chunk_format: crate::chunk_stream::ExpectedChunkFormat,
+    seal: MetadataSeal,
+    nonce: Option<[u8; NONCE_LEN]>,
+) -> Result<String, CoreError> {
     let mut meta = serde_json::json!({
         "name": filename,
         "mime_type": mime_type,
@@ -160,9 +201,21 @@ pub(crate) fn encrypt_name_sealed(
     }
     let plaintext = meta.to_string();
     let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
-    let blob = match seal {
-        MetadataSeal::Legacy => encrypt_metadata(&file_key, &plaintext)?,
-        MetadataSeal::Subkey => encrypt_metadata(&derive_name_key(&file_key), &plaintext)?,
+    let key = match seal {
+        MetadataSeal::Legacy => file_key,
+        MetadataSeal::Subkey => derive_name_key(&file_key),
+    };
+    let blob = match nonce {
+        None => encrypt_metadata(&key, &plaintext)?,
+        // The same blob `encrypt_metadata` builds (no AAD), with the given nonce.
+        Some(n) => {
+            let frame = seal_raw_with_nonce(&key, &n, plaintext.as_bytes(), &[])?;
+            EncryptedBlob {
+                cipher_suite: CipherSuite::V1Aes256Gcm,
+                nonce: frame[..NONCE_LEN].to_vec(),
+                ciphertext: frame[NONCE_LEN..].to_vec(),
+            }
+        }
     };
     serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
 }

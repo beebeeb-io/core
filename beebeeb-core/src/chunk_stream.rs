@@ -628,6 +628,10 @@ pub struct ChunkEncryptor {
     chunk_key: FileKey,
     /// v2: the nonce of frame 0 = this upload's version id (set when frame 0 is sealed).
     version_id: Option<[u8; VERSION_ID_LEN]>,
+    /// Known-answer vectors only ([`Self::with_vector_nonces`]): the v2 frame
+    /// nonces to use, in order. Never present in a shipped client build.
+    #[cfg(any(test, feature = "test-support"))]
+    vector_nonces: std::collections::VecDeque<[u8; NONCE_LEN]>,
 }
 
 impl ChunkEncryptor {
@@ -759,7 +763,26 @@ impl ChunkEncryptor {
             file_id: file_id.as_bytes().to_vec(),
             chunk_key,
             version_id: None,
+            #[cfg(any(test, feature = "test-support"))]
+            vector_nonces: std::collections::VecDeque::new(),
         })
+    }
+
+    /// Seal the v2 frames with these FIXED nonces, in order — for the published
+    /// known-answer vectors only (`test-vectors/vectors.json`, task 1943).
+    /// Compiled only under `cfg(test)` or the `test-support` feature (like
+    /// [`Self::with_format`]), never in a shipped client: a nonce reused under
+    /// one key breaks AES-GCM. Frame 0's nonce is the version id, as always.
+    /// Only before the first chunk; a frame past the list falls back to random.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_vector_nonces(mut self, nonces: Vec<[u8; NONCE_LEN]>) -> Result<Self, CoreError> {
+        if self.emitted_chunks != 0 {
+            return Err(CoreError::InvalidInput(
+                "with_vector_nonces must be called before the first chunk".into(),
+            ));
+        }
+        self.vector_nonces = nonces.into();
+        Ok(self)
     }
 
     /// Override the written format — **tests only** (v1 fixtures, v2 attack
@@ -893,6 +916,9 @@ impl ChunkEncryptor {
         let data = match self.format {
             ChunkFormat::V1Legacy => seal_raw_with_aad(&self.file_key, plaintext, &[])?,
             ChunkFormat::V2 => {
+                #[cfg(any(test, feature = "test-support"))]
+                let nonce = self.vector_nonces.pop_front().unwrap_or_else(random_nonce);
+                #[cfg(not(any(test, feature = "test-support")))]
                 let nonce = random_nonce();
                 // Frame 0's nonce becomes this upload's version id; every frame
                 // (frame 0 included) binds it.
