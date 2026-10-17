@@ -15,3 +15,8 @@ tokio = { version = "1", features = ["rt", "macros", "fs", "time"] }
 uuid = { version = "1", features = ["v4"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+# Tests only: lets this crate's tests write v2 chunk frames while core's
+# WRITE_FORMAT is still v1 (task 1908 read-only rollout). Never in a shipped build.
+[dev-dependencies]
+beebeeb-core = { path = "../beebeeb-core", default-features = false, features = ["test-support"] }

@@ -48,6 +48,10 @@ rayon = "1"
 [features]
 default = ["webp-encode"]
 webp-encode = ["webp"]
+# Exposes `ChunkEncryptor::with_format` so the binding crates' TESTS can write
+# v2 frames while `WRITE_FORMAT` is still v1 (task 1908 read-only rollout).
+# Enable it only from `[dev-dependencies]`; never from a shipped client build.
+test-support = []
 
 [dev-dependencies]
 hex = "0.4"

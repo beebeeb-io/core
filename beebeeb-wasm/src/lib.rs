@@ -59,6 +59,10 @@ pub fn encrypt_chunk(key: &[u8], plaintext: &[u8]) -> Result<JsValue, JsError> {
 
 /// Decrypt a ciphertext chunk that was produced by `encrypt_chunk`.
 /// `key`, `nonce`, and `ciphertext` are raw byte slices.
+///
+/// Generic no-AAD AEAD open (key unwrap, share keys, v1 blobs). It does NOT
+/// open v2 file-content frames — use `WasmChunkDecryptor` (sequential) or
+/// `decrypt_chunk_frame` (random access) for file content (task 1908).
 #[wasm_bindgen]
 pub fn decrypt_chunk(key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, JsError> {
     let fk = file_key_from_slice(key)?;
@@ -658,6 +662,49 @@ impl WasmChunkEncryptor {
         self.inner.chunks_emitted()
     }
 
+    /// The chunk format this encryptor writes: 1 = v1, 2 = v2 (task 1908).
+    /// Still 1 during the read-only rollout phase. Record it at upload via
+    /// `encrypt_name_with_chunk_format` (2 if this is 2, else 0) so readers
+    /// can pin it.
+    #[wasm_bindgen(getter)]
+    pub fn format(&self) -> u8 {
+        self.inner.format().as_u8()
+    }
+
+    /// Replace / new version of an EXISTING file (task 1908 round 4, I-1):
+    /// returns this encryptor writing in the format the file's recorded pin
+    /// requires. `recordedPin` = the `chunk_format` from
+    /// `decrypt_file_metadata` (0 = unrecorded, 2 = v2), never a server field.
+    /// A v2 pin forces v2 frames even during the read-only phase; 0 keeps the
+    /// default. Before the first `pushChunk` only; other codes throw. Consumes
+    /// the old JS object — use the returned one.
+    ///
+    /// **New-file rule (lead ruling 2026-10-17):** pass 2 ONLY when it was
+    /// read from an EXISTING file's authenticated metadata. A brand-new file
+    /// makes NO call (the default write format applies) and records `format`
+    /// in its name; passing 2 for a new file would create a v2 file before the
+    /// switch. Core cannot enforce this; the web client keeps a test that its
+    /// new-file path never calls this with 2.
+    #[wasm_bindgen(js_name = withRecordedPin)]
+    pub fn with_recorded_pin(self, recorded_pin: u8) -> Result<WasmChunkEncryptor, JsError> {
+        let inner = recorded_pin_core(self.inner, recorded_pin).map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    /// Resuming an interrupted upload (task 1908 round 3): may this (new)
+    /// encryptor continue the old server upload session? `storedFormat` = the
+    /// `format` persisted next to the session id when the session was opened
+    /// (1 = v1, 2 = v2), or `undefined` if the resume record does not say.
+    /// Returns `"continue"` (keep the session, re-PUT from chunk 0) only for a
+    /// v1 session resumed by a v1 encryptor, else `"restart"`: never PUT to the
+    /// old session again, upload from chunk 0 into a fresh session. Restart =
+    /// `POST /api/v1/files/{id}/upload/abandon` (or wait for the lease to
+    /// expire), then init again; on a 409 retry that, never the old session.
+    #[wasm_bindgen(js_name = resumePolicy)]
+    pub fn resume_policy(&self, stored_format: Option<u8>) -> Result<String, JsError> {
+        resume_policy_str(&self.inner, stored_format).map_err(|e| JsError::new(&e.to_string()))
+    }
+
     /// Consume the encryptor, run the integrity guard (all planned chunks
     /// emitted and the ciphertext total matches), and return the summary
     /// `{ chunk_count, total_plaintext, total_ciphertext, chunk_size_bytes }`.
@@ -680,6 +727,309 @@ impl WasmChunkEncryptor {
             chunk_size_bytes: summary.chunk_size_bytes,
         })?)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Streaming chunk decryption (push form) — task 1908
+// ---------------------------------------------------------------------------
+
+/// Stateful, single-file streaming decryptor for the web client — the ONE way
+/// web should decrypt file content (downloads, previews, shared links).
+///
+/// Reads v2 (position-bound) and v1 (legacy) files. Both constructors take
+/// `expectedChunkFormat` from the file's encrypted metadata
+/// (`decrypt_file_metadata(...).chunk_format`; 0 = unrecorded, 2 = v2): with
+/// 2 only v2 frames open; with 0 (legacy metadata) chunk 0 decides. In v2 every
+/// frame must be the next chunk in order and from the same upload as chunk 0,
+/// and nothing may follow the last one; [`finish`] fails if the file ended
+/// before its last chunk (truncation). JS must treat any thrown error — from
+/// `pushFrame` or `finish` — as a failed download and discard the plaintext it
+/// has buffered.
+///
+/// Replaces the per-chunk `decrypt_chunk(fileKey, nonce, ciphertext)` loop for
+/// file content: that generic function has no position and can only open v1
+/// frames (it stays for key unwrapping).
+///
+/// [`finish`]: Self::finish
+#[wasm_bindgen]
+pub struct WasmChunkDecryptor {
+    inner: beebeeb_core::chunk_stream::ChunkDecryptor,
+}
+
+#[wasm_bindgen]
+impl WasmChunkDecryptor {
+    /// Decryptor for the owner: the file key is derived in core from the
+    /// 32-byte master key and `file_id`.
+    #[wasm_bindgen(constructor)]
+    pub fn new(master_key: &[u8], file_id: String, expected_chunk_format: u8) -> Result<WasmChunkDecryptor, JsError> {
+        let mk = master_key_from_slice(master_key)?;
+        let expected = expected_from_u8(expected_chunk_format)?;
+        Ok(Self {
+            inner: beebeeb_core::chunk_stream::ChunkDecryptor::for_push(&mk, &file_id, expected),
+        })
+    }
+
+    /// Decryptor from an already-unwrapped 32-byte file key (share / shared-link
+    /// recipients). `file_id` must be the id the file was uploaded under.
+    #[wasm_bindgen(js_name = fromFileKey)]
+    pub fn from_file_key(
+        file_key: &[u8],
+        file_id: String,
+        expected_chunk_format: u8,
+    ) -> Result<WasmChunkDecryptor, JsError> {
+        let fk = file_key_from_slice(file_key)?;
+        let expected = expected_from_u8(expected_chunk_format)?;
+        Ok(Self {
+            inner: beebeeb_core::chunk_stream::ChunkDecryptor::for_push_with_file_key(fk, &file_id, expected),
+        })
+    }
+
+    /// v2: the upload's version id (chunk 0's 12-byte nonce) once chunk 0 has
+    /// authenticated — what a seeking reader passes to `decrypt_chunk_frame`.
+    /// `undefined` before chunk 0 and for v1 files.
+    #[wasm_bindgen(getter, js_name = versionId)]
+    pub fn version_id(&self) -> Option<Vec<u8>> {
+        self.inner.version_id().map(|v| v.to_vec())
+    }
+
+    /// Decrypt the next wire frame (`nonce(12) || ciphertext || tag(16)`),
+    /// returning its plaintext. Frames must be pushed in order from chunk 0.
+    #[wasm_bindgen(js_name = pushFrame)]
+    pub fn push_frame(&mut self, frame: &[u8]) -> Result<Vec<u8>, JsError> {
+        self.inner
+            .push_frame(frame)
+            .map(|c| c.data)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// The file's chunk format once chunk 0 has been opened: 1 = v1, 2 = v2;
+    /// 0 before the first frame.
+    #[wasm_bindgen(getter)]
+    pub fn format(&self) -> u8 {
+        self.inner.format().map(|f| f.as_u8()).unwrap_or(0)
+    }
+
+    /// How many frames have been decrypted so far.
+    #[wasm_bindgen(getter, js_name = chunksDecrypted)]
+    pub fn chunks_decrypted(&self) -> u32 {
+        self.inner.chunks_decrypted()
+    }
+
+    /// Consume the decryptor and run the end-of-stream check. Throws if no frame
+    /// was pushed or a v2 file ended before its last chunk. Returns
+    /// `{ chunk_count, format }`.
+    pub fn finish(self) -> Result<JsValue, JsError> {
+        let summary = self.inner.finish().map_err(|e| JsError::new(&e.to_string()))?;
+        #[derive(serde::Serialize)]
+        struct DecryptSummaryJs {
+            chunk_count: u32,
+            format: u8,
+        }
+        Ok(serde_wasm_bindgen::to_value(&DecryptSummaryJs {
+            chunk_count: summary.chunk_count,
+            format: summary.format.as_u8(),
+        })?)
+    }
+}
+
+/// Random-access open of ONE file-content frame at a known position (seeking
+/// readers: video, range previews). `index` is the chunk requested and
+/// `is_last = index == chunk_count - 1`; a server that serves another chunk or
+/// lies about the count fails the tag. `format` (1 = v1, 2 = v2) must come from
+/// authenticated data (2 when the encrypted metadata records v2, else a
+/// `WasmChunkDecryptor.format` after chunk 0), never from a server field.
+/// `version_id` (12 bytes, v2 only; ignored for v1) is `WasmChunkDecryptor.versionId`
+/// after chunk 0 (or chunk 0's first 12 bytes): another upload's frames fail.
+#[wasm_bindgen]
+pub fn decrypt_chunk_frame(
+    file_key: &[u8],
+    file_id: &str,
+    version_id: &[u8],
+    index: u32,
+    is_last: bool,
+    format: u8,
+    frame: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    let f = beebeeb_core::chunk_stream::ChunkFormat::from_u8(format).map_err(|e| JsError::new(&e.to_string()))?;
+    beebeeb_core::chunk_stream::open_chunk(&fk, file_id, version_id, index, is_last, f, frame)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+fn expected_from_u8(code: u8) -> Result<beebeeb_core::chunk_stream::ExpectedChunkFormat, JsError> {
+    beebeeb_core::chunk_stream::ExpectedChunkFormat::from_u8(code).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Encrypt a filename (+ MIME) into a `name_encrypted` envelope that also
+/// records the file's chunk format (task 1908): `chunk_format` 2 = every upload
+/// of this file id is v2, 0 = record nothing (the pre-1908 shape). New file:
+/// 2 only if its content was written as v2. Rename / replace: pass the value
+/// `decrypt_file_metadata` returned — never upgrade a file with v1 history,
+/// never drop a recorded 2.
+#[wasm_bindgen]
+pub fn encrypt_name_with_chunk_format(
+    master_key: &[u8],
+    file_id: &str,
+    filename: &str,
+    mime_type: Option<String>,
+    chunk_format: u8,
+) -> Result<String, JsError> {
+    let mk = master_key_from_slice(master_key)?;
+    let cf = expected_from_u8(chunk_format)?;
+    encrypt::encrypt_name_with_chunk_format(&mk, file_id, filename, mime_type.as_deref(), cf)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+#[derive(serde::Serialize)]
+struct NameMetadataJs {
+    name: String,
+    mime_type: Option<String>,
+    /// 0 = unrecorded (detect), 2 = v2 — pass to `WasmChunkDecryptor`.
+    chunk_format: u8,
+}
+
+impl From<encrypt::NameMetadata> for NameMetadataJs {
+    fn from(m: encrypt::NameMetadata) -> Self {
+        Self {
+            name: m.name,
+            mime_type: m.mime_type,
+            chunk_format: m.chunk_format.as_u8(),
+        }
+    }
+}
+
+/// Decrypt a `name_encrypted` envelope (same format/key matrix as core
+/// `decrypt_name`) into `{ name, mime_type, chunk_format }`. `chunk_format`
+/// (0 = unrecorded, 2 = v2) is what every content reader of the file must be
+/// given — task 1908.
+#[wasm_bindgen]
+pub fn decrypt_name_metadata(master_key: &[u8], file_id: &str, name_encrypted: &str) -> Result<JsValue, JsError> {
+    let mk = master_key_from_slice(master_key)?;
+    let meta =
+        encrypt::decrypt_name_metadata(&mk, file_id, name_encrypted).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(serde_wasm_bindgen::to_value(&NameMetadataJs::from(meta))?)
+}
+
+/// The metadata reader for FILES (task 1908 round 3): exactly
+/// [`decrypt_name_metadata`], except that a plaintext (non-JSON)
+/// `name_encrypted` is refused — a plaintext name carries no chunk-format pin.
+/// Take every file-content reader's `chunk_format` from THIS;
+/// `decrypt_name_metadata` stays for folders / display.
+#[wasm_bindgen]
+pub fn decrypt_file_metadata(master_key: &[u8], file_id: &str, name_encrypted: &str) -> Result<JsValue, JsError> {
+    let mk = master_key_from_slice(master_key)?;
+    let meta =
+        encrypt::decrypt_file_metadata(&mk, file_id, name_encrypted).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(serde_wasm_bindgen::to_value(&NameMetadataJs::from(meta))?)
+}
+
+/// [`decrypt_file_metadata`] with an already-unwrapped 32-byte file key.
+#[wasm_bindgen]
+pub fn decrypt_file_metadata_with_key(file_key: &[u8], name_encrypted: &str) -> Result<JsValue, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    let meta =
+        encrypt::decrypt_file_metadata_with_key(&fk, name_encrypted).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(serde_wasm_bindgen::to_value(&NameMetadataJs::from(meta))?)
+}
+
+/// Seal a thumbnail (already-encoded image bytes) under a 32-byte file key:
+/// `nonce(12) || ciphertext || tag(16)` (the existing thumbnail wire format).
+/// The ONLY way to seal a thumbnail (task 1908 round 3) — after the gated seal
+/// switch it uses the thumbnail subkey, so a thumbnail can never be served as
+/// file content.
+#[wasm_bindgen]
+pub fn encrypt_thumbnail(file_key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    encrypt::encrypt_thumbnail(&fk, plaintext).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Seal a thumbnail of an EXISTING file under the rule of its recorded pin
+/// (task 1908 round 4): `recordedPin` = the `chunk_format` from
+/// `decrypt_file_metadata` (0 = unrecorded, 2 = v2). A v2 pin is always sealed
+/// under the thumbnail subkey; 0 behaves like `encrypt_thumbnail`.
+#[wasm_bindgen]
+pub fn encrypt_thumbnail_for(file_key: &[u8], plaintext: &[u8], recorded_pin: u8) -> Result<Vec<u8>, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    let pin = expected_from_u8(recorded_pin)?;
+    encrypt::encrypt_thumbnail_for(&fk, plaintext, pin).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Open a thumbnail frame: the thumbnail subkey first, then the legacy raw
+/// file key (thumbnails stored before the switch).
+#[wasm_bindgen]
+pub fn decrypt_thumbnail(file_key: &[u8], frame: &[u8]) -> Result<Vec<u8>, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    encrypt::decrypt_thumbnail(&fk, frame).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Seal a file note for a file with no recorded pin yet (task 1908 round 5):
+/// returns the canonical `EncryptedBlob` JSON to store in `note_encrypted` (the
+/// shape `serializeEncryptedBlob` writes). Follows the gated seal switch, like
+/// `encrypt_thumbnail`. For a note on an EXISTING file (the details panel) use
+/// `encrypt_note_for` with the file's recorded pin. The ONLY way to seal a
+/// note — not `encryptFilename` / `encrypt_metadata` under the file key (a
+/// raw-key note can stand in for a v2 file's name and content).
+#[wasm_bindgen]
+pub fn encrypt_note(file_key: &[u8], note: &str) -> Result<String, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    encrypt::encrypt_note(&fk, note).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Seal a note of an EXISTING file under the rule of its recorded pin (task
+/// 1908 round 5): `recordedPin` = the `chunk_format` from
+/// `decrypt_file_metadata` of THIS file (0 = unrecorded, 2 = v2), never a
+/// server field. A v2 pin is always sealed under the note subkey; 0 behaves
+/// like `encrypt_note`.
+#[wasm_bindgen]
+pub fn encrypt_note_for(file_key: &[u8], note: &str, recorded_pin: u8) -> Result<String, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    note_for_core(&fk, note, recorded_pin).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Native seam of [`encrypt_note_for`] (testable off-wasm, incl. the
+/// unknown-pin error path).
+fn note_for_core(fk: &kdf::FileKey, note: &str, recorded_pin: u8) -> Result<String, beebeeb_core::CoreError> {
+    let pin = beebeeb_core::chunk_stream::ExpectedChunkFormat::from_u8(recorded_pin)?;
+    encrypt::encrypt_note_for(fk, note, pin)
+}
+
+/// Open a `note_encrypted` envelope: the note subkey first, then the legacy
+/// raw file key (notes stored before the switch). A plaintext value is an
+/// error. The ONLY way to open a note — not `decryptFilename`.
+#[wasm_bindgen]
+pub fn decrypt_note(file_key: &[u8], note_encrypted: &str) -> Result<String, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    encrypt::decrypt_note(&fk, note_encrypted).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// [`decrypt_name_metadata`] with an already-unwrapped 32-byte file key (share
+/// / shared-link recipients, file-request content keys).
+#[wasm_bindgen]
+pub fn decrypt_name_metadata_with_key(file_key: &[u8], name_encrypted: &str) -> Result<JsValue, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    let meta =
+        encrypt::decrypt_name_metadata_with_key(&fk, name_encrypted).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(serde_wasm_bindgen::to_value(&NameMetadataJs::from(meta))?)
+}
+
+/// Native seam of [`WasmChunkEncryptor::with_recorded_pin`] (testable off-wasm).
+fn recorded_pin_core(
+    enc: beebeeb_core::chunk_stream::ChunkEncryptor,
+    recorded_pin: u8,
+) -> Result<beebeeb_core::chunk_stream::ChunkEncryptor, beebeeb_core::CoreError> {
+    let pin = beebeeb_core::chunk_stream::ExpectedChunkFormat::from_u8(recorded_pin)?;
+    enc.with_recorded_pin(pin)
+}
+
+/// Native seam of [`WasmChunkEncryptor::resume_policy`] (testable off-wasm).
+fn resume_policy_str(
+    enc: &beebeeb_core::chunk_stream::ChunkEncryptor,
+    stored_format: Option<u8>,
+) -> Result<String, beebeeb_core::CoreError> {
+    let stored = stored_format
+        .map(beebeeb_core::chunk_stream::ChunkFormat::from_u8)
+        .transpose()?;
+    Ok(enc.resume_policy(stored).as_str().to_string())
 }
 
 impl WasmChunkEncryptor {
@@ -1603,7 +1953,11 @@ mod tests {
     /// concatenated plaintext — proves the wrapper emits the standard wire
     /// format and the FileKey derivation matches.
     fn decrypt_frames(mk: &kdf::MasterKey, file_id: &str, frames: &[Vec<u8>]) -> Vec<u8> {
-        let mut dec = ChunkDecryptor::for_push(mk, file_id);
+        let mut dec = ChunkDecryptor::for_push(
+            mk,
+            file_id,
+            beebeeb_core::chunk_stream::ExpectedChunkFormat::recorded_for(beebeeb_core::chunk_stream::WRITE_FORMAT),
+        );
         let mut out = Vec::new();
         for f in frames {
             out.extend_from_slice(&dec.push_frame(f).unwrap().data);
@@ -1664,6 +2018,62 @@ mod tests {
         }
         enc.finish_summary().unwrap();
         assert_eq!(decrypt_frames(&mk, file_id, &frames), data);
+    }
+
+    #[test]
+    fn wasm_decryptor_roundtrip_and_v2_format() {
+        // Task 1908: the web decryptor (both constructors, pinned v2 as the
+        // metadata records it) reads v2 back in order; the web encryptor still
+        // writes v1 during the read-only rollout. Error paths throw JsError,
+        // which cannot be constructed off-wasm (see NOTE below), so only the
+        // success seams are exercised here; the rejection cases live in core.
+        use beebeeb_core::chunk_stream::{ChunkEncryptor, ChunkFormat, ExpectedChunkFormat};
+        let mk = kdf::derive_master_key("test-password", b"test-salt-16bytes").unwrap();
+        let mk_bytes = mk.to_bytes();
+        let file_id = "wasm-dec-1";
+        let data = pattern(40);
+        let enc = WasmChunkEncryptor::with_chunk_size(&mk_bytes, file_id.to_string(), data.len() as u64, 16).unwrap();
+        assert_eq!(enc.format(), 1, "web uploads stay v1 until the gated v2 switch");
+
+        // v2 frames as a client writes them after the switch (dev-only feature).
+        let mut enc = ChunkEncryptor::for_push_with_chunk_size(&mk, file_id, data.len() as u64, 16)
+            .unwrap()
+            .with_format(ChunkFormat::V2)
+            .unwrap();
+        let frames: Vec<Vec<u8>> = data.chunks(16).map(|c| enc.push_chunk(c).unwrap().data).collect();
+        enc.finish().unwrap();
+
+        // The name metadata a v2 upload writes records 2.
+        let ne = encrypt_name_with_chunk_format(&mk_bytes, file_id, "a.txt", None, 2).unwrap();
+        let meta = encrypt::decrypt_name_metadata(&mk, file_id, &ne).unwrap();
+        assert_eq!(meta.chunk_format, ExpectedChunkFormat::V2);
+        let pin = meta.chunk_format.as_u8();
+
+        let mut dec = WasmChunkDecryptor::new(&mk_bytes, file_id.to_string(), pin).unwrap();
+        assert_eq!(dec.format(), 0);
+        assert_eq!(dec.version_id(), None);
+        let mut out = Vec::new();
+        for f in &frames {
+            out.extend(dec.push_frame(f).unwrap());
+        }
+        assert_eq!(out, data);
+        assert_eq!(dec.format(), 2);
+        assert_eq!(dec.chunks_decrypted(), 3);
+        let vid = dec.version_id().unwrap();
+        assert_eq!(vid, frames[0][..12].to_vec());
+        let summary = dec.inner.finish().unwrap();
+        assert_eq!(summary.chunk_count, 3);
+
+        let fk = kdf::derive_file_key(&mk, file_id.as_bytes());
+        let mut dec = WasmChunkDecryptor::from_file_key(fk.as_bytes(), file_id.to_string(), pin).unwrap();
+        for f in &frames {
+            dec.push_frame(f).unwrap();
+        }
+        dec.inner.finish().unwrap();
+
+        // Random-access open at the right position and version.
+        let last = decrypt_chunk_frame(fk.as_bytes(), file_id, &vid, 2, true, 2, &frames[2]).unwrap();
+        assert_eq!(last, data[32..]);
     }
 
     // NOTE: error-path coverage (bad key length, unknown profile, push beyond
@@ -1780,5 +2190,104 @@ mod tests {
         // abandon() returns to a fresh ceremony.
         c.abandon();
         assert_eq!(c.inner.step().as_str(), "verify_email");
+    }
+
+    #[test]
+    fn recorded_pin_and_pinned_thumbnail_wrappers() {
+        // Task 1908 round 4, I-1 / P2-4 through the WASM wrappers (native
+        // seams; the JsError paths need a JS runtime).
+        let mk = kdf::derive_master_key("test-password", b"test-salt-16bytes").unwrap();
+        let mk_bytes = mk.to_bytes();
+        let id = "wasm-replace-v2";
+        let name = encrypt_name_with_chunk_format(&mk_bytes, id, "a.pdf", None, 2).unwrap();
+        let pin = encrypt::decrypt_file_metadata(&mk, id, &name).unwrap().chunk_format;
+        assert_eq!(pin.as_u8(), 2);
+        let data = pattern(40);
+        let mut enc = WasmChunkEncryptor::with_chunk_size(&mk_bytes, id.to_string(), data.len() as u64, 16)
+            .unwrap()
+            .with_recorded_pin(pin.as_u8())
+            .unwrap();
+        assert_eq!(enc.format(), 2, "a v2-pinned file must be written as v2");
+        let frames: Vec<Vec<u8>> = data.chunks(16).map(|c| enc.push_chunk(c).unwrap()).collect();
+        enc.finish_summary().unwrap();
+        let mut dec = ChunkDecryptor::for_push(&mk, id, pin);
+        let mut out = Vec::new();
+        for f in &frames {
+            out.extend_from_slice(&dec.push_frame(f).unwrap().data);
+        }
+        dec.finish().unwrap();
+        assert_eq!(out, data);
+
+        let unrec = WasmChunkEncryptor::with_chunk_size(&mk_bytes, "wasm-replace-v1".into(), 4, 16)
+            .unwrap()
+            .with_recorded_pin(0)
+            .unwrap();
+        assert_eq!(unrec.format(), beebeeb_core::chunk_stream::WRITE_FORMAT.as_u8());
+        let bad = WasmChunkEncryptor::with_chunk_size(&mk_bytes, "wasm-bad-pin".into(), 4, 16).unwrap();
+        assert!(recorded_pin_core(bad.inner, 1).is_err());
+
+        let fk = kdf::derive_file_key(&mk, b"wasm-thumb-pin");
+        let t = encrypt_thumbnail_for(fk.as_bytes(), b"thumb", 2).unwrap();
+        assert_eq!(decrypt_thumbnail(fk.as_bytes(), &t).unwrap(), b"thumb");
+        assert!(
+            beebeeb_core::encrypt::decrypt_chunk_raw(&fk, &t).is_err(),
+            "a v2-pinned thumbnail must not open under the raw file key"
+        );
+    }
+
+    #[test]
+    fn resume_policy_and_thumbnail_wrappers() {
+        // Task 1908 round 3: the resume rule and the thumbnail seal through the
+        // WASM wrappers (native seams; the JsError paths need a JS runtime).
+        let mk = kdf::derive_master_key("test-password", b"test-salt-16bytes").unwrap();
+        let enc =
+            beebeeb_core::chunk_stream::ChunkEncryptor::for_push_with_chunk_size(&mk, "wasm-resume", 10, 16).unwrap();
+        assert_eq!(resume_policy_str(&enc, Some(1)).unwrap(), "continue");
+        assert_eq!(resume_policy_str(&enc, None).unwrap(), "restart");
+        assert_eq!(resume_policy_str(&enc, Some(2)).unwrap(), "restart");
+        assert!(resume_policy_str(&enc, Some(9)).is_err());
+
+        let fk = kdf::derive_file_key(&mk, b"wasm-thumb");
+        let sealed = encrypt_thumbnail(fk.as_bytes(), b"thumb").unwrap();
+        assert_eq!(decrypt_thumbnail(fk.as_bytes(), &sealed).unwrap(), b"thumb");
+    }
+
+    #[test]
+    fn note_wrappers_follow_the_pin() {
+        // Task 1908 round 5 through the WASM wrappers: a note for a v2-pinned
+        // file never sits under the raw file key and never opens as the
+        // file's metadata; unrecorded follows the write switch.
+        let mk = kdf::derive_master_key("test-password", b"test-salt-16bytes").unwrap();
+        let id = "wasm-note-v2";
+        let name = beebeeb_core::encrypt::encrypt_name_with_chunk_format(
+            &mk,
+            id,
+            "a.pdf",
+            None,
+            beebeeb_core::chunk_stream::ExpectedChunkFormat::V2,
+        )
+        .unwrap();
+        let pin = beebeeb_core::encrypt::decrypt_file_metadata(&mk, id, &name)
+            .unwrap()
+            .chunk_format;
+        let fk = kdf::derive_file_key(&mk, id.as_bytes());
+        let note = encrypt_note_for(fk.as_bytes(), "wasm note", pin.as_u8()).unwrap();
+        assert_eq!(decrypt_note(fk.as_bytes(), &note).unwrap(), "wasm note");
+        let blob: EncryptedBlob = serde_json::from_str(&note).unwrap();
+        assert!(
+            beebeeb_core::encrypt::decrypt_metadata(&fk, &blob).is_err(),
+            "a v2-pinned note must not open under the raw file key"
+        );
+        assert!(
+            beebeeb_core::encrypt::decrypt_file_metadata(&mk, id, &note).is_err(),
+            "a v2 note must not open as the file's metadata"
+        );
+
+        let n0 = encrypt_note_for(fk.as_bytes(), "n0", 0).unwrap();
+        assert_eq!(decrypt_note(fk.as_bytes(), &n0).unwrap(), "n0");
+        let n = encrypt_note(fk.as_bytes(), "n").unwrap();
+        assert_eq!(decrypt_note(fk.as_bytes(), &n).unwrap(), "n");
+        assert!(note_for_core(&fk, "x", 1).is_err());
+        assert!(note_for_core(&fk, "x", 7).is_err());
     }
 }

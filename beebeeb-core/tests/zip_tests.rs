@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use beebeeb_core::CoreError;
+use beebeeb_core::chunk_stream::ExpectedChunkFormat;
 use beebeeb_core::encrypt::encrypt_chunk_raw;
 use beebeeb_core::kdf::{MasterKey, derive_file_key};
 use beebeeb_core::zip::{ZipEntry, ZipProgress, stream_folder_zip};
@@ -32,6 +33,7 @@ fn single_file_roundtrip() {
         file_id: file_id.to_string(),
         chunk_count: 1,
         size_bytes: plaintext.len() as u64,
+        chunk_format: ExpectedChunkFormat::Unrecorded,
     }];
 
     let cancel = AtomicBool::new(false);
@@ -72,18 +74,21 @@ fn multi_file_with_nested_paths() {
             file_id: "file-a".to_string(),
             chunk_count: 1,
             size_bytes: file_a_content.len() as u64,
+            chunk_format: ExpectedChunkFormat::Unrecorded,
         },
         ZipEntry {
             path: "docs/readme.txt".to_string(),
             file_id: "file-b".to_string(),
             chunk_count: 1,
             size_bytes: file_b_content.len() as u64,
+            chunk_format: ExpectedChunkFormat::Unrecorded,
         },
         ZipEntry {
             path: "docs/deep/nested.txt".to_string(),
             file_id: "file-c".to_string(),
             chunk_count: 1,
             size_bytes: file_c_content.len() as u64,
+            chunk_format: ExpectedChunkFormat::Unrecorded,
         },
     ];
 
@@ -130,6 +135,7 @@ fn cancellation_returns_cancelled() {
         file_id: "file-x".to_string(),
         chunk_count: 1,
         size_bytes: plaintext.len() as u64,
+        chunk_format: ExpectedChunkFormat::Unrecorded,
     }];
 
     let cancel = AtomicBool::new(true); // cancelled before start
@@ -160,6 +166,7 @@ fn cancellation_mid_chunks() {
         file_id: "file-mid".to_string(),
         chunk_count: 3,
         size_bytes: (chunk_data.len() * 3) as u64,
+        chunk_format: ExpectedChunkFormat::Unrecorded,
     }];
 
     let cancel = AtomicBool::new(false);
@@ -193,6 +200,7 @@ fn progress_callback_fires() {
         file_id: "file-prog".to_string(),
         chunk_count: 2,
         size_bytes: (chunk1.len() + chunk2.len()) as u64,
+        chunk_format: ExpectedChunkFormat::Unrecorded,
     }];
 
     let cancel = AtomicBool::new(false);
@@ -243,6 +251,7 @@ fn empty_file_produces_valid_zip_entry() {
         file_id: "file-empty".to_string(),
         chunk_count: 1,
         size_bytes: 0,
+        chunk_format: ExpectedChunkFormat::Unrecorded,
     }];
 
     let cancel = AtomicBool::new(false);
