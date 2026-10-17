@@ -72,6 +72,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ChunkEncryptorHandle.resume_policy` + enum `SessionResumeAction`; WASM
   `decrypt_file_metadata[_with_key]`, `encrypt_thumbnail`, `decrypt_thumbnail`,
   `WasmChunkEncryptor.resumePolicy`. `kdf::derive_file_subkey` is public.
+- Replace / new version honours the file's recorded pin (task 1908 review round 4, I-1):
+  `ChunkEncryptor::with_recorded_pin(pin)` writes v2 frames for a file whose encrypted metadata
+  records v2, even while `WRITE_FORMAT` is still v1 (the server keeps a file's metadata on
+  replace, so a v1 new version of a v2-pinned file would never open); `Unrecorded` keeps
+  `WRITE_FORMAT`. One rule for content, names and thumbnails: `chunk_stream::chunk_format_for_pin`
+  + `encrypt::metadata_seal_for` (`METADATA_SEAL_WRITE = metadata_seal_for(WRITE_FORMAT)`).
+  New `encrypt::encrypt_thumbnail_for(file_key, plaintext, pin)` (a v2 pin is always
+  subkey-sealed). Bindings: UniFFI `ChunkEncryptorHandle.apply_recorded_pin`,
+  `FileKeyHandle.encrypt_thumbnail_for`; WASM `WasmChunkEncryptor.withRecordedPin`,
+  `encrypt_thumbnail_for`. Restart path for resumed v2 uploads documented (abandon or lease
+  expiry before re-init; never the old session on a 409).
 
 ### Added
 - `onboarding` module (task 1744): password-policy evaluator driven by the server's numbers

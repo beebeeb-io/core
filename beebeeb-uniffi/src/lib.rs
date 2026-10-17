@@ -1051,6 +1051,19 @@ impl FileKeyHandle {
             .map_err(Into::into)
     }
 
+    /// Seal a thumbnail of an EXISTING file (replace / new version /
+    /// regenerated thumbnail) under the rule of its recorded pin (task 1908
+    /// round 4): `recorded_pin` = the `chunk_format` that
+    /// `decrypt_file_metadata` returned (0 = unrecorded, 2 = v2). A v2 pin is
+    /// always sealed under the thumbnail subkey; 0 behaves like
+    /// `encrypt_thumbnail`. Any other code is an error.
+    pub fn encrypt_thumbnail_for(&self, plaintext: Vec<u8>, recorded_pin: u8) -> Result<Vec<u8>, CryptoError> {
+        let pin = ExpectedChunkFormat::from_u8(recorded_pin)?;
+        let plaintext = Zeroizing::new(plaintext);
+        self.with_key(|fk| encrypt::encrypt_thumbnail_for(fk, &plaintext, pin))?
+            .map_err(Into::into)
+    }
+
     /// Open a thumbnail frame (`nonce || ct || tag`): the thumbnail subkey
     /// first, then the legacy raw file key (every thumbnail stored before the
     /// switch). The ONLY way to open a thumbnail — not `decrypt_chunk`.
@@ -1325,6 +1338,33 @@ impl ChunkEncryptorHandle {
         self.with_inner(|e| e.format().as_u8())
     }
 
+    /// Replace / new version of an EXISTING file (task 1908 round 4, I-1):
+    /// write in the format the file's recorded pin requires. `recorded_pin` =
+    /// the `chunk_format` that `decrypt_file_metadata` returned for the file
+    /// (0 = unrecorded, 2 = v2) — never a server field. A v2 pin forces v2
+    /// frames even during the read-only phase (the server keeps the v2
+    /// metadata on replace, so v1 frames would never open); 0 keeps the default
+    /// write format. Call it right after the constructor, before the first
+    /// chunk (afterwards it errors and the handle stays usable as it was). Any
+    /// other code is an error. A new file needs no call.
+    pub fn apply_recorded_pin(&self, recorded_pin: u8) -> Result<(), CryptoError> {
+        let pin = ExpectedChunkFormat::from_u8(recorded_pin)?;
+        let mut guard = self.inner.lock().unwrap();
+        let enc = guard.as_ref().ok_or(CryptoError::InvalidInput {
+            detail: "chunk encryptor handle has been finished or cleared".into(),
+        })?;
+        if enc.chunks_emitted() != 0 {
+            return Err(CryptoError::InvalidInput {
+                detail: "apply_recorded_pin must be called before the first chunk".into(),
+            });
+        }
+        // Checked above, so `with_recorded_pin` cannot fail and the handle is
+        // never left empty.
+        let enc = guard.take().expect("checked Some above");
+        *guard = Some(enc.with_recorded_pin(pin)?);
+        Ok(())
+    }
+
     /// Resuming an interrupted upload (task 1908 round 3): may THIS (new)
     /// encryptor continue the old server upload session? `stored_format` is the
     /// `chunk_format()` the client persisted next to the session id when it
@@ -1332,7 +1372,9 @@ impl ChunkEncryptorHandle {
     /// does not say. Only a v1 session resumed by a v1 encryptor may continue;
     /// everything else (always for v2) must abandon the session and upload
     /// from chunk 0 into a FRESH session — a v2 upload's frames all bind one
-    /// version id, and a new encryptor has a new one.
+    /// version id, and a new encryptor has a new one. Restart = `POST
+    /// /api/v1/files/{id}/upload/abandon` (or wait for the lease to expire),
+    /// then init again; on a 409 retry that, never fall back to the old session.
     pub fn resume_policy(&self, stored_format: Option<u8>) -> Result<SessionResumeAction, CryptoError> {
         let stored = stored_format.map(ChunkFormat::from_u8).transpose()?;
         self.with_inner(|e| SessionResumeAction::from(e.resume_policy(stored)))
@@ -1668,6 +1710,55 @@ mod chunk_stream_handle_tests {
             );
         }
         assert!(enc.resume_policy(Some(3)).is_err());
+    }
+
+    #[test]
+    fn handle_replace_of_a_v2_pinned_file_uses_the_recorded_pin() {
+        // Task 1908 round 4, I-1 through the FFI: pin from the file's metadata
+        // -> apply_recorded_pin -> the new version reads back under that pin.
+        let mk = mk_handle();
+        let id = "ffi-replace-v2";
+        let name = mk
+            .encrypt_name_with_chunk_format(id.into(), "a.pdf".into(), None, 2)
+            .unwrap();
+        let pin = mk.decrypt_file_metadata(id.into(), name).unwrap().chunk_format;
+        assert_eq!(pin, 2);
+        let data = b"replaced content of a v2-pinned file".to_vec();
+        let enc = ChunkEncryptorHandle::for_push(&mk, id.into(), data.len() as u64, "mobile".into()).unwrap();
+        enc.apply_recorded_pin(pin).unwrap();
+        assert_eq!(enc.chunk_format().unwrap(), 2, "a v2-pinned file must be written as v2");
+        let frame = enc.push_chunk(data.clone()).unwrap();
+        enc.finish().unwrap();
+        let dec = ChunkDecryptorHandle::for_push(&mk, id.into(), pin).unwrap();
+        assert_eq!(dec.push_frame(frame.data).unwrap().data, data);
+        dec.finish().unwrap();
+
+        // Unrecorded keeps the write format; unknown codes are errors.
+        let enc0 = ChunkEncryptorHandle::for_push(&mk, "ffi-replace-v1".into(), 4, "mobile".into()).unwrap();
+        enc0.apply_recorded_pin(0).unwrap();
+        assert_eq!(enc0.chunk_format().unwrap(), default_write_format());
+        for bad in [1u8, 3] {
+            let e = ChunkEncryptorHandle::for_push(&mk, "ffi-bad-pin".into(), 4, "mobile".into()).unwrap();
+            assert!(e.apply_recorded_pin(bad).is_err(), "pin code {bad}");
+        }
+    }
+
+    #[test]
+    fn handle_thumbnail_for_a_v2_pin_is_not_raw_key_sealed() {
+        let mk = mk_handle();
+        let fk = mk.derive_file_key(b"ffi-thumb-pin".to_vec()).unwrap();
+        let sealed = fk.encrypt_thumbnail_for(b"webp".to_vec(), 2).unwrap();
+        assert_eq!(fk.decrypt_thumbnail(sealed.clone()).unwrap(), b"webp");
+        assert!(
+            fk.decrypt_chunk(sealed[..12].to_vec(), sealed[12..].to_vec()).is_err(),
+            "a v2-pinned thumbnail must not open under the raw file key"
+        );
+        assert!(fk.encrypt_thumbnail_for(b"webp".to_vec(), 7).is_err());
+    }
+
+    /// The default write format's code (1 during the read-only phase).
+    fn default_write_format() -> u8 {
+        beebeeb_core::chunk_stream::WRITE_FORMAT.as_u8()
     }
 
     /// Parse a native `name_encrypted` envelope (numeric-array JSON).

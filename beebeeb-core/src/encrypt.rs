@@ -111,6 +111,9 @@ pub const METADATA_CHUNK_FORMAT_FIELD: &str = "chunk_format";
 ///   its current metadata ([`decrypt_file_metadata`]) — never upgrade a file id
 ///   with v1 history to `V2` (its old versions would stop opening), and never
 ///   drop a recorded `V2` (that silently re-enables detection for the file).
+///   The replace's content writer takes the same value
+///   ([`ChunkEncryptor::with_recorded_pin`](crate::chunk_stream::ChunkEncryptor::with_recorded_pin)),
+///   and so does its thumbnail ([`encrypt_thumbnail_for`]) — round 4, I-1.
 ///
 /// [`ExpectedChunkFormat::Unrecorded`]: crate::chunk_stream::ExpectedChunkFormat::Unrecorded
 /// [`ExpectedChunkFormat::recorded_for`]: crate::chunk_stream::ExpectedChunkFormat::recorded_for
@@ -125,12 +128,9 @@ pub fn encrypt_name_with_chunk_format(
     // reader on this core can open v2 content anyway, so nothing breaks, and a
     // v2 file then has no blob under its raw file key at all. Everything else
     // follows the write switch (legacy during the read-only phase, so clients
-    // not yet on this core keep reading the names this core writes).
-    let seal = if chunk_format == crate::chunk_stream::ExpectedChunkFormat::V2 {
-        MetadataSeal::Subkey
-    } else {
-        METADATA_SEAL_WRITE
-    };
+    // not yet on this core keep reading the names this core writes). One rule
+    // for content, names and thumbnails: chunk_format_for_pin + metadata_seal_for.
+    let seal = metadata_seal_for(crate::chunk_stream::chunk_format_for_pin(chunk_format));
     encrypt_name_sealed(master_key, file_id, filename, mime_type, chunk_format, seal)
 }
 
@@ -193,11 +193,37 @@ pub enum MetadataSeal {
 /// the two flip in ONE gated release: while content is still written as v1,
 /// a subkey-sealed name would be unreadable by every client not yet on this
 /// core, and there is no v2 file for it to protect. A name that records
-/// `chunk_format: 2` is subkey-sealed regardless.
-pub const METADATA_SEAL_WRITE: MetadataSeal = match crate::chunk_stream::WRITE_FORMAT {
-    crate::chunk_stream::ChunkFormat::V1Legacy => MetadataSeal::Legacy,
-    crate::chunk_stream::ChunkFormat::V2 => MetadataSeal::Subkey,
-};
+/// `chunk_format: 2` (and a thumbnail written with [`encrypt_thumbnail_for`] a
+/// v2 pin) is subkey-sealed regardless. `= metadata_seal_for(WRITE_FORMAT)`.
+pub const METADATA_SEAL_WRITE: MetadataSeal = metadata_seal_for(crate::chunk_stream::WRITE_FORMAT);
+
+/// How names and thumbnails are sealed for content written in `format`
+/// (task 1908 review round 4, P2-1): v1 content → [`MetadataSeal::Legacy`]
+/// (readable by clients not yet on this core), v2 content →
+/// [`MetadataSeal::Subkey`] (only a reader on this core opens v2 content
+/// anyway). Both arms are pinned by a test, so the V2 arm is checked although
+/// [`METADATA_SEAL_WRITE`] does not take it yet.
+pub const fn metadata_seal_for(format: crate::chunk_stream::ChunkFormat) -> MetadataSeal {
+    match format {
+        crate::chunk_stream::ChunkFormat::V1Legacy => MetadataSeal::Legacy,
+        crate::chunk_stream::ChunkFormat::V2 => MetadataSeal::Subkey,
+    }
+}
+
+/// Seal a thumbnail for a file whose encrypted metadata records `pin` (task
+/// 1908 review round 4, P2-4) — the same rule as names: a v2 pin is ALWAYS
+/// subkey-sealed; `Unrecorded` follows [`METADATA_SEAL_WRITE`]. Use this for
+/// every thumbnail of an EXISTING file (replace / new version / regenerated
+/// thumbnail), with `pin` from [`decrypt_file_metadata`]; for a new file
+/// [`encrypt_thumbnail`] is the same as `Unrecorded`.
+pub fn encrypt_thumbnail_for(
+    file_key: &FileKey,
+    plaintext: &[u8],
+    pin: crate::chunk_stream::ExpectedChunkFormat,
+) -> Result<Vec<u8>, CoreError> {
+    let seal = metadata_seal_for(crate::chunk_stream::chunk_format_for_pin(pin));
+    encrypt_thumbnail_sealed(file_key, plaintext, seal)
+}
 
 /// Name/MIME-envelope subkey of a per-file key.
 pub(crate) fn derive_name_key(file_key: &FileKey) -> FileKey {
@@ -209,11 +235,13 @@ pub(crate) fn derive_thumbnail_key(file_key: &FileKey) -> FileKey {
     crate::kdf::derive_file_subkey(file_key, THUMBNAIL_KEY_INFO)
 }
 
-/// Encrypt a thumbnail (already-encoded image bytes) for upload. Wire format
-/// unchanged: `nonce(12) || ciphertext || tag(16)` (web `thumbnail.ts`). Sealed
-/// per [`METADATA_SEAL_WRITE`]; read it back with [`decrypt_thumbnail`]. This
-/// is the only way clients should seal a thumbnail — not
-/// [`encrypt_chunk_raw`] / `encrypt_chunk`.
+/// Encrypt a thumbnail (already-encoded image bytes) for upload of a NEW file.
+/// Wire format unchanged: `nonce(12) || ciphertext || tag(16)` (web
+/// `thumbnail.ts`). Sealed per [`METADATA_SEAL_WRITE`]; read it back with
+/// [`decrypt_thumbnail`]. For a thumbnail of an existing file use
+/// [`encrypt_thumbnail_for`] with the file's recorded pin. These two are the
+/// only ways clients should seal a thumbnail — not [`encrypt_chunk_raw`] /
+/// `encrypt_chunk`.
 pub fn encrypt_thumbnail(file_key: &FileKey, plaintext: &[u8]) -> Result<Vec<u8>, CoreError> {
     encrypt_thumbnail_sealed(file_key, plaintext, METADATA_SEAL_WRITE)
 }

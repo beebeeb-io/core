@@ -1082,6 +1082,19 @@ public func FfiConverterTypeChunkDecryptorHandle_lower(_ value: ChunkDecryptorHa
 public protocol ChunkEncryptorHandleProtocol: AnyObject, Sendable {
     
     /**
+     * Replace / new version of an EXISTING file (task 1908 round 4, I-1):
+     * write in the format the file's recorded pin requires. `recorded_pin` =
+     * the `chunk_format` that `decrypt_file_metadata` returned for the file
+     * (0 = unrecorded, 2 = v2) — never a server field. A v2 pin forces v2
+     * frames even during the read-only phase (the server keeps the v2
+     * metadata on replace, so v1 frames would never open); 0 keeps the default
+     * write format. Call it right after the constructor, before the first
+     * chunk (afterwards it errors and the handle stays usable as it was). Any
+     * other code is an error. A new file needs no call.
+     */
+    func applyRecordedPin(recordedPin: UInt8) throws 
+    
+    /**
      * The chunk format this encryptor writes: 1 = v1, 2 = v2 (task 1908).
      * Still 1 during the read-only rollout phase. Record it at upload via
      * `encrypt_name_with_chunk_format` (2 if this is 2, else 0) so readers
@@ -1129,7 +1142,9 @@ public protocol ChunkEncryptorHandleProtocol: AnyObject, Sendable {
      * does not say. Only a v1 session resumed by a v1 encryptor may continue;
      * everything else (always for v2) must abandon the session and upload
      * from chunk 0 into a FRESH session — a v2 upload's frames all bind one
-     * version id, and a new encryptor has a new one.
+     * version id, and a new encryptor has a new one. Restart = `POST
+     * /api/v1/files/{id}/upload/abandon` (or wait for the lease to expire),
+     * then init again; on a 409 retry that, never fall back to the old session.
      */
     func resumePolicy(storedFormat: UInt8?) throws  -> SessionResumeAction
     
@@ -1227,6 +1242,25 @@ public static func fromFile(masterKey: MasterKeyHandle, fileId: String, inputPat
 
     
     /**
+     * Replace / new version of an EXISTING file (task 1908 round 4, I-1):
+     * write in the format the file's recorded pin requires. `recorded_pin` =
+     * the `chunk_format` that `decrypt_file_metadata` returned for the file
+     * (0 = unrecorded, 2 = v2) — never a server field. A v2 pin forces v2
+     * frames even during the read-only phase (the server keeps the v2
+     * metadata on replace, so v1 frames would never open); 0 keeps the default
+     * write format. Call it right after the constructor, before the first
+     * chunk (afterwards it errors and the handle stays usable as it was). Any
+     * other code is an error. A new file needs no call.
+     */
+open func applyRecordedPin(recordedPin: UInt8)throws   {try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_chunkencryptorhandle_apply_recorded_pin(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt8.lower(recordedPin),$0
+    )
+}
+}
+    
+    /**
      * The chunk format this encryptor writes: 1 = v1, 2 = v2 (task 1908).
      * Still 1 during the read-only rollout phase. Record it at upload via
      * `encrypt_name_with_chunk_format` (2 if this is 2, else 0) so readers
@@ -1317,7 +1351,9 @@ open func pushChunk(plaintext: Data)throws  -> EncryptedChunkDto  {
      * does not say. Only a v1 session resumed by a v1 encryptor may continue;
      * everything else (always for v2) must abandon the session and upload
      * from chunk 0 into a FRESH session — a v2 upload's frames all bind one
-     * version id, and a new encryptor has a new one.
+     * version id, and a new encryptor has a new one. Restart = `POST
+     * /api/v1/files/{id}/upload/abandon` (or wait for the lease to expire),
+     * then init again; on a 409 retry that, never fall back to the old session.
      */
 open func resumePolicy(storedFormat: UInt8?)throws  -> SessionResumeAction  {
     return try  FfiConverterTypeSessionResumeAction_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
@@ -1612,6 +1648,16 @@ public protocol FileKeyHandleProtocol: AnyObject, Sendable {
      */
     func encryptThumbnail(plaintext: Data) throws  -> Data
     
+    /**
+     * Seal a thumbnail of an EXISTING file (replace / new version /
+     * regenerated thumbnail) under the rule of its recorded pin (task 1908
+     * round 4): `recorded_pin` = the `chunk_format` that
+     * `decrypt_file_metadata` returned (0 = unrecorded, 2 = v2). A v2 pin is
+     * always sealed under the thumbnail subkey; 0 behaves like
+     * `encrypt_thumbnail`. Any other code is an error.
+     */
+    func encryptThumbnailFor(plaintext: Data, recordedPin: UInt8) throws  -> Data
+    
 }
 /**
  * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`.
@@ -1787,6 +1833,24 @@ open func encryptThumbnail(plaintext: Data)throws  -> Data  {
     uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_thumbnail(
             self.uniffiCloneHandle(),
         FfiConverterData.lower(plaintext),$0
+    )
+})
+}
+    
+    /**
+     * Seal a thumbnail of an EXISTING file (replace / new version /
+     * regenerated thumbnail) under the rule of its recorded pin (task 1908
+     * round 4): `recorded_pin` = the `chunk_format` that
+     * `decrypt_file_metadata` returned (0 = unrecorded, 2 = v2). A v2 pin is
+     * always sealed under the thumbnail subkey; 0 behaves like
+     * `encrypt_thumbnail`. Any other code is an error.
+     */
+open func encryptThumbnailFor(plaintext: Data, recordedPin: UInt8)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_thumbnail_for(
+            self.uniffiCloneHandle(),
+        FfiConverterData.lower(plaintext),
+        FfiConverterUInt8.lower(recordedPin),$0
     )
 })
 }
@@ -8867,6 +8931,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_version_id() != 23865) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_chunkencryptorhandle_apply_recorded_pin() != 7352) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_chunkencryptorhandle_chunk_format() != 59364) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -8888,7 +8955,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_chunkencryptorhandle_push_chunk() != 41028) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_chunkencryptorhandle_resume_policy() != 33727) {
+    if (uniffi_beebeeb_uniffi_checksum_method_chunkencryptorhandle_resume_policy() != 18674) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_constellationdecoderhandle_frames_ingested() != 10893) {
@@ -8931,6 +8998,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_thumbnail() != 50799) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_thumbnail_for() != 63311) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_fileprovidercachehandle_clear() != 34269) {

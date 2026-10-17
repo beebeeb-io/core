@@ -205,7 +205,11 @@ AAD = "beebeeb/chunk/v2"         16 bytes: domain tag + version
   expectedChunkFormat)` + `pushFrame`, `format`, `versionId`, `chunksDecrypted`,
   `finish`; `decrypt_chunk_frame(fileKey, fileId, versionId, ...)`,
   `encrypt_name_with_chunk_format`, `decrypt_name_metadata[_with_key]`,
-  `WasmChunkEncryptor.format`.
+  `WasmChunkEncryptor.format`. Round 4: `chunk_stream::chunk_format_for_pin`,
+  `ChunkEncryptor::with_recorded_pin`, `encrypt::{metadata_seal_for,
+  encrypt_thumbnail_for}`; UniFFI `ChunkEncryptorHandle.apply_recorded_pin`,
+  `FileKeyHandle.encrypt_thumbnail_for`; WASM `WasmChunkEncryptor.withRecordedPin`,
+  `encrypt_thumbnail_for`.
 - **Not v2 (unchanged, generic no-AAD):** `encrypt_chunk` / `decrypt_chunk` /
   `encrypt_chunk_raw` / `decrypt_chunk_raw` / `encrypt_chunk_json` and WASM
   `decrypt_chunks` — key wrap, search shards, v1 content (and legacy names and
@@ -231,17 +235,27 @@ AAD = "beebeeb/chunk/v2"         16 bytes: domain tag + version
     first, then the legacy raw key, so every blob already stored keeps opening.
     `decrypt_metadata` / `decrypt_chunk` on a parsed envelope do NOT try the
     subkey — clients must not open names or thumbnails that way.
-  - Writers: a name that records `chunk_format: 2` is ALWAYS subkey-sealed (only
-    a reader on this core can open v2 content anyway). Everything else follows
-    `encrypt::METADATA_SEAL_WRITE`, which is derived from `WRITE_FORMAT` and is
-    `Legacy` during the read-only phase. **Deviation from the lead's round-3
+  - Writers: a name that records `chunk_format: 2`, and a thumbnail written with
+    `encrypt::encrypt_thumbnail_for(file_key, plaintext, V2)` (round 4, P2-4),
+    are ALWAYS subkey-sealed (only a reader on this core can open v2 content
+    anyway). Everything else follows `encrypt::METADATA_SEAL_WRITE` =
+    `metadata_seal_for(WRITE_FORMAT)`, which is `Legacy` during the read-only
+    phase. ONE rule for content, names and thumbnails (round 4, P2-1):
+    `chunk_stream::chunk_format_for_pin(pin)` (V2 → V2, Unrecorded →
+    `WRITE_FORMAT`) then `encrypt::metadata_seal_for(format)` (V1Legacy →
+    Legacy, V2 → Subkey); both arms of both functions are pinned by tests
+    (`i1_unrecorded_pin_writes_the_write_format`, `p2_1_metadata_seal_for_both_arms`). **Deviation from the lead's round-3
     ruling ("seal NEW name metadata and thumbnails under their own subkeys from
     now on"), flagged in task 1908:** sealing new v1-file names and thumbnails
     under the subkey today would make them unreadable on every client not yet on
     this core (web `thumbnail.ts`, mobile, older builds), and there is no v2 file
     yet for it to protect. Both switches flip in ONE gated release.
-  - Thumbnails are sealed ONLY via `encrypt::encrypt_thumbnail` (UniFFI
-    `FileKeyHandle.encrypt_thumbnail`, WASM `encrypt_thumbnail`), wire format
+  - Thumbnails are sealed ONLY via `encrypt::encrypt_thumbnail` (new file;
+    UniFFI `FileKeyHandle.encrypt_thumbnail`, WASM `encrypt_thumbnail`) or
+    `encrypt::encrypt_thumbnail_for(file_key, plaintext, pin)` (existing file,
+    pin from `decrypt_file_metadata`; UniFFI
+    `FileKeyHandle.encrypt_thumbnail_for(plaintext, recorded_pin)`, WASM
+    `encrypt_thumbnail_for(fileKey, plaintext, recordedPin)`), wire format
     unchanged (`nonce || ct || tag`).
   - Residual (decision task 1912): a file written before the switch has a
     legacy name and/or thumbnail under the same raw key as its v1 content and no
@@ -261,7 +275,19 @@ AAD = "beebeeb/chunk/v2"         16 bytes: domain tag + version
   that does not say which format it holds (`None`), is
   `RestartWithFreshSession`: never PUT to the old session again, upload from
   chunk 0 into a new session. Clients persist `ChunkEncryptor::format()` next to
-  the session id when they open it. UniFFI `ChunkEncryptorHandle.resume_policy(stored_format)`
+  the session id when they open it.
+  **The restart path, precisely (round 4, P2-3; server `routes/uploads.rs`
+  init + `routes/files.rs` abandon, server 8eca915c):** the server refuses a new
+  init for a file whose session still holds a live lease (409 "upload is
+  already in progress for this file"). So a client told
+  `RestartWithFreshSession` MUST first `POST /api/v1/files/{id}/upload/abandon`
+  (a replace reverts to the previous version; a never-completed first upload
+  is deleted), or wait until the lease expires (default 3600 s,
+  `UPLOAD_LEASE_SECS`; an init after expiry takes the session over inline),
+  and only then init again with the same file id and upload from chunk 0
+  with the new encryptor. On a 409 from that init it retries the abandon /
+  waits; it NEVER falls back to PUTting into the old session — that is exactly
+  the two-version-id file that completes and never opens. UniFFI `ChunkEncryptorHandle.resume_policy(stored_format)`
   → `SessionResumeAction`; WASM `WasmChunkEncryptor.resumePolicy(storedFormat)`
   → `"continue"` / `"restart"`. Pinned by `p1a_probe_b_*` and `p1a_resume_policy_matrix`.
 - **Client adoption checklist (every client, before it ships on this core):**
@@ -276,15 +302,28 @@ AAD = "beebeeb/chunk/v2"         16 bytes: domain tag + version
      plaintext already produced (delete the partial file, drop the buffer) when
      any `push_frame` / `next_chunk` / `finish` returns `Err` — a truncated or
      spliced file is detected only at that point.
-  4. Record the format at upload: `encrypt_name_with_chunk_format(...,
-     recorded_for(enc.format()))`; on rename/replace carry forward the value
-     `decrypt_file_metadata` returned.
-  5. Seal and open thumbnails only with `encrypt_thumbnail` / `decrypt_thumbnail`;
-     open names only through the `decrypt_name*` / `decrypt_*_metadata` readers.
-  6. Resuming an upload session: ask `resume_policy(stored_format)` and obey it;
-     persist the encryptor's format with the session id. CLI follow-up:
-     `repos/cli` `src/resume.rs` + `src/upload.rs` must record the format and
-     start a fresh session when told `RestartWithFreshSession`.
+  4. **Every replace / new version uses the file's recorded pin (round 4,
+     I-1).** Read the pin with `decrypt_file_metadata` and build the writer
+     with `ChunkEncryptor::with_recorded_pin(pin)` (UniFFI
+     `ChunkEncryptorHandle.apply_recorded_pin(recorded_pin)` right after the
+     constructor; WASM `enc = enc.withRecordedPin(recordedPin)`), its thumbnail
+     with `encrypt_thumbnail_for(.., pin)`, and, if the name is rewritten,
+     `encrypt_name_with_chunk_format(.., pin)`. The server keeps a file's
+     `name_encrypted` on replace (server `routes/uploads.rs` ~907-923), so a
+     v2-pinned file replaced with the default (v1, read-only phase) writer
+     would complete and never open (`i1_probe_*`); a v2 pin therefore forces v2
+     frames even before the switch. If the pin cannot be read, do not upload.
+  5. Record the format at upload of a NEW file:
+     `encrypt_name_with_chunk_format(..., recorded_for(enc.format()))`; on
+     rename/replace carry forward the value `decrypt_file_metadata` returned.
+  6. Seal and open thumbnails only with `encrypt_thumbnail` (new file) /
+     `encrypt_thumbnail_for` (existing file) / `decrypt_thumbnail`; open names
+     only through the `decrypt_name*` / `decrypt_*_metadata` readers.
+  7. Resuming an upload session: ask `resume_policy(stored_format)` and obey it
+     (restart path above: abandon or lease expiry first, never the old session
+     on a 409); persist the encryptor's format with the session id. CLI
+     follow-up: `repos/cli` `src/resume.rs` + `src/upload.rs` must record the
+     format and start a fresh session when told `RestartWithFreshSession`.
 - **Rollout (read-only phase now):** `WRITE_FORMAT = ChunkFormat::V1Legacy`.
   A client on this core reads v2 but writes v1, because a v2 file is unreadable
   by every client whose read path is not yet on this core (web `decrypt_chunk` /
@@ -293,7 +332,13 @@ AAD = "beebeeb/chunk/v2"         16 bytes: domain tag + version
   read path (with the metadata pin) is live — task 1908. Tests that need v2
   frames use `ChunkEncryptor::with_format`, compiled only under `cfg(test)` or
   the `test-support` feature, which the binding crates enable in
-  `[dev-dependencies]` only.
+  `[dev-dependencies]` only. The ONE shipped way to write v2 before the switch
+  is `with_recorded_pin(V2)`, i.e. a new version of a file whose authenticated
+  metadata already records v2 (round 4, I-1).
+  **Switch gate (server follow-up, not in core):** before `WRITE_FORMAT` flips,
+  the server must reject replace inits (`base_version_number` set) from client
+  versions older than 1908 round 4 — such a client writes v1 frames under the
+  v2 pin the server keeps, i.e. an unreadable new version (task 1908 notes).
 
 ### WASM target gating (0653)
 

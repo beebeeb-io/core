@@ -54,7 +54,13 @@
 //!
 //! A resumed upload asks [`ChunkEncryptor::resume_policy`] whether it may
 //! continue its old server session: a v2 upload never may (see
-//! [`SessionResume`]).
+//! [`SessionResume`]; restart = abandon the session or let its lease expire,
+//! then re-init — never the old session on a 409).
+//!
+//! A replace / new version of an existing file builds its writer with
+//! [`ChunkEncryptor::with_recorded_pin`] (the pin from the file's encrypted
+//! metadata): a v2-pinned file is written as v2 even while [`WRITE_FORMAT`] is
+//! v1, because the server keeps the v2 metadata on replace.
 //!
 //! ## Sync, reactor-agnostic
 //!
@@ -266,6 +272,19 @@ pub enum SessionResume {
     ContinueSession,
     /// Abandon the session (never PUT to it again) and upload from chunk 0
     /// into a FRESH upload session with this new encryptor.
+    ///
+    /// The restart path, precisely (review round 4, P2-3; server
+    /// `routes/uploads.rs` init, `routes/files.rs` abandon): the server refuses
+    /// a new init for a file whose upload session still holds a live lease
+    /// (409 "upload is already in progress for this file"). So the client
+    /// first calls `POST /api/v1/files/{id}/upload/abandon` (a replace reverts
+    /// to the previous version; a never-completed first upload is deleted), or
+    /// waits until the session's lease expires (default 3600 s; an init after
+    /// expiry takes the session over inline), then inits again with the same
+    /// file id and uploads from chunk 0. On a 409 from that init it abandons /
+    /// waits and retries; it NEVER falls back to PUTting into the old session,
+    /// because that stores frames of two version ids: a file that completes
+    /// and never opens.
     RestartWithFreshSession,
 }
 
@@ -292,6 +311,26 @@ pub fn resume_policy(stored: Option<ChunkFormat>, writing: ChunkFormat) -> Sessi
     match (stored, writing) {
         (Some(ChunkFormat::V1Legacy), ChunkFormat::V1Legacy) => SessionResume::ContinueSession,
         _ => SessionResume::RestartWithFreshSession,
+    }
+}
+
+/// The chunk format a writer must use for an upload to a file whose encrypted
+/// metadata records `pin` (task 1908 review round 4, I-1).
+///
+/// - [`ExpectedChunkFormat::V2`] → [`ChunkFormat::V2`], ALWAYS, also during the
+///   read-only phase. The server keeps a file's `name_encrypted` on replace, so
+///   a new version of a v2-pinned file is read under the v2 pin: written as v1
+///   it would complete and never open.
+/// - [`ExpectedChunkFormat::Unrecorded`] → [`WRITE_FORMAT`] (a new file id, or
+///   a file whose metadata records nothing; detection reads either format).
+///
+/// Used by [`ChunkEncryptor::with_recorded_pin`] and, for the metadata seal,
+/// by `encrypt::encrypt_name_with_chunk_format` / `encrypt::encrypt_thumbnail_for`,
+/// so content, name and thumbnail of one upload always follow ONE rule.
+pub const fn chunk_format_for_pin(pin: ExpectedChunkFormat) -> ChunkFormat {
+    match pin {
+        ExpectedChunkFormat::V2 => ChunkFormat::V2,
+        ExpectedChunkFormat::Unrecorded => WRITE_FORMAT,
     }
 }
 
@@ -746,6 +785,28 @@ impl ChunkEncryptor {
     /// so readers can pin it.
     pub fn format(&self) -> ChunkFormat {
         self.format
+    }
+
+    /// Write in the format the file's **recorded pin** requires
+    /// ([`chunk_format_for_pin`]) — task 1908 review round 4, I-1. Every
+    /// replace / new version of an existing file MUST build its encryptor this
+    /// way, with `pin` = the `chunk_format` that
+    /// [`crate::encrypt::decrypt_file_metadata`] returned for that file (never
+    /// a server field). A v2 pin forces v2 frames even while [`WRITE_FORMAT`]
+    /// is still v1; `Unrecorded` keeps [`WRITE_FORMAT`].
+    ///
+    /// For a NEW file id there is no pin: use the plain constructor (same as
+    /// passing `Unrecorded`). Only before the first chunk, so a file can never
+    /// mix formats. Pair it with `encrypt::encrypt_thumbnail_for(.., pin)` and,
+    /// when the name is rewritten, `encrypt_name_with_chunk_format(.., pin)`.
+    pub fn with_recorded_pin(mut self, pin: ExpectedChunkFormat) -> Result<Self, CoreError> {
+        if self.emitted_chunks != 0 {
+            return Err(CoreError::InvalidInput(
+                "with_recorded_pin must be called before the first chunk".into(),
+            ));
+        }
+        self.format = chunk_format_for_pin(pin);
+        Ok(self)
     }
 
     /// Whether this (new) encryptor may continue an interrupted upload session
@@ -2746,5 +2807,288 @@ mod review_round3_tests {
             "plaintext metadata + a same-key blob must not read as a file (got {} bytes)",
             got.map(|p| p.len()).unwrap_or(0)
         );
+    }
+}
+
+/// Task 1908 review round 4 (independent re-review of 38e225d): writers honour
+/// the file's recorded pin (I-1), the seal rule as a function (P2-1), name /
+/// thumbnail separation through the public functions (P2-2) and the
+/// pin-aware thumbnail writer (P2-4).
+#[cfg(test)]
+mod review_round4_tests {
+    use super::*;
+    use crate::encrypt::{
+        METADATA_SEAL_WRITE, MetadataSeal, NAME_KEY_INFO, THUMBNAIL_KEY_INFO, decrypt_file_metadata,
+        decrypt_file_metadata_with_key, decrypt_metadata, decrypt_name, decrypt_name_metadata, decrypt_thumbnail,
+        encrypt_name_with_chunk_format, encrypt_thumbnail_for, metadata_seal_for,
+    };
+    use crate::kdf::derive_master_key;
+    use beebeeb_types::{CipherSuite, EncryptedBlob};
+
+    const CS: u64 = 16;
+
+    fn mk() -> MasterKey {
+        derive_master_key("round4-password", b"round4-salt-16by").unwrap()
+    }
+
+    fn pattern(len: usize, seed: u8) -> Vec<u8> {
+        (0..len)
+            .map(|i| (i as u8).wrapping_mul(31).wrapping_add(seed))
+            .collect()
+    }
+
+    fn write(enc: &mut ChunkEncryptor, data: &[u8]) -> Vec<Vec<u8>> {
+        data.chunks(CS as usize)
+            .map(|c| enc.push_chunk(c).unwrap().data)
+            .collect()
+    }
+
+    fn read(m: &MasterKey, id: &str, expected: ExpectedChunkFormat, frames: &[Vec<u8>]) -> Result<Vec<u8>, CoreError> {
+        let mut dec = ChunkDecryptor::for_push(m, id, expected);
+        let mut out = Vec::new();
+        for f in frames {
+            out.extend_from_slice(&dec.push_frame(f)?.data);
+        }
+        dec.finish()?;
+        Ok(out)
+    }
+
+    /// HKDF-SHA256(salt = none, ikm = file key, info) computed with the hkdf
+    /// crate directly — NOT through `kdf::derive_file_subkey` or the
+    /// `derive_*_key` helpers, so a mutation of those helpers (or of which one
+    /// a writer calls) cannot also move this reference key.
+    fn independent_subkey(fk: &FileKey, info: &[u8]) -> FileKey {
+        let hk = hkdf::Hkdf::<sha2::Sha256>::new(None, fk.as_bytes());
+        let mut okm = [0u8; 32];
+        hk.expand(info, &mut okm).unwrap();
+        FileKey::from_bytes(okm)
+    }
+
+    /// Wrap a `nonce || ct || tag` frame as a native `name_encrypted` envelope.
+    fn frame_as_envelope(frame: &[u8]) -> String {
+        serde_json::to_string(&EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce: frame[..NONCE_LEN].to_vec(),
+            ciphertext: frame[NONCE_LEN..].to_vec(),
+        })
+        .unwrap()
+    }
+
+    /// The `nonce || ct || tag` frame inside a native `name_encrypted` envelope.
+    fn envelope_as_frame(envelope: &str) -> Vec<u8> {
+        let blob: EncryptedBlob = serde_json::from_str(envelope).unwrap();
+        let mut frame = blob.nonce.clone();
+        frame.extend_from_slice(&blob.ciphertext);
+        frame
+    }
+
+    // ── I-1: a replace / new version honours the file's recorded pin ────────
+
+    #[test]
+    fn i1_probe_default_writer_under_a_v2_pin_is_unreadable_documented() {
+        // The reviewer's probe, kept as documentation of WHY the pin-aware
+        // writer exists: a file whose metadata records v2 (written after the
+        // switch) replaced by a client using the default writer (v1 during
+        // the read-only phase). The server keeps the v2 metadata on replace,
+        // so the new version is unreadable.
+        assert_eq!(WRITE_FORMAT, ChunkFormat::V1Legacy);
+        let m = mk();
+        let id = "probe-v2-pinned";
+        let name = encrypt_name_with_chunk_format(&m, id, "a.pdf", None, ExpectedChunkFormat::V2).unwrap();
+        let pin = decrypt_file_metadata(&m, id, &name).unwrap().chunk_format;
+        assert_eq!(pin, ExpectedChunkFormat::V2);
+        let data = pattern(40, 1);
+        let mut enc = ChunkEncryptor::for_push_with_chunk_size(&m, id, data.len() as u64, CS).unwrap();
+        let frames = write(&mut enc, &data);
+        assert!(read(&m, id, pin, &frames).is_err());
+    }
+
+    #[test]
+    fn i1_replace_of_a_v2_pinned_file_with_the_recorded_pin_is_readable() {
+        // The inverse of the probe: the replace takes the pin from the file's
+        // metadata and builds its writer with `with_recorded_pin`. The new
+        // version must read back under the same (server-kept) metadata.
+        let m = mk();
+        let id = "replace-v2-pinned";
+        let name = encrypt_name_with_chunk_format(&m, id, "a.pdf", None, ExpectedChunkFormat::V2).unwrap();
+        let pin = decrypt_file_metadata(&m, id, &name).unwrap().chunk_format;
+        assert_eq!(pin, ExpectedChunkFormat::V2);
+        let data = pattern(40, 2);
+        let mut enc = ChunkEncryptor::for_push_with_chunk_size(&m, id, data.len() as u64, CS)
+            .unwrap()
+            .with_recorded_pin(pin)
+            .unwrap();
+        assert_eq!(
+            enc.format(),
+            ChunkFormat::V2,
+            "a v2-pinned file must be written as v2 even in the read-only phase"
+        );
+        let frames = write(&mut enc, &data);
+        enc.finish().unwrap();
+        // The server did not touch name_encrypted on replace: the metadata
+        // still opens and still pins v2, and the new version reads under it.
+        let meta = decrypt_file_metadata(&m, id, &name).unwrap();
+        assert_eq!(meta.name, "a.pdf");
+        assert_eq!(
+            read(&m, id, meta.chunk_format, &frames).expect("a replace written with the recorded pin must be readable"),
+            data
+        );
+
+        // Pull form too.
+        let mut pull = ChunkEncryptor::from_reader_with_chunk_size(
+            &m,
+            id,
+            data.len() as u64,
+            CS,
+            std::io::Cursor::new(data.clone()),
+        )
+        .unwrap()
+        .with_recorded_pin(pin)
+        .unwrap();
+        let mut pulled = Vec::new();
+        while let Some(c) = pull.next_chunk().unwrap() {
+            pulled.push(c.data);
+        }
+        assert_eq!(read(&m, id, pin, &pulled).unwrap(), data);
+    }
+
+    #[test]
+    fn i1_unrecorded_pin_writes_the_write_format() {
+        // Both arms of the rule: V2 -> V2 always; Unrecorded -> WRITE_FORMAT.
+        assert_eq!(chunk_format_for_pin(ExpectedChunkFormat::V2), ChunkFormat::V2);
+        assert_eq!(chunk_format_for_pin(ExpectedChunkFormat::Unrecorded), WRITE_FORMAT);
+        let m = mk();
+        let id = "replace-unrecorded";
+        let data = pattern(20, 3);
+        let mut enc = ChunkEncryptor::for_push_with_chunk_size(&m, id, data.len() as u64, CS)
+            .unwrap()
+            .with_recorded_pin(ExpectedChunkFormat::Unrecorded)
+            .unwrap();
+        assert_eq!(enc.format(), WRITE_FORMAT);
+        let frames = write(&mut enc, &data);
+        assert_eq!(read(&m, id, ExpectedChunkFormat::Unrecorded, &frames).unwrap(), data);
+    }
+
+    #[test]
+    fn i1_recorded_pin_only_before_the_first_chunk() {
+        let m = mk();
+        let mut enc = ChunkEncryptor::for_push_with_chunk_size(&m, "late-pin", 40, CS).unwrap();
+        enc.push_chunk(&[0u8; 16]).unwrap();
+        assert!(
+            enc.with_recorded_pin(ExpectedChunkFormat::V2).is_err(),
+            "switching format after a frame was sealed would mix formats in one file"
+        );
+    }
+
+    // ── P2-1: the seal rule, both arms ──────────────────────────────────────
+
+    #[test]
+    fn p2_1_metadata_seal_for_both_arms() {
+        assert_eq!(metadata_seal_for(ChunkFormat::V1Legacy), MetadataSeal::Legacy);
+        assert_eq!(
+            metadata_seal_for(ChunkFormat::V2),
+            MetadataSeal::Subkey,
+            "the v2 write switch must flip names and thumbnails to their subkeys"
+        );
+        assert_eq!(METADATA_SEAL_WRITE, metadata_seal_for(WRITE_FORMAT));
+    }
+
+    // ── P2-2: name / thumbnail separation through the public functions ──────
+
+    #[test]
+    fn p2_2_subkey_sealed_thumbnail_wrapped_as_a_name_envelope_is_refused() {
+        let m = mk();
+        let id = "thumb-as-name";
+        let fk = derive_file_key(&m, id.as_bytes());
+        let name_shaped = br#"{"name":"evil.exe","mime_type":null}"#;
+
+        // Control (proves the wrapping is a valid envelope): the LEGACY
+        // raw-key thumbnail wrapped this way does open as a name — that is the
+        // pre-switch residual (decision 1912), not something this test fixes.
+        let legacy = crate::encrypt::encrypt_thumbnail_sealed(&fk, name_shaped, MetadataSeal::Legacy).unwrap();
+        assert_eq!(decrypt_name(&m, id, &frame_as_envelope(&legacy)).unwrap(), "evil.exe");
+
+        let thumb = encrypt_thumbnail_for(&fk, name_shaped, ExpectedChunkFormat::V2).unwrap();
+        assert_eq!(decrypt_thumbnail(&fk, &thumb).unwrap(), name_shaped);
+        let env = frame_as_envelope(&thumb);
+        assert!(
+            decrypt_file_metadata(&m, id, &env).is_err(),
+            "a subkey-sealed thumbnail must not open as a file's metadata"
+        );
+        assert!(decrypt_file_metadata_with_key(&fk, &env).is_err());
+        assert!(decrypt_name_metadata(&m, id, &env).is_err());
+        assert!(
+            decrypt_name(&m, id, &env).is_err(),
+            "a subkey-sealed thumbnail must not open as a name"
+        );
+    }
+
+    #[test]
+    fn p2_2_v2_name_blob_is_not_a_thumbnail() {
+        let m = mk();
+        let id = "name-as-thumb";
+        let fk = derive_file_key(&m, id.as_bytes());
+
+        // Control: a legacy (raw-key) name opens through decrypt_thumbnail's
+        // legacy fallback — the residual again, and proof the frame is valid.
+        let legacy = crate::encrypt::encrypt_name(&m, id, "old.txt", None).unwrap();
+        assert!(decrypt_thumbnail(&fk, &envelope_as_frame(&legacy)).is_ok());
+
+        let v2 = encrypt_name_with_chunk_format(&m, id, "a.pdf", None, ExpectedChunkFormat::V2).unwrap();
+        assert!(
+            decrypt_thumbnail(&fk, &envelope_as_frame(&v2)).is_err(),
+            "a v2 file's name envelope must not open as its thumbnail"
+        );
+    }
+
+    #[test]
+    fn p2_2_v2_name_opens_only_under_an_independently_derived_name_key() {
+        let m = mk();
+        let id = "name-key-independent";
+        let fk = derive_file_key(&m, id.as_bytes());
+        let env = encrypt_name_with_chunk_format(&m, id, "a.pdf", None, ExpectedChunkFormat::V2).unwrap();
+        let blob: EncryptedBlob = serde_json::from_str(&env).unwrap();
+        let pt = decrypt_metadata(&independent_subkey(&fk, b"beebeeb/name/v1"), &blob)
+            .expect("a v2 name must be sealed under HKDF(file_key, \"beebeeb/name/v1\")");
+        assert!(pt.contains("\"chunk_format\":2"), "{pt}");
+        assert_eq!(NAME_KEY_INFO, b"beebeeb/name/v1");
+        for other in [
+            independent_subkey(&fk, b"beebeeb/thumb/v1"),
+            independent_subkey(&fk, b"beebeeb/chunk/v2/key"),
+            FileKey::from_bytes(*fk.as_bytes()),
+        ] {
+            assert!(decrypt_metadata(&other, &blob).is_err());
+        }
+    }
+
+    // ── P2-4: thumbnails follow the pin like names ──────────────────────────
+
+    #[test]
+    fn p2_4_thumbnail_for_a_v2_pin_is_subkey_sealed() {
+        let m = mk();
+        let id = "thumb-v2-pin";
+        let fk = derive_file_key(&m, id.as_bytes());
+        let t = encrypt_thumbnail_for(&fk, b"\xff\xd8 thumb", ExpectedChunkFormat::V2).unwrap();
+        assert!(
+            open_raw_with_aad(&fk, &t, &[]).is_err(),
+            "a v2-pinned file's thumbnail must not be sealed under the raw file key"
+        );
+        assert_eq!(
+            open_raw_with_aad(&independent_subkey(&fk, b"beebeeb/thumb/v1"), &t, &[]).unwrap(),
+            b"\xff\xd8 thumb"
+        );
+        assert_eq!(THUMBNAIL_KEY_INFO, b"beebeeb/thumb/v1");
+        assert_eq!(decrypt_thumbnail(&fk, &t).unwrap(), b"\xff\xd8 thumb");
+        assert!(read(&m, id, ExpectedChunkFormat::Unrecorded, &[t]).is_err());
+    }
+
+    #[test]
+    fn p2_4_thumbnail_for_an_unrecorded_pin_follows_the_write_switch() {
+        let m = mk();
+        let fk = derive_file_key(&m, b"thumb-unrecorded");
+        let t = encrypt_thumbnail_for(&fk, b"thumb", ExpectedChunkFormat::Unrecorded).unwrap();
+        let raw_opens = open_raw_with_aad(&fk, &t, &[]).is_ok();
+        assert_eq!(raw_opens, METADATA_SEAL_WRITE == MetadataSeal::Legacy);
+        assert_eq!(decrypt_thumbnail(&fk, &t).unwrap(), b"thumb");
     }
 }
