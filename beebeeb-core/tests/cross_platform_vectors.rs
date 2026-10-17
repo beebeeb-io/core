@@ -668,8 +668,8 @@ fn vector_file_version_check() {
         .as_u64()
         .expect("vectors.json must have a 'version' field");
     assert_eq!(
-        version, 4,
-        "vectors.json version mismatch — expected 4, got {version}. \
+        version, 5,
+        "vectors.json version mismatch — expected 5, got {version}. \
          Update this test if you intentionally bumped the version."
     );
 
@@ -690,8 +690,142 @@ fn vector_file_version_check() {
         "file_request_seal_open",
         "share_key_wrap",
         "thumbnail_encrypt",
+        // Version 5 (task 1943): chunk format v2 + v2 name metadata.
+        "chunk_v2_stream",
+        "chunk_v2_single_frame",
+        "metadata_v2_name",
     ];
     for name in &required {
         assert!(names.contains(name), "vectors.json is missing required vector '{name}'");
     }
+}
+
+// ---------------------------------------------------------------------------
+// 21. Chunk format v2 (version 5, task 1943) — what every client's v2 READ
+//     path must do with these bytes, through the public reader only.
+// ---------------------------------------------------------------------------
+
+use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkFormat, ExpectedChunkFormat, chunk_aad_v2, open_chunk};
+
+/// A v2 vector's frames, decrypted in order by the streaming reader under the
+/// V2 pin, equal its plaintext, and the stream finishes (last frame seen). Each
+/// frame also opens on its own at its index (random access), its published AAD
+/// is the documented layout, and it does NOT open as a v1 frame.
+fn check_chunk_v2(name: &str) {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, name);
+    let mk = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let file_id = v["file_id"].as_str().unwrap();
+    let file_key = derive_file_key(&mk, file_id.as_bytes());
+    assert_eq!(
+        hex::encode(file_key.as_bytes()),
+        v["file_key_hex"].as_str().unwrap(),
+        "{name}: file key"
+    );
+    let version_id: [u8; 12] = decode_hex(&v, "version_id_hex").try_into().unwrap();
+    let frames = v["frames"].as_array().unwrap();
+    assert_eq!(frames.len() as u64, v["chunk_count"].as_u64().unwrap());
+
+    let mut dec = ChunkDecryptor::for_push(&mk, file_id, ExpectedChunkFormat::V2);
+    let mut plaintext = Vec::new();
+    let mut wire = Vec::new();
+    for f in frames {
+        let frame = decode_hex(f, "frame_hex");
+        let index = f["index"].as_u64().unwrap() as u32;
+        let is_last = f["is_last"].as_bool().unwrap();
+        assert_eq!(
+            hex::encode(chunk_aad_v2(file_id.as_bytes(), &version_id, index, is_last)),
+            f["aad_hex"].as_str().unwrap(),
+            "{name}: AAD of frame {index}"
+        );
+        let opened = open_chunk(&file_key, file_id, &version_id, index, is_last, ChunkFormat::V2, &frame).unwrap();
+        assert_eq!(
+            opened,
+            decode_hex(f, "plaintext_hex"),
+            "{name}: frame {index} (random access)"
+        );
+        assert!(
+            open_chunk(
+                &file_key,
+                file_id,
+                &version_id,
+                index,
+                is_last,
+                ChunkFormat::V1Legacy,
+                &frame
+            )
+            .is_err(),
+            "{name}: a v2 frame must not open as v1"
+        );
+        plaintext.extend(dec.push_frame(&frame).unwrap().data);
+        wire.extend(frame);
+    }
+    dec.finish().expect("the stream ends with its last frame");
+    assert_eq!(
+        detected_format(&mk, file_id, &decode_hex(&frames[0], "frame_hex")),
+        Some(ChunkFormat::V2)
+    );
+    assert_eq!(plaintext, decode_hex(&v, "plaintext_hex"), "{name}: plaintext");
+    assert_eq!(
+        hex::encode(&wire),
+        v["wire_hex"].as_str().unwrap(),
+        "{name}: wire = frames back to back"
+    );
+}
+
+/// The format a fresh reader detects for these frames when the metadata records
+/// nothing (`Unrecorded`): v2, from frame 0.
+fn detected_format(mk: &MasterKey, file_id: &str, frame0: &[u8]) -> Option<ChunkFormat> {
+    let mut dec = ChunkDecryptor::for_push(mk, file_id, ExpectedChunkFormat::Unrecorded);
+    dec.push_frame(frame0).unwrap();
+    dec.format()
+}
+
+#[test]
+fn vector_chunk_v2_stream_decrypt() {
+    check_chunk_v2("chunk_v2_stream");
+    // A multi-frame v2 file without its last frame is rejected (truncation).
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "chunk_v2_stream");
+    let mk = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let frames = v["frames"].as_array().unwrap();
+    assert!(frames.len() > 2, "the stream vector must have more than two frames");
+    let mut dec = ChunkDecryptor::for_push(&mk, v["file_id"].as_str().unwrap(), ExpectedChunkFormat::V2);
+    for f in &frames[..frames.len() - 1] {
+        dec.push_frame(&decode_hex(f, "frame_hex")).unwrap();
+    }
+    assert!(
+        dec.finish().is_err(),
+        "a v2 stream without its last frame must not finish"
+    );
+}
+
+#[test]
+fn vector_chunk_v2_single_frame_decrypt() {
+    check_chunk_v2("chunk_v2_single_frame");
+}
+
+#[test]
+fn vector_metadata_v2_name_decrypt() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "metadata_v2_name");
+    let mk = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let meta = beebeeb_core::encrypt::decrypt_file_metadata(
+        &mk,
+        v["file_id"].as_str().unwrap(),
+        v["name_encrypted"].as_str().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(meta.name, v["expected_name"].as_str().unwrap());
+    assert_eq!(meta.mime_type.as_deref(), v["expected_mime_type"].as_str());
+    assert_eq!(meta.chunk_format, ExpectedChunkFormat::V2);
+    assert_eq!(v["expected_chunk_format"].as_u64(), Some(2));
+    // Sealed under the name subkey: the raw file key alone does not open it.
+    let file_key = derive_file_key(&mk, v["file_id"].as_str().unwrap().as_bytes());
+    let blob: beebeeb_types::EncryptedBlob = serde_json::from_str(v["name_encrypted"].as_str().unwrap()).unwrap();
+    assert!(
+        decrypt_metadata(&file_key, &blob).is_err(),
+        "a v2 name must not open under the raw file key"
+    );
+    assert_eq!(hex::encode(&blob.nonce), v["nonce_hex"].as_str().unwrap());
 }

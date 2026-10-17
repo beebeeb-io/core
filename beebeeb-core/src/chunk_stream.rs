@@ -628,6 +628,10 @@ pub struct ChunkEncryptor {
     chunk_key: FileKey,
     /// v2: the nonce of frame 0 = this upload's version id (set when frame 0 is sealed).
     version_id: Option<[u8; VERSION_ID_LEN]>,
+    /// Known-answer vectors only ([`Self::with_vector_nonces`]): the v2 frame
+    /// nonces to use, in order. Never present in a shipped client build.
+    #[cfg(any(test, feature = "test-support"))]
+    vector_nonces: std::collections::VecDeque<[u8; NONCE_LEN]>,
 }
 
 impl ChunkEncryptor {
@@ -759,7 +763,45 @@ impl ChunkEncryptor {
             file_id: file_id.as_bytes().to_vec(),
             chunk_key,
             version_id: None,
+            #[cfg(any(test, feature = "test-support"))]
+            vector_nonces: std::collections::VecDeque::new(),
         })
+    }
+
+    /// Seal the v2 frames with these FIXED nonces, in order — for the published
+    /// known-answer vectors only (`test-vectors/vectors.json`, task 1943).
+    /// Compiled only under `cfg(test)` or the `test-support` feature (like
+    /// [`Self::with_format`]), never in a shipped client: a nonce reused under
+    /// one key breaks AES-GCM. Frame 0's nonce is the version id, as always.
+    /// Only before the first chunk, only on a v2 writer (v1 frames draw their
+    /// own nonce), exactly one nonce per planned frame, and no nonce twice.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_vector_nonces(mut self, nonces: Vec<[u8; NONCE_LEN]>) -> Result<Self, CoreError> {
+        if self.emitted_chunks != 0 {
+            return Err(CoreError::InvalidInput(
+                "with_vector_nonces must be called before the first chunk".into(),
+            ));
+        }
+        if self.format != ChunkFormat::V2 {
+            return Err(CoreError::InvalidInput(
+                "with_vector_nonces needs a v2 writer (set the format first)".into(),
+            ));
+        }
+        if nonces.len() as u64 != self.chunk_count as u64 {
+            return Err(CoreError::InvalidInput(format!(
+                "with_vector_nonces needs one nonce per frame ({} frames, {} nonces)",
+                self.chunk_count,
+                nonces.len()
+            )));
+        }
+        let distinct: std::collections::HashSet<_> = nonces.iter().collect();
+        if distinct.len() != nonces.len() {
+            return Err(CoreError::InvalidInput(
+                "with_vector_nonces got the same nonce twice".into(),
+            ));
+        }
+        self.vector_nonces = nonces.into();
+        Ok(self)
     }
 
     /// Override the written format — **tests only** (v1 fixtures, v2 attack
@@ -891,8 +933,19 @@ impl ChunkEncryptor {
         // `next_index < chunk_count` first, so `index + 1` cannot overflow.
         let is_last = index + 1 == self.chunk_count;
         let data = match self.format {
-            ChunkFormat::V1Legacy => seal_raw_with_aad(&self.file_key, plaintext, &[])?,
+            ChunkFormat::V1Legacy => {
+                // Vector nonces are v2-only; a format switched back to v1
+                // after they were set must not silently drop them.
+                #[cfg(any(test, feature = "test-support"))]
+                if !self.vector_nonces.is_empty() {
+                    return Err(CoreError::InvalidInput("vector nonces are for v2 frames only".into()));
+                }
+                seal_raw_with_aad(&self.file_key, plaintext, &[])?
+            }
             ChunkFormat::V2 => {
+                #[cfg(any(test, feature = "test-support"))]
+                let nonce = self.vector_nonces.pop_front().unwrap_or_else(random_nonce);
+                #[cfg(not(any(test, feature = "test-support")))]
                 let nonce = random_nonce();
                 // Frame 0's nonce becomes this upload's version id; every frame
                 // (frame 0 included) binds it.
@@ -3473,5 +3526,50 @@ mod review_round5_tests {
             !raw_opens(&encrypt_note_for(&fk, "n", ExpectedChunkFormat::V2).unwrap()),
             "a v2-pinned file's note must not be sealed under the raw file key"
         );
+    }
+
+    /// The vector-nonce seam refuses what it would otherwise get wrong
+    /// silently: a v1 writer (v1 frames draw their own nonce), a count that is
+    /// not one nonce per frame (the rest would be random), a nonce twice
+    /// (AES-GCM nonce reuse under one key), and a format switched back to v1
+    /// after the nonces were set.
+    #[test]
+    fn vector_nonces_are_v2_only_one_per_frame_and_distinct() {
+        let m = mk();
+        // 71 bytes in 32-byte chunks: 3 frames.
+        let v2 = || {
+            ChunkEncryptor::for_push_with_chunk_size(&m, "vn", 71, 32)
+                .unwrap()
+                .with_format(ChunkFormat::V2)
+                .unwrap()
+        };
+        let three = vec![[1u8; NONCE_LEN], [2u8; NONCE_LEN], [3u8; NONCE_LEN]];
+
+        let v1 = ChunkEncryptor::for_push_with_chunk_size(&m, "vn", 71, 32)
+            .unwrap()
+            .with_format(ChunkFormat::V1Legacy)
+            .unwrap();
+        assert!(v1.with_vector_nonces(three.clone()).is_err(), "v1 writer");
+        assert!(v2().with_vector_nonces(three[..2].to_vec()).is_err(), "too few");
+        let mut four = three.clone();
+        four.push([4u8; NONCE_LEN]);
+        assert!(v2().with_vector_nonces(four).is_err(), "too many");
+        let dup = vec![[1u8; NONCE_LEN], [2u8; NONCE_LEN], [1u8; NONCE_LEN]];
+        assert!(v2().with_vector_nonces(dup).is_err(), "a nonce twice");
+
+        let mut back_to_v1 = v2()
+            .with_vector_nonces(three.clone())
+            .unwrap()
+            .with_format(ChunkFormat::V1Legacy)
+            .unwrap();
+        assert!(back_to_v1.push_chunk(&[0u8; 32]).is_err(), "nonces dropped on v1");
+
+        let mut ok = v2().with_vector_nonces(three.clone()).unwrap();
+        let data: Vec<u8> = (0..71u8).collect();
+        for (i, part) in data.chunks(32).enumerate() {
+            let frame = ok.push_chunk(part).unwrap();
+            assert_eq!(&frame.data[..NONCE_LEN], &three[i], "frame {i} uses its vector nonce");
+        }
+        ok.finish().unwrap();
     }
 }
