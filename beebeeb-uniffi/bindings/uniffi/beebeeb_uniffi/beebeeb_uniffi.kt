@@ -1022,6 +1022,8 @@ external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkencryptorhandle_fro
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_constellationdecoderhandle_new(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_key_bytes(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_fileprovidercachehandle_open(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_masterkeyhandle_from_keychain_bytes(
@@ -1149,6 +1151,8 @@ external fun uniffi_beebeeb_uniffi_fn_clone_filekeyhandle(`handle`: Long,uniffi_
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_filekeyhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_from_key_bytes(`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
 external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_chunk(`ptr`: Long,`nonce`: RustBuffer.ByValue,`ciphertext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_chunk_frame(`ptr`: Long,`fileId`: RustBuffer.ByValue,`versionId`: RustBuffer.ByValue,`index`: Int,`isLast`: Byte,`format`: Byte,`frame`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1984,6 +1988,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_constellationdecoderhandle_new() != 21598.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_key_bytes() != 50246.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_fileprovidercachehandle_open() != 22658.toShort()) {
@@ -4184,7 +4191,9 @@ public object FfiConverterTypeConstellationDecoderHandle: FfiConverter<Constella
 
 
 /**
- * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`.
+ * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`
+ * for a key derived from the account's master key, or via
+ * [`FileKeyHandle::from_key_bytes`] for one the app holds as 32 bytes.
  */
 public interface FileKeyHandleInterface {
     
@@ -4299,7 +4308,9 @@ public interface FileKeyHandleInterface {
 }
 
 /**
- * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`.
+ * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`
+ * for a key derived from the account's master key, or via
+ * [`FileKeyHandle::from_key_bytes`] for one the app holds as 32 bytes.
  */
 open class FileKeyHandle: Disposable, AutoCloseable, FileKeyHandleInterface
 {
@@ -4678,11 +4689,33 @@ open class FileKeyHandle: Disposable, AutoCloseable, FileKeyHandleInterface
 
 
     
-    
+    companion object {
+        
     /**
-     * @suppress
+     * A handle for a per-file key the app holds as raw bytes and that is NOT
+     * derived from the account's master key: a file-request upload's content
+     * key (`open_request_upload`), a shared file's key. Task 1958 round 4: the
+     * with-key name, note and thumbnail functions of this handle
+     * (`encrypt_name_for`, `decrypt_file_metadata`, `encrypt_note_for`, ...)
+     * were reachable only through `MasterKeyHandle::derive_file_key`, so not
+     * for these keys. The WASM side takes the same bytes (`fileKey`).
+     *
+     * Exactly 32 bytes, anything else is an `InvalidInput` error. The input is
+     * zeroized once copied into the key.
      */
-    companion object
+    @Throws(CryptoException::class) fun `fromKeyBytes`(`key`: kotlin.ByteArray): FileKeyHandle {
+            return FfiConverterTypeFileKeyHandle.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_from_key_bytes(
+    
+        FfiConverterByteArray.lower(`key`),_status)
+}
+    )
+    }
+    
+
+        
+    }
     
 }
 
