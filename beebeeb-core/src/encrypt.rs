@@ -136,13 +136,15 @@ pub fn encrypt_name_with_chunk_format(
     // follows the write switch (legacy during the read-only phase, so clients
     // not yet on this core keep reading the names this core writes). One rule
     // for content, names and thumbnails: chunk_format_for_pin + metadata_seal_for.
-    let seal = metadata_seal_for(crate::chunk_stream::chunk_format_for_pin(chunk_format));
-    encrypt_name_sealed(master_key, file_id, filename, mime_type, chunk_format, seal)
+    let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
+    encrypt_name_for(&file_key, filename, mime_type, chunk_format)
 }
 
-/// [`encrypt_name_with_chunk_format`] with an explicit seal — crate-internal,
-/// so no shipped client can write subkey-sealed names for a v1 file ahead of
-/// the [`METADATA_SEAL_WRITE`] switch.
+/// [`encrypt_name_with_chunk_format`] with an explicit seal — for the crate's own
+/// tests only (a subkey-sealed name on a v1 file, ahead of the
+/// [`METADATA_SEAL_WRITE`] switch). `cfg(test)`, so no build of a shipped client
+/// contains a writer that can choose the seal against the pin.
+#[cfg(test)]
 pub(crate) fn encrypt_name_sealed(
     master_key: &crate::kdf::MasterKey,
     file_id: &str,
@@ -152,75 +154,50 @@ pub(crate) fn encrypt_name_sealed(
     seal: MetadataSeal,
 ) -> Result<String, CoreError> {
     let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
-    encrypt_name_sealed_for_key(&file_key, filename, mime_type, chunk_format, seal)
+    seal_name_envelope(&file_key, filename, mime_type, chunk_format, seal, random_nonce())
 }
 
-/// Seal the name/MIME envelope of an EXISTING file under ITS per-file key, by
-/// the rule of the `pin` its encrypted metadata records (from
-/// [`decrypt_file_metadata_with_key`] / [`decrypt_file_metadata`], never a
-/// server field) — task 1958. The rename writer for every file, including the
-/// ones whose key is not derived from the caller's master key (file-request
-/// uploads, shared-folder files), so a rename keeps the 1908 pin:
+/// Seal the name/MIME envelope under a per-file key, by the rule of the `pin`
+/// the file's encrypted metadata records (from [`decrypt_file_metadata_with_key`]
+/// / [`decrypt_file_metadata`], never a server field) — task 1958. The only
+/// name writer that takes a key instead of deriving one, so it is the writer
+/// for every file whose key is not derived from the caller's master key
+/// (file-request uploads, shared-folder files):
 /// - a v2 pin records `chunk_format: 2` and is ALWAYS sealed under the name
 ///   subkey (as [`encrypt_name_with_chunk_format`] does);
 /// - `Unrecorded` follows [`METADATA_SEAL_WRITE`] (legacy, the raw file key,
 ///   during the read-only phase) and records nothing.
 ///
-/// For a key derived from the master key it is byte-for-byte the master-key
-/// writer: `encrypt_name_for(&derive_file_key(mk, id), ..)` and
-/// `encrypt_name_with_chunk_format(mk, id, ..)` seal the same plaintext under
-/// the same key (only the random nonce differs).
+/// Which `pin` to pass:
+/// - an EXISTING file (rename): the pin its metadata records;
+/// - a NEW file (e.g. a file-request upload, whose key the uploader holds):
+///   [`ExpectedChunkFormat::recorded_for`] of the format its content was written
+///   in (`ChunkEncryptor::format`), exactly as
+///   [`encrypt_name_with_chunk_format`] is used at upload. Any other pin for a
+///   new file records a format its content does not have.
+///
+/// [`encrypt_name_with_chunk_format`] is this writer after deriving the file key,
+/// and the published name vectors are written through the same path
+/// ([`encrypt_name_for_nonce`]), so they pin this writer's key choice and
+/// plaintext.
+///
+/// [`ExpectedChunkFormat::recorded_for`]: crate::chunk_stream::ExpectedChunkFormat::recorded_for
 pub fn encrypt_name_for(
     file_key: &FileKey,
     filename: &str,
     mime_type: Option<&str>,
     pin: crate::chunk_stream::ExpectedChunkFormat,
 ) -> Result<String, CoreError> {
-    let seal = metadata_seal_for(crate::chunk_stream::chunk_format_for_pin(pin));
-    encrypt_name_sealed_for_key(file_key, filename, mime_type, pin, seal)
+    encrypt_name_for_nonce(file_key, filename, mime_type, pin, random_nonce())
 }
 
-/// The one name sealer under a per-file key: [`encrypt_name_sealed`] (master
-/// key, after deriving) and [`encrypt_name_for`] (a given key) both end here.
-fn encrypt_name_sealed_for_key(
-    file_key: &FileKey,
-    filename: &str,
-    mime_type: Option<&str>,
-    chunk_format: crate::chunk_stream::ExpectedChunkFormat,
-    seal: MetadataSeal,
-) -> Result<String, CoreError> {
-    let plaintext = name_plaintext(filename, mime_type, chunk_format);
-    let blob = match seal {
-        MetadataSeal::Legacy => encrypt_metadata(file_key, &plaintext)?,
-        MetadataSeal::Subkey => encrypt_metadata(&derive_name_key(file_key), &plaintext)?,
-    };
-    serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
-}
-
-/// [`encrypt_name_with_chunk_format`] with a FIXED nonce — for the published
-/// known-answer vectors only (`test-vectors/vectors.json`, task 1943). Compiled
-/// only under `cfg(test)` or the `test-support` feature, never in a shipped
-/// client: a fixed nonce reused under one key breaks AES-GCM. Same rule as the
-/// real writer (the pin picks the seal), so the vector IS what the writer emits
-/// apart from the nonce.
-#[cfg(any(test, feature = "test-support"))]
-pub fn encrypt_name_with_chunk_format_and_nonce(
-    master_key: &crate::kdf::MasterKey,
-    file_id: &str,
-    filename: &str,
-    mime_type: Option<&str>,
-    chunk_format: crate::chunk_stream::ExpectedChunkFormat,
-    nonce: [u8; NONCE_LEN],
-) -> Result<String, CoreError> {
-    let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
-    encrypt_name_for_with_nonce(&file_key, filename, mime_type, chunk_format, nonce)
-}
-
-/// [`encrypt_name_for`] with a FIXED nonce — for the published known-answer
-/// vectors only (task 1958), under the same `cfg(test)` / `test-support` gate as
-/// every other nonce seam. Same plaintext and key choice as the real writer.
-#[cfg(any(test, feature = "test-support"))]
-pub fn encrypt_name_for_with_nonce(
+/// [`encrypt_name_for`] with the nonce as a parameter: the shipped writers pass a
+/// fresh [`random_nonce`], and only the `cfg(test)` / `test-support` vector seams
+/// ([`encrypt_name_for_with_nonce`], [`encrypt_name_with_chunk_format_and_nonce`])
+/// pass a fixed one. Private, so no shipped API takes a nonce. Everything that
+/// depends on the pin (the seal and the recorded `chunk_format`) happens here
+/// and in [`seal_name_envelope`], on the path both share (task 1958 round 2, I-1).
+fn encrypt_name_for_nonce(
     file_key: &FileKey,
     filename: &str,
     mime_type: Option<&str>,
@@ -228,8 +205,22 @@ pub fn encrypt_name_for_with_nonce(
     nonce: [u8; NONCE_LEN],
 ) -> Result<String, CoreError> {
     let seal = metadata_seal_for(crate::chunk_stream::chunk_format_for_pin(pin));
-    let plaintext = name_plaintext(filename, mime_type, pin);
-    // The same blob `encrypt_metadata` builds (no AAD), with the given nonce.
+    seal_name_envelope(file_key, filename, mime_type, pin, seal, nonce)
+}
+
+/// The one name sealer: [`encrypt_name_for_nonce`] (every pin-ruled writer and
+/// vector seam) and, in the crate's tests, [`encrypt_name_sealed`] (an explicit
+/// seal) both end here. The key choice and the blob framing exist once.
+fn seal_name_envelope(
+    file_key: &FileKey,
+    filename: &str,
+    mime_type: Option<&str>,
+    chunk_format: crate::chunk_stream::ExpectedChunkFormat,
+    seal: MetadataSeal,
+    nonce: [u8; NONCE_LEN],
+) -> Result<String, CoreError> {
+    let plaintext = name_plaintext(filename, mime_type, chunk_format);
+    // The blob `encrypt_metadata` builds (no AAD), with the caller's nonce.
     let frame = match seal {
         MetadataSeal::Legacy => seal_raw_with_nonce(file_key, &nonce, plaintext.as_bytes(), &[])?,
         MetadataSeal::Subkey => seal_raw_with_nonce(&derive_name_key(file_key), &nonce, plaintext.as_bytes(), &[])?,
@@ -242,9 +233,43 @@ pub fn encrypt_name_for_with_nonce(
     serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
 }
 
+/// [`encrypt_name_with_chunk_format`] with a FIXED nonce — for the published
+/// known-answer vectors only (`test-vectors/vectors.json`, task 1943). Compiled
+/// only under `cfg(test)` or the `test-support` feature, never in a shipped
+/// client: a fixed nonce reused under one key breaks AES-GCM. It derives the
+/// file key and takes the shipped writer's own path ([`encrypt_name_for_nonce`]),
+/// so a vector is what the writer emits apart from the nonce, by construction.
+#[cfg(any(test, feature = "test-support"))]
+pub fn encrypt_name_with_chunk_format_and_nonce(
+    master_key: &crate::kdf::MasterKey,
+    file_id: &str,
+    filename: &str,
+    mime_type: Option<&str>,
+    chunk_format: crate::chunk_stream::ExpectedChunkFormat,
+    nonce: [u8; NONCE_LEN],
+) -> Result<String, CoreError> {
+    let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
+    encrypt_name_for_nonce(&file_key, filename, mime_type, chunk_format, nonce)
+}
+
+/// [`encrypt_name_for`] with a FIXED nonce — for the published known-answer
+/// vectors only (task 1958), under the same `cfg(test)` / `test-support` gate as
+/// every other nonce seam. The shipped writer's own path
+/// ([`encrypt_name_for_nonce`]), so the key choice and plaintext are its own.
+#[cfg(any(test, feature = "test-support"))]
+pub fn encrypt_name_for_with_nonce(
+    file_key: &FileKey,
+    filename: &str,
+    mime_type: Option<&str>,
+    pin: crate::chunk_stream::ExpectedChunkFormat,
+    nonce: [u8; NONCE_LEN],
+) -> Result<String, CoreError> {
+    encrypt_name_for_nonce(file_key, filename, mime_type, pin, nonce)
+}
+
 /// The name/MIME envelope plaintext: `{"name":..,"mime_type":..}` plus
-/// `"chunk_format":2` for a v2 pin (nothing recorded otherwise). Shared by every
-/// name writer, so a fixed nonce is never a parameter of shipped code.
+/// `"chunk_format":2` for a v2 pin (nothing recorded otherwise). Built only in
+/// [`seal_name_envelope`], the sealer every name writer shares.
 fn name_plaintext(
     filename: &str,
     mime_type: Option<&str>,
@@ -847,8 +872,9 @@ pub(crate) fn random_nonce() -> [u8; NONCE_LEN] {
 /// plaintext, aad)`. Callers MUST pass a fresh [`random_nonce`], except the
 /// `cfg(test)` / `test-support` known-answer vector seams
 /// ([`ChunkEncryptor::with_vector_nonces`](crate::chunk_stream::ChunkEncryptor::with_vector_nonces),
-/// [`encrypt_name_with_chunk_format_and_nonce`]), which no shipped build
-/// compiles. The only reason this exists is that chunk format v2 binds frame
+/// [`encrypt_name_with_chunk_format_and_nonce`], [`encrypt_name_for_with_nonce`]),
+/// which no shipped build compiles. The name sealer ([`seal_name_envelope`])
+/// passes its caller's nonce through: a fresh one from every shipped writer. The only reason this exists is that chunk format v2 binds frame
 /// 0's nonce (the per-upload version id) into frame 0's own AAD, so the nonce
 /// has to be known before the AAD is built.
 pub(crate) fn seal_raw_with_nonce(

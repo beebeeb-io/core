@@ -694,7 +694,7 @@ fn vector_file_version_check() {
         "chunk_v2_stream",
         "chunk_v2_single_frame",
         "metadata_v2_name",
-        // Version 6 (task 1958): the rename writer under a given per-file key.
+        // Version 6 (task 1958): the name writer under a given per-file key.
         "metadata_v2_name_filekey",
         "metadata_v1_name_filekey",
     ];
@@ -884,4 +884,61 @@ fn vector_metadata_v2_name_filekey_is_not_under_the_raw_key_and_v1_is() {
         raw_opens("metadata_v1_name_filekey"),
         "an unpinned name is legacy raw-key sealed"
     );
+}
+
+/// The SHIPPED name writers against the published name vectors (task 1958
+/// round 2, I-1). A shipped writer draws a fresh nonce, so its bytes cannot
+/// equal a vector's; what can be compared is everything else. With each vector's
+/// own inputs, `encrypt_name_with_chunk_format` (master key, 1943) and
+/// `encrypt_name_for` (given key, 1958) must seal under the SAME key as the
+/// vector (raw file key or name subkey: each opens both blobs or neither) to the
+/// SAME plaintext, at the same length. A wrong key choice, a dropped pin or a
+/// different envelope in the shipped path is red here, not only in unit tests.
+#[test]
+fn vector_names_are_what_the_shipped_writers_seal() {
+    let vectors = load_vectors();
+    let cases: [(&str, bool); 3] = [
+        ("metadata_v2_name", true),
+        ("metadata_v2_name_filekey", false),
+        ("metadata_v1_name_filekey", false),
+    ];
+    for (name, master_key_writer) in cases {
+        let v = get_vector(&vectors, name);
+        let filename = v["expected_name"].as_str().unwrap();
+        let mime = v["expected_mime_type"].as_str();
+        let pin = ExpectedChunkFormat::from_u8(v["expected_chunk_format"].as_u64().unwrap() as u8).unwrap();
+        let file_key = file_key_of(&v);
+        let shipped = if master_key_writer {
+            let mk = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+            beebeeb_core::encrypt::encrypt_name_with_chunk_format(
+                &mk,
+                v["file_id"].as_str().unwrap(),
+                filename,
+                mime,
+                pin,
+            )
+        } else {
+            beebeeb_core::encrypt::encrypt_name_for(&file_key, filename, mime, pin)
+        }
+        .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let shipped: EncryptedBlob = serde_json::from_str(&shipped).unwrap();
+        let published: EncryptedBlob = serde_json::from_str(v["name_encrypted"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            shipped.ciphertext.len(),
+            published.ciphertext.len(),
+            "{name}: envelope length"
+        );
+        let name_key = FileKey::from_bytes(bytes32(&v, "name_key_hex"));
+        let mut opened = 0;
+        for (label, key) in [("raw file key", &file_key), ("name subkey", &name_key)] {
+            let want = decrypt_metadata(key, &published).ok();
+            let got = decrypt_metadata(key, &shipped).ok();
+            assert_eq!(
+                got, want,
+                "{name}: the shipped writer and the vector differ under the {label}"
+            );
+            opened += usize::from(want.is_some());
+        }
+        assert_eq!(opened, 1, "{name}: the vector opens under exactly one key");
+    }
 }

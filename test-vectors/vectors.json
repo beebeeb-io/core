@@ -180,7 +180,7 @@
       "name_encrypted": "{\"cipher_suite\":\"V1Aes256Gcm\",\"nonce\":[91,91,91,91,91,91,91,91,91,91,91,91],\"ciphertext\":[24,177,248,51,73,209,186,96,92,54,131,69,222,152,150,18,159,237,98,112,132,176,228,33,232,215,71,89,203,80,186,73,69,174,11,20,252,117,135,79,236,122,169,163,43,202,16,223,181,53,120,54,218,224,48,215,62,234,180,251,52,147,93,9,133,68,101,117,161,39,126,203,196,115,84,79,239,95,246,177,238,34,243,196,72,188,7,33,153,186,66,52]}",
       "name_key_hex": "59de2c3db1e77891331d20ccdc81b5b050a21b8d620350abe6843f1c254eca80",
       "nonce_hex": "5b5b5b5b5b5b5b5b5b5b5b5b",
-      "note": "Fixed nonce for a known-answer test. Written by encrypt_name_for(file_key, name, mime, pin), the rename writer for a key that is not derived from the master key. Read with decrypt_file_metadata_with_key(file_key, name_encrypted): pin 2 opens under the name subkey only, pin 0 under the raw file key.",
+      "note": "Fixed nonce for a known-answer test. Written by encrypt_name_for(file_key, name, mime, pin), the name writer for a key that is not derived from the master key (renames, file-request uploads). Read with decrypt_file_metadata_with_key(file_key, name_encrypted): pin 2 opens under the name subkey only; pin 0 opens under the raw file key while METADATA_SEAL_WRITE is Legacy (the read-only phase), and is subkey-sealed after the switch, when this vector is re-published.",
       "pin": 2
     },
     {
@@ -192,7 +192,7 @@
       "name_encrypted": "{\"cipher_suite\":\"V1Aes256Gcm\",\"nonce\":[92,92,92,92,92,92,92,92,92,92,92,92],\"ciphertext\":[54,140,155,130,89,193,141,108,77,167,26,224,193,212,96,149,187,163,101,7,123,44,61,177,49,241,44,200,51,100,138,160,215,148,20,97,250,251,184,158,129,34,98,60,237,110,226,66,9,95,132,150,239,121,183,232,17,10,11,18,171,225,228,50,83,31,64,31,108,161,124,166,246,121,69]}",
       "name_key_hex": "59de2c3db1e77891331d20ccdc81b5b050a21b8d620350abe6843f1c254eca80",
       "nonce_hex": "5c5c5c5c5c5c5c5c5c5c5c5c",
-      "note": "Fixed nonce for a known-answer test. Written by encrypt_name_for(file_key, name, mime, pin), the rename writer for a key that is not derived from the master key. Read with decrypt_file_metadata_with_key(file_key, name_encrypted): pin 2 opens under the name subkey only, pin 0 under the raw file key.",
+      "note": "Fixed nonce for a known-answer test. Written by encrypt_name_for(file_key, name, mime, pin), the name writer for a key that is not derived from the master key (renames, file-request uploads). Read with decrypt_file_metadata_with_key(file_key, name_encrypted): pin 2 opens under the name subkey only; pin 0 opens under the raw file key while METADATA_SEAL_WRITE is Legacy (the read-only phase), and is subkey-sealed after the switch, when this vector is re-published.",
       "pin": 0
     }
   ],

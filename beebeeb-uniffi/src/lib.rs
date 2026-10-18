@@ -1097,14 +1097,19 @@ impl FileKeyHandle {
             .map_err(Into::into)
     }
 
-    /// Seal the name/MIME envelope of an EXISTING file under THIS file key, by
-    /// the rule of its recorded pin (task 1958): the rename writer.
-    /// `recorded_pin` = the `chunk_format` that `decrypt_file_metadata`
-    /// returned for this file (0 = unrecorded, 2 = v2), never a server field.
-    /// A v2 pin records `chunk_format: 2` and is always sealed under the name
-    /// subkey; 0 follows the current write rule. Any other code is an error.
-    /// Works for keys not derived from the master key (file-request uploads,
-    /// shared-folder files).
+    /// Seal the name/MIME envelope under THIS file key, by the rule of a
+    /// recorded pin (task 1958). The only name writer that takes a key, so it
+    /// serves keys not derived from the master key (file-request uploads,
+    /// shared-folder files). A v2 pin records `chunk_format: 2` and is always
+    /// sealed under the name subkey; 0 follows the current write rule. Any
+    /// other code is an error. `recorded_pin`:
+    /// - an EXISTING file (rename): the `chunk_format` that
+    ///   `decrypt_file_metadata` returned for this file (0 = unrecorded,
+    ///   2 = v2), never a server field;
+    /// - a NEW file (e.g. a file-request upload): the pin of the format its
+    ///   content was written in, `recorded_for(encryptor.format())` (2 for a v2
+    ///   upload, 0 for v1), as at any upload. Nothing else is allowed for a new
+    ///   file.
     pub fn encrypt_name_for(
         &self,
         filename: String,

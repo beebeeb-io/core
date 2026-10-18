@@ -93,7 +93,9 @@ pub fn v2_vectors() -> Vec<Value> {
 /// A name envelope written by `encrypt::encrypt_name_for` under
 /// [`GIVEN_FILE_KEY`] (task 1958). A v2 pin records `chunk_format: 2` and is
 /// sealed under the name subkey; `Unrecorded` is sealed under the raw key with
-/// nothing recorded (the read-only-phase write rule).
+/// nothing recorded only while [`crate::encrypt::METADATA_SEAL_WRITE`] is
+/// `Legacy` (the read-only phase): at the switch the unpinned vector changes,
+/// and the drift guard says so.
 fn metadata_name_filekey(name: &str, pin: ExpectedChunkFormat, nonce: [u8; 12]) -> Value {
     let file_key = crate::kdf::FileKey::from_bytes(GIVEN_FILE_KEY);
     let (filename, mime) = ("request-upload.pdf", "application/pdf");
@@ -110,9 +112,10 @@ fn metadata_name_filekey(name: &str, pin: ExpectedChunkFormat, nonce: [u8; 12]) 
         "expected_mime_type": mime,
         "expected_chunk_format": pin.as_u8(),
         "note": "Fixed nonce for a known-answer test. Written by encrypt_name_for(file_key, name, mime, pin), the \
-            rename writer for a key that is not derived from the master key. Read with \
-            decrypt_file_metadata_with_key(file_key, name_encrypted): pin 2 opens under the name subkey only, \
-            pin 0 under the raw file key.",
+            name writer for a key that is not derived from the master key (renames, file-request uploads). Read \
+            with decrypt_file_metadata_with_key(file_key, name_encrypted): pin 2 opens under the name subkey only; \
+            pin 0 opens under the raw file key while METADATA_SEAL_WRITE is Legacy (the read-only phase), and is \
+            subkey-sealed after the switch, when this vector is re-published.",
     })
 }
 
@@ -208,7 +211,7 @@ mod tests {
     }
 
     /// The drift guard: every published v2 vector is exactly what core's writer
-    /// produces from the fixed inputs today, and the file carries version 5.
+    /// produces from the fixed inputs today, and the file carries version 6.
     #[test]
     fn published_v2_vectors_match_core() {
         let doc = published();

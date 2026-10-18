@@ -993,14 +993,19 @@ fn note_for_core(fk: &kdf::FileKey, note: &str, recorded_pin: u8) -> Result<Stri
     encrypt::encrypt_note_for(fk, note, pin)
 }
 
-/// Seal the name/MIME envelope of an EXISTING file under ITS per-file key, by
-/// the rule of its recorded pin (task 1958): the rename writer. `recordedPin` =
-/// the `chunk_format` from `decrypt_file_metadata` / `..._with_key` of THIS file
-/// (0 = unrecorded, 2 = v2), never a server field. A v2 pin records
-/// `chunk_format: 2` and is always sealed under the name subkey; 0 follows the
-/// current write rule. Works for keys NOT derived from the master key
-/// (file-request uploads, shared-folder files); for a derived key it writes
-/// what `encrypt_name_with_chunk_format` writes.
+/// Seal the name/MIME envelope under a GIVEN per-file key, by the rule of a
+/// recorded pin (task 1958). The only name writer that takes a key, so it serves
+/// keys NOT derived from the master key (file-request uploads, shared-folder
+/// files); for a derived key it writes what `encrypt_name_with_chunk_format`
+/// writes. A v2 pin records `chunk_format: 2` and is always sealed under the
+/// name subkey; 0 follows the current write rule. Any other code is an error.
+/// `recordedPin`:
+/// - an EXISTING file (rename): the `chunk_format` from
+///   `decrypt_file_metadata` / `..._with_key` of THIS file (0 = unrecorded,
+///   2 = v2), never a server field;
+/// - a NEW file (e.g. a file-request upload): the pin of the format its content
+///   was written in, `recorded_for(encryptor.format())` (2 for a v2 upload, 0
+///   for v1), as at any upload. Nothing else is allowed for a new file.
 #[wasm_bindgen]
 pub fn encrypt_name_for(
     file_key: &[u8],
