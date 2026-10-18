@@ -912,6 +912,8 @@ external fun uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_chunk(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_metadata(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_name_for(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_note(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_note_for(
@@ -1164,6 +1166,8 @@ external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_thumbnail(`pt
 external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_chunk(`ptr`: Long,`plaintext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_metadata(`ptr`: Long,`metadata`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_name_for(`ptr`: Long,`filename`: RustBuffer.ByValue,`mimeType`: RustBuffer.ByValue,`recordedPin`: Byte,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_note(`ptr`: Long,`note`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1815,6 +1819,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_metadata() != 60336.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_name_for() != 26823.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_note() != 32953.toShort()) {
@@ -4233,6 +4240,23 @@ public interface FileKeyHandleInterface {
     fun `encryptMetadata`(`metadata`: kotlin.String): EncryptedData
     
     /**
+     * Seal the name/MIME envelope under THIS file key, by the rule of a
+     * recorded pin (task 1958). The only name writer that takes a key, so it
+     * serves keys not derived from the master key (file-request uploads,
+     * shared-folder files). A v2 pin records `chunk_format: 2` and is always
+     * sealed under the name subkey; 0 follows the current write rule. Any
+     * other code is an error. `recorded_pin`:
+     * - an EXISTING file (rename): the `chunk_format` that
+     * `decrypt_file_metadata` returned for this file (0 = unrecorded,
+     * 2 = v2), never a server field;
+     * - a NEW file (e.g. a file-request upload): the pin of the format its
+     * content was written in, `recorded_for(encryptor.format())` (2 for a v2
+     * upload, 0 for v1), as at any upload. Nothing else is allowed for a new
+     * file.
+     */
+    fun `encryptNameFor`(`filename`: kotlin.String, `mimeType`: kotlin.String?, `recordedPin`: kotlin.UByte): kotlin.String
+    
+    /**
      * Seal a file note for a file with no recorded pin yet (task 1908 round
      * 5): returns the canonical `EncryptedBlob` JSON to store in
      * `note_encrypted`. Follows the gated seal switch, like
@@ -4526,6 +4550,35 @@ open class FileKeyHandle: Disposable, AutoCloseable, FileKeyHandleInterface
     UniffiLib.uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_metadata(
         it,
         FfiConverterString.lower(`metadata`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Seal the name/MIME envelope under THIS file key, by the rule of a
+     * recorded pin (task 1958). The only name writer that takes a key, so it
+     * serves keys not derived from the master key (file-request uploads,
+     * shared-folder files). A v2 pin records `chunk_format: 2` and is always
+     * sealed under the name subkey; 0 follows the current write rule. Any
+     * other code is an error. `recorded_pin`:
+     * - an EXISTING file (rename): the `chunk_format` that
+     * `decrypt_file_metadata` returned for this file (0 = unrecorded,
+     * 2 = v2), never a server field;
+     * - a NEW file (e.g. a file-request upload): the pin of the format its
+     * content was written in, `recorded_for(encryptor.format())` (2 for a v2
+     * upload, 0 for v1), as at any upload. Nothing else is allowed for a new
+     * file.
+     */
+    @Throws(CryptoException::class)override fun `encryptNameFor`(`filename`: kotlin.String, `mimeType`: kotlin.String?, `recordedPin`: kotlin.UByte): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_name_for(
+        it,
+        FfiConverterString.lower(`filename`),FfiConverterOptionalString.lower(`mimeType`),FfiConverterUByte.lower(`recordedPin`),_status)
 }
     }
     )

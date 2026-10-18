@@ -874,9 +874,13 @@ pub(crate) fn random_nonce() -> [u8; NONCE_LEN] {
 /// ([`ChunkEncryptor::with_vector_nonces`](crate::chunk_stream::ChunkEncryptor::with_vector_nonces),
 /// [`encrypt_name_with_chunk_format_and_nonce`], [`encrypt_name_for_with_nonce`]),
 /// which no shipped build compiles. The name sealer ([`seal_name_envelope`])
-/// passes its caller's nonce through: a fresh one from every shipped writer. The only reason this exists is that chunk format v2 binds frame
-/// 0's nonce (the per-upload version id) into frame 0's own AAD, so the nonce
-/// has to be known before the AAD is built.
+/// passes its caller's nonce through: a fresh one from every shipped writer
+/// (`shipped_name_writers_draw_a_fresh_nonce_each_call` pins that).
+///
+/// It exists because chunk format v2 binds frame 0's nonce (the per-upload
+/// version id) into frame 0's own AAD, so the nonce has to be known before the
+/// AAD is built. The name sealer reuses it so the vector seams take the shipped
+/// path.
 pub(crate) fn seal_raw_with_nonce(
     key: &FileKey,
     nonce_bytes: &[u8; NONCE_LEN],
@@ -1926,6 +1930,33 @@ mod tests {
 mod encrypt_name_for_tests_1958 {
     use super::*;
     use crate::chunk_stream::ExpectedChunkFormat;
+
+    /// Round 3, I-2: the nonce is a parameter of the shared name path, so the
+    /// shipped writers must draw a fresh one on every call. The same input
+    /// sealed twice carries two different nonces, under a given key
+    /// (`encrypt_name_for`) and under a master key
+    /// (`encrypt_name_with_chunk_format`), for both pins. A constant nonce in
+    /// the shipped path is red here.
+    #[test]
+    fn shipped_name_writers_draw_a_fresh_nonce_each_call() {
+        let nonce = |name_encrypted: &str| serde_json::from_str::<EncryptedBlob>(name_encrypted).unwrap().nonce;
+        let mk = crate::kdf::MasterKey::from_bytes([0x41; 32]);
+        for pin in [ExpectedChunkFormat::Unrecorded, ExpectedChunkFormat::V2] {
+            let seal_given = || encrypt_name_for(&given_key(), "same.pdf", Some("application/pdf"), pin).unwrap();
+            assert_ne!(
+                nonce(&seal_given()),
+                nonce(&seal_given()),
+                "encrypt_name_for reused a nonce ({pin:?})"
+            );
+            let seal_derived =
+                || encrypt_name_with_chunk_format(&mk, "file-1958", "same.pdf", Some("application/pdf"), pin).unwrap();
+            assert_ne!(
+                nonce(&seal_derived()),
+                nonce(&seal_derived()),
+                "encrypt_name_with_chunk_format reused a nonce ({pin:?})"
+            );
+        }
+    }
 
     /// A key not derived from any master key: what a file-request upload or a
     /// shared-folder file is sealed under.
