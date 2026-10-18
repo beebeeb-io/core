@@ -1097,6 +1097,26 @@ impl FileKeyHandle {
             .map_err(Into::into)
     }
 
+    /// Seal the name/MIME envelope of an EXISTING file under THIS file key, by
+    /// the rule of its recorded pin (task 1958): the rename writer.
+    /// `recorded_pin` = the `chunk_format` that `decrypt_file_metadata`
+    /// returned for this file (0 = unrecorded, 2 = v2), never a server field.
+    /// A v2 pin records `chunk_format: 2` and is always sealed under the name
+    /// subkey; 0 follows the current write rule. Any other code is an error.
+    /// Works for keys not derived from the master key (file-request uploads,
+    /// shared-folder files).
+    pub fn encrypt_name_for(
+        &self,
+        filename: String,
+        mime_type: Option<String>,
+        recorded_pin: u8,
+    ) -> Result<String, CryptoError> {
+        let pin = ExpectedChunkFormat::from_u8(recorded_pin)?;
+        let filename = Zeroizing::new(filename);
+        self.with_key(|fk| encrypt::encrypt_name_for(fk, &filename, mime_type.as_deref(), pin))?
+            .map_err(Into::into)
+    }
+
     /// Open a `note_encrypted` envelope: the note subkey first, then the
     /// legacy raw file key (notes stored before the switch). A plaintext value
     /// is an error. The ONLY way to open a note — not `decrypt_chunk` or the
@@ -1831,6 +1851,37 @@ mod chunk_stream_handle_tests {
             assert!(fk.encrypt_note_for("x".into(), bad).is_err(), "pin code {bad}");
         }
         assert!(fk.decrypt_note("a plaintext note".into()).is_err());
+    }
+
+    #[test]
+    fn handle_name_for_keeps_the_pin_under_a_file_key_handle_1958() {
+        // Task 1958 through the FFI: the rename writer of a FileKeyHandle keeps
+        // a v2 pin, seals under the name subkey, and for a derived key reads back
+        // through the master-key reader too.
+        let mk = mk_handle();
+        let id = "ffi-name-for";
+        let fk = mk.derive_file_key(id.as_bytes().to_vec()).unwrap();
+        let renamed = fk
+            .encrypt_name_for("renamed.pdf".into(), Some("application/pdf".into()), 2)
+            .unwrap();
+        let meta = fk.decrypt_file_metadata(renamed.clone()).unwrap();
+        assert_eq!((meta.name.as_str(), meta.chunk_format), ("renamed.pdf", 2));
+        assert_eq!(
+            mk.decrypt_file_metadata(id.into(), renamed.clone())
+                .unwrap()
+                .chunk_format,
+            2
+        );
+        let blob = parse_name_blob(&renamed);
+        assert!(
+            fk.decrypt_chunk(blob.nonce.clone(), blob.ciphertext.clone()).is_err(),
+            "a v2-pinned name must not open under the raw file key"
+        );
+        let r0 = fk.encrypt_name_for("r0.txt".into(), None, 0).unwrap();
+        assert_eq!(fk.decrypt_file_metadata(r0).unwrap().chunk_format, 0);
+        for bad in [1u8, 7] {
+            assert!(fk.encrypt_name_for("x".into(), None, bad).is_err(), "pin code {bad}");
+        }
     }
 
     /// The default write format's code (1 during the read-only phase).

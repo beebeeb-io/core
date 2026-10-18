@@ -151,8 +151,49 @@ pub(crate) fn encrypt_name_sealed(
     chunk_format: crate::chunk_stream::ExpectedChunkFormat,
     seal: MetadataSeal,
 ) -> Result<String, CoreError> {
-    let (key, plaintext) = name_envelope(master_key, file_id, filename, mime_type, chunk_format, seal);
-    let blob = encrypt_metadata(&key, &plaintext)?;
+    let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
+    encrypt_name_sealed_for_key(&file_key, filename, mime_type, chunk_format, seal)
+}
+
+/// Seal the name/MIME envelope of an EXISTING file under ITS per-file key, by
+/// the rule of the `pin` its encrypted metadata records (from
+/// [`decrypt_file_metadata_with_key`] / [`decrypt_file_metadata`], never a
+/// server field) — task 1958. The rename writer for every file, including the
+/// ones whose key is not derived from the caller's master key (file-request
+/// uploads, shared-folder files), so a rename keeps the 1908 pin:
+/// - a v2 pin records `chunk_format: 2` and is ALWAYS sealed under the name
+///   subkey (as [`encrypt_name_with_chunk_format`] does);
+/// - `Unrecorded` follows [`METADATA_SEAL_WRITE`] (legacy, the raw file key,
+///   during the read-only phase) and records nothing.
+///
+/// For a key derived from the master key it is byte-for-byte the master-key
+/// writer: `encrypt_name_for(&derive_file_key(mk, id), ..)` and
+/// `encrypt_name_with_chunk_format(mk, id, ..)` seal the same plaintext under
+/// the same key (only the random nonce differs).
+pub fn encrypt_name_for(
+    file_key: &FileKey,
+    filename: &str,
+    mime_type: Option<&str>,
+    pin: crate::chunk_stream::ExpectedChunkFormat,
+) -> Result<String, CoreError> {
+    let seal = metadata_seal_for(crate::chunk_stream::chunk_format_for_pin(pin));
+    encrypt_name_sealed_for_key(file_key, filename, mime_type, pin, seal)
+}
+
+/// The one name sealer under a per-file key: [`encrypt_name_sealed`] (master
+/// key, after deriving) and [`encrypt_name_for`] (a given key) both end here.
+fn encrypt_name_sealed_for_key(
+    file_key: &FileKey,
+    filename: &str,
+    mime_type: Option<&str>,
+    chunk_format: crate::chunk_stream::ExpectedChunkFormat,
+    seal: MetadataSeal,
+) -> Result<String, CoreError> {
+    let plaintext = name_plaintext(filename, mime_type, chunk_format);
+    let blob = match seal {
+        MetadataSeal::Legacy => encrypt_metadata(file_key, &plaintext)?,
+        MetadataSeal::Subkey => encrypt_metadata(&derive_name_key(file_key), &plaintext)?,
+    };
     serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
 }
 
@@ -171,10 +212,28 @@ pub fn encrypt_name_with_chunk_format_and_nonce(
     chunk_format: crate::chunk_stream::ExpectedChunkFormat,
     nonce: [u8; NONCE_LEN],
 ) -> Result<String, CoreError> {
-    let seal = metadata_seal_for(crate::chunk_stream::chunk_format_for_pin(chunk_format));
-    let (key, plaintext) = name_envelope(master_key, file_id, filename, mime_type, chunk_format, seal);
+    let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
+    encrypt_name_for_with_nonce(&file_key, filename, mime_type, chunk_format, nonce)
+}
+
+/// [`encrypt_name_for`] with a FIXED nonce — for the published known-answer
+/// vectors only (task 1958), under the same `cfg(test)` / `test-support` gate as
+/// every other nonce seam. Same plaintext and key choice as the real writer.
+#[cfg(any(test, feature = "test-support"))]
+pub fn encrypt_name_for_with_nonce(
+    file_key: &FileKey,
+    filename: &str,
+    mime_type: Option<&str>,
+    pin: crate::chunk_stream::ExpectedChunkFormat,
+    nonce: [u8; NONCE_LEN],
+) -> Result<String, CoreError> {
+    let seal = metadata_seal_for(crate::chunk_stream::chunk_format_for_pin(pin));
+    let plaintext = name_plaintext(filename, mime_type, pin);
     // The same blob `encrypt_metadata` builds (no AAD), with the given nonce.
-    let frame = seal_raw_with_nonce(&key, &nonce, plaintext.as_bytes(), &[])?;
+    let frame = match seal {
+        MetadataSeal::Legacy => seal_raw_with_nonce(file_key, &nonce, plaintext.as_bytes(), &[])?,
+        MetadataSeal::Subkey => seal_raw_with_nonce(&derive_name_key(file_key), &nonce, plaintext.as_bytes(), &[])?,
+    };
     let blob = EncryptedBlob {
         cipher_suite: CipherSuite::V1Aes256Gcm,
         nonce: frame[..NONCE_LEN].to_vec(),
@@ -183,18 +242,14 @@ pub fn encrypt_name_with_chunk_format_and_nonce(
     serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
 }
 
-/// The name/MIME envelope plaintext and the key it is sealed under — shared by
-/// the real writer ([`encrypt_name_sealed`], random nonce) and the vector seam
-/// ([`encrypt_name_with_chunk_format_and_nonce`]), so a fixed nonce is never a
-/// parameter of any code a shipped build compiles.
-fn name_envelope(
-    master_key: &crate::kdf::MasterKey,
-    file_id: &str,
+/// The name/MIME envelope plaintext: `{"name":..,"mime_type":..}` plus
+/// `"chunk_format":2` for a v2 pin (nothing recorded otherwise). Shared by every
+/// name writer, so a fixed nonce is never a parameter of shipped code.
+fn name_plaintext(
     filename: &str,
     mime_type: Option<&str>,
     chunk_format: crate::chunk_stream::ExpectedChunkFormat,
-    seal: MetadataSeal,
-) -> (FileKey, String) {
+) -> String {
     let mut meta = serde_json::json!({
         "name": filename,
         "mime_type": mime_type,
@@ -202,13 +257,7 @@ fn name_envelope(
     if chunk_format == crate::chunk_stream::ExpectedChunkFormat::V2 {
         meta[METADATA_CHUNK_FORMAT_FIELD] = serde_json::json!(chunk_format.as_u8());
     }
-    let plaintext = meta.to_string();
-    let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
-    let key = match seal {
-        MetadataSeal::Legacy => file_key,
-        MetadataSeal::Subkey => derive_name_key(&file_key),
-    };
-    (key, plaintext)
+    meta.to_string()
 }
 
 // ── Metadata sealing: name/MIME envelope + thumbnails (task 1908 round 3, P1-B) ──
@@ -1843,5 +1892,91 @@ mod tests {
         let ne = encrypt_name_with_chunk_format(&mk, NAME_FID, "a", None, V2).unwrap();
         let other = derive_master_key("other-password", b"test-salt-16bytes").unwrap();
         assert!(decrypt_name_metadata(&other, NAME_FID, &ne).is_err());
+    }
+}
+
+/// Task 1958: `encrypt_name_for`, the rename writer under a GIVEN per-file key.
+#[cfg(test)]
+mod encrypt_name_for_tests_1958 {
+    use super::*;
+    use crate::chunk_stream::ExpectedChunkFormat;
+
+    /// A key not derived from any master key: what a file-request upload or a
+    /// shared-folder file is sealed under.
+    fn given_key() -> FileKey {
+        FileKey::from_bytes([0x37; 32])
+    }
+
+    fn opens_under(key: &FileKey, name_encrypted: &str) -> bool {
+        serde_json::from_str::<EncryptedBlob>(name_encrypted)
+            .ok()
+            .and_then(|blob| decrypt_metadata(key, &blob).ok())
+            .is_some()
+    }
+
+    /// A v2-pinned rename keeps the pin and is sealed under the name subkey, not
+    /// the raw file key (which would open as a one-frame v1 "file" again).
+    #[test]
+    fn a_pinned_rename_keeps_the_pin_and_is_subkey_sealed() {
+        let fk = given_key();
+        let sealed = encrypt_name_for(&fk, "taxes 2026.pdf", Some("application/pdf"), ExpectedChunkFormat::V2).unwrap();
+        let meta = decrypt_file_metadata_with_key(&fk, &sealed).unwrap();
+        assert_eq!(meta.name, "taxes 2026.pdf");
+        assert_eq!(meta.mime_type.as_deref(), Some("application/pdf"));
+        assert_eq!(
+            meta.chunk_format,
+            ExpectedChunkFormat::V2,
+            "the pin survives the rename"
+        );
+        assert!(
+            opens_under(&derive_name_key(&fk), &sealed),
+            "sealed under the name subkey"
+        );
+        assert!(!opens_under(&fk, &sealed), "never under the raw file key");
+    }
+
+    /// An unpinned rename follows the read-only-phase write rule: the raw key
+    /// (legacy) and nothing recorded, exactly like an unpinned new file's name.
+    #[test]
+    fn an_unpinned_rename_follows_the_write_format() {
+        let fk = given_key();
+        let sealed = encrypt_name_for(&fk, "notes.txt", None, ExpectedChunkFormat::Unrecorded).unwrap();
+        let meta = decrypt_file_metadata_with_key(&fk, &sealed).unwrap();
+        assert_eq!(
+            (meta.name.as_str(), meta.chunk_format),
+            ("notes.txt", ExpectedChunkFormat::Unrecorded)
+        );
+        assert_eq!(
+            opens_under(&fk, &sealed),
+            METADATA_SEAL_WRITE == MetadataSeal::Legacy,
+            "unpinned names follow METADATA_SEAL_WRITE"
+        );
+    }
+
+    /// For a key derived from the master key, the per-file-key writer IS the
+    /// master-key writer: identical bytes under the same nonce, for both pins,
+    /// and the shipped (random-nonce) writers read back identically.
+    #[test]
+    fn the_filekey_writer_matches_the_master_key_writer_for_a_derived_key() {
+        let mk = crate::kdf::MasterKey::from_bytes([0x11; 32]);
+        let id = "1958f00d-0000-4000-8000-000000001958";
+        let fk = crate::kdf::derive_file_key(&mk, id.as_bytes());
+        for pin in [ExpectedChunkFormat::V2, ExpectedChunkFormat::Unrecorded] {
+            let nonce = [0x42; NONCE_LEN];
+            let by_master =
+                encrypt_name_with_chunk_format_and_nonce(&mk, id, "a.pdf", Some("application/pdf"), pin, nonce)
+                    .unwrap();
+            let by_key = encrypt_name_for_with_nonce(&fk, "a.pdf", Some("application/pdf"), pin, nonce).unwrap();
+            assert_eq!(by_master, by_key, "{pin:?}: same bytes");
+
+            let shipped_master =
+                encrypt_name_with_chunk_format(&mk, id, "a.pdf", Some("application/pdf"), pin).unwrap();
+            let shipped_key = encrypt_name_for(&fk, "a.pdf", Some("application/pdf"), pin).unwrap();
+            assert_eq!(
+                decrypt_file_metadata(&mk, id, &shipped_master).unwrap(),
+                decrypt_file_metadata(&mk, id, &shipped_key).unwrap(),
+                "{pin:?}: same metadata through the master-key reader"
+            );
+        }
     }
 }

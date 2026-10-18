@@ -226,7 +226,7 @@ fn main() {
     vectors.extend(beebeeb_core::test_vectors_v2::v2_vectors());
 
     let output = json!({
-        "version": 5,
+        "version": 6,
         "generated_by": "beebeeb-core test vector generator",
         "vectors": vectors,
     });

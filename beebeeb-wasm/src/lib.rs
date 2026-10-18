@@ -993,6 +993,37 @@ fn note_for_core(fk: &kdf::FileKey, note: &str, recorded_pin: u8) -> Result<Stri
     encrypt::encrypt_note_for(fk, note, pin)
 }
 
+/// Seal the name/MIME envelope of an EXISTING file under ITS per-file key, by
+/// the rule of its recorded pin (task 1958): the rename writer. `recordedPin` =
+/// the `chunk_format` from `decrypt_file_metadata` / `..._with_key` of THIS file
+/// (0 = unrecorded, 2 = v2), never a server field. A v2 pin records
+/// `chunk_format: 2` and is always sealed under the name subkey; 0 follows the
+/// current write rule. Works for keys NOT derived from the master key
+/// (file-request uploads, shared-folder files); for a derived key it writes
+/// what `encrypt_name_with_chunk_format` writes.
+#[wasm_bindgen]
+pub fn encrypt_name_for(
+    file_key: &[u8],
+    filename: &str,
+    mime_type: Option<String>,
+    recorded_pin: u8,
+) -> Result<String, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    name_for_core(&fk, filename, mime_type.as_deref(), recorded_pin).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Native seam of [`encrypt_name_for`] (testable off-wasm, incl. the
+/// unknown-pin error path).
+fn name_for_core(
+    fk: &kdf::FileKey,
+    filename: &str,
+    mime_type: Option<&str>,
+    recorded_pin: u8,
+) -> Result<String, beebeeb_core::CoreError> {
+    let pin = beebeeb_core::chunk_stream::ExpectedChunkFormat::from_u8(recorded_pin)?;
+    encrypt::encrypt_name_for(fk, filename, mime_type, pin)
+}
+
 /// Open a `note_encrypted` envelope: the note subkey first, then the legacy
 /// raw file key (notes stored before the switch). A plaintext value is an
 /// error. The ONLY way to open a note — not `decryptFilename`.
@@ -2289,5 +2320,26 @@ mod tests {
         assert_eq!(decrypt_note(fk.as_bytes(), &n).unwrap(), "n");
         assert!(note_for_core(&fk, "x", 1).is_err());
         assert!(note_for_core(&fk, "x", 7).is_err());
+    }
+
+    /// Task 1958: the rename writer under a GIVEN key (here not derived from
+    /// any master key) keeps a v2 pin and seals under the name subkey; unknown
+    /// pin codes are errors.
+    #[test]
+    fn name_for_keeps_the_pin_under_a_given_key_1958() {
+        let fk = kdf::FileKey::from_bytes([0x29; 32]);
+        let sealed = encrypt_name_for(fk.as_bytes(), "w.pdf", Some("application/pdf".into()), 2).unwrap();
+        let meta = beebeeb_core::encrypt::decrypt_file_metadata_with_key(&fk, &sealed).unwrap();
+        assert_eq!((meta.name.as_str(), meta.chunk_format.as_u8()), ("w.pdf", 2));
+        let blob: EncryptedBlob = serde_json::from_str(&sealed).unwrap();
+        assert!(
+            beebeeb_core::encrypt::decrypt_metadata(&fk, &blob).is_err(),
+            "a v2-pinned name must not open under the raw file key"
+        );
+        let r0 = encrypt_name_for(fk.as_bytes(), "r0.txt", None, 0).unwrap();
+        let meta0 = beebeeb_core::encrypt::decrypt_file_metadata_with_key(&fk, &r0).unwrap();
+        assert_eq!(meta0.chunk_format.as_u8(), 0);
+        assert!(name_for_core(&fk, "x", None, 1).is_err());
+        assert!(name_for_core(&fk, "x", None, 7).is_err());
     }
 }

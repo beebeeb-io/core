@@ -668,8 +668,8 @@ fn vector_file_version_check() {
         .as_u64()
         .expect("vectors.json must have a 'version' field");
     assert_eq!(
-        version, 5,
-        "vectors.json version mismatch — expected 5, got {version}. \
+        version, 6,
+        "vectors.json version mismatch — expected 6, got {version}. \
          Update this test if you intentionally bumped the version."
     );
 
@@ -694,6 +694,9 @@ fn vector_file_version_check() {
         "chunk_v2_stream",
         "chunk_v2_single_frame",
         "metadata_v2_name",
+        // Version 6 (task 1958): the rename writer under a given per-file key.
+        "metadata_v2_name_filekey",
+        "metadata_v1_name_filekey",
     ];
     for name in &required {
         assert!(names.contains(name), "vectors.json is missing required vector '{name}'");
@@ -828,4 +831,57 @@ fn vector_metadata_v2_name_decrypt() {
         "a v2 name must not open under the raw file key"
     );
     assert_eq!(hex::encode(&blob.nonce), v["nonce_hex"].as_str().unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// 22. The rename writer under a given per-file key (version 6, task 1958) —
+//     what every client's rename reader must read back, public API only.
+// ---------------------------------------------------------------------------
+
+fn file_key_of(v: &serde_json::Value) -> beebeeb_core::kdf::FileKey {
+    let bytes: [u8; 32] = hex::decode(v["file_key_hex"].as_str().unwrap())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    beebeeb_core::kdf::FileKey::from_bytes(bytes)
+}
+
+#[test]
+fn vector_metadata_name_filekey_reads_back_with_its_pin() {
+    let vectors = load_vectors();
+    for (name, pin) in [
+        ("metadata_v2_name_filekey", ExpectedChunkFormat::V2),
+        ("metadata_v1_name_filekey", ExpectedChunkFormat::Unrecorded),
+    ] {
+        let v = get_vector(&vectors, name);
+        let fk = file_key_of(&v);
+        let meta = beebeeb_core::encrypt::decrypt_file_metadata_with_key(&fk, v["name_encrypted"].as_str().unwrap())
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(meta.name, v["expected_name"].as_str().unwrap(), "{name}");
+        assert_eq!(meta.mime_type.as_deref(), v["expected_mime_type"].as_str(), "{name}");
+        assert_eq!(meta.chunk_format, pin, "{name}");
+        assert_eq!(
+            u64::from(pin.as_u8()),
+            v["expected_chunk_format"].as_u64().unwrap(),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn vector_metadata_v2_name_filekey_is_not_under_the_raw_key_and_v1_is() {
+    let vectors = load_vectors();
+    let raw_opens = |name: &str| {
+        let v = get_vector(&vectors, name);
+        let blob: beebeeb_types::EncryptedBlob = serde_json::from_str(v["name_encrypted"].as_str().unwrap()).unwrap();
+        beebeeb_core::encrypt::decrypt_metadata(&file_key_of(&v), &blob).is_ok()
+    };
+    assert!(
+        !raw_opens("metadata_v2_name_filekey"),
+        "a v2-pinned name is subkey-sealed"
+    );
+    assert!(
+        raw_opens("metadata_v1_name_filekey"),
+        "an unpinned name is legacy raw-key sealed"
+    );
 }
