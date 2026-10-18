@@ -912,6 +912,8 @@ external fun uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_chunk(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_metadata(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_name_for(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_note(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_note_for(
@@ -1019,6 +1021,8 @@ external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkencryptorhandle_for
 external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkencryptorhandle_from_file(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_constellationdecoderhandle_new(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_key_bytes(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_fileprovidercachehandle_open(
 ): Short
@@ -1147,6 +1151,8 @@ external fun uniffi_beebeeb_uniffi_fn_clone_filekeyhandle(`handle`: Long,uniffi_
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_filekeyhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_from_key_bytes(`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
 external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_chunk(`ptr`: Long,`nonce`: RustBuffer.ByValue,`ciphertext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_chunk_frame(`ptr`: Long,`fileId`: RustBuffer.ByValue,`versionId`: RustBuffer.ByValue,`index`: Int,`isLast`: Byte,`format`: Byte,`frame`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1164,6 +1170,8 @@ external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_thumbnail(`pt
 external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_chunk(`ptr`: Long,`plaintext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_metadata(`ptr`: Long,`metadata`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_name_for(`ptr`: Long,`filename`: RustBuffer.ByValue,`mimeType`: RustBuffer.ByValue,`recordedPin`: Byte,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_note(`ptr`: Long,`note`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1817,6 +1825,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_metadata() != 60336.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_name_for() != 26823.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_note() != 32953.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1977,6 +1988,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_constellationdecoderhandle_new() != 21598.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_key_bytes() != 50246.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_fileprovidercachehandle_open() != 22658.toShort()) {
@@ -4177,7 +4191,9 @@ public object FfiConverterTypeConstellationDecoderHandle: FfiConverter<Constella
 
 
 /**
- * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`.
+ * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`
+ * for a key derived from the account's master key, or via
+ * [`FileKeyHandle::from_key_bytes`] for one the app holds as 32 bytes.
  */
 public interface FileKeyHandleInterface {
     
@@ -4233,6 +4249,23 @@ public interface FileKeyHandleInterface {
     fun `encryptMetadata`(`metadata`: kotlin.String): EncryptedData
     
     /**
+     * Seal the name/MIME envelope under THIS file key, by the rule of a
+     * recorded pin (task 1958). The only name writer that takes a key, so it
+     * serves keys not derived from the master key (file-request uploads,
+     * shared-folder files). A v2 pin records `chunk_format: 2` and is always
+     * sealed under the name subkey; 0 follows the current write rule. Any
+     * other code is an error. `recorded_pin`:
+     * - an EXISTING file (rename): the `chunk_format` that
+     * `decrypt_file_metadata` returned for this file (0 = unrecorded,
+     * 2 = v2), never a server field;
+     * - a NEW file (e.g. a file-request upload): the pin of the format its
+     * content was written in, `recorded_for(encryptor.format())` (2 for a v2
+     * upload, 0 for v1), as at any upload. Nothing else is allowed for a new
+     * file.
+     */
+    fun `encryptNameFor`(`filename`: kotlin.String, `mimeType`: kotlin.String?, `recordedPin`: kotlin.UByte): kotlin.String
+    
+    /**
      * Seal a file note for a file with no recorded pin yet (task 1908 round
      * 5): returns the canonical `EncryptedBlob` JSON to store in
      * `note_encrypted`. Follows the gated seal switch, like
@@ -4275,7 +4308,9 @@ public interface FileKeyHandleInterface {
 }
 
 /**
- * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`.
+ * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`
+ * for a key derived from the account's master key, or via
+ * [`FileKeyHandle::from_key_bytes`] for one the app holds as 32 bytes.
  */
 open class FileKeyHandle: Disposable, AutoCloseable, FileKeyHandleInterface
 {
@@ -4534,6 +4569,35 @@ open class FileKeyHandle: Disposable, AutoCloseable, FileKeyHandleInterface
 
     
     /**
+     * Seal the name/MIME envelope under THIS file key, by the rule of a
+     * recorded pin (task 1958). The only name writer that takes a key, so it
+     * serves keys not derived from the master key (file-request uploads,
+     * shared-folder files). A v2 pin records `chunk_format: 2` and is always
+     * sealed under the name subkey; 0 follows the current write rule. Any
+     * other code is an error. `recorded_pin`:
+     * - an EXISTING file (rename): the `chunk_format` that
+     * `decrypt_file_metadata` returned for this file (0 = unrecorded,
+     * 2 = v2), never a server field;
+     * - a NEW file (e.g. a file-request upload): the pin of the format its
+     * content was written in, `recorded_for(encryptor.format())` (2 for a v2
+     * upload, 0 for v1), as at any upload. Nothing else is allowed for a new
+     * file.
+     */
+    @Throws(CryptoException::class)override fun `encryptNameFor`(`filename`: kotlin.String, `mimeType`: kotlin.String?, `recordedPin`: kotlin.UByte): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_name_for(
+        it,
+        FfiConverterString.lower(`filename`),FfiConverterOptionalString.lower(`mimeType`),FfiConverterUByte.lower(`recordedPin`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Seal a file note for a file with no recorded pin yet (task 1908 round
      * 5): returns the canonical `EncryptedBlob` JSON to store in
      * `note_encrypted`. Follows the gated seal switch, like
@@ -4625,11 +4689,33 @@ open class FileKeyHandle: Disposable, AutoCloseable, FileKeyHandleInterface
 
 
     
-    
+    companion object {
+        
     /**
-     * @suppress
+     * A handle for a per-file key the app holds as raw bytes and that is NOT
+     * derived from the account's master key: a file-request upload's content
+     * key (`open_request_upload`), a shared file's key. Task 1958 round 4: the
+     * with-key name, note and thumbnail functions of this handle
+     * (`encrypt_name_for`, `decrypt_file_metadata`, `encrypt_note_for`, ...)
+     * were reachable only through `MasterKeyHandle::derive_file_key`, so not
+     * for these keys. The WASM side takes the same bytes (`fileKey`).
+     *
+     * Exactly 32 bytes, anything else is an `InvalidInput` error. The input is
+     * zeroized once copied into the key.
      */
-    companion object
+    @Throws(CryptoException::class) fun `fromKeyBytes`(`key`: kotlin.ByteArray): FileKeyHandle {
+            return FfiConverterTypeFileKeyHandle.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_from_key_bytes(
+    
+        FfiConverterByteArray.lower(`key`),_status)
+}
+    )
+    }
+    
+
+        
+    }
     
 }
 

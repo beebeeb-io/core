@@ -1606,7 +1606,9 @@ public func FfiConverterTypeConstellationDecoderHandle_lower(_ value: Constellat
 
 
 /**
- * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`.
+ * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`
+ * for a key derived from the account's master key, or via
+ * [`FileKeyHandle::from_key_bytes`] for one the app holds as 32 bytes.
  */
 public protocol FileKeyHandleProtocol: AnyObject, Sendable {
     
@@ -1662,6 +1664,23 @@ public protocol FileKeyHandleProtocol: AnyObject, Sendable {
     func encryptMetadata(metadata: String) throws  -> EncryptedData
     
     /**
+     * Seal the name/MIME envelope under THIS file key, by the rule of a
+     * recorded pin (task 1958). The only name writer that takes a key, so it
+     * serves keys not derived from the master key (file-request uploads,
+     * shared-folder files). A v2 pin records `chunk_format: 2` and is always
+     * sealed under the name subkey; 0 follows the current write rule. Any
+     * other code is an error. `recorded_pin`:
+     * - an EXISTING file (rename): the `chunk_format` that
+     * `decrypt_file_metadata` returned for this file (0 = unrecorded,
+     * 2 = v2), never a server field;
+     * - a NEW file (e.g. a file-request upload): the pin of the format its
+     * content was written in, `recorded_for(encryptor.format())` (2 for a v2
+     * upload, 0 for v1), as at any upload. Nothing else is allowed for a new
+     * file.
+     */
+    func encryptNameFor(filename: String, mimeType: String?, recordedPin: UInt8) throws  -> String
+    
+    /**
      * Seal a file note for a file with no recorded pin yet (task 1908 round
      * 5): returns the canonical `EncryptedBlob` JSON to store in
      * `note_encrypted`. Follows the gated seal switch, like
@@ -1702,7 +1721,9 @@ public protocol FileKeyHandleProtocol: AnyObject, Sendable {
     
 }
 /**
- * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`.
+ * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`
+ * for a key derived from the account's master key, or via
+ * [`FileKeyHandle::from_key_bytes`] for one the app holds as 32 bytes.
  */
 open class FileKeyHandle: FileKeyHandleProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
@@ -1754,6 +1775,26 @@ open class FileKeyHandle: FileKeyHandleProtocol, @unchecked Sendable {
         try! rustCall { uniffi_beebeeb_uniffi_fn_free_filekeyhandle(handle, $0) }
     }
 
+    
+    /**
+     * A handle for a per-file key the app holds as raw bytes and that is NOT
+     * derived from the account's master key: a file-request upload's content
+     * key (`open_request_upload`), a shared file's key. Task 1958 round 4: the
+     * with-key name, note and thumbnail functions of this handle
+     * (`encrypt_name_for`, `decrypt_file_metadata`, `encrypt_note_for`, ...)
+     * were reachable only through `MasterKeyHandle::derive_file_key`, so not
+     * for these keys. The WASM side takes the same bytes (`fileKey`).
+     *
+     * Exactly 32 bytes, anything else is an `InvalidInput` error. The input is
+     * zeroized once copied into the key.
+     */
+public static func fromKeyBytes(key: Data)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_from_key_bytes(
+        FfiConverterData.lower(key),$0
+    )
+})
+}
     
 
     
@@ -1874,6 +1915,32 @@ open func encryptMetadata(metadata: String)throws  -> EncryptedData  {
     uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_metadata(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(metadata),$0
+    )
+})
+}
+    
+    /**
+     * Seal the name/MIME envelope under THIS file key, by the rule of a
+     * recorded pin (task 1958). The only name writer that takes a key, so it
+     * serves keys not derived from the master key (file-request uploads,
+     * shared-folder files). A v2 pin records `chunk_format: 2` and is always
+     * sealed under the name subkey; 0 follows the current write rule. Any
+     * other code is an error. `recorded_pin`:
+     * - an EXISTING file (rename): the `chunk_format` that
+     * `decrypt_file_metadata` returned for this file (0 = unrecorded,
+     * 2 = v2), never a server field;
+     * - a NEW file (e.g. a file-request upload): the pin of the format its
+     * content was written in, `recorded_for(encryptor.format())` (2 for a v2
+     * upload, 0 for v1), as at any upload. Nothing else is allowed for a new
+     * file.
+     */
+open func encryptNameFor(filename: String, mimeType: String?, recordedPin: UInt8)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_name_for(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(filename),
+        FfiConverterOptionString.lower(mimeType),
+        FfiConverterUInt8.lower(recordedPin),$0
     )
 })
 }
@@ -9092,6 +9159,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_metadata() != 60336) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_name_for() != 26823) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_note() != 32953) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -9252,6 +9322,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_constellationdecoderhandle_new() != 21598) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_key_bytes() != 50246) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_fileprovidercachehandle_open() != 22658) {

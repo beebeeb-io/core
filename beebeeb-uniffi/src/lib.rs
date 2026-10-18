@@ -983,7 +983,9 @@ impl MasterKeyHandle {
     }
 }
 
-/// Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`.
+/// Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`
+/// for a key derived from the account's master key, or via
+/// [`FileKeyHandle::from_key_bytes`] for one the app holds as 32 bytes.
 #[derive(uniffi::Object)]
 pub struct FileKeyHandle {
     inner: Mutex<Option<kdf::FileKey>>,
@@ -1006,6 +1008,22 @@ impl FileKeyHandle {
 
 #[uniffi::export]
 impl FileKeyHandle {
+    /// A handle for a per-file key the app holds as raw bytes and that is NOT
+    /// derived from the account's master key: a file-request upload's content
+    /// key (`open_request_upload`), a shared file's key. Task 1958 round 4: the
+    /// with-key name, note and thumbnail functions of this handle
+    /// (`encrypt_name_for`, `decrypt_file_metadata`, `encrypt_note_for`, ...)
+    /// were reachable only through `MasterKeyHandle::derive_file_key`, so not
+    /// for these keys. The WASM side takes the same bytes (`fileKey`).
+    ///
+    /// Exactly 32 bytes, anything else is an `InvalidInput` error. The input is
+    /// zeroized once copied into the key.
+    #[uniffi::constructor]
+    pub fn from_key_bytes(key: Vec<u8>) -> Result<Arc<Self>, CryptoError> {
+        let key = Zeroizing::new(key);
+        Ok(Self::new(file_key_from_slice(&key)?))
+    }
+
     pub fn encrypt_chunk(&self, plaintext: Vec<u8>) -> Result<EncryptedData, CryptoError> {
         self.with_key(|fk| encrypt::encrypt_chunk(fk, &plaintext))?
             .map(|blob| encrypted_blob_to_data(&blob))
@@ -1094,6 +1112,31 @@ impl FileKeyHandle {
         let pin = ExpectedChunkFormat::from_u8(recorded_pin)?;
         let note = Zeroizing::new(note);
         self.with_key(|fk| encrypt::encrypt_note_for(fk, &note, pin))?
+            .map_err(Into::into)
+    }
+
+    /// Seal the name/MIME envelope under THIS file key, by the rule of a
+    /// recorded pin (task 1958). The only name writer that takes a key, so it
+    /// serves keys not derived from the master key (file-request uploads,
+    /// shared-folder files). A v2 pin records `chunk_format: 2` and is always
+    /// sealed under the name subkey; 0 follows the current write rule. Any
+    /// other code is an error. `recorded_pin`:
+    /// - an EXISTING file (rename): the `chunk_format` that
+    ///   `decrypt_file_metadata` returned for this file (0 = unrecorded,
+    ///   2 = v2), never a server field;
+    /// - a NEW file (e.g. a file-request upload): the pin of the format its
+    ///   content was written in, `recorded_for(encryptor.format())` (2 for a v2
+    ///   upload, 0 for v1), as at any upload. Nothing else is allowed for a new
+    ///   file.
+    pub fn encrypt_name_for(
+        &self,
+        filename: String,
+        mime_type: Option<String>,
+        recorded_pin: u8,
+    ) -> Result<String, CryptoError> {
+        let pin = ExpectedChunkFormat::from_u8(recorded_pin)?;
+        let filename = Zeroizing::new(filename);
+        self.with_key(|fk| encrypt::encrypt_name_for(fk, &filename, mime_type.as_deref(), pin))?
             .map_err(Into::into)
     }
 
@@ -1831,6 +1874,80 @@ mod chunk_stream_handle_tests {
             assert!(fk.encrypt_note_for("x".into(), bad).is_err(), "pin code {bad}");
         }
         assert!(fk.decrypt_note("a plaintext note".into()).is_err());
+    }
+
+    #[test]
+    fn handle_name_for_keeps_the_pin_under_a_file_key_handle_1958() {
+        // Task 1958 through the FFI: the rename writer of a FileKeyHandle keeps
+        // a v2 pin, seals under the name subkey, and for a derived key reads back
+        // through the master-key reader too.
+        let mk = mk_handle();
+        let id = "ffi-name-for";
+        let fk = mk.derive_file_key(id.as_bytes().to_vec()).unwrap();
+        let renamed = fk
+            .encrypt_name_for("renamed.pdf".into(), Some("application/pdf".into()), 2)
+            .unwrap();
+        let meta = fk.decrypt_file_metadata(renamed.clone()).unwrap();
+        assert_eq!((meta.name.as_str(), meta.chunk_format), ("renamed.pdf", 2));
+        assert_eq!(
+            mk.decrypt_file_metadata(id.into(), renamed.clone())
+                .unwrap()
+                .chunk_format,
+            2
+        );
+        let blob = parse_name_blob(&renamed);
+        assert!(
+            fk.decrypt_chunk(blob.nonce.clone(), blob.ciphertext.clone()).is_err(),
+            "a v2-pinned name must not open under the raw file key"
+        );
+        let r0 = fk.encrypt_name_for("r0.txt".into(), None, 0).unwrap();
+        assert_eq!(fk.decrypt_file_metadata(r0).unwrap().chunk_format, 0);
+        for bad in [1u8, 7] {
+            assert!(fk.encrypt_name_for("x".into(), None, bad).is_err(), "pin code {bad}");
+        }
+    }
+
+    /// The key of the published given-key name vectors (task 1958): 32 bytes
+    /// NOT derived from any master key.
+    const GIVEN_FILE_KEY: [u8; 32] = [
+        0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0x71,
+        0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f,
+    ];
+
+    #[test]
+    fn a_non_derived_key_reaches_the_name_writer_and_reader_1958_r4() {
+        // Task 1958 round 4 (Codex P1): a key the app holds as bytes (a
+        // file-request upload's content key, a shared file's key) becomes a
+        // FileKeyHandle, and its name round-trips with the pin: what Swift and
+        // Kotlin could not do while `derive_file_key` was the only way in.
+        let fk = FileKeyHandle::from_key_bytes(GIVEN_FILE_KEY.to_vec()).unwrap();
+        for pin in [0u8, 2] {
+            let sealed = fk
+                .encrypt_name_for("request-upload.pdf".into(), Some("application/pdf".into()), pin)
+                .unwrap();
+            let meta = fk.decrypt_file_metadata(sealed.clone()).unwrap();
+            assert_eq!(meta.name, "request-upload.pdf", "pin {pin}");
+            assert_eq!(meta.mime_type.as_deref(), Some("application/pdf"), "pin {pin}");
+            assert_eq!(meta.chunk_format, pin, "pin {pin}");
+            // The same key as core's, byte for byte: core's with-key reader opens it.
+            let core_meta =
+                encrypt::decrypt_file_metadata_with_key(&kdf::FileKey::from_bytes(GIVEN_FILE_KEY), &sealed).unwrap();
+            assert_eq!(core_meta.chunk_format.as_u8(), pin, "pin {pin}");
+        }
+        // The rest of the handle is reachable for such a key too (notes).
+        let note = fk.encrypt_note_for("a note".into(), 2).unwrap();
+        assert_eq!(fk.decrypt_note(note).unwrap(), "a note");
+    }
+
+    #[test]
+    fn file_key_handle_from_key_bytes_refuses_other_lengths_1958_r4() {
+        for len in [0usize, 16, 31, 33, 64] {
+            match FileKeyHandle::from_key_bytes(vec![0x42; len]) {
+                Err(CryptoError::InvalidInput { .. }) => {}
+                Err(other) => panic!("{len} bytes: wrong error {other:?}"),
+                Ok(_) => panic!("{len} bytes must be refused"),
+            }
+        }
     }
 
     /// The default write format's code (1 during the read-only phase).

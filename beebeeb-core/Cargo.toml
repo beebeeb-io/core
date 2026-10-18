@@ -51,9 +51,10 @@ webp-encode = ["webp"]
 # Test-only seams, never in a shipped client build:
 # - `ChunkEncryptor::with_format`: the binding crates' TESTS write v2 frames
 #   while `WRITE_FORMAT` is still v1 (task 1908 read-only rollout);
-# - `ChunkEncryptor::with_vector_nonces` and
-#   `encrypt::encrypt_name_with_chunk_format_and_nonce`: fixed nonces for the
-#   published known-answer vectors (task 1943).
+# - `ChunkEncryptor::with_vector_nonces`,
+#   `encrypt::encrypt_name_with_chunk_format_and_nonce` (task 1943) and
+#   `encrypt::encrypt_name_for_with_nonce` (task 1958): fixed nonces for the
+#   published known-answer vectors.
 # Enable it only from `[dev-dependencies]`.
 test-support = []
 
