@@ -604,6 +604,20 @@ pub fn compute_recovery_check(master_key: Vec<u8>) -> Result<Vec<u8>, CryptoErro
     Ok(beebeeb_core::opaque::compute_recovery_check(&mk).to_vec())
 }
 
+/// A shared folder's key id (task 2133): the public commitment to the folder's
+/// 32-byte key that the server stores and compares (HKDF-SHA256, info
+/// `beebeeb/folder-key-id/v1`). Returns 32 bytes; not secret, and never a key.
+#[uniffi::export]
+pub fn folder_key_id(folder_key: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
+    let mut folder_key = folder_key;
+    let key = <[u8; 32]>::try_from(folder_key.as_slice()).map(Zeroizing::new);
+    folder_key.zeroize();
+    let key = key.map_err(|_| CryptoError::InvalidInput {
+        detail: "folder_key must be exactly 32 bytes".into(),
+    })?;
+    Ok(beebeeb_core::folder_key::folder_key_id(&key).to_vec())
+}
+
 // ---------------------------------------------------------------------------
 // File requests (sealed-box / ECIES per request)
 // ---------------------------------------------------------------------------

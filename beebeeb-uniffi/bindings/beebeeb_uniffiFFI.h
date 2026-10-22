@@ -1034,6 +1034,11 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_encrypt_name(RustBuffer master_key, Rus
 RustBuffer uniffi_beebeeb_uniffi_fn_func_evaluate_password(RustBuffer password, uint32_t min_length, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_FOLDER_KEY_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_FOLDER_KEY_ID
+RustBuffer uniffi_beebeeb_uniffi_fn_func_folder_key_id(RustBuffer folder_key, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_GENERATE_RECOVERY_PDF
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_GENERATE_RECOVERY_PDF
 RustBuffer uniffi_beebeeb_uniffi_fn_func_generate_recovery_pdf(RustBuffer title, RustBuffer words, RustBuffer metadata_keys, RustBuffer metadata_values, RustCallStatus *_Nonnull out_status
@@ -1636,6 +1641,12 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_encrypt_name(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_EVALUATE_PASSWORD
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_EVALUATE_PASSWORD
 uint16_t uniffi_beebeeb_uniffi_checksum_func_evaluate_password(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_FOLDER_KEY_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_FOLDER_KEY_ID
+uint16_t uniffi_beebeeb_uniffi_checksum_func_folder_key_id(void
     
 );
 #endif

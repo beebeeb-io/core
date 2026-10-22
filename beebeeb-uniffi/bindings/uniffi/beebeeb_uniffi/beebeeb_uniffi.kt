@@ -782,6 +782,8 @@ external fun uniffi_beebeeb_uniffi_checksum_func_encrypt_name(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_evaluate_password(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_folder_key_id(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_generate_recovery_pdf(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_generate_recovery_phrase(
@@ -1357,6 +1359,8 @@ external fun uniffi_beebeeb_uniffi_fn_func_encrypt_name(`masterKey`: RustBuffer.
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_evaluate_password(`password`: RustBuffer.ByValue,`minLength`: Int,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_folder_key_id(`folderKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_generate_recovery_pdf(`title`: RustBuffer.ByValue,`words`: RustBuffer.ByValue,`metadataKeys`: RustBuffer.ByValue,`metadataValues`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_generate_recovery_phrase(uniffi_out_err: UniffiRustCallStatus, 
@@ -1628,6 +1632,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_evaluate_password() != 50314.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_folder_key_id() != 59202.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_generate_recovery_pdf() != 58665.toShort()) {
@@ -11289,6 +11296,22 @@ public object FfiConverterSequenceTypeCeremonyStepDto: FfiConverterRustBuffer<Li
     UniffiLib.uniffi_beebeeb_uniffi_fn_func_evaluate_password(
     
         FfiConverterString.lower(`password`),FfiConverterUInt.lower(`minLength`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * A shared folder's key id (task 2133): the public commitment to the folder's
+         * 32-byte key that the server stores and compares (HKDF-SHA256, info
+         * `beebeeb/folder-key-id/v1`). Returns 32 bytes; not secret, and never a key.
+         */
+    @Throws(CryptoException::class) fun `folderKeyId`(`folderKey`: kotlin.ByteArray): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_folder_key_id(
+    
+        FfiConverterByteArray.lower(`folderKey`),_status)
 }
     )
     }

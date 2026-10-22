@@ -308,6 +308,18 @@ pub fn compute_recovery_check(master_key: &[u8]) -> Result<Vec<u8>, JsError> {
     Ok(beebeeb_core::opaque::compute_recovery_check(&mk).to_vec())
 }
 
+/// A shared folder's key id (task 2133): the public commitment to the folder's
+/// 32-byte key that the server stores and compares (HKDF-SHA256, info
+/// `beebeeb/folder-key-id/v1`). Returns a 32-byte `Uint8Array`; not secret, and
+/// never a key. The copy of the key is wiped before returning.
+#[wasm_bindgen]
+pub fn folder_key_id(folder_key: &[u8]) -> Result<Vec<u8>, JsError> {
+    let key = zeroize::Zeroizing::new(
+        <[u8; 32]>::try_from(folder_key).map_err(|_| JsError::new("folder_key must be 32 bytes"))?,
+    );
+    Ok(beebeeb_core::folder_key::folder_key_id(&key).to_vec())
+}
+
 // ---------------------------------------------------------------------------
 // Constellation transfer (ephemeral device-to-device E2E channel)
 // ---------------------------------------------------------------------------

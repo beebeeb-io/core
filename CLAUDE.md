@@ -24,6 +24,24 @@ cargo fmt -- --check
 - `EncryptedBlob` — cipher_suite + nonce (Vec<u8>) + ciphertext (Vec<u8>).
 - `encrypt_chunk(key: &FileKey, plaintext)` / `decrypt_chunk(key: &FileKey, blob)` — generic AES-256-GCM, NO associated data (key wrap, search shards). **Not for file content** — file chunks go through `chunk_stream` (chunk format v2, task 1908) — **and not for names, thumbnails or file notes** — those go through `encrypt_name*` / `decrypt_file_metadata`, `encrypt_thumbnail[_for]` / `decrypt_thumbnail` (purpose subkeys, task 1908 round 3) and `encrypt_note[_for]` / `decrypt_note` (round 5).
 
+## Shared folder key id (`folder_key.rs`, task 2133, design K)
+
+`folder_key::folder_key_id(folder_key: &[u8; 32]) -> [u8; 32]` =
+HKDF-SHA256(ikm = the folder key, salt = none, info = `b"beebeeb/folder-key-id/v1"`).
+It is the public commitment to a shared folder's key: every client sends it with
+the folder's child-key wraps, the server stores the first one per folder and
+compares bytes only (a different id is a `409 folder_key_mismatch`), and a client
+finds which of its candidate keys a folder uses by recomputing it. It is not
+secret and must never be used as a key. A new derivation gets a new info string
+(`v2`), never a change to this one.
+
+- Exports: WASM `folder_key_id(folder_key: Uint8Array) -> Uint8Array`; UniFFI
+  `folder_key_id(folder_key: Vec<u8>) -> Vec<u8>`. Both refuse a key that is not
+  32 bytes and wipe their copy of it.
+- Vector: `folder_key_id` in `test-vectors/vectors.json` (version 7), under the
+  `test_vectors_v2` drift guard; the expected id was computed outside the crate
+  (RFC 5869 in Python, checked against the RFC's test case 3).
+
 ## Streaming chunk primitive (`chunk_stream.rs`)
 
 `chunk_stream::ChunkEncryptor` / `ChunkDecryptor` are the ONE shared chunk

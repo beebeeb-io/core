@@ -194,7 +194,15 @@
       "nonce_hex": "5c5c5c5c5c5c5c5c5c5c5c5c",
       "note": "Fixed nonce for a known-answer test. Written by encrypt_name_for(file_key, name, mime, pin), the name writer for a key that is not derived from the master key (renames, file-request uploads). Read with decrypt_file_metadata_with_key(file_key, name_encrypted): pin 2 opens under the name subkey only; pin 0 opens under the raw file key while METADATA_SEAL_WRITE is Legacy (the read-only phase), and is subkey-sealed after the switch, when this vector is re-published.",
       "pin": 0
+    },
+    {
+      "expected_key_id_hex": "e07f022dd6a140210b19530af0a6b316ec4f06b3a2b086fdf0c03c761baf3b07",
+      "folder_key_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "info": "beebeeb/folder-key-id/v1",
+      "name": "folder_key_id",
+      "note": "folder_key_id = HKDF-SHA256(ikm = folder key, salt = none, info = \"beebeeb/folder-key-id/v1\"), 32 bytes. The public commitment to a shared folder's key that every client sends with its wraps; the server stores the first per folder and compares bytes only. Not secret, and never a key.",
+      "salt": "none"
     }
   ],
-  "version": 6
+  "version": 7
 }

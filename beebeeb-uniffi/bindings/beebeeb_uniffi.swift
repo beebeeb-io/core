@@ -8432,6 +8432,18 @@ public func evaluatePassword(password: String, minLength: UInt32) -> PasswordEva
 })
 }
 /**
+ * A shared folder's key id (task 2133): the public commitment to the folder's
+ * 32-byte key that the server stores and compares (HKDF-SHA256, info
+ * `beebeeb/folder-key-id/v1`). Returns 32 bytes; not secret, and never a key.
+ */
+public func folderKeyId(folderKey: Data)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_folder_key_id(
+        FfiConverterData.lower(folderKey),$0
+    )
+})
+}
+/**
  * Generate a recovery kit PDF with a title, recovery words, and metadata.
  *
  * Returns the raw PDF bytes (valid PDF 1.4).
@@ -8962,6 +8974,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_evaluate_password() != 50314) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_folder_key_id() != 59202) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_generate_recovery_pdf() != 58665) {

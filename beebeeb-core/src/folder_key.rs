@@ -26,8 +26,11 @@ pub const FOLDER_KEY_LEN: usize = 32;
 /// The public id of a shared folder's 32-byte key (task 2133):
 /// HKDF-SHA256(ikm = `folder_key`, salt = none, info = [`FOLDER_KEY_ID_INFO`]).
 pub fn folder_key_id(folder_key: &[u8; FOLDER_KEY_LEN]) -> [u8; 32] {
-    let _ = folder_key;
-    [0u8; 32]
+    let hk = Hkdf::<Sha256>::new(None, folder_key);
+    let mut id = [0u8; 32];
+    hk.expand(FOLDER_KEY_ID_INFO, &mut id)
+        .expect("HKDF-SHA256 expand for 32 bytes cannot fail");
+    id
 }
 
 #[cfg(test)]
