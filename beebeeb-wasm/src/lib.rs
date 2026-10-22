@@ -308,10 +308,11 @@ pub fn compute_recovery_check(master_key: &[u8]) -> Result<Vec<u8>, JsError> {
     Ok(beebeeb_core::opaque::compute_recovery_check(&mk).to_vec())
 }
 
-/// A shared folder's key id (task 2133): the public commitment to the folder's
-/// 32-byte key that the server stores and compares (HKDF-SHA256, info
-/// `beebeeb/folder-key-id/v1`). Returns a 32-byte `Uint8Array`; not secret, and
-/// never a key. The copy of the key is wiped before returning.
+/// A shared folder's key id (task 2133): a one-way id of the folder's 32-byte
+/// key, for a server to compare folder keys without learning them (HKDF-SHA256,
+/// info `beebeeb/folder-key-id/v1`). Returns a 32-byte `Uint8Array`; not secret,
+/// and never a key. Wipes the copy of the key this function owns
+/// (wasm-bindgen's own copy is freed without a wipe).
 #[wasm_bindgen]
 pub fn folder_key_id(folder_key: &[u8]) -> Result<Vec<u8>, JsError> {
     let key = zeroize::Zeroizing::new(

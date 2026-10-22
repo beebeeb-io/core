@@ -1,17 +1,16 @@
-//! A shared folder's key id (task 2133, design K).
+//! A shared folder's key id (task 2133).
 //!
-//! A shared folder's members wrap every child's key under one folder key. The
-//! server must refuse a second, different folder key for the same folder (a
-//! second invite that re-keyed the folder locked the first member out), yet it
-//! must not learn the key. So every client sends a commitment to the key with
-//! its wraps: `folder_key_id = HKDF-SHA256(ikm = folder key, salt = none,
-//! info = "beebeeb/folder-key-id/v1")`, 32 bytes. The server stores the first
-//! one per folder and compares bytes only; a client tells which of its
-//! candidate keys a folder uses by recomputing the id.
+//! `folder_key_id = HKDF-SHA256(ikm = folder key, salt = none, info =
+//! "beebeeb/folder-key-id/v1")`, 32 bytes: a one-way id of a folder key, meant
+//! for a server to compare folder keys without learning them. A client tells
+//! which of its candidate keys an id names by recomputing it.
 //!
-//! The id reveals nothing usable about the key (HKDF is a PRF keyed by the
-//! folder key) and is not secret. It is not the key and must never be used as
-//! one.
+//! With no salt, HKDF's extract step is HMAC-SHA256 under an all-zero salt over
+//! the key, and the id is the expand of that pseudorandom key under the info
+//! string. The id reveals nothing usable about the key and is not secret. It
+//! commits to the key it was computed from, but it CANNOT prove that wraps sent
+//! with it were made under that key. It is not the key and must never be used
+//! as one.
 
 use hkdf::Hkdf;
 use sha2::Sha256;

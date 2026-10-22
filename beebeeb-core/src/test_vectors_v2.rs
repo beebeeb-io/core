@@ -114,8 +114,8 @@ fn folder_key_id_vector() -> Value {
         "info": std::str::from_utf8(crate::folder_key::FOLDER_KEY_ID_INFO).expect("ascii info"),
         "expected_key_id_hex": hex(&crate::folder_key::folder_key_id(&FOLDER_KEY)),
         "note": "folder_key_id = HKDF-SHA256(ikm = folder key, salt = none, info = \"beebeeb/folder-key-id/v1\"), 32 \
-            bytes. The public commitment to a shared folder's key that every client sends with its wraps; the server \
-            stores the first per folder and compares bytes only. Not secret, and never a key.",
+            bytes. A one-way id of a folder key, meant for a server to compare folder keys without learning them. \
+            Not secret, and never a key.",
     })
 }
 

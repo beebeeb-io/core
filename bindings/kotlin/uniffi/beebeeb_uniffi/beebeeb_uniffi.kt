@@ -1634,7 +1634,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_func_evaluate_password() != 50314.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_func_folder_key_id() != 59202.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_folder_key_id() != 44432.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_generate_recovery_pdf() != 58665.toShort()) {
@@ -11302,9 +11302,10 @@ public object FfiConverterSequenceTypeCeremonyStepDto: FfiConverterRustBuffer<Li
     
 
         /**
-         * A shared folder's key id (task 2133): the public commitment to the folder's
-         * 32-byte key that the server stores and compares (HKDF-SHA256, info
-         * `beebeeb/folder-key-id/v1`). Returns 32 bytes; not secret, and never a key.
+         * A shared folder's key id (task 2133): a one-way id of the folder's 32-byte
+         * key, for a server to compare folder keys without learning them (HKDF-SHA256,
+         * info `beebeeb/folder-key-id/v1`). Returns 32 bytes; not secret, and never a
+         * key. Wipes the copy of the key this function owns.
          */
     @Throws(CryptoException::class) fun `folderKeyId`(`folderKey`: kotlin.ByteArray): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
