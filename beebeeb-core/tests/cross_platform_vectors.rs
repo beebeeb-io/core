@@ -49,6 +49,23 @@ fn bytes32(v: &serde_json::Value, field: &str) -> [u8; 32] {
 }
 
 // ---------------------------------------------------------------------------
+// 0. A shared folder's key id (task 2133)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn vector_folder_key_id() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "folder_key_id");
+    assert_eq!(v["info"].as_str(), Some("beebeeb/folder-key-id/v1"));
+    assert_eq!(v["salt"].as_str(), Some("none"));
+    let key = bytes32(&v, "folder_key_hex");
+    assert_eq!(
+        beebeeb_core::folder_key::folder_key_id(&key),
+        bytes32(&v, "expected_key_id_hex")
+    );
+}
+
+// ---------------------------------------------------------------------------
 // 1. Master key derivation from password (Argon2id)
 // ---------------------------------------------------------------------------
 
@@ -668,8 +685,8 @@ fn vector_file_version_check() {
         .as_u64()
         .expect("vectors.json must have a 'version' field");
     assert_eq!(
-        version, 6,
-        "vectors.json version mismatch — expected 6, got {version}. \
+        version, 7,
+        "vectors.json version mismatch — expected 7, got {version}. \
          Update this test if you intentionally bumped the version."
     );
 
@@ -697,6 +714,8 @@ fn vector_file_version_check() {
         // Version 6 (task 1958): the name writer under a given per-file key.
         "metadata_v2_name_filekey",
         "metadata_v1_name_filekey",
+        // Version 7 (task 2133): a shared folder's key id.
+        "folder_key_id",
     ];
     for name in &required {
         assert!(names.contains(name), "vectors.json is missing required vector '{name}'");
