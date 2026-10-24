@@ -3,6 +3,7 @@ pub mod blob;
 pub mod chunk_stream;
 pub mod cli_auth;
 pub mod constellation;
+pub mod direct_transfer;
 pub mod encrypt;
 pub mod error;
 pub mod file_encrypt;
