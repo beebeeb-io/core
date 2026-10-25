@@ -7403,7 +7403,8 @@ public enum DirectOutcomeDto: Equatable, Hashable {
      */
     case useApiNow
     /**
-     * This file is served over the API.
+     * This file is served over the API. For an UPLOAD call it means this session cannot go direct:
+     * abandon the session and init again WITHOUT the capability token.
      */
     case apiForThisFile
     /**
@@ -7421,14 +7422,24 @@ public enum DirectOutcomeDto: Equatable, Hashable {
     case terminal(status: UInt16, error: String?
     )
     /**
-     * The pinned chunk route and the upload calls: a failure that may pass (5xx, no answer); retry
-     * after the bounded backoff of `direct_pinned_retry_decision`.
+     * The pinned chunk route and the upload calls: a failure that may pass (5xx, no answer). For the
+     * pinned route the bounded backoff is `direct_pinned_retry_decision`; the retry rules of an upload
+     * chunk (the grant cap, the attempts, the waits) are core's `UploadChunkState`, which is not
+     * exported yet, so do NOT pass an upload outcome to `direct_pinned_retry_decision` (it knows no
+     * grant cap and answers give-up for `Regrant`).
      */
     case retry
     /**
      * `upload_commit` only: the staged chunk is not there; ask for a new link and send it again.
      */
     case regrant
+    /**
+     * `upload_commit` only (409 `commit_in_progress`): the server holds the chunk's commit lock, up to
+     * 420 s after a failed copy. Wait (`millis` is the server's stated wait, `None` when it sent none)
+     * and commit again; this is not a failure and has an allowance of its own.
+     */
+    case held(millis: UInt64?
+    )
 
 
 
@@ -7469,6 +7480,9 @@ public struct FfiConverterTypeDirectOutcomeDto: FfiConverterRustBuffer {
         case 8: return .retry
         
         case 9: return .regrant
+        
+        case 10: return .held(millis: try FfiConverterOptionUInt64.read(from: &buf)
+        )
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -7516,6 +7530,11 @@ public struct FfiConverterTypeDirectOutcomeDto: FfiConverterRustBuffer {
         case .regrant:
             writeInt(&buf, Int32(9))
         
+        
+        case let .held(millis):
+            writeInt(&buf, Int32(10))
+            FfiConverterOptionUInt64.write(millis, into: &buf)
+            
         }
     }
 }

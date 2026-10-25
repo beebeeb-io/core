@@ -10867,7 +10867,8 @@ sealed class DirectOutcomeDto {
     
     
     /**
-     * This file is served over the API.
+     * This file is served over the API. For an UPLOAD call it means this session cannot go direct:
+     * abandon the session and init again WITHOUT the capability token.
      */
     object ApiForThisFile : DirectOutcomeDto()
     
@@ -10904,8 +10905,11 @@ sealed class DirectOutcomeDto {
     }
     
     /**
-     * The pinned chunk route and the upload calls: a failure that may pass (5xx, no answer); retry
-     * after the bounded backoff of `direct_pinned_retry_decision`.
+     * The pinned chunk route and the upload calls: a failure that may pass (5xx, no answer). For the
+     * pinned route the bounded backoff is `direct_pinned_retry_decision`; the retry rules of an upload
+     * chunk (the grant cap, the attempts, the waits) are core's `UploadChunkState`, which is not
+     * exported yet, so do NOT pass an upload outcome to `direct_pinned_retry_decision` (it knows no
+     * grant cap and answers give-up for `Regrant`).
      */
     object Retry : DirectOutcomeDto()
     
@@ -10915,6 +10919,20 @@ sealed class DirectOutcomeDto {
      */
     object Regrant : DirectOutcomeDto()
     
+    
+    /**
+     * `upload_commit` only (409 `commit_in_progress`): the server holds the chunk's commit lock, up to
+     * 420 s after a failed copy. Wait (`millis` is the server's stated wait, `None` when it sent none)
+     * and commit again; this is not a failure and has an allowance of its own.
+     */
+    data class Held(
+        val `millis`: kotlin.ULong?) : DirectOutcomeDto()
+        
+    {
+        
+
+        companion object
+    }
     
 
     
@@ -10946,6 +10964,9 @@ public object FfiConverterTypeDirectOutcomeDto : FfiConverterRustBuffer<DirectOu
                 )
             8 -> DirectOutcomeDto.Retry
             9 -> DirectOutcomeDto.Regrant
+            10 -> DirectOutcomeDto.Held(
+                FfiConverterOptionalULong.read(buf),
+                )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
         }
     }
@@ -11008,6 +11029,13 @@ public object FfiConverterTypeDirectOutcomeDto : FfiConverterRustBuffer<DirectOu
                 4UL
             )
         }
+        is DirectOutcomeDto.Held -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterOptionalULong.allocationSize(value.`millis`)
+            )
+        }
     }
 
     override fun write(value: DirectOutcomeDto, buf: ByteBuffer) {
@@ -11049,6 +11077,11 @@ public object FfiConverterTypeDirectOutcomeDto : FfiConverterRustBuffer<DirectOu
             }
             is DirectOutcomeDto.Regrant -> {
                 buf.putInt(9)
+                Unit
+            }
+            is DirectOutcomeDto.Held -> {
+                buf.putInt(10)
+                FfiConverterOptionalULong.write(value.`millis`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }

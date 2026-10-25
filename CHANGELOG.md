@@ -125,14 +125,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Direct upload rules (task 2173, `direct_transfer::upload`): what a client may believe of the
   server's `object-upload-v1` answers and how hard it tries one chunk before the file goes back to
   the API. `UploadGrant::from_answer`, `UploadCommitted::from_answer`, `put_stored`,
-  `UploadChunkState` (`UploadChunkPolicy`: at most 4 grants per chunk, 8 attempts, 150 s of
-  waiting), `UploadFailure`, `UploadNext`; `Call::UploadGrant` and `Call::UploadCommit` in
-  `classify`, with a new `Outcome::Regrant` (kind `regrant`) for a commit `409 chunk_not_stored`.
-  `Outcome::Regrant` is exported through WASM (`DirectOutcomeJs`) and UniFFI
-  (`DirectOutcomeDto`); the Swift, Kotlin and header bindings are regenerated for it. The
-  vectors are the server's real bodies (`test-vectors/direct_upload.json`, new, and 50 more
-  `classify` rows in `direct_transfer.json`: 63 -> 113), run by core, the WASM seams and the
-  UniFFI exports; the server's 4-grant cap is pinned by a test against the vectors' `constants`.
+  `UploadChunkState` (`UploadChunkPolicy`: at most 4 grants per chunk; the 8th failure ends the
+  tries, 7 are ridden out; 150 s of waiting in all; the client's own backoff is 1 s doubling with
+  equal jitter, `UploadChunkState::with_seed` takes one random seed per chunk), `UploadFailure`,
+  `UploadNext`; `Call::UploadGrant` and `Call::UploadCommit` in `classify`, with two new outcomes:
+  `Outcome::Regrant` (a commit `409 chunk_not_stored`: ask for a new link) and `Outcome::Held` (a
+  commit `409 commit_in_progress`: the server's commit lock, which after a failed copy lives
+  `COMMIT_LOCK_TTL` = 420 s). A hold is not a failure: it is waited out on an allowance of its own
+  (`hold_budget` = TTL + 30 s, polls of 5 s doubling to 15 s with equal jitter, or the stated
+  wait) that leaves the failure cap and the retry budget alone. A 1xx/3xx on an upload call is
+  `UseApiNow`, as for a download; only "no answer" may pass. Both new outcomes are exported through
+  WASM (`DirectOutcomeJs`) and UniFFI (`DirectOutcomeDto`; `Held { millis: Option }`); the Swift,
+  Kotlin and header bindings are regenerated, and the docs of `Retry` and `ApiForThisFile` now say
+  what they mean for an upload (do not hand an upload outcome to `direct_pinned_retry_decision`).
+  Test vectors: 53 more `classify` rows in `direct_transfer.json` (63 -> 116, run by core, the WASM
+  seams and the UniFFI exports) and the new `direct_upload.json` (24 grant answers, 8 commit
+  answers, 5 init `transport` rows, 26 policy scenarios, the server constants it copies with their
+  source lines), which is read by `upload.rs`'s tests ONLY. Every row names its source; 32 of the
+  85 upload rows are the server's own status and body on that call at server main 30c8ed62; the
+  others say what they are: 14 what a proxy or the framework sends (a bare 404, an HTML page, a
+  redirect), 7 client-side cases (a server answer that exists but not on that call), 32 synthetic. Core's copies of the 4-grant cap and the lock TTL are pinned to
+  that file; the server does not read it, so a server change turns no test red until the server
+  adds its own assert.
   Not yet exported through WASM or UniFFI as functions: the CLI uses the Rust module directly;
   desktop, iOS and web adopt it in their own tasks.
 - CI `Claims guard` job: runs the shared claims-guard engine plus

@@ -1053,25 +1053,30 @@ impl DownloadPlanner {
             .backoff_base_ms
             .saturating_mul(1u64 << shift)
             .min(self.cfg.backoff_cap_ms);
-        let half = exp / 2;
-        let jitter = if half == 0 { 0 } else { self.next_random() % (half + 1) };
-        i64::try_from(half + jitter).unwrap_or(i64::MAX)
+        i64::try_from(equal_jitter(&mut self.rng, exp)).unwrap_or(i64::MAX)
     }
+}
 
-    /// xorshift64*: deterministic for a given seed, which is the point.
-    fn next_random(&mut self) -> u64 {
-        let mut x = self.rng;
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        self.rng = x;
-        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
-    }
+/// Equal jitter, shared with the upload policy: half of `exp` plus a random share of the other half, so
+/// many chunks backing off together do not come back together.
+pub(super) fn equal_jitter(rng: &mut u64, exp: u64) -> u64 {
+    let half = exp / 2;
+    half + if half == 0 { 0 } else { xorshift_star(rng) % (half + 1) }
+}
+
+/// xorshift64*: deterministic for a given seed, which is the point.
+pub(super) fn xorshift_star(state: &mut u64) -> u64 {
+    let mut x = *state;
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    *state = x;
+    x.wrapping_mul(0x2545_F491_4F6C_DD1D)
 }
 
 /// Scramble a seed into a nonzero xorshift state; neighbouring seeds must not
 /// give neighbouring (or equal) streams.
-fn splitmix64(seed: u64) -> u64 {
+pub(super) fn splitmix64(seed: u64) -> u64 {
     let mut z = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);

@@ -110,9 +110,13 @@ impl ApiAnswer {
     /// How long to wait before asking again: the server's `Retry-After`, else
     /// [`DEFAULT_RETRY_AFTER`], clamped to 1 s ..= [`MAX_RETRY_AFTER`].
     fn wait(&self) -> Duration {
+        self.stated_wait().unwrap_or(DEFAULT_RETRY_AFTER)
+    }
+
+    /// The server's `Retry-After`, when it sent one, clamped to 1 s ..= [`MAX_RETRY_AFTER`].
+    fn stated_wait(&self) -> Option<Duration> {
         self.retry_after
-            .unwrap_or(DEFAULT_RETRY_AFTER)
-            .clamp(Duration::from_secs(1), MAX_RETRY_AFTER)
+            .map(|d| d.clamp(Duration::from_secs(1), MAX_RETRY_AFTER))
     }
 
     /// `true` when the body is a JSON error object (the answer is about the
@@ -190,6 +194,13 @@ pub enum Outcome {
     /// `UploadCommit` only (409 `chunk_not_stored`): the staged object is not there, or has the
     /// wrong length. Nothing was committed: ask for a new link and send the chunk again.
     Regrant,
+    /// `UploadCommit` only (409 `commit_in_progress`): the server holds this chunk's commit lock. After
+    /// a copy that failed, the lock lives its whole TTL
+    /// ([`COMMIT_LOCK_TTL`](super::upload::COMMIT_LOCK_TTL), 420 s), so this can last minutes: it is a
+    /// wait with its own allowance, not a counted failure
+    /// ([`UploadChunkState`](super::upload::UploadChunkState)). The duration is the server's
+    /// `Retry-After` when it sent one (clamped like any stated wait), `None` when it did not.
+    Held(Option<Duration>),
 }
 
 impl Outcome {
@@ -205,6 +216,7 @@ impl Outcome {
             Outcome::Terminal(_) => "terminal",
             Outcome::Retry => "retry",
             Outcome::Regrant => "regrant",
+            Outcome::Held(_) => "held",
         }
     }
 }
@@ -262,8 +274,11 @@ pub fn classify(call: Call, answer: &ApiAnswer) -> Outcome {
             // A bare 404/405 is a node (or proxy) without the route (R1.6): this session cannot go direct.
             404 | 405 => Outcome::ApiForThisFile,
             409 => match answer.error_code() {
-                // R2.6: another commit of this chunk holds the lock, or a transient storage failure
-                // on the commit's HEAD (R3.4). Retry after a short, bounded backoff; never terminal.
+                // R2.6/R3.1: another commit of this chunk holds the lock, or a copy that failed leaves it
+                // held for its whole TTL. Only the COMMIT route sends it: a wait with its own allowance
+                // ([`Outcome::Held`]); never terminal.
+                Some("commit_in_progress") if call == Call::UploadCommit => Outcome::Held(answer.stated_wait()),
+                // The grant route never sends it; if one ever does, a short counted wait.
                 Some("commit_in_progress") => Outcome::Backoff(answer.wait()),
                 // R1.1/R2.5: the staged object is absent or the wrong length. Nothing was committed.
                 Some("chunk_not_stored") if call == Call::UploadCommit => Outcome::Regrant,
@@ -278,8 +293,12 @@ pub fn classify(call: Call, answer: &ApiAnswer) -> Outcome {
             // 400 (a size the geometry does not allow), 402/413 (quota), 422 …: not an
             // authorization answer. The API path judges the same upload for itself.
             400..=499 => Outcome::ApiForThisFile,
-            // 0 (no answer), 1xx, 3xx.
-            _ => Outcome::Retry,
+            // 0: no answer at all (a network failure, a timeout): it may pass.
+            0 => Outcome::Retry,
+            // 1xx, 3xx: nothing we asked for happened, and a redirect or an interim answer is a path that
+            // is wrong (a proxy, a captive portal), not a fault that passes: this session cannot go
+            // direct, as for a download (spec R1.6).
+            _ => Outcome::UseApiNow,
         },
         Call::PinnedChunk => match status {
             401 | 403 => terminal(),
@@ -936,8 +955,26 @@ mod tests {
                 Outcome::ApiForThisFile,
             ),
             (
-                "commit_in_progress waits (R2.6)",
+                "commit_in_progress is a hold with its own allowance (R2.6, R3.1)",
                 UploadCommit,
+                json(409, r#"{"error":"commit_in_progress"}"#),
+                Outcome::Held(None),
+            ),
+            (
+                "a stated wait on a hold is kept, clamped like any other",
+                UploadCommit,
+                ApiAnswer::from_parts(409, JSON, br#"{"error":"commit_in_progress"}"#, Some("3")),
+                Outcome::Held(Some(secs(3))),
+            ),
+            (
+                "a hold that states an hour is clamped",
+                UploadCommit,
+                ApiAnswer::from_parts(409, JSON, br#"{"error":"commit_in_progress"}"#, Some("3600")),
+                Outcome::Held(Some(MAX_RETRY_AFTER)),
+            ),
+            (
+                "the grant route never sends commit_in_progress; if one does it is a counted wait",
+                UploadGrant,
                 json(409, r#"{"error":"commit_in_progress"}"#),
                 Outcome::Backoff(DEFAULT_RETRY_AFTER),
             ),
@@ -978,6 +1015,18 @@ mod tests {
                 Outcome::Retry,
             ),
             (
+                "a redirect is a path that is wrong, not a fault that passes (as for a download)",
+                UploadGrant,
+                ApiAnswer::from_parts(302, None, b"", None),
+                Outcome::UseApiNow,
+            ),
+            (
+                "an interim answer on a commit likewise",
+                UploadCommit,
+                ApiAnswer::from_parts(100, None, b"", None),
+                Outcome::UseApiNow,
+            ),
+            (
                 "a 4xx the API judges for itself",
                 UploadGrant,
                 json(413, r#"{"error":"quota_exceeded"}"#),
@@ -991,5 +1040,6 @@ mod tests {
         assert_eq!(Call::from_code("upload_commit"), Some(Call::UploadCommit));
         assert_eq!(Call::UploadCommit.code(), "upload_commit");
         assert_eq!(Outcome::Regrant.kind(), "regrant");
+        assert_eq!(Outcome::Held(None).kind(), "held");
     }
 }

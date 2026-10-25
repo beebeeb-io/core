@@ -54,8 +54,8 @@ pub mod vectors;
 pub use authority::{MAX_URL_LEN, Refusal, check_storage_url, redact, scrub};
 pub use classify::{ApiAnswer, Call, Outcome, PinnedRetry, RetryDecision, Terminal, classify};
 pub use upload::{
-    MAX_GRANTS_PER_CHUNK, UPLOAD_CONTENT_TYPE, UploadChunkPolicy, UploadChunkState, UploadCommitted, UploadFailure,
-    UploadGrant, UploadLink, UploadNext, UploadViolation, put_stored,
+    COMMIT_HOLD_MARGIN, COMMIT_LOCK_TTL, MAX_GRANTS_PER_CHUNK, UPLOAD_CONTENT_TYPE, UploadChunkPolicy,
+    UploadChunkState, UploadCommitted, UploadFailure, UploadGrant, UploadLink, UploadNext, UploadViolation, put_stored,
 };
 pub use window::{DownloadPlanner, Geometry, PlanError, PlannerConfig, Poll, Verdict, Violation, WindowAnswer};
 pub use wire::{

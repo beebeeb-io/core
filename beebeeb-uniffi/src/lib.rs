@@ -4493,7 +4493,8 @@ pub enum DirectOutcomeDto {
     NotSupported,
     /// No direct transport right now: use the API for this file now.
     UseApiNow,
-    /// This file is served over the API.
+    /// This file is served over the API. For an UPLOAD call it means this session cannot go direct:
+    /// abandon the session and init again WITHOUT the capability token.
     ApiForThisFile,
     /// `version_unavailable`: discard and restart from fresh metadata.
     Restart,
@@ -4501,11 +4502,18 @@ pub enum DirectOutcomeDto {
     Backoff { millis: u64 },
     /// 401, 403 or a JSON 404: do not fall back.
     Terminal { status: u16, error: Option<String> },
-    /// The pinned chunk route and the upload calls: a failure that may pass (5xx, no answer); retry
-    /// after the bounded backoff of `direct_pinned_retry_decision`.
+    /// The pinned chunk route and the upload calls: a failure that may pass (5xx, no answer). For the
+    /// pinned route the bounded backoff is `direct_pinned_retry_decision`; the retry rules of an upload
+    /// chunk (the grant cap, the attempts, the waits) are core's `UploadChunkState`, which is not
+    /// exported yet, so do NOT pass an upload outcome to `direct_pinned_retry_decision` (it knows no
+    /// grant cap and answers give-up for `Regrant`).
     Retry,
     /// `upload_commit` only: the staged chunk is not there; ask for a new link and send it again.
     Regrant,
+    /// `upload_commit` only (409 `commit_in_progress`): the server holds the chunk's commit lock, up to
+    /// 420 s after a failed copy. Wait (`millis` is the server's stated wait, `None` when it sent none)
+    /// and commit again; this is not a failure and has an allowance of its own.
+    Held { millis: Option<u64> },
 }
 
 impl DirectOutcomeDto {
@@ -4525,6 +4533,9 @@ impl DirectOutcomeDto {
             },
             dt::Outcome::Retry => Self::Retry,
             dt::Outcome::Regrant => Self::Regrant,
+            dt::Outcome::Held(d) => Self::Held {
+                millis: d.map(|d| d.as_millis() as u64),
+            },
             // `Outcome` is non-exhaustive: a variant added later is the safe one.
             _ => Self::UseApiNow,
         }
@@ -4544,6 +4555,7 @@ impl DirectOutcomeDto {
             }),
             Self::Retry => dt::Outcome::Retry,
             Self::Regrant => dt::Outcome::Regrant,
+            Self::Held { millis } => dt::Outcome::Held(millis.map(std::time::Duration::from_millis)),
         }
     }
 }
@@ -5273,6 +5285,8 @@ mod direct_transfer_binding_tests {
             },
             DirectOutcomeDto::Retry,
             DirectOutcomeDto::Regrant,
+            DirectOutcomeDto::Held { millis: None },
+            DirectOutcomeDto::Held { millis: Some(3000) },
         ] {
             assert_eq!(DirectOutcomeDto::from_core(&outcome.to_core()), outcome);
         }
@@ -5291,6 +5305,7 @@ mod direct_transfer_binding_tests {
             }
             DirectOutcomeDto::Retry => json!({"kind": "retry"}),
             DirectOutcomeDto::Regrant => json!({"kind": "regrant"}),
+            DirectOutcomeDto::Held { millis } => json!({"kind": "held", "millis": millis}),
         }
     }
 
@@ -5303,6 +5318,9 @@ mod direct_transfer_binding_tests {
             "restart" => DirectOutcomeDto::Restart,
             "retry" => DirectOutcomeDto::Retry,
             "regrant" => DirectOutcomeDto::Regrant,
+            "held" => DirectOutcomeDto::Held {
+                millis: v["millis"].as_u64(),
+            },
             "backoff" => DirectOutcomeDto::Backoff {
                 millis: v["millis"].as_u64().unwrap(),
             },

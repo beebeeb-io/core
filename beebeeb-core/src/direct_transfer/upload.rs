@@ -19,6 +19,13 @@
 //! After any failure the caller asks [`UploadChunkState::failed`] what to do next. The session's
 //! transport never changes after init, so "this session cannot go direct" is always the same
 //! answer, [`UploadNext::UseApi`]: abandon the session and init again WITHOUT the capability token.
+//!
+//! A commit the server answers with `409 commit_in_progress` ([`Outcome::Held`]) is not a failure: after
+//! a copy that failed, the server keeps the chunk's lock for [`COMMIT_LOCK_TTL`], so the staged chunk is
+//! still there and the commit will go through once the lock clears. Pass it to the same
+//! [`UploadChunkState::failed`]; it is waited out on an allowance of its own and does not count against
+//! the failure cap or the retry budget. The client's own backoff has equal jitter (seed one state per
+//! chunk with [`UploadChunkState::with_seed`]) so many chunks do not come back together.
 
 use std::fmt;
 use std::time::Duration;
@@ -176,19 +183,46 @@ pub fn put_stored(status: u16) -> bool {
     (200..300).contains(&status)
 }
 
+/// How long the server keeps a chunk's commit lock after a copy that failed (R2.3, R3.1): the lock
+/// outlives every step it covers, and a copy that may still land holds it for its whole TTL. Server
+/// `beebeeb-api/src/direct_transfer.rs:410-412` (`commit_lock_secs()` = 4 * `s3_op_timeout_secs()` + 60),
+/// `storage.rs:1952-1958` (`s3_op_timeout_secs()` = 90 by default; env `S3_PUT_OP_TIMEOUT_SECS`), at
+/// server 30c8ed62. Pinned by a test against `test-vectors/direct_upload.json` (`constants`), like
+/// [`MAX_GRANTS_PER_CHUNK`]. A server run with a longer storage timeout holds longer; a client that
+/// waits this long and then gives up costs the file a restart through the API, not a failure.
+pub const COMMIT_LOCK_TTL: Duration = Duration::from_secs(420);
+
+/// What a chunk waits for the commit lock beyond [`COMMIT_LOCK_TTL`]: the lock's clock starts on the
+/// server before our next request and the answer takes a moment.
+pub const COMMIT_HOLD_MARGIN: Duration = Duration::from_secs(30);
+
 /// How hard one chunk is tried before the whole file goes back to the API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UploadChunkPolicy {
     /// Links to ask for, in all ([`MAX_GRANTS_PER_CHUNK`]: the server refuses a fifth).
     pub max_grants: u32,
-    /// Failures of any kind (grant, PUT, commit) to ride out.
+    /// The failure that ends the tries: the `attempts`-th failure of any kind (grant, PUT, commit) is
+    /// answered with [`UploadNext::UseApi`], so `attempts - 1` are ridden out. A hold
+    /// ([`Outcome::Held`]) is not a failure and is not counted.
     pub attempts: u32,
     /// The most the retries may wait in total; a wait that would pass it ends them. It must hold
     /// the longest wait a server can state ([`MAX_RETRY_AFTER`](super::classify::MAX_RETRY_AFTER))
     /// plus a margin, as for [`PinnedRetry`](super::PinnedRetry): the real limiter's 429 says 60 s.
+    /// With the default `base` the seven waits the doubling allows add up to at most 127 s (1 + 2 + ... +
+    /// 64), inside it, so it binds stated waits, not the client's own backoff. Holds are not counted here
+    /// either.
     pub budget: Duration,
-    /// The wait after the first failure that named none; it doubles each time.
+    /// The wait after the first failure that named none; it doubles each time, with equal jitter
+    /// (half to all of it) so many chunks backing off together do not come back together.
     pub base: Duration,
+    /// The most one chunk waits, in all, for a commit lock to clear ([`COMMIT_LOCK_TTL`] plus
+    /// [`COMMIT_HOLD_MARGIN`]); then the lock outlived its TTL and the session goes to the API.
+    pub hold_budget: Duration,
+    /// The first poll while the commit is held and the server named no wait; it doubles (equal
+    /// jitter) up to [`hold_poll_max`](Self::hold_poll_max).
+    pub hold_poll: Duration,
+    /// The longest poll interval while held.
+    pub hold_poll_max: Duration,
 }
 
 impl Default for UploadChunkPolicy {
@@ -198,6 +232,9 @@ impl Default for UploadChunkPolicy {
             attempts: 8,
             budget: Duration::from_secs(150),
             base: Duration::from_secs(1),
+            hold_budget: COMMIT_LOCK_TTL + COMMIT_HOLD_MARGIN,
+            hold_poll: Duration::from_secs(5),
+            hold_poll_max: Duration::from_secs(15),
         }
     }
 }
@@ -212,6 +249,7 @@ pub enum UploadFailure {
     Put { status: u16 },
     /// The commit request: [`classify`](super::classify) of [`Call::UploadCommit`] (not `Proceed`),
     /// or a `200` whose body [`UploadCommitted::from_answer`] refused (pass `Outcome::ApiForThisFile`).
+    /// An [`Outcome::Held`] is a hold, not a failure: see [`UploadChunkPolicy::hold_budget`].
     Commit(Outcome),
 }
 
@@ -246,15 +284,30 @@ pub struct UploadChunkState {
     grants: u32,
     failures: u32,
     waited: Duration,
+    /// Time spent waiting for a commit lock, and the polls it took (see [`UploadChunkPolicy::hold_budget`]).
+    held: Duration,
+    holds: u32,
+    rng: u64,
 }
 
 impl UploadChunkState {
+    /// A state whose jitter is the stream of seed 0: the same waits every time, for tests. Production
+    /// uses [`with_seed`](Self::with_seed) with random bytes.
     pub fn new(policy: UploadChunkPolicy) -> Self {
+        Self::with_seed(policy, 0)
+    }
+
+    /// `seed` starts the jitter of this chunk's backoff. Production passes random bytes, one per
+    /// chunk; the same seed gives the same waits.
+    pub fn with_seed(policy: UploadChunkPolicy, seed: u64) -> Self {
         UploadChunkState {
             policy,
             grants: 0,
             failures: 0,
             waited: Duration::ZERO,
+            held: Duration::ZERO,
+            holds: 0,
+            rng: super::window::splitmix64(seed),
         }
     }
 
@@ -273,24 +326,26 @@ impl UploadChunkState {
     /// A step of this chunk failed. Returns what to do; the waits and tries it allows are bounded
     /// by the policy, after which the answer is [`UploadNext::UseApi`].
     pub fn failed(&mut self, failure: &UploadFailure) -> UploadNext {
+        // The server's commit lock is not a failure: after a copy that failed it lives its whole TTL,
+        // minutes, and the staged chunk is still there. Waiting it out has its own allowance, so the
+        // failure cap and the retry budget keep bounding real failures.
+        if let UploadFailure::Commit(Outcome::Held(stated)) = failure {
+            return self.held(*stated);
+        }
         self.failures = self.failures.saturating_add(1);
-        let backoff = self
-            .policy
-            .base
-            .saturating_mul(2u32.saturating_pow(self.failures.saturating_sub(1)));
         let (after, call) = match failure {
             UploadFailure::Grant(outcome) => match outcome {
                 Outcome::Backoff(d) => (*d, Call::UploadGrant),
-                Outcome::Retry => (backoff, Call::UploadGrant),
+                Outcome::Retry => (self.backoff(), Call::UploadGrant),
                 Outcome::Terminal(t) => return UploadNext::Terminal(t.clone()),
                 _ => return UploadNext::UseApi,
             },
             // The link may have expired, been revoked, or the storage node had a bad moment: a new
             // link, bounded by the grant budget.
-            UploadFailure::Put { .. } => (backoff, Call::UploadGrant),
+            UploadFailure::Put { .. } => (self.backoff(), Call::UploadGrant),
             UploadFailure::Commit(outcome) => match outcome {
                 Outcome::Backoff(d) => (*d, Call::UploadCommit),
-                Outcome::Retry => (backoff, Call::UploadCommit),
+                Outcome::Retry => (self.backoff(), Call::UploadCommit),
                 // Nothing was committed: the staged object is not there. A new link, no wait.
                 Outcome::Regrant => (Duration::ZERO, Call::UploadGrant),
                 Outcome::Terminal(t) => return UploadNext::Terminal(t.clone()),
@@ -307,6 +362,50 @@ impl UploadChunkState {
         self.waited = self.waited.saturating_add(after);
         UploadNext::Retry { after, call }
     }
+
+    /// The client's own wait after the failures so far: `base` doubled per failure, with equal jitter.
+    fn backoff(&mut self) -> Duration {
+        let exp = self
+            .policy
+            .base
+            .saturating_mul(2u32.saturating_pow(self.failures.saturating_sub(1)));
+        jittered(&mut self.rng, exp)
+    }
+
+    /// The commit is held by the server's lock: poll again, inside [`UploadChunkPolicy::hold_budget`].
+    fn held(&mut self, stated: Option<Duration>) -> UploadNext {
+        let left = self.policy.hold_budget.saturating_sub(self.held);
+        if left.is_zero() {
+            return UploadNext::UseApi;
+        }
+        let want = match stated {
+            // The server's own wait is kept as it is.
+            Some(d) => d,
+            // 5 s, 10 s, 15 s, 15 s ... each with equal jitter.
+            None => {
+                let exp = self
+                    .policy
+                    .hold_poll
+                    .saturating_mul(2u32.saturating_pow(self.holds.min(16)))
+                    .min(self.policy.hold_poll_max);
+                jittered(&mut self.rng, exp)
+            }
+        };
+        // The last poll is cut to what is left, so the whole allowance is used and no more.
+        let after = want.min(left);
+        self.held = self.held.saturating_add(after);
+        self.holds = self.holds.saturating_add(1);
+        UploadNext::Retry {
+            after,
+            call: Call::UploadCommit,
+        }
+    }
+}
+
+/// `exp` with equal jitter (half to all of it), in whole milliseconds.
+fn jittered(rng: &mut u64, exp: Duration) -> Duration {
+    let ms = u64::try_from(exp.as_millis()).unwrap_or(u64::MAX);
+    Duration::from_millis(super::window::equal_jitter(rng, ms))
 }
 
 #[cfg(test)]
@@ -483,12 +582,17 @@ mod tests {
         for n in 0..3 {
             assert!(s.may_ask_for_a_link());
             s.link_issued();
-            // The wait doubles with each failure: 1 s, 2 s, 4 s.
-            assert_eq!(
-                s.failed(&UploadFailure::Put { status: 403 }),
-                retry(secs(1 << n), Call::UploadGrant),
-                "failure {}",
-                n + 1
+            // The wait doubles with each failure (1 s, 2 s, 4 s), with equal jitter: half to all of it.
+            let UploadNext::Retry { after, call } = s.failed(&UploadFailure::Put { status: 403 }) else {
+                panic!("failure {} must be retried", n + 1);
+            };
+            assert_eq!(call, Call::UploadGrant);
+            let exp = Duration::from_secs(1 << n);
+            assert!(
+                after >= exp / 2 && after <= exp,
+                "failure {}: {after:?} outside [{:?}, {exp:?}]",
+                n + 1,
+                exp / 2
             );
         }
         // The fourth link is the last the server will issue; its PUT fails too.
@@ -505,10 +609,190 @@ mod tests {
             s.failed(&UploadFailure::Commit(Outcome::Backoff(secs(5)))),
             retry(secs(5), Call::UploadCommit)
         );
-        // Not tied to the grant count: the staged chunk is still there.
+        // Not tied to the grant count: the staged chunk is still there. The second failure's own wait is
+        // 2 s doubled-from-base with equal jitter: between 1 s and 2 s.
+        let UploadNext::Retry { after, call } = s.failed(&UploadFailure::Commit(Outcome::Retry)) else {
+            panic!("a plain commit failure is retried");
+        };
+        assert_eq!(call, Call::UploadCommit);
+        assert!(after >= secs(1) && after <= secs(2), "{after:?}");
+    }
+
+    #[test]
+    fn the_backoff_is_jittered_by_the_seed_and_the_same_seed_repeats() {
+        let waits = |seed: u64| -> Vec<Duration> {
+            let mut s = UploadChunkState::with_seed(UploadChunkPolicy::default(), seed);
+            (0..7)
+                .map(|_| match s.failed(&UploadFailure::Commit(Outcome::Retry)) {
+                    UploadNext::Retry { after, .. } => after,
+                    other => panic!("{other:?}"),
+                })
+                .collect()
+        };
+        assert_eq!(waits(1), waits(1), "the same seed, the same waits");
+        assert_ne!(waits(1), waits(2), "the seed matters");
         assert_eq!(
+            waits(0),
+            {
+                let mut s = state();
+                (0..7)
+                    .map(|_| match s.failed(&UploadFailure::Commit(Outcome::Retry)) {
+                        UploadNext::Retry { after, .. } => after,
+                        other => panic!("{other:?}"),
+                    })
+                    .collect::<Vec<_>>()
+            },
+            "`new` is seed 0"
+        );
+        // Every wait is within its equal-jitter bounds: [exp / 2, exp] for exp = 1 s, 2 s, ... 64 s.
+        for (n, w) in waits(99).iter().enumerate() {
+            let exp = Duration::from_secs(1 << n);
+            assert!(*w >= exp / 2 && *w <= exp, "wait {} = {w:?}", n + 1);
+        }
+    }
+
+    #[test]
+    fn a_stated_wait_is_kept_exactly_and_draws_no_jitter() {
+        // Two chunks that differ only in a stated wait in between: their later jittered waits are equal.
+        let later = |with_stated: bool| {
+            let mut s = UploadChunkState::with_seed(UploadChunkPolicy::default(), 4);
+            if with_stated {
+                assert_eq!(
+                    s.failed(&UploadFailure::Commit(Outcome::Backoff(secs(5)))),
+                    retry(secs(5), Call::UploadCommit)
+                );
+            } else {
+                // A plain failure in its place, so that the failure counts line up.
+                let _ = s.failed(&UploadFailure::Commit(Outcome::Backoff(secs(5))));
+            }
+            s.failed(&UploadFailure::Commit(Outcome::Retry))
+        };
+        assert_eq!(later(true), later(false));
+    }
+
+    // ── the commit lock: a hold is a wait with its own allowance, not a failure (P2-1) ──
+
+    fn hold(s: &mut UploadChunkState, stated: Option<Duration>) -> UploadNext {
+        s.failed(&UploadFailure::Commit(Outcome::Held(stated)))
+    }
+
+    #[test]
+    fn a_held_commit_is_waited_out_for_the_whole_lock_ttl_without_leaving_the_direct_upload() {
+        // The copy failed (a plain commit failure); the server's lock now lives COMMIT_LOCK_TTL.
+        let mut s = state();
+        assert!(matches!(
             s.failed(&UploadFailure::Commit(Outcome::Retry)),
-            retry(secs(2), Call::UploadCommit)
+            UploadNext::Retry {
+                call: Call::UploadCommit,
+                ..
+            }
+        ));
+        let mut waited = Duration::ZERO;
+        while waited < COMMIT_LOCK_TTL {
+            match hold(&mut s, Some(secs(10))) {
+                UploadNext::Retry { after, call } => {
+                    assert_eq!(call, Call::UploadCommit);
+                    assert_eq!(after, secs(10), "a stated wait is kept");
+                    waited += after;
+                }
+                other => panic!("after {waited:?} of holds: {other:?}"),
+            }
+        }
+        // The lock has now outlived its TTL by at most one poll; the margin still allows more polls.
+        assert!(
+            matches!(hold(&mut s, Some(secs(10))), UploadNext::Retry { .. }),
+            "the margin covers the TTL"
+        );
+    }
+
+    #[test]
+    fn holds_leave_the_failure_cap_and_the_retry_budget_alone() {
+        let mut s = state();
+        for _ in 0..40 {
+            assert!(matches!(hold(&mut s, Some(secs(10))), UploadNext::Retry { .. }));
+        }
+        // 400 s of holds; all 150 s of the retry budget are still there ...
+        assert_eq!(
+            s.failed(&UploadFailure::Commit(Outcome::Backoff(secs(150)))),
+            retry(secs(150), Call::UploadCommit)
+        );
+        assert_eq!(
+            s.failed(&UploadFailure::Commit(Outcome::Backoff(Duration::from_millis(1)))),
+            UploadNext::UseApi
+        );
+        // ... and so are the failures: seven are ridden out, the eighth ends it.
+        let mut s = UploadChunkState::new(UploadChunkPolicy {
+            base: Duration::ZERO,
+            ..UploadChunkPolicy::default()
+        });
+        for _ in 0..40 {
+            hold(&mut s, Some(secs(10)));
+        }
+        for n in 1..8 {
+            assert!(
+                matches!(
+                    s.failed(&UploadFailure::Commit(Outcome::Retry)),
+                    UploadNext::Retry { .. }
+                ),
+                "failure {n}"
+            );
+        }
+        assert_eq!(s.failed(&UploadFailure::Commit(Outcome::Retry)), UploadNext::UseApi);
+    }
+
+    #[test]
+    fn the_hold_allowance_is_spent_to_the_millisecond_and_then_the_session_goes_to_the_api() {
+        let mut s = state();
+        for _ in 0..3 {
+            assert_eq!(hold(&mut s, Some(secs(120))), retry(secs(120), Call::UploadCommit));
+        }
+        // 360 s used of 450 s: the next poll is cut to the 90 s that are left ...
+        assert_eq!(hold(&mut s, Some(secs(120))), retry(secs(90), Call::UploadCommit));
+        // ... and nothing is left.
+        assert_eq!(hold(&mut s, Some(secs(1))), UploadNext::UseApi);
+        assert_eq!(
+            COMMIT_LOCK_TTL + COMMIT_HOLD_MARGIN,
+            UploadChunkPolicy::default().hold_budget
+        );
+    }
+
+    #[test]
+    fn unstated_holds_are_polled_every_five_seconds_doubling_to_fifteen_with_jitter() {
+        let mut s = UploadChunkState::with_seed(UploadChunkPolicy::default(), 17);
+        let mut total = Duration::ZERO;
+        let mut polls = Vec::new();
+        loop {
+            match hold(&mut s, None) {
+                UploadNext::Retry { after, call } => {
+                    assert_eq!(call, Call::UploadCommit);
+                    total += after;
+                    polls.push(after);
+                }
+                UploadNext::UseApi => break,
+                other => panic!("{other:?}"),
+            }
+            assert!(polls.len() < 500, "the holds never end");
+        }
+        assert_eq!(
+            total,
+            COMMIT_LOCK_TTL + COMMIT_HOLD_MARGIN,
+            "the whole allowance, no more"
+        );
+        // Poll n is within equal-jitter bounds of min(5 s * 2^(n-1), 15 s); only the last may be cut shorter.
+        for (i, p) in polls.iter().enumerate() {
+            let exp = secs((5u64 << i.min(8)).min(15));
+            let last = i + 1 == polls.len();
+            assert!(*p <= exp, "poll {} = {p:?} > {exp:?}", i + 1);
+            assert!(last || *p >= exp / 2, "poll {} = {p:?} < {:?}", i + 1, exp / 2);
+        }
+    }
+
+    #[test]
+    fn a_hold_is_only_a_hold_on_the_commit_side() {
+        assert_eq!(
+            state().failed(&UploadFailure::Grant(Outcome::Held(None))),
+            UploadNext::UseApi,
+            "no route sends it on a grant"
         );
     }
 
@@ -595,7 +879,7 @@ mod tests {
             s.failed(&UploadFailure::Commit(Outcome::Backoff(Duration::from_millis(1)))),
             UploadNext::UseApi
         );
-        // Short waits end by the number of failures: the eighth failure is the last the policy rides out.
+        // Short waits end by the number of failures: the eighth failure ends the tries (seven are ridden out).
         let mut s = UploadChunkState::new(UploadChunkPolicy {
             base: Duration::ZERO,
             ..UploadChunkPolicy::default()
@@ -613,10 +897,11 @@ mod tests {
     #[test]
     fn a_grant_that_is_busy_or_unwell_is_asked_for_again() {
         let mut s = state();
-        assert_eq!(
-            s.failed(&UploadFailure::Grant(Outcome::Retry)),
-            retry(secs(1), Call::UploadGrant)
-        );
+        let UploadNext::Retry { after, call } = s.failed(&UploadFailure::Grant(Outcome::Retry)) else {
+            panic!("an unwell grant is asked for again");
+        };
+        assert_eq!(call, Call::UploadGrant);
+        assert!(after >= Duration::from_millis(500) && after <= secs(1), "{after:?}");
         assert_eq!(
             s.failed(&UploadFailure::Grant(Outcome::Backoff(secs(3)))),
             retry(secs(3), Call::UploadGrant)
@@ -637,7 +922,7 @@ mod tests {
     fn every_grant_answer_row_of_the_vectors() {
         let v = vectors();
         let rows = v["grant_answers"].as_array().unwrap();
-        assert!(rows.len() >= 24, "{} rows", rows.len());
+        assert_eq!(rows.len(), 24, "grant answer rows");
         for row in rows {
             let name = row["name"].as_str().unwrap();
             let api = v["api_bases"][row["api_base"].as_str().unwrap()].as_str().unwrap();
@@ -664,7 +949,7 @@ mod tests {
     fn every_commit_answer_row_of_the_vectors() {
         let v = vectors();
         let rows = v["commit_answers"].as_array().unwrap();
-        assert!(rows.len() >= 8, "{} rows", rows.len());
+        assert_eq!(rows.len(), 8, "commit answer rows");
         for row in rows {
             let name = row["name"].as_str().unwrap();
             let got = UploadCommitted::from_answer(
@@ -685,7 +970,7 @@ mod tests {
     fn every_init_transport_row_of_the_vectors() {
         let v = vectors();
         let rows = v["init_transport"].as_array().unwrap();
-        assert!(rows.len() >= 5);
+        assert_eq!(rows.len(), 5, "init transport rows");
         for row in rows {
             assert_eq!(
                 super::super::upload_init_selects_direct(row["field"].as_str()),
@@ -701,10 +986,11 @@ mod tests {
         use super::super::vectors::outcome_from_json;
         let v = vectors();
         let scenarios = v["policy"].as_array().unwrap();
-        assert!(scenarios.len() >= 19, "{} scenarios", scenarios.len());
+        assert_eq!(scenarios.len(), 26, "policy scenarios");
         for scenario in scenarios {
             let name = scenario["name"].as_str().unwrap();
-            let mut state = state();
+            let mut state =
+                UploadChunkState::with_seed(UploadChunkPolicy::default(), scenario["seed"].as_u64().unwrap());
             for (i, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
                 let at = format!("{name}, step {}", i + 1);
                 match step["op"].as_str().unwrap() {
@@ -720,20 +1006,52 @@ mod tests {
                             },
                             other => panic!("{at}: unknown failure {other}"),
                         };
-                        let got = state.failed(&failure);
-                        let want = &step["expect"];
-                        match (want["kind"].as_str().unwrap(), &got) {
-                            ("retry", UploadNext::Retry { after, call }) => {
-                                assert_eq!(after.as_millis() as u64, want["millis"].as_u64().unwrap(), "{at}");
-                                assert_eq!(call.code(), want["call"].as_str().unwrap(), "{at}");
+                        // `repeat` runs the same failure with the same expectation n times (stated waits).
+                        for round in 0..step["repeat"].as_u64().unwrap_or(1) {
+                            let at = format!("{at}, round {}", round + 1);
+                            let got = state.failed(&failure);
+                            let want = &step["expect"];
+                            match (want["kind"].as_str().unwrap(), &got) {
+                                ("retry", UploadNext::Retry { after, call }) => {
+                                    assert_eq!(after.as_millis() as u64, want["millis"].as_u64().unwrap(), "{at}");
+                                    assert_eq!(call.code(), want["call"].as_str().unwrap(), "{at}");
+                                }
+                                ("use_api", UploadNext::UseApi) => {}
+                                ("terminal", UploadNext::Terminal(t)) => {
+                                    assert_eq!(u64::from(t.status), want["status"].as_u64().unwrap(), "{at}");
+                                    assert_eq!(t.error.as_deref(), want["error"].as_str(), "{at}");
+                                }
+                                (kind, got) => panic!("{at}: wanted {kind}, got {got:?}"),
                             }
-                            ("use_api", UploadNext::UseApi) => {}
-                            ("terminal", UploadNext::Terminal(t)) => {
-                                assert_eq!(u64::from(t.status), want["status"].as_u64().unwrap(), "{at}");
-                                assert_eq!(t.error.as_deref(), want["error"].as_str(), "{at}");
-                            }
-                            (kind, got) => panic!("{at}: wanted {kind}, got {got:?}"),
                         }
+                    }
+                    // Poll an unstated hold until the allowance is spent: each wait within bounds (only the last
+                    // may be cut shorter), the total exactly the allowance, then the API.
+                    "exhaust_holds" => {
+                        let outcome = outcome_from_json(&step["outcome"]);
+                        let (max, min) = (
+                            step["each_max_ms"].as_u64().unwrap(),
+                            step["each_min_ms"].as_u64().unwrap(),
+                        );
+                        let mut total = step["already_ms"].as_u64().unwrap();
+                        let mut cut = false;
+                        for _ in 0..1000 {
+                            match state.failed(&UploadFailure::Commit(outcome.clone())) {
+                                UploadNext::Retry { after, call } => {
+                                    assert_eq!(call, Call::UploadCommit, "{at}");
+                                    let ms = after.as_millis() as u64;
+                                    assert!(!cut, "{at}: a poll after the cut one");
+                                    assert!(ms <= max, "{at}: {ms} ms > {max} ms");
+                                    if ms < min {
+                                        cut = true;
+                                    }
+                                    total += ms;
+                                }
+                                UploadNext::UseApi => break,
+                                other => panic!("{at}: {other:?}"),
+                            }
+                        }
+                        assert_eq!(total, step["total_ms"].as_u64().unwrap(), "{at}");
                     }
                     other => panic!("{at}: unknown op {other}"),
                 }
@@ -744,8 +1062,10 @@ mod tests {
     #[test]
     fn the_constants_are_the_ones_the_server_fixes() {
         // A client cannot import the server's constants. The vectors record them with their source, and this pins the
-        // client's copies to that record; the server pins its own to core's (see the PR body), so a change on either
-        // side turns a test red.
+        // client's copies to that record. Only core's side is pinned: this file is read by THESE tests alone (the
+        // server does not read it, and neither do the WASM or UniFFI exports). The server-side half is a proposal
+        // for the s3-server lane (an assert against core's constants once its CORE_REV carries this module), so until
+        // then a change on the server turns no test red.
         let v = vectors();
         assert_eq!(
             u64::from(MAX_GRANTS_PER_CHUNK),
@@ -758,6 +1078,22 @@ mod tests {
                 .as_str()
                 .unwrap()
                 .contains("MAX_GRANTS_PER_CHUNK")
+        );
+        // The commit lock's TTL (R2.3, R3.1): how long a chunk can be held after a copy that failed.
+        assert_eq!(
+            COMMIT_LOCK_TTL,
+            Duration::from_secs(v["constants"]["commit_lock_ttl_seconds"].as_u64().unwrap())
+        );
+        assert!(
+            v["constants"]["commit_lock_ttl_source"]
+                .as_str()
+                .unwrap()
+                .contains("commit_lock_secs")
+        );
+        assert_eq!(
+            UploadChunkPolicy::default().hold_budget,
+            COMMIT_LOCK_TTL + COMMIT_HOLD_MARGIN,
+            "the client waits the TTL plus its margin"
         );
     }
 

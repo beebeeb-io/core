@@ -1,5 +1,5 @@
 {
-  "_provenance": "Task 2173 vectors for beebeeb_core::direct_transfer::upload: the grant and commit answer parsers, the init transport rule and the per-chunk retry policy. Hand-authored from the spec (R1.1, R1.6, R2.4, R2.6, R3.4) and the merged server's real bodies (#331, routes/direct_transfer.rs). Run by the core tests; the WASM and UniFFI exports take the parsers and the policy when web/mobile ship uploads.",
+  "_provenance": "Task 2173 vectors for beebeeb_core::direct_transfer::upload: the grant and commit answer parsers, the init transport rule and the per-chunk retry policy. Hand-authored from the spec (R1.1, R1.6, R2.4, R2.6, R3.4) and the merged server's real bodies (server main 30c8ed62, routes/direct_transfer.rs). Read by the core tests in upload.rs ONLY (exact row counts); the WASM and UniFFI exports do not load it (they take the parsers and the policy when web/mobile ship uploads). The 'classify' rows for the upload calls live in direct_transfer.json and ARE run by core, the WASM seams and the UniFFI exports.",
   "version": 1,
   "api_bases": {
     "prod": "https://api.beebeeb.test",
@@ -55,7 +55,7 @@
         "index": 3,
         "content_type": "application/octet-stream"
       },
-      "source": "server ed7ae138 routes/direct_transfer.rs:870 (upload_grant); tests/direct_upload_2173.rs:402-403"
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:895-902 (upload_grant); tests/direct_upload_2173.rs:402-403"
     },
     {
       "name": "a skipped chunk carries no link (R1.1)",
@@ -66,7 +66,7 @@
       "expect": {
         "kind": "skipped"
       },
-      "source": "server ed7ae138 routes/direct_transfer.rs:673; tests/direct_upload_2173.rs:505"
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:700 (a chunk already recorded); tests/direct_upload_2173.rs:505"
     },
     {
       "name": "a header name in another case",
@@ -79,7 +79,7 @@
         "index": 3,
         "content_type": "application/octet-stream"
       },
-      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+      "source": "synthetic: a variation the client accepts (it is not an error)"
     },
     {
       "name": "dev: http to the local MinIO",
@@ -92,7 +92,7 @@
         "index": 3,
         "content_type": "application/octet-stream"
       },
-      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+      "source": "synthetic: a variation the client accepts (it is not an error)"
     },
     {
       "name": "not json",
@@ -345,7 +345,7 @@
         "kind": "committed",
         "skipped": false
       },
-      "source": "server ed7ae138 routes/direct_transfer.rs:1104 (commit_locked); tests/direct_upload_2173.rs:472"
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:1137 (commit_locked); tests/direct_upload_2173.rs:472"
     },
     {
       "name": "a repeated commit is skipped (R1.1)",
@@ -356,7 +356,7 @@
         "kind": "committed",
         "skipped": true
       },
-      "source": "server ed7ae138 routes/direct_transfer.rs:974-975 (skipped_commit); tests/direct_upload_2173.rs:496"
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:1000-1001 (skipped_commit); tests/direct_upload_2173.rs:496"
     },
     {
       "name": "no skipped field",
@@ -367,7 +367,7 @@
         "kind": "committed",
         "skipped": false
       },
-      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+      "source": "synthetic: a variation the client accepts (it is not an error)"
     },
     {
       "name": "another chunk",
@@ -427,9 +427,11 @@
   ],
   "constants": {
     "max_grants_per_chunk": 4,
-    "max_grants_per_chunk_source": "server ed7ae138 beebeeb-api/src/direct_transfer.rs:400 (MAX_GRANTS_PER_CHUNK), enforced at routes/direct_transfer.rs:745; tests/direct_upload_2173.rs:1475 (the fifth grant is a 429, x-ratelimit-limit 4)",
+    "max_grants_per_chunk_source": "server 30c8ed62 beebeeb-api/src/direct_transfer.rs:402 (MAX_GRANTS_PER_CHUNK), enforced at routes/direct_transfer.rs:770-775; tests/direct_upload_2173.rs:1475 (the fifth grant is a 429, x-ratelimit-limit 4)",
     "content_type": "application/octet-stream",
-    "content_type_source": "server ed7ae138 beebeeb-api/src/direct_transfer.rs:393 (CHUNK_CONTENT_TYPE), routes/direct_transfer.rs:874; tests/direct_upload_2173.rs:403"
+    "content_type_source": "server 30c8ed62 beebeeb-api/src/direct_transfer.rs:395 (CHUNK_CONTENT_TYPE), routes/direct_transfer.rs:900; tests/direct_upload_2173.rs:403",
+    "commit_lock_ttl_seconds": 420,
+    "commit_lock_ttl_source": "server 30c8ed62 beebeeb-api/src/direct_transfer.rs:410-412 (commit_lock_secs() = 4 * s3_op_timeout_secs() + 60), storage.rs:1952-1958 (s3_op_timeout_secs() = 90 unless S3_PUT_OP_TIMEOUT_SECS); the lock is held for its whole TTL after a copy was issued: routes/direct_transfer.rs:1079-1086 (mutation_issued .. mutation_settled, R3.1)"
   },
   "init_transport": [
     {
@@ -460,7 +462,8 @@
   ],
   "policy": [
     {
-      "name": "a PUT that fails is regranted with a doubling wait, and the fourth link is the last",
+      "name": "a PUT that fails is regranted with a doubling wait (equal jitter), and the fourth link is the last",
+      "seed": 11,
       "steps": [
         {
           "op": "may_ask",
@@ -477,7 +480,7 @@
           },
           "expect": {
             "kind": "retry",
-            "millis": 1000,
+            "millis": 822,
             "call": "upload_grant"
           }
         },
@@ -496,7 +499,7 @@
           },
           "expect": {
             "kind": "retry",
-            "millis": 2000,
+            "millis": 1976,
             "call": "upload_grant"
           }
         },
@@ -515,7 +518,7 @@
           },
           "expect": {
             "kind": "retry",
-            "millis": 4000,
+            "millis": 2467,
             "call": "upload_grant"
           }
         },
@@ -543,7 +546,8 @@
       ]
     },
     {
-      "name": "a commit that is busy waits the stated time, then again, and is not tied to the grants",
+      "name": "a commit that is busy waits the stated time exactly, a plain failure waits a jittered 2 s at most, and none of it is tied to the grants",
+      "seed": 5,
       "steps": [
         {
           "op": "may_ask",
@@ -577,7 +581,7 @@
           },
           "expect": {
             "kind": "retry",
-            "millis": 2000,
+            "millis": 1884,
             "call": "upload_commit"
           }
         },
@@ -604,6 +608,7 @@
     },
     {
       "name": "a chunk that was not stored is granted again at once",
+      "seed": 0,
       "steps": [
         {
           "op": "may_ask",
@@ -655,6 +660,7 @@
     },
     {
       "name": "a grant that is rate limited waits what the server says, within the budget",
+      "seed": 0,
       "steps": [
         {
           "op": "failed",
@@ -703,6 +709,7 @@
     },
     {
       "name": "the budget is spent up to and including its last millisecond",
+      "seed": 0,
       "steps": [
         {
           "op": "failed",
@@ -750,7 +757,8 @@
       ]
     },
     {
-      "name": "a grant that is unwell is asked for again",
+      "name": "a grant that is unwell is asked for again after a jittered wait, a stated wait is kept as it is",
+      "seed": 3,
       "steps": [
         {
           "op": "failed",
@@ -762,7 +770,7 @@
           },
           "expect": {
             "kind": "retry",
-            "millis": 1000,
+            "millis": 573,
             "call": "upload_grant"
           }
         },
@@ -791,7 +799,7 @@
           },
           "expect": {
             "kind": "retry",
-            "millis": 4000,
+            "millis": 3554,
             "call": "upload_grant"
           }
         }
@@ -799,6 +807,7 @@
     },
     {
       "name": "a grant answer of 'api_for_this_file' means this session cannot go direct",
+      "seed": 0,
       "steps": [
         {
           "op": "failed",
@@ -816,6 +825,7 @@
     },
     {
       "name": "a commit answer of 'api_for_this_file' means this session cannot go direct",
+      "seed": 0,
       "steps": [
         {
           "op": "failed",
@@ -833,6 +843,7 @@
     },
     {
       "name": "a grant answer of 'use_api_now' means this session cannot go direct",
+      "seed": 0,
       "steps": [
         {
           "op": "failed",
@@ -850,6 +861,7 @@
     },
     {
       "name": "a commit answer of 'use_api_now' means this session cannot go direct",
+      "seed": 0,
       "steps": [
         {
           "op": "failed",
@@ -867,6 +879,7 @@
     },
     {
       "name": "a grant answer of 'not_supported' means this session cannot go direct",
+      "seed": 0,
       "steps": [
         {
           "op": "failed",
@@ -884,6 +897,7 @@
     },
     {
       "name": "a commit answer of 'not_supported' means this session cannot go direct",
+      "seed": 0,
       "steps": [
         {
           "op": "failed",
@@ -901,6 +915,7 @@
     },
     {
       "name": "a grant answer of 'restart' means this session cannot go direct",
+      "seed": 0,
       "steps": [
         {
           "op": "failed",
@@ -918,6 +933,7 @@
     },
     {
       "name": "a commit answer of 'restart' means this session cannot go direct",
+      "seed": 0,
       "steps": [
         {
           "op": "failed",
@@ -935,6 +951,7 @@
     },
     {
       "name": "an authorization answer on a grant is terminal",
+      "seed": 0,
       "steps": [
         {
           "op": "failed",
@@ -956,6 +973,7 @@
     },
     {
       "name": "an authorization answer on a commit is terminal",
+      "seed": 0,
       "steps": [
         {
           "op": "failed",
@@ -977,6 +995,7 @@
     },
     {
       "name": "a session that is gone is terminal for the caller's recovery",
+      "seed": 0,
       "steps": [
         {
           "op": "failed",
@@ -997,7 +1016,8 @@
       ]
     },
     {
-      "name": "eight failures are the most it rides out, however short the waits",
+      "name": "the eighth failure ends the tries, however short the waits (seven are ridden out)",
+      "seed": 0,
       "steps": [
         {
           "op": "failed",
@@ -1012,97 +1032,8 @@
             "kind": "retry",
             "millis": 0,
             "call": "upload_commit"
-          }
-        },
-        {
-          "op": "failed",
-          "failure": {
-            "kind": "commit",
-            "outcome": {
-              "kind": "backoff",
-              "millis": 0
-            }
           },
-          "expect": {
-            "kind": "retry",
-            "millis": 0,
-            "call": "upload_commit"
-          }
-        },
-        {
-          "op": "failed",
-          "failure": {
-            "kind": "commit",
-            "outcome": {
-              "kind": "backoff",
-              "millis": 0
-            }
-          },
-          "expect": {
-            "kind": "retry",
-            "millis": 0,
-            "call": "upload_commit"
-          }
-        },
-        {
-          "op": "failed",
-          "failure": {
-            "kind": "commit",
-            "outcome": {
-              "kind": "backoff",
-              "millis": 0
-            }
-          },
-          "expect": {
-            "kind": "retry",
-            "millis": 0,
-            "call": "upload_commit"
-          }
-        },
-        {
-          "op": "failed",
-          "failure": {
-            "kind": "commit",
-            "outcome": {
-              "kind": "backoff",
-              "millis": 0
-            }
-          },
-          "expect": {
-            "kind": "retry",
-            "millis": 0,
-            "call": "upload_commit"
-          }
-        },
-        {
-          "op": "failed",
-          "failure": {
-            "kind": "commit",
-            "outcome": {
-              "kind": "backoff",
-              "millis": 0
-            }
-          },
-          "expect": {
-            "kind": "retry",
-            "millis": 0,
-            "call": "upload_commit"
-          }
-        },
-        {
-          "op": "failed",
-          "failure": {
-            "kind": "commit",
-            "outcome": {
-              "kind": "backoff",
-              "millis": 0
-            }
-          },
-          "expect": {
-            "kind": "retry",
-            "millis": 0,
-            "call": "upload_commit"
-          }
+          "repeat": 7
         },
         {
           "op": "failed",
@@ -1120,7 +1051,8 @@
       ]
     },
     {
-      "name": "a doubling wait is also bounded by the budget: the seventh failure still fits, the eighth does not",
+      "name": "seven retries with doubling jittered waits (the default doubling alone never reaches the 150 s budget); the eighth failure ends the tries",
+      "seed": 7,
       "steps": [
         {
           "op": "failed",
@@ -1132,7 +1064,7 @@
           },
           "expect": {
             "kind": "retry",
-            "millis": 1000,
+            "millis": 993,
             "call": "upload_commit"
           }
         },
@@ -1146,7 +1078,7 @@
           },
           "expect": {
             "kind": "retry",
-            "millis": 2000,
+            "millis": 1260,
             "call": "upload_commit"
           }
         },
@@ -1160,7 +1092,7 @@
           },
           "expect": {
             "kind": "retry",
-            "millis": 4000,
+            "millis": 2329,
             "call": "upload_commit"
           }
         },
@@ -1174,7 +1106,7 @@
           },
           "expect": {
             "kind": "retry",
-            "millis": 8000,
+            "millis": 4981,
             "call": "upload_commit"
           }
         },
@@ -1188,7 +1120,7 @@
           },
           "expect": {
             "kind": "retry",
-            "millis": 16000,
+            "millis": 13196,
             "call": "upload_commit"
           }
         },
@@ -1202,7 +1134,7 @@
           },
           "expect": {
             "kind": "retry",
-            "millis": 32000,
+            "millis": 19610,
             "call": "upload_commit"
           }
         },
@@ -1216,7 +1148,7 @@
           },
           "expect": {
             "kind": "retry",
-            "millis": 64000,
+            "millis": 42266,
             "call": "upload_commit"
           }
         },
@@ -1226,6 +1158,368 @@
             "kind": "commit",
             "outcome": {
               "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a copy that failed leaves the commit held for minutes: 410 s of holds are waited out on their own allowance, no fallback",
+      "seed": 21,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 922,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 10000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 10000,
+            "call": "upload_commit"
+          },
+          "repeat": 41
+        }
+      ]
+    },
+    {
+      "name": "400 s of holds leave the retry budget untouched: a 150 s stated wait still fits, one millisecond more does not",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 10000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 10000,
+            "call": "upload_commit"
+          },
+          "repeat": 40
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 150000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 150000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 1
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "400 s of holds leave the failure cap untouched: seven failures are still ridden out, the eighth ends it",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 10000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 10000,
+            "call": "upload_commit"
+          },
+          "repeat": 40
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 0
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 0,
+            "call": "upload_commit"
+          },
+          "repeat": 7
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 0
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "the hold allowance is the lock TTL plus 30 s, used to the millisecond: the last poll is cut, the next hold goes to the API",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 120000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 120000,
+            "call": "upload_commit"
+          },
+          "repeat": 3
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 120000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 90000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 1000
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a hold that is spent is spent for the chunk: a later plain failure does not give it back",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 120000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 120000,
+            "call": "upload_commit"
+          },
+          "repeat": 3
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 120000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 90000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 791,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 1000
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "holds the server states no wait for are polled every 5 s doubling to 15 s, each with equal jitter, until the allowance is spent",
+      "seed": 9,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": null
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 3649,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": null
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 9874,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": null
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 12382,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": null
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 11191,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": null
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 8439,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "exhaust_holds",
+          "outcome": {
+            "kind": "held",
+            "millis": null
+          },
+          "already_ms": 45535,
+          "total_ms": 450000,
+          "each_max_ms": 15000,
+          "each_min_ms": 7500
+        }
+      ]
+    },
+    {
+      "name": "a Held answer on a grant is nothing the server sends: that session goes to the API",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "held",
+              "millis": 10000
             }
           },
           "expect": {
