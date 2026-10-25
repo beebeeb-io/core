@@ -1,0 +1,571 @@
+//! Cross-client contract vectors for [`crate::direct_transfer`] (task 2173).
+//!
+//! `test-vectors/direct_transfer.json` is hand-authored from the spec (R1.6,
+//! R1.12, R1.13, R2.6 and the core #33 review): the expected answer of every
+//! row is what the CONTRACT says, not what the code printed. This module is the
+//! one interpreter of that file. Every surface that exports the rules (core
+//! itself, the WASM bindings, the UniFFI bindings, later the web and mobile test
+//! suites) implements [`Surface`] over its own exported functions and calls
+//! [`run_all`], so a binding cannot drift from core: both execute the same rows
+//! through their own public API.
+//!
+//! Test-support only (`feature = "test-support"` or `cfg(test)`); never in a
+//! shipped build.
+
+use serde_json::{Value, json};
+
+use super::{
+    ApiAnswer, Call, Discovery, DownloadGrantResponse, DownloadPlanner, Geometry, Outcome, PlannerConfig, Poll,
+    Terminal, check_storage_url, classify, redact, scrub,
+};
+
+const API_PROD: &str = "https://api.beebeeb.test";
+const API_DEV: &str = "http://127.0.0.1:3001";
+
+/// The vectors file, embedded.
+pub const VECTORS_JSON: &str = include_str!("../../../test-vectors/direct_transfer.json");
+
+/// A surface the rules are exported through. Values cross as `serde_json`
+/// values shaped like the file; failures cross as the stable `code` strings.
+pub trait Surface {
+    type Planner: PlannerSurface;
+
+    fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String>;
+    fn classify(
+        &self,
+        call: &str,
+        status: u16,
+        content_type: Option<&str>,
+        body: &[u8],
+        retry_after: Option<&str>,
+    ) -> Value;
+    fn redact(&self, input: &str) -> String;
+    fn scrub(&self, input: &str) -> String;
+    fn chunk_length(&self, chunk_count: u32, chunk_size: u64, encrypted_size: u64, index: u32) -> Option<u64>;
+    fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> Self::Planner;
+}
+
+/// The planner as a surface exports it.
+pub trait PlannerSurface {
+    /// The poll result as `{kind, ...}` (see [`poll_json`]).
+    fn poll(&mut self, now_ms: i64) -> Value;
+    fn window_answered(&mut self, response: &Value, now_ms: i64) -> Result<(), String>;
+    /// `outcome` is `{kind, millis?, status?, error?}`.
+    fn window_failed(&mut self, outcome: &Value, now_ms: i64);
+    fn window_malformed(&mut self);
+    fn fetch_ok(&mut self, index: u32) -> Result<(), String>;
+    fn fetch_failed(&mut self, index: u32, now_ms: i64) -> Result<(), String>;
+    fn api_fetch_failed(&mut self, index: u32) -> Result<(), String>;
+    fn chunk_unauthentic(&mut self, index: u32) -> Result<(), String>;
+    fn consumed(&mut self, index: u32) -> Result<(), String>;
+}
+
+/// How many rows of each kind ran. A runner asserts these equal the file's
+/// counts, so a section that was skipped is a failure, not a pass.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Report {
+    pub authority: usize,
+    pub classify: usize,
+    pub redact: usize,
+    pub scrub: usize,
+    pub chunk_length: usize,
+    pub scenarios: usize,
+    pub steps: usize,
+    pub refusals: usize,
+}
+
+/// The counts the file itself contains.
+pub fn expected_report() -> Report {
+    let v = vectors();
+    let len = |k: &str| v[k].as_array().map_or(0, Vec::len);
+    let mut r = Report {
+        authority: len("authority"),
+        classify: len("classify"),
+        redact: len("redact"),
+        scrub: len("scrub"),
+        chunk_length: len("chunk_length"),
+        scenarios: len("planner"),
+        ..Report::default()
+    };
+    for s in v["planner"].as_array().into_iter().flatten() {
+        r.steps += s["steps"].as_array().map_or(0, Vec::len);
+        r.refusals += s["refusals"].as_array().map_or(0, Vec::len);
+    }
+    r
+}
+
+pub fn vectors() -> Value {
+    serde_json::from_str(VECTORS_JSON).expect("the vectors file is valid JSON")
+}
+
+/// A surface that returns numbers as `f64` (the WASM convention) normalises them
+/// before comparison: an integral float becomes an integer, recursively.
+pub fn normalize_numbers(v: Value) -> Value {
+    match v {
+        Value::Number(n) => match n.as_f64() {
+            Some(f) if n.is_f64() && f.fract() == 0.0 && f.abs() < 9_007_199_254_740_992.0 => json!(f as i64),
+            _ => Value::Number(n),
+        },
+        Value::Array(a) => Value::Array(a.into_iter().map(normalize_numbers).collect()),
+        Value::Object(o) => Value::Object(o.into_iter().map(|(k, v)| (k, normalize_numbers(v))).collect()),
+        other => other,
+    }
+}
+
+/// A number written as a JSON number or, beyond 2^53, as a decimal string.
+fn as_u64(v: &Value) -> u64 {
+    match v {
+        Value::String(s) => s.parse().expect("decimal u64"),
+        other => other.as_u64().expect("u64"),
+    }
+}
+
+/// Run every row of the file through `surface`. Panics (with the row's name) on the first mismatch.
+pub fn run_all<S: Surface>(surface: &S) -> Report {
+    let v = vectors();
+    let mut report = Report::default();
+
+    for row in v["authority"].as_array().expect("authority") {
+        let name = row["name"].as_str().unwrap();
+        let api = if row["api_base"].as_str().unwrap() == API_PROD {
+            API_PROD
+        } else {
+            API_DEV
+        };
+        let disc = &v["discoveries"][row["discovery"].as_str().unwrap()];
+        let got = surface.check_storage_url(row["url"].as_str().unwrap(), disc, api);
+        let want = row["expect"].as_str().unwrap();
+        match (&got, want) {
+            (Ok(()), "ok") => {}
+            (Err(code), want) if code == want => {}
+            _ => panic!("authority row {name:?}: expected {want}, got {got:?}"),
+        }
+        report.authority += 1;
+    }
+
+    for row in v["classify"].as_array().expect("classify") {
+        let name = row["name"].as_str().unwrap();
+        let got = surface.classify(
+            row["call"].as_str().unwrap(),
+            row["status"].as_u64().unwrap() as u16,
+            row["content_type"].as_str(),
+            row["body"].as_str().unwrap().as_bytes(),
+            row["retry_after"].as_str(),
+        );
+        let want = &row["expect"];
+        for key in ["kind", "millis", "status", "error"] {
+            assert_eq!(
+                got.get(key),
+                want.get(key),
+                "classify row {name:?}: field {key} (got {got})"
+            );
+        }
+        report.classify += 1;
+    }
+
+    for row in v["redact"].as_array().expect("redact") {
+        assert_eq!(
+            surface.redact(row["input"].as_str().unwrap()),
+            row["expect"].as_str().unwrap(),
+            "redact {row}"
+        );
+        report.redact += 1;
+    }
+    for row in v["scrub"].as_array().expect("scrub") {
+        assert_eq!(
+            surface.scrub(row["input"].as_str().unwrap()),
+            row["expect"].as_str().unwrap(),
+            "scrub {row}"
+        );
+        report.scrub += 1;
+    }
+    for row in v["chunk_length"].as_array().expect("chunk_length") {
+        let got = surface.chunk_length(
+            row["chunk_count"].as_u64().unwrap() as u32,
+            as_u64(&row["chunk_size"]),
+            as_u64(&row["encrypted_size"]),
+            row["index"].as_u64().unwrap() as u32,
+        );
+        let want = row["expect"].as_u64();
+        assert_eq!(got, want, "chunk_length row {:?}", row["name"]);
+        report.chunk_length += 1;
+    }
+
+    let file_id = v["file_id"].as_str().unwrap();
+    for scenario in v["planner"].as_array().expect("planner") {
+        let name = scenario["name"].as_str().unwrap();
+        let disc = &v["discoveries"][scenario["discovery"].as_str().unwrap()];
+        let seed = scenario["seed"].as_u64().unwrap();
+        for refusal in scenario["refusals"].as_array().into_iter().flatten() {
+            let mut p = surface.planner(disc, API_PROD, file_id, seed);
+            let first = p.poll(vectors_t0(&v));
+            assert_eq!(
+                first["kind"], "request_window",
+                "{name}: the first poll asks for a window"
+            );
+            let got = p.window_answered(&refusal["response"], vectors_t0(&v));
+            assert_eq!(
+                got,
+                Err(refusal["expect"].as_str().unwrap().to_string()),
+                "{name}: {}",
+                refusal["name"]
+            );
+            report.refusals += 1;
+        }
+        if let Some(steps) = scenario["steps"].as_array() {
+            let mut p = surface.planner(disc, API_PROD, file_id, seed);
+            for (i, step) in steps.iter().enumerate() {
+                run_step(&mut p, step).unwrap_or_else(|e| panic!("scenario {name:?}, step {i} {step}: {e}"));
+                report.steps += 1;
+            }
+        }
+        report.scenarios += 1;
+    }
+    report
+}
+
+fn vectors_t0(v: &Value) -> i64 {
+    v["t0_ms"].as_i64().unwrap()
+}
+
+fn run_step<P: PlannerSurface>(p: &mut P, step: &Value) -> Result<(), String> {
+    let now = step["now"].as_i64().unwrap_or(0);
+    let index = step["index"].as_u64().unwrap_or(0) as u32;
+    let expect = |got: Result<(), String>| -> Result<(), String> {
+        let want = step["expect"].as_str().unwrap_or("ok");
+        match (got, want) {
+            (Ok(()), "ok") => Ok(()),
+            (Err(code), want) if code == want => Ok(()),
+            (got, want) => Err(format!("expected {want}, got {got:?}")),
+        }
+    };
+    match step["op"].as_str().unwrap() {
+        "poll" => {
+            let got = p.poll(now);
+            let want = &step["expect"];
+            if let Some(range) = want.get("until_ms_between") {
+                let (lo, hi) = (range[0].as_i64().unwrap(), range[1].as_i64().unwrap());
+                let until = got["until_ms"]
+                    .as_i64()
+                    .ok_or_else(|| format!("no wait deadline in {got}"))?;
+                if got["kind"] != "wait" || !(lo..=hi).contains(&until) {
+                    return Err(format!("expected a wait ending in {lo}..={hi}, got {got}"));
+                }
+                return Ok(());
+            }
+            if &got == want {
+                Ok(())
+            } else {
+                Err(format!("expected {want}, got {got}"))
+            }
+        }
+        "window_answered" => expect(p.window_answered(&step["response"], now)),
+        "window_failed" => {
+            p.window_failed(&step["outcome"], now);
+            Ok(())
+        }
+        "window_malformed" => {
+            p.window_malformed();
+            Ok(())
+        }
+        "fetch_ok" => expect(p.fetch_ok(index)),
+        "fetch_failed" => expect(p.fetch_failed(index, now)),
+        "api_fetch_failed" => expect(p.api_fetch_failed(index)),
+        "chunk_unauthentic" => expect(p.chunk_unauthentic(index)),
+        "consumed" => expect(p.consumed(index)),
+        other => Err(format!("unknown op {other}")),
+    }
+}
+
+// ─────────────────────────── core's own surface ───────────────────────────
+
+/// Core, called directly: the reference the other surfaces are held to.
+pub struct CoreSurface;
+
+/// `{kind, ...}` for a poll result: the shape every surface returns.
+pub fn poll_json(poll: &Poll) -> Value {
+    match poll {
+        Poll::RequestWindow(r) => json!({"kind": poll.kind(), "request": {
+            "object_version_id": r.object_version_id, "start_index": r.start_index,
+            "count": r.count, "renewal": r.renewal}}),
+        Poll::Fetch { index, grant } => {
+            json!({"kind": poll.kind(), "index": index, "url": grant.url, "length": grant.length})
+        }
+        Poll::FetchViaApi {
+            index,
+            object_version_id,
+        } => json!({"kind": poll.kind(), "index": index, "object_version_id": object_version_id}),
+        Poll::Wait { until_ms } => json!({"kind": poll.kind(), "until_ms": until_ms}),
+        Poll::Done => json!({"kind": poll.kind()}),
+        Poll::Stop(v) => {
+            let mut verdict = json!({"kind": v.kind()});
+            if let super::Verdict::Terminal(t) = v {
+                verdict["status"] = json!(t.status);
+                verdict["error"] = json!(t.error);
+            }
+            json!({"kind": poll.kind(), "verdict": verdict})
+        }
+    }
+}
+
+/// `{kind, millis?, status?, error?}` for an outcome.
+pub fn outcome_json(outcome: &Outcome) -> Value {
+    let mut v = json!({"kind": outcome.kind()});
+    match outcome {
+        Outcome::Backoff(d) => v["millis"] = json!(d.as_millis() as u64),
+        Outcome::Terminal(t) => {
+            v["status"] = json!(t.status);
+            v["error"] = json!(t.error);
+        }
+        _ => {}
+    }
+    v
+}
+
+/// The inverse of [`outcome_json`] for the kinds a window failure can carry.
+pub fn outcome_from_json(v: &Value) -> Outcome {
+    match v["kind"].as_str().unwrap() {
+        "proceed" => Outcome::Proceed,
+        "not_supported" => Outcome::NotSupported,
+        "use_api_now" => Outcome::UseApiNow,
+        "api_for_this_file" => Outcome::ApiForThisFile,
+        "restart" => Outcome::Restart,
+        "backoff" => Outcome::Backoff(std::time::Duration::from_millis(v["millis"].as_u64().unwrap())),
+        "terminal" => Outcome::Terminal(Terminal {
+            status: v["status"].as_u64().unwrap() as u16,
+            error: v["error"].as_str().map(str::to_string),
+        }),
+        other => panic!("unknown outcome kind {other}"),
+    }
+}
+
+impl PlannerSurface for DownloadPlanner {
+    fn poll(&mut self, now_ms: i64) -> Value {
+        poll_json(&DownloadPlanner::poll(self, now_ms))
+    }
+    fn window_answered(&mut self, response: &Value, now_ms: i64) -> Result<(), String> {
+        let r: DownloadGrantResponse = serde_json::from_value(response.clone()).map_err(|e| e.to_string())?;
+        DownloadPlanner::window_answered(self, r, now_ms).map_err(|v| v.code().to_string())
+    }
+    fn window_failed(&mut self, outcome: &Value, now_ms: i64) {
+        DownloadPlanner::window_failed(self, outcome_from_json(outcome), now_ms);
+    }
+    fn window_malformed(&mut self) {
+        DownloadPlanner::window_malformed(self);
+    }
+    fn fetch_ok(&mut self, index: u32) -> Result<(), String> {
+        DownloadPlanner::fetch_ok(self, index).map_err(|e| e.code().to_string())
+    }
+    fn fetch_failed(&mut self, index: u32, now_ms: i64) -> Result<(), String> {
+        DownloadPlanner::fetch_failed(self, index, now_ms).map_err(|e| e.code().to_string())
+    }
+    fn api_fetch_failed(&mut self, index: u32) -> Result<(), String> {
+        DownloadPlanner::api_fetch_failed(self, index).map_err(|e| e.code().to_string())
+    }
+    fn chunk_unauthentic(&mut self, index: u32) -> Result<(), String> {
+        DownloadPlanner::chunk_unauthentic(self, index).map_err(|e| e.code().to_string())
+    }
+    fn consumed(&mut self, index: u32) -> Result<(), String> {
+        DownloadPlanner::consumed(self, index).map_err(|e| e.code().to_string())
+    }
+}
+
+impl Surface for CoreSurface {
+    type Planner = DownloadPlanner;
+
+    fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String> {
+        let d: Discovery = serde_json::from_value(discovery.clone()).map_err(|e| e.to_string())?;
+        check_storage_url(url, &d, api_base).map_err(|r| r.code().to_string())
+    }
+    fn classify(
+        &self,
+        call: &str,
+        status: u16,
+        content_type: Option<&str>,
+        body: &[u8],
+        retry_after: Option<&str>,
+    ) -> Value {
+        let answer = if status == 0 {
+            ApiAnswer::no_answer()
+        } else {
+            ApiAnswer::from_parts(status, content_type, body, retry_after)
+        };
+        outcome_json(&classify(Call::from_code(call).expect("known call"), &answer))
+    }
+    fn redact(&self, input: &str) -> String {
+        redact(input)
+    }
+    fn scrub(&self, input: &str) -> String {
+        scrub(input)
+    }
+    fn chunk_length(&self, chunk_count: u32, chunk_size: u64, encrypted_size: u64, index: u32) -> Option<u64> {
+        Geometry {
+            chunk_count,
+            chunk_size,
+            encrypted_size,
+            original_size: 0,
+        }
+        .chunk_length(index)
+    }
+    fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> DownloadPlanner {
+        let d: Discovery = serde_json::from_value(discovery.clone()).expect("discovery");
+        DownloadPlanner::new(PlannerConfig::from_discovery(&d, seed), d, api_base, file_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use super::*;
+
+    /// Wraps core and changes ONE answer, to prove the runner goes red (a guard that has never
+    /// failed is not trusted).
+    struct Drift(&'static str);
+
+    impl Surface for Drift {
+        type Planner = DownloadPlanner;
+        fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String> {
+            if self.0 == "authority" && url.contains("evil.test") {
+                return Ok(()); // a binding that lets an unlisted host through
+            }
+            CoreSurface.check_storage_url(url, discovery, api_base)
+        }
+        fn classify(&self, call: &str, status: u16, ct: Option<&str>, body: &[u8], ra: Option<&str>) -> Value {
+            let mut v = CoreSurface.classify(call, status, ct, body, ra);
+            if self.0 == "classify" && v["kind"] == "restart" {
+                v["kind"] = json!("api_for_this_file");
+            }
+            v
+        }
+        fn redact(&self, input: &str) -> String {
+            if self.0 == "redact" {
+                input.split('?').next().unwrap().to_string()
+            } else {
+                CoreSurface.redact(input)
+            }
+        }
+        fn scrub(&self, input: &str) -> String {
+            CoreSurface.scrub(input)
+        }
+        fn chunk_length(&self, n: u32, s: u64, e: u64, i: u32) -> Option<u64> {
+            if self.0 == "geometry" {
+                Some(0)
+            } else {
+                CoreSurface.chunk_length(n, s, e, i)
+            }
+        }
+        fn planner(&self, d: &Value, api: &str, file: &str, seed: u64) -> DownloadPlanner {
+            CoreSurface.planner(d, api, file, seed)
+        }
+    }
+
+    /// A planner that forgets the pin on renewals.
+    struct ForgetfulPlanner(DownloadPlanner);
+
+    impl PlannerSurface for ForgetfulPlanner {
+        fn poll(&mut self, now_ms: i64) -> Value {
+            let mut v = PlannerSurface::poll(&mut self.0, now_ms);
+            if v["kind"] == "request_window" && v["request"]["renewal"] == true {
+                v["request"]["object_version_id"] = Value::Null;
+            }
+            v
+        }
+        fn window_answered(&mut self, r: &Value, n: i64) -> Result<(), String> {
+            PlannerSurface::window_answered(&mut self.0, r, n)
+        }
+        fn window_failed(&mut self, o: &Value, n: i64) {
+            PlannerSurface::window_failed(&mut self.0, o, n)
+        }
+        fn window_malformed(&mut self) {
+            PlannerSurface::window_malformed(&mut self.0)
+        }
+        fn fetch_ok(&mut self, i: u32) -> Result<(), String> {
+            PlannerSurface::fetch_ok(&mut self.0, i)
+        }
+        fn fetch_failed(&mut self, i: u32, n: i64) -> Result<(), String> {
+            PlannerSurface::fetch_failed(&mut self.0, i, n)
+        }
+        fn api_fetch_failed(&mut self, i: u32) -> Result<(), String> {
+            PlannerSurface::api_fetch_failed(&mut self.0, i)
+        }
+        fn chunk_unauthentic(&mut self, i: u32) -> Result<(), String> {
+            PlannerSurface::chunk_unauthentic(&mut self.0, i)
+        }
+        fn consumed(&mut self, i: u32) -> Result<(), String> {
+            PlannerSurface::consumed(&mut self.0, i)
+        }
+    }
+
+    struct Forgetful;
+
+    impl Surface for Forgetful {
+        type Planner = ForgetfulPlanner;
+        fn check_storage_url(&self, u: &str, d: &Value, a: &str) -> Result<(), String> {
+            CoreSurface.check_storage_url(u, d, a)
+        }
+        fn classify(&self, c: &str, s: u16, ct: Option<&str>, b: &[u8], r: Option<&str>) -> Value {
+            CoreSurface.classify(c, s, ct, b, r)
+        }
+        fn redact(&self, i: &str) -> String {
+            CoreSurface.redact(i)
+        }
+        fn scrub(&self, i: &str) -> String {
+            CoreSurface.scrub(i)
+        }
+        fn chunk_length(&self, n: u32, s: u64, e: u64, i: u32) -> Option<u64> {
+            CoreSurface.chunk_length(n, s, e, i)
+        }
+        fn planner(&self, d: &Value, api: &str, file: &str, seed: u64) -> ForgetfulPlanner {
+            ForgetfulPlanner(CoreSurface.planner(d, api, file, seed))
+        }
+    }
+
+    #[test]
+    fn core_runs_every_row_of_the_vectors() {
+        let report = run_all(&CoreSurface);
+        assert_eq!(report, expected_report(), "a section that did not run is a failure");
+        // Counts, not adjectives: the file is not empty and the sections are what the review asked for.
+        assert!(
+            report.authority >= 55 && report.classify >= 30 && report.chunk_length >= 8,
+            "{report:?}"
+        );
+        assert!(
+            report.scenarios >= 12 && report.steps >= 60 && report.refusals >= 9,
+            "{report:?}"
+        );
+    }
+
+    #[test]
+    fn every_row_has_a_distinct_name() {
+        let v = vectors();
+        for section in ["authority", "classify", "chunk_length", "planner"] {
+            let mut names: Vec<&str> = v[section]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["name"].as_str().unwrap())
+                .collect();
+            let total = names.len();
+            names.sort_unstable();
+            names.dedup();
+            assert_eq!(names.len(), total, "duplicate row name in {section}");
+        }
+    }
+
+    #[test]
+    fn the_runner_goes_red_when_a_surface_drifts() {
+        for what in ["authority", "classify", "redact", "geometry"] {
+            let result = catch_unwind(AssertUnwindSafe(|| run_all(&Drift(what))));
+            assert!(
+                result.is_err(),
+                "a surface that drifted on {what} must fail the vectors"
+            );
+        }
+        let result = catch_unwind(AssertUnwindSafe(|| run_all(&Forgetful)));
+        assert!(
+            result.is_err(),
+            "a planner that forgets the pin on a renewal must fail the vectors"
+        );
+    }
+}

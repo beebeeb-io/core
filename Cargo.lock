@@ -281,6 +281,7 @@ dependencies = [
  "beebeeb-core",
  "beebeeb-types",
  "beebeeb-upload",
+ "serde_json",
  "thiserror",
  "tokio",
  "uniffi",

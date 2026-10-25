@@ -34,6 +34,25 @@ pub enum Call {
     DownloadGrant,
 }
 
+impl Call {
+    /// Stable machine name (bindings and vectors).
+    pub fn code(self) -> &'static str {
+        match self {
+            Call::Discovery => "discovery",
+            Call::DownloadGrant => "download_grant",
+        }
+    }
+
+    /// The inverse of [`Call::code`].
+    pub fn from_code(code: &str) -> Option<Call> {
+        match code {
+            "discovery" => Some(Call::Discovery),
+            "download_grant" => Some(Call::DownloadGrant),
+            _ => None,
+        }
+    }
+}
+
 /// What the client saw. Build it with [`ApiAnswer::from_parts`] (an HTTP
 /// answer) or [`ApiAnswer::no_answer`] (connect failure, timeout, TLS error).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +168,21 @@ pub enum Outcome {
     /// 401, 403, or a JSON 404: an authorization answer, not a routing one.
     /// The API path would refuse too; do not fall back.
     Terminal(Terminal),
+}
+
+impl Outcome {
+    /// Stable machine name of the variant (bindings and vectors).
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Outcome::Proceed => "proceed",
+            Outcome::NotSupported => "not_supported",
+            Outcome::UseApiNow => "use_api_now",
+            Outcome::ApiForThisFile => "api_for_this_file",
+            Outcome::Restart => "restart",
+            Outcome::Backoff(_) => "backoff",
+            Outcome::Terminal(_) => "terminal",
+        }
+    }
 }
 
 /// Classify an answer to `call`.

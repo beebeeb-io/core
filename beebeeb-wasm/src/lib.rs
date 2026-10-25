@@ -1985,6 +1985,585 @@ pub fn decrypt_names(master_key: &[u8], items: JsValue) -> Result<JsValue, JsErr
 }
 
 // ---------------------------------------------------------------------------
+// Direct S3 transfers (task 2173): the client rules of `beebeeb_core::direct_transfer`
+// ---------------------------------------------------------------------------
+//
+// Thin wrappers. ALL logic lives in core; this section converts types. The web
+// client keeps its own `fetch`; it asks these rules whether a link may be
+// followed, what an API answer means, and what to do next (windows, renewals,
+// fallbacks), exactly as the CLI, desktop and mobile do.
+//
+// Conventions (as in the onboarding section): enum-like values cross as
+// lowercase string `kind`s (the `kind()`/`code()` of the core type), objects
+// are plain JS objects (maps serialize as objects, missing values as `null`),
+// counts, lengths and times cross as `f64` (never `BigInt`; every length here
+// is far below 2^53), and a caller error is thrown as an `Error` with a stable
+// string `code`. A planner is ONE sequence's cursor: drive it from one place.
+
+use beebeeb_core::direct_transfer as dt;
+
+/// JS-facing serializer: plain objects, `null` for absent values.
+fn direct_to_js<T: serde::Serialize>(value: &T) -> Result<JsValue, JsError> {
+    let serializer = serde_wasm_bindgen::Serializer::new()
+        .serialize_maps_as_objects(true)
+        .serialize_missing_as_null(true);
+    value.serialize(&serializer).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// An `Error` with a stable `code` property.
+fn direct_error(message: &str, code: &str) -> JsValue {
+    let err = js_sys::Error::new(message);
+    let _ = js_sys::Reflect::set(&err, &"code".into(), &JsValue::from_str(code));
+    err.into()
+}
+
+/// A failure the caller can branch on. It crosses to JS as an `Error` with a stable
+/// `code`; in Rust (tests) it is plain data, so the exported methods that return it
+/// can be called and checked without a JS engine. The message never contains a URL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectFailure {
+    message: String,
+    code: &'static str,
+}
+
+impl DirectFailure {
+    fn new(message: impl Into<String>, code: &'static str) -> Self {
+        Self {
+            message: message.into(),
+            code,
+        }
+    }
+}
+
+impl From<DirectFailure> for JsValue {
+    fn from(failure: DirectFailure) -> JsValue {
+        direct_error(&failure.message, failure.code)
+    }
+}
+
+/// A call that does not fit the planner's state: a bug in the caller.
+impl From<dt::PlanError> for DirectFailure {
+    fn from(e: dt::PlanError) -> Self {
+        Self::new(e.to_string(), e.code())
+    }
+}
+
+/// Milliseconds since the epoch cross as `f64` (a JS number); core counts in `i64`.
+fn direct_ms(now_ms: f64) -> i64 {
+    now_ms as i64
+}
+
+fn direct_discovery_from_js(discovery: JsValue) -> Result<dt::Discovery, DirectFailure> {
+    serde_wasm_bindgen::from_value(discovery).map_err(|e| DirectFailure::new(e.to_string(), "discovery_invalid"))
+}
+
+fn direct_outcome_from_js(outcome: JsValue) -> Result<DirectOutcomeJs, DirectFailure> {
+    serde_wasm_bindgen::from_value(outcome).map_err(|e| DirectFailure::new(e.to_string(), "outcome_invalid"))
+}
+
+#[derive(serde::Serialize)]
+struct DirectConstantsJs {
+    cap_object_download_v1: &'static str,
+    cap_object_upload_v1: &'static str,
+    capabilities_header: &'static str,
+    discovery_path: &'static str,
+    max_window: u32,
+    default_window: u32,
+    chunk_overhead: u32,
+}
+
+/// `{ cap_object_download_v1, cap_object_upload_v1, capabilities_header,
+/// discovery_path, max_window, default_window, chunk_overhead }`: the contract's
+/// names and numbers, so no client re-types them.
+#[wasm_bindgen(js_name = directTransferConstants)]
+pub fn direct_transfer_constants() -> Result<JsValue, JsError> {
+    direct_to_js(&direct_constants())
+}
+
+fn direct_constants() -> DirectConstantsJs {
+    DirectConstantsJs {
+        cap_object_download_v1: dt::CAP_OBJECT_DOWNLOAD_V1,
+        cap_object_upload_v1: dt::CAP_OBJECT_UPLOAD_V1,
+        capabilities_header: dt::CAPABILITIES_HEADER,
+        discovery_path: dt::DISCOVERY_PATH,
+        max_window: dt::wire::MAX_WINDOW,
+        default_window: dt::wire::DEFAULT_WINDOW,
+        chunk_overhead: dt::wire::CHUNK_OVERHEAD as u32,
+    }
+}
+
+/// `/api/v1/files/{id}/download-grants` for `file_id`.
+#[wasm_bindgen(js_name = directDownloadGrantsPath)]
+pub fn direct_download_grants_path(file_id: &str) -> String {
+    dt::download_grants_path(file_id)
+}
+
+/// Decode a discovery body (`GET /api/v1/transfer/capabilities`). Returns
+/// `{ download, upload, storage_hosts, storage_buckets: [{host, bucket}],
+/// max_window, url_ttl_seconds }`; unknown fields are ignored and missing lists
+/// are empty. Throws an `Error` with `code` `discovery_too_large` or
+/// `discovery_malformed`.
+#[wasm_bindgen(js_name = parseDirectDiscovery)]
+pub fn parse_direct_discovery(body: &[u8]) -> Result<JsValue, JsValue> {
+    let discovery = direct_parse_discovery(body)?;
+    direct_to_js(&discovery).map_err(JsValue::from)
+}
+
+/// May the client follow this storage link? Throws an `Error` whose `code` is
+/// the refusal (`malformed`, `not_https`, `userinfo`, `ip_literal`, `loopback`,
+/// `bad_host`, `port`, `host_not_listed`, `bucket_not_listed`, `bad_path`); the
+/// message never contains the URL. `discovery` is the object
+/// `parseDirectDiscovery` returned; `api_base` is the API origin in use.
+#[wasm_bindgen(js_name = checkStorageUrl)]
+pub fn check_storage_url_js(url: &str, discovery: JsValue, api_base: &str) -> Result<(), JsValue> {
+    let discovery = direct_discovery_from_js(discovery)?;
+    direct_check_url(url, &discovery, api_base).map_err(JsValue::from)
+}
+
+/// A URL for a log line: scheme and host only.
+#[wasm_bindgen(js_name = redactUrl)]
+pub fn redact_url(url: &str) -> String {
+    dt::redact(url)
+}
+
+/// Text that may contain URLs, made safe to print.
+#[wasm_bindgen(js_name = scrubText)]
+pub fn scrub_text(text: &str) -> String {
+    dt::scrub(text)
+}
+
+/// What an API answer means, as `{ kind, millis?, status?, error? }` with `kind`
+/// one of `proceed`, `not_supported`, `use_api_now`, `api_for_this_file`,
+/// `restart`, `backoff` (with `millis`), `terminal` (with `status`, `error`).
+/// `call` is `"discovery"` or `"download_grant"`; pass `status` 0 when there was
+/// no HTTP answer. `body` is whatever was read of the body (at most 64 KiB is
+/// looked at); `retry_after` is the raw header value.
+#[wasm_bindgen(js_name = classifyDirectAnswer)]
+pub fn classify_direct_answer(
+    call: &str,
+    status: u16,
+    content_type: Option<String>,
+    body: &[u8],
+    retry_after: Option<String>,
+) -> Result<JsValue, JsValue> {
+    let outcome = direct_classify(call, status, content_type.as_deref(), body, retry_after.as_deref())?;
+    direct_to_js(&outcome).map_err(JsValue::from)
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum DirectOutcomeJs {
+    Proceed,
+    NotSupported,
+    UseApiNow,
+    ApiForThisFile,
+    Restart,
+    Backoff { millis: f64 },
+    Terminal { status: u16, error: Option<String> },
+}
+
+impl DirectOutcomeJs {
+    fn from_core(o: &dt::Outcome) -> Self {
+        match o {
+            dt::Outcome::Proceed => Self::Proceed,
+            dt::Outcome::NotSupported => Self::NotSupported,
+            dt::Outcome::UseApiNow => Self::UseApiNow,
+            dt::Outcome::ApiForThisFile => Self::ApiForThisFile,
+            dt::Outcome::Restart => Self::Restart,
+            dt::Outcome::Backoff(d) => Self::Backoff {
+                millis: d.as_millis() as f64,
+            },
+            dt::Outcome::Terminal(t) => Self::Terminal {
+                status: t.status,
+                error: t.error.clone(),
+            },
+            // `Outcome` is non-exhaustive: a variant added later is the safe one.
+            _ => Self::UseApiNow,
+        }
+    }
+
+    fn to_core(&self) -> dt::Outcome {
+        match self {
+            Self::Proceed => dt::Outcome::Proceed,
+            Self::NotSupported => dt::Outcome::NotSupported,
+            Self::UseApiNow => dt::Outcome::UseApiNow,
+            Self::ApiForThisFile => dt::Outcome::ApiForThisFile,
+            Self::Restart => dt::Outcome::Restart,
+            Self::Backoff { millis } => dt::Outcome::Backoff(std::time::Duration::from_millis(millis.max(0.0) as u64)),
+            Self::Terminal { status, error } => dt::Outcome::Terminal(dt::Terminal {
+                status: *status,
+                error: error.clone(),
+            }),
+        }
+    }
+}
+
+// ── seams: plain Rust (no `JsValue`), used by the wrappers and by the tests ──
+
+fn direct_parse_discovery(body: &[u8]) -> Result<dt::Discovery, DirectFailure> {
+    dt::Discovery::from_json(body).map_err(|e| {
+        let code = match e {
+            dt::WireError::TooLarge(_) => "discovery_too_large",
+            dt::WireError::Malformed => "discovery_malformed",
+        };
+        DirectFailure::new(e.to_string(), code)
+    })
+}
+
+fn direct_check_url(url: &str, discovery: &dt::Discovery, api_base: &str) -> Result<(), DirectFailure> {
+    dt::check_storage_url(url, discovery, api_base).map_err(|r| DirectFailure::new(r.to_string(), r.code()))
+}
+
+fn direct_classify(
+    call: &str,
+    status: u16,
+    content_type: Option<&str>,
+    body: &[u8],
+    retry_after: Option<&str>,
+) -> Result<DirectOutcomeJs, DirectFailure> {
+    let call = dt::Call::from_code(call).ok_or_else(|| DirectFailure::new("unknown call", "unknown_call"))?;
+    let answer = if status == 0 {
+        dt::ApiAnswer::no_answer()
+    } else {
+        dt::ApiAnswer::from_parts(status, content_type, body, retry_after)
+    };
+    Ok(DirectOutcomeJs::from_core(&dt::classify(call, &answer)))
+}
+
+#[derive(serde::Serialize)]
+struct DirectGrantRequestJs {
+    object_version_id: Option<String>,
+    start_index: u32,
+    count: u32,
+    renewal: bool,
+}
+
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum DirectVerdictJs {
+    ApiForFile,
+    Restart,
+    Terminal { status: u16, error: Option<String> },
+    Corrupt,
+}
+
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum DirectPollJs {
+    /// `POST` this body to `directDownloadGrantsPath(fileId)` with the
+    /// capability header.
+    RequestWindow {
+        request: DirectGrantRequestJs,
+    },
+    /// `GET url` with a client that sends nothing else (no cookies, no
+    /// `Authorization`), `redirect: "error"`; accept only `200` whose
+    /// `Content-Length` is `length`.
+    Fetch {
+        index: u32,
+        method: String,
+        url: String,
+        length: f64,
+        expires_at: String,
+    },
+    /// `GET /api/v1/files/{id}/chunks/{index}?object_version_id=<pinned>`.
+    FetchViaApi {
+        index: u32,
+        object_version_id: String,
+    },
+    /// `until_ms` is the next moment the planner can act by itself, `null` when
+    /// it waits for a request that is outstanding.
+    Wait {
+        until_ms: Option<f64>,
+    },
+    Done,
+    Stop {
+        verdict: DirectVerdictJs,
+    },
+}
+
+impl DirectPollJs {
+    fn from_core(p: &dt::Poll) -> Self {
+        match p {
+            dt::Poll::RequestWindow(r) => Self::RequestWindow {
+                request: DirectGrantRequestJs {
+                    object_version_id: r.object_version_id.clone(),
+                    start_index: r.start_index,
+                    count: r.count,
+                    renewal: r.renewal,
+                },
+            },
+            dt::Poll::Fetch { index, grant } => Self::Fetch {
+                index: *index,
+                method: grant.method.clone(),
+                url: grant.url.clone(),
+                length: grant.length as f64,
+                expires_at: grant.expires_at.clone(),
+            },
+            dt::Poll::FetchViaApi {
+                index,
+                object_version_id,
+            } => Self::FetchViaApi {
+                index: *index,
+                object_version_id: object_version_id.clone(),
+            },
+            dt::Poll::Wait { until_ms } => Self::Wait {
+                until_ms: until_ms.map(|t| t as f64),
+            },
+            dt::Poll::Done => Self::Done,
+            dt::Poll::Stop(v) => Self::Stop {
+                verdict: match v {
+                    dt::Verdict::ApiForFile => DirectVerdictJs::ApiForFile,
+                    dt::Verdict::Restart => DirectVerdictJs::Restart,
+                    dt::Verdict::Terminal(t) => DirectVerdictJs::Terminal {
+                        status: t.status,
+                        error: t.error.clone(),
+                    },
+                    dt::Verdict::Corrupt => DirectVerdictJs::Corrupt,
+                },
+            },
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+struct DirectGeometryJs {
+    chunk_count: u32,
+    chunk_size: f64,
+    encrypted_size: f64,
+    original_size: f64,
+}
+
+/// The download planner for ONE file: when to ask the API for a window of
+/// links, which chunk to fetch next (at most 4 in flight, in order), when to
+/// renew a link, and when a chunk goes to the pinned API route. It performs no
+/// I/O and holds no clock: pass `Date.now()` as `nowMs` on every call.
+///
+/// Drive it from one place:
+///
+/// ```js
+/// const p = new WasmDownloadPlanner(discovery, apiBase, fileId, seed)
+/// for (;;) {
+///   const w = p.poll(Date.now())
+///   switch (w.kind) {
+///     case "request_window": /* POST, then windowAnswered(body) or windowFailed(outcome) */ break
+///     case "fetch": /* GET w.url, then fetchOk(w.index) or fetchFailed(w.index) */ break
+///     case "fetch_via_api": /* pinned route, then fetchOk or apiFetchFailed */ break
+///     case "wait": /* sleep until w.until_ms or until a request returns */ break
+///     case "done": return
+///     case "stop": /* discard partial output and act on w.verdict.kind */ return
+///   }
+///   // chunks are decrypted IN ORDER: after each, consumed(index); if one does
+///   // not authenticate, chunkUnauthentic(index)
+/// }
+/// ```
+#[wasm_bindgen]
+pub struct WasmDownloadPlanner {
+    inner: dt::DownloadPlanner,
+}
+
+#[wasm_bindgen]
+impl WasmDownloadPlanner {
+    /// `discovery` is the object `parseDirectDiscovery` returned; `jitter_seed`
+    /// any integer (use random bytes in production).
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        discovery: JsValue,
+        api_base: &str,
+        file_id: &str,
+        jitter_seed: f64,
+    ) -> Result<WasmDownloadPlanner, JsValue> {
+        let discovery = direct_discovery_from_js(discovery)?;
+        Ok(Self::from_parts(discovery, api_base, file_id, jitter_seed as u64))
+    }
+
+    /// What to do now: `{ kind, ... }` (see the class docs).
+    pub fn poll(&mut self, now_ms: f64) -> Result<JsValue, JsError> {
+        direct_to_js(&self.poll_dto(direct_ms(now_ms)))
+    }
+
+    /// The window answer for the outstanding request, as the raw response body
+    /// (`Uint8Array`). Returns `"accepted"`, `"malformed"` (the body is not the
+    /// contract's JSON; handled like any window the server could not serve), or
+    /// the code of the contract violation (`transport`, `file_mismatch`,
+    /// `version_changed`, `geometry`, `grants`, `length`, `method`,
+    /// `authority_<refusal>`, `expiry`, `unexpected`). It never throws: poll
+    /// again.
+    #[wasm_bindgen(js_name = windowAnswered)]
+    pub fn window_answered(&mut self, body: &[u8], now_ms: f64) -> String {
+        self.answered_code(body, direct_ms(now_ms))
+    }
+
+    /// The window request failed. `outcome` is what `classifyDirectAnswer`
+    /// returned for the answer (or `{ kind: "use_api_now" }` for a network
+    /// error).
+    #[wasm_bindgen(js_name = windowFailed)]
+    pub fn window_failed(&mut self, outcome: JsValue, now_ms: f64) -> Result<(), JsValue> {
+        let outcome = direct_outcome_from_js(outcome)?;
+        self.failed_core(&outcome, direct_ms(now_ms));
+        Ok(())
+    }
+
+    /// A 2xx window response whose body could not be decoded at all.
+    #[wasm_bindgen(js_name = windowMalformed)]
+    pub fn window_malformed(&mut self) {
+        self.inner.window_malformed();
+    }
+
+    /// Chunk `index` arrived whole (status 200 and the right length).
+    #[wasm_bindgen(js_name = fetchOk)]
+    pub fn fetch_ok(&mut self, index: u32) -> Result<(), DirectFailure> {
+        self.inner.fetch_ok(index).map_err(DirectFailure::from)
+    }
+
+    /// The transfer of chunk `index` from storage failed (any non-200, a short
+    /// body, a wrong length, a network error, an expired link).
+    #[wasm_bindgen(js_name = fetchFailed)]
+    pub fn fetch_failed(&mut self, index: u32, now_ms: f64) -> Result<(), DirectFailure> {
+        self.inner
+            .fetch_failed(index, direct_ms(now_ms))
+            .map_err(DirectFailure::from)
+    }
+
+    /// The pinned API route failed for chunk `index` after the caller's own retries.
+    #[wasm_bindgen(js_name = apiFetchFailed)]
+    pub fn api_fetch_failed(&mut self, index: u32) -> Result<(), DirectFailure> {
+        self.inner.api_fetch_failed(index).map_err(DirectFailure::from)
+    }
+
+    /// Chunk `index` arrived but did not authenticate when decrypted.
+    #[wasm_bindgen(js_name = chunkUnauthentic)]
+    pub fn chunk_unauthentic(&mut self, index: u32) -> Result<(), DirectFailure> {
+        self.inner.chunk_unauthentic(index).map_err(DirectFailure::from)
+    }
+
+    /// Chunk `index` has been decrypted and written. Strictly in order.
+    pub fn consumed(&mut self, index: u32) -> Result<(), DirectFailure> {
+        self.inner.consumed(index).map_err(DirectFailure::from)
+    }
+
+    /// `{ chunk_count, chunk_size, encrypted_size, original_size }` once the
+    /// first window was accepted, else `null`.
+    pub fn geometry(&self) -> Result<JsValue, JsError> {
+        direct_to_js(&self.geometry_dto())
+    }
+
+    /// The pinned `object_version_id`, or `null` before the first window.
+    #[wasm_bindgen(js_name = pinnedVersion)]
+    pub fn pinned_version(&self) -> Option<String> {
+        self.inner.pinned_version().map(str::to_string)
+    }
+
+    /// Chunks decrypted and written so far.
+    #[wasm_bindgen(js_name = consumedCount)]
+    pub fn consumed_count(&self) -> u32 {
+        self.inner.consumed_count()
+    }
+
+    /// Chunk requests (storage or API) currently outstanding.
+    #[wasm_bindgen(js_name = inFlight)]
+    pub fn in_flight(&self) -> u32 {
+        self.inner.in_flight() as u32
+    }
+}
+
+impl WasmDownloadPlanner {
+    fn from_parts(discovery: dt::Discovery, api_base: &str, file_id: &str, seed: u64) -> Self {
+        let config = dt::PlannerConfig::from_discovery(&discovery, seed);
+        Self {
+            inner: dt::DownloadPlanner::new(config, discovery, api_base, file_id),
+        }
+    }
+
+    fn failed_core(&mut self, outcome: &DirectOutcomeJs, now_ms: i64) {
+        self.inner.window_failed(outcome.to_core(), now_ms);
+    }
+
+    fn poll_dto(&mut self, now_ms: i64) -> DirectPollJs {
+        DirectPollJs::from_core(&self.inner.poll(now_ms))
+    }
+
+    fn answered_code(&mut self, body: &[u8], now_ms: i64) -> String {
+        match dt::DownloadGrantResponse::from_json(body) {
+            Err(_) => {
+                self.inner.window_malformed();
+                "malformed".to_string()
+            }
+            Ok(response) => match self.inner.window_answered(response, now_ms) {
+                Ok(()) => "accepted".to_string(),
+                Err(violation) => violation.code().to_string(),
+            },
+        }
+    }
+
+    fn geometry_dto(&self) -> Option<DirectGeometryJs> {
+        self.inner.geometry().map(|g| DirectGeometryJs {
+            chunk_count: g.chunk_count,
+            chunk_size: g.chunk_size as f64,
+            encrypted_size: g.encrypted_size as f64,
+            original_size: g.original_size as f64,
+        })
+    }
+}
+
+/// How long a discovery answer is trusted, and whether to ask again: one per API base.
+/// `lookup(nowMs)` is `{ kind: "fetch" | "cached" | "use_api", discovery? }`;
+/// `record(outcome, body, nowMs)` takes the `classifyDirectAnswer` result and the
+/// discovery body (or `null`).
+#[wasm_bindgen]
+pub struct WasmDirectDiscoveryCache {
+    inner: dt::DiscoveryCache,
+}
+
+impl Default for WasmDirectDiscoveryCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[wasm_bindgen]
+impl WasmDirectDiscoveryCache {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> WasmDirectDiscoveryCache {
+        Self {
+            inner: dt::DiscoveryCache::new(),
+        }
+    }
+
+    pub fn lookup(&self, now_ms: f64) -> Result<JsValue, JsError> {
+        direct_to_js(&self.lookup_dto(direct_ms(now_ms)))
+    }
+
+    pub fn record(&mut self, outcome: JsValue, body: Option<Vec<u8>>, now_ms: f64) -> Result<(), JsValue> {
+        let outcome = direct_outcome_from_js(outcome)?;
+        self.record_core(&outcome, body.as_deref(), direct_ms(now_ms));
+        Ok(())
+    }
+}
+
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum DirectLookupJs {
+    Fetch,
+    Cached { discovery: dt::Discovery },
+    UseApi,
+}
+
+impl WasmDirectDiscoveryCache {
+    fn lookup_dto(&self, now_ms: i64) -> DirectLookupJs {
+        match self.inner.lookup(now_ms) {
+            dt::Lookup::Fetch => DirectLookupJs::Fetch,
+            dt::Lookup::Cached(discovery) => DirectLookupJs::Cached { discovery },
+            dt::Lookup::UseApi => DirectLookupJs::UseApi,
+        }
+    }
+
+    fn record_core(&mut self, outcome: &DirectOutcomeJs, body: Option<&[u8]>, now_ms: i64) {
+        let discovery = body.and_then(|b| dt::Discovery::from_json(b).ok());
+        self.inner.record(&outcome.to_core(), discovery, now_ms);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -2359,5 +2938,247 @@ mod tests {
         assert_eq!(meta0.chunk_format.as_u8(), 0);
         assert!(name_for_core(&fk, "x", None, 1).is_err());
         assert!(name_for_core(&fk, "x", None, 7).is_err());
+    }
+}
+
+#[cfg(test)]
+mod direct_vector_tests {
+    //! The cross-client contract vectors, run through this crate's exported functions and
+    //! methods wherever they can run without a JS engine, and otherwise through the seam the
+    //! `JsValue` wrapper calls. The same file `beebeeb-core` runs through core directly: a
+    //! wrapper that drifts from core fails here.
+
+    use beebeeb_core::direct_transfer::vectors::{self, PlannerSurface, Surface};
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    struct WasmSurface;
+
+    struct WasmPlannerSurface(WasmDownloadPlanner);
+
+    /// The shape the vectors use: the flat fetch has no `method`/`expires_at`, numbers are integers.
+    fn poll_value(dto: DirectPollJs) -> Value {
+        let mut v = serde_json::to_value(dto).unwrap();
+        if v["kind"] == "fetch" {
+            v.as_object_mut().unwrap().remove("method");
+            v.as_object_mut().unwrap().remove("expires_at");
+        }
+        vectors::normalize_numbers(v)
+    }
+
+    impl Surface for WasmSurface {
+        type Planner = WasmPlannerSurface;
+
+        fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String> {
+            let d: dt::Discovery = serde_json::from_value(discovery.clone()).map_err(|e| e.to_string())?;
+            direct_check_url(url, &d, api_base).map_err(|f| f.code.to_string())
+        }
+
+        fn classify(
+            &self,
+            call: &str,
+            status: u16,
+            content_type: Option<&str>,
+            body: &[u8],
+            retry_after: Option<&str>,
+        ) -> Value {
+            let outcome = direct_classify(call, status, content_type, body, retry_after).expect("known call");
+            vectors::normalize_numbers(serde_json::to_value(outcome).unwrap())
+        }
+
+        fn redact(&self, input: &str) -> String {
+            redact_url(input)
+        }
+
+        fn scrub(&self, input: &str) -> String {
+            scrub_text(input)
+        }
+
+        fn chunk_length(&self, chunk_count: u32, chunk_size: u64, encrypted_size: u64, index: u32) -> Option<u64> {
+            dt::Geometry {
+                chunk_count,
+                chunk_size,
+                encrypted_size,
+                original_size: 0,
+            }
+            .chunk_length(index)
+        }
+
+        fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> WasmPlannerSurface {
+            let d: dt::Discovery = serde_json::from_value(discovery.clone()).unwrap();
+            WasmPlannerSurface(WasmDownloadPlanner::from_parts(d, api_base, file_id, seed))
+        }
+    }
+
+    impl PlannerSurface for WasmPlannerSurface {
+        fn poll(&mut self, now_ms: i64) -> Value {
+            poll_value(self.0.poll_dto(now_ms))
+        }
+
+        fn window_answered(&mut self, response: &Value, now_ms: i64) -> Result<(), String> {
+            match self
+                .0
+                .window_answered(&serde_json::to_vec(response).unwrap(), now_ms as f64)
+                .as_str()
+            {
+                "accepted" => Ok(()),
+                code => Err(code.to_string()),
+            }
+        }
+
+        fn window_failed(&mut self, outcome: &Value, now_ms: i64) {
+            let outcome: DirectOutcomeJs = serde_json::from_value(outcome.clone()).unwrap();
+            self.0.failed_core(&outcome, now_ms);
+        }
+
+        fn window_malformed(&mut self) {
+            self.0.window_malformed();
+        }
+
+        fn fetch_ok(&mut self, index: u32) -> Result<(), String> {
+            self.0.fetch_ok(index).map_err(|f| f.code.to_string())
+        }
+
+        fn fetch_failed(&mut self, index: u32, now_ms: i64) -> Result<(), String> {
+            self.0
+                .fetch_failed(index, now_ms as f64)
+                .map_err(|f| f.code.to_string())
+        }
+
+        fn api_fetch_failed(&mut self, index: u32) -> Result<(), String> {
+            self.0.api_fetch_failed(index).map_err(|f| f.code.to_string())
+        }
+
+        fn chunk_unauthentic(&mut self, index: u32) -> Result<(), String> {
+            self.0.chunk_unauthentic(index).map_err(|f| f.code.to_string())
+        }
+
+        fn consumed(&mut self, index: u32) -> Result<(), String> {
+            self.0.consumed(index).map_err(|f| f.code.to_string())
+        }
+    }
+
+    #[test]
+    fn the_wasm_seams_pass_every_row_of_the_vectors() {
+        let report = vectors::run_all(&WasmSurface);
+        assert_eq!(
+            report,
+            vectors::expected_report(),
+            "a section that did not run is a failure"
+        );
+    }
+
+    #[test]
+    fn discovery_decoding_and_the_cache_follow_core() {
+        let body =
+            br#"{"download":["object-download-v1"],"upload":null,"storage_hosts":["s3.storage.test"],"future":1}"#;
+        let d = direct_parse_discovery(body).unwrap();
+        assert!(d.offers_download() && d.upload.is_empty());
+        assert_eq!(direct_parse_discovery(b"[]").unwrap_err().code, "discovery_malformed");
+        assert_eq!(
+            direct_parse_discovery(&vec![b' '; dt::wire::MAX_DISCOVERY_BYTES + 1])
+                .unwrap_err()
+                .code,
+            "discovery_too_large"
+        );
+
+        let mut cache = WasmDirectDiscoveryCache::new();
+        assert!(matches!(cache.lookup_dto(0), DirectLookupJs::Fetch));
+        cache.record_core(&DirectOutcomeJs::Proceed, Some(body), 1_000);
+        assert!(matches!(cache.lookup_dto(1_000), DirectLookupJs::Cached { .. }));
+        assert!(
+            matches!(cache.lookup_dto(1_000 + 10 * 60 * 1000), DirectLookupJs::Fetch),
+            "trusted for 10 minutes"
+        );
+        // A success whose body does not decode is a failed attempt; two of them stop the asking.
+        let mut bad = WasmDirectDiscoveryCache::new();
+        bad.record_core(&DirectOutcomeJs::Proceed, Some(b"nope"), 0);
+        bad.record_core(&DirectOutcomeJs::Proceed, None, 1);
+        assert!(matches!(bad.lookup_dto(2), DirectLookupJs::UseApi));
+        let mut gone = WasmDirectDiscoveryCache::new();
+        gone.record_core(&DirectOutcomeJs::NotSupported, None, 0);
+        assert!(
+            matches!(gone.lookup_dto(1), DirectLookupJs::UseApi),
+            "NotSupported is remembered"
+        );
+    }
+
+    #[test]
+    fn classify_refuses_an_unknown_call_and_outcomes_round_trip() {
+        assert_eq!(
+            direct_classify("nope", 200, None, b"", None).unwrap_err().code,
+            "unknown_call"
+        );
+        for outcome in [
+            json!({"kind": "backoff", "millis": 1500.0}),
+            json!({"kind": "terminal", "status": 403, "error": null}),
+            json!({"kind": "restart"}),
+        ] {
+            let parsed: DirectOutcomeJs = serde_json::from_value(outcome.clone()).unwrap();
+            assert_eq!(
+                serde_json::to_value(DirectOutcomeJs::from_core(&parsed.to_core())).unwrap(),
+                outcome
+            );
+        }
+    }
+
+    #[test]
+    fn the_constants_are_the_contracts_names_and_numbers() {
+        let c = serde_json::to_value(direct_constants()).unwrap();
+        assert_eq!(
+            c,
+            json!({
+                "cap_object_download_v1": "object-download-v1",
+                "cap_object_upload_v1": "object-upload-v1",
+                "capabilities_header": "X-Beebeeb-Capabilities",
+                "discovery_path": "/api/v1/transfer/capabilities",
+                "max_window": 32,
+                "default_window": 8,
+                "chunk_overhead": 28,
+            })
+        );
+        assert_eq!(
+            direct_download_grants_path("11111111-1111-4111-8111-111111111111"),
+            "/api/v1/files/11111111-1111-4111-8111-111111111111/download-grants"
+        );
+    }
+
+    #[test]
+    fn no_signature_survives_the_planner_debug_or_the_error_text() {
+        // A planner that holds signed links: its Debug shows none of them.
+        let vectors = vectors::vectors();
+        let discovery: dt::Discovery = serde_json::from_value(vectors["discoveries"]["std"].clone()).unwrap();
+        let mut planner = WasmDownloadPlanner::from_parts(discovery, "https://api.beebeeb.test", "f", 1);
+        let window = json!({
+            "transport": "object-download-v1",
+            "file_id": "f",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 1, "chunk_size": 1000, "encrypted_size": 1028, "original_size": 1000,
+            "grants": [{"index": 0, "method": "GET", "length": 1028, "expires_at": "2027-01-15T08:05:00Z",
+                        "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SECRETSIG"}],
+            "next_index": null,
+        });
+        planner.poll_dto(1_800_000_000_000);
+        assert_eq!(
+            planner.window_answered(&serde_json::to_vec(&window).unwrap(), 1_800_000_000_000.0),
+            "accepted"
+        );
+        assert!(matches!(
+            planner.poll_dto(1_800_000_000_000),
+            DirectPollJs::Fetch { .. }
+        ));
+        let shown = format!("{:?}", planner.inner);
+        assert!(!shown.contains("SECRETSIG") && !shown.contains("X-Amz"), "{shown}");
+        // The error a refused link throws never contains the link.
+        let failure = direct_check_url(
+            "https://evil.test@s3.storage.test/bb-01/k?X-Amz-Signature=SECRETSIG",
+            &dt::Discovery::default(),
+            "https://api.beebeeb.test",
+        )
+        .unwrap_err();
+        let shown = format!("{failure:?} {}", failure.message);
+        assert_eq!(failure.code, "userinfo");
+        assert!(!shown.contains("SECRETSIG") && !shown.contains("evil.test"), "{shown}");
     }
 }

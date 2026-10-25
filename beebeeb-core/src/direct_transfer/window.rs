@@ -235,6 +235,72 @@ pub enum Violation {
     Unexpected,
 }
 
+impl Violation {
+    /// Stable machine name (bindings and vectors). A refused link carries the
+    /// reason as `authority_<refusal code>`.
+    pub fn code(self) -> &'static str {
+        match self {
+            Violation::Transport => "transport",
+            Violation::FileMismatch => "file_mismatch",
+            Violation::VersionChanged => "version_changed",
+            Violation::Geometry => "geometry",
+            Violation::Grants => "grants",
+            Violation::Length => "length",
+            Violation::Method => "method",
+            Violation::Authority(Refusal::Malformed) => "authority_malformed",
+            Violation::Authority(Refusal::NotHttps) => "authority_not_https",
+            Violation::Authority(Refusal::Userinfo) => "authority_userinfo",
+            Violation::Authority(Refusal::IpLiteral) => "authority_ip_literal",
+            Violation::Authority(Refusal::Loopback) => "authority_loopback",
+            Violation::Authority(Refusal::BadHost) => "authority_bad_host",
+            Violation::Authority(Refusal::Port) => "authority_port",
+            Violation::Authority(Refusal::HostNotListed) => "authority_host_not_listed",
+            Violation::Authority(Refusal::BucketNotListed) => "authority_bucket_not_listed",
+            Violation::Authority(Refusal::BadPath) => "authority_bad_path",
+            Violation::Expiry => "expiry",
+            Violation::Unexpected => "unexpected",
+        }
+    }
+}
+
+impl PlanError {
+    /// Stable machine name (bindings and vectors).
+    pub fn code(self) -> &'static str {
+        match self {
+            PlanError::NotInFlight(_) => "not_in_flight",
+            PlanError::NotFetched(_) => "not_fetched",
+            PlanError::OutOfOrder { .. } => "out_of_order",
+            PlanError::ApiRouteFailure(_) => "api_route_failure",
+        }
+    }
+}
+
+impl Verdict {
+    /// Stable machine name of the variant (bindings and vectors).
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Verdict::ApiForFile => "api_for_file",
+            Verdict::Restart => "restart",
+            Verdict::Terminal(_) => "terminal",
+            Verdict::Corrupt => "corrupt",
+        }
+    }
+}
+
+impl Poll {
+    /// Stable machine name of the variant (bindings and vectors).
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Poll::RequestWindow(_) => "request_window",
+            Poll::Fetch { .. } => "fetch",
+            Poll::FetchViaApi { .. } => "fetch_via_api",
+            Poll::Wait { .. } => "wait",
+            Poll::Done => "done",
+            Poll::Stop(_) => "stop",
+        }
+    }
+}
+
 /// A call that does not fit the planner's state: a bug in the caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PlanError {

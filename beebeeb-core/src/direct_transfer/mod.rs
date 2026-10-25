@@ -45,6 +45,10 @@ pub mod classify;
 pub mod window;
 pub mod wire;
 
+/// Contract vectors and their interpreter (test-support only); see the module docs.
+#[cfg(any(test, feature = "test-support"))]
+pub mod vectors;
+
 pub use authority::{MAX_URL_LEN, Refusal, check_storage_url, redact, scrub};
 pub use classify::{ApiAnswer, Call, Outcome, Terminal, classify};
 pub use window::{DownloadPlanner, Geometry, PlanError, PlannerConfig, Poll, Verdict, Violation};
