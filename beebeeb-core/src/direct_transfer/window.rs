@@ -2744,8 +2744,7 @@ mod tests {
                 Outcome::ApiForThisFile,
                 Outcome::NotSupported,
                 Outcome::Retry,
-                Outcome::Regrant,
-                Outcome::Backoff(secs(1)),
+                Outcome::Backoff(Duration::from_secs(1)),
             ] {
                 let mut p = with_chunk_zero_on_the_api_route();
                 reach(&mut p, &existing);
