@@ -4334,6 +4334,12 @@ pub struct DirectConstantsDto {
     pub max_window: u32,
     pub default_window: u32,
     pub chunk_overhead: u32,
+    /// The time bounds every client applies (clients design 6.2), in milliseconds.
+    pub storage_connect_timeout_ms: u32,
+    pub storage_get_idle_ms: u32,
+    pub discovery_timeout_ms: u32,
+    pub api_call_timeout_ms: u32,
+    pub background_put_resource_timeout_ms: u32,
 }
 
 #[uniffi::export]
@@ -4346,7 +4352,38 @@ pub fn direct_transfer_constants() -> DirectConstantsDto {
         max_window: dt::wire::MAX_WINDOW,
         default_window: dt::wire::DEFAULT_WINDOW,
         chunk_overhead: dt::wire::CHUNK_OVERHEAD as u32,
+        storage_connect_timeout_ms: timeout_ms(dt::timeouts::STORAGE_CONNECT_TIMEOUT),
+        storage_get_idle_ms: timeout_ms(dt::timeouts::STORAGE_GET_IDLE),
+        discovery_timeout_ms: timeout_ms(dt::timeouts::DISCOVERY_TIMEOUT),
+        api_call_timeout_ms: timeout_ms(dt::timeouts::API_CALL_TIMEOUT),
+        background_put_resource_timeout_ms: timeout_ms(dt::timeouts::BACKGROUND_PUT_RESOURCE_TIMEOUT),
     }
+}
+
+/// A fixed bound in milliseconds (every one is a few minutes at most).
+fn timeout_ms(d: std::time::Duration) -> u32 {
+    u32::try_from(d.as_millis()).unwrap_or(u32::MAX)
+}
+
+/// The most a storage PUT of `len` ciphertext bytes may take, in milliseconds: a minute plus the
+/// chunk at 1 Mbit/s (`60 s + ceil(len / 131072) s`). Any length is safe: a huge one is a long timeout.
+#[uniffi::export]
+pub fn direct_storage_put_total_ms(len: u64) -> u64 {
+    u64::try_from(dt::timeouts::storage_put_total(len).as_millis()).unwrap_or(u64::MAX)
+}
+
+/// The most a storage GET of `len` ciphertext bytes may take, in milliseconds (the same formula as a PUT).
+#[uniffi::export]
+pub fn direct_storage_get_total_ms(len: u64) -> u64 {
+    u64::try_from(dt::timeouts::storage_get_total(len).as_millis()).unwrap_or(u64::MAX)
+}
+
+/// A background URL session's resource timeout for a storage PUT, in milliseconds. No app timer runs in
+/// the background, so this is the only bound; it stays under the server's late-write fence from any
+/// start up to the link's expiry.
+#[uniffi::export]
+pub fn direct_background_put_resource_timeout_ms() -> u64 {
+    u64::try_from(dt::timeouts::BACKGROUND_PUT_RESOURCE_TIMEOUT.as_millis()).unwrap_or(u64::MAX)
 }
 
 /// `/api/v1/files/{id}/download-grants` for `file_id`.
@@ -5500,6 +5537,30 @@ mod direct_transfer_binding_tests {
             report,
             vectors::expected_report(),
             "a section that did not run is a failure"
+        );
+    }
+
+    #[test]
+    fn the_time_bounds_and_the_storage_totals_follow_core() {
+        // A 4 MiB chunk (plus the AEAD overhead): 60 s + 33 s, in milliseconds.
+        let len = 4 * 1024 * 1024 + 28;
+        assert_eq!(direct_storage_put_total_ms(len), 93_000);
+        assert_eq!(direct_storage_get_total_ms(len), 93_000);
+        assert_eq!(direct_storage_put_total_ms(0), 60_000);
+        assert_eq!(direct_background_put_resource_timeout_ms(), 240_000);
+        // A hostile length is a long timeout, not a wrap to a short one.
+        assert!(direct_storage_put_total_ms(u64::MAX) > direct_storage_put_total_ms(256 * 1024 * 1024 + 28));
+        let c = direct_transfer_constants();
+        assert_eq!(
+            (
+                c.storage_connect_timeout_ms,
+                c.storage_get_idle_ms,
+                c.discovery_timeout_ms,
+                c.api_call_timeout_ms,
+                c.background_put_resource_timeout_ms
+            ),
+            (15_000, 30_000, 15_000, 60_000, 240_000),
+            "the numbers of the clients design, 6.2"
         );
     }
 

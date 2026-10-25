@@ -2144,11 +2144,18 @@ struct DirectConstantsJs {
     max_window: u32,
     default_window: u32,
     chunk_overhead: u32,
+    storage_connect_timeout_ms: u32,
+    storage_get_idle_ms: u32,
+    discovery_timeout_ms: u32,
+    api_call_timeout_ms: u32,
+    background_put_resource_timeout_ms: u32,
 }
 
 /// `{ cap_object_download_v1, cap_object_upload_v1, capabilities_header,
-/// discovery_path, max_window, default_window, chunk_overhead }`: the contract's
-/// names and numbers, so no client re-types them.
+/// discovery_path, max_window, default_window, chunk_overhead,
+/// storage_connect_timeout_ms, storage_get_idle_ms, discovery_timeout_ms,
+/// api_call_timeout_ms, background_put_resource_timeout_ms }`: the contract's
+/// names and numbers, and the time bounds every client applies, so no client re-types them.
 #[wasm_bindgen(js_name = directTransferConstants)]
 pub fn direct_transfer_constants() -> Result<JsValue, JsError> {
     direct_to_js(&direct_constants())
@@ -2163,7 +2170,41 @@ fn direct_constants() -> DirectConstantsJs {
         max_window: dt::wire::MAX_WINDOW,
         default_window: dt::wire::DEFAULT_WINDOW,
         chunk_overhead: dt::wire::CHUNK_OVERHEAD as u32,
+        storage_connect_timeout_ms: direct_timeout_ms(dt::timeouts::STORAGE_CONNECT_TIMEOUT),
+        storage_get_idle_ms: direct_timeout_ms(dt::timeouts::STORAGE_GET_IDLE),
+        discovery_timeout_ms: direct_timeout_ms(dt::timeouts::DISCOVERY_TIMEOUT),
+        api_call_timeout_ms: direct_timeout_ms(dt::timeouts::API_CALL_TIMEOUT),
+        background_put_resource_timeout_ms: direct_timeout_ms(dt::timeouts::BACKGROUND_PUT_RESOURCE_TIMEOUT),
     }
+}
+
+/// A fixed bound in milliseconds (every one is a few minutes at most).
+fn direct_timeout_ms(d: std::time::Duration) -> u32 {
+    u32::try_from(d.as_millis()).unwrap_or(u32::MAX)
+}
+
+/// A length that crossed as a JS number: finite, whole, and a number JS holds exactly (below 2^53).
+fn direct_length(len: f64) -> Result<u64, DirectFailure> {
+    if len.is_finite() && len >= 0.0 && len.fract() == 0.0 && len < 9_007_199_254_740_992.0 {
+        Ok(len as u64)
+    } else {
+        Err(DirectFailure::new("not a byte length", "length_invalid"))
+    }
+}
+
+/// The most a storage PUT of `len` ciphertext bytes may take, in milliseconds: a minute plus the
+/// chunk at 1 Mbit/s (`60 s + ceil(len / 131072) s`). Throws an `Error` with `code` `length_invalid`
+/// for a `len` that is not a whole, non-negative number.
+#[wasm_bindgen(js_name = storagePutTotalMs)]
+pub fn storage_put_total_ms(len: f64) -> Result<f64, DirectFailure> {
+    Ok(dt::timeouts::storage_put_total(direct_length(len)?).as_millis() as f64)
+}
+
+/// The most a storage GET of `len` ciphertext bytes may take, in milliseconds (the same formula as a PUT).
+/// Throws like `storagePutTotalMs`.
+#[wasm_bindgen(js_name = storageGetTotalMs)]
+pub fn storage_get_total_ms(len: f64) -> Result<f64, DirectFailure> {
+    Ok(dt::timeouts::storage_get_total(direct_length(len)?).as_millis() as f64)
 }
 
 /// `/api/v1/files/{id}/download-grants` for `file_id`.
@@ -3263,6 +3304,56 @@ mod direct_vector_tests {
         );
     }
 
+    /// A length crosses as a JS number: only a finite, whole, non-negative number below 2^53 is a length.
+    #[test]
+    fn storage_totals_follow_core_and_refuse_a_length_that_is_not_one() {
+        // A 4 MiB chunk (plus the AEAD overhead): 60 s + 33 s, in milliseconds.
+        let len = (4 * 1024 * 1024 + 28) as f64;
+        assert_eq!(storage_put_total_ms(len).unwrap(), 93_000.0);
+        assert_eq!(storage_get_total_ms(len).unwrap(), 93_000.0);
+        assert_eq!(storage_put_total_ms(0.0).unwrap(), 60_000.0);
+        for bad in [-1.0, f64::NAN, f64::INFINITY, 1.5, 9_007_199_254_740_992.0] {
+            assert_eq!(storage_put_total_ms(bad).unwrap_err().code, "length_invalid", "{bad}");
+            assert_eq!(storage_get_total_ms(bad).unwrap_err().code, "length_invalid", "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_constants_carry_core_s_time_bounds() {
+        let c = direct_constants();
+        assert_eq!(
+            u64::from(c.storage_connect_timeout_ms),
+            dt::timeouts::STORAGE_CONNECT_TIMEOUT.as_millis() as u64
+        );
+        assert_eq!(
+            u64::from(c.storage_get_idle_ms),
+            dt::timeouts::STORAGE_GET_IDLE.as_millis() as u64
+        );
+        assert_eq!(
+            u64::from(c.discovery_timeout_ms),
+            dt::timeouts::DISCOVERY_TIMEOUT.as_millis() as u64
+        );
+        assert_eq!(
+            u64::from(c.api_call_timeout_ms),
+            dt::timeouts::API_CALL_TIMEOUT.as_millis() as u64
+        );
+        assert_eq!(
+            u64::from(c.background_put_resource_timeout_ms),
+            dt::timeouts::BACKGROUND_PUT_RESOURCE_TIMEOUT.as_millis() as u64
+        );
+        assert_eq!(
+            (
+                c.storage_connect_timeout_ms,
+                c.storage_get_idle_ms,
+                c.discovery_timeout_ms,
+                c.api_call_timeout_ms,
+                c.background_put_resource_timeout_ms
+            ),
+            (15_000, 30_000, 15_000, 60_000, 240_000),
+            "the numbers of the clients design, 6.2"
+        );
+    }
+
     #[test]
     fn discovery_decoding_and_the_cache_follow_core() {
         let body =
@@ -3396,6 +3487,11 @@ mod direct_vector_tests {
                 "max_window": 32,
                 "default_window": 8,
                 "chunk_overhead": 28,
+                "storage_connect_timeout_ms": 15_000,
+                "storage_get_idle_ms": 30_000,
+                "discovery_timeout_ms": 15_000,
+                "api_call_timeout_ms": 60_000,
+                "background_put_resource_timeout_ms": 240_000,
             })
         );
         assert_eq!(
