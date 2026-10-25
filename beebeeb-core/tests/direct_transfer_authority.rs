@@ -229,7 +229,7 @@ mod direct_transfer {
             no(
                 "ipv4 loopback, production api",
                 "https://127.0.0.1/bb-01/k",
-                Refusal::IpLiteral,
+                Refusal::Loopback,
             ),
             no("ipv6", "https://[2001:db8::1]/bb-01/k", Refusal::IpLiteral),
             no("ipv6 loopback", "https://[::1]/bb-01/k", Refusal::IpLiteral),
@@ -240,7 +240,17 @@ mod direct_transfer {
             no(
                 "localhost on a production api base",
                 "https://localhost/bb-01/k",
-                Refusal::HostNotListed,
+                Refusal::Loopback,
+            ),
+            no(
+                "LOCALHOST on a production api base",
+                "https://LOCALHOST/bb-01/k",
+                Refusal::Loopback,
+            ),
+            no(
+                "localhost with a port on a production api base",
+                "https://localhost:9000/bb-01/k",
+                Refusal::Loopback,
             ),
             // Ports.
             no(
@@ -251,7 +261,7 @@ mod direct_transfer {
             no(
                 "non-default port on an unlisted host",
                 "https://evil.example.com:8443/bb-01/k",
-                Refusal::HostNotListed,
+                Refusal::Port,
             ),
             // Buckets and paths.
             no(
@@ -451,20 +461,62 @@ mod direct_transfer {
     }
 
     #[test]
-    fn listed_non_default_port_is_followed_only_with_that_exact_port() {
-        let d = discovery(&[("minio.example.net:9443", "bb")]);
+    fn a_non_default_port_is_refused_even_when_discovery_lists_it() {
+        // R1.12: the server's own list is not independent approval of a port.
+        let d = discovery(&[("minio.example.net:9443", "bb"), ("evil.example.com:8443", "bb")]);
+        for url in [
+            "https://minio.example.net:9443/bb/k",
+            "https://evil.example.com:8443/bb/k?X-Amz-Signature=x",
+        ] {
+            assert_eq!(check_storage_url(url, &d, PROD), Err(Refusal::Port), "{url}");
+        }
+        // Listed WITHOUT the port and sent WITH one: also refused. Never silently normalized away.
+        let bare = discovery(&[("minio.example.net", "bb")]);
         assert_eq!(
-            check_storage_url("https://minio.example.net:9443/bb/k", &d, PROD),
+            check_storage_url("https://minio.example.net:9443/bb/k", &bare, PROD),
+            Err(Refusal::Port)
+        );
+        // The default port, spelled out, is the default port.
+        assert_eq!(
+            check_storage_url("https://minio.example.net:443/bb/k", &bare, PROD),
             Ok(())
         );
+    }
+
+    #[test]
+    fn loopback_names_and_addresses_are_one_rule() {
+        let d = discovery(&[
+            ("localhost:9000", "bb"),
+            ("127.0.0.1:9000", "bb"),
+            ("localhost", "bb"),
+            ("127.0.0.1", "bb"),
+        ]);
+        for host in ["localhost", "LocalHost", "LOCALHOST", "127.0.0.1"] {
+            for url in [
+                format!("https://{host}/bb/k"),
+                format!("https://{host}:9000/bb/k"),
+                format!("http://{host}:9000/bb/k"),
+            ] {
+                // A production API base: never, whatever the spelling, scheme or port.
+                assert!(
+                    check_storage_url(&url, &d, PROD).is_err(),
+                    "{url} on a production API base"
+                );
+            }
+        }
         assert_eq!(
-            check_storage_url("https://minio.example.net/bb/k", &d, PROD),
-            Err(Refusal::HostNotListed)
+            check_storage_url("https://localhost/bb/k", &d, PROD),
+            Err(Refusal::Loopback)
         );
         assert_eq!(
-            check_storage_url("https://minio.example.net:9444/bb/k", &d, PROD),
-            Err(Refusal::HostNotListed)
+            check_storage_url("https://127.0.0.1/bb/k", &d, PROD),
+            Err(Refusal::Loopback)
         );
+        // A loopback http API base (development): name and address alike, with a port.
+        for host in ["localhost", "LocalHost", "127.0.0.1"] {
+            let url = format!("http://{host}:9000/bb/k");
+            assert_eq!(check_storage_url(&url, &d, DEV), Ok(()), "{url} in development");
+        }
     }
 
     #[test]
@@ -572,29 +624,37 @@ mod direct_transfer {
     }
 
     #[test]
-    fn redact_strips_query_fragment_credentials_and_length() {
-        assert_eq!(
-            redact("https://s3.example.net/bb-01/k?X-Amz-Signature=abc&x=1"),
-            "https://s3.example.net/bb-01/k"
-        );
-        assert_eq!(
-            redact("https://s3.example.net/bb-01/k#frag?x"),
-            "https://s3.example.net/bb-01/k"
-        );
-        assert_eq!(
-            redact("https://user:pw@s3.example.net/b/k?q"),
-            "https://s3.example.net/b/k"
-        );
-        assert_eq!(redact("https://a@b@s3.example.net/b"), "https://s3.example.net/b");
+    fn redact_keeps_scheme_and_host_only() {
+        for url in [
+            "https://s3.example.net/bb-01/tenant-0000/versions/v-1111/0.bin?X-Amz-Signature=abc&x=1",
+            "https://s3.example.net/bb-01/k#frag?x",
+            "https://user:pw@s3.example.net/b/k?q",
+            "https://a@b@s3.example.net/b/k",
+        ] {
+            assert_eq!(redact(url), "https://s3.example.net/<redacted>", "{url}");
+        }
+        // A bare host, with or without a trailing slash, has nothing to hide.
         assert_eq!(redact("https://s3.example.net"), "https://s3.example.net");
+        assert_eq!(redact("https://s3.example.net/"), "https://s3.example.net/");
+        assert_eq!(redact("https://s3.example.net?x=1"), "https://s3.example.net");
         assert_eq!(redact("not a url?secret=1"), "not a url");
         assert_eq!(redact("?only=query"), "");
+        // Nothing past the host survives, however long, and multi-byte text is not split.
         let long = format!("https://s3.example.net/{}", "a".repeat(1000));
-        let shown = redact(&long);
-        assert!(shown.chars().count() <= 257 && shown.ends_with('…'), "{}", shown.len());
-        // Multi-byte characters must not be split by the length cap.
-        let wide = format!("https://s3.example.net/{}", "é".repeat(400));
-        assert!(redact(&wide).is_char_boundary(redact(&wide).len()));
+        assert_eq!(redact(&long), "https://s3.example.net/<redacted>");
+        let wide = format!("https://{}.example.net/x", "é".repeat(400));
+        let shown = redact(&wide);
+        assert!(
+            shown.is_char_boundary(shown.len()) && shown.chars().count() <= 257,
+            "{}",
+            shown.len()
+        );
+        for secret in ["tenant-0000", "versions", "0.bin", "X-Amz", "pw", "bb-01"] {
+            assert!(
+                !redact("https://u:pw@h.example.net/bb-01/tenant-0000/versions/0.bin?X-Amz-Signature=1")
+                    .contains(secret)
+            );
+        }
     }
 
     #[test]
@@ -603,12 +663,12 @@ mod direct_transfer {
         let shown = scrub(err);
         assert!(!shown.contains("SECRETSIG") && !shown.contains("AKID"), "{shown}");
         assert!(
-            shown.contains("https://s3.example.net/bb-01/k") && shown.contains("connection reset"),
+            shown.contains("https://s3.example.net/<redacted>") && shown.contains("connection reset"),
             "{shown}"
         );
 
         let two = scrub("a http://h/p?s=1 b HTTPS://h2/q?t=2 c");
-        assert_eq!(two, "a http://h/p b HTTPS://h2/q c");
+        assert_eq!(two, "a http://h/<redacted> b HTTPS://h2/<redacted> c");
 
         // A parameter dump with no URL around it.
         let bare = scrub("retrying with X-Amz-Signature=SECRETSIG next");

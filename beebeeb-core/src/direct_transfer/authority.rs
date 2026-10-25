@@ -22,7 +22,8 @@
 //! and require the same host, port and path prefix.
 //!
 //! [`redact`] and [`scrub`] are the only ways a URL (or text that may contain
-//! one) is allowed into a log line, error message or progress event.
+//! one) is allowed into a log line, error message or progress event. They keep
+//! the scheme and host only: the path names the tenant, the version and the key.
 
 /// Longest URL accepted. Real presigned URLs are about 1 KiB.
 pub const MAX_URL_LEN: usize = 8 * 1024;
@@ -38,9 +39,11 @@ pub enum Refusal {
     Userinfo,
     #[error("the storage link names an IP address")]
     IpLiteral,
+    #[error("the storage link names this machine (loopback), which is allowed only in local development")]
+    Loopback,
     #[error("the storage link names a host in an unexpected form")]
     BadHost,
-    #[error("the storage link names a port the server did not list")]
+    #[error("the storage link names a non-default port")]
     Port,
     #[error("the storage link names a host the server did not list")]
     HostNotListed,
@@ -192,24 +195,33 @@ pub fn check_storage_url(url: &str, discovery: &super::Discovery, api_base: &str
         .map(|api| !api.https && is_loopback_host(&api.host))
         .unwrap_or(false);
     let loopback = is_loopback_host(&parsed.host);
+    // The loopback exceptions (plain http, a non-default port, the address
+    // itself) are one switch: the API itself is on loopback http. The loopback
+    // NAME and ADDRESS are treated alike.
+    let dev_loopback = dev && loopback;
 
-    let plain_http_allowed = dev && loopback;
-    if !parsed.https && !plain_http_allowed {
+    if !parsed.https && !dev_loopback {
         return Err(Refusal::NotHttps);
     }
-    let dev_loopback_ip = dev && parsed.host == "127.0.0.1";
-    if ends_in_a_number(&parsed.host) && !dev_loopback_ip {
+    if loopback && !dev {
+        return Err(Refusal::Loopback);
+    }
+    if ends_in_a_number(&parsed.host) && !dev_loopback {
         return Err(Refusal::IpLiteral);
+    }
+    // R1.12: a non-default port is refused outright, even when discovery lists
+    // it; the server's own list is not independent approval.
+    if parsed.port.is_some() && !dev_loopback {
+        return Err(Refusal::Port);
     }
 
     let authority = parsed.authority();
-    let listed = |host: &str| discovery.storage_hosts.iter().any(|h| h.eq_ignore_ascii_case(host));
-    if !listed(&authority) {
-        return Err(if parsed.port.is_some() && listed(&parsed.host) {
-            Refusal::Port
-        } else {
-            Refusal::HostNotListed
-        });
+    if !discovery
+        .storage_hosts
+        .iter()
+        .any(|h| h.eq_ignore_ascii_case(&authority))
+    {
+        return Err(Refusal::HostNotListed);
     }
 
     // Path-style addressing: `/<bucket>/<key…>` with the bucket listed for
@@ -239,8 +251,9 @@ pub fn check_storage_url(url: &str, discovery: &super::Discovery, api_base: &str
     Ok(())
 }
 
-/// A URL for a log line or error: query and fragment removed (they carry the
-/// signature), credentials removed, length bounded.
+/// A URL for a log line or error: scheme and host only. The query and fragment
+/// (they carry the signature), credentials, and the PATH (bucket, tenant and
+/// version ids, the object key) are all replaced; length bounded.
 pub fn redact(url: &str) -> String {
     let cut = url.find(['?', '#']).unwrap_or(url.len());
     let head = &url[..cut];
@@ -250,7 +263,11 @@ pub fn redact(url: &str) -> String {
             let auth_end = rest.find('/').unwrap_or(rest.len());
             let (authority, tail) = rest.split_at(auth_end);
             let authority = authority.rsplit('@').next().unwrap_or(authority);
-            format!("{scheme}{authority}{tail}")
+            if tail.is_empty() || tail == "/" {
+                format!("{scheme}{authority}{tail}")
+            } else {
+                format!("{scheme}{authority}/<redacted>")
+            }
         }
         None => head.to_string(),
     };

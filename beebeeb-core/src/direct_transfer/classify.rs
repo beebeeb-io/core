@@ -73,6 +73,14 @@ impl ApiAnswer {
         }
     }
 
+    /// How long to wait before asking again: the server's `Retry-After`, else
+    /// [`DEFAULT_RETRY_AFTER`], clamped to 1 s ..= [`MAX_RETRY_AFTER`].
+    fn wait(&self) -> Duration {
+        self.retry_after
+            .unwrap_or(DEFAULT_RETRY_AFTER)
+            .clamp(Duration::from_secs(1), MAX_RETRY_AFTER)
+    }
+
     /// `true` when the body is a JSON error object (the answer is about the
     /// request, not about the route).
     pub fn has_json_error(&self) -> bool {
@@ -129,13 +137,14 @@ pub enum Outcome {
     /// failure, anything unrecognised): use the API for this file now and ask
     /// discovery again later, at most once per command.
     UseApiNow,
-    /// This file is served over the API (`direct_unavailable`,
-    /// `replace_in_progress`, an unknown 409 or other 4xx): today's path.
+    /// This file is served over the API (`direct_unavailable`, an unknown 409
+    /// or other 4xx): today's path.
     ApiForThisFile,
     /// `version_unavailable`: the pinned version is gone. Discard what was
     /// fetched and restart from fresh metadata. Never mix versions.
     Restart,
-    /// 429: wait this long, then ask again.
+    /// 429, or 409 `replace_in_progress` / `commit_in_progress`: wait this
+    /// long, then ask again (the planner gives up after a bounded number).
     Backoff(Duration),
     /// 401, 403, or a JSON 404: an authorization answer, not a routing one.
     /// The API path would refuse too; do not fall back.
@@ -169,16 +178,14 @@ pub fn classify(call: Call, answer: &ApiAnswer) -> Outcome {
             404 | 405 => Outcome::UseApiNow,
             409 => match answer.error_code() {
                 Some("version_unavailable") => Outcome::Restart,
-                // `direct_unavailable`, `replace_in_progress`, and any 409 we
-                // do not know: the API serves this file.
+                // R1.13 / R2.6: another operation holds the file for a moment.
+                // Wait and ask again; the planner bounds how often.
+                Some("replace_in_progress" | "commit_in_progress") => Outcome::Backoff(answer.wait()),
+                // `direct_unavailable`, and any 409 we do not know: the API
+                // serves this file.
                 _ => Outcome::ApiForThisFile,
             },
-            429 => Outcome::Backoff(
-                answer
-                    .retry_after
-                    .unwrap_or(DEFAULT_RETRY_AFTER)
-                    .clamp(Duration::from_secs(1), MAX_RETRY_AFTER),
-            ),
+            429 => Outcome::Backoff(answer.wait()),
             500..=599 => Outcome::UseApiNow,
             // 400 (bad window), 410, 413, 422 …: not an authorization answer.
             // The API path authorizes and answers for itself.
@@ -364,7 +371,7 @@ mod tests {
                 what: "409 replace_in_progress",
                 call: DownloadGrant,
                 answer: json(409, r#"{"error":"replace_in_progress"}"#),
-                want: Outcome::ApiForThisFile,
+                want: Outcome::Backoff(DEFAULT_RETRY_AFTER),
             },
             Row {
                 what: "409 unknown code",
@@ -474,6 +481,41 @@ mod tests {
         for row in rows {
             assert_eq!(classify(row.call, &row.answer), row.want, "{}", row.what);
         }
+    }
+
+    #[test]
+    fn a_file_held_by_another_operation_is_waited_for_not_given_to_the_api() {
+        // R1.13 `replace_in_progress`, R2.6 `commit_in_progress`: bounded Backoff.
+        for code in ["replace_in_progress", "commit_in_progress"] {
+            let body = format!(r#"{{"error":"{code}"}}"#);
+            let a = ApiAnswer::from_parts(409, JSON, body.as_bytes(), None);
+            assert_eq!(
+                classify(Call::DownloadGrant, &a),
+                Outcome::Backoff(DEFAULT_RETRY_AFTER),
+                "{code}"
+            );
+            let with_header = ApiAnswer::from_parts(409, JSON, body.as_bytes(), Some("3"));
+            assert_eq!(
+                classify(Call::DownloadGrant, &with_header),
+                Outcome::Backoff(secs(3)),
+                "{code}"
+            );
+            let huge = ApiAnswer::from_parts(409, JSON, body.as_bytes(), Some("86400"));
+            assert_eq!(
+                classify(Call::DownloadGrant, &huge),
+                Outcome::Backoff(MAX_RETRY_AFTER),
+                "{code}"
+            );
+            let zero = ApiAnswer::from_parts(409, JSON, body.as_bytes(), Some("0"));
+            assert_eq!(
+                classify(Call::DownloadGrant, &zero),
+                Outcome::Backoff(secs(1)),
+                "{code}"
+            );
+        }
+        // Only on the strict JSON reading: a bare 409 stays the API's.
+        let bare = ApiAnswer::from_parts(409, None, br#"{"error":"replace_in_progress"}"#, None);
+        assert_eq!(classify(Call::DownloadGrant, &bare), Outcome::ApiForThisFile);
     }
 
     #[test]

@@ -43,8 +43,9 @@ pub const MAX_DISCOVERY_BYTES: usize = 256 * 1024;
 /// Largest grant-window body a client should read: 32 links of at most a few
 /// KiB each, plus the envelope.
 pub const MAX_GRANT_BODY_BYTES: usize = 1024 * 1024;
-/// AEAD overhead per chunk on the wire: `nonce(12) + tag(16)`.
-pub const CHUNK_OVERHEAD: u64 = 28;
+/// AEAD overhead per chunk on the wire (`nonce(12) + tag(16)`), defined once in
+/// [`crate::chunk_stream`].
+pub use crate::chunk_stream::CHUNK_OVERHEAD;
 
 /// Path of the download-grant route for `file_id` (a UUID string).
 pub fn download_grants_path(file_id: &str) -> String {
@@ -266,7 +267,8 @@ impl fmt::Debug for UploadGrantResponse {
             .field("skipped", &self.skipped)
             .field("method", &self.method)
             .field("url", &self.url.as_deref().map(redact))
-            .field("headers", &self.headers)
+            // Names only: a header value may be signed or carry a checksum.
+            .field("headers", &self.headers.keys().collect::<Vec<_>>())
             .field("expires_at", &self.expires_at)
             .finish()
     }
@@ -279,7 +281,7 @@ pub struct UploadCommitRequest {
 }
 
 /// `200` body of the commit route: the proxy chunk route's body (R1.18).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UploadCommitResponse {
     pub index: u32,
     pub size: u64,
@@ -289,6 +291,18 @@ pub struct UploadCommitResponse {
     /// so a client must not log or display it.
     #[serde(default)]
     pub object_key: Option<String>,
+}
+
+impl fmt::Debug for UploadCommitResponse {
+    /// The object key carries the tenant id: it never prints.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UploadCommitResponse")
+            .field("index", &self.index)
+            .field("size", &self.size)
+            .field("skipped", &self.skipped)
+            .field("object_key", &self.object_key.as_ref().map(|_| "<hidden>"))
+            .finish()
+    }
 }
 
 #[cfg(test)]
@@ -409,8 +423,12 @@ mod tests {
         let shown = format!("{grant:?}");
         assert!(!shown.contains("SECRETSIG") && !shown.contains("AKIDSECRET") && !shown.contains("X-Amz"));
         assert!(
-            shown.contains("s3.storage.test/bb-01/k"),
-            "the redacted URL stays useful: {shown}"
+            shown.contains("https://s3.storage.test/<redacted>"),
+            "host stays, path goes: {shown}"
+        );
+        assert!(
+            !shown.contains("bb-01") && !shown.contains("/k"),
+            "no bucket or key: {shown}"
         );
 
         let up = UploadGrantResponse {
@@ -426,6 +444,52 @@ mod tests {
         assert!(!shown.contains("SECRETSIG"), "{shown}");
         let wrapped = format!("{:#?}", vec![grant]);
         assert!(!wrapped.contains("SECRETSIG"), "{wrapped}");
+    }
+
+    #[test]
+    fn debug_hides_the_object_key_and_header_values() {
+        let commit = UploadCommitResponse {
+            index: 1,
+            size: 10,
+            skipped: false,
+            object_key: Some("tenant-0000/versions/v1/1.bin".into()),
+        };
+        let shown = format!("{commit:?} {commit:#?}");
+        assert!(!shown.contains("tenant-0000") && !shown.contains("versions"), "{shown}");
+        assert!(shown.contains("<hidden>"), "{shown}");
+        assert_eq!(
+            format!(
+                "{:?}",
+                UploadCommitResponse {
+                    object_key: None,
+                    ..commit.clone()
+                }
+            )
+            .matches("None")
+            .count(),
+            1,
+            "an absent key still prints as absent"
+        );
+        let mut headers = BTreeMap::new();
+        headers.insert("x-amz-checksum-sha256".to_string(), "SECRETCHECKSUM".to_string());
+        let grant = UploadGrantResponse {
+            transport: CAP_OBJECT_UPLOAD_V1.into(),
+            index: 0,
+            skipped: false,
+            method: Some("PUT".into()),
+            url: Some("https://s3.storage.test/bb-01/k?X-Amz-Signature=SECRETSIG".into()),
+            headers,
+            expires_at: None,
+        };
+        let shown = format!("{grant:?}");
+        assert!(!shown.contains("SECRETCHECKSUM"), "{shown}");
+        assert!(shown.contains("x-amz-checksum-sha256"), "names stay: {shown}");
+    }
+
+    #[test]
+    fn the_chunk_overhead_is_the_one_in_chunk_stream() {
+        assert_eq!(CHUNK_OVERHEAD, crate::chunk_stream::CHUNK_OVERHEAD);
+        assert_eq!(CHUNK_OVERHEAD, 28);
     }
 
     #[test]

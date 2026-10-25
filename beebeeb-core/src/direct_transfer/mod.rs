@@ -61,12 +61,12 @@ pub const DISCOVERY_TTL_MS: i64 = 10 * 60 * 1000;
 pub const DISCOVERY_ATTEMPTS: u8 = 2;
 
 /// What to do about discovery right now.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Lookup<'a> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Lookup {
     /// Ask the server.
     Fetch,
     /// Use this answer (it may still say the server offers nothing).
-    Cached(&'a Discovery),
+    Cached(Discovery),
     /// Do not ask; use the API.
     UseApi,
 }
@@ -108,14 +108,14 @@ impl DiscoveryCache {
         }
     }
 
-    pub fn lookup(&self, now_ms: i64) -> Lookup<'_> {
+    pub fn lookup(&self, now_ms: i64) -> Lookup {
         match &self.state {
             CacheState::NotSupported => Lookup::UseApi,
             CacheState::Known {
                 discovery,
                 fetched_at_ms,
             } if now_ms.saturating_sub(*fetched_at_ms) < DISCOVERY_TTL_MS && now_ms >= *fetched_at_ms => {
-                Lookup::Cached(discovery)
+                Lookup::Cached(discovery.clone())
             }
             // Unknown, expired, or a clock that went backwards: ask again,
             // unless asking has already failed enough times.

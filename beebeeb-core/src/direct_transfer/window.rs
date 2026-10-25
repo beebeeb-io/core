@@ -73,6 +73,14 @@ pub const MAX_RATE_LIMITS: u8 = 5;
 pub const BACKOFF_BASE_MS: u64 = 250;
 /// Ceiling of the renewal backoff.
 pub const BACKOFF_CAP_MS: u64 = 8_000;
+/// The longest the planner ever waits on its own: a server's `Retry-After` is
+/// clamped to this (see `classify::MAX_RETRY_AFTER`). A deadline further away
+/// than this from the current clock reading is a clock that stepped back, and
+/// is pulled in.
+pub const MAX_WAIT_MS: i64 = 120_000;
+/// A stated link lifetime shorter than this is not believed: no server issues
+/// 60 s links (`MIN_URL_LIFETIME`), so it is the client clock that is off.
+pub const MIN_STATED_LIFETIME_MS: i64 = 60_000;
 
 /// Tunables. [`PlannerConfig::from_discovery`] gives the production values;
 /// tests change single fields.
@@ -125,12 +133,19 @@ pub struct Geometry {
 impl Geometry {
     /// The exact stored length of chunk `index` (stride + 28; the last chunk
     /// is whatever remains).
-    pub fn chunk_length(&self, index: u32) -> u64 {
-        let full = self.chunk_size + CHUNK_OVERHEAD;
+    ///
+    /// `None` for an index outside the file and for numbers no real version
+    /// has (checked arithmetic: nothing here can panic on a hostile geometry).
+    pub fn chunk_length(&self, index: u32) -> Option<u64> {
+        if self.chunk_count == 0 || index >= self.chunk_count {
+            return None;
+        }
+        let full = self.chunk_size.checked_add(CHUNK_OVERHEAD)?;
         if index + 1 < self.chunk_count {
-            full
+            Some(full)
         } else {
-            self.encrypted_size - full * u64::from(self.chunk_count - 1)
+            let before_last = full.checked_mul(u64::from(self.chunk_count - 1))?;
+            self.encrypted_size.checked_sub(before_last)
         }
     }
 
@@ -156,8 +171,12 @@ impl Geometry {
 /// How the whole file ends when it cannot go on directly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
-    /// Stop using direct transport for this file: discard partial output and
-    /// start it again on today's API path. Never append mixed transports.
+    /// Stop using direct transport for this file: discard any partial output and
+    /// start it again on today's API path. Reached before the version is pinned
+    /// (nothing was written yet), and as the last resort when the pinned API
+    /// route itself fails ([`DownloadPlanner::api_fetch_failed`]). Once the
+    /// version is pinned, a window that cannot be served moves the REST of the
+    /// file to the pinned per-chunk API route instead and keeps what was written.
     ApiForFile,
     /// The pinned version is gone or changed: discard and restart from fresh
     /// metadata.
@@ -215,15 +234,6 @@ pub enum Violation {
     Unexpected,
 }
 
-impl Violation {
-    fn verdict(self) -> Verdict {
-        match self {
-            Violation::VersionChanged => Verdict::Restart,
-            _ => Verdict::ApiForFile,
-        }
-    }
-}
-
 /// A call that does not fit the planner's state: a bug in the caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PlanError {
@@ -233,7 +243,7 @@ pub enum PlanError {
     NotFetched(u32),
     #[error("chunk {got} consumed out of order (expected {expected})")]
     OutOfOrder { expected: u32, got: u32 },
-    #[error("chunk {0} failed on the API route; handle that failure in the caller")]
+    #[error("chunk {0} is being fetched through the API route; report its failure with api_fetch_failed")]
     ApiRouteFailure(u32),
 }
 
@@ -286,6 +296,10 @@ pub struct DownloadPlanner {
     window: Option<DownloadGrantRequest>,
     window_not_before_ms: i64,
     rate_limits: u8,
+    /// Set once a window could not be served after the version was pinned: no
+    /// more grants are asked for and every chunk still to fetch goes through
+    /// the pinned per-chunk API route.
+    api_only: bool,
     verdict: Option<Verdict>,
     rng: u64,
 }
@@ -310,6 +324,7 @@ impl DownloadPlanner {
             window: None,
             window_not_before_ms: i64::MIN,
             rate_limits: 0,
+            api_only: false,
             verdict: None,
             rng,
         }
@@ -366,6 +381,7 @@ impl DownloadPlanner {
         if let Some(verdict) = &self.verdict {
             return Poll::Stop(verdict.clone());
         }
+        self.clamp_deadlines(now_ms);
         let Some(geometry) = self.geometry else {
             return self.poll_first_window(now_ms);
         };
@@ -409,6 +425,22 @@ impl DownloadPlanner {
         Poll::RequestWindow(request)
     }
 
+    /// A clock that stepped BACKWARDS leaves deadlines computed on the old
+    /// reading far in the future. No legitimate wait is longer than
+    /// [`MAX_WAIT_MS`], and no link outlives the TTL, so pull both in.
+    fn clamp_deadlines(&mut self, now_ms: i64) {
+        let latest_wait = now_ms.saturating_add(MAX_WAIT_MS);
+        let latest_use = now_ms.saturating_add((self.cfg.url_ttl_ms - self.cfg.renew_skew_ms).max(0));
+        self.window_not_before_ms = self.window_not_before_ms.min(latest_wait);
+        for slot in self.slots.values_mut() {
+            match slot {
+                Slot::NeedsGrant { not_before_ms, .. } => *not_before_ms = (*not_before_ms).min(latest_wait),
+                Slot::Granted { usable_until_ms, .. } => *usable_until_ms = (*usable_until_ms).min(latest_use),
+                _ => {}
+            }
+        }
+    }
+
     /// The reorder window: chunks `consumed .. consumed + max_in_flight`.
     fn limit(&self, geometry: Geometry) -> u32 {
         self.consumed
@@ -420,6 +452,7 @@ impl DownloadPlanner {
     /// renewal of that chunk (the same budget a failure spends).
     fn age_out_grants(&mut self, now_ms: i64) {
         let max = self.cfg.max_renewals;
+        let api_only = self.api_only;
         for slot in self.slots.values_mut() {
             let Slot::Granted {
                 attempts,
@@ -434,7 +467,7 @@ impl DownloadPlanner {
             }
             let mut attempts = *attempts;
             attempts.renewals = attempts.renewals.saturating_add(1);
-            *slot = if attempts.renewals > max {
+            *slot = if attempts.renewals > max || api_only {
                 Slot::ApiPending { attempts }
             } else {
                 Slot::NeedsGrant {
@@ -450,6 +483,15 @@ impl DownloadPlanner {
             return None;
         }
         let limit = self.limit(geometry);
+        if self.api_only {
+            // No grants are coming: every chunk within reach that has nothing
+            // yet is simply fetched through the pinned API route.
+            for index in self.consumed..limit {
+                self.slots.entry(index).or_insert(Slot::ApiPending {
+                    attempts: Attempts::default(),
+                });
+            }
+        }
         let index = self
             .slots
             .range(self.consumed..limit)
@@ -489,6 +531,9 @@ impl DownloadPlanner {
     }
 
     fn next_window(&self, geometry: Geometry, now_ms: i64) -> Option<DownloadGrantRequest> {
+        if self.api_only {
+            return None;
+        }
         let pinned = self.pinned.clone()?;
         // Renewals first: they are what the consumer is waiting for.
         let limit = self.limit(geometry);
@@ -558,9 +603,42 @@ impl DownloadPlanner {
                 self.rate_limits = 0;
                 Ok(())
             }
+            Err(Violation::VersionChanged) => {
+                self.verdict = Some(Verdict::Restart);
+                Err(Violation::VersionChanged)
+            }
+            Err(Violation::Unexpected) => {
+                self.verdict = Some(Verdict::ApiForFile);
+                Err(Violation::Unexpected)
+            }
             Err(violation) => {
-                self.verdict = Some(violation.verdict());
+                self.window_unusable();
                 Err(violation)
+            }
+        }
+    }
+
+    /// A window request got an answer that cannot be decoded at all (a 2xx whose
+    /// body is not the contract's JSON). Handled like any window the server
+    /// could not serve.
+    pub fn window_malformed(&mut self) {
+        self.window = None;
+        self.window_unusable();
+    }
+
+    /// A window could not be served and nothing says the file is gone: before
+    /// the version is pinned nothing is written, so the file goes to the API
+    /// path; after, the remaining chunks go to the pinned per-chunk API route
+    /// and what was written stays (R1.6: the mixed-node rollout case).
+    fn window_unusable(&mut self) {
+        if self.pinned.is_none() {
+            self.verdict = Some(Verdict::ApiForFile);
+            return;
+        }
+        self.api_only = true;
+        for slot in self.slots.values_mut() {
+            if let Slot::NeedsGrant { attempts, .. } = slot {
+                *slot = Slot::ApiPending { attempts: *attempts };
             }
         }
     }
@@ -615,7 +693,7 @@ impl DownloadPlanner {
             if grant.method != "GET" {
                 return Err(Violation::Method);
             }
-            if grant.length != geometry.chunk_length(grant.index) {
+            if Some(grant.length) != geometry.chunk_length(grant.index) {
                 return Err(Violation::Length);
             }
             check_storage_url(&grant.url, &self.discovery, &self.api_base).map_err(Violation::Authority)?;
@@ -660,10 +738,11 @@ impl DownloadPlanner {
         let ttl = self.cfg.url_ttl_ms;
         let skew = self.cfg.renew_skew_ms;
         let stated = expires_ms.saturating_sub(now_ms);
-        // Trust the server's expiry only when it is consistent with our clock;
-        // otherwise count the link's lifetime from its arrival.
-        let lifetime = if stated > 0 && stated <= ttl.saturating_add(skew) {
-            stated
+        // A link never lives longer than the TTL, and no server issues links
+        // shorter than a minute: a stated lifetime under that is this clock
+        // running ahead, so the lifetime counts from the arrival instead.
+        let lifetime = if stated >= MIN_STATED_LIFETIME_MS.min(ttl) {
+            stated.min(ttl)
         } else {
             ttl
         };
@@ -682,16 +761,16 @@ impl DownloadPlanner {
             Outcome::Backoff(wait) => {
                 self.rate_limits = self.rate_limits.saturating_add(1);
                 if self.rate_limits > self.cfg.max_rate_limits {
-                    self.verdict = Some(Verdict::ApiForFile);
+                    self.window_unusable();
                 } else {
-                    let wait_ms = i64::try_from(wait.as_millis()).unwrap_or(i64::MAX);
+                    let wait_ms = i64::try_from(wait.as_millis()).unwrap_or(i64::MAX).min(MAX_WAIT_MS);
                     self.window_not_before_ms = self.window_not_before_ms.max(now_ms.saturating_add(wait_ms));
                 }
             }
             Outcome::Restart => self.verdict = Some(Verdict::Restart),
             Outcome::Terminal(terminal) => self.verdict = Some(Verdict::Terminal(terminal)),
             // Not a failure (a caller bug), or any routing answer: the API serves this file.
-            _ => self.verdict = Some(Verdict::ApiForFile),
+            _ => self.window_unusable(),
         }
     }
 
@@ -712,8 +791,8 @@ impl DownloadPlanner {
     /// fallback). It is renewed (bounded, with backoff) and then goes to the
     /// pinned API route.
     ///
-    /// A failure on the API route itself is the caller's to handle (its own
-    /// retries, 401/403 and 409 handling) and is reported as an error here.
+    /// A failure on the API route itself is reported with
+    /// [`DownloadPlanner::api_fetch_failed`]; here it is an error.
     pub fn fetch_failed(&mut self, index: u32, now_ms: i64) -> Result<(), PlanError> {
         let Some(Slot::Fetching { attempts, via_api }) = self.slots.get(&index) else {
             return Err(PlanError::NotInFlight(index));
@@ -723,7 +802,7 @@ impl DownloadPlanner {
             return Err(PlanError::ApiRouteFailure(index));
         }
         attempts.renewals = attempts.renewals.saturating_add(1);
-        if attempts.renewals > self.cfg.max_renewals {
+        if attempts.renewals > self.cfg.max_renewals || self.api_only {
             self.slots.insert(index, Slot::ApiPending { attempts });
         } else {
             let delay = self.backoff_ms(attempts.renewals);
@@ -736,6 +815,23 @@ impl DownloadPlanner {
             );
         }
         Ok(())
+    }
+
+    /// The fetch of chunk `index` through the pinned API route failed (network,
+    /// 5xx, a length that is not the manifest's) after the caller's own retries.
+    /// There is nothing left to try per chunk: the file ends with
+    /// [`Verdict::ApiForFile`] (the caller restarts it on the API stream) and
+    /// the chunk's slot is freed. 401/403 and 409 on that route are the
+    /// caller's to turn into errors, not reported here.
+    pub fn api_fetch_failed(&mut self, index: u32) -> Result<(), PlanError> {
+        match self.slots.get(&index) {
+            Some(Slot::Fetching { via_api: true, .. }) => {
+                self.slots.remove(&index);
+                self.verdict = Some(Verdict::ApiForFile);
+                Ok(())
+            }
+            _ => Err(PlanError::NotInFlight(index)),
+        }
     }
 
     /// Chunk `index` arrived whole but did not authenticate when it was
@@ -875,7 +971,7 @@ mod tests {
                     index: i,
                     method: "GET".into(),
                     url: format!("https://s3.storage.test/bb-01/t/v/{i}.bin?X-Amz-Signature=SIG{i}"),
-                    length: g.chunk_length(i),
+                    length: g.chunk_length(i).unwrap(),
                     expires_at: rfc3339(now_ms + 300_000),
                 })
                 .collect(),
@@ -1462,13 +1558,200 @@ mod tests {
         }
     }
 
+    // ── a window that cannot be served after the version is pinned (R1.6) ──
+
+    /// Poll until a window is requested, finishing fetches and advancing the clock meanwhile.
+    fn next_window_request(p: &mut DownloadPlanner, now: &mut i64) -> DownloadGrantRequest {
+        for _ in 0..STEPS {
+            match p.poll(*now) {
+                Poll::RequestWindow(r) => return r,
+                Poll::Fetch { index, .. } => finish(p, index),
+                Poll::Wait { until_ms } => *now = until_ms.unwrap_or(*now + 1),
+                other => panic!("expected the next window, got {other:?}"),
+            }
+        }
+        panic!("no window was requested");
+    }
+
+    /// Run the file to its end, serving every fetch; returns the chunks that went through the
+    /// pinned API route and how many windows were still requested.
+    fn run_to_the_end(p: &mut DownloadPlanner, now: &mut i64) -> (Vec<u32>, usize) {
+        let (mut via_api, mut windows) = (vec![], 0);
+        for _ in 0..STEPS {
+            match p.poll(*now) {
+                Poll::Fetch { index, .. } => finish(p, index),
+                Poll::FetchViaApi {
+                    index,
+                    object_version_id,
+                } => {
+                    assert_eq!(object_version_id, VERSION, "the pin travels with every API fetch");
+                    via_api.push(index);
+                    finish(p, index);
+                }
+                Poll::RequestWindow(r) => {
+                    windows += 1;
+                    p.window_answered(answer(&r, *now), *now).unwrap();
+                }
+                Poll::Wait { until_ms } => *now = until_ms.unwrap_or(*now + 1),
+                Poll::Done => return (via_api, windows),
+                Poll::Stop(v) => panic!("stopped: {v:?}"),
+            }
+        }
+        panic!("the file did not finish");
+    }
+
     #[test]
-    fn a_mid_transfer_window_failure_also_stops_the_file() {
+    fn a_window_that_cannot_be_served_after_pinning_moves_the_rest_to_the_pinned_api_route() {
+        // Every way a window can fail without saying the file is gone or forbidden.
+        type Fail = fn(&mut DownloadPlanner, i64);
+        let fails: Vec<(&str, Fail)> = vec![
+            ("409 direct_unavailable", |p, now| {
+                p.window_failed(Outcome::ApiForThisFile, now)
+            }),
+            ("bare 404 / 5xx / network", |p, now| {
+                p.window_failed(Outcome::UseApiNow, now)
+            }),
+            ("not supported", |p, now| p.window_failed(Outcome::NotSupported, now)),
+            ("a 2xx that does not decode", |p, _| p.window_malformed()),
+        ];
+        for (what, fail) in fails {
+            let mut p = started();
+            let mut now = T0;
+            let r = next_window_request(&mut p, &mut now);
+            assert_eq!(r.start_index, 8, "{what}");
+            fail(&mut p, now);
+            let (via_api, windows) = run_to_the_end(&mut p, &mut now);
+            assert_eq!(windows, 0, "{what}: no further window is requested");
+            assert_eq!(
+                via_api,
+                (8..CHUNKS).collect::<Vec<_>>(),
+                "{what}: exactly the chunks without a grant go to the pinned route, in order"
+            );
+            assert_eq!(p.consumed_count(), CHUNKS, "{what}: the written chunks are kept");
+        }
+    }
+
+    #[test]
+    fn running_out_of_429s_after_pinning_also_moves_the_rest_to_the_api_route() {
         let mut p = started();
-        let r = drive_to_next_window(&mut p, T0);
-        assert_eq!(r.start_index, 8);
-        p.window_failed(Outcome::ApiForThisFile, T0);
+        let mut now = T0;
+        for n in 1..=6 {
+            let r = next_window_request(&mut p, &mut now);
+            assert_eq!(r.start_index, 8, "attempt {n}");
+            p.window_failed(Outcome::Backoff(Duration::from_secs(1)), now);
+        }
+        let (via_api, windows) = run_to_the_end(&mut p, &mut now);
+        assert_eq!((windows, via_api), (0, (8..CHUNKS).collect::<Vec<_>>()));
+    }
+
+    #[test]
+    fn a_bad_window_after_pinning_is_not_trusted_but_does_not_end_the_file() {
+        // A later window that names an unlisted host (or any other broken answer, except a changed
+        // version): the grants are dropped, the rest goes to the pinned route.
+        let mut p = started();
+        let mut now = T0;
+        let r = next_window_request(&mut p, &mut now);
+        let mut bad = answer(&r, now);
+        bad.grants[1].url = "https://evil.storage.test/bb-01/k?s=1".into();
+        assert_eq!(
+            p.window_answered(bad, now),
+            Err(Violation::Authority(Refusal::HostNotListed))
+        );
+        let (via_api, windows) = run_to_the_end(&mut p, &mut now);
+        assert_eq!((windows, via_api), (0, (8..CHUNKS).collect::<Vec<_>>()));
+    }
+
+    #[test]
+    fn restart_and_terminal_stay_final_after_pinning() {
+        let mut p = started();
+        let mut now = T0;
+        next_window_request(&mut p, &mut now);
+        p.window_failed(Outcome::Restart, now);
+        assert_eq!(p.poll(now), Poll::Stop(Verdict::Restart));
+
+        let t = Terminal {
+            status: 403,
+            error: None,
+        };
+        let mut q = started();
+        let mut now = T0;
+        next_window_request(&mut q, &mut now);
+        q.window_failed(Outcome::Terminal(t.clone()), now);
+        assert_eq!(q.poll(now), Poll::Stop(Verdict::Terminal(t)));
+    }
+
+    #[test]
+    fn a_chunk_waiting_for_a_renewal_goes_to_the_api_route_when_grants_stop() {
+        let mut p = started();
+        for _ in 0..4 {
+            expect_fetch(&mut p, T0);
+        }
+        p.fetch_failed(1, T0).unwrap(); // waits for a renewal, with a backoff
+        p.window_malformed(); // grants stop for this file
+        match p.poll(T0) {
+            Poll::FetchViaApi { index: 1, .. } => {}
+            other => panic!("the waiting chunk must not wait for a renewal that cannot come, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_huge_retry_after_is_capped_by_the_planner_too() {
+        let mut p = planner();
+        expect_window(&mut p, T0);
+        p.window_failed(Outcome::Backoff(Duration::from_secs(86_400)), T0);
+        assert_eq!(
+            p.poll(T0 + 1),
+            Poll::Wait {
+                until_ms: Some(T0 + MAX_WAIT_MS)
+            }
+        );
+    }
+
+    #[test]
+    fn a_malformed_first_window_sends_the_file_to_the_api_path() {
+        let mut p = planner();
+        expect_window(&mut p, T0);
+        p.window_malformed();
+        assert_eq!(
+            p.poll(T0),
+            Poll::Stop(Verdict::ApiForFile),
+            "nothing is pinned, nothing is written"
+        );
+    }
+
+    #[test]
+    fn a_failed_api_route_fetch_ends_the_file_and_frees_its_slot() {
+        let mut p = started();
+        fetched_but_unauthentic(&mut p);
+        assert!(matches!(p.poll(T0), Poll::FetchViaApi { index: 0, .. }));
+        assert_eq!(p.in_flight(), 1);
+        p.api_fetch_failed(0).unwrap();
+        assert_eq!(p.in_flight(), 0, "the slot is free");
         assert_eq!(p.poll(T0), Poll::Stop(Verdict::ApiForFile));
+        // Only a chunk that is being fetched through the API route can fail that way.
+        let mut q = started();
+        expect_fetch(&mut q, T0);
+        assert_eq!(q.api_fetch_failed(0), Err(PlanError::NotInFlight(0)), "a storage fetch");
+        assert_eq!(
+            q.api_fetch_failed(9),
+            Err(PlanError::NotInFlight(9)),
+            "nothing outstanding"
+        );
+    }
+
+    #[test]
+    fn storage_failures_after_the_window_gave_up_go_straight_to_the_api_route() {
+        let mut p = started();
+        for _ in 0..4 {
+            expect_fetch(&mut p, T0);
+        }
+        assert_eq!(p.poll(T0), Poll::Wait { until_ms: None }, "nothing is due");
+        p.window_malformed(); // grants have stopped for this file
+        p.fetch_failed(0, T0).unwrap();
+        match p.poll(T0) {
+            Poll::FetchViaApi { index: 0, .. } => {}
+            other => panic!("no renewal is scheduled once grants have stopped, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1603,24 +1886,28 @@ mod tests {
         );
         refuses(|a| a.grants[0].expires_at = "tomorrow".into(), Violation::Expiry, Api);
         refuses(|a| a.grants[0].expires_at.clear(), Violation::Expiry, Api);
-        // A server handing out links shorter than the margin.
-        refuses(
-            |a| {
-                for g in &mut a.grants {
-                    g.expires_at = rfc3339(T0 + 10_000);
-                }
-            },
-            Violation::Expiry,
-            Api,
-        );
+    }
+
+    #[test]
+    fn a_link_lifetime_shorter_than_the_renewal_margin_is_refused() {
+        // A stated lifetime under a minute is read as clock skew (the TTL counts), so only a TTL that
+        // is itself shorter than the margin can leave a grant with no usable time: the server's
+        // `url_ttl_seconds` says 20 s against a 30 s margin.
+        let mut discovery = discovery();
+        discovery.url_ttl_seconds = Some(20);
+        let cfg = PlannerConfig::from_discovery(&discovery, 7);
+        let mut p = DownloadPlanner::new(cfg, discovery, API, FILE);
+        let r = expect_window(&mut p, T0);
+        assert_eq!(p.window_answered(answer(&r, T0), T0), Err(Violation::Expiry));
+        assert_eq!(p.poll(T0), Poll::Stop(Verdict::ApiForFile));
     }
 
     #[test]
     fn the_last_chunk_length_is_the_remainder() {
         let g = geometry();
-        assert_eq!(g.chunk_length(0), 1028);
-        assert_eq!(g.chunk_length(18), 1028);
-        assert_eq!(g.chunk_length(19), LAST_PLAIN + CHUNK_OVERHEAD);
+        assert_eq!(g.chunk_length(0), Some(1028));
+        assert_eq!(g.chunk_length(18), Some(1028));
+        assert_eq!(g.chunk_length(19), Some(LAST_PLAIN + CHUNK_OVERHEAD));
         let single = Geometry {
             chunk_count: 1,
             chunk_size: 1000,
@@ -1628,7 +1915,45 @@ mod tests {
             original_size: 0,
         };
         assert!(single.is_consistent(), "the empty file is one empty chunk");
-        assert_eq!(single.chunk_length(0), 28);
+        assert_eq!(single.chunk_length(0), Some(28));
+    }
+
+    #[test]
+    fn chunk_length_never_panics_on_hostile_numbers() {
+        let g = geometry();
+        assert_eq!(g.chunk_length(20), None, "one past the last chunk");
+        assert_eq!(g.chunk_length(u32::MAX), None);
+        let empty = Geometry {
+            chunk_count: 0,
+            chunk_size: 10,
+            encrypted_size: 0,
+            original_size: 0,
+        };
+        assert_eq!(empty.chunk_length(0), None, "no chunks, no lengths");
+        let overflow = Geometry {
+            chunk_count: u32::MAX,
+            chunk_size: u64::MAX,
+            encrypted_size: u64::MAX,
+            original_size: u64::MAX,
+        };
+        for i in [0, 1, u32::MAX - 1, u32::MAX] {
+            assert_eq!(overflow.chunk_length(i), None, "index {i}");
+        }
+        let stride_overflow = Geometry {
+            chunk_count: 2,
+            chunk_size: u64::MAX - 5,
+            encrypted_size: 100,
+            original_size: 44,
+        };
+        assert_eq!(stride_overflow.chunk_length(0), None);
+        // A total smaller than the full chunks before the last is no geometry.
+        let short = Geometry {
+            chunk_count: 3,
+            chunk_size: 100,
+            encrypted_size: 10,
+            original_size: 0,
+        };
+        assert_eq!(short.chunk_length(2), None);
     }
 
     #[test]
@@ -1685,7 +2010,8 @@ mod tests {
         other_geometry.encrypted_size += u64::from(CHUNKS);
         other_geometry.original_size += u64::from(CHUNKS);
         assert_eq!(q.window_answered(other_geometry, T0), Err(Violation::Geometry));
-        assert_eq!(q.poll(T0), Poll::Stop(Verdict::ApiForFile));
+        // The version is pinned, so the rest is served through the pinned route, not abandoned.
+        assert!(!matches!(q.poll(T0), Poll::Stop(_) | Poll::RequestWindow(_)));
     }
 
     #[test]
@@ -1724,6 +2050,120 @@ mod tests {
         let r = expect_window(&mut q, T0);
         q.window_answered(answer(&r, T0), skewed_now).unwrap();
         assert!(matches!(q.poll(skewed_now + 270_000), Poll::RequestWindow(r) if r.renewal));
+    }
+
+    #[test]
+    fn a_clock_just_ahead_is_not_mistaken_for_a_short_link() {
+        // The server's expiry is 20 s away by this clock (it runs 280 s ahead): a stated lifetime
+        // under a minute is clock skew, so the full TTL counts from arrival.
+        for ahead in [270_000, 280_000, 299_000, 299_999] {
+            let mut p = planner();
+            let r = expect_window(&mut p, T0);
+            let arrival = T0 + ahead;
+            p.window_answered(answer(&r, T0), arrival)
+                .unwrap_or_else(|v| panic!("{ahead} ms ahead: {v}"));
+            assert!(
+                matches!(p.poll(arrival + 269_999), Poll::Fetch { .. }),
+                "{ahead} ms ahead: usable for the TTL from arrival"
+            );
+            let mut q = planner();
+            let r = expect_window(&mut q, T0);
+            q.window_answered(answer(&r, T0), arrival).unwrap();
+            assert!(matches!(q.poll(arrival + 270_000), Poll::RequestWindow(r) if r.renewal));
+        }
+    }
+
+    #[test]
+    fn the_stated_lifetime_band_edges() {
+        // 59.999 s stated: not believed (TTL). 60 s stated: believed (minus the margin).
+        for (stated, usable) in [(59_999, 270_000), (60_000, 30_000), (61_000, 31_000)] {
+            let mut p = planner();
+            let r = expect_window(&mut p, T0);
+            let mut a = answer(&r, T0);
+            for g in &mut a.grants {
+                g.expires_at = rfc3339(T0 + stated);
+            }
+            p.window_answered(a, T0).unwrap();
+            assert!(matches!(p.poll(T0 + usable - 1), Poll::Fetch { .. }), "stated {stated}");
+            let mut q = planner();
+            let r = expect_window(&mut q, T0);
+            let mut a = answer(&r, T0);
+            for g in &mut a.grants {
+                g.expires_at = rfc3339(T0 + stated);
+            }
+            q.window_answered(a, T0).unwrap();
+            assert!(
+                matches!(q.poll(T0 + usable), Poll::RequestWindow(r) if r.renewal),
+                "stated {stated}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_client_clock_30_seconds_behind_does_not_stretch_a_link_past_the_ttl() {
+        // The server's expiry is 330 s away by this clock: a link never outlives the TTL.
+        let mut p = planner();
+        let r = expect_window(&mut p, T0);
+        let arrival = T0 - 30_000;
+        p.window_answered(answer(&r, T0), arrival).unwrap();
+        assert!(matches!(p.poll(arrival + 269_999), Poll::Fetch { .. }));
+        let mut q = planner();
+        let r = expect_window(&mut q, T0);
+        q.window_answered(answer(&r, T0), arrival).unwrap();
+        assert!(
+            matches!(q.poll(arrival + 270_000), Poll::RequestWindow(r) if r.renewal),
+            "renewed after TTL - margin, not after 330 s - margin"
+        );
+    }
+
+    // ── a clock that steps backwards ──
+
+    #[test]
+    fn a_backoff_deadline_is_pulled_in_when_the_clock_steps_back() {
+        let mut p = planner();
+        expect_window(&mut p, T0);
+        p.window_failed(Outcome::Backoff(Duration::from_secs(100)), T0);
+        assert_eq!(
+            p.poll(T0 + 1),
+            Poll::Wait {
+                until_ms: Some(T0 + 100_000)
+            }
+        );
+        // An hour back: the old deadline would be an hour and 100 s away.
+        let back = T0 - 3_600_000;
+        assert_eq!(
+            p.poll(back),
+            Poll::Wait {
+                until_ms: Some(back + MAX_WAIT_MS)
+            }
+        );
+    }
+
+    #[test]
+    fn a_renewal_backoff_and_a_grant_deadline_are_pulled_in_too() {
+        let mut cfg = PlannerConfig::from_discovery(&discovery(), 7);
+        cfg.backoff_base_ms = 50_000_000;
+        cfg.backoff_cap_ms = 50_000_000;
+        let mut p = DownloadPlanner::new(cfg, discovery(), API, FILE);
+        let first = expect_window(&mut p, T0);
+        p.window_answered(answer(&first, T0), T0).unwrap();
+        for _ in 0..4 {
+            expect_fetch(&mut p, T0);
+        }
+        p.fetch_failed(0, T0).unwrap(); // not before T0 + ~25_000..50_000 s
+        let back = T0 - 3_600_000;
+        match p.poll(back) {
+            Poll::Wait { until_ms: Some(t) } => assert_eq!(t, back + MAX_WAIT_MS, "NeedsGrant deadline clamped"),
+            other => panic!("{other:?}"),
+        }
+        // The unused grants (4..8) would have lasted until T0 + 270 s: an hour later.
+        // Clamped, they last 270 s from the new reading.
+        let mut q = started();
+        assert!(matches!(q.poll(back), Poll::Fetch { .. }));
+        assert!(
+            matches!(q.poll(back + 270_000), Poll::RequestWindow(r) if r.renewal),
+            "a grant deadline from before the step does not outlive the TTL"
+        );
     }
 
     #[test]
