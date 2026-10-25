@@ -2216,7 +2216,11 @@ pub fn scrub_text(text: &str) -> String {
 /// not exported yet, so do not pass an upload outcome to `pinnedRetryDecision`), `regrant`
 /// (`upload_commit` only: the staged chunk is not there, ask for a new link and send it again), `held`
 /// (`upload_commit` only: the server holds the chunk's commit lock, possibly for minutes: wait and
-/// commit again, `millis` is the server's stated wait or null).
+/// commit again, `millis` is the server's stated wait or null). core's `UploadChunkState` gives a hold an
+/// allowance of its own (the lock TTL, 420 s, plus 30 s; never polling faster than once a second), but it
+/// is not exported yet: a host that handles `held` itself must bound the wait the same way (at least the
+/// server's lock TTL, or it abandons a chunk whose commit would have gone through), poll no faster than
+/// once a second, and not count a hold as one of its failures.
 /// `call` is `"discovery"`, `"download_grant"`, `"pinned_chunk"`, `"upload_grant"` or
 /// `"upload_commit"`; pass `status` 0 when there was
 /// no HTTP answer. `body` is whatever was read of the body (at most 64 KiB is
@@ -2253,6 +2257,8 @@ enum DirectOutcomeJs {
     Regrant,
     /// `upload_commit` only: the server holds the chunk's commit lock (up to 420 s after a failed
     /// copy); wait and commit again. `millis` is the server's stated wait, `null` when it sent none.
+    /// The host bounds the wait itself (at least 450 s in all, polls no faster than once a second, not
+    /// counted as a failure) until core's `UploadChunkState` is exported.
     Held {
         millis: Option<f64>,
     },

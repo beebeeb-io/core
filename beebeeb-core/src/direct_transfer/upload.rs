@@ -196,6 +196,10 @@ pub const COMMIT_LOCK_TTL: Duration = Duration::from_secs(420);
 /// server before our next request and the answer takes a moment.
 pub const COMMIT_HOLD_MARGIN: Duration = Duration::from_secs(30);
 
+/// The shortest wait between two polls of a held commit, whatever was stated (`Held(Some(0))`, a hand-built
+/// outcome with 0, negative or NaN milliseconds) or configured (`hold_poll` of 0): a hold must always end.
+pub const MIN_HOLD_POLL: Duration = Duration::from_secs(1);
+
 /// How hard one chunk is tried before the whole file goes back to the API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UploadChunkPolicy {
@@ -223,6 +227,10 @@ pub struct UploadChunkPolicy {
     pub hold_poll: Duration,
     /// The longest poll interval while held.
     pub hold_poll_max: Duration,
+    /// The most polls of one held commit, whatever their waits: a second bound next to
+    /// [`hold_budget`](Self::hold_budget) (a poll never waits less than [`MIN_HOLD_POLL`], so the
+    /// budget alone ends it, but a policy with a huge budget must still end).
+    pub hold_max_polls: u32,
 }
 
 impl Default for UploadChunkPolicy {
@@ -235,6 +243,7 @@ impl Default for UploadChunkPolicy {
             hold_budget: COMMIT_LOCK_TTL + COMMIT_HOLD_MARGIN,
             hold_poll: Duration::from_secs(5),
             hold_poll_max: Duration::from_secs(15),
+            hold_max_polls: 450,
         }
     }
 }
@@ -291,14 +300,16 @@ pub struct UploadChunkState {
 }
 
 impl UploadChunkState {
-    /// A state whose jitter is the stream of seed 0: the same waits every time, for tests. Production
-    /// uses [`with_seed`](Self::with_seed) with random bytes.
+    /// A state whose jitter is the stream of seed 0: the same waits every time. **Tests only**: a client
+    /// that used it would give every chunk of every installation the same backoff stream, which is what
+    /// jitter is there to prevent. Production uses [`with_seed`](Self::with_seed) with random bytes.
+    #[cfg(test)]
     pub fn new(policy: UploadChunkPolicy) -> Self {
         Self::with_seed(policy, 0)
     }
 
-    /// `seed` starts the jitter of this chunk's backoff. Production passes random bytes, one per
-    /// chunk; the same seed gives the same waits.
+    /// `seed` starts the jitter of this chunk's backoff. Pass random bytes, one seed per chunk (the same
+    /// seed gives the same waits, which is how the vectors pin them).
     pub fn with_seed(policy: UploadChunkPolicy, seed: u64) -> Self {
         UploadChunkState {
             policy,
@@ -375,7 +386,7 @@ impl UploadChunkState {
     /// The commit is held by the server's lock: poll again, inside [`UploadChunkPolicy::hold_budget`].
     fn held(&mut self, stated: Option<Duration>) -> UploadNext {
         let left = self.policy.hold_budget.saturating_sub(self.held);
-        if left.is_zero() {
+        if left.is_zero() || self.holds >= self.policy.hold_max_polls {
             return UploadNext::UseApi;
         }
         let want = match stated {
@@ -391,6 +402,9 @@ impl UploadChunkState {
                 jittered(&mut self.rng, exp)
             }
         };
+        // Never a busy loop: a stated 0 (or one that arrived as a negative or NaN number from a binding) and a
+        // configured `hold_poll` of 0 both wait at least a second.
+        let want = want.max(MIN_HOLD_POLL);
         // The last poll is cut to what is left, so the whole allowance is used and no more.
         let after = want.min(left);
         self.held = self.held.saturating_add(after);
@@ -653,21 +667,29 @@ mod tests {
 
     #[test]
     fn a_stated_wait_is_kept_exactly_and_draws_no_jitter() {
-        // Two chunks that differ only in a stated wait in between: their later jittered waits are equal.
-        let later = |with_stated: bool| {
+        // Two chunks, the same seed. The first failure of each draws NO jitter, one because the server stated its wait
+        // (a Backoff), the other because it is a Regrant (a new link, no wait). The second failure of each is a plain
+        // one whose jittered wait comes from the START of the stream in both cases: if a stated wait drew a value, the
+        // two would differ.
+        let second_wait = |first: Outcome| {
             let mut s = UploadChunkState::with_seed(UploadChunkPolicy::default(), 4);
-            if with_stated {
-                assert_eq!(
-                    s.failed(&UploadFailure::Commit(Outcome::Backoff(secs(5)))),
-                    retry(secs(5), Call::UploadCommit)
-                );
-            } else {
-                // A plain failure in its place, so that the failure counts line up.
-                let _ = s.failed(&UploadFailure::Commit(Outcome::Backoff(secs(5))));
+            let got = s.failed(&UploadFailure::Commit(first.clone()));
+            if let Outcome::Backoff(d) = first {
+                assert_eq!(got, retry(d, Call::UploadCommit), "a stated wait is kept exactly");
             }
             s.failed(&UploadFailure::Commit(Outcome::Retry))
         };
-        assert_eq!(later(true), later(false));
+        assert_eq!(second_wait(Outcome::Backoff(secs(5))), second_wait(Outcome::Regrant));
+        // ... and the first failure of a chunk that DOES draw (a plain one) moves the stream, so this comparison can fail.
+        let mut a = UploadChunkState::with_seed(UploadChunkPolicy::default(), 4);
+        let mut b = UploadChunkState::with_seed(UploadChunkPolicy::default(), 4);
+        let _ = a.failed(&UploadFailure::Commit(Outcome::Retry));
+        let _ = b.failed(&UploadFailure::Commit(Outcome::Regrant));
+        assert_ne!(
+            a.failed(&UploadFailure::Commit(Outcome::Retry)),
+            b.failed(&UploadFailure::Commit(Outcome::Retry)),
+            "a plain failure draws, a regrant does not (different failure counts and streams)"
+        );
     }
 
     // ── the commit lock: a hold is a wait with its own allowance, not a failure (P2-1) ──
@@ -785,6 +807,64 @@ mod tests {
             assert!(*p <= exp, "poll {} = {p:?} > {exp:?}", i + 1);
             assert!(last || *p >= exp / 2, "poll {} = {p:?} < {:?}", i + 1, exp / 2);
         }
+    }
+
+    #[test]
+    fn a_hold_that_states_nothing_sensible_still_waits_at_least_a_second_and_ends() {
+        // `Held(Some(0))` is what a binding hands over for 0, a negative or NaN number of milliseconds.
+        for stated in [
+            Some(Duration::ZERO),
+            Some(Duration::from_millis(1)),
+            Some(Duration::from_millis(999)),
+        ] {
+            let mut s = state();
+            let mut total = Duration::ZERO;
+            let mut polls = 0;
+            loop {
+                match hold(&mut s, stated) {
+                    UploadNext::Retry { after, call } => {
+                        assert_eq!(call, Call::UploadCommit);
+                        assert!(after >= MIN_HOLD_POLL, "{stated:?}: poll {polls} waited {after:?}");
+                        total += after;
+                        polls += 1;
+                    }
+                    UploadNext::UseApi => break,
+                    other => panic!("{other:?}"),
+                }
+                assert!(polls <= 1000, "{stated:?}: the hold never ends");
+            }
+            assert_eq!(total, COMMIT_LOCK_TTL + COMMIT_HOLD_MARGIN, "{stated:?}");
+        }
+        // A configured poll of 0 does not busy-loop either.
+        let mut s = UploadChunkState::new(UploadChunkPolicy {
+            hold_poll: Duration::ZERO,
+            hold_poll_max: Duration::ZERO,
+            ..UploadChunkPolicy::default()
+        });
+        match hold(&mut s, None) {
+            UploadNext::Retry { after, .. } => assert!(after >= MIN_HOLD_POLL, "{after:?}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_number_of_polls_is_capped_whatever_the_allowance() {
+        let mut s = UploadChunkState::new(UploadChunkPolicy {
+            hold_budget: Duration::from_secs(24 * 3600),
+            hold_max_polls: 10,
+            ..UploadChunkPolicy::default()
+        });
+        for n in 1..=10 {
+            assert!(
+                matches!(hold(&mut s, Some(secs(1))), UploadNext::Retry { .. }),
+                "poll {n}"
+            );
+        }
+        assert_eq!(
+            hold(&mut s, Some(secs(1))),
+            UploadNext::UseApi,
+            "the 11th poll is refused"
+        );
     }
 
     #[test]
@@ -919,6 +999,31 @@ mod tests {
     }
 
     #[test]
+    fn every_row_of_the_vectors_says_where_it_comes_from() {
+        let v = vectors();
+        for section in ["grant_answers", "commit_answers", "init_transport", "policy"] {
+            for row in v[section].as_array().unwrap() {
+                let source = row["source"].as_str().unwrap_or("");
+                assert!(source.len() > 20, "{section}: `{}` has no source", row["name"]);
+            }
+        }
+        let d: serde_json::Value =
+            serde_json::from_str(include_str!("../../../test-vectors/direct_transfer.json")).unwrap();
+        let mut upload_rows = 0;
+        for row in d["classify"].as_array().unwrap() {
+            if row["call"].as_str().unwrap().starts_with("upload_") {
+                upload_rows += 1;
+                assert!(
+                    row["source"].as_str().unwrap_or("").len() > 20,
+                    "classify: `{}` has no source",
+                    row["name"]
+                );
+            }
+        }
+        assert_eq!(upload_rows, 55, "classify rows for the upload calls");
+    }
+
+    #[test]
     fn every_grant_answer_row_of_the_vectors() {
         let v = vectors();
         let rows = v["grant_answers"].as_array().unwrap();
@@ -986,7 +1091,7 @@ mod tests {
         use super::super::vectors::outcome_from_json;
         let v = vectors();
         let scenarios = v["policy"].as_array().unwrap();
-        assert_eq!(scenarios.len(), 26, "policy scenarios");
+        assert_eq!(scenarios.len(), 27, "policy scenarios");
         for scenario in scenarios {
             let name = scenario["name"].as_str().unwrap();
             let mut state =

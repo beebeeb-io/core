@@ -1530,9 +1530,9 @@
       "body": "",
       "retry_after": null,
       "expect": {
-        "kind": "use_api_now"
+        "kind": "api_for_this_file"
       },
-      "source": "no handler sends it: a proxy redirect (a wrong path, not a passing fault)"
+      "source": "no handler sends it: a proxy redirect (a wrong path, not a passing fault: this session cannot go direct)"
     },
     {
       "name": "upload grant 100 is no answer to what was asked",
@@ -1542,7 +1542,7 @@
       "body": "",
       "retry_after": null,
       "expect": {
-        "kind": "use_api_now"
+        "kind": "api_for_this_file"
       },
       "source": "no handler sends it: an interim response nothing asked for"
     },
@@ -1696,6 +1696,32 @@
         "millis": null
       },
       "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:912-914 (commit_in_progress), returned by commit_locked at 975, 1075, 1093, 1123; tests/direct_upload_2173.rs:1427"
+    },
+    {
+      "name": "upload commit 409 commit_in_progress with the lock already released: the record's HEAD could not tell (R3.4), server 30c8ed62",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "held",
+        "millis": null
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:1121-1123 (RecordOutcome::Unavailable -> commit_in_progress while the lock is no longer held); the allowance is also the bound on this case, where every poll re-copies the chunk"
+    },
+    {
+      "name": "upload commit 503 with Retry-After: the record's HEAD could not tell (R3.4), a server after 30c8ed62",
+      "call": "upload_commit",
+      "status": 503,
+      "content_type": "application/json",
+      "body": "{\"error\":\"statement_timeout\",\"message\":\"This took too long, so the server stopped it. Try again in a moment.\"}",
+      "retry_after": "5",
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      },
+      "source": "client-side case: NOT 30c8ed62 (which answers commit_in_progress there, routes/direct_transfer.rs:1123); the change agreed with the s3-server lane answers R3.4 transient failures as a 503 with Retry-After, a counted wait, and keeps commit_in_progress for the lock alone"
     },
     {
       "name": "upload commit 409 commit_in_progress keeps a stated wait",
@@ -1854,9 +1880,9 @@
       "body": "",
       "retry_after": null,
       "expect": {
-        "kind": "use_api_now"
+        "kind": "api_for_this_file"
       },
-      "source": "no handler sends it: a proxy redirect (a wrong path, not a passing fault)"
+      "source": "no handler sends it: a proxy redirect (a wrong path, not a passing fault: this session cannot go direct)"
     },
     {
       "name": "upload commit 100 is no answer to what was asked",
@@ -1866,7 +1892,7 @@
       "body": "",
       "retry_after": null,
       "expect": {
-        "kind": "use_api_now"
+        "kind": "api_for_this_file"
       },
       "source": "no handler sends it: an interim response nothing asked for"
     },

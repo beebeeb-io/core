@@ -7436,7 +7436,9 @@ public enum DirectOutcomeDto: Equatable, Hashable {
     /**
      * `upload_commit` only (409 `commit_in_progress`): the server holds the chunk's commit lock, up to
      * 420 s after a failed copy. Wait (`millis` is the server's stated wait, `None` when it sent none)
-     * and commit again; this is not a failure and has an allowance of its own.
+     * and commit again; it is not a failure. core's `UploadChunkState` bounds the wait (the lock TTL
+     * plus 30 s = 450 s, polls no faster than once a second) but is not exported yet: a host that
+     * handles this itself must bound it the same way, and not count a hold as one of its failures.
      */
     case held(millis: UInt64?
     )

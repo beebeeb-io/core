@@ -173,16 +173,22 @@ pub enum Outcome {
     NotSupported,
     /// No direct transport right now (bare 404/405, 5xx, redirect, network
     /// failure, anything unrecognised): use the API for this file now and ask
-    /// discovery again later, at most once per command.
+    /// discovery again later, at most once per command. (The upload calls never
+    /// answer this: see [`Outcome::ApiForThisFile`].)
     UseApiNow,
     /// This file is served over the API (`direct_unavailable`, an unknown 409
-    /// or other 4xx): today's path.
+    /// or other 4xx): today's path. **For an UPLOAD call it means this SESSION cannot go
+    /// direct**: its transport never changes after init, so abandon the session and init
+    /// again WITHOUT the capability token. A bare 404/405, a 1xx/3xx, `direct_unavailable`,
+    /// `transport_mismatch` and any unknown 409 or 4xx are all this on `UploadGrant` and
+    /// `UploadCommit`.
     ApiForThisFile,
     /// `version_unavailable`: the pinned version is gone. Discard what was
     /// fetched and restart from fresh metadata. Never mix versions.
     Restart,
-    /// 429, or 409 `replace_in_progress` / `commit_in_progress`: wait this
-    /// long, then ask again (the planner gives up after a bounded number).
+    /// 429, or 409 `replace_in_progress` / `commit_in_progress` on a DOWNLOAD call: wait this
+    /// long, then ask again (the planner gives up after a bounded number). On an upload call
+    /// it is a counted wait (a 429, a 5xx that states one); the commit lock is [`Outcome::Held`].
     Backoff(Duration),
     /// 401, 403, or a JSON 404: an authorization answer, not a routing one.
     /// The API path would refuse too; do not fall back.
@@ -200,6 +206,12 @@ pub enum Outcome {
     /// wait with its own allowance, not a counted failure
     /// ([`UploadChunkState`](super::upload::UploadChunkState)). The duration is the server's
     /// `Retry-After` when it sent one (clamped like any stated wait), `None` when it did not.
+    ///
+    /// The server (30c8ed62) also answers `commit_in_progress` when the lock is ALREADY released, if
+    /// the record's in-lock HEAD could not tell (R3.4, `routes/direct_transfer.rs:1123`): on slow
+    /// storage every poll of that case re-copies the chunk. A server that states those transient
+    /// failures as a `503` with `Retry-After` (a counted wait) and keeps `commit_in_progress` for the
+    /// lock alone removes the ambiguity; until then the allowance is also the bound on that case.
     Held(Option<Duration>),
 }
 
@@ -297,8 +309,8 @@ pub fn classify(call: Call, answer: &ApiAnswer) -> Outcome {
             0 => Outcome::Retry,
             // 1xx, 3xx: nothing we asked for happened, and a redirect or an interim answer is a path that
             // is wrong (a proxy, a captive portal), not a fault that passes: this session cannot go
-            // direct, as for a download (spec R1.6).
-            _ => Outcome::UseApiNow,
+            // direct (spec R1.6), like every other answer of this arm that is not worth another try.
+            _ => Outcome::ApiForThisFile,
         },
         Call::PinnedChunk => match status {
             401 | 403 => terminal(),
@@ -1015,16 +1027,16 @@ mod tests {
                 Outcome::Retry,
             ),
             (
-                "a redirect is a path that is wrong, not a fault that passes (as for a download)",
+                "a redirect is a path that is wrong, not a fault that passes",
                 UploadGrant,
                 ApiAnswer::from_parts(302, None, b"", None),
-                Outcome::UseApiNow,
+                Outcome::ApiForThisFile,
             ),
             (
                 "an interim answer on a commit likewise",
                 UploadCommit,
                 ApiAnswer::from_parts(100, None, b"", None),
-                Outcome::UseApiNow,
+                Outcome::ApiForThisFile,
             ),
             (
                 "a 4xx the API judges for itself",
