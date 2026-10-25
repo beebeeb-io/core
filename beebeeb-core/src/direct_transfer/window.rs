@@ -11,12 +11,13 @@
 //!     match planner.poll(now_ms) {
 //!         Poll::RequestWindow(req) => POST it, then window_answered(..) or window_failed(..),
 //!         Poll::Fetch { index, grant } => GET grant.url (separate client), then fetch_ok / fetch_failed,
-//!         Poll::FetchViaApi { index, .. } => GET the pinned per-chunk API route, then fetch_ok / fetch_failed(Unauthentic),
+//!         Poll::FetchViaApi { index, .. } => GET the pinned per-chunk API route, then fetch_ok,
 //!         Poll::Wait { until_ms } => sleep until then or until an outstanding request returns,
 //!         Poll::Done => break,
 //!         Poll::Stop(verdict) => discard partial output and act on the verdict,
 //!     }
-//!     // chunks are decrypted and written IN ORDER; after each: planner.consumed(index)
+//!     // chunks are decrypted and written IN ORDER; after each: planner.consumed(index),
+//!     // or planner.chunk_unauthentic(index) when one does not open
 //! }
 //! ```
 //!
@@ -152,17 +153,6 @@ impl Geometry {
     }
 }
 
-/// What the storage (or API) attempt for a chunk ran into.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FetchFailure {
-    /// Any failure of the transfer itself: a non-200, a short body, a length
-    /// that is not the grant's `length`, a connection error, a 404 after a
-    /// migration, a 403 from an expired link (R1.13: one defined fallback).
-    Storage,
-    /// The chunk arrived whole but did not authenticate when decrypted.
-    Unauthentic,
-}
-
 /// How the whole file ends when it cannot go on directly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
@@ -268,7 +258,11 @@ enum Slot {
         attempts: Attempts,
         via_api: bool,
     },
-    Fetched,
+    /// Arrived whole; waits to be decrypted in order. `attempts` is kept so an
+    /// authentication failure at decrypt time still counts.
+    Fetched {
+        attempts: Attempts,
+    },
     ApiPending {
         attempts: Attempts,
     },
@@ -701,54 +695,64 @@ impl DownloadPlanner {
         }
     }
 
-    /// Chunk `index` arrived whole (length checked). It now waits to be
-    /// decrypted in order.
+    /// Chunk `index` arrived whole (status and length checked). It now waits
+    /// to be decrypted in order.
     pub fn fetch_ok(&mut self, index: u32) -> Result<(), PlanError> {
-        match self.slots.get_mut(&index) {
-            Some(slot @ Slot::Fetching { .. }) => {
-                *slot = Slot::Fetched;
-                Ok(())
-            }
-            _ => Err(PlanError::NotInFlight(index)),
-        }
+        let Some(Slot::Fetching { attempts, .. }) = self.slots.get(&index) else {
+            return Err(PlanError::NotInFlight(index));
+        };
+        let attempts = *attempts;
+        self.slots.insert(index, Slot::Fetched { attempts });
+        Ok(())
     }
 
-    /// Chunk `index` failed. Storage failures renew (bounded) and then fall
-    /// back to the API route; an authentication failure is re-fetched once
-    /// through the API route and is a hard error the second time.
-    pub fn fetch_failed(&mut self, index: u32, failure: FetchFailure, now_ms: i64) -> Result<(), PlanError> {
+    /// The transfer of chunk `index` from storage failed: a non-200, a short
+    /// body, a length that is not the grant's `length`, a connection error, a
+    /// 404 after a migration, a 403 from an expired link (R1.13: one defined
+    /// fallback). It is renewed (bounded, with backoff) and then goes to the
+    /// pinned API route.
+    ///
+    /// A failure on the API route itself is the caller's to handle (its own
+    /// retries, 401/403 and 409 handling) and is reported as an error here.
+    pub fn fetch_failed(&mut self, index: u32, now_ms: i64) -> Result<(), PlanError> {
         let Some(Slot::Fetching { attempts, via_api }) = self.slots.get(&index) else {
             return Err(PlanError::NotInFlight(index));
         };
         let (mut attempts, via_api) = (*attempts, *via_api);
-        match failure {
-            FetchFailure::Unauthentic => {
-                attempts.auth_failures = attempts.auth_failures.saturating_add(1);
-                if attempts.auth_failures >= 2 {
-                    self.verdict = Some(Verdict::Corrupt);
-                    self.slots.remove(&index);
-                } else {
-                    self.slots.insert(index, Slot::ApiPending { attempts });
-                }
-            }
-            FetchFailure::Storage => {
-                if via_api {
-                    return Err(PlanError::ApiRouteFailure(index));
-                }
-                attempts.renewals = attempts.renewals.saturating_add(1);
-                if attempts.renewals > self.cfg.max_renewals {
-                    self.slots.insert(index, Slot::ApiPending { attempts });
-                } else {
-                    let delay = self.backoff_ms(attempts.renewals);
-                    self.slots.insert(
-                        index,
-                        Slot::NeedsGrant {
-                            attempts,
-                            not_before_ms: now_ms.saturating_add(delay),
-                        },
-                    );
-                }
-            }
+        if via_api {
+            return Err(PlanError::ApiRouteFailure(index));
+        }
+        attempts.renewals = attempts.renewals.saturating_add(1);
+        if attempts.renewals > self.cfg.max_renewals {
+            self.slots.insert(index, Slot::ApiPending { attempts });
+        } else {
+            let delay = self.backoff_ms(attempts.renewals);
+            self.slots.insert(
+                index,
+                Slot::NeedsGrant {
+                    attempts,
+                    not_before_ms: now_ms.saturating_add(delay),
+                },
+            );
+        }
+        Ok(())
+    }
+
+    /// Chunk `index` arrived whole but did not authenticate when it was
+    /// decrypted. It is fetched once through the pinned API route; if that copy
+    /// does not authenticate either, the file ends with [`Verdict::Corrupt`].
+    /// Never publish partial plaintext on that verdict.
+    pub fn chunk_unauthentic(&mut self, index: u32) -> Result<(), PlanError> {
+        let Some(Slot::Fetched { attempts }) = self.slots.get(&index) else {
+            return Err(PlanError::NotFetched(index));
+        };
+        let mut attempts = *attempts;
+        attempts.auth_failures = attempts.auth_failures.saturating_add(1);
+        if attempts.auth_failures >= 2 {
+            self.verdict = Some(Verdict::Corrupt);
+            self.slots.remove(&index);
+        } else {
+            self.slots.insert(index, Slot::ApiPending { attempts });
         }
         Ok(())
     }
@@ -762,7 +766,7 @@ impl DownloadPlanner {
             });
         }
         match self.slots.get(&index) {
-            Some(Slot::Fetched) => {
+            Some(Slot::Fetched { .. }) => {
                 self.slots.remove(&index);
                 self.consumed += 1;
                 Ok(())
@@ -954,6 +958,20 @@ mod tests {
     }
 
     #[test]
+    fn a_config_asking_for_more_than_four_in_flight_is_clamped() {
+        let mut cfg = PlannerConfig::from_discovery(&discovery(), 7);
+        cfg.max_in_flight = 99;
+        let mut p = DownloadPlanner::new(cfg, discovery(), API, FILE);
+        let first = expect_window(&mut p, T0);
+        p.window_answered(answer(&first, T0), T0).unwrap();
+        for _ in 0..MAX_IN_FLIGHT {
+            expect_fetch(&mut p, T0);
+        }
+        assert_eq!(p.poll(T0), Poll::Wait { until_ms: None });
+        assert_eq!(p.in_flight(), MAX_IN_FLIGHT);
+    }
+
+    #[test]
     fn a_stalled_first_chunk_bounds_how_far_ahead_the_others_run() {
         let mut p = started();
         for _ in 0..4 {
@@ -981,10 +999,7 @@ mod tests {
         assert_eq!(p.consumed(1), Err(PlanError::OutOfOrder { expected: 0, got: 1 }));
         assert_eq!(p.consumed(0), Err(PlanError::NotFetched(0)));
         assert_eq!(p.fetch_ok(5), Err(PlanError::NotInFlight(5)));
-        assert_eq!(
-            p.fetch_failed(5, FetchFailure::Storage, T0),
-            Err(PlanError::NotInFlight(5))
-        );
+        assert_eq!(p.fetch_failed(5, T0), Err(PlanError::NotInFlight(5)));
     }
 
     // ── window refill ──
@@ -1184,7 +1199,7 @@ mod tests {
         for _ in 0..4 {
             expect_fetch(&mut p, T0);
         }
-        p.fetch_failed(0, FetchFailure::Storage, fail_at).unwrap();
+        p.fetch_failed(0, fail_at).unwrap();
         match p.poll(fail_at) {
             Poll::Wait { until_ms: Some(t) } => {
                 let delay = t - fail_at;
@@ -1228,7 +1243,7 @@ mod tests {
                 }
             };
             assert!(fetch);
-            p.fetch_failed(0, FetchFailure::Storage, now).unwrap();
+            p.fetch_failed(0, now).unwrap();
         }
         (p, now)
     }
@@ -1250,7 +1265,7 @@ mod tests {
                 other => panic!("{other:?}"),
             }
         }
-        p.fetch_failed(0, FetchFailure::Storage, now).unwrap();
+        p.fetch_failed(0, now).unwrap();
         loop {
             match p.poll(now) {
                 Poll::FetchViaApi {
@@ -1315,11 +1330,17 @@ mod tests {
 
     // ── authentication failures ──
 
+    /// Start chunk 0, let it arrive, and report that it did not authenticate.
+    fn fetched_but_unauthentic(p: &mut DownloadPlanner) {
+        expect_fetch(p, T0);
+        p.fetch_ok(0).unwrap();
+        p.chunk_unauthentic(0).unwrap();
+    }
+
     #[test]
     fn an_unauthentic_chunk_is_refetched_once_through_the_api_then_is_a_hard_error() {
         let mut p = started();
-        expect_fetch(&mut p, T0);
-        p.fetch_failed(0, FetchFailure::Unauthentic, T0).unwrap();
+        fetched_but_unauthentic(&mut p);
         match p.poll(T0) {
             Poll::FetchViaApi {
                 index,
@@ -1329,7 +1350,8 @@ mod tests {
             }
             other => panic!("expected the API re-fetch, got {other:?}"),
         }
-        p.fetch_failed(0, FetchFailure::Unauthentic, T0).unwrap();
+        p.fetch_ok(0).unwrap();
+        p.chunk_unauthentic(0).unwrap();
         assert_eq!(p.poll(T0), Poll::Stop(Verdict::Corrupt));
         assert_eq!(p.poll(T0 + 1), Poll::Stop(Verdict::Corrupt), "the verdict sticks");
     }
@@ -1337,8 +1359,7 @@ mod tests {
     #[test]
     fn a_chunk_that_authenticates_on_the_api_route_goes_on() {
         let mut p = started();
-        expect_fetch(&mut p, T0);
-        p.fetch_failed(0, FetchFailure::Unauthentic, T0).unwrap();
+        fetched_but_unauthentic(&mut p);
         assert!(matches!(p.poll(T0), Poll::FetchViaApi { index: 0, .. }));
         p.fetch_ok(0).unwrap();
         p.consumed(0).unwrap();
@@ -1346,15 +1367,40 @@ mod tests {
     }
 
     #[test]
+    fn an_unauthentic_chunk_that_arrived_after_storage_failures_still_gets_its_one_api_copy() {
+        // Two storage failures first, then it arrives and fails to open: the budget of
+        // authentication failures is separate from the renewal budget.
+        let (mut p, mut now) = fail_chunk_zero(2);
+        loop {
+            match p.poll(now) {
+                Poll::Fetch { index: 0, .. } => break,
+                Poll::RequestWindow(r) => {
+                    p.window_answered(answer(&r, now), now).unwrap();
+                }
+                Poll::Wait { until_ms } => now = until_ms.unwrap_or(now + 1),
+                Poll::Fetch { .. } => {}
+                other => panic!("{other:?}"),
+            }
+        }
+        p.fetch_ok(0).unwrap();
+        p.chunk_unauthentic(0).unwrap();
+        assert!(matches!(p.poll(now), Poll::FetchViaApi { index: 0, .. }));
+    }
+
+    #[test]
     fn api_route_transport_failures_are_the_callers_to_handle() {
         let mut p = started();
-        expect_fetch(&mut p, T0);
-        p.fetch_failed(0, FetchFailure::Unauthentic, T0).unwrap();
+        fetched_but_unauthentic(&mut p);
         assert!(matches!(p.poll(T0), Poll::FetchViaApi { .. }));
-        assert_eq!(
-            p.fetch_failed(0, FetchFailure::Storage, T0),
-            Err(PlanError::ApiRouteFailure(0))
-        );
+        assert_eq!(p.fetch_failed(0, T0), Err(PlanError::ApiRouteFailure(0)));
+    }
+
+    #[test]
+    fn unauthentic_is_only_valid_for_a_chunk_that_arrived() {
+        let mut p = started();
+        assert_eq!(p.chunk_unauthentic(0), Err(PlanError::NotFetched(0)), "not started");
+        expect_fetch(&mut p, T0);
+        assert_eq!(p.chunk_unauthentic(0), Err(PlanError::NotFetched(0)), "still in flight");
     }
 
     // ── window failures ──
