@@ -2655,8 +2655,9 @@ mod tests {
         p
     }
 
-    /// Chunk 1 fails authentication twice: the file is Corrupt.
-    fn make_corrupt(p: &mut DownloadPlanner) {
+    /// A chunk that has failed authentication once and has come back from the API route: one more
+    /// failure and the file is Corrupt. Done with `poll`, so call it BEFORE any other verdict is set.
+    fn chunk_that_failed_once(p: &mut DownloadPlanner) -> u32 {
         let index = expect_fetch(p, T0);
         p.fetch_ok(index).unwrap();
         p.chunk_unauthentic(index).unwrap();
@@ -2665,6 +2666,12 @@ mod tests {
             other => panic!("expected the API re-fetch, got {other:?}"),
         }
         p.fetch_ok(index).unwrap();
+        index
+    }
+
+    /// The file is Corrupt: a chunk fails authentication twice.
+    fn make_corrupt(p: &mut DownloadPlanner) {
+        let index = chunk_that_failed_once(p);
         p.chunk_unauthentic(index).unwrap();
     }
 
@@ -2764,8 +2771,9 @@ mod tests {
     fn a_chunk_that_does_not_authenticate_escalates_every_other_verdict_to_corrupt() {
         for existing in all_verdicts().into_iter().take(3) {
             let mut p = with_chunk_zero_on_the_api_route();
+            let index = chunk_that_failed_once(&mut p);
             reach(&mut p, &existing);
-            make_corrupt(&mut p);
+            p.chunk_unauthentic(index).unwrap();
             assert_eq!(p.poll(T0), Poll::Stop(Verdict::Corrupt), "Corrupt after {existing:?}");
         }
     }
