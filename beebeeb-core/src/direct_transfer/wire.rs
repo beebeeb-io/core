@@ -35,6 +35,7 @@ pub const DISCOVERY_PATH: &str = "/api/v1/transfer/capabilities";
 pub const MAX_WINDOW: u32 = 32;
 /// Grants asked per window when discovery names no smaller maximum.
 pub const DEFAULT_WINDOW: u32 = 8;
+const _: () = assert!(DEFAULT_WINDOW >= 1 && DEFAULT_WINDOW <= MAX_WINDOW);
 /// Link lifetime assumed when discovery omits `url_ttl_seconds`.
 pub const DEFAULT_URL_TTL_SECS: u64 = 300;
 /// Largest discovery body a client should read (the real one is < 1 KiB).
@@ -131,8 +132,9 @@ impl Discovery {
     /// server states and never above [`MAX_WINDOW`] (an untrusted number
     /// cannot raise it), never below 1.
     pub fn window(&self) -> u32 {
-        let ceiling = self.max_window.unwrap_or(MAX_WINDOW).clamp(1, MAX_WINDOW);
-        DEFAULT_WINDOW.min(ceiling)
+        // DEFAULT_WINDOW <= MAX_WINDOW (asserted below), so the minimum is
+        // bounded by the cap whatever the server states.
+        DEFAULT_WINDOW.min(self.max_window.unwrap_or(MAX_WINDOW).max(1))
     }
 
     /// Link lifetime the server states (default [`DEFAULT_URL_TTL_SECS`]).

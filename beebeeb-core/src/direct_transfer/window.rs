@@ -821,6 +821,8 @@ mod tests {
     const VERSION: &str = "22222222-2222-4222-8222-222222222222";
     const T0: i64 = 1_800_000_000_000; // 2027-01-15, Unix ms
     const STRIDE: u64 = 1000;
+    /// Upper bound of any drive loop: a broken planner fails an assertion instead of hanging the suite.
+    const STEPS: usize = 5_000;
     const CHUNKS: u32 = 20;
     const LAST_PLAIN: u64 = 500;
 
@@ -972,6 +974,20 @@ mod tests {
     }
 
     #[test]
+    fn a_config_window_above_the_servers_cap_is_clamped() {
+        let mut cfg = PlannerConfig::from_discovery(&discovery(), 7);
+        cfg.window = 500;
+        let mut p = DownloadPlanner::new(cfg, discovery(), API, FILE);
+        let first = expect_window(&mut p, T0);
+        assert_eq!(first.count, super::super::wire::MAX_WINDOW);
+
+        let mut cfg = PlannerConfig::from_discovery(&discovery(), 7);
+        cfg.window = 0;
+        let mut p = DownloadPlanner::new(cfg, discovery(), API, FILE);
+        assert_eq!(expect_window(&mut p, T0).count, 1);
+    }
+
+    #[test]
     fn a_stalled_first_chunk_bounds_how_far_ahead_the_others_run() {
         let mut p = started();
         for _ in 0..4 {
@@ -1110,7 +1126,8 @@ mod tests {
         let mut p = planner();
         let mut now = T0;
         let mut windows = vec![];
-        loop {
+        let mut done = false;
+        for _ in 0..STEPS {
             match p.poll(now) {
                 Poll::RequestWindow(r) => {
                     windows.push((r.start_index, r.count));
@@ -1121,11 +1138,15 @@ mod tests {
                     // consume in order as soon as possible
                     while p.consumed(p.consumed_count()).is_ok() {}
                 }
-                Poll::Done => break,
+                Poll::Done => {
+                    done = true;
+                    break;
+                }
                 Poll::Wait { .. } => now += 1,
                 other => panic!("{other:?}"),
             }
         }
+        assert!(done, "the transfer did not finish within {STEPS} steps");
         assert_eq!(windows, vec![(0, 8), (8, 8), (16, 4)]);
         assert_eq!(p.consumed_count(), CHUNKS);
     }
@@ -1231,9 +1252,13 @@ mod tests {
         let mut now = T0;
         for round in 0..times {
             // (re)start chunk 0 and fail it
-            let fetch = loop {
+            let mut fetch = false;
+            for _ in 0..STEPS {
                 match p.poll(now) {
-                    Poll::Fetch { index: 0, .. } => break true,
+                    Poll::Fetch { index: 0, .. } => {
+                        fetch = true;
+                        break;
+                    }
                     Poll::Fetch { .. } => {}
                     Poll::RequestWindow(r) => {
                         p.window_answered(answer(&r, now), now).unwrap();
@@ -1241,8 +1266,8 @@ mod tests {
                     Poll::Wait { until_ms } => now = until_ms.unwrap_or(now + 1),
                     other => panic!("round {round}: {other:?}"),
                 }
-            };
-            assert!(fetch);
+            }
+            assert!(fetch, "round {round}: chunk 0 was never offered to storage");
             p.fetch_failed(0, now).unwrap();
         }
         (p, now)
@@ -1253,9 +1278,13 @@ mod tests {
         // Three failures are renewed; the budget is spent on the fourth.
         let (mut p, mut now) = fail_chunk_zero(3);
         // Third renewal granted, fourth attempt on storage.
-        loop {
+        let mut offered = false;
+        for _ in 0..STEPS {
             match p.poll(now) {
-                Poll::Fetch { index: 0, .. } => break,
+                Poll::Fetch { index: 0, .. } => {
+                    offered = true;
+                    break;
+                }
                 Poll::Fetch { .. } => {}
                 Poll::RequestWindow(r) => {
                     assert!(r.renewal || r.start_index >= 8);
@@ -1265,14 +1294,17 @@ mod tests {
                 other => panic!("{other:?}"),
             }
         }
+        assert!(offered, "chunk 0 was not offered to storage a fourth time");
         p.fetch_failed(0, now).unwrap();
-        loop {
+        let mut via_api = false;
+        for _ in 0..STEPS {
             match p.poll(now) {
                 Poll::FetchViaApi {
                     index: 0,
                     object_version_id,
                 } => {
                     assert_eq!(object_version_id, VERSION);
+                    via_api = true;
                     break;
                 }
                 Poll::Fetch { .. } => {}
@@ -1287,6 +1319,7 @@ mod tests {
                 other => panic!("{other:?}"),
             }
         }
+        assert!(via_api, "chunk 0 never went to the pinned API route");
     }
 
     #[test]
@@ -1371,9 +1404,13 @@ mod tests {
         // Two storage failures first, then it arrives and fails to open: the budget of
         // authentication failures is separate from the renewal budget.
         let (mut p, mut now) = fail_chunk_zero(2);
-        loop {
+        let mut offered = false;
+        for _ in 0..STEPS {
             match p.poll(now) {
-                Poll::Fetch { index: 0, .. } => break,
+                Poll::Fetch { index: 0, .. } => {
+                    offered = true;
+                    break;
+                }
                 Poll::RequestWindow(r) => {
                     p.window_answered(answer(&r, now), now).unwrap();
                 }
@@ -1382,6 +1419,7 @@ mod tests {
                 other => panic!("{other:?}"),
             }
         }
+        assert!(offered, "chunk 0 was not offered to storage again");
         p.fetch_ok(0).unwrap();
         p.chunk_unauthentic(0).unwrap();
         assert!(matches!(p.poll(now), Poll::FetchViaApi { index: 0, .. }));
@@ -1716,6 +1754,29 @@ mod tests {
         }
         q.window_answered(a, T0).unwrap();
         assert!(matches!(q.poll(T0 + 70_000), Poll::RequestWindow(r) if r.renewal));
+    }
+
+    #[test]
+    fn a_grant_that_keeps_aging_out_unused_ends_on_the_api_route() {
+        // Nothing is ever fetched; each time the four reachable grants age out they
+        // are renewed, and the renewal budget (3) is the same one a failure spends.
+        let mut p = started();
+        let mut now = T0;
+        for round in 1..=3 {
+            now += 300_000;
+            match p.poll(now) {
+                Poll::RequestWindow(r) => {
+                    assert!(r.renewal && r.start_index == 0, "round {round}: {r:?}");
+                    p.window_answered(answer(&r, now), now).unwrap();
+                }
+                other => panic!("round {round}: expected a renewal, got {other:?}"),
+            }
+        }
+        now += 300_000;
+        match p.poll(now) {
+            Poll::FetchViaApi { index: 0, .. } => {}
+            other => panic!("the fourth age-out must send chunk 0 to the API route, got {other:?}"),
+        }
     }
 
     #[test]

@@ -141,9 +141,6 @@ fn parse(url: &str) -> Result<Parsed<'_>, Refusal> {
     if authority.contains('[') || authority.contains(']') {
         return Err(Refusal::IpLiteral);
     }
-    if authority.contains('%') {
-        return Err(Refusal::BadHost);
-    }
     let mut parts = authority.split(':');
     let host = parts.next().unwrap_or("");
     let port_text = parts.next();

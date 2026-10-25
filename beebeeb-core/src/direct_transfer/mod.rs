@@ -155,6 +155,10 @@ mod tests {
 
     #[test]
     fn a_good_answer_is_reused_for_ten_minutes_then_refreshed() {
+        assert_eq!(
+            DISCOVERY_TTL_MS, 600_000,
+            "spec: a discovery answer is cached for at most 10 minutes"
+        );
         let mut c = DiscoveryCache::new();
         assert_eq!(c.lookup(0), Lookup::Fetch);
         c.record(&Outcome::Proceed, Some(offers()), 1_000);
