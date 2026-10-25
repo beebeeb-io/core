@@ -108,6 +108,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `BreachCheck` bound to the password (never a bare verdict), treats an empty or oversized
   breach-endpoint body as an outage, exposes `wipe()` (`abandon()` in the bindings) and
   `email_changed()`, and floors the password minimum at the shipped 12.
+- `direct_transfer` module (task 2173): the client-side rules of the direct S3 transfer contract
+  v1 as pure Rust (no I/O, no clock): wire types, the storage-link authority check
+  (`check_storage_url`, `redact`, `scrub`), the API-answer classifier, the download window
+  planner and the discovery cache. Exposed through native Rust, WASM (`WasmDownloadPlanner`,
+  `WasmDirectDiscoveryCache`, `checkStorageUrl`, `classifyDirectAnswer`, `parseDirectDiscovery`,
+  `redactUrl`, `scrubText`, `directTransferConstants`) and UniFFI (`DirectDownloadPlannerHandle`,
+  `DirectDiscoveryCacheHandle`, `direct_check_storage_url`, `classify_direct_answer`,
+  `parse_direct_discovery`, `direct_redact_url`, `direct_scrub_text`, `direct_transfer_constants`).
+  Stable `code()`/`kind()` names on `Refusal`, `Call`, `Outcome`, `Violation`, `PlanError`,
+  `Verdict`, `Poll`. `test-vectors/direct_transfer.json` is run by core, the WASM seams and the
+  UniFFI exports through one interpreter (`direct_transfer::vectors`, `test-support`).
 - CI `Claims guard` job: runs the shared claims-guard engine plus
   `scripts/claims-guard/canon-sweep.sh`, the canon CLAIM_SWEEP over the whole tree
   (including any `design/` folder), so a false audit or compliance claim fails the build.

@@ -51,7 +51,7 @@ pub mod vectors;
 
 pub use authority::{MAX_URL_LEN, Refusal, check_storage_url, redact, scrub};
 pub use classify::{ApiAnswer, Call, Outcome, Terminal, classify};
-pub use window::{DownloadPlanner, Geometry, PlanError, PlannerConfig, Poll, Verdict, Violation};
+pub use window::{DownloadPlanner, Geometry, PlanError, PlannerConfig, Poll, Verdict, Violation, WindowAnswer};
 pub use wire::{
     CAP_OBJECT_DOWNLOAD_V1, CAP_OBJECT_UPLOAD_V1, CAPABILITIES_HEADER, ChunkGrant, DISCOVERY_PATH, Discovery,
     DownloadGrantRequest, DownloadGrantResponse, StorageBucket, UploadCommitRequest, UploadCommitResponse,

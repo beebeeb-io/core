@@ -4528,11 +4528,7 @@ pub fn classify_direct_answer(
     retry_after: Option<String>,
 ) -> Result<DirectOutcomeDto, DirectTransferError> {
     let call = dt::Call::from_code(&call).ok_or(DirectTransferError::UnknownCall)?;
-    let answer = if status == 0 {
-        dt::ApiAnswer::no_answer()
-    } else {
-        dt::ApiAnswer::from_parts(status, content_type.as_deref(), &body, retry_after.as_deref())
-    };
+    let answer = dt::ApiAnswer::from_parts(status, content_type.as_deref(), &body, retry_after.as_deref());
     Ok(DirectOutcomeDto::from_core(&dt::classify(call, &answer)))
 }
 
@@ -4707,17 +4703,11 @@ impl DirectDownloadPlannerHandle {
 
     /// The window answer for the outstanding request, as the raw response body.
     pub fn window_answered(&self, body: Vec<u8>, now_ms: i64) -> DirectWindowAnswerDto {
-        let mut planner = lock_tolerant(&self.inner);
-        match dt::DownloadGrantResponse::from_json(&body) {
-            Err(_) => {
-                planner.window_malformed();
-                DirectWindowAnswerDto::Malformed
-            }
-            Ok(response) => match planner.window_answered(response, now_ms) {
-                Ok(()) => DirectWindowAnswerDto::Accepted,
-                Err(v) => DirectWindowAnswerDto::Refused {
-                    code: v.code().to_owned(),
-                },
+        match lock_tolerant(&self.inner).window_answered_bytes(&body, now_ms) {
+            dt::WindowAnswer::Accepted => DirectWindowAnswerDto::Accepted,
+            dt::WindowAnswer::Malformed => DirectWindowAnswerDto::Malformed,
+            dt::WindowAnswer::Refused(v) => DirectWindowAnswerDto::Refused {
+                code: v.code().to_owned(),
             },
         }
     }
@@ -5278,8 +5268,8 @@ mod direct_transfer_binding_tests {
             poll_value(self.0.poll(now_ms))
         }
 
-        fn window_answered(&mut self, response: &Value, now_ms: i64) -> Result<(), String> {
-            match self.0.window_answered(serde_json::to_vec(response).unwrap(), now_ms) {
+        fn window_answered(&mut self, body: &[u8], now_ms: i64) -> Result<(), String> {
+            match self.0.window_answered(body.to_vec(), now_ms) {
                 DirectWindowAnswerDto::Accepted => Ok(()),
                 DirectWindowAnswerDto::Malformed => Err("malformed".to_owned()),
                 DirectWindowAnswerDto::Refused { code } => Err(code),
@@ -5312,6 +5302,17 @@ mod direct_transfer_binding_tests {
 
         fn consumed(&mut self, index: u32) -> Result<(), String> {
             self.0.consumed(index).map_err(plan_code)
+        }
+
+        fn inspect(&self) -> Value {
+            json!({
+                "geometry": self.0.geometry().map(|g| json!({
+                    "chunk_count": g.chunk_count, "chunk_size": g.chunk_size,
+                    "encrypted_size": g.encrypted_size, "original_size": g.original_size})),
+                "pinned_version": self.0.pinned_version(),
+                "consumed": self.0.consumed_count(),
+                "in_flight": self.0.in_flight(),
+            })
         }
     }
 
@@ -5361,6 +5362,40 @@ mod direct_transfer_binding_tests {
         let gone = DirectDiscoveryCacheHandle::new();
         gone.record(DirectOutcomeDto::NotSupported, None, 0);
         assert_eq!(gone.lookup(1), DirectLookupDto::UseApi, "NotSupported is remembered");
+    }
+
+    #[test]
+    fn the_jitter_seed_reaches_the_planner() {
+        // The same failure, on planners seeded differently, waits different times (equal jitter);
+        // the same seed repeats. A binding that drops the seed would give every client one schedule.
+        let vectors = vectors::vectors();
+        let t0 = vectors["t0_ms"].as_i64().unwrap();
+        let file_id = vectors["file_id"].as_str().unwrap().to_owned();
+        let wait_after_a_failure = |seed: u64| -> i64 {
+            let p = DirectDownloadPlannerHandle::new(
+                discovery_dto(&vectors["discoveries"]["std"]),
+                "https://api.beebeeb.test".to_owned(),
+                file_id.clone(),
+                seed,
+            );
+            p.poll(t0);
+            let window = vectors["planner"][0]["steps"][2]["response"].clone();
+            assert_eq!(
+                p.window_answered(serde_json::to_vec(&window).unwrap(), t0),
+                DirectWindowAnswerDto::Accepted
+            );
+            for _ in 0..3 {
+                p.poll(t0);
+            }
+            p.fetch_failed(0, t0).unwrap();
+            match p.poll(t0) {
+                DirectPollDto::Wait { until_ms: Some(t) } => t,
+                other => panic!("expected a wait for the renewal, got {other:?}"),
+            }
+        };
+        let waits: Vec<i64> = (1..=6).map(wait_after_a_failure).collect();
+        assert!(waits.iter().any(|w| *w != waits[0]), "{waits:?}");
+        assert_eq!(wait_after_a_failure(3), wait_after_a_failure(3));
     }
 
     #[test]

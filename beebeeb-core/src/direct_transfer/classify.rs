@@ -604,4 +604,14 @@ mod tests {
         let long = json(403, &format!(r#"{{"error":"{}"}}"#, "x".repeat(500)));
         assert_eq!(long.error_code().unwrap().len(), 64);
     }
+
+    #[test]
+    fn call_codes_are_stable_and_invertible() {
+        for (call, code) in [(Call::Discovery, "discovery"), (Call::DownloadGrant, "download_grant")] {
+            assert_eq!(call.code(), code);
+            assert_eq!(Call::from_code(code), Some(call));
+        }
+        assert_eq!(Call::from_code("Discovery"), None);
+        assert_eq!(Call::from_code(""), None);
+    }
 }

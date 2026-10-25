@@ -15,8 +15,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    ApiAnswer, Call, Discovery, DownloadGrantResponse, DownloadPlanner, Geometry, Outcome, PlannerConfig, Poll,
-    Terminal, check_storage_url, classify, redact, scrub,
+    ApiAnswer, Call, Discovery, DownloadPlanner, Geometry, Outcome, PlannerConfig, Poll, Terminal, WindowAnswer,
+    check_storage_url, classify, redact, scrub,
 };
 
 const API_PROD: &str = "https://api.beebeeb.test";
@@ -49,7 +49,9 @@ pub trait Surface {
 pub trait PlannerSurface {
     /// The poll result as `{kind, ...}` (see [`poll_json`]).
     fn poll(&mut self, now_ms: i64) -> Value;
-    fn window_answered(&mut self, response: &Value, now_ms: i64) -> Result<(), String>;
+    /// The raw 2xx body of the outstanding window request. `Ok` when the window was
+    /// accepted; else the code: `malformed` (not the contract's JSON) or a violation.
+    fn window_answered(&mut self, body: &[u8], now_ms: i64) -> Result<(), String>;
     /// `outcome` is `{kind, millis?, status?, error?}`.
     fn window_failed(&mut self, outcome: &Value, now_ms: i64);
     fn window_malformed(&mut self);
@@ -58,6 +60,8 @@ pub trait PlannerSurface {
     fn api_fetch_failed(&mut self, index: u32) -> Result<(), String>;
     fn chunk_unauthentic(&mut self, index: u32) -> Result<(), String>;
     fn consumed(&mut self, index: u32) -> Result<(), String>;
+    /// What the planner reports about itself, as [`inspect_json`].
+    fn inspect(&self) -> Value;
 }
 
 /// How many rows of each kind ran. A runner asserts these equal the file's
@@ -203,7 +207,7 @@ pub fn run_all<S: Surface>(surface: &S) -> Report {
                 first["kind"], "request_window",
                 "{name}: the first poll asks for a window"
             );
-            let got = p.window_answered(&refusal["response"], vectors_t0(&v));
+            let got = p.window_answered(&body_bytes(refusal), vectors_t0(&v));
             assert_eq!(
                 got,
                 Err(refusal["expect"].as_str().unwrap().to_string()),
@@ -222,6 +226,15 @@ pub fn run_all<S: Surface>(surface: &S) -> Report {
         report.scenarios += 1;
     }
     report
+}
+
+/// The body of a window answer: a JSON `response` is serialised, a `body` string is sent as it is
+/// (so a row can be something that is not the contract's JSON at all).
+fn body_bytes(row: &Value) -> Vec<u8> {
+    match row["body"].as_str() {
+        Some(raw) => raw.as_bytes().to_vec(),
+        None => serde_json::to_vec(&row["response"]).expect("a response row serialises"),
+    }
 }
 
 fn vectors_t0(v: &Value) -> i64 {
@@ -259,7 +272,7 @@ fn run_step<P: PlannerSurface>(p: &mut P, step: &Value) -> Result<(), String> {
                 Err(format!("expected {want}, got {got}"))
             }
         }
-        "window_answered" => expect(p.window_answered(&step["response"], now)),
+        "window_answered" => expect(p.window_answered(&body_bytes(step), now)),
         "window_failed" => {
             p.window_failed(&step["outcome"], now);
             Ok(())
@@ -273,6 +286,14 @@ fn run_step<P: PlannerSurface>(p: &mut P, step: &Value) -> Result<(), String> {
         "api_fetch_failed" => expect(p.api_fetch_failed(index)),
         "chunk_unauthentic" => expect(p.chunk_unauthentic(index)),
         "consumed" => expect(p.consumed(index)),
+        "inspect" => {
+            let got = p.inspect();
+            if got == step["expect"] {
+                Ok(())
+            } else {
+                Err(format!("expected {}, got {got}", step["expect"]))
+            }
+        }
         other => Err(format!("unknown op {other}")),
     }
 }
@@ -339,13 +360,27 @@ pub fn outcome_from_json(v: &Value) -> Outcome {
     }
 }
 
+/// `{geometry, pinned_version, consumed, in_flight}`: the planner's state as every surface reports it.
+pub fn inspect_json(p: &DownloadPlanner) -> Value {
+    json!({
+        "geometry": p.geometry().map(|g| json!({
+            "chunk_count": g.chunk_count, "chunk_size": g.chunk_size,
+            "encrypted_size": g.encrypted_size, "original_size": g.original_size})),
+        "pinned_version": p.pinned_version(),
+        "consumed": p.consumed_count(),
+        "in_flight": p.in_flight(),
+    })
+}
+
 impl PlannerSurface for DownloadPlanner {
     fn poll(&mut self, now_ms: i64) -> Value {
         poll_json(&DownloadPlanner::poll(self, now_ms))
     }
-    fn window_answered(&mut self, response: &Value, now_ms: i64) -> Result<(), String> {
-        let r: DownloadGrantResponse = serde_json::from_value(response.clone()).map_err(|e| e.to_string())?;
-        DownloadPlanner::window_answered(self, r, now_ms).map_err(|v| v.code().to_string())
+    fn window_answered(&mut self, body: &[u8], now_ms: i64) -> Result<(), String> {
+        match DownloadPlanner::window_answered_bytes(self, body, now_ms) {
+            WindowAnswer::Accepted => Ok(()),
+            other => Err(other.code().to_string()),
+        }
     }
     fn window_failed(&mut self, outcome: &Value, now_ms: i64) {
         DownloadPlanner::window_failed(self, outcome_from_json(outcome), now_ms);
@@ -368,6 +403,9 @@ impl PlannerSurface for DownloadPlanner {
     fn consumed(&mut self, index: u32) -> Result<(), String> {
         DownloadPlanner::consumed(self, index).map_err(|e| e.code().to_string())
     }
+    fn inspect(&self) -> Value {
+        inspect_json(self)
+    }
 }
 
 impl Surface for CoreSurface {
@@ -385,11 +423,7 @@ impl Surface for CoreSurface {
         body: &[u8],
         retry_after: Option<&str>,
     ) -> Value {
-        let answer = if status == 0 {
-            ApiAnswer::no_answer()
-        } else {
-            ApiAnswer::from_parts(status, content_type, body, retry_after)
-        };
+        let answer = ApiAnswer::from_parts(status, content_type, body, retry_after);
         outcome_json(&classify(Call::from_code(call).expect("known call"), &answer))
     }
     fn redact(&self, input: &str) -> String {
@@ -436,6 +470,9 @@ mod tests {
             if self.0 == "classify" && v["kind"] == "restart" {
                 v["kind"] = json!("api_for_this_file");
             }
+            if self.0 == "millis" && v["kind"] == "backoff" {
+                v["millis"] = json!(v["millis"].as_u64().unwrap() + 1); // a binding that mangles the wait
+            }
             v
         }
         fn redact(&self, input: &str) -> String {
@@ -460,19 +497,20 @@ mod tests {
         }
     }
 
-    /// A planner that forgets the pin on renewals.
-    struct ForgetfulPlanner(DownloadPlanner);
+    /// A planner that drifts in ONE way: `"pin"` forgets the pin on renewals, `"inspect"` reports
+    /// a wrong count of consumed chunks.
+    struct ForgetfulPlanner(DownloadPlanner, &'static str);
 
     impl PlannerSurface for ForgetfulPlanner {
         fn poll(&mut self, now_ms: i64) -> Value {
             let mut v = PlannerSurface::poll(&mut self.0, now_ms);
-            if v["kind"] == "request_window" && v["request"]["renewal"] == true {
+            if self.1 == "pin" && v["kind"] == "request_window" && v["request"]["renewal"] == true {
                 v["request"]["object_version_id"] = Value::Null;
             }
             v
         }
-        fn window_answered(&mut self, r: &Value, n: i64) -> Result<(), String> {
-            PlannerSurface::window_answered(&mut self.0, r, n)
+        fn window_answered(&mut self, b: &[u8], n: i64) -> Result<(), String> {
+            PlannerSurface::window_answered(&mut self.0, b, n)
         }
         fn window_failed(&mut self, o: &Value, n: i64) {
             PlannerSurface::window_failed(&mut self.0, o, n)
@@ -495,9 +533,16 @@ mod tests {
         fn consumed(&mut self, i: u32) -> Result<(), String> {
             PlannerSurface::consumed(&mut self.0, i)
         }
+        fn inspect(&self) -> Value {
+            let mut v = PlannerSurface::inspect(&self.0);
+            if self.1 == "inspect" {
+                v["consumed"] = json!(v["consumed"].as_u64().unwrap() + 1);
+            }
+            v
+        }
     }
 
-    struct Forgetful;
+    struct Forgetful(&'static str);
 
     impl Surface for Forgetful {
         type Planner = ForgetfulPlanner;
@@ -517,7 +562,7 @@ mod tests {
             CoreSurface.chunk_length(n, s, e, i)
         }
         fn planner(&self, d: &Value, api: &str, file: &str, seed: u64) -> ForgetfulPlanner {
-            ForgetfulPlanner(CoreSurface.planner(d, api, file, seed))
+            ForgetfulPlanner(CoreSurface.planner(d, api, file, seed), self.0)
         }
     }
 
@@ -527,11 +572,11 @@ mod tests {
         assert_eq!(report, expected_report(), "a section that did not run is a failure");
         // Counts, not adjectives: the file is not empty and the sections are what the review asked for.
         assert!(
-            report.authority >= 55 && report.classify >= 30 && report.chunk_length >= 8,
+            report.authority >= 59 && report.classify >= 34 && report.chunk_length >= 8,
             "{report:?}"
         );
         assert!(
-            report.scenarios >= 12 && report.steps >= 60 && report.refusals >= 9,
+            report.scenarios >= 18 && report.steps >= 149 && report.refusals >= 21,
             "{report:?}"
         );
     }
@@ -555,17 +600,16 @@ mod tests {
 
     #[test]
     fn the_runner_goes_red_when_a_surface_drifts() {
-        for what in ["authority", "classify", "redact", "geometry"] {
+        for what in ["authority", "classify", "millis", "redact", "geometry"] {
             let result = catch_unwind(AssertUnwindSafe(|| run_all(&Drift(what))));
             assert!(
                 result.is_err(),
                 "a surface that drifted on {what} must fail the vectors"
             );
         }
-        let result = catch_unwind(AssertUnwindSafe(|| run_all(&Forgetful)));
-        assert!(
-            result.is_err(),
-            "a planner that forgets the pin on a renewal must fail the vectors"
-        );
+        for what in ["pin", "inspect"] {
+            let result = catch_unwind(AssertUnwindSafe(|| run_all(&Forgetful(what))));
+            assert!(result.is_err(), "a planner that drifts on {what} must fail the vectors");
+        }
     }
 }

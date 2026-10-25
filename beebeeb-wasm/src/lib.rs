@@ -2222,11 +2222,7 @@ fn direct_classify(
     retry_after: Option<&str>,
 ) -> Result<DirectOutcomeJs, DirectFailure> {
     let call = dt::Call::from_code(call).ok_or_else(|| DirectFailure::new("unknown call", "unknown_call"))?;
-    let answer = if status == 0 {
-        dt::ApiAnswer::no_answer()
-    } else {
-        dt::ApiAnswer::from_parts(status, content_type, body, retry_after)
-    };
+    let answer = dt::ApiAnswer::from_parts(status, content_type, body, retry_after);
     Ok(DirectOutcomeJs::from_core(&dt::classify(call, &answer)))
 }
 
@@ -2483,16 +2479,7 @@ impl WasmDownloadPlanner {
     }
 
     fn answered_code(&mut self, body: &[u8], now_ms: i64) -> String {
-        match dt::DownloadGrantResponse::from_json(body) {
-            Err(_) => {
-                self.inner.window_malformed();
-                "malformed".to_string()
-            }
-            Ok(response) => match self.inner.window_answered(response, now_ms) {
-                Ok(()) => "accepted".to_string(),
-                Err(violation) => violation.code().to_string(),
-            },
-        }
+        self.inner.window_answered_bytes(body, now_ms).code().to_string()
     }
 
     fn geometry_dto(&self) -> Option<DirectGeometryJs> {
@@ -3016,12 +3003,8 @@ mod direct_vector_tests {
             poll_value(self.0.poll_dto(now_ms))
         }
 
-        fn window_answered(&mut self, response: &Value, now_ms: i64) -> Result<(), String> {
-            match self
-                .0
-                .window_answered(&serde_json::to_vec(response).unwrap(), now_ms as f64)
-                .as_str()
-            {
+        fn window_answered(&mut self, body: &[u8], now_ms: i64) -> Result<(), String> {
+            match self.0.window_answered(body, now_ms as f64).as_str() {
                 "accepted" => Ok(()),
                 code => Err(code.to_string()),
             }
@@ -3056,6 +3039,15 @@ mod direct_vector_tests {
 
         fn consumed(&mut self, index: u32) -> Result<(), String> {
             self.0.consumed(index).map_err(|f| f.code.to_string())
+        }
+
+        fn inspect(&self) -> Value {
+            vectors::normalize_numbers(json!({
+                "geometry": serde_json::to_value(self.0.geometry_dto()).unwrap(),
+                "pinned_version": self.0.pinned_version(),
+                "consumed": self.0.consumed_count(),
+                "in_flight": self.0.in_flight(),
+            }))
         }
     }
 
@@ -3121,6 +3113,36 @@ mod direct_vector_tests {
                 outcome
             );
         }
+    }
+
+    #[test]
+    fn the_jitter_seed_reaches_the_planner() {
+        // The same failure, on planners seeded differently, waits different times (equal jitter);
+        // the same seed repeats. A binding that drops the seed would give every client one schedule.
+        let vectors = vectors::vectors();
+        let t0 = vectors["t0_ms"].as_i64().unwrap();
+        let file_id = vectors["file_id"].as_str().unwrap().to_string();
+        let wait_after_a_failure = |seed: u64| -> i64 {
+            let discovery: dt::Discovery = serde_json::from_value(vectors["discoveries"]["std"].clone()).unwrap();
+            let mut p = WasmDownloadPlanner::from_parts(discovery, "https://api.beebeeb.test", &file_id, seed);
+            p.poll_dto(t0);
+            let window = vectors["planner"][0]["steps"][2]["response"].clone();
+            assert_eq!(
+                p.window_answered(&serde_json::to_vec(&window).unwrap(), t0 as f64),
+                "accepted"
+            );
+            for _ in 0..3 {
+                p.poll_dto(t0);
+            }
+            p.fetch_failed(0, t0 as f64).unwrap();
+            match p.poll_dto(t0) {
+                DirectPollJs::Wait { until_ms: Some(t) } => t as i64,
+                _ => panic!("expected a wait for the renewal"),
+            }
+        };
+        let waits: Vec<i64> = (1..=6).map(wait_after_a_failure).collect();
+        assert!(waits.iter().any(|w| *w != waits[0]), "{waits:?}");
+        assert_eq!(wait_after_a_failure(3), wait_after_a_failure(3));
     }
 
     #[test]

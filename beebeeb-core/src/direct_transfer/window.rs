@@ -263,6 +263,30 @@ impl Violation {
     }
 }
 
+/// What became of the body of a window answer ([`DownloadPlanner::window_answered_bytes`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowAnswer {
+    /// The window was accepted; poll again.
+    Accepted,
+    /// The body was not the contract's JSON; the window is treated as one the
+    /// server could not serve. Poll again.
+    Malformed,
+    /// The answer broke the contract; the file's verdict is set. Poll again.
+    Refused(Violation),
+}
+
+impl WindowAnswer {
+    /// Stable machine name (bindings and vectors): `accepted`, `malformed`, or
+    /// the [`Violation::code`].
+    pub fn code(self) -> &'static str {
+        match self {
+            WindowAnswer::Accepted => "accepted",
+            WindowAnswer::Malformed => "malformed",
+            WindowAnswer::Refused(violation) => violation.code(),
+        }
+    }
+}
+
 impl PlanError {
     /// Stable machine name (bindings and vectors).
     pub fn code(self) -> &'static str {
@@ -682,6 +706,23 @@ impl DownloadPlanner {
                 self.window_unusable();
                 Err(violation)
             }
+        }
+    }
+
+    /// The 2xx body of the outstanding window request, as it came off the wire:
+    /// decode it and judge it. A body that is not the contract's JSON is handled
+    /// like any window the server could not serve ([`DownloadPlanner::window_malformed`]),
+    /// so no client decides that for itself.
+    pub fn window_answered_bytes(&mut self, body: &[u8], now_ms: i64) -> WindowAnswer {
+        match DownloadGrantResponse::from_json(body) {
+            Err(_) => {
+                self.window_malformed();
+                WindowAnswer::Malformed
+            }
+            Ok(response) => match self.window_answered(response, now_ms) {
+                Ok(()) => WindowAnswer::Accepted,
+                Err(violation) => WindowAnswer::Refused(violation),
+            },
         }
     }
 
@@ -2341,5 +2382,35 @@ mod tests {
         assert!(!shown.contains("SIG0") && !shown.contains("X-Amz"), "{shown}");
         let state = format!("{p:?}");
         assert!(!state.contains("SIG") && !state.contains("X-Amz-Signature"), "{state}");
+    }
+
+    // ── window_answered_bytes: decode, judge, report ──
+
+    #[test]
+    fn window_answered_bytes_decodes_judges_and_reports_the_code() {
+        let mut p = planner();
+        let first = expect_window(&mut p, T0);
+        let body = serde_json::to_vec(&answer(&first, T0)).unwrap();
+        assert_eq!(p.window_answered_bytes(&body, T0), WindowAnswer::Accepted);
+        assert_eq!(p.pinned_version(), Some(VERSION));
+
+        // Not the contract's JSON: handled like a window the server could not serve.
+        for junk in [&b"{not json"[..], b"[]", b"", b"null"] {
+            let mut p = planner();
+            expect_window(&mut p, T0);
+            assert_eq!(p.window_answered_bytes(junk, T0), WindowAnswer::Malformed, "{junk:?}");
+            assert_eq!(p.poll(T0), Poll::Stop(Verdict::ApiForFile), "{junk:?}");
+        }
+
+        // An answer that breaks the contract carries its code.
+        let mut p = planner();
+        let first = expect_window(&mut p, T0);
+        let mut bad = answer(&first, T0);
+        bad.transport = "object-download-v2".into();
+        let got = p.window_answered_bytes(&serde_json::to_vec(&bad).unwrap(), T0);
+        assert_eq!(got, WindowAnswer::Refused(Violation::Transport));
+        assert_eq!(got.code(), "transport");
+        assert_eq!(WindowAnswer::Accepted.code(), "accepted");
+        assert_eq!(WindowAnswer::Malformed.code(), "malformed");
     }
 }
