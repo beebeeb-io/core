@@ -4493,7 +4493,8 @@ pub enum DirectOutcomeDto {
     NotSupported,
     /// No direct transport right now: use the API for this file now.
     UseApiNow,
-    /// This file is served over the API.
+    /// This file is served over the API. For an UPLOAD call it means this session cannot go direct:
+    /// abandon the session and init again WITHOUT the capability token.
     ApiForThisFile,
     /// `version_unavailable`: discard and restart from fresh metadata.
     Restart,
@@ -4501,9 +4502,20 @@ pub enum DirectOutcomeDto {
     Backoff { millis: u64 },
     /// 401, 403 or a JSON 404: do not fall back.
     Terminal { status: u16, error: Option<String> },
-    /// The pinned chunk route only: a failure that may pass (5xx, no answer); retry after the
-    /// bounded backoff of `direct_pinned_retry_decision`.
+    /// The pinned chunk route and the upload calls: a failure that may pass (5xx, no answer). For the
+    /// pinned route the bounded backoff is `direct_pinned_retry_decision`; the retry rules of an upload
+    /// chunk (the grant cap, the attempts, the waits) are core's `UploadChunkState`, which is not
+    /// exported yet, so do NOT pass an upload outcome to `direct_pinned_retry_decision` (it knows no
+    /// grant cap and answers give-up for `Regrant`).
     Retry,
+    /// `upload_commit` only: the staged chunk is not there; ask for a new link and send it again.
+    Regrant,
+    /// `upload_commit` only (409 `commit_in_progress`): the server holds the chunk's commit lock, up to
+    /// 420 s after a failed copy. Wait (`millis` is the server's stated wait, `None` when it sent none)
+    /// and commit again; it is not a failure. core's `UploadChunkState` bounds the wait (the lock TTL
+    /// plus 30 s = 450 s, polls no faster than once a second) but is not exported yet: a host that
+    /// handles this itself must bound it the same way, and not count a hold as one of its failures.
+    Held { millis: Option<u64> },
 }
 
 impl DirectOutcomeDto {
@@ -4522,6 +4534,10 @@ impl DirectOutcomeDto {
                 error: t.error.clone(),
             },
             dt::Outcome::Retry => Self::Retry,
+            dt::Outcome::Regrant => Self::Regrant,
+            dt::Outcome::Held(d) => Self::Held {
+                millis: d.map(|d| d.as_millis() as u64),
+            },
             // `Outcome` is non-exhaustive: a variant added later is the safe one.
             _ => Self::UseApiNow,
         }
@@ -4540,6 +4556,8 @@ impl DirectOutcomeDto {
                 error: error.clone(),
             }),
             Self::Retry => dt::Outcome::Retry,
+            Self::Regrant => dt::Outcome::Regrant,
+            Self::Held { millis } => dt::Outcome::Held(millis.map(std::time::Duration::from_millis)),
         }
     }
 }
@@ -4567,8 +4585,8 @@ pub fn direct_pinned_retry_decision(outcome: DirectOutcomeDto, attempt: u32, wai
     }
 }
 
-/// Classify an API answer. `call` is `"discovery"`, `"download_grant"` or `"pinned_chunk"`; pass
-/// `status` 0 when there was no HTTP answer. `body` is whatever was read of the
+/// Classify an API answer. `call` is `"discovery"`, `"download_grant"`, `"pinned_chunk"`,
+/// `"upload_grant"` or `"upload_commit"`; pass `status` 0 when there was no HTTP answer. `body` is whatever was read of the
 /// body (at most 64 KiB is looked at); `retry_after` is the raw header value.
 #[uniffi::export]
 pub fn classify_direct_answer(
@@ -5248,6 +5266,34 @@ mod direct_transfer_binding_tests {
         d.into()
     }
 
+    /// The host hands outcomes back to core (a planner's `window_failed`, the pinned retry decision, the
+    /// discovery cache): every kind must come back as itself, `Regrant` and `Retry` included.
+    #[test]
+    fn every_outcome_survives_a_round_trip_through_core() {
+        for outcome in [
+            DirectOutcomeDto::Proceed,
+            DirectOutcomeDto::NotSupported,
+            DirectOutcomeDto::UseApiNow,
+            DirectOutcomeDto::ApiForThisFile,
+            DirectOutcomeDto::Restart,
+            DirectOutcomeDto::Backoff { millis: 1500 },
+            DirectOutcomeDto::Terminal {
+                status: 403,
+                error: None,
+            },
+            DirectOutcomeDto::Terminal {
+                status: 404,
+                error: Some("not found".to_string()),
+            },
+            DirectOutcomeDto::Retry,
+            DirectOutcomeDto::Regrant,
+            DirectOutcomeDto::Held { millis: None },
+            DirectOutcomeDto::Held { millis: Some(3000) },
+        ] {
+            assert_eq!(DirectOutcomeDto::from_core(&outcome.to_core()), outcome);
+        }
+    }
+
     fn outcome_value(o: &DirectOutcomeDto) -> Value {
         match o {
             DirectOutcomeDto::Proceed => json!({"kind": "proceed"}),
@@ -5260,6 +5306,8 @@ mod direct_transfer_binding_tests {
                 json!({"kind": "terminal", "status": status, "error": error})
             }
             DirectOutcomeDto::Retry => json!({"kind": "retry"}),
+            DirectOutcomeDto::Regrant => json!({"kind": "regrant"}),
+            DirectOutcomeDto::Held { millis } => json!({"kind": "held", "millis": millis}),
         }
     }
 
@@ -5271,6 +5319,10 @@ mod direct_transfer_binding_tests {
             "api_for_this_file" => DirectOutcomeDto::ApiForThisFile,
             "restart" => DirectOutcomeDto::Restart,
             "retry" => DirectOutcomeDto::Retry,
+            "regrant" => DirectOutcomeDto::Regrant,
+            "held" => DirectOutcomeDto::Held {
+                millis: v["millis"].as_u64(),
+            },
             "backoff" => DirectOutcomeDto::Backoff {
                 millis: v["millis"].as_u64().unwrap(),
             },

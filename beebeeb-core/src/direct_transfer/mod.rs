@@ -17,6 +17,7 @@
 //! | [`authority`] | [`check_storage_url`] (may this link be followed), [`redact`] / [`scrub`] (how a link may be shown) |
 //! | [`classify`] | [`classify()`]: what an API answer on a discovery or grant call means (R1.6) |
 //! | [`window`] | [`DownloadPlanner`]: windows, in-flight cap, renewals, per-chunk fallback |
+//! | [`upload`] | the direct upload: [`UploadGrant`] / [`UploadCommitted`] validation, [`UploadChunkState`] (grants, waits, fallback per chunk) |
 //! | this file | [`DiscoveryCache`]: how long discovery's answer is trusted |
 //!
 //! # What a client still has to do itself
@@ -42,6 +43,7 @@
 
 pub mod authority;
 pub mod classify;
+pub mod upload;
 pub mod window;
 pub mod wire;
 
@@ -51,11 +53,16 @@ pub mod vectors;
 
 pub use authority::{MAX_URL_LEN, Refusal, check_storage_url, redact, scrub};
 pub use classify::{ApiAnswer, Call, Outcome, PinnedRetry, RetryDecision, Terminal, classify};
+pub use upload::{
+    COMMIT_HOLD_MARGIN, COMMIT_LOCK_TTL, MAX_GRANTS_PER_CHUNK, UPLOAD_CONTENT_TYPE, UploadChunkPolicy,
+    UploadChunkState, UploadCommitted, UploadFailure, UploadGrant, UploadLink, UploadNext, UploadViolation, put_stored,
+};
 pub use window::{DownloadPlanner, Geometry, PlanError, PlannerConfig, Poll, Verdict, Violation, WindowAnswer};
 pub use wire::{
     CAP_OBJECT_DOWNLOAD_V1, CAP_OBJECT_UPLOAD_V1, CAPABILITIES_HEADER, ChunkGrant, DISCOVERY_PATH, Discovery,
-    DownloadGrantRequest, DownloadGrantResponse, StorageBucket, UploadCommitRequest, UploadCommitResponse,
-    UploadGrantRequest, UploadGrantResponse, WireError, download_grants_path, upload_init_selects_direct,
+    DownloadGrantRequest, DownloadGrantResponse, MAX_UPLOAD_BODY_BYTES, StorageBucket, UploadCommitRequest,
+    UploadCommitResponse, UploadGrantRequest, UploadGrantResponse, WireError, download_grants_path, upload_commit_path,
+    upload_grant_path, upload_init_selects_direct,
 };
 
 /// How long a discovery answer is trusted (spec: at most 10 minutes per API base).

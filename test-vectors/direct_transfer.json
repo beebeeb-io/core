@@ -1234,6 +1234,730 @@
       "expect": {
         "kind": "api_for_this_file"
       }
+    },
+    {
+      "name": "upload grant 200",
+      "call": "upload_grant",
+      "status": 200,
+      "content_type": "application/json",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "proceed"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:895-902 (upload_grant); tests/direct_upload_2173.rs:402-403"
+    },
+    {
+      "name": "upload grant 401",
+      "call": "upload_grant",
+      "status": 401,
+      "content_type": "application/json",
+      "body": "{\"error\":\"unauthorized\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 401,
+        "error": "unauthorized"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/error.rs:1012 (ApiError::Unauthorized)"
+    },
+    {
+      "name": "upload grant 403",
+      "call": "upload_grant",
+      "status": 403,
+      "content_type": "application/json",
+      "body": "{\"error\":\"forbidden\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 403,
+        "error": "forbidden"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/error.rs:1013 (ApiError::Forbidden)"
+    },
+    {
+      "name": "upload grant JSON 404: the session is gone",
+      "call": "upload_grant",
+      "status": 404,
+      "content_type": "application/json",
+      "body": "{\"error\":\"not found\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 404,
+        "error": "not found"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/error.rs:1008 (ApiError::NotFound: the session is not the caller's or is gone, load_upload_session); tests/direct_upload_2173.rs:360"
+    },
+    {
+      "name": "upload grant bare 404: a node without the route",
+      "call": "upload_grant",
+      "status": 404,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "no handler sends it: axum's unknown-route fallback (spec R1.6), a node without the route"
+    },
+    {
+      "name": "upload grant HTML 404",
+      "call": "upload_grant",
+      "status": 404,
+      "content_type": "text/html; charset=utf-8",
+      "body": "<h1>Not Found</h1>",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "no handler sends it: a front proxy's page (spec R1.6)"
+    },
+    {
+      "name": "upload grant 405",
+      "call": "upload_grant",
+      "status": 405,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "no handler sends it: axum's method-not-allowed fallback, empty body (spec R1.6)"
+    },
+    {
+      "name": "upload grant 409 direct_unavailable: this session cannot go direct",
+      "call": "upload_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"direct_unavailable\",\"reason\":\"disabled\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:55-65 (direct_unavailable; the commit route returns it at 942, 977, 1027, the grant route at 710-746); tests/direct_upload_2173.rs:982-1016 (the reasons)"
+    },
+    {
+      "name": "upload grant 409 transport_mismatch",
+      "call": "upload_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"transport_mismatch\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:598-599 (direct_session) + error.rs:1014 (ApiError::Conflict); tests/direct_upload_2173.rs:344"
+    },
+    {
+      "name": "upload grant 409 with any other code",
+      "call": "upload_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"something the server may say tomorrow\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "synthetic: a code no handler sends today (spec R1.6: an unknown 409 is the API's to judge)"
+    },
+    {
+      "name": "upload grant bare 409",
+      "call": "upload_grant",
+      "status": 409,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "synthetic: a 409 with no body (a proxy); spec R1.6"
+    },
+    {
+      "name": "upload grant 409 commit_in_progress: if one ever comes, a counted wait",
+      "call": "upload_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      },
+      "source": "client-side case: the grant route never sends commit_in_progress (only the commit route does: routes/direct_transfer.rs:912-914 (commit_in_progress), returned by commit_locked at 975, 1075, 1093, 1123); the client treats it as a short counted wait"
+    },
+    {
+      "name": "upload grant 409 commit_in_progress keeps a stated wait",
+      "call": "upload_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": "3",
+      "expect": {
+        "kind": "backoff",
+        "millis": 3000
+      },
+      "source": "client-side case: the grant route never sends commit_in_progress, and no route sends Retry-After on it today"
+    },
+    {
+      "name": "upload grant 429 with the real limiter body",
+      "call": "upload_grant",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"rate_limited\",\"message\":\"Too many requests. Try again in 60 seconds.\",\"retry_after\":60}",
+      "retry_after": "60",
+      "expect": {
+        "kind": "backoff",
+        "millis": 60000
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/rate_limit.rs:2028-2041 (too_many_requests: the body, Retry-After and X-RateLimit-*); the grant budget at routes/direct_transfer.rs:814-816; tests/direct_upload_2173.rs:1011"
+    },
+    {
+      "name": "upload grant 429 the fifth grant of a chunk states the link's remaining life, more than a client will wait",
+      "call": "upload_grant",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"rate_limited\",\"message\":\"Too many requests. Try again in 587 seconds.\",\"retry_after\":587}",
+      "retry_after": "587",
+      "expect": {
+        "kind": "backoff",
+        "millis": 120000
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/rate_limit.rs:2028-2041 (too_many_requests: the body, Retry-After and X-RateLimit-*); routes/direct_transfer.rs:770-775 (TooManyGrants -> rate_limited_response(retry_after, 4)); direct_transfer.rs:790-792 (retry_after = the grants key's remaining life, link lifetime + PUT allowance, about 600 s for a fresh chunk; 587 is an example); tests/direct_upload_2173.rs:1475-1477"
+    },
+    {
+      "name": "upload grant 400: a size the geometry does not allow",
+      "call": "upload_grant",
+      "status": 400,
+      "content_type": "application/json",
+      "body": "{\"error\":\"size must be 4194332 bytes for chunk 3\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:626-629 (direct_session: size) + error.rs:1010 (ApiError::BadRequest)"
+    },
+    {
+      "name": "upload grant 400: the session is not writable",
+      "call": "upload_grant",
+      "status": 400,
+      "content_type": "application/json",
+      "body": "{\"error\":\"upload session is not writable: expired\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:604-607 (direct_session: status) + error.rs:1010; the caller's session recovery reads this text before the classifier (CLI is_upload_session_gone)"
+    },
+    {
+      "name": "upload grant 413 quota",
+      "call": "upload_grant",
+      "status": 413,
+      "content_type": "application/json",
+      "body": "{\"error\":\"quota_exceeded\",\"limit_bytes\":5368709120,\"used_bytes\":5368709000,\"is_trial_cap\":false}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:674 (admit_chunk: ChunkBound::Quota, called by both routes) + error.rs:603-632 (ApiError::QuotaExceeded)"
+    },
+    {
+      "name": "upload grant 500 may pass",
+      "call": "upload_grant",
+      "status": 500,
+      "content_type": "application/json",
+      "body": "{\"error\":\"Something went wrong.\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/error.rs:1025-1044 (ApiError::Internal: 'Something went wrong.')"
+    },
+    {
+      "name": "upload grant 502 may pass",
+      "call": "upload_grant",
+      "status": 502,
+      "content_type": "text/html",
+      "body": "<html>Bad Gateway</html>",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "no handler sends it: an edge proxy's page"
+    },
+    {
+      "name": "upload grant 503 from storage, no Retry-After",
+      "call": "upload_grant",
+      "status": 503,
+      "content_type": "application/json",
+      "body": "{\"error\":\"File could not be saved. Our storage is having trouble — please try again.\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "client-side case: only the commit route sends the storage 503 (storage_failed, routes/direct_transfer.rs:1042, 1085); the rule is the same on both calls"
+    },
+    {
+      "name": "upload grant 503 states its wait",
+      "call": "upload_grant",
+      "status": 503,
+      "content_type": "application/json",
+      "body": "{\"error\":\"statement_timeout\",\"message\":\"This took too long, so the server stopped it. Try again in a moment.\"}",
+      "retry_after": "5",
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/error.rs:970-984 (a statement_timeout: 503 with Retry-After: 5)"
+    },
+    {
+      "name": "upload grant no answer may pass",
+      "call": "upload_grant",
+      "status": 0,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "no API answer: a network failure or timeout"
+    },
+    {
+      "name": "upload grant 302 is a path that is wrong, not a passing fault",
+      "call": "upload_grant",
+      "status": 302,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "no handler sends it: a proxy redirect (a wrong path, not a passing fault: this session cannot go direct)"
+    },
+    {
+      "name": "upload grant 100 is no answer to what was asked",
+      "call": "upload_grant",
+      "status": 100,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "no handler sends it: an interim response nothing asked for"
+    },
+    {
+      "name": "upload commit 200",
+      "call": "upload_commit",
+      "status": 200,
+      "content_type": "application/json",
+      "body": "{\"index\":3,\"size\":4194332,\"skipped\":false,\"object_key\":\"tenants/t/files/f/versions/v/3.bin\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "proceed"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:1137 (commit_locked); tests/direct_upload_2173.rs:472"
+    },
+    {
+      "name": "upload commit 401",
+      "call": "upload_commit",
+      "status": 401,
+      "content_type": "application/json",
+      "body": "{\"error\":\"unauthorized\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 401,
+        "error": "unauthorized"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/error.rs:1012 (ApiError::Unauthorized)"
+    },
+    {
+      "name": "upload commit 403",
+      "call": "upload_commit",
+      "status": 403,
+      "content_type": "application/json",
+      "body": "{\"error\":\"forbidden\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 403,
+        "error": "forbidden"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/error.rs:1013 (ApiError::Forbidden)"
+    },
+    {
+      "name": "upload commit JSON 404: the session is gone",
+      "call": "upload_commit",
+      "status": 404,
+      "content_type": "application/json",
+      "body": "{\"error\":\"not found\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 404,
+        "error": "not found"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/error.rs:1008 (ApiError::NotFound: the session is not the caller's or is gone, load_upload_session); tests/direct_upload_2173.rs:360"
+    },
+    {
+      "name": "upload commit bare 404: a node without the route",
+      "call": "upload_commit",
+      "status": 404,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "no handler sends it: axum's unknown-route fallback (spec R1.6), a node without the route"
+    },
+    {
+      "name": "upload commit HTML 404",
+      "call": "upload_commit",
+      "status": 404,
+      "content_type": "text/html; charset=utf-8",
+      "body": "<h1>Not Found</h1>",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "no handler sends it: a front proxy's page (spec R1.6)"
+    },
+    {
+      "name": "upload commit 405",
+      "call": "upload_commit",
+      "status": 405,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "no handler sends it: axum's method-not-allowed fallback, empty body (spec R1.6)"
+    },
+    {
+      "name": "upload commit 409 direct_unavailable: this session cannot go direct",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"direct_unavailable\",\"reason\":\"disabled\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:55-65 (direct_unavailable; the commit route returns it at 942, 977, 1027, the grant route at 710-746); tests/direct_upload_2173.rs:982-1016 (the reasons)"
+    },
+    {
+      "name": "upload commit 409 transport_mismatch",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"transport_mismatch\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:598-599 (direct_session) + error.rs:1014 (ApiError::Conflict); tests/direct_upload_2173.rs:344"
+    },
+    {
+      "name": "upload commit 409 with any other code",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"something the server may say tomorrow\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "synthetic: a code no handler sends today (spec R1.6: an unknown 409 is the API's to judge)"
+    },
+    {
+      "name": "upload commit bare 409",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "synthetic: a 409 with no body (a proxy); spec R1.6"
+    },
+    {
+      "name": "upload commit 409 commit_in_progress: the lock is held, wait on its own allowance",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "held",
+        "millis": null
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:912-914 (commit_in_progress), returned by commit_locked at 975, 1075, 1093, 1123; tests/direct_upload_2173.rs:1427"
+    },
+    {
+      "name": "upload commit 409 commit_in_progress with the lock already released: the record's HEAD could not tell (R3.4), server 30c8ed62",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "held",
+        "millis": null
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:1121-1123 (RecordOutcome::Unavailable -> commit_in_progress while the lock is no longer held); the allowance is also the bound on this case, where every poll re-copies the chunk"
+    },
+    {
+      "name": "upload commit 503 storage_unavailable with Retry-After: the R3.4 transients (the staging HEAD error, the record HEAD unavailable)",
+      "call": "upload_commit",
+      "status": 503,
+      "content_type": "application/json",
+      "body": "{\"error\":\"storage_unavailable\"}",
+      "retry_after": "5",
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      },
+      "source": "client-side case: server PR after #338 (s3-server's local commit e05d316c, not pushed yet; its lines to be cited once it lands): storage_unavailable() answers every R3.4 transient with 503 {\"error\":\"storage_unavailable\"} and Retry-After: 5, a stated and COUNTED wait; 30c8ed62 answers the record case with commit_in_progress (the row above)"
+    },
+    {
+      "name": "upload commit 409 commit_in_progress with Retry-After = the lock's remaining TTL (287 s): a stated wait, clamped to 120 s",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": "287",
+      "expect": {
+        "kind": "held",
+        "millis": 120000
+      },
+      "source": "client-side case: server PR after #338 (s3-server's local commit e05d316c, not pushed yet; its lines to be cited once it lands): the lock paths (acquire busy, confirm lost) answer commit_in_progress with Retry-After = the lock's remaining TTL in [1, commit_lock_secs() = 420], 1 when the key is gone; the client clamps a stated wait to 120 s and polls again"
+    },
+    {
+      "name": "upload commit 409 commit_in_progress with Retry-After = the lock's remaining TTL (30 s)",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": "30",
+      "expect": {
+        "kind": "held",
+        "millis": 30000
+      },
+      "source": "client-side case: server PR after #338 (s3-server's local commit e05d316c, not pushed yet; its lines to be cited once it lands): as above"
+    },
+    {
+      "name": "upload commit 409 commit_in_progress with Retry-After 1: the lock key is gone",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": "1",
+      "expect": {
+        "kind": "held",
+        "millis": 1000
+      },
+      "source": "client-side case: server PR after #338 (s3-server's local commit e05d316c, not pushed yet; its lines to be cited once it lands): as above (1 when the key is gone)"
+    },
+    {
+      "name": "upload commit 409 commit_in_progress keeps a stated wait",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": "3",
+      "expect": {
+        "kind": "held",
+        "millis": 3000
+      },
+      "source": "client-side case: the server sends no Retry-After on commit_in_progress today (routes/direct_transfer.rs:912-914); a stated wait is kept"
+    },
+    {
+      "name": "upload commit 409 commit_in_progress states an hour: clamped",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": "3600",
+      "expect": {
+        "kind": "held",
+        "millis": 120000
+      },
+      "source": "client-side case: the clamp (MAX_RETRY_AFTER) on a stated wait"
+    },
+    {
+      "name": "upload commit 429 with the real limiter body",
+      "call": "upload_commit",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"rate_limited\",\"message\":\"Too many requests. Try again in 60 seconds.\",\"retry_after\":60}",
+      "retry_after": "60",
+      "expect": {
+        "kind": "backoff",
+        "millis": 60000
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/router.rs:584-587 (rate_limit_by_user over the upload routes: the only 429 the commit route sends) + rate_limit.rs:2028-2041 (too_many_requests: the body, Retry-After and X-RateLimit-*) (the 60 is a window length, an example)"
+    },
+    {
+      "name": "upload commit 429 states more than a client will wait",
+      "call": "upload_commit",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"rate_limited\",\"message\":\"Too many requests. Try again in 300 seconds.\",\"retry_after\":300}",
+      "retry_after": "300",
+      "expect": {
+        "kind": "backoff",
+        "millis": 120000
+      },
+      "source": "client-side case: no commit answer states this long today; the clamp (MAX_RETRY_AFTER) is the client's"
+    },
+    {
+      "name": "upload commit 400: a size the geometry does not allow",
+      "call": "upload_commit",
+      "status": 400,
+      "content_type": "application/json",
+      "body": "{\"error\":\"size must be 4194332 bytes for chunk 3\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:626-629 (direct_session: size) + error.rs:1010 (ApiError::BadRequest)"
+    },
+    {
+      "name": "upload commit 400: the session is not writable",
+      "call": "upload_commit",
+      "status": 400,
+      "content_type": "application/json",
+      "body": "{\"error\":\"upload session is not writable: expired\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:604-607 (direct_session: status) + error.rs:1010; the caller's session recovery reads this text before the classifier (CLI is_upload_session_gone)"
+    },
+    {
+      "name": "upload commit 413 quota",
+      "call": "upload_commit",
+      "status": 413,
+      "content_type": "application/json",
+      "body": "{\"error\":\"quota_exceeded\",\"limit_bytes\":5368709120,\"used_bytes\":5368709000,\"is_trial_cap\":false}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:674 (admit_chunk: ChunkBound::Quota, called by both routes) + error.rs:603-632 (ApiError::QuotaExceeded)"
+    },
+    {
+      "name": "upload commit 500 may pass",
+      "call": "upload_commit",
+      "status": 500,
+      "content_type": "application/json",
+      "body": "{\"error\":\"Something went wrong.\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/error.rs:1025-1044 (ApiError::Internal: 'Something went wrong.')"
+    },
+    {
+      "name": "upload commit 502 may pass",
+      "call": "upload_commit",
+      "status": 502,
+      "content_type": "text/html",
+      "body": "<html>Bad Gateway</html>",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "no handler sends it: an edge proxy's page"
+    },
+    {
+      "name": "upload commit 503 from storage, no Retry-After",
+      "call": "upload_commit",
+      "status": 503,
+      "content_type": "application/json",
+      "body": "{\"error\":\"File could not be saved. Our storage is having trouble — please try again.\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/error.rs:1075 (ApiError::Storage -> 503, no Retry-After) + routes/direct_transfer.rs:916-925 (storage_failed), returned at 1042 (the commit's HEAD) and 1085 (its COPY)"
+    },
+    {
+      "name": "upload commit 503 states its wait",
+      "call": "upload_commit",
+      "status": 503,
+      "content_type": "application/json",
+      "body": "{\"error\":\"statement_timeout\",\"message\":\"This took too long, so the server stopped it. Try again in a moment.\"}",
+      "retry_after": "5",
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/error.rs:970-984 (a statement_timeout: 503 with Retry-After: 5)"
+    },
+    {
+      "name": "upload commit no answer may pass",
+      "call": "upload_commit",
+      "status": 0,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "no API answer: a network failure or timeout"
+    },
+    {
+      "name": "upload commit 302 is a path that is wrong, not a passing fault",
+      "call": "upload_commit",
+      "status": 302,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "no handler sends it: a proxy redirect (a wrong path, not a passing fault: this session cannot go direct)"
+    },
+    {
+      "name": "upload commit 100 is no answer to what was asked",
+      "call": "upload_commit",
+      "status": 100,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "no handler sends it: an interim response nothing asked for"
+    },
+    {
+      "name": "upload commit 409 chunk_not_stored: nothing was committed, grant again",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"chunk_not_stored\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "regrant"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:906-908 (chunk_not_stored), returned at 1025, 1045, 1121; tests/direct_upload_2173.rs:414"
+    },
+    {
+      "name": "upload grant 409 chunk_not_stored is not a grant answer",
+      "call": "upload_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"chunk_not_stored\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "client-side case: only the commit route sends it (routes/direct_transfer.rs:1025, 1045, 1121)"
     }
   ],
   "redact": [

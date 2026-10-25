@@ -2207,10 +2207,22 @@ pub fn scrub_text(text: &str) -> String {
 }
 
 /// What an API answer means, as `{ kind, millis?, status?, error? }` with `kind`
-/// one of `proceed`, `not_supported`, `use_api_now`, `api_for_this_file`,
+/// one of `proceed`, `not_supported`, `use_api_now`, `api_for_this_file`
+/// (for an UPLOAD call: this session cannot go direct, so abandon it and init again WITHOUT the
+/// capability token),
 /// `restart`, `backoff` (with `millis`), `terminal` (with `status`, `error`),
-/// `retry` (the pinned chunk route only: a failure that may pass).
-/// `call` is `"discovery"`, `"download_grant"` or `"pinned_chunk"`; pass `status` 0 when there was
+/// `retry` (the pinned chunk route and the upload calls: a failure that may pass; the retry rules of
+/// the pinned route are `pinnedRetryDecision`, those of an upload are core's `UploadChunkState`, which is
+/// not exported yet, so do not pass an upload outcome to `pinnedRetryDecision`), `regrant`
+/// (`upload_commit` only: the staged chunk is not there, ask for a new link and send it again), `held`
+/// (`upload_commit` only: the server holds the chunk's commit lock, possibly for minutes: wait and
+/// commit again, `millis` is the server's stated wait or null). core's `UploadChunkState` gives a hold an
+/// allowance of its own (the lock TTL, 420 s, plus 30 s; never polling faster than once a second), but it
+/// is not exported yet: a host that handles `held` itself must bound the wait the same way (at least the
+/// server's lock TTL, or it abandons a chunk whose commit would have gone through), poll no faster than
+/// once a second, and not count a hold as one of its failures.
+/// `call` is `"discovery"`, `"download_grant"`, `"pinned_chunk"`, `"upload_grant"` or
+/// `"upload_commit"`; pass `status` 0 when there was
 /// no HTTP answer. `body` is whatever was read of the body (at most 64 KiB is
 /// looked at); `retry_after` is the raw header value.
 #[wasm_bindgen(js_name = classifyDirectAnswer)]
@@ -2233,9 +2245,23 @@ enum DirectOutcomeJs {
     UseApiNow,
     ApiForThisFile,
     Restart,
-    Backoff { millis: f64 },
-    Terminal { status: u16, error: Option<String> },
+    Backoff {
+        millis: f64,
+    },
+    Terminal {
+        status: u16,
+        error: Option<String>,
+    },
     Retry,
+    /// `upload_commit` only: the staged chunk is not there; ask for a new link and send it again.
+    Regrant,
+    /// `upload_commit` only: the server holds the chunk's commit lock (up to 420 s after a failed
+    /// copy); wait and commit again. `millis` is the server's stated wait, `null` when it sent none.
+    /// The host bounds the wait itself (at least 450 s in all, polls no faster than once a second, not
+    /// counted as a failure) until core's `UploadChunkState` is exported.
+    Held {
+        millis: Option<f64>,
+    },
 }
 
 impl DirectOutcomeJs {
@@ -2254,6 +2280,10 @@ impl DirectOutcomeJs {
                 error: t.error.clone(),
             },
             dt::Outcome::Retry => Self::Retry,
+            dt::Outcome::Regrant => Self::Regrant,
+            dt::Outcome::Held(d) => Self::Held {
+                millis: d.map(|d| d.as_millis() as f64),
+            },
             // `Outcome` is non-exhaustive: a variant added later is the safe one.
             _ => Self::UseApiNow,
         }
@@ -2272,6 +2302,10 @@ impl DirectOutcomeJs {
                 error: error.clone(),
             }),
             Self::Retry => dt::Outcome::Retry,
+            Self::Regrant => dt::Outcome::Regrant,
+            Self::Held { millis } => {
+                dt::Outcome::Held(millis.map(|m| std::time::Duration::from_millis(m.max(0.0) as u64)))
+            }
         }
     }
 }
@@ -3274,6 +3308,13 @@ mod direct_vector_tests {
             json!({"kind": "backoff", "millis": 1500.0}),
             json!({"kind": "terminal", "status": 403, "error": null}),
             json!({"kind": "restart"}),
+            json!({"kind": "retry"}),
+            // The upload commit's "the staged chunk is not there": the JS side hands it back to core
+            // (a planner or a retry decision), where it must still be a regrant and not a catch-all.
+            json!({"kind": "regrant"}),
+            // The commit hold: with the server's stated wait, and without.
+            json!({"kind": "held", "millis": 3000.0}),
+            json!({"kind": "held", "millis": null}),
         ] {
             let parsed: DirectOutcomeJs = serde_json::from_value(outcome.clone()).unwrap();
             assert_eq!(

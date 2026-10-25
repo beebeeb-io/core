@@ -1,0 +1,1611 @@
+{
+  "_provenance": "Task 2173 vectors for beebeeb_core::direct_transfer::upload: the grant and commit answer parsers, the init transport rule and the per-chunk retry policy. Hand-authored from the spec (R1.1, R1.6, R2.4, R2.6, R3.4) and the merged server's real bodies (server main 30c8ed62, routes/direct_transfer.rs). Read by the core tests in upload.rs ONLY (exact row counts); the WASM and UniFFI exports do not load it (they take the parsers and the policy when web/mobile ship uploads). The 'classify' rows for the upload calls live in direct_transfer.json and ARE run by core, the WASM seams and the UniFFI exports. Every row has a `source` (a server file:line at 30c8ed62, a spec rule, or 'client policy' / 'client-side case' / 'synthetic'). Regenerate with test-vectors/tools/make_direct_upload_vectors.py; the jittered waits come from test-vectors/tools/jitter_port.py.",
+  "version": 1,
+  "api_bases": {
+    "prod": "https://api.beebeeb.test",
+    "dev": "http://localhost:3001"
+  },
+  "discoveries": {
+    "std": {
+      "download": [
+        "object-download-v1"
+      ],
+      "upload": [
+        "object-upload-v1"
+      ],
+      "storage_hosts": [
+        "s3.storage.test"
+      ],
+      "storage_buckets": [
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-01"
+        }
+      ],
+      "max_window": 32,
+      "url_ttl_seconds": 300
+    },
+    "dev": {
+      "download": [],
+      "upload": [
+        "object-upload-v1"
+      ],
+      "storage_hosts": [
+        "localhost:9000"
+      ],
+      "storage_buckets": [
+        {
+          "host": "localhost:9000",
+          "bucket": "bb-dev"
+        }
+      ],
+      "max_window": 32,
+      "url_ttl_seconds": 300
+    }
+  },
+  "grant_answers": [
+    {
+      "name": "the server's grant",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "link",
+        "index": 3,
+        "content_type": "application/octet-stream"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:895-902 (upload_grant); tests/direct_upload_2173.rs:402-403"
+    },
+    {
+      "name": "a skipped chunk carries no link (R1.1)",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"skipped\":true}",
+      "expect": {
+        "kind": "skipped"
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:700 (a chunk already recorded); tests/direct_upload_2173.rs:505"
+    },
+    {
+      "name": "a header name in another case",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"Content-Type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "link",
+        "index": 3,
+        "content_type": "application/octet-stream"
+      },
+      "source": "synthetic: a variation the client accepts (it is not an error)"
+    },
+    {
+      "name": "dev: http to the local MinIO",
+      "index": 3,
+      "api_base": "dev",
+      "discovery": "dev",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"http://localhost:9000/bb-dev/k?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "link",
+        "index": 3,
+        "content_type": "application/octet-stream"
+      },
+      "source": "synthetic: a variation the client accepts (it is not an error)"
+    },
+    {
+      "name": "not json",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{nope",
+      "expect": {
+        "kind": "violation",
+        "code": "malformed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "an array",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "[]",
+      "expect": {
+        "kind": "violation",
+        "code": "malformed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "an empty object",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{}",
+      "expect": {
+        "kind": "violation",
+        "code": "malformed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "another transport",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v2\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "transport"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "the api transport",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"api\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "transport"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "another chunk",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":4,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "index"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "a GET",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"GET\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "method"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "no method",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "method"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "no url",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "malformed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "an extra header",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\",\"x-amz-acl\":\"public-read\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "headers"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "another content type",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"text/html\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "headers"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "an authorization header",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"authorization\":\"Bearer x\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "headers"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "no headers",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "headers"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "an unreadable expiry",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"tomorrow\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "expiry"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "no expiry",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"}}",
+      "expect": {
+        "kind": "violation",
+        "code": "expiry"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "a host that is not listed",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://evil.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "authority_host_not_listed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "a bucket that is not listed",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/other/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "authority_bucket_not_listed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "plain http to a public host",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"http://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "authority_not_https"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "userinfo in the link",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://evil@s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "authority_userinfo"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "an IP literal",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://203.0.113.9/bb-01/k?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "authority_ip_literal"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    }
+  ],
+  "commit_answers": [
+    {
+      "name": "the server's commit",
+      "index": 3,
+      "size": 4194332,
+      "body": "{\"index\":3,\"size\":4194332,\"skipped\":false,\"object_key\":\"tenants/t/files/f/versions/v/3.bin\"}",
+      "expect": {
+        "kind": "committed",
+        "skipped": false
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:1137 (commit_locked); tests/direct_upload_2173.rs:472"
+    },
+    {
+      "name": "a repeated commit is skipped (R1.1)",
+      "index": 3,
+      "size": 4194332,
+      "body": "{\"index\":3,\"size\":4194332,\"skipped\":true,\"object_key\":\"tenants/t/files/f/versions/v/3.bin\"}",
+      "expect": {
+        "kind": "committed",
+        "skipped": true
+      },
+      "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:1000-1001 (skipped_commit); tests/direct_upload_2173.rs:496"
+    },
+    {
+      "name": "no skipped field",
+      "index": 3,
+      "size": 4194332,
+      "body": "{\"index\":3,\"size\":4194332}",
+      "expect": {
+        "kind": "committed",
+        "skipped": false
+      },
+      "source": "synthetic: a variation the client accepts (it is not an error)"
+    },
+    {
+      "name": "another chunk",
+      "index": 3,
+      "size": 4194332,
+      "body": "{\"index\":4,\"size\":4194332,\"skipped\":false}",
+      "expect": {
+        "kind": "violation",
+        "code": "index"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "another size",
+      "index": 3,
+      "size": 4194332,
+      "body": "{\"index\":3,\"size\":4194331,\"skipped\":false}",
+      "expect": {
+        "kind": "violation",
+        "code": "size"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "not json",
+      "index": 3,
+      "size": 4194332,
+      "body": "{nope",
+      "expect": {
+        "kind": "violation",
+        "code": "malformed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "an empty object",
+      "index": 3,
+      "size": 4194332,
+      "body": "{}",
+      "expect": {
+        "kind": "violation",
+        "code": "malformed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "an array",
+      "index": 3,
+      "size": 4194332,
+      "body": "[]",
+      "expect": {
+        "kind": "violation",
+        "code": "malformed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    }
+  ],
+  "constants": {
+    "max_grants_per_chunk": 4,
+    "max_grants_per_chunk_source": "server 30c8ed62 beebeeb-api/src/direct_transfer.rs:402 (MAX_GRANTS_PER_CHUNK), enforced at routes/direct_transfer.rs:770-775; tests/direct_upload_2173.rs:1475 (the fifth grant is a 429, x-ratelimit-limit 4)",
+    "content_type": "application/octet-stream",
+    "content_type_source": "server 30c8ed62 beebeeb-api/src/direct_transfer.rs:395 (CHUNK_CONTENT_TYPE), routes/direct_transfer.rs:900; tests/direct_upload_2173.rs:403",
+    "commit_lock_ttl_seconds": 420,
+    "commit_lock_ttl_source": "server 30c8ed62 beebeeb-api/src/direct_transfer.rs:410-412 (commit_lock_secs() = 4 * s3_op_timeout_secs() + 60), storage.rs:1952-1958 (s3_op_timeout_secs() = 90 unless S3_PUT_OP_TIMEOUT_SECS); the lock is held for its whole TTL after a copy was issued: routes/direct_transfer.rs:1079-1086 (mutation_issued .. mutation_settled, R3.1)"
+  },
+  "init_transport": [
+    {
+      "name": "the server selected direct",
+      "field": "object-upload-v1",
+      "direct": true,
+      "source": "server 30c8ed62 beebeeb-api/src/routes/uploads.rs:789-792 (direct_wanted: the flag, the declared token, no upload cap, a live Redis; only then does the 201 carry transport = object-upload-v1); core wire.rs upload_init_selects_direct"
+    },
+    {
+      "name": "no transport field: today's chunk PUT route",
+      "field": null,
+      "direct": false,
+      "source": "server 30c8ed62 beebeeb-api/src/routes/uploads.rs:789-792 (direct_wanted: the flag, the declared token, no upload cap, a live Redis; only then does the 201 carry transport = object-upload-v1); core wire.rs upload_init_selects_direct; an old server, or a flag that is off, sends none"
+    },
+    {
+      "name": "any other value: today's chunk PUT route",
+      "field": "api",
+      "direct": false,
+      "source": "client-side case: no server sends it; the rule is that only the exact token selects direct"
+    },
+    {
+      "name": "a transport nobody asked for",
+      "field": "object-upload-v2",
+      "direct": false,
+      "source": "client-side case: a future server; the rule is that only the exact token selects direct"
+    },
+    {
+      "name": "another case",
+      "field": "Object-Upload-V1",
+      "direct": false,
+      "source": "client-side case: the token is compared exactly"
+    }
+  ],
+  "policy": [
+    {
+      "name": "a PUT that fails is regranted with a doubling wait (equal jitter), and the fourth link is the last",
+      "seed": 11,
+      "steps": [
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "put",
+            "status": 403
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 822,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "put",
+            "status": 500
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 1976,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "put",
+            "status": 0
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 2467,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "may_ask",
+          "expect": false
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "put",
+            "status": 403
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R4 'exponential backoff and jitter'; the jittered waits are computed by test-vectors/tools/jitter_port.py, not by running the Rust"
+    },
+    {
+      "name": "a commit that is busy waits the stated time exactly, a plain failure waits a jittered 2 s at most, and none of it is tied to the grants",
+      "seed": 5,
+      "steps": [
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 5000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 5000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 1884,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 3000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 3000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "may_ask",
+          "expect": true
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R4 'exponential backoff and jitter'; the jittered waits are computed by test-vectors/tools/jitter_port.py, not by running the Rust"
+    },
+    {
+      "name": "a chunk that was not stored is granted again at once",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "regrant"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 0,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "may_ask",
+          "expect": false
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "regrant"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): the server's 4-grant cap: server 30c8ed62 beebeeb-api/src/direct_transfer.rs:402 (MAX_GRANTS_PER_CHUNK, R2.4); a chunk_not_stored commit means nothing was committed (routes/direct_transfer.rs:906-908)"
+    },
+    {
+      "name": "a grant that is rate limited waits what the server says, within the budget",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 60000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 60000,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 60000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 60000,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 60000
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R2.6 bounded retries: 150 s of waiting in all; stated waits are the server's (the limiter's Retry-After, rate_limit.rs:2028-2041)"
+    },
+    {
+      "name": "the budget is spent up to and including its last millisecond",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 90000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 90000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 60000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 60000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 1
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R2.6 bounded retries: 150 s of waiting in all; stated waits are the server's (the limiter's Retry-After, rate_limit.rs:2028-2041)"
+    },
+    {
+      "name": "a grant that is unwell is asked for again after a jittered wait, a stated wait is kept as it is",
+      "seed": 3,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 573,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 3000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 3000,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 3554,
+            "call": "upload_grant"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R4 'exponential backoff and jitter'; the jittered waits are computed by test-vectors/tools/jitter_port.py, not by running the Rust"
+    },
+    {
+      "name": "a grant answer of 'api_for_this_file' means this session cannot go direct",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "api_for_this_file"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R1.6 and 'Transport exclusivity': every answer that is not worth another try means this SESSION cannot go direct"
+    },
+    {
+      "name": "a commit answer of 'api_for_this_file' means this session cannot go direct",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "api_for_this_file"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R1.6 and 'Transport exclusivity': every answer that is not worth another try means this SESSION cannot go direct"
+    },
+    {
+      "name": "a grant answer of 'use_api_now' means this session cannot go direct",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "use_api_now"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R1.6 and 'Transport exclusivity': every answer that is not worth another try means this SESSION cannot go direct"
+    },
+    {
+      "name": "a commit answer of 'use_api_now' means this session cannot go direct",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "use_api_now"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R1.6 and 'Transport exclusivity': every answer that is not worth another try means this SESSION cannot go direct"
+    },
+    {
+      "name": "a grant answer of 'not_supported' means this session cannot go direct",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "not_supported"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R1.6 and 'Transport exclusivity': every answer that is not worth another try means this SESSION cannot go direct"
+    },
+    {
+      "name": "a commit answer of 'not_supported' means this session cannot go direct",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "not_supported"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R1.6 and 'Transport exclusivity': every answer that is not worth another try means this SESSION cannot go direct"
+    },
+    {
+      "name": "a grant answer of 'restart' means this session cannot go direct",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "restart"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R1.6 and 'Transport exclusivity': every answer that is not worth another try means this SESSION cannot go direct"
+    },
+    {
+      "name": "a commit answer of 'restart' means this session cannot go direct",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "restart"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R1.6 and 'Transport exclusivity': every answer that is not worth another try means this SESSION cannot go direct"
+    },
+    {
+      "name": "an authorization answer on a grant is terminal",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "terminal",
+              "status": 403,
+              "error": "forbidden"
+            }
+          },
+          "expect": {
+            "kind": "terminal",
+            "status": 403,
+            "error": "forbidden"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R1.6: an authorization answer is terminal, never a fallback (server error.rs:1012-1013)"
+    },
+    {
+      "name": "an authorization answer on a commit is terminal",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "terminal",
+              "status": 403,
+              "error": "forbidden"
+            }
+          },
+          "expect": {
+            "kind": "terminal",
+            "status": 403,
+            "error": "forbidden"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R1.6: an authorization answer is terminal, never a fallback (server error.rs:1012-1013)"
+    },
+    {
+      "name": "a session that is gone is terminal for the caller's recovery",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "terminal",
+              "status": 404,
+              "error": "not found"
+            }
+          },
+          "expect": {
+            "kind": "terminal",
+            "status": 404,
+            "error": "not found"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R1.6: a JSON 404 is the session being gone, which the caller's session recovery owns (server error.rs:1008)"
+    },
+    {
+      "name": "the eighth failure ends the tries, however short the waits (seven are ridden out)",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 0
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 0,
+            "call": "upload_commit"
+          },
+          "repeat": 7
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 0
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R2.6 bounded retries: the 8th failure ends the tries (7 are ridden out)"
+    },
+    {
+      "name": "seven retries with doubling jittered waits (the default doubling alone never reaches the 150 s budget); the eighth failure ends the tries",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 993,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 1260,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 2329,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 4981,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 13196,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 19610,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 42266,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R4 'exponential backoff and jitter'; the jittered waits are computed by test-vectors/tools/jitter_port.py, not by running the Rust"
+    },
+    {
+      "name": "a copy that failed leaves the commit held for minutes: 410 s of holds are waited out on their own allowance, no fallback",
+      "seed": 21,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 922,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 10000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 10000,
+            "call": "upload_commit"
+          },
+          "repeat": 41
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): the server's commit lock: server 30c8ed62 beebeeb-api/src/direct_transfer.rs:410-412 (commit_lock_secs = 4 * 90 s + 60 s) and routes/direct_transfer.rs:1079-1086 (the lock is held from the copy's issue to its TTL, R3.1); the client waits it out on an allowance of its own"
+    },
+    {
+      "name": "400 s of holds leave the retry budget untouched: a 150 s stated wait still fits, one millisecond more does not",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 10000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 10000,
+            "call": "upload_commit"
+          },
+          "repeat": 40
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 150000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 150000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 1
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): the server's commit lock: server 30c8ed62 beebeeb-api/src/direct_transfer.rs:410-412 (commit_lock_secs = 4 * 90 s + 60 s) and routes/direct_transfer.rs:1079-1086 (the lock is held from the copy's issue to its TTL, R3.1); the client waits it out on an allowance of its own"
+    },
+    {
+      "name": "400 s of holds leave the failure cap untouched: seven failures are still ridden out, the eighth ends it",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 10000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 10000,
+            "call": "upload_commit"
+          },
+          "repeat": 40
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 0
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 0,
+            "call": "upload_commit"
+          },
+          "repeat": 7
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 0
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): the server's commit lock: server 30c8ed62 beebeeb-api/src/direct_transfer.rs:410-412 (commit_lock_secs = 4 * 90 s + 60 s) and routes/direct_transfer.rs:1079-1086 (the lock is held from the copy's issue to its TTL, R3.1); the client waits it out on an allowance of its own"
+    },
+    {
+      "name": "the hold allowance is the lock TTL plus 30 s, used to the millisecond: the last poll is cut, the next hold goes to the API",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 120000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 120000,
+            "call": "upload_commit"
+          },
+          "repeat": 3
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 120000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 90000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 1000
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): the server's commit lock: server 30c8ed62 beebeeb-api/src/direct_transfer.rs:410-412 (commit_lock_secs = 4 * 90 s + 60 s) and routes/direct_transfer.rs:1079-1086 (the lock is held from the copy's issue to its TTL, R3.1); the client waits it out on an allowance of its own"
+    },
+    {
+      "name": "a hold that is spent is spent for the chunk: a later plain failure does not give it back",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 120000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 120000,
+            "call": "upload_commit"
+          },
+          "repeat": 3
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 120000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 90000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 791,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 1000
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): the server's commit lock: server 30c8ed62 beebeeb-api/src/direct_transfer.rs:410-412 (commit_lock_secs = 4 * 90 s + 60 s) and routes/direct_transfer.rs:1079-1086 (the lock is held from the copy's issue to its TTL, R3.1); the client waits it out on an allowance of its own"
+    },
+    {
+      "name": "holds the server states no wait for are polled every 5 s doubling to 15 s, each with equal jitter, until the allowance is spent",
+      "seed": 9,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": null
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 3649,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": null
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 9874,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": null
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 12382,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": null
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 11191,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": null
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 8439,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "exhaust_holds",
+          "outcome": {
+            "kind": "held",
+            "millis": null
+          },
+          "already_ms": 45535,
+          "total_ms": 450000,
+          "each_max_ms": 15000,
+          "each_min_ms": 7500
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): the server's commit lock: server 30c8ed62 beebeeb-api/src/direct_transfer.rs:410-412 (commit_lock_secs = 4 * 90 s + 60 s) and routes/direct_transfer.rs:1079-1086 (the lock is held from the copy's issue to its TTL, R3.1); the client waits it out on an allowance of its own"
+    },
+    {
+      "name": "a hold that states 0 or 999 ms is polled once a second, never faster, until the allowance is spent",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 0
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 1000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "held",
+              "millis": 999
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 1000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "exhaust_holds",
+          "outcome": {
+            "kind": "held",
+            "millis": 0
+          },
+          "already_ms": 2000,
+          "total_ms": 450000,
+          "each_max_ms": 1000,
+          "each_min_ms": 1000
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): the server's commit lock: server 30c8ed62 beebeeb-api/src/direct_transfer.rs:410-412 (commit_lock_secs = 4 * 90 s + 60 s) and routes/direct_transfer.rs:1079-1086 (the lock is held from the copy's issue to its TTL, R3.1); the client waits it out on an allowance of its own"
+    },
+    {
+      "name": "a Held answer on a grant is nothing the server sends: that session goes to the API",
+      "seed": 0,
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "held",
+              "millis": 10000
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): a hold is a commit answer: server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:975, 1075, 1093, 1123 are all in commit_locked"
+    }
+  ]
+}

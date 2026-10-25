@@ -36,6 +36,11 @@ pub enum Call {
     /// version through the API (the fallback for a chunk storage could not give). Its answers are
     /// NOT the grant route's: a gone version is a 409 whose body is a sentence, not a code.
     PinnedChunk,
+    /// `POST /api/v1/uploads/{session}/chunks/{index}/grant` (upload; spec "Upload: direct session").
+    UploadGrant,
+    /// `POST /api/v1/uploads/{session}/chunks/{index}/commit`: the staged chunk is verified,
+    /// copied to its real key and recorded.
+    UploadCommit,
 }
 
 impl Call {
@@ -45,6 +50,8 @@ impl Call {
             Call::Discovery => "discovery",
             Call::DownloadGrant => "download_grant",
             Call::PinnedChunk => "pinned_chunk",
+            Call::UploadGrant => "upload_grant",
+            Call::UploadCommit => "upload_commit",
         }
     }
 
@@ -54,6 +61,8 @@ impl Call {
             "discovery" => Some(Call::Discovery),
             "download_grant" => Some(Call::DownloadGrant),
             "pinned_chunk" => Some(Call::PinnedChunk),
+            "upload_grant" => Some(Call::UploadGrant),
+            "upload_commit" => Some(Call::UploadCommit),
             _ => None,
         }
     }
@@ -101,9 +110,13 @@ impl ApiAnswer {
     /// How long to wait before asking again: the server's `Retry-After`, else
     /// [`DEFAULT_RETRY_AFTER`], clamped to 1 s ..= [`MAX_RETRY_AFTER`].
     fn wait(&self) -> Duration {
+        self.stated_wait().unwrap_or(DEFAULT_RETRY_AFTER)
+    }
+
+    /// The server's `Retry-After`, when it sent one, clamped to 1 s ..= [`MAX_RETRY_AFTER`].
+    fn stated_wait(&self) -> Option<Duration> {
         self.retry_after
-            .unwrap_or(DEFAULT_RETRY_AFTER)
-            .clamp(Duration::from_secs(1), MAX_RETRY_AFTER)
+            .map(|d| d.clamp(Duration::from_secs(1), MAX_RETRY_AFTER))
     }
 
     /// `true` when the body is a JSON error object (the answer is about the
@@ -160,23 +173,46 @@ pub enum Outcome {
     NotSupported,
     /// No direct transport right now (bare 404/405, 5xx, redirect, network
     /// failure, anything unrecognised): use the API for this file now and ask
-    /// discovery again later, at most once per command.
+    /// discovery again later, at most once per command. (The upload calls never
+    /// answer this: see [`Outcome::ApiForThisFile`].)
     UseApiNow,
     /// This file is served over the API (`direct_unavailable`, an unknown 409
-    /// or other 4xx): today's path.
+    /// or other 4xx): today's path. **For an UPLOAD call it means this SESSION cannot go
+    /// direct**: its transport never changes after init, so abandon the session and init
+    /// again WITHOUT the capability token. A bare 404/405, a 1xx/3xx, `direct_unavailable`,
+    /// `transport_mismatch` and any unknown 409 or 4xx are all this on `UploadGrant` and
+    /// `UploadCommit`.
     ApiForThisFile,
     /// `version_unavailable`: the pinned version is gone. Discard what was
     /// fetched and restart from fresh metadata. Never mix versions.
     Restart,
-    /// 429, or 409 `replace_in_progress` / `commit_in_progress`: wait this
-    /// long, then ask again (the planner gives up after a bounded number).
+    /// 429, or 409 `replace_in_progress` / `commit_in_progress` on a DOWNLOAD call: wait this
+    /// long, then ask again (the planner gives up after a bounded number). On an upload call
+    /// it is a counted wait (a 429, a 5xx that states one); the commit lock is [`Outcome::Held`].
     Backoff(Duration),
     /// 401, 403, or a JSON 404: an authorization answer, not a routing one.
     /// The API path would refuse too; do not fall back.
     Terminal(Terminal),
-    /// `PinnedChunk` only: a failure that may pass (5xx, a node without the route, no
-    /// answer). Try again after the client's own bounded backoff ([`PinnedRetry`]).
+    /// `PinnedChunk`, `UploadGrant`, `UploadCommit`: a failure that may pass (5xx, a node without
+    /// the route, no answer). Try again after the client's own bounded backoff
+    /// ([`PinnedRetry`], [`UploadChunkState`](super::upload::UploadChunkState)).
     Retry,
+    /// `UploadCommit` only (409 `chunk_not_stored`): the staged object is not there, or has the
+    /// wrong length. Nothing was committed: ask for a new link and send the chunk again.
+    Regrant,
+    /// `UploadCommit` only (409 `commit_in_progress`): the server holds this chunk's commit lock. After
+    /// a copy that failed, the lock lives its whole TTL
+    /// ([`COMMIT_LOCK_TTL`](super::upload::COMMIT_LOCK_TTL), 420 s), so this can last minutes: it is a
+    /// wait with its own allowance, not a counted failure
+    /// ([`UploadChunkState`](super::upload::UploadChunkState)). The duration is the server's
+    /// `Retry-After` when it sent one (clamped like any stated wait), `None` when it did not.
+    ///
+    /// The server (30c8ed62) also answers `commit_in_progress` when the lock is ALREADY released, if
+    /// the record's in-lock HEAD could not tell (R3.4, `routes/direct_transfer.rs:1123`): on slow
+    /// storage every poll of that case re-copies the chunk. A server that states those transient
+    /// failures as a `503` with `Retry-After` (a counted wait) and keeps `commit_in_progress` for the
+    /// lock alone removes the ambiguity; until then the allowance is also the bound on that case.
+    Held(Option<Duration>),
 }
 
 impl Outcome {
@@ -191,6 +227,8 @@ impl Outcome {
             Outcome::Backoff(_) => "backoff",
             Outcome::Terminal(_) => "terminal",
             Outcome::Retry => "retry",
+            Outcome::Regrant => "regrant",
+            Outcome::Held(_) => "held",
         }
     }
 }
@@ -236,6 +274,43 @@ pub fn classify(call: Call, answer: &ApiAnswer) -> Outcome {
             400..=499 => Outcome::ApiForThisFile,
             // 0 (no answer), 1xx, 3xx: nothing we asked for happened.
             _ => Outcome::UseApiNow,
+        },
+        // Upload: the session's transport never changes, so everything that means "this session
+        // cannot go direct" (a node without the route, `direct_unavailable`, `transport_mismatch`,
+        // any 409 or 4xx we do not know) is `ApiForThisFile`: abandon the session and init again
+        // WITHOUT the capability token (spec, "Transport exclusivity"; R1.6).
+        Call::UploadGrant | Call::UploadCommit => match status {
+            401 | 403 => terminal(),
+            // A JSON 404 is the session (or file) being gone: the caller's session recovery owns it.
+            404 if answer.has_json_error() => terminal(),
+            // A bare 404/405 is a node (or proxy) without the route (R1.6): this session cannot go direct.
+            404 | 405 => Outcome::ApiForThisFile,
+            409 => match answer.error_code() {
+                // R2.6/R3.1: another commit of this chunk holds the lock, or a copy that failed leaves it
+                // held for its whole TTL. Only the COMMIT route sends it: a wait with its own allowance
+                // ([`Outcome::Held`]); never terminal.
+                Some("commit_in_progress") if call == Call::UploadCommit => Outcome::Held(answer.stated_wait()),
+                // The grant route never sends it; if one ever does, a short counted wait.
+                Some("commit_in_progress") => Outcome::Backoff(answer.wait()),
+                // R1.1/R2.5: the staged object is absent or the wrong length. Nothing was committed.
+                Some("chunk_not_stored") if call == Call::UploadCommit => Outcome::Regrant,
+                // `direct_unavailable` (any reason), `transport_mismatch`, anything else.
+                _ => Outcome::ApiForThisFile,
+            },
+            // The limiter, the per-chunk grant cap (R2.4) and the staging bound: the server states
+            // how long. The policy bounds how often.
+            429 => Outcome::Backoff(answer.wait()),
+            500..=599 if answer.retry_after.is_some() => Outcome::Backoff(answer.wait()),
+            500..=599 => Outcome::Retry,
+            // 400 (a size the geometry does not allow), 402/413 (quota), 422 …: not an
+            // authorization answer. The API path judges the same upload for itself.
+            400..=499 => Outcome::ApiForThisFile,
+            // 0: no answer at all (a network failure, a timeout): it may pass.
+            0 => Outcome::Retry,
+            // 1xx, 3xx: nothing we asked for happened, and a redirect or an interim answer is a path that
+            // is wrong (a proxy, a captive portal), not a fault that passes: this session cannot go
+            // direct (spec R1.6), like every other answer of this arm that is not worth another try.
+            _ => Outcome::ApiForThisFile,
         },
         Call::PinnedChunk => match status {
             401 | 403 => terminal(),
@@ -846,5 +921,137 @@ mod tests {
         }
         // The doubling cannot overflow.
         assert_eq!(policy.decide(u32::MAX, none, &Outcome::Retry), RetryDecision::GiveUp);
+    }
+
+    #[test]
+    fn the_upload_calls_are_classified_for_a_session_that_cannot_change_transport() {
+        use Call::{UploadCommit, UploadGrant};
+        let bare404 = ApiAnswer::from_parts(404, None, b"", None);
+        let rows: Vec<(&str, Call, ApiAnswer, Outcome)> = vec![
+            ("grant 200", UploadGrant, json(200, "{}"), Outcome::Proceed),
+            ("commit 200", UploadCommit, json(200, "{}"), Outcome::Proceed),
+            (
+                "a bare 404 is a node without the route (R1.6)",
+                UploadGrant,
+                bare404.clone(),
+                Outcome::ApiForThisFile,
+            ),
+            (
+                "a bare 404 on commit too",
+                UploadCommit,
+                bare404,
+                Outcome::ApiForThisFile,
+            ),
+            (
+                "a JSON 404 is the session being gone",
+                UploadCommit,
+                json(404, r#"{"error":"not found"}"#),
+                terminal(404, Some("not found")),
+            ),
+            (
+                "401",
+                UploadGrant,
+                json(401, r#"{"error":"unauthorized"}"#),
+                terminal(401, Some("unauthorized")),
+            ),
+            (
+                "direct_unavailable: the session cannot go direct",
+                UploadGrant,
+                json(409, r#"{"error":"direct_unavailable","reason":"disabled"}"#),
+                Outcome::ApiForThisFile,
+            ),
+            (
+                "transport_mismatch",
+                UploadCommit,
+                json(409, r#"{"error":"transport_mismatch"}"#),
+                Outcome::ApiForThisFile,
+            ),
+            (
+                "commit_in_progress is a hold with its own allowance (R2.6, R3.1)",
+                UploadCommit,
+                json(409, r#"{"error":"commit_in_progress"}"#),
+                Outcome::Held(None),
+            ),
+            (
+                "a stated wait on a hold is kept, clamped like any other",
+                UploadCommit,
+                ApiAnswer::from_parts(409, JSON, br#"{"error":"commit_in_progress"}"#, Some("3")),
+                Outcome::Held(Some(secs(3))),
+            ),
+            (
+                "a hold that states an hour is clamped",
+                UploadCommit,
+                ApiAnswer::from_parts(409, JSON, br#"{"error":"commit_in_progress"}"#, Some("3600")),
+                Outcome::Held(Some(MAX_RETRY_AFTER)),
+            ),
+            (
+                "the grant route never sends commit_in_progress; if one does it is a counted wait",
+                UploadGrant,
+                json(409, r#"{"error":"commit_in_progress"}"#),
+                Outcome::Backoff(DEFAULT_RETRY_AFTER),
+            ),
+            (
+                "chunk_not_stored on commit: grant again",
+                UploadCommit,
+                json(409, r#"{"error":"chunk_not_stored"}"#),
+                Outcome::Regrant,
+            ),
+            (
+                "chunk_not_stored on a grant is nothing the server says there",
+                UploadGrant,
+                json(409, r#"{"error":"chunk_not_stored"}"#),
+                Outcome::ApiForThisFile,
+            ),
+            (
+                "429 states its wait",
+                UploadGrant,
+                ApiAnswer::from_parts(429, JSON, br#"{"error":"rate_limited"}"#, Some("60")),
+                Outcome::Backoff(secs(60)),
+            ),
+            (
+                "a 5xx may pass",
+                UploadCommit,
+                json(500, r#"{"error":"Something went wrong."}"#),
+                Outcome::Retry,
+            ),
+            (
+                "a 503 that states its wait",
+                UploadGrant,
+                ApiAnswer::from_parts(503, JSON, b"{}", Some("5")),
+                Outcome::Backoff(secs(5)),
+            ),
+            (
+                "no answer may pass",
+                UploadGrant,
+                ApiAnswer::no_answer(),
+                Outcome::Retry,
+            ),
+            (
+                "a redirect is a path that is wrong, not a fault that passes",
+                UploadGrant,
+                ApiAnswer::from_parts(302, None, b"", None),
+                Outcome::ApiForThisFile,
+            ),
+            (
+                "an interim answer on a commit likewise",
+                UploadCommit,
+                ApiAnswer::from_parts(100, None, b"", None),
+                Outcome::ApiForThisFile,
+            ),
+            (
+                "a 4xx the API judges for itself",
+                UploadGrant,
+                json(413, r#"{"error":"quota_exceeded"}"#),
+                Outcome::ApiForThisFile,
+            ),
+        ];
+        for (what, call, answer, want) in rows {
+            assert_eq!(classify(call, &answer), want, "{what}");
+        }
+        assert_eq!(Call::from_code("upload_grant"), Some(Call::UploadGrant));
+        assert_eq!(Call::from_code("upload_commit"), Some(Call::UploadCommit));
+        assert_eq!(Call::UploadCommit.code(), "upload_commit");
+        assert_eq!(Outcome::Regrant.kind(), "regrant");
+        assert_eq!(Outcome::Held(None).kind(), "held");
     }
 }
