@@ -1711,17 +1711,56 @@
       "source": "server 30c8ed62 beebeeb-api/src/routes/direct_transfer.rs:1121-1123 (RecordOutcome::Unavailable -> commit_in_progress while the lock is no longer held); the allowance is also the bound on this case, where every poll re-copies the chunk"
     },
     {
-      "name": "upload commit 503 with Retry-After: the record's HEAD could not tell (R3.4), a server after 30c8ed62",
+      "name": "upload commit 503 storage_unavailable with Retry-After: the R3.4 transients (the staging HEAD error, the record HEAD unavailable)",
       "call": "upload_commit",
       "status": 503,
       "content_type": "application/json",
-      "body": "{\"error\":\"statement_timeout\",\"message\":\"This took too long, so the server stopped it. Try again in a moment.\"}",
+      "body": "{\"error\":\"storage_unavailable\"}",
       "retry_after": "5",
       "expect": {
         "kind": "backoff",
         "millis": 5000
       },
-      "source": "client-side case: NOT 30c8ed62 (which answers commit_in_progress there, routes/direct_transfer.rs:1123); the change agreed with the s3-server lane answers R3.4 transient failures as a 503 with Retry-After, a counted wait, and keeps commit_in_progress for the lock alone"
+      "source": "client-side case: server PR after #338 (s3-server's local commit e05d316c, not pushed yet; its lines to be cited once it lands): storage_unavailable() answers every R3.4 transient with 503 {\"error\":\"storage_unavailable\"} and Retry-After: 5, a stated and COUNTED wait; 30c8ed62 answers the record case with commit_in_progress (the row above)"
+    },
+    {
+      "name": "upload commit 409 commit_in_progress with Retry-After = the lock's remaining TTL (287 s): a stated wait, clamped to 120 s",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": "287",
+      "expect": {
+        "kind": "held",
+        "millis": 120000
+      },
+      "source": "client-side case: server PR after #338 (s3-server's local commit e05d316c, not pushed yet; its lines to be cited once it lands): the lock paths (acquire busy, confirm lost) answer commit_in_progress with Retry-After = the lock's remaining TTL in [1, commit_lock_secs() = 420], 1 when the key is gone; the client clamps a stated wait to 120 s and polls again"
+    },
+    {
+      "name": "upload commit 409 commit_in_progress with Retry-After = the lock's remaining TTL (30 s)",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": "30",
+      "expect": {
+        "kind": "held",
+        "millis": 30000
+      },
+      "source": "client-side case: server PR after #338 (s3-server's local commit e05d316c, not pushed yet; its lines to be cited once it lands): as above"
+    },
+    {
+      "name": "upload commit 409 commit_in_progress with Retry-After 1: the lock key is gone",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": "1",
+      "expect": {
+        "kind": "held",
+        "millis": 1000
+      },
+      "source": "client-side case: server PR after #338 (s3-server's local commit e05d316c, not pushed yet; its lines to be cited once it lands): as above (1 when the key is gone)"
     },
     {
       "name": "upload commit 409 commit_in_progress keeps a stated wait",

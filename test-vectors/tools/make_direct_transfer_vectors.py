@@ -275,8 +275,13 @@ for call in ("upload_grant", "upload_commit"):
           RS + CIP_SITES + "; tests/direct_upload_2173.rs:1427")
         c(f"{w} 409 commit_in_progress with the lock already released: the record's HEAD could not tell (R3.4), server 30c8ed62", call, 409, JSONCT, CIP, None, {"kind": "held", "millis": None},
           RS + "routes/direct_transfer.rs:1121-1123 (RecordOutcome::Unavailable -> commit_in_progress while the lock is no longer held); the allowance is also the bound on this case, where every poll re-copies the chunk")
-        c(f"{w} 503 with Retry-After: the record's HEAD could not tell (R3.4), a server after 30c8ed62", call, 503, JSONCT, TIMEOUT503, "5", {"kind": "backoff", "millis": 5000},
-          "client-side case: NOT 30c8ed62 (which answers commit_in_progress there, routes/direct_transfer.rs:1123); the change agreed with the s3-server lane answers R3.4 transient failures as a 503 with Retry-After, a counted wait, and keeps commit_in_progress for the lock alone")
+        R34 = "client-side case: server PR after #338 (s3-server's local commit e05d316c, not pushed yet; its lines to be cited once it lands): "
+        c(f"{w} 503 storage_unavailable with Retry-After: the R3.4 transients (the staging HEAD error, the record HEAD unavailable)", call, 503, JSONCT, '{"error":"storage_unavailable"}', "5", {"kind": "backoff", "millis": 5000},
+          R34 + "storage_unavailable() answers every R3.4 transient with 503 {\"error\":\"storage_unavailable\"} and Retry-After: 5, a stated and COUNTED wait; 30c8ed62 answers the record case with commit_in_progress (the row above)")
+        c(f"{w} 409 commit_in_progress with Retry-After = the lock's remaining TTL (287 s): a stated wait, clamped to 120 s", call, 409, JSONCT, CIP, "287", {"kind": "held", "millis": 120000},
+          R34 + "the lock paths (acquire busy, confirm lost) answer commit_in_progress with Retry-After = the lock's remaining TTL in [1, commit_lock_secs() = 420], 1 when the key is gone; the client clamps a stated wait to 120 s and polls again")
+        c(f"{w} 409 commit_in_progress with Retry-After = the lock's remaining TTL (30 s)", call, 409, JSONCT, CIP, "30", {"kind": "held", "millis": 30000}, R34 + "as above")
+        c(f"{w} 409 commit_in_progress with Retry-After 1: the lock key is gone", call, 409, JSONCT, CIP, "1", {"kind": "held", "millis": 1000}, R34 + "as above (1 when the key is gone)")
         c(f"{w} 409 commit_in_progress keeps a stated wait", call, 409, JSONCT, CIP, "3", {"kind": "held", "millis": 3000},
           "client-side case: the server sends no Retry-After on commit_in_progress today (routes/direct_transfer.rs:912-914); a stated wait is kept")
         c(f"{w} 409 commit_in_progress states an hour: clamped", call, 409, JSONCT, CIP, "3600", {"kind": "held", "millis": 120000},

@@ -1020,7 +1020,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(upload_rows, 55, "classify rows for the upload calls");
+        assert_eq!(upload_rows, 58, "classify rows for the upload calls");
     }
 
     #[test]
