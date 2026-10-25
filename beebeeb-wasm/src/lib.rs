@@ -2429,12 +2429,16 @@ struct DirectGeometryJs {
 /// for (;;) {
 ///   const w = p.poll(Date.now())
 ///   switch (w.kind) {
-///     case "request_window": /* POST, then windowAnswered(body) or windowFailed(outcome) */ break
-///     case "fetch": /* GET w.url, then fetchOk(w.index) or fetchFailed(w.index) */ break
-///     case "fetch_via_api": /* pinned route, then fetchOk or apiFetchFailed */ break
-///     case "wait": /* sleep until w.until_ms or until a request returns */ break
+///     case "request_window": // POST, then windowAnswered(body) or windowFailed(outcome)
+///       break
+///     case "fetch": // GET w.url.raw() (w.url is a WasmSignedUrl, not a string), then fetchOk(w.index) or fetchFailed(w.index)
+///       break
+///     case "fetch_via_api": // pinned route, then fetchOk or apiFetchFailed
+///       break
+///     case "wait": // sleep until w.until_ms or until a request returns
+///       break
 ///     case "done": return
-///     case "stop": /* discard partial output and act on w.verdict.kind */ return
+///     case "stop": return // discard partial output and act on w.verdict.kind
 ///   }
 ///   // chunks are decrypted IN ORDER: after each, consumed(index); if one does
 ///   // not authenticate, chunkUnauthentic(index)
@@ -2647,6 +2651,29 @@ impl WasmDirectDiscoveryCache {
 mod tests {
     use super::*;
     use beebeeb_core::chunk_stream::ChunkDecryptor;
+
+    /// Doc comments are copied into the generated glue (JSDoc in the `.js` and `.d.ts`, Kotlin and Swift doc
+    /// comments in the UniFFI bindings). A block-comment closer inside one ends the comment early, which
+    /// is a SyntaxError in the glue; an opener starts a nested comment that Kotlin and Swift then wait to
+    /// see closed. Neither can be seen by `cargo test` of the generated code, so the source is checked.
+    #[test]
+    fn no_doc_comment_contains_a_block_comment_token() {
+        let offending: Vec<String> = include_str!("lib.rs")
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| {
+                let line = line.trim_start();
+                line.starts_with("///") || line.starts_with("//!")
+            })
+            .filter(|(_, line)| line.contains("/*") || line.contains("*/"))
+            .map(|(i, line)| format!("lib.rs:{}: {}", i + 1, line.trim()))
+            .collect();
+        assert!(
+            offending.is_empty(),
+            "use line comments (or words) inside doc comments, never a block-comment token:\n{}",
+            offending.join("\n")
+        );
+    }
 
     /// Deterministic, non-trivial test data.
     fn pattern(len: usize) -> Vec<u8> {

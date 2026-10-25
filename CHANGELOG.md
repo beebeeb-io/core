@@ -130,7 +130,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Nothing yet.
 
 ### Fixed
-- Nothing yet.
+- `beebeeb-wasm`: the generated `beebeeb_wasm.js` and `beebeeb_wasm.d.ts` did not parse since core #34
+  (`SyntaxError: Illegal break statement`). The driver example in the `WasmDownloadPlanner` doc comment
+  used inline `/* ... */` comments; wasm-bindgen copies doc comments into a JSDoc block, whose first inner
+  closer ended it early. The example now uses `//` comments, and `beebeeb-wasm/js-tests/run.sh` loads the
+  real module under node so `cargo test` is no longer the only judge of the JS surface; it also `node --check`s
+  the glue of both wasm targets and `tsc --noEmit`s the `.d.ts` files, in the new CI job `wasm-js`. A test in
+  `beebeeb-wasm` and `beebeeb-uniffi` fails on any block-comment token in a `///` doc comment.
 
 ### Removed
 - `design/hifi/`: a stale snapshot of UI mockups committed with the initial import. Its mockup
