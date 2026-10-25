@@ -53,6 +53,25 @@ pub enum Refusal {
     BadPath,
 }
 
+impl Refusal {
+    /// A stable machine name for bindings, vectors and logs (the `Display` text
+    /// is for people and may be reworded).
+    pub fn code(self) -> &'static str {
+        match self {
+            Refusal::Malformed => "malformed",
+            Refusal::NotHttps => "not_https",
+            Refusal::Userinfo => "userinfo",
+            Refusal::IpLiteral => "ip_literal",
+            Refusal::Loopback => "loopback",
+            Refusal::BadHost => "bad_host",
+            Refusal::Port => "port",
+            Refusal::HostNotListed => "host_not_listed",
+            Refusal::BucketNotListed => "bucket_not_listed",
+            Refusal::BadPath => "bad_path",
+        }
+    }
+}
+
 /// A URL taken apart by the strict grammar.
 struct Parsed<'a> {
     https: bool,

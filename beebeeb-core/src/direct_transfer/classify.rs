@@ -32,6 +32,31 @@ pub enum Call {
     Discovery,
     /// `POST /api/v1/files/{id}/download-grants` (first window, later window or renewal).
     DownloadGrant,
+    /// `GET /api/v1/files/{id}/chunks/{index}?object_version_id=<pin>`: one chunk of the pinned
+    /// version through the API (the fallback for a chunk storage could not give). Its answers are
+    /// NOT the grant route's: a gone version is a 409 whose body is a sentence, not a code.
+    PinnedChunk,
+}
+
+impl Call {
+    /// Stable machine name (bindings and vectors).
+    pub fn code(self) -> &'static str {
+        match self {
+            Call::Discovery => "discovery",
+            Call::DownloadGrant => "download_grant",
+            Call::PinnedChunk => "pinned_chunk",
+        }
+    }
+
+    /// The inverse of [`Call::code`].
+    pub fn from_code(code: &str) -> Option<Call> {
+        match code {
+            "discovery" => Some(Call::Discovery),
+            "download_grant" => Some(Call::DownloadGrant),
+            "pinned_chunk" => Some(Call::PinnedChunk),
+            _ => None,
+        }
+    }
 }
 
 /// What the client saw. Build it with [`ApiAnswer::from_parts`] (an HTTP
@@ -131,7 +156,7 @@ pub enum Outcome {
     /// 2xx: decode the body and go on.
     Proceed,
     /// Discovery only: this server has no direct transport. Cache that for the
-    /// process; use the API.
+    /// trust period ([`DISCOVERY_TTL_MS`](super::DISCOVERY_TTL_MS)); use the API.
     NotSupported,
     /// No direct transport right now (bare 404/405, 5xx, redirect, network
     /// failure, anything unrecognised): use the API for this file now and ask
@@ -149,6 +174,25 @@ pub enum Outcome {
     /// 401, 403, or a JSON 404: an authorization answer, not a routing one.
     /// The API path would refuse too; do not fall back.
     Terminal(Terminal),
+    /// `PinnedChunk` only: a failure that may pass (5xx, a node without the route, no
+    /// answer). Try again after the client's own bounded backoff ([`PinnedRetry`]).
+    Retry,
+}
+
+impl Outcome {
+    /// Stable machine name of the variant (bindings and vectors).
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Outcome::Proceed => "proceed",
+            Outcome::NotSupported => "not_supported",
+            Outcome::UseApiNow => "use_api_now",
+            Outcome::ApiForThisFile => "api_for_this_file",
+            Outcome::Restart => "restart",
+            Outcome::Backoff(_) => "backoff",
+            Outcome::Terminal(_) => "terminal",
+            Outcome::Retry => "retry",
+        }
+    }
 }
 
 /// Classify an answer to `call`.
@@ -193,6 +237,99 @@ pub fn classify(call: Call, answer: &ApiAnswer) -> Outcome {
             // 0 (no answer), 1xx, 3xx: nothing we asked for happened.
             _ => Outcome::UseApiNow,
         },
+        Call::PinnedChunk => match status {
+            401 | 403 => terminal(),
+            404 if answer.has_json_error() => terminal(),
+            // A bare 404/405 is a node (or proxy) without the route; it may pass.
+            404 | 405 => Outcome::Retry,
+            409 => match answer.error_code() {
+                // Another operation holds the file for a moment (the server sends this on the
+                // UNPINNED branch only, but the contract allows it here): wait, ask again.
+                Some("replace_in_progress" | "commit_in_progress") => Outcome::Backoff(answer.wait()),
+                // Any other 409 means the pin is gone. The server's body here is a sentence
+                // ("download version unavailable; restart download from fresh metadata"), not
+                // the grant route's `version_unavailable` code, so the STATUS is the contract.
+                _ => Outcome::Restart,
+            },
+            429 => Outcome::Backoff(answer.wait()),
+            // A 5xx may say how long it needs (the server's 503 sends `Retry-After: 5`): then that
+            // is a stated wait, the same as for a 429. Without it, the client's own backoff.
+            500..=599 if answer.retry_after.is_some() => Outcome::Backoff(answer.wait()),
+            500..=599 => Outcome::Retry,
+            // 400 (an index out of range), 410, 413, 422 …: a retry will not change it. The
+            // API stream serves the file.
+            400..=499 => Outcome::ApiForThisFile,
+            // 0 (no answer), 1xx, 3xx.
+            _ => Outcome::Retry,
+        },
+    }
+}
+
+/// How hard a client tries the pinned per-chunk route before the file goes to the API stream.
+/// Grants and this route share the per-user rate limiter server-side and a download that has
+/// fallen back to it fetches several chunks at a time, so a 429 is likely and one must not cost
+/// the whole transfer. One policy for every client: ask [`PinnedRetry::decide`] after each failed
+/// attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PinnedRetry {
+    /// Attempts in all, the first one included.
+    pub attempts: u32,
+    /// The most the retries may wait in total; a wait that would pass it ends them. It must hold the
+    /// longest wait a server can state ([`MAX_RETRY_AFTER`], 120 s) plus a margin: the server's real
+    /// 429 on `/api/v1/files/*` says `Retry-After: 60`, so a budget of 60 s would give up on a second
+    /// 429, or on any stated wait that follows an earlier one, and restart the whole file.
+    pub budget: Duration,
+    /// The wait before the second attempt when the server named none; it doubles each time.
+    pub base: Duration,
+}
+
+impl Default for PinnedRetry {
+    fn default() -> Self {
+        PinnedRetry {
+            attempts: 4,
+            budget: Duration::from_secs(150),
+            base: Duration::from_secs(1),
+        }
+    }
+}
+
+/// What to do after a failed attempt on the pinned route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetryDecision {
+    /// Wait this long, then try again.
+    Wait(Duration),
+    /// Stop: hand the file to the API stream (or, for `Restart` / `Terminal`, act on that verdict).
+    GiveUp,
+}
+
+impl RetryDecision {
+    /// Stable machine name (bindings and vectors).
+    pub fn kind(&self) -> &'static str {
+        match self {
+            RetryDecision::Wait(_) => "wait",
+            RetryDecision::GiveUp => "give_up",
+        }
+    }
+}
+
+impl PinnedRetry {
+    /// `attempt` is the 1-based number of the attempt that just failed with `outcome`
+    /// ([`classify`] of [`Call::PinnedChunk`]; `0` is read as `1`, the first attempt); `waited` is
+    /// the total wait so far. Only [`Outcome::Backoff`] (the server's own wait) and
+    /// [`Outcome::Retry`] (base, 2 x base, 4 x base …) are worth another try, and only while the
+    /// attempts and the time budget last.
+    pub fn decide(&self, attempt: u32, waited: Duration, outcome: &Outcome) -> RetryDecision {
+        let attempt = attempt.max(1);
+        let wait = match outcome {
+            Outcome::Backoff(d) => *d,
+            Outcome::Retry => self.base.saturating_mul(2u32.saturating_pow(attempt - 1)),
+            _ => return RetryDecision::GiveUp,
+        };
+        if attempt >= self.attempts || waited.saturating_add(wait) > self.budget {
+            RetryDecision::GiveUp
+        } else {
+            RetryDecision::Wait(wait)
+        }
     }
 }
 
@@ -569,5 +706,145 @@ mod tests {
         assert!(code.chars().all(|c| c.is_ascii_graphic() || c == ' '), "{code:?}");
         let long = json(403, &format!(r#"{{"error":"{}"}}"#, "x".repeat(500)));
         assert_eq!(long.error_code().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn call_codes_are_stable_and_invertible() {
+        for (call, code) in [
+            (Call::Discovery, "discovery"),
+            (Call::DownloadGrant, "download_grant"),
+            (Call::PinnedChunk, "pinned_chunk"),
+        ] {
+            assert_eq!(call.code(), code);
+            assert_eq!(Call::from_code(code), Some(call));
+        }
+        assert_eq!(Call::from_code("Discovery"), None);
+        assert_eq!(Call::from_code(""), None);
+    }
+
+    // ── the pinned per-chunk route (PinnedChunk) ──
+
+    /// What the server's pinned chunk route says for a version that is gone
+    /// (`version_download.rs::unavailable`), as `{"error": <this>}`.
+    const GONE_VERSION: &str = "download version unavailable; restart download from fresh metadata";
+
+    fn pinned(status: u16, body: &str, retry_after: Option<&str>) -> Outcome {
+        classify(
+            Call::PinnedChunk,
+            &ApiAnswer::from_parts(status, JSON, body.as_bytes(), retry_after),
+        )
+    }
+
+    #[test]
+    fn the_pinned_route_reads_its_own_answers() {
+        // A gone pin is a 409 whose body is a sentence; the status is the contract.
+        let real = format!(r#"{{"error":"{GONE_VERSION}"}}"#);
+        assert_eq!(pinned(409, &real, None), Outcome::Restart);
+        assert_eq!(pinned(409, "", None), Outcome::Restart, "a bare 409");
+        assert_eq!(
+            pinned(409, r#"{"error":"version_unavailable"}"#, None),
+            Outcome::Restart
+        );
+        assert_eq!(pinned(409, r#"{"error":"anything new"}"#, None), Outcome::Restart);
+        // Only "held" is a wait.
+        assert_eq!(
+            pinned(409, r#"{"error":"replace_in_progress"}"#, Some("3")),
+            Outcome::Backoff(secs(3))
+        );
+        assert_eq!(
+            pinned(409, r#"{"error":"commit_in_progress"}"#, None),
+            Outcome::Backoff(DEFAULT_RETRY_AFTER)
+        );
+        assert_eq!(
+            pinned(429, r#"{"error":"server_busy"}"#, Some("7")),
+            Outcome::Backoff(secs(7))
+        );
+        assert_eq!(pinned(429, "", Some("100000")), Outcome::Backoff(MAX_RETRY_AFTER));
+        // Server trouble may pass.
+        for status in [0, 500, 502, 503, 504, 302] {
+            assert_eq!(pinned(status, "", None), Outcome::Retry, "{status}");
+        }
+        // ... but a 5xx that names its wait is a stated wait (clamped like any other).
+        assert_eq!(pinned(503, "", Some("5")), Outcome::Backoff(secs(5)));
+        assert_eq!(pinned(500, "", Some("0")), Outcome::Backoff(secs(1)));
+        assert_eq!(pinned(502, "", Some("86400")), Outcome::Backoff(MAX_RETRY_AFTER));
+        assert_eq!(
+            pinned(503, "", Some("soon")),
+            Outcome::Retry,
+            "an unreadable Retry-After names nothing"
+        );
+        assert_eq!(
+            classify(Call::PinnedChunk, &ApiAnswer::from_parts(404, None, b"", None)),
+            Outcome::Retry,
+            "a bare 404 is a node without the route"
+        );
+        // An authorization answer is final; so is a refusal a retry cannot change.
+        assert_eq!(
+            pinned(401, r#"{"error":"unauthorized"}"#, None),
+            terminal(401, Some("unauthorized"))
+        );
+        assert_eq!(
+            pinned(403, r#"{"error":"forbidden"}"#, None),
+            terminal(403, Some("forbidden"))
+        );
+        assert_eq!(
+            pinned(404, r#"{"error":"not found"}"#, None),
+            terminal(404, Some("not found"))
+        );
+        for status in [400, 410, 413, 422] {
+            assert_eq!(pinned(status, "", None), Outcome::ApiForThisFile, "{status}");
+        }
+        assert_eq!(pinned(200, "", None), Outcome::Proceed);
+    }
+
+    #[test]
+    fn the_retry_policy_is_bounded_in_attempts_and_in_waiting() {
+        let policy = PinnedRetry::default();
+        let none = Duration::ZERO;
+        // What the server did not name doubles: 1 s, 2 s, 4 s, then the attempts are spent.
+        assert_eq!(policy.decide(1, none, &Outcome::Retry), RetryDecision::Wait(secs(1)));
+        assert_eq!(policy.decide(2, secs(1), &Outcome::Retry), RetryDecision::Wait(secs(2)));
+        assert_eq!(policy.decide(3, secs(3), &Outcome::Retry), RetryDecision::Wait(secs(4)));
+        assert_eq!(policy.decide(4, secs(7), &Outcome::Retry), RetryDecision::GiveUp);
+        // The server's real 429 on /api/v1/files/* says `Retry-After: 60`: waited for at attempt 1
+        // (nothing waited yet) and at attempt 2 (1 s waited), and again for a second 429.
+        let limited = Outcome::Backoff(secs(60));
+        assert_eq!(policy.decide(1, none, &limited), RetryDecision::Wait(secs(60)));
+        assert_eq!(policy.decide(2, secs(1), &limited), RetryDecision::Wait(secs(60)));
+        assert_eq!(policy.decide(2, secs(60), &limited), RetryDecision::Wait(secs(60)));
+        // A ban (clamped to 120 s) is waited for once; a third wait of 60 s (180 s in all) is not.
+        assert_eq!(
+            policy.decide(1, none, &Outcome::Backoff(secs(120))),
+            RetryDecision::Wait(secs(120))
+        );
+        assert_eq!(policy.decide(3, secs(120), &limited), RetryDecision::GiveUp);
+        // The budget (150 s in all) is taken up to and including its last second, not beyond.
+        assert_eq!(
+            policy.decide(2, secs(90), &Outcome::Backoff(secs(60))),
+            RetryDecision::Wait(secs(60))
+        );
+        assert_eq!(policy.decide(2, secs(91), &limited), RetryDecision::GiveUp);
+        assert!(
+            policy.budget >= MAX_RETRY_AFTER + secs(30),
+            "room for the longest stated wait"
+        );
+        // `attempt == 0` is read as the first attempt, not as an underflow.
+        assert_eq!(
+            policy.decide(0, none, &Outcome::Retry),
+            policy.decide(1, none, &Outcome::Retry)
+        );
+        assert_eq!(policy.decide(0, none, &limited), policy.decide(1, none, &limited));
+        // Nothing else is worth another try.
+        for outcome in [
+            Outcome::Proceed,
+            Outcome::Restart,
+            Outcome::ApiForThisFile,
+            Outcome::UseApiNow,
+            terminal(403, None),
+        ] {
+            assert_eq!(policy.decide(1, none, &outcome), RetryDecision::GiveUp, "{outcome:?}");
+        }
+        // The doubling cannot overflow.
+        assert_eq!(policy.decide(u32::MAX, none, &Outcome::Retry), RetryDecision::GiveUp);
     }
 }

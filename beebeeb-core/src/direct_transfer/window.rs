@@ -235,6 +235,96 @@ pub enum Violation {
     Unexpected,
 }
 
+impl Violation {
+    /// Stable machine name (bindings and vectors). A refused link carries the
+    /// reason as `authority_<refusal code>`.
+    pub fn code(self) -> &'static str {
+        match self {
+            Violation::Transport => "transport",
+            Violation::FileMismatch => "file_mismatch",
+            Violation::VersionChanged => "version_changed",
+            Violation::Geometry => "geometry",
+            Violation::Grants => "grants",
+            Violation::Length => "length",
+            Violation::Method => "method",
+            Violation::Authority(Refusal::Malformed) => "authority_malformed",
+            Violation::Authority(Refusal::NotHttps) => "authority_not_https",
+            Violation::Authority(Refusal::Userinfo) => "authority_userinfo",
+            Violation::Authority(Refusal::IpLiteral) => "authority_ip_literal",
+            Violation::Authority(Refusal::Loopback) => "authority_loopback",
+            Violation::Authority(Refusal::BadHost) => "authority_bad_host",
+            Violation::Authority(Refusal::Port) => "authority_port",
+            Violation::Authority(Refusal::HostNotListed) => "authority_host_not_listed",
+            Violation::Authority(Refusal::BucketNotListed) => "authority_bucket_not_listed",
+            Violation::Authority(Refusal::BadPath) => "authority_bad_path",
+            Violation::Expiry => "expiry",
+            Violation::Unexpected => "unexpected",
+        }
+    }
+}
+
+/// What became of the body of a window answer ([`DownloadPlanner::window_answered_bytes`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowAnswer {
+    /// The window was accepted; poll again.
+    Accepted,
+    /// The body was not the contract's JSON; the window is treated as one the
+    /// server could not serve. Poll again.
+    Malformed,
+    /// The answer broke the contract; the file's verdict is set. Poll again.
+    Refused(Violation),
+}
+
+impl WindowAnswer {
+    /// Stable machine name (bindings and vectors): `accepted`, `malformed`, or
+    /// the [`Violation::code`].
+    pub fn code(self) -> &'static str {
+        match self {
+            WindowAnswer::Accepted => "accepted",
+            WindowAnswer::Malformed => "malformed",
+            WindowAnswer::Refused(violation) => violation.code(),
+        }
+    }
+}
+
+impl PlanError {
+    /// Stable machine name (bindings and vectors).
+    pub fn code(self) -> &'static str {
+        match self {
+            PlanError::NotInFlight(_) => "not_in_flight",
+            PlanError::NotFetched(_) => "not_fetched",
+            PlanError::OutOfOrder { .. } => "out_of_order",
+            PlanError::ApiRouteFailure(_) => "api_route_failure",
+        }
+    }
+}
+
+impl Verdict {
+    /// Stable machine name of the variant (bindings and vectors).
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Verdict::ApiForFile => "api_for_file",
+            Verdict::Restart => "restart",
+            Verdict::Terminal(_) => "terminal",
+            Verdict::Corrupt => "corrupt",
+        }
+    }
+}
+
+impl Poll {
+    /// Stable machine name of the variant (bindings and vectors).
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Poll::RequestWindow(_) => "request_window",
+            Poll::Fetch { .. } => "fetch",
+            Poll::FetchViaApi { .. } => "fetch_via_api",
+            Poll::Wait { .. } => "wait",
+            Poll::Done => "done",
+            Poll::Stop(_) => "stop",
+        }
+    }
+}
+
 /// A call that does not fit the planner's state: a bug in the caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PlanError {
@@ -616,6 +706,32 @@ impl DownloadPlanner {
                 self.window_unusable();
                 Err(violation)
             }
+        }
+    }
+
+    /// The 2xx body of the outstanding window request, as it came off the wire:
+    /// decode it and judge it. A body that is not the contract's JSON is handled
+    /// like any window the server could not serve ([`DownloadPlanner::window_malformed`]),
+    /// so no client decides that for itself.
+    ///
+    /// An answer with no window request outstanding is a bug in the caller, and gets the verdict
+    /// [`DownloadPlanner::window_answered`] gives it whatever the body is: [`Violation::Unexpected`],
+    /// and the file goes to the API path (undecodable bytes are not "malformed" then, and the file
+    /// does not carry on through the pinned route).
+    pub fn window_answered_bytes(&mut self, body: &[u8], now_ms: i64) -> WindowAnswer {
+        if self.window.is_none() {
+            self.verdict = Some(Verdict::ApiForFile);
+            return WindowAnswer::Refused(Violation::Unexpected);
+        }
+        match DownloadGrantResponse::from_json(body) {
+            Err(_) => {
+                self.window_malformed();
+                WindowAnswer::Malformed
+            }
+            Ok(response) => match self.window_answered(response, now_ms) {
+                Ok(()) => WindowAnswer::Accepted,
+                Err(violation) => WindowAnswer::Refused(violation),
+            },
         }
     }
 
@@ -1550,6 +1666,7 @@ mod tests {
             (Outcome::Restart, Verdict::Restart),
             (Outcome::Terminal(t(403)), Verdict::Terminal(t(403))),
             (Outcome::Proceed, Verdict::ApiForFile),
+            (Outcome::Retry, Verdict::ApiForFile),
         ];
         for (outcome, want) in cases {
             let mut p = planner();
@@ -2275,5 +2392,71 @@ mod tests {
         assert!(!shown.contains("SIG0") && !shown.contains("X-Amz"), "{shown}");
         let state = format!("{p:?}");
         assert!(!state.contains("SIG") && !state.contains("X-Amz-Signature"), "{state}");
+    }
+
+    // ── window_answered_bytes: decode, judge, report ──
+
+    #[test]
+    fn window_answered_bytes_decodes_judges_and_reports_the_code() {
+        let mut p = planner();
+        let first = expect_window(&mut p, T0);
+        let body = serde_json::to_vec(&answer(&first, T0)).unwrap();
+        assert_eq!(p.window_answered_bytes(&body, T0), WindowAnswer::Accepted);
+        assert_eq!(p.pinned_version(), Some(VERSION));
+
+        // Not the contract's JSON: handled like a window the server could not serve.
+        for junk in [&b"{not json"[..], b"[]", b"", b"null"] {
+            let mut p = planner();
+            expect_window(&mut p, T0);
+            assert_eq!(p.window_answered_bytes(junk, T0), WindowAnswer::Malformed, "{junk:?}");
+            assert_eq!(p.poll(T0), Poll::Stop(Verdict::ApiForFile), "{junk:?}");
+        }
+
+        // An answer that breaks the contract carries its code.
+        let mut p = planner();
+        let first = expect_window(&mut p, T0);
+        let mut bad = answer(&first, T0);
+        bad.transport = "object-download-v2".into();
+        let got = p.window_answered_bytes(&serde_json::to_vec(&bad).unwrap(), T0);
+        assert_eq!(got, WindowAnswer::Refused(Violation::Transport));
+        assert_eq!(got.code(), "transport");
+        assert_eq!(WindowAnswer::Accepted.code(), "accepted");
+        assert_eq!(WindowAnswer::Malformed.code(), "malformed");
+    }
+
+    #[test]
+    fn a_late_window_answer_is_the_same_caller_bug_whatever_the_body() {
+        // The first window is answered; a second answer arrives with no request outstanding. The
+        // planner is pinned, so junk used to read as "malformed" and let the file carry on through
+        // the pinned route, while valid JSON sent it to the API path.
+        let bodies: Vec<(&str, Vec<u8>)> = {
+            let mut p = planner();
+            let first = expect_window(&mut p, T0);
+            vec![
+                ("junk", b"{not json".to_vec()),
+                ("empty", Vec::new()),
+                ("valid", serde_json::to_vec(&answer(&first, T0)).unwrap()),
+            ]
+        };
+        for (what, body) in bodies {
+            let mut p = planner();
+            let first = expect_window(&mut p, T0);
+            let ok = serde_json::to_vec(&answer(&first, T0)).unwrap();
+            assert_eq!(p.window_answered_bytes(&ok, T0), WindowAnswer::Accepted);
+            assert_eq!(p.pinned_version(), Some(VERSION), "{what}: the version is pinned");
+            assert_eq!(
+                p.window_answered_bytes(&body, T0),
+                WindowAnswer::Refused(Violation::Unexpected),
+                "{what}"
+            );
+            assert_eq!(p.poll(T0), Poll::Stop(Verdict::ApiForFile), "{what}");
+        }
+        // Before the first request is even made, too.
+        let mut p = planner();
+        assert_eq!(
+            p.window_answered_bytes(b"{not json", T0),
+            WindowAnswer::Refused(Violation::Unexpected)
+        );
+        assert_eq!(p.poll(T0), Poll::Stop(Verdict::ApiForFile));
     }
 }

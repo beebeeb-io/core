@@ -1,0 +1,4654 @@
+{
+  "_provenance": "Task 2173 contract vectors for beebeeb_core::direct_transfer. Hand-authored from the spec (R1.6, R1.12, R1.13, R2.6) and the core #33 review, not generated from the code. One interpreter, beebeeb_core::direct_transfer::vectors (test-support), is run by beebeeb-core, the beebeeb-wasm seams and the beebeeb-uniffi exports.",
+  "version": 1,
+  "t0_ms": 1800000000000,
+  "file_id": "11111111-1111-4111-8111-111111111111",
+  "discoveries": {
+    "std": {
+      "download": [
+        "object-download-v1"
+      ],
+      "upload": [],
+      "storage_hosts": [
+        "s3.storage.test",
+        "eu.storage.test"
+      ],
+      "storage_buckets": [
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-01"
+        },
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-02"
+        },
+        {
+          "host": "eu.storage.test",
+          "bucket": "vault"
+        }
+      ],
+      "max_window": 32,
+      "url_ttl_seconds": 300
+    },
+    "ports": {
+      "download": [
+        "object-download-v1"
+      ],
+      "storage_hosts": [
+        "minio.storage.test:9443",
+        "evil.storage.test:8443"
+      ],
+      "storage_buckets": [
+        {
+          "host": "minio.storage.test:9443",
+          "bucket": "bb"
+        },
+        {
+          "host": "evil.storage.test:8443",
+          "bucket": "bb"
+        }
+      ]
+    },
+    "dev": {
+      "download": [
+        "object-download-v1"
+      ],
+      "storage_hosts": [
+        "127.0.0.1:9000",
+        "localhost:9000"
+      ],
+      "storage_buckets": [
+        {
+          "host": "127.0.0.1:9000",
+          "bucket": "bb-dev"
+        },
+        {
+          "host": "localhost:9000",
+          "bucket": "bb-dev"
+        }
+      ]
+    },
+    "hosts_only": {
+      "download": [
+        "object-download-v1"
+      ],
+      "storage_hosts": [
+        "s3.storage.test"
+      ]
+    },
+    "empty": {},
+    "small_window": {
+      "download": [
+        "object-download-v1"
+      ],
+      "storage_hosts": [
+        "s3.storage.test"
+      ],
+      "storage_buckets": [
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-01"
+        }
+      ],
+      "max_window": 2,
+      "url_ttl_seconds": 300
+    }
+  },
+  "authority": [
+    {
+      "name": "plain presigned GET",
+      "url": "https://s3.storage.test/bb-01/tenant/versions/v/0.bin?X-Amz-Signature=SIG&X-Amz-Expires=300",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "ok"
+    },
+    {
+      "name": "second bucket, same host",
+      "url": "https://s3.storage.test/bb-02/k?X-Amz-Signature=SIG",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "ok"
+    },
+    {
+      "name": "another listed host",
+      "url": "https://eu.storage.test/vault/a/b/c",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "ok"
+    },
+    {
+      "name": "upper-case scheme and host",
+      "url": "HTTPS://S3.Storage.TEST/bb-01/k?x=1",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "ok"
+    },
+    {
+      "name": "explicit default port is the same authority",
+      "url": "https://s3.storage.test:443/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "ok"
+    },
+    {
+      "name": "bucket-looking key part",
+      "url": "https://s3.storage.test/bb-01/bb-02/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "ok"
+    },
+    {
+      "name": "http to a public host",
+      "url": "http://s3.storage.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "not_https"
+    },
+    {
+      "name": "ftp",
+      "url": "ftp://s3.storage.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "not_https"
+    },
+    {
+      "name": "scheme-relative",
+      "url": "//s3.storage.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "not_https"
+    },
+    {
+      "name": "one slash (WHATWG repairs it)",
+      "url": "https:/s3.storage.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "not_https"
+    },
+    {
+      "name": "empty",
+      "url": "",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "malformed"
+    },
+    {
+      "name": "userinfo",
+      "url": "https://user:secret@s3.storage.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "userinfo"
+    },
+    {
+      "name": "listed host as userinfo of another host",
+      "url": "https://s3.storage.test@evil.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "userinfo"
+    },
+    {
+      "name": "backslash host confusion",
+      "url": "https://evil.test\\@s3.storage.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "malformed"
+    },
+    {
+      "name": "fragment hides the real host",
+      "url": "https://evil.test#@s3.storage.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "malformed"
+    },
+    {
+      "name": "tab inside the host",
+      "url": "https://s3.stor\tage.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "malformed"
+    },
+    {
+      "name": "newline splits the host",
+      "url": "https://s3.storage.test\n.evil.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "malformed"
+    },
+    {
+      "name": "leading space",
+      "url": " https://s3.storage.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "malformed"
+    },
+    {
+      "name": "non-ASCII full stop",
+      "url": "https://s3。storage.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "malformed"
+    },
+    {
+      "name": "percent in the host",
+      "url": "https://s3%2estorage.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "bad_host"
+    },
+    {
+      "name": "unlisted host",
+      "url": "https://evil.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "host_not_listed"
+    },
+    {
+      "name": "listed host as a prefix of another",
+      "url": "https://s3.storage.test.evil.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "host_not_listed"
+    },
+    {
+      "name": "subdomain of a listed host",
+      "url": "https://x.s3.storage.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "host_not_listed"
+    },
+    {
+      "name": "virtual-hosted bucket form",
+      "url": "https://bb-01.s3.storage.test/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "host_not_listed"
+    },
+    {
+      "name": "trailing dot",
+      "url": "https://s3.storage.test./bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "bad_host"
+    },
+    {
+      "name": "empty port",
+      "url": "https://s3.storage.test:/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "bad_host"
+    },
+    {
+      "name": "port 0",
+      "url": "https://s3.storage.test:0/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "bad_host"
+    },
+    {
+      "name": "ipv4",
+      "url": "https://203.0.113.9/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "ip_literal"
+    },
+    {
+      "name": "ipv6",
+      "url": "https://[2001:db8::1]/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "ip_literal"
+    },
+    {
+      "name": "decimal ipv4",
+      "url": "https://2130706433/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "ip_literal"
+    },
+    {
+      "name": "hex ipv4",
+      "url": "https://0x7f000001/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "ip_literal"
+    },
+    {
+      "name": "short ipv4",
+      "url": "https://127.1/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "ip_literal"
+    },
+    {
+      "name": "loopback address on a production api",
+      "url": "https://127.0.0.1/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "loopback"
+    },
+    {
+      "name": "localhost on a production api",
+      "url": "https://localhost/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "loopback"
+    },
+    {
+      "name": "LOCALHOST on a production api",
+      "url": "https://LOCALHOST/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "loopback"
+    },
+    {
+      "name": "http localhost on a production api",
+      "url": "http://localhost:9000/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "not_https"
+    },
+    {
+      "name": "non-default port on a listed host",
+      "url": "https://s3.storage.test:8443/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "port"
+    },
+    {
+      "name": "non-default port on an unlisted host",
+      "url": "https://evil.test:8443/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "port"
+    },
+    {
+      "name": "unlisted bucket",
+      "url": "https://s3.storage.test/other/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "bucket_not_listed"
+    },
+    {
+      "name": "bucket of another host",
+      "url": "https://eu.storage.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "bucket_not_listed"
+    },
+    {
+      "name": "bucket case differs",
+      "url": "https://s3.storage.test/BB-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "bucket_not_listed"
+    },
+    {
+      "name": "no path",
+      "url": "https://s3.storage.test",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "bucket_not_listed"
+    },
+    {
+      "name": "bucket only",
+      "url": "https://s3.storage.test/bb-01",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "bucket_not_listed"
+    },
+    {
+      "name": "bucket with an empty key",
+      "url": "https://s3.storage.test/bb-01/",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "bad_path"
+    },
+    {
+      "name": "dot-dot escapes to another bucket",
+      "url": "https://s3.storage.test/bb-01/../other/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "bad_path"
+    },
+    {
+      "name": "encoded dot-dot",
+      "url": "https://s3.storage.test/bb-01/%2e%2e/other/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "bad_path"
+    },
+    {
+      "name": "single dot segment",
+      "url": "https://s3.storage.test/bb-01/./k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "bad_path"
+    },
+    {
+      "name": "empty segment",
+      "url": "https://s3.storage.test/bb-01//k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "std",
+      "expect": "bad_path"
+    },
+    {
+      "name": "a listed non-default port is refused (R1.12)",
+      "url": "https://minio.storage.test:9443/bb/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "ports",
+      "expect": "port"
+    },
+    {
+      "name": "a hostile listed port is refused (R1.12)",
+      "url": "https://evil.storage.test:8443/bb/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "ports",
+      "expect": "port"
+    },
+    {
+      "name": "hosts listed but no buckets: fail closed",
+      "url": "https://s3.storage.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "hosts_only",
+      "expect": "bucket_not_listed"
+    },
+    {
+      "name": "nothing listed, nothing allowed",
+      "url": "https://s3.storage.test/bb-01/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "empty",
+      "expect": "host_not_listed"
+    },
+    {
+      "name": "dev: http to loopback MinIO",
+      "url": "http://127.0.0.1:9000/bb-dev/k?x=1",
+      "api_base": "http://127.0.0.1:3001",
+      "discovery": "dev",
+      "expect": "ok"
+    },
+    {
+      "name": "dev: http to localhost MinIO",
+      "url": "http://localhost:9000/bb-dev/k",
+      "api_base": "http://127.0.0.1:3001",
+      "discovery": "dev",
+      "expect": "ok"
+    },
+    {
+      "name": "dev: https to loopback MinIO",
+      "url": "https://127.0.0.1:9000/bb-dev/k",
+      "api_base": "http://127.0.0.1:3001",
+      "discovery": "dev",
+      "expect": "ok"
+    },
+    {
+      "name": "dev: http to a public host",
+      "url": "http://s3.storage.test/bb-01/k",
+      "api_base": "http://127.0.0.1:3001",
+      "discovery": "std",
+      "expect": "not_https"
+    },
+    {
+      "name": "dev: an unlisted loopback port",
+      "url": "http://127.0.0.1:9001/bb-dev/k",
+      "api_base": "http://127.0.0.1:3001",
+      "discovery": "dev",
+      "expect": "host_not_listed"
+    },
+    {
+      "name": "dev: another private address",
+      "url": "https://10.0.0.5:9000/bb-dev/k",
+      "api_base": "http://127.0.0.1:3001",
+      "discovery": "dev",
+      "expect": "ip_literal"
+    },
+    {
+      "name": "production api: the same loopback URL",
+      "url": "http://127.0.0.1:9000/bb-dev/k",
+      "api_base": "https://api.beebeeb.test",
+      "discovery": "dev",
+      "expect": "not_https"
+    }
+  ],
+  "classify": [
+    {
+      "name": "discovery 200",
+      "call": "discovery",
+      "status": 200,
+      "content_type": "application/json",
+      "body": "{}",
+      "retry_after": null,
+      "expect": {
+        "kind": "proceed"
+      }
+    },
+    {
+      "name": "discovery JSON 404 is not-supported",
+      "call": "discovery",
+      "status": 404,
+      "content_type": "application/json",
+      "body": "{\"error\":\"not found\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "not_supported"
+      }
+    },
+    {
+      "name": "discovery bare 404 (an old server's unknown route)",
+      "call": "discovery",
+      "status": 404,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "use_api_now"
+      }
+    },
+    {
+      "name": "discovery HTML 404",
+      "call": "discovery",
+      "status": 404,
+      "content_type": "text/html; charset=utf-8",
+      "body": "<h1>Not Found</h1>",
+      "retry_after": null,
+      "expect": {
+        "kind": "use_api_now"
+      }
+    },
+    {
+      "name": "discovery 405 (the old server's /transfer/{id} collision)",
+      "call": "discovery",
+      "status": 405,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "use_api_now"
+      }
+    },
+    {
+      "name": "discovery 500",
+      "call": "discovery",
+      "status": 500,
+      "content_type": "application/json",
+      "body": "{\"error\":\"Something went wrong.\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "use_api_now"
+      }
+    },
+    {
+      "name": "discovery HTML 502",
+      "call": "discovery",
+      "status": 502,
+      "content_type": "text/html",
+      "body": "<html>Bad Gateway</html>",
+      "retry_after": null,
+      "expect": {
+        "kind": "use_api_now"
+      }
+    },
+    {
+      "name": "discovery no answer",
+      "call": "discovery",
+      "status": 0,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "use_api_now"
+      }
+    },
+    {
+      "name": "discovery 429 does not make the command wait",
+      "call": "discovery",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"rate_limited\"}",
+      "retry_after": "30",
+      "expect": {
+        "kind": "use_api_now"
+      }
+    },
+    {
+      "name": "discovery 401",
+      "call": "discovery",
+      "status": 401,
+      "content_type": "application/json",
+      "body": "{\"error\":\"unauthorized\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "grant 200",
+      "call": "download_grant",
+      "status": 200,
+      "content_type": "application/json",
+      "body": "{}",
+      "retry_after": null,
+      "expect": {
+        "kind": "proceed"
+      }
+    },
+    {
+      "name": "grant 401",
+      "call": "download_grant",
+      "status": 401,
+      "content_type": "application/json",
+      "body": "{\"error\":\"unauthorized\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "grant 403",
+      "call": "download_grant",
+      "status": 403,
+      "content_type": "application/json",
+      "body": "{\"error\":\"forbidden\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 403,
+        "error": "forbidden"
+      }
+    },
+    {
+      "name": "grant JSON 404 is a real not-found",
+      "call": "download_grant",
+      "status": 404,
+      "content_type": "application/json",
+      "body": "{\"error\":\"not found\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 404,
+        "error": "not found"
+      }
+    },
+    {
+      "name": "grant bare 404: this node has no route",
+      "call": "download_grant",
+      "status": 404,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "use_api_now"
+      }
+    },
+    {
+      "name": "grant HTML 404",
+      "call": "download_grant",
+      "status": 404,
+      "content_type": "text/html",
+      "body": "<h1>Not Found</h1>",
+      "retry_after": null,
+      "expect": {
+        "kind": "use_api_now"
+      }
+    },
+    {
+      "name": "grant JSON-looking body under the wrong content type",
+      "call": "download_grant",
+      "status": 404,
+      "content_type": "text/plain",
+      "body": "{\"error\":\"not found\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "use_api_now"
+      }
+    },
+    {
+      "name": "grant 405",
+      "call": "download_grant",
+      "status": 405,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "use_api_now"
+      }
+    },
+    {
+      "name": "409 direct_unavailable",
+      "call": "download_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"direct_unavailable\",\"reason\":\"disabled\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      }
+    },
+    {
+      "name": "409 version_unavailable",
+      "call": "download_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"version_unavailable\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "restart"
+      }
+    },
+    {
+      "name": "409 replace_in_progress: wait (R1.13)",
+      "call": "download_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"replace_in_progress\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      }
+    },
+    {
+      "name": "409 replace_in_progress with Retry-After",
+      "call": "download_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"replace_in_progress\"}",
+      "retry_after": "3",
+      "expect": {
+        "kind": "backoff",
+        "millis": 3000
+      }
+    },
+    {
+      "name": "409 commit_in_progress: wait (R2.6)",
+      "call": "download_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      }
+    },
+    {
+      "name": "409 unknown code",
+      "call": "download_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"something_new\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      }
+    },
+    {
+      "name": "409 with no JSON body",
+      "call": "download_grant",
+      "status": 409,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      }
+    },
+    {
+      "name": "429 with Retry-After",
+      "call": "download_grant",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"rate_limited\"}",
+      "retry_after": "17",
+      "expect": {
+        "kind": "backoff",
+        "millis": 17000
+      }
+    },
+    {
+      "name": "429 without Retry-After",
+      "call": "download_grant",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"rate_limited\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      }
+    },
+    {
+      "name": "429 with an HTTP-date Retry-After",
+      "call": "download_grant",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{}",
+      "retry_after": "Wed, 21 Oct 2026 07:28:00 GMT",
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      }
+    },
+    {
+      "name": "429 with Retry-After 0 waits a second",
+      "call": "download_grant",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{}",
+      "retry_after": "0",
+      "expect": {
+        "kind": "backoff",
+        "millis": 1000
+      }
+    },
+    {
+      "name": "429 with a huge Retry-After is capped",
+      "call": "download_grant",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{}",
+      "retry_after": "86400",
+      "expect": {
+        "kind": "backoff",
+        "millis": 120000
+      }
+    },
+    {
+      "name": "grant 500",
+      "call": "download_grant",
+      "status": 500,
+      "content_type": "application/json",
+      "body": "{\"error\":\"Something went wrong.\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "use_api_now"
+      }
+    },
+    {
+      "name": "grant no answer",
+      "call": "download_grant",
+      "status": 0,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "use_api_now"
+      }
+    },
+    {
+      "name": "grant 302 (redirects are never followed)",
+      "call": "download_grant",
+      "status": 302,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "use_api_now"
+      }
+    },
+    {
+      "name": "grant 400 bad window",
+      "call": "download_grant",
+      "status": 400,
+      "content_type": "application/json",
+      "body": "{\"error\":\"count must be between 1 and 32\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      }
+    },
+    {
+      "name": "pinned 200",
+      "call": "pinned_chunk",
+      "status": 200,
+      "content_type": "application/octet-stream",
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "proceed"
+      }
+    },
+    {
+      "name": "pinned 409 with the server's real body: the pin is gone",
+      "call": "pinned_chunk",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"download version unavailable; restart download from fresh metadata\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "restart"
+      }
+    },
+    {
+      "name": "pinned bare 409: the pin is gone",
+      "call": "pinned_chunk",
+      "status": 409,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "restart"
+      }
+    },
+    {
+      "name": "pinned 409 with the grant route's code: the pin is gone",
+      "call": "pinned_chunk",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"version_unavailable\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "restart"
+      }
+    },
+    {
+      "name": "pinned 409 with any other text: the pin is gone",
+      "call": "pinned_chunk",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"something the server may say tomorrow\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "restart"
+      }
+    },
+    {
+      "name": "pinned 409 replace_in_progress is a wait",
+      "call": "pinned_chunk",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"replace_in_progress\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      }
+    },
+    {
+      "name": "pinned 409 replace_in_progress with Retry-After",
+      "call": "pinned_chunk",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"replace_in_progress\"}",
+      "retry_after": "3",
+      "expect": {
+        "kind": "backoff",
+        "millis": 3000
+      }
+    },
+    {
+      "name": "pinned 409 commit_in_progress is a wait",
+      "call": "pinned_chunk",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      }
+    },
+    {
+      "name": "pinned 429, the server's real limiter body and Retry-After: 60",
+      "call": "pinned_chunk",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"rate_limited\",\"message\":\"Too many requests. Try again in 60 seconds.\",\"retry_after\":60}",
+      "retry_after": "60",
+      "expect": {
+        "kind": "backoff",
+        "millis": 60000
+      }
+    },
+    {
+      "name": "pinned 429 with a shorter Retry-After",
+      "call": "pinned_chunk",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"rate_limited\",\"message\":\"Too many requests. Try again in 60 seconds.\",\"retry_after\":60}",
+      "retry_after": "7",
+      "expect": {
+        "kind": "backoff",
+        "millis": 7000
+      }
+    },
+    {
+      "name": "pinned 429 without Retry-After",
+      "call": "pinned_chunk",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"rate_limited\",\"message\":\"Too many requests. Try again in 60 seconds.\",\"retry_after\":60}",
+      "retry_after": null,
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      }
+    },
+    {
+      "name": "pinned 429 with a huge Retry-After is capped",
+      "call": "pinned_chunk",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{}",
+      "retry_after": "86400",
+      "expect": {
+        "kind": "backoff",
+        "millis": 120000
+      }
+    },
+    {
+      "name": "pinned 500 may pass",
+      "call": "pinned_chunk",
+      "status": 500,
+      "content_type": "application/json",
+      "body": "{\"error\":\"Something went wrong.\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      }
+    },
+    {
+      "name": "pinned HTML 502 may pass",
+      "call": "pinned_chunk",
+      "status": 502,
+      "content_type": "text/html",
+      "body": "<html>Bad Gateway</html>",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      }
+    },
+    {
+      "name": "pinned 503 may pass",
+      "call": "pinned_chunk",
+      "status": 503,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      }
+    },
+    {
+      "name": "pinned 503 with the server's Retry-After: 5 is a stated wait",
+      "call": "pinned_chunk",
+      "status": 503,
+      "content_type": "application/json",
+      "body": "{\"error\":\"statement_timeout\"}",
+      "retry_after": "5",
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      }
+    },
+    {
+      "name": "pinned 500 with Retry-After 0 waits a second",
+      "call": "pinned_chunk",
+      "status": 500,
+      "content_type": null,
+      "body": "",
+      "retry_after": "0",
+      "expect": {
+        "kind": "backoff",
+        "millis": 1000
+      }
+    },
+    {
+      "name": "pinned 502 with a huge Retry-After is capped",
+      "call": "pinned_chunk",
+      "status": 502,
+      "content_type": null,
+      "body": "",
+      "retry_after": "86400",
+      "expect": {
+        "kind": "backoff",
+        "millis": 120000
+      }
+    },
+    {
+      "name": "pinned 503 with an unreadable Retry-After names nothing",
+      "call": "pinned_chunk",
+      "status": 503,
+      "content_type": null,
+      "body": "",
+      "retry_after": "soon",
+      "expect": {
+        "kind": "retry"
+      }
+    },
+    {
+      "name": "pinned no answer may pass",
+      "call": "pinned_chunk",
+      "status": 0,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      }
+    },
+    {
+      "name": "pinned 302 may pass",
+      "call": "pinned_chunk",
+      "status": 302,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      }
+    },
+    {
+      "name": "pinned bare 404: a node without the route may pass",
+      "call": "pinned_chunk",
+      "status": 404,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      }
+    },
+    {
+      "name": "pinned 405 may pass",
+      "call": "pinned_chunk",
+      "status": 405,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      }
+    },
+    {
+      "name": "pinned JSON 404 is a real not-found",
+      "call": "pinned_chunk",
+      "status": 404,
+      "content_type": "application/json",
+      "body": "{\"error\":\"not found\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 404,
+        "error": "not found"
+      }
+    },
+    {
+      "name": "pinned 401",
+      "call": "pinned_chunk",
+      "status": 401,
+      "content_type": "application/json",
+      "body": "{\"error\":\"unauthorized\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "pinned 403",
+      "call": "pinned_chunk",
+      "status": 403,
+      "content_type": "application/json",
+      "body": "{\"error\":\"forbidden\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 403,
+        "error": "forbidden"
+      }
+    },
+    {
+      "name": "pinned 400: an index out of range will not change",
+      "call": "pinned_chunk",
+      "status": 400,
+      "content_type": "application/json",
+      "body": "{\"error\":\"chunk index 9 out of range (version has 3 chunk(s))\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      }
+    },
+    {
+      "name": "pinned 410",
+      "call": "pinned_chunk",
+      "status": 410,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      }
+    },
+    {
+      "name": "pinned 413",
+      "call": "pinned_chunk",
+      "status": 413,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      }
+    }
+  ],
+  "redact": [
+    {
+      "input": "https://s3.storage.test/bb-01/tenant-0000/versions/v-1111/0.bin?X-Amz-Signature=abc&x=1",
+      "expect": "https://s3.storage.test/<redacted>"
+    },
+    {
+      "input": "https://s3.storage.test/bb-01/k#frag?x",
+      "expect": "https://s3.storage.test/<redacted>"
+    },
+    {
+      "input": "https://u:pw@s3.storage.test/b/k?q",
+      "expect": "https://s3.storage.test/<redacted>"
+    },
+    {
+      "input": "https://s3.storage.test",
+      "expect": "https://s3.storage.test"
+    },
+    {
+      "input": "https://s3.storage.test/",
+      "expect": "https://s3.storage.test/"
+    },
+    {
+      "input": "not a url?secret=1",
+      "expect": "not a url"
+    }
+  ],
+  "scrub": [
+    {
+      "input": "error sending request for url (https://s3.storage.test/bb-01/k?X-Amz-Signature=SECRETSIG&X-Amz-Credential=AKID): connection reset",
+      "expect": "error sending request for url (https://s3.storage.test/<redacted>): connection reset"
+    },
+    {
+      "input": "a http://h.test/p?s=1 b HTTPS://h2.test/q?t=2 c",
+      "expect": "a http://h.test/<redacted> b HTTPS://h2.test/<redacted> c"
+    },
+    {
+      "input": "retrying with X-Amz-Signature=SECRETSIG next",
+      "expect": "retrying with x-amz-[redacted] next"
+    },
+    {
+      "input": "nothing to hide",
+      "expect": "nothing to hide"
+    }
+  ],
+  "chunk_length": [
+    {
+      "name": "full chunk",
+      "chunk_count": 20,
+      "chunk_size": 1000,
+      "encrypted_size": 20060,
+      "index": 0,
+      "expect": 1028
+    },
+    {
+      "name": "last chunk is the remainder",
+      "chunk_count": 20,
+      "chunk_size": 1000,
+      "encrypted_size": 20060,
+      "index": 19,
+      "expect": 528
+    },
+    {
+      "name": "one past the last chunk",
+      "chunk_count": 20,
+      "chunk_size": 1000,
+      "encrypted_size": 20060,
+      "index": 20,
+      "expect": null
+    },
+    {
+      "name": "index u32::MAX",
+      "chunk_count": 20,
+      "chunk_size": 1000,
+      "encrypted_size": 20060,
+      "index": 4294967295,
+      "expect": null
+    },
+    {
+      "name": "no chunks",
+      "chunk_count": 0,
+      "chunk_size": 10,
+      "encrypted_size": 0,
+      "index": 0,
+      "expect": null
+    },
+    {
+      "name": "the empty file is one empty chunk",
+      "chunk_count": 1,
+      "chunk_size": 1000,
+      "encrypted_size": 28,
+      "index": 0,
+      "expect": 28
+    },
+    {
+      "name": "stride overflow",
+      "chunk_count": 2,
+      "chunk_size": "18446744073709551610",
+      "encrypted_size": 100,
+      "index": 0,
+      "expect": null
+    },
+    {
+      "name": "stride times count overflows",
+      "chunk_count": 4294967295,
+      "chunk_size": "1099511627776",
+      "encrypted_size": "18446744073709551615",
+      "index": 4294967294,
+      "expect": null
+    }
+  ],
+  "pinned_retry": [
+    {
+      "name": "first failure of a server hiccup waits 1 s",
+      "outcome": {
+        "kind": "retry"
+      },
+      "attempt": 1,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "wait",
+        "millis": 1000
+      }
+    },
+    {
+      "name": "second doubles",
+      "outcome": {
+        "kind": "retry"
+      },
+      "attempt": 2,
+      "waited_ms": 1000,
+      "expect": {
+        "kind": "wait",
+        "millis": 2000
+      }
+    },
+    {
+      "name": "third doubles again",
+      "outcome": {
+        "kind": "retry"
+      },
+      "attempt": 3,
+      "waited_ms": 3000,
+      "expect": {
+        "kind": "wait",
+        "millis": 4000
+      }
+    },
+    {
+      "name": "the fourth attempt was the last",
+      "outcome": {
+        "kind": "retry"
+      },
+      "attempt": 4,
+      "waited_ms": 7000,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "a stated wait is kept",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 3000
+      },
+      "attempt": 1,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "wait",
+        "millis": 3000
+      }
+    },
+    {
+      "name": "the server's real 429 (Retry-After: 60) at attempt 1, nothing waited",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 60000
+      },
+      "attempt": 1,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "wait",
+        "millis": 60000
+      }
+    },
+    {
+      "name": "the same 429 at attempt 2 after a 1 s hiccup",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 60000
+      },
+      "attempt": 2,
+      "waited_ms": 1000,
+      "expect": {
+        "kind": "wait",
+        "millis": 60000
+      }
+    },
+    {
+      "name": "a second 429 right after the first",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 60000
+      },
+      "attempt": 2,
+      "waited_ms": 60000,
+      "expect": {
+        "kind": "wait",
+        "millis": 60000
+      }
+    },
+    {
+      "name": "a ban clamped to 120 s is waited for once",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 120000
+      },
+      "attempt": 1,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "wait",
+        "millis": 120000
+      }
+    },
+    {
+      "name": "a third 60 s wait (180 s in all) is past the budget",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 60000
+      },
+      "attempt": 3,
+      "waited_ms": 120000,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "a stated wait ending exactly at the budget (150 s) is taken",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 60000
+      },
+      "attempt": 2,
+      "waited_ms": 90000,
+      "expect": {
+        "kind": "wait",
+        "millis": 60000
+      }
+    },
+    {
+      "name": "one millisecond past the budget is not",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 60000
+      },
+      "attempt": 2,
+      "waited_ms": 90001,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "a ban after a long wait does not fit",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 120000
+      },
+      "attempt": 2,
+      "waited_ms": 31000,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "attempt 0 is read as the first attempt",
+      "outcome": {
+        "kind": "retry"
+      },
+      "attempt": 0,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "wait",
+        "millis": 1000
+      }
+    },
+    {
+      "name": "a stated wait on the last attempt is not taken",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 1000
+      },
+      "attempt": 4,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "a gone pin is not retried",
+      "outcome": {
+        "kind": "restart"
+      },
+      "attempt": 1,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "an authorization answer is not retried",
+      "outcome": {
+        "kind": "terminal",
+        "status": 403,
+        "error": "forbidden"
+      },
+      "attempt": 1,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "a refusal a retry cannot change is not retried",
+      "outcome": {
+        "kind": "api_for_this_file"
+      },
+      "attempt": 1,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "a success needs no retry",
+      "outcome": {
+        "kind": "proceed"
+      },
+      "attempt": 1,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "the doubling cannot overflow",
+      "outcome": {
+        "kind": "retry"
+      },
+      "attempt": 4000000000,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "give_up"
+      }
+    }
+  ],
+  "discovery_cache": [
+    {
+      "name": "a good answer is reused for ten minutes, then asked for again",
+      "steps": [
+        {
+          "op": "lookup",
+          "now": 1800000000000,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "proceed"
+          },
+          "body": "@std"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000000,
+          "expect": "cached"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000599999,
+          "expect": "cached"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600000,
+          "expect": "fetch"
+        },
+        {
+          "op": "lookup",
+          "now": 1799999999999,
+          "expect": "fetch"
+        }
+      ]
+    },
+    {
+      "name": "a JSON 404 is remembered for ten minutes, not for ever",
+      "steps": [
+        {
+          "op": "lookup",
+          "now": 1800000000000,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "not_supported"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000001,
+          "expect": "use_api"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000599999,
+          "expect": "use_api"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600000,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000600000,
+          "outcome": {
+            "kind": "not_supported"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600001,
+          "expect": "use_api"
+        },
+        {
+          "op": "lookup",
+          "now": 1800001200000,
+          "expect": "fetch"
+        }
+      ]
+    },
+    {
+      "name": "two failed attempts stop the asking for ten minutes, then it asks again",
+      "steps": [
+        {
+          "op": "lookup",
+          "now": 1800000000000,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000001,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000000001,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000002,
+          "expect": "use_api"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600000,
+          "expect": "use_api"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600001,
+          "expect": "fetch"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000000,
+          "expect": "fetch"
+        }
+      ]
+    },
+    {
+      "name": "the re-probe gets a fresh allowance of two",
+      "steps": [
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "record",
+          "now": 1800000000001,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000002,
+          "expect": "use_api"
+        },
+        {
+          "op": "record",
+          "now": 1800000600001,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600002,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000600002,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600003,
+          "expect": "use_api"
+        }
+      ]
+    },
+    {
+      "name": "failures further apart than ten minutes do not add up",
+      "steps": [
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "record",
+          "now": 1800000600005,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600006,
+          "expect": "fetch"
+        }
+      ]
+    },
+    {
+      "name": "a success after a failure clears the count",
+      "steps": [
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "record",
+          "now": 1800000000001,
+          "outcome": {
+            "kind": "proceed"
+          },
+          "body": "@std"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000002,
+          "expect": "cached"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600001,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000000002,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600001,
+          "expect": "fetch"
+        }
+      ]
+    },
+    {
+      "name": "a discovery body sent as text",
+      "steps": [
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "proceed"
+          },
+          "body": "{\"download\": [\"object-download-v1\"], \"upload\": [], \"storage_hosts\": [\"s3.storage.test\", \"eu.storage.test\"], \"storage_buckets\": [{\"host\": \"s3.storage.test\", \"bucket\": \"bb-01\"}, {\"host\": \"s3.storage.test\", \"bucket\": \"bb-02\"}, {\"host\": \"eu.storage.test\", \"bucket\": \"vault\"}], \"max_window\": 32, \"url_ttl_seconds\": 300}"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000001,
+          "expect": "cached"
+        }
+      ]
+    },
+    {
+      "name": "a success whose body does not decode is a failed attempt",
+      "steps": [
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "proceed"
+          },
+          "body": "not json"
+        },
+        {
+          "op": "record",
+          "now": 1800000000001,
+          "outcome": {
+            "kind": "proceed"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000002,
+          "expect": "use_api"
+        }
+      ]
+    },
+    {
+      "name": "an authorization answer counts as a failed attempt only",
+      "steps": [
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "terminal",
+            "status": 401,
+            "error": "unauthorized"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000001,
+          "expect": "fetch"
+        }
+      ]
+    }
+  ],
+  "planner": [
+    {
+      "name": "one window, three chunks",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "inspect",
+          "expect": {
+            "geometry": null,
+            "pinned_version": null,
+            "consumed": 0,
+            "in_flight": 0
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "inspect",
+          "expect": {
+            "geometry": {
+              "chunk_count": 3,
+              "chunk_size": 1000,
+              "encrypted_size": 2584,
+              "original_size": 2500
+            },
+            "pinned_version": "22222222-2222-4222-8222-222222222222",
+            "consumed": 0,
+            "in_flight": 0
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+            "length": 1028
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 1,
+            "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+            "length": 1028
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 2,
+            "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+            "length": 528
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "wait",
+            "until_ms": null
+          }
+        },
+        {
+          "op": "inspect",
+          "expect": {
+            "geometry": {
+              "chunk_count": 3,
+              "chunk_size": 1000,
+              "encrypted_size": 2584,
+              "original_size": 2500
+            },
+            "pinned_version": "22222222-2222-4222-8222-222222222222",
+            "consumed": 0,
+            "in_flight": 3
+          }
+        },
+        {
+          "op": "fetch_ok",
+          "index": 0,
+          "expect": "ok"
+        },
+        {
+          "op": "consumed",
+          "index": 0,
+          "expect": "ok"
+        },
+        {
+          "op": "inspect",
+          "expect": {
+            "geometry": {
+              "chunk_count": 3,
+              "chunk_size": 1000,
+              "encrypted_size": 2584,
+              "original_size": 2500
+            },
+            "pinned_version": "22222222-2222-4222-8222-222222222222",
+            "consumed": 1,
+            "in_flight": 2
+          }
+        },
+        {
+          "op": "fetch_ok",
+          "index": 1,
+          "expect": "ok"
+        },
+        {
+          "op": "consumed",
+          "index": 1,
+          "expect": "ok"
+        },
+        {
+          "op": "inspect",
+          "expect": {
+            "geometry": {
+              "chunk_count": 3,
+              "chunk_size": 1000,
+              "encrypted_size": 2584,
+              "original_size": 2500
+            },
+            "pinned_version": "22222222-2222-4222-8222-222222222222",
+            "consumed": 2,
+            "in_flight": 1
+          }
+        },
+        {
+          "op": "fetch_ok",
+          "index": 2,
+          "expect": "ok"
+        },
+        {
+          "op": "consumed",
+          "index": 2,
+          "expect": "ok"
+        },
+        {
+          "op": "inspect",
+          "expect": {
+            "geometry": {
+              "chunk_count": 3,
+              "chunk_size": 1000,
+              "encrypted_size": 2584,
+              "original_size": 2500
+            },
+            "pinned_version": "22222222-2222-4222-8222-222222222222",
+            "consumed": 3,
+            "in_flight": 0
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "done"
+          }
+        }
+      ]
+    },
+    {
+      "name": "two windows: the pin travels with the second",
+      "discovery": "small_window",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 2,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": 2
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": "22222222-2222-4222-8222-222222222222",
+              "start_index": 2,
+              "count": 1,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+            "length": 1028
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 1,
+            "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+            "length": 1028
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 2,
+            "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+            "length": 528
+          }
+        },
+        {
+          "op": "fetch_ok",
+          "index": 0,
+          "expect": "ok"
+        },
+        {
+          "op": "consumed",
+          "index": 0,
+          "expect": "ok"
+        },
+        {
+          "op": "fetch_ok",
+          "index": 1,
+          "expect": "ok"
+        },
+        {
+          "op": "consumed",
+          "index": 1,
+          "expect": "ok"
+        },
+        {
+          "op": "fetch_ok",
+          "index": 2,
+          "expect": "ok"
+        },
+        {
+          "op": "consumed",
+          "index": 2,
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "done"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a failed chunk is renewed after a backoff",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+            "length": 1028
+          }
+        },
+        {
+          "op": "fetch_failed",
+          "index": 0,
+          "now": 1800000001000,
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000001000,
+          "expect": {
+            "kind": "fetch",
+            "index": 1,
+            "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+            "length": 1028
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000001000,
+          "expect": {
+            "kind": "fetch",
+            "index": 2,
+            "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+            "length": 528
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000001000,
+          "expect": {
+            "kind": "wait",
+            "until_ms_between": [
+              1800000001125,
+              1800000001250
+            ]
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000001250,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": "22222222-2222-4222-8222-222222222222",
+              "start_index": 0,
+              "count": 1,
+              "renewal": true
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000001250,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=NEWSIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": 1
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000001250,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=NEWSIG0",
+            "length": 1028
+          }
+        }
+      ]
+    },
+    {
+      "name": "three renewals, then the pinned API route",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+            "length": 1028
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 1,
+            "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+            "length": 1028
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 2,
+            "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+            "length": 528
+          }
+        },
+        {
+          "op": "fetch_failed",
+          "index": 0,
+          "now": 1800000000000,
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000010000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": "22222222-2222-4222-8222-222222222222",
+              "start_index": 0,
+              "count": 1,
+              "renewal": true
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000010000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=R1SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": 1
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000010000,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=R1SIG0",
+            "length": 1028
+          }
+        },
+        {
+          "op": "fetch_failed",
+          "index": 0,
+          "now": 1800000010000,
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000020000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": "22222222-2222-4222-8222-222222222222",
+              "start_index": 0,
+              "count": 1,
+              "renewal": true
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000020000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=R2SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": 1
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000020000,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=R2SIG0",
+            "length": 1028
+          }
+        },
+        {
+          "op": "fetch_failed",
+          "index": 0,
+          "now": 1800000020000,
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000030000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": "22222222-2222-4222-8222-222222222222",
+              "start_index": 0,
+              "count": 1,
+              "renewal": true
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000030000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=R3SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": 1
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000030000,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=R3SIG0",
+            "length": 1028
+          }
+        },
+        {
+          "op": "fetch_failed",
+          "index": 0,
+          "now": 1800000030000,
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000030000,
+          "expect": {
+            "kind": "fetch_via_api",
+            "index": 0,
+            "object_version_id": "22222222-2222-4222-8222-222222222222"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a refused window after pinning moves the rest to the pinned route",
+      "discovery": "small_window",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 2,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": 2
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": "22222222-2222-4222-8222-222222222222",
+              "start_index": 2,
+              "count": 1,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_failed",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "api_for_this_file"
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+            "length": 1028
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 1,
+            "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+            "length": 1028
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch_via_api",
+            "index": 2,
+            "object_version_id": "22222222-2222-4222-8222-222222222222"
+          }
+        },
+        {
+          "op": "fetch_ok",
+          "index": 0,
+          "expect": "ok"
+        },
+        {
+          "op": "consumed",
+          "index": 0,
+          "expect": "ok"
+        },
+        {
+          "op": "fetch_ok",
+          "index": 1,
+          "expect": "ok"
+        },
+        {
+          "op": "consumed",
+          "index": 1,
+          "expect": "ok"
+        },
+        {
+          "op": "fetch_ok",
+          "index": 2,
+          "expect": "ok"
+        },
+        {
+          "op": "consumed",
+          "index": 2,
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "done"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a refused first window sends the file to the API path",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_failed",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "use_api_now"
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "stop",
+            "verdict": {
+              "kind": "api_for_file"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "version_unavailable restarts",
+      "discovery": "small_window",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 2,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": 2
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": "22222222-2222-4222-8222-222222222222",
+              "start_index": 2,
+              "count": 1,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_failed",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "restart"
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "stop",
+            "verdict": {
+              "kind": "restart"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a 403 is terminal",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_failed",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "terminal",
+            "status": 403,
+            "error": "forbidden"
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "stop",
+            "verdict": {
+              "kind": "terminal",
+              "status": 403,
+              "error": "forbidden"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "an unauthentic chunk is fetched once more through the API, then is corrupt",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+            "length": 1028
+          }
+        },
+        {
+          "op": "fetch_ok",
+          "index": 0,
+          "expect": "ok"
+        },
+        {
+          "op": "chunk_unauthentic",
+          "index": 0,
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch_via_api",
+            "index": 0,
+            "object_version_id": "22222222-2222-4222-8222-222222222222"
+          }
+        },
+        {
+          "op": "fetch_ok",
+          "index": 0,
+          "expect": "ok"
+        },
+        {
+          "op": "chunk_unauthentic",
+          "index": 0,
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "stop",
+            "verdict": {
+              "kind": "corrupt"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "answers that break the contract",
+      "discovery": "std",
+      "seed": 7,
+      "refusals": [
+        {
+          "name": "wrong transport",
+          "response": {
+            "transport": "object-download-v2",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "transport"
+        },
+        {
+          "name": "other file",
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "33333333-3333-4333-8333-333333333333",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "file_mismatch"
+        },
+        {
+          "name": "geometry not of any version",
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2585,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "geometry"
+        },
+        {
+          "name": "a grant too few",
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "grants"
+        },
+        {
+          "name": "a PUT grant",
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "PUT",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "method"
+        },
+        {
+          "name": "a wrong chunk length",
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1029,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "length"
+        },
+        {
+          "name": "an unlisted host",
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://evil.test/bb-01/k?s=1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "authority_host_not_listed"
+        },
+        {
+          "name": "a plain-http link",
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "http://s3.storage.test/bb-01/k?s=1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "authority_not_https"
+        },
+        {
+          "name": "a link that does not parse",
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://evil.test\\@s3.storage.test/bb-01/k?s=1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "authority_malformed"
+        },
+        {
+          "name": "a link with userinfo",
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test@evil.test/bb-01/k?s=1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "authority_userinfo"
+        },
+        {
+          "name": "an IP-literal link",
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://203.0.113.9/bb-01/k?s=1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "authority_ip_literal"
+        },
+        {
+          "name": "a loopback link on a production api",
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://127.0.0.1/bb-01/k?s=1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "authority_loopback"
+        },
+        {
+          "name": "a trailing-dot host",
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test./bb-01/k?s=1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "authority_bad_host"
+        },
+        {
+          "name": "a non-default port",
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test:8443/bb-01/k?s=1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "authority_port"
+        },
+        {
+          "name": "an unlisted bucket",
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/other/k?s=1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "authority_bucket_not_listed"
+        },
+        {
+          "name": "a dot-dot path",
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/../other/k?s=1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "authority_bad_path"
+        },
+        {
+          "name": "an unreadable expiry",
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "tomorrow"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "expiry"
+        },
+        {
+          "name": "a body that is not JSON",
+          "body": "{not json",
+          "expect": "malformed"
+        },
+        {
+          "name": "JSON that is not an object",
+          "body": "[]",
+          "expect": "malformed"
+        },
+        {
+          "name": "an empty body",
+          "body": "",
+          "expect": "malformed"
+        },
+        {
+          "name": "an object without the contract's fields",
+          "body": "{}",
+          "expect": "malformed"
+        }
+      ]
+    },
+    {
+      "name": "an undecodable first window",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_malformed"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "stop",
+            "verdict": {
+              "kind": "api_for_file"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "an undecodable first window body",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "body": "{not json",
+          "expect": "malformed"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "stop",
+            "verdict": {
+              "kind": "api_for_file"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a window body sent as text",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "body": "{\"transport\": \"object-download-v1\", \"file_id\": \"11111111-1111-4111-8111-111111111111\", \"object_version_id\": \"22222222-2222-4222-8222-222222222222\", \"chunk_count\": 3, \"chunk_size\": 1000, \"encrypted_size\": 2584, \"original_size\": 2500, \"grants\": [{\"index\": 0, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 1, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 2, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2\", \"length\": 528, \"expires_at\": \"2027-01-15T08:05:00Z\"}], \"next_index\": null}",
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+            "length": 1028
+          }
+        }
+      ]
+    },
+    {
+      "name": "a 429 on the window request waits the stated time",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_failed",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "backoff",
+            "millis": 2500
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000001000,
+          "expect": {
+            "kind": "wait",
+            "until_ms": 1800000002500
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000002500,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a clock 280 s ahead does not read the link as short",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000280000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000280000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000549999,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+            "length": 1028
+          }
+        }
+      ]
+    },
+    {
+      "name": "an unsolicited window",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "unexpected"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "stop",
+            "verdict": {
+              "kind": "api_for_file"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a window for another version restarts the file",
+      "discovery": "small_window",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 2,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": 2
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": "22222222-2222-4222-8222-222222222222",
+              "start_index": 2,
+              "count": 1,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "44444444-4444-4444-8444-444444444444",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "version_changed"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "stop",
+            "verdict": {
+              "kind": "restart"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "calls that do not fit the planner's state",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+            "length": 1028
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 1,
+            "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+            "length": 1028
+          }
+        },
+        {
+          "op": "fetch_ok",
+          "index": 5,
+          "expect": "not_in_flight"
+        },
+        {
+          "op": "fetch_failed",
+          "index": 5,
+          "now": 1800000000000,
+          "expect": "not_in_flight"
+        },
+        {
+          "op": "consumed",
+          "index": 0,
+          "expect": "not_fetched"
+        },
+        {
+          "op": "fetch_ok",
+          "index": 1,
+          "expect": "ok"
+        },
+        {
+          "op": "consumed",
+          "index": 1,
+          "expect": "out_of_order"
+        },
+        {
+          "op": "api_fetch_failed",
+          "index": 0,
+          "expect": "not_in_flight"
+        },
+        {
+          "op": "chunk_unauthentic",
+          "index": 2,
+          "expect": "not_fetched"
+        }
+      ]
+    },
+    {
+      "name": "a failure on the pinned route sends the file to the API path",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 1,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              },
+              {
+                "index": 2,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+                "length": 528,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": null
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0",
+            "length": 1028
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 1,
+            "url": "https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1",
+            "length": 1028
+          }
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "fetch",
+            "index": 2,
+            "url": "https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2",
+            "length": 528
+          }
+        },
+        {
+          "op": "fetch_failed",
+          "index": 0,
+          "now": 1800000000000,
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000010000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": "22222222-2222-4222-8222-222222222222",
+              "start_index": 0,
+              "count": 1,
+              "renewal": true
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000010000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=R1SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": 1
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000010000,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=R1SIG0",
+            "length": 1028
+          }
+        },
+        {
+          "op": "fetch_failed",
+          "index": 0,
+          "now": 1800000010000,
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000020000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": "22222222-2222-4222-8222-222222222222",
+              "start_index": 0,
+              "count": 1,
+              "renewal": true
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000020000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=R2SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": 1
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000020000,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=R2SIG0",
+            "length": 1028
+          }
+        },
+        {
+          "op": "fetch_failed",
+          "index": 0,
+          "now": 1800000020000,
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000030000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": "22222222-2222-4222-8222-222222222222",
+              "start_index": 0,
+              "count": 1,
+              "renewal": true
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000030000,
+          "response": {
+            "transport": "object-download-v1",
+            "file_id": "11111111-1111-4111-8111-111111111111",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 3,
+            "chunk_size": 1000,
+            "encrypted_size": 2584,
+            "original_size": 2500,
+            "grants": [
+              {
+                "index": 0,
+                "method": "GET",
+                "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=R3SIG0",
+                "length": 1028,
+                "expires_at": "2027-01-15T08:05:00Z"
+              }
+            ],
+            "next_index": 1
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000030000,
+          "expect": {
+            "kind": "fetch",
+            "index": 0,
+            "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=R3SIG0",
+            "length": 1028
+          }
+        },
+        {
+          "op": "fetch_failed",
+          "index": 0,
+          "now": 1800000030000,
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000030000,
+          "expect": {
+            "kind": "fetch_via_api",
+            "index": 0,
+            "object_version_id": "22222222-2222-4222-8222-222222222222"
+          }
+        },
+        {
+          "op": "fetch_failed",
+          "index": 0,
+          "now": 1800000030000,
+          "expect": "api_route_failure"
+        },
+        {
+          "op": "api_fetch_failed",
+          "index": 0,
+          "expect": "ok"
+        },
+        {
+          "op": "poll",
+          "now": 1800000030000,
+          "expect": {
+            "kind": "stop",
+            "verdict": {
+              "kind": "api_for_file"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a late undecodable window answer after the version is pinned",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "body": "{\"transport\": \"object-download-v1\", \"file_id\": \"11111111-1111-4111-8111-111111111111\", \"object_version_id\": \"22222222-2222-4222-8222-222222222222\", \"chunk_count\": 3, \"chunk_size\": 1000, \"encrypted_size\": 2584, \"original_size\": 2500, \"grants\": [{\"index\": 0, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 1, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 2, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2\", \"length\": 528, \"expires_at\": \"2027-01-15T08:05:00Z\"}], \"next_index\": null}",
+          "expect": "ok"
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "body": "{not json",
+          "expect": "unexpected"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "stop",
+            "verdict": {
+              "kind": "api_for_file"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a late empty window answer after the version is pinned",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "body": "{\"transport\": \"object-download-v1\", \"file_id\": \"11111111-1111-4111-8111-111111111111\", \"object_version_id\": \"22222222-2222-4222-8222-222222222222\", \"chunk_count\": 3, \"chunk_size\": 1000, \"encrypted_size\": 2584, \"original_size\": 2500, \"grants\": [{\"index\": 0, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 1, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 2, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2\", \"length\": 528, \"expires_at\": \"2027-01-15T08:05:00Z\"}], \"next_index\": null}",
+          "expect": "ok"
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "body": "",
+          "expect": "unexpected"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "stop",
+            "verdict": {
+              "kind": "api_for_file"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a late valid window answer after the version is pinned",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "body": "{\"transport\": \"object-download-v1\", \"file_id\": \"11111111-1111-4111-8111-111111111111\", \"object_version_id\": \"22222222-2222-4222-8222-222222222222\", \"chunk_count\": 3, \"chunk_size\": 1000, \"encrypted_size\": 2584, \"original_size\": 2500, \"grants\": [{\"index\": 0, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 1, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 2, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2\", \"length\": 528, \"expires_at\": \"2027-01-15T08:05:00Z\"}], \"next_index\": null}",
+          "expect": "ok"
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "body": "{\"transport\": \"object-download-v1\", \"file_id\": \"11111111-1111-4111-8111-111111111111\", \"object_version_id\": \"22222222-2222-4222-8222-222222222222\", \"chunk_count\": 3, \"chunk_size\": 1000, \"encrypted_size\": 2584, \"original_size\": 2500, \"grants\": [{\"index\": 0, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 1, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 2, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2\", \"length\": 528, \"expires_at\": \"2027-01-15T08:05:00Z\"}], \"next_index\": null}",
+          "expect": "unexpected"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "stop",
+            "verdict": {
+              "kind": "api_for_file"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

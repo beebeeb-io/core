@@ -45,9 +45,13 @@ pub mod classify;
 pub mod window;
 pub mod wire;
 
+/// Contract vectors and their interpreter (test-support only); see the module docs.
+#[cfg(any(test, feature = "test-support"))]
+pub mod vectors;
+
 pub use authority::{MAX_URL_LEN, Refusal, check_storage_url, redact, scrub};
-pub use classify::{ApiAnswer, Call, Outcome, Terminal, classify};
-pub use window::{DownloadPlanner, Geometry, PlanError, PlannerConfig, Poll, Verdict, Violation};
+pub use classify::{ApiAnswer, Call, Outcome, PinnedRetry, RetryDecision, Terminal, classify};
+pub use window::{DownloadPlanner, Geometry, PlanError, PlannerConfig, Poll, Verdict, Violation, WindowAnswer};
 pub use wire::{
     CAP_OBJECT_DOWNLOAD_V1, CAP_OBJECT_UPLOAD_V1, CAPABILITIES_HEADER, ChunkGrant, DISCOVERY_PATH, Discovery,
     DownloadGrantRequest, DownloadGrantResponse, StorageBucket, UploadCommitRequest, UploadCommitResponse,
@@ -75,23 +79,35 @@ pub enum Lookup {
 enum CacheState {
     Unknown,
     Known { discovery: Discovery, fetched_at_ms: i64 },
-    NotSupported,
+    NotSupported { at_ms: i64 },
 }
 
 /// Per-API-base discovery cache (R1.6: "the discovery cache is a hint, never
 /// proof that every node has the route"):
 ///
 /// * a good answer is reused for [`DISCOVERY_TTL_MS`];
-/// * [`Outcome::NotSupported`] (a JSON 404) is remembered for the life of the cache;
+/// * [`Outcome::NotSupported`] (a JSON 404) is remembered for [`DISCOVERY_TTL_MS`];
 /// * [`Outcome::UseApiNow`] is not remembered as "unsupported": the next lookup
-///   asks again, but only [`DISCOVERY_ATTEMPTS`] times in total, so a broken
-///   node costs one retry per command, not one per file.
+///   asks again, but only [`DISCOVERY_ATTEMPTS`] times within a trust period, so a
+///   broken node costs one retry per command, not one per file.
+///
+/// Nothing is remembered for longer than the trust period: a Mac that woke before
+/// its network, or a daemon started before the server was deployed, probes again
+/// ten minutes later instead of staying off the direct transport until it is
+/// restarted. The clock is injected; a clock that went backwards counts as expired.
 ///
 /// Keep one per `ApiClient` (per API base); a new command starts a new cache.
 #[derive(Debug)]
 pub struct DiscoveryCache {
     state: CacheState,
     failures: u8,
+    /// When the most recent failed attempt was recorded (meaningful while `failures > 0`).
+    last_failure_ms: i64,
+}
+
+/// Is something recorded at `at_ms` still inside the trust period at `now_ms`?
+fn within_trust(at_ms: i64, now_ms: i64) -> bool {
+    now_ms >= at_ms && now_ms.saturating_sub(at_ms) < DISCOVERY_TTL_MS
 }
 
 impl Default for DiscoveryCache {
@@ -105,21 +121,20 @@ impl DiscoveryCache {
         DiscoveryCache {
             state: CacheState::Unknown,
             failures: 0,
+            last_failure_ms: 0,
         }
     }
 
     pub fn lookup(&self, now_ms: i64) -> Lookup {
         match &self.state {
-            CacheState::NotSupported => Lookup::UseApi,
+            CacheState::NotSupported { at_ms } if within_trust(*at_ms, now_ms) => Lookup::UseApi,
             CacheState::Known {
                 discovery,
                 fetched_at_ms,
-            } if now_ms.saturating_sub(*fetched_at_ms) < DISCOVERY_TTL_MS && now_ms >= *fetched_at_ms => {
-                Lookup::Cached(discovery.clone())
-            }
-            // Unknown, expired, or a clock that went backwards: ask again,
-            // unless asking has already failed enough times.
-            _ if self.failures >= DISCOVERY_ATTEMPTS => Lookup::UseApi,
+            } if within_trust(*fetched_at_ms, now_ms) => Lookup::Cached(discovery.clone()),
+            // Unknown, expired, or a clock that went backwards: ask again, unless asking has
+            // already failed enough times within the last trust period.
+            _ if self.failures >= DISCOVERY_ATTEMPTS && within_trust(self.last_failure_ms, now_ms) => Lookup::UseApi,
             _ => Lookup::Fetch,
         }
     }
@@ -136,8 +151,15 @@ impl DiscoveryCache {
                     fetched_at_ms: now_ms,
                 };
             }
-            (Outcome::NotSupported, _) => self.state = CacheState::NotSupported,
-            _ => self.failures = self.failures.saturating_add(1),
+            (Outcome::NotSupported, _) => self.state = CacheState::NotSupported { at_ms: now_ms },
+            _ => {
+                // Failures older than the trust period are forgotten: this one starts a new count.
+                if self.failures > 0 && !within_trust(self.last_failure_ms, now_ms) {
+                    self.failures = 0;
+                }
+                self.failures = self.failures.saturating_add(1);
+                self.last_failure_ms = now_ms;
+            }
         }
     }
 }
@@ -173,11 +195,58 @@ mod tests {
     }
 
     #[test]
-    fn not_supported_is_remembered_for_the_process() {
+    fn not_supported_is_remembered_for_one_trust_period() {
+        let mut c = DiscoveryCache::new();
+        c.record(&Outcome::NotSupported, None, 1_000);
+        assert_eq!(c.lookup(1_000), Lookup::UseApi);
+        assert_eq!(c.lookup(1_000 + DISCOVERY_TTL_MS - 1), Lookup::UseApi);
+        // Then it asks again: the server may have been deployed since.
+        assert_eq!(c.lookup(1_000 + DISCOVERY_TTL_MS), Lookup::Fetch);
+        assert_eq!(
+            c.lookup(999),
+            Lookup::Fetch,
+            "a clock that went backwards does not extend it"
+        );
+        c.record(&Outcome::Proceed, Some(offers()), 1_000 + DISCOVERY_TTL_MS);
+        assert!(matches!(c.lookup(2_000 + DISCOVERY_TTL_MS), Lookup::Cached(d) if d.offers_download()));
+        // Still not supported on the next probe: remembered for another period.
         let mut c = DiscoveryCache::new();
         c.record(&Outcome::NotSupported, None, 0);
-        assert_eq!(c.lookup(0), Lookup::UseApi);
-        assert_eq!(c.lookup(10 * DISCOVERY_TTL_MS), Lookup::UseApi);
+        c.record(&Outcome::NotSupported, None, DISCOVERY_TTL_MS);
+        assert_eq!(c.lookup(DISCOVERY_TTL_MS + 1), Lookup::UseApi);
+    }
+
+    #[test]
+    fn a_cache_that_gave_up_asks_again_after_one_trust_period() {
+        let mut c = DiscoveryCache::new();
+        c.record(&Outcome::UseApiNow, None, 1_000);
+        c.record(&Outcome::UseApiNow, None, 2_000);
+        assert_eq!(c.lookup(2_001), Lookup::UseApi, "given up");
+        assert_eq!(c.lookup(2_000 + DISCOVERY_TTL_MS - 1), Lookup::UseApi);
+        assert_eq!(c.lookup(2_000 + DISCOVERY_TTL_MS), Lookup::Fetch, "a re-probe");
+        assert_eq!(
+            c.lookup(1_500),
+            Lookup::Fetch,
+            "a clock that went backwards does not keep it parked"
+        );
+        // The re-probe gets a fresh allowance, not the old count: one failure, then one more try.
+        let later = 2_000 + DISCOVERY_TTL_MS;
+        c.record(&Outcome::UseApiNow, None, later);
+        assert_eq!(c.lookup(later + 1), Lookup::Fetch);
+        c.record(&Outcome::UseApiNow, None, later + 1);
+        assert_eq!(c.lookup(later + 2), Lookup::UseApi, "two failures park it again");
+    }
+
+    #[test]
+    fn failures_further_apart_than_a_trust_period_do_not_add_up() {
+        let mut c = DiscoveryCache::new();
+        c.record(&Outcome::UseApiNow, None, 0);
+        c.record(&Outcome::UseApiNow, None, DISCOVERY_TTL_MS + 5);
+        assert_eq!(
+            c.lookup(DISCOVERY_TTL_MS + 6),
+            Lookup::Fetch,
+            "the first one had expired, so this is the first of two"
+        );
     }
 
     #[test]

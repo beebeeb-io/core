@@ -4284,6 +4284,603 @@ impl SignupCeremonyHandle {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Direct S3 transfers (task 2173): the client rules of `beebeeb_core::direct_transfer`
+// ---------------------------------------------------------------------------
+//
+// Thin wrappers. ALL logic lives in core; this section converts types. The app
+// keeps its own HTTP stack (URLSession / OkHttp) and asks these rules whether a
+// storage link may be followed, what an API answer means, and what to do next
+// (windows, renewals, fallbacks), exactly as the CLI, desktop and web do.
+//
+// A planner is one sequence's cursor (the `Mutex` is only UniFFI's Send+Sync
+// backstop): drive it from ONE place, and feed it `now_ms` (Unix milliseconds)
+// on every call. Errors carry stable string codes; no error text ever contains
+// a URL. A presigned URL is a bearer capability until it expires: do not log
+// `DirectChunkGrantDto.url`, use `direct_redact_url` / `direct_scrub_text`.
+
+use beebeeb_core::direct_transfer as dt;
+
+/// The contract's names and numbers, so no client re-types them.
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct DirectConstantsDto {
+    pub cap_object_download_v1: String,
+    pub cap_object_upload_v1: String,
+    pub capabilities_header: String,
+    pub discovery_path: String,
+    pub max_window: u32,
+    pub default_window: u32,
+    pub chunk_overhead: u32,
+}
+
+#[uniffi::export]
+pub fn direct_transfer_constants() -> DirectConstantsDto {
+    DirectConstantsDto {
+        cap_object_download_v1: dt::CAP_OBJECT_DOWNLOAD_V1.to_owned(),
+        cap_object_upload_v1: dt::CAP_OBJECT_UPLOAD_V1.to_owned(),
+        capabilities_header: dt::CAPABILITIES_HEADER.to_owned(),
+        discovery_path: dt::DISCOVERY_PATH.to_owned(),
+        max_window: dt::wire::MAX_WINDOW,
+        default_window: dt::wire::DEFAULT_WINDOW,
+        chunk_overhead: dt::wire::CHUNK_OVERHEAD as u32,
+    }
+}
+
+/// `/api/v1/files/{id}/download-grants` for `file_id`.
+#[uniffi::export]
+pub fn direct_download_grants_path(file_id: String) -> String {
+    dt::download_grants_path(&file_id)
+}
+
+/// Why a call into the direct-transfer rules failed. Every variant carries a
+/// stable `code`; none carries a URL.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum DirectTransferError {
+    /// A storage link was refused: `malformed`, `not_https`, `userinfo`,
+    /// `ip_literal`, `loopback`, `bad_host`, `port`, `host_not_listed`,
+    /// `bucket_not_listed`, `bad_path`.
+    #[error("the storage link was refused: {code}")]
+    LinkRefused { code: String },
+
+    /// The discovery body could not be decoded: `discovery_too_large`,
+    /// `discovery_malformed`.
+    #[error("the discovery answer could not be used: {code}")]
+    Discovery { code: String },
+
+    /// A call that does not fit the planner's state (a bug in the caller):
+    /// `not_in_flight`, `not_fetched`, `out_of_order`, `api_route_failure`.
+    #[error("the planner was driven out of order: {code}")]
+    Plan { code: String },
+
+    /// `call` was none of `discovery`, `download_grant`, `pinned_chunk`.
+    #[error("unknown call")]
+    UnknownCall,
+}
+
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct DirectStorageBucketDto {
+    pub host: String,
+    pub bucket: String,
+}
+
+/// The answer of `GET /api/v1/transfer/capabilities`.
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct DirectDiscoveryDto {
+    pub download: Vec<String>,
+    pub upload: Vec<String>,
+    pub storage_hosts: Vec<String>,
+    pub storage_buckets: Vec<DirectStorageBucketDto>,
+    pub max_window: Option<u32>,
+    pub url_ttl_seconds: Option<u64>,
+}
+
+impl From<dt::Discovery> for DirectDiscoveryDto {
+    fn from(d: dt::Discovery) -> Self {
+        Self {
+            download: d.download,
+            upload: d.upload,
+            storage_hosts: d.storage_hosts,
+            storage_buckets: d
+                .storage_buckets
+                .into_iter()
+                .map(|b| DirectStorageBucketDto {
+                    host: b.host,
+                    bucket: b.bucket,
+                })
+                .collect(),
+            max_window: d.max_window,
+            url_ttl_seconds: d.url_ttl_seconds,
+        }
+    }
+}
+
+impl From<DirectDiscoveryDto> for dt::Discovery {
+    fn from(d: DirectDiscoveryDto) -> Self {
+        Self {
+            download: d.download,
+            upload: d.upload,
+            storage_hosts: d.storage_hosts,
+            storage_buckets: d
+                .storage_buckets
+                .into_iter()
+                .map(|b| dt::StorageBucket {
+                    host: b.host,
+                    bucket: b.bucket,
+                })
+                .collect(),
+            max_window: d.max_window,
+            url_ttl_seconds: d.url_ttl_seconds,
+        }
+    }
+}
+
+/// Decode a discovery body. Unknown fields are ignored, missing lists are empty.
+#[uniffi::export]
+pub fn parse_direct_discovery(body: Vec<u8>) -> Result<DirectDiscoveryDto, DirectTransferError> {
+    dt::Discovery::from_json(&body)
+        .map(DirectDiscoveryDto::from)
+        .map_err(|e| DirectTransferError::Discovery {
+            code: match e {
+                dt::WireError::TooLarge(_) => "discovery_too_large",
+                dt::WireError::Malformed => "discovery_malformed",
+            }
+            .to_owned(),
+        })
+}
+
+/// Does the server offer direct downloads, and how many grants to ask per window.
+#[uniffi::export]
+pub fn direct_discovery_offers_download(discovery: DirectDiscoveryDto) -> bool {
+    dt::Discovery::from(discovery).offers_download()
+}
+
+/// May the app follow this storage link? `api_base` is the API origin in use.
+/// Throws `LinkRefused` with the refusal code; the message never contains the URL.
+#[uniffi::export]
+pub fn direct_check_storage_url(
+    url: String,
+    discovery: DirectDiscoveryDto,
+    api_base: String,
+) -> Result<(), DirectTransferError> {
+    dt::check_storage_url(&url, &dt::Discovery::from(discovery), &api_base).map_err(|r| {
+        DirectTransferError::LinkRefused {
+            code: r.code().to_owned(),
+        }
+    })
+}
+
+/// A URL for a log line: scheme and host only.
+#[uniffi::export]
+pub fn direct_redact_url(url: String) -> String {
+    dt::redact(&url)
+}
+
+/// Text that may contain URLs, made safe to print.
+#[uniffi::export]
+pub fn direct_scrub_text(text: String) -> String {
+    dt::scrub(&text)
+}
+
+/// What an API answer means.
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+pub enum DirectOutcomeDto {
+    /// 2xx: decode the body and go on.
+    Proceed,
+    /// Discovery only: this server has no direct transport; cache that.
+    NotSupported,
+    /// No direct transport right now: use the API for this file now.
+    UseApiNow,
+    /// This file is served over the API.
+    ApiForThisFile,
+    /// `version_unavailable`: discard and restart from fresh metadata.
+    Restart,
+    /// 429 / `replace_in_progress` / `commit_in_progress`: wait, then ask again.
+    Backoff { millis: u64 },
+    /// 401, 403 or a JSON 404: do not fall back.
+    Terminal { status: u16, error: Option<String> },
+    /// The pinned chunk route only: a failure that may pass (5xx, no answer); retry after the
+    /// bounded backoff of `direct_pinned_retry_decision`.
+    Retry,
+}
+
+impl DirectOutcomeDto {
+    fn from_core(o: &dt::Outcome) -> Self {
+        match o {
+            dt::Outcome::Proceed => Self::Proceed,
+            dt::Outcome::NotSupported => Self::NotSupported,
+            dt::Outcome::UseApiNow => Self::UseApiNow,
+            dt::Outcome::ApiForThisFile => Self::ApiForThisFile,
+            dt::Outcome::Restart => Self::Restart,
+            dt::Outcome::Backoff(d) => Self::Backoff {
+                millis: d.as_millis() as u64,
+            },
+            dt::Outcome::Terminal(t) => Self::Terminal {
+                status: t.status,
+                error: t.error.clone(),
+            },
+            dt::Outcome::Retry => Self::Retry,
+            // `Outcome` is non-exhaustive: a variant added later is the safe one.
+            _ => Self::UseApiNow,
+        }
+    }
+
+    fn to_core(&self) -> dt::Outcome {
+        match self {
+            Self::Proceed => dt::Outcome::Proceed,
+            Self::NotSupported => dt::Outcome::NotSupported,
+            Self::UseApiNow => dt::Outcome::UseApiNow,
+            Self::ApiForThisFile => dt::Outcome::ApiForThisFile,
+            Self::Restart => dt::Outcome::Restart,
+            Self::Backoff { millis } => dt::Outcome::Backoff(std::time::Duration::from_millis(*millis)),
+            Self::Terminal { status, error } => dt::Outcome::Terminal(dt::Terminal {
+                status: *status,
+                error: error.clone(),
+            }),
+            Self::Retry => dt::Outcome::Retry,
+        }
+    }
+}
+
+/// What to do after a failed attempt on the pinned per-chunk route.
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+pub enum DirectRetryDecisionDto {
+    /// Wait this long, then try again.
+    Wait { millis: u64 },
+    /// Stop: act on the outcome (restart, terminal) or hand the file to the API stream.
+    GiveUp,
+}
+
+/// The shared retry policy of the pinned per-chunk route (4 attempts, 150 s of waiting in all, a
+/// stated `Retry-After` kept, otherwise 1 s doubling). `outcome` is `classify_direct_answer`'s
+/// answer for `"pinned_chunk"`; `attempt` is the 1-based number of the attempt that just failed;
+/// `waited_ms` is the total waited so far.
+#[uniffi::export]
+pub fn direct_pinned_retry_decision(outcome: DirectOutcomeDto, attempt: u32, waited_ms: u64) -> DirectRetryDecisionDto {
+    match dt::PinnedRetry::default().decide(attempt, std::time::Duration::from_millis(waited_ms), &outcome.to_core()) {
+        dt::RetryDecision::Wait(d) => DirectRetryDecisionDto::Wait {
+            millis: d.as_millis() as u64,
+        },
+        dt::RetryDecision::GiveUp => DirectRetryDecisionDto::GiveUp,
+    }
+}
+
+/// Classify an API answer. `call` is `"discovery"`, `"download_grant"` or `"pinned_chunk"`; pass
+/// `status` 0 when there was no HTTP answer. `body` is whatever was read of the
+/// body (at most 64 KiB is looked at); `retry_after` is the raw header value.
+#[uniffi::export]
+pub fn classify_direct_answer(
+    call: String,
+    status: u16,
+    content_type: Option<String>,
+    body: Vec<u8>,
+    retry_after: Option<String>,
+) -> Result<DirectOutcomeDto, DirectTransferError> {
+    let call = dt::Call::from_code(&call).ok_or(DirectTransferError::UnknownCall)?;
+    let answer = dt::ApiAnswer::from_parts(status, content_type.as_deref(), &body, retry_after.as_deref());
+    Ok(DirectOutcomeDto::from_core(&dt::classify(call, &answer)))
+}
+
+/// `POST /api/v1/files/{id}/download-grants` body.
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct DirectGrantRequestDto {
+    pub object_version_id: Option<String>,
+    pub start_index: u32,
+    pub count: u32,
+    pub renewal: bool,
+}
+
+/// A presigned storage link: a bearer capability until it expires (it carries the signature in its
+/// query). It is an OBJECT, not a string, so that no generated `toString()` (Kotlin), `description`
+/// (Swift) or `print` can show it: its `Debug` and `Display` are the redacted form (scheme and host),
+/// and so is the derived `Debug`/`toString()` of every record that holds one. The only way to the
+/// link is [`DirectSignedUrl::raw`], by name, so it shows up in a review: pass it to the HTTP client
+/// and nowhere else.
+#[derive(uniffi::Object, PartialEq, Eq)]
+#[uniffi::export(Debug, Display)]
+pub struct DirectSignedUrl {
+    url: String,
+}
+
+impl DirectSignedUrl {
+    fn new(url: String) -> Arc<Self> {
+        Arc::new(Self { url })
+    }
+}
+
+impl std::fmt::Display for DirectSignedUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&dt::redact(&self.url))
+    }
+}
+
+impl std::fmt::Debug for DirectSignedUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DirectSignedUrl({})", dt::redact(&self.url))
+    }
+}
+
+#[uniffi::export]
+impl DirectSignedUrl {
+    /// The full presigned link, to hand to the HTTP client. Never log it.
+    pub fn raw(&self) -> String {
+        self.url.clone()
+    }
+
+    /// Scheme and host only: safe for a log line.
+    pub fn redacted(&self) -> String {
+        dt::redact(&self.url)
+    }
+}
+
+/// One presigned link. `url` is a bearer capability, and cannot be printed by accident: see
+/// [`DirectSignedUrl`].
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct DirectChunkGrantDto {
+    pub index: u32,
+    pub method: String,
+    pub url: Arc<DirectSignedUrl>,
+    pub length: u64,
+    pub expires_at: String,
+}
+
+/// How a file ends when it cannot go on directly.
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+pub enum DirectVerdictDto {
+    /// Discard any partial output and download the file again on the API path.
+    ApiForFile,
+    /// The pinned version changed: discard and restart from fresh metadata.
+    Restart,
+    /// An authorization answer: do not fall back.
+    Terminal { status: u16, error: Option<String> },
+    /// A chunk failed authentication from storage and from the API: a hard error.
+    Corrupt,
+}
+
+/// What the app must do now.
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+pub enum DirectPollDto {
+    /// `POST` this body to `direct_download_grants_path(file_id)` with the
+    /// capability header, then report the answer.
+    RequestWindow { request: DirectGrantRequestDto },
+    /// `GET grant.url` with a client that sends nothing else (no cookies, no
+    /// `Authorization`), redirects off; accept only `200` whose `Content-Length`
+    /// is `grant.length`.
+    Fetch { index: u32, grant: DirectChunkGrantDto },
+    /// `GET /api/v1/files/{id}/chunks/{index}?object_version_id=<pinned>`.
+    FetchViaApi { index: u32, object_version_id: String },
+    /// Nothing to start. `until_ms` is the next moment the planner can act by
+    /// itself; `None` means it waits for a request that is outstanding.
+    Wait { until_ms: Option<i64> },
+    /// Every chunk has been consumed.
+    Done,
+    /// Cannot go on directly.
+    Stop { verdict: DirectVerdictDto },
+}
+
+impl DirectPollDto {
+    fn from_core(p: &dt::Poll) -> Self {
+        match p {
+            dt::Poll::RequestWindow(r) => Self::RequestWindow {
+                request: DirectGrantRequestDto {
+                    object_version_id: r.object_version_id.clone(),
+                    start_index: r.start_index,
+                    count: r.count,
+                    renewal: r.renewal,
+                },
+            },
+            dt::Poll::Fetch { index, grant } => Self::Fetch {
+                index: *index,
+                grant: DirectChunkGrantDto {
+                    index: grant.index,
+                    method: grant.method.clone(),
+                    url: DirectSignedUrl::new(grant.url.clone()),
+                    length: grant.length,
+                    expires_at: grant.expires_at.clone(),
+                },
+            },
+            dt::Poll::FetchViaApi {
+                index,
+                object_version_id,
+            } => Self::FetchViaApi {
+                index: *index,
+                object_version_id: object_version_id.clone(),
+            },
+            dt::Poll::Wait { until_ms } => Self::Wait { until_ms: *until_ms },
+            dt::Poll::Done => Self::Done,
+            dt::Poll::Stop(v) => Self::Stop {
+                verdict: match v {
+                    dt::Verdict::ApiForFile => DirectVerdictDto::ApiForFile,
+                    dt::Verdict::Restart => DirectVerdictDto::Restart,
+                    dt::Verdict::Terminal(t) => DirectVerdictDto::Terminal {
+                        status: t.status,
+                        error: t.error.clone(),
+                    },
+                    dt::Verdict::Corrupt => DirectVerdictDto::Corrupt,
+                },
+            },
+        }
+    }
+}
+
+/// The version's geometry, once the first window was accepted.
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct DirectGeometryDto {
+    pub chunk_count: u32,
+    pub chunk_size: u64,
+    pub encrypted_size: u64,
+    pub original_size: u64,
+}
+
+/// The outcome of handing a window answer to the planner.
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+pub enum DirectWindowAnswerDto {
+    Accepted,
+    /// The body was not the contract's JSON; handled like any window the server
+    /// could not serve. Poll again.
+    Malformed,
+    /// The answer broke the contract (`transport`, `file_mismatch`,
+    /// `version_changed`, `geometry`, `grants`, `length`, `method`,
+    /// `authority_<refusal>`, `expiry`, `unexpected`). Poll again.
+    Refused {
+        code: String,
+    },
+}
+
+fn plan_error(e: dt::PlanError) -> DirectTransferError {
+    DirectTransferError::Plan {
+        code: e.code().to_owned(),
+    }
+}
+
+/// The download planner for ONE file: when to ask the API for a window of
+/// links, which chunk to fetch next (at most 4 in flight, in order), when to
+/// renew a link, and when a chunk goes to the pinned API route. It performs no
+/// I/O and holds no clock. See `DirectPollDto` for what each poll asks of you;
+/// decrypt chunks in order and report each with `consumed`, or `chunk_unauthentic`
+/// when one does not authenticate.
+#[derive(uniffi::Object)]
+pub struct DirectDownloadPlannerHandle {
+    inner: Mutex<dt::DownloadPlanner>,
+}
+
+#[uniffi::export]
+impl DirectDownloadPlannerHandle {
+    /// `discovery` is what `parse_direct_discovery` returned; `jitter_seed` any
+    /// integer (random in production).
+    #[uniffi::constructor]
+    pub fn new(discovery: DirectDiscoveryDto, api_base: String, file_id: String, jitter_seed: u64) -> Arc<Self> {
+        let discovery = dt::Discovery::from(discovery);
+        let config = dt::PlannerConfig::from_discovery(&discovery, jitter_seed);
+        Arc::new(Self {
+            inner: Mutex::new(dt::DownloadPlanner::new(config, discovery, &api_base, &file_id)),
+        })
+    }
+
+    /// What to do now. Call again after every report.
+    pub fn poll(&self, now_ms: i64) -> DirectPollDto {
+        DirectPollDto::from_core(&lock_tolerant(&self.inner).poll(now_ms))
+    }
+
+    /// The window answer for the outstanding request, as the raw response body.
+    pub fn window_answered(&self, body: Vec<u8>, now_ms: i64) -> DirectWindowAnswerDto {
+        match lock_tolerant(&self.inner).window_answered_bytes(&body, now_ms) {
+            dt::WindowAnswer::Accepted => DirectWindowAnswerDto::Accepted,
+            dt::WindowAnswer::Malformed => DirectWindowAnswerDto::Malformed,
+            dt::WindowAnswer::Refused(v) => DirectWindowAnswerDto::Refused {
+                code: v.code().to_owned(),
+            },
+        }
+    }
+
+    /// The window request failed; `outcome` is what `classify_direct_answer`
+    /// returned (or `UseApiNow` for a network error).
+    pub fn window_failed(&self, outcome: DirectOutcomeDto, now_ms: i64) {
+        lock_tolerant(&self.inner).window_failed(outcome.to_core(), now_ms);
+    }
+
+    /// A 2xx window response whose body could not be decoded at all.
+    pub fn window_malformed(&self) {
+        lock_tolerant(&self.inner).window_malformed();
+    }
+
+    /// Chunk `index` arrived whole (status 200 and the right length).
+    pub fn fetch_ok(&self, index: u32) -> Result<(), DirectTransferError> {
+        lock_tolerant(&self.inner).fetch_ok(index).map_err(plan_error)
+    }
+
+    /// The transfer of chunk `index` from storage failed (any non-200, a short
+    /// body, a wrong length, a network error, an expired link).
+    pub fn fetch_failed(&self, index: u32, now_ms: i64) -> Result<(), DirectTransferError> {
+        lock_tolerant(&self.inner)
+            .fetch_failed(index, now_ms)
+            .map_err(plan_error)
+    }
+
+    /// The pinned API route failed for chunk `index` after the caller's own retries.
+    pub fn api_fetch_failed(&self, index: u32) -> Result<(), DirectTransferError> {
+        lock_tolerant(&self.inner).api_fetch_failed(index).map_err(plan_error)
+    }
+
+    /// Chunk `index` arrived but did not authenticate when decrypted.
+    pub fn chunk_unauthentic(&self, index: u32) -> Result<(), DirectTransferError> {
+        lock_tolerant(&self.inner).chunk_unauthentic(index).map_err(plan_error)
+    }
+
+    /// Chunk `index` has been decrypted and written. Strictly in order.
+    pub fn consumed(&self, index: u32) -> Result<(), DirectTransferError> {
+        lock_tolerant(&self.inner).consumed(index).map_err(plan_error)
+    }
+
+    /// The version's geometry, once the first window was accepted.
+    pub fn geometry(&self) -> Option<DirectGeometryDto> {
+        lock_tolerant(&self.inner).geometry().map(|g| DirectGeometryDto {
+            chunk_count: g.chunk_count,
+            chunk_size: g.chunk_size,
+            encrypted_size: g.encrypted_size,
+            original_size: g.original_size,
+        })
+    }
+
+    /// The pinned `object_version_id`, once the first window was accepted.
+    pub fn pinned_version(&self) -> Option<String> {
+        lock_tolerant(&self.inner).pinned_version().map(str::to_owned)
+    }
+
+    /// Chunks decrypted and written so far.
+    pub fn consumed_count(&self) -> u32 {
+        lock_tolerant(&self.inner).consumed_count()
+    }
+
+    /// Chunk requests (storage or API) currently outstanding.
+    pub fn in_flight(&self) -> u32 {
+        lock_tolerant(&self.inner).in_flight() as u32
+    }
+}
+
+/// What to do about discovery right now.
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+pub enum DirectLookupDto {
+    /// Ask the server.
+    Fetch,
+    /// Use this answer (it may still say the server offers nothing).
+    Cached { discovery: DirectDiscoveryDto },
+    /// Do not ask; use the API.
+    UseApi,
+}
+
+/// How long a discovery answer is trusted (10 minutes), and whether to ask
+/// again. A JSON 404 and two failed attempts are each remembered for the same ten minutes, then the
+/// client probes again; within a trust period a failed attempt is retried once.
+#[derive(uniffi::Object)]
+pub struct DirectDiscoveryCacheHandle {
+    inner: Mutex<dt::DiscoveryCache>,
+}
+
+#[uniffi::export]
+impl DirectDiscoveryCacheHandle {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            inner: Mutex::new(dt::DiscoveryCache::new()),
+        })
+    }
+
+    pub fn lookup(&self, now_ms: i64) -> DirectLookupDto {
+        match lock_tolerant(&self.inner).lookup(now_ms) {
+            dt::Lookup::Fetch => DirectLookupDto::Fetch,
+            dt::Lookup::Cached(d) => DirectLookupDto::Cached { discovery: d.into() },
+            dt::Lookup::UseApi => DirectLookupDto::UseApi,
+        }
+    }
+
+    /// Record the result of a discovery call: the `classify_direct_answer`
+    /// outcome and the response body (or `None`).
+    pub fn record(&self, outcome: DirectOutcomeDto, body: Option<Vec<u8>>, now_ms: i64) {
+        let discovery = body.and_then(|b| dt::Discovery::from_json(&b).ok());
+        lock_tolerant(&self.inner).record(&outcome.to_core(), discovery, now_ms);
+    }
+}
+
 #[cfg(test)]
 mod search_index_binding_tests {
     use super::*;
@@ -4578,5 +5175,378 @@ mod folder_key_id_2133 {
         let id = folder_key_id(key).expect("a 32-byte key");
         let hex: String = id.iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(hex, "e07f022dd6a140210b19530af0a6b316ec4f06b3a2b086fdf0c03c761baf3b07");
+    }
+}
+
+#[cfg(test)]
+mod direct_transfer_binding_tests {
+    //! The cross-client contract vectors, run through the EXPORTED functions and handle of this
+    //! crate. The same file `beebeeb-core` runs through core directly: a binding that drifts
+    //! from core fails here.
+
+    use beebeeb_core::direct_transfer::vectors::{self, CacheSurface, PlannerSurface, Surface};
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    struct UniffiSurface;
+
+    struct UniffiPlanner(Arc<DirectDownloadPlannerHandle>);
+
+    struct UniffiCache(Arc<DirectDiscoveryCacheHandle>);
+
+    impl CacheSurface for UniffiCache {
+        fn lookup(&self, now_ms: i64) -> String {
+            match self.0.lookup(now_ms) {
+                DirectLookupDto::Fetch => "fetch",
+                DirectLookupDto::Cached { .. } => "cached",
+                DirectLookupDto::UseApi => "use_api",
+            }
+            .to_string()
+        }
+
+        fn record(&mut self, outcome: &Value, body: Option<&[u8]>, now_ms: i64) {
+            self.0.record(outcome_dto(outcome), body.map(<[u8]>::to_vec), now_ms);
+        }
+    }
+
+    fn discovery_dto(v: &Value) -> DirectDiscoveryDto {
+        let d: dt::Discovery = serde_json::from_value(v.clone()).expect("discovery");
+        d.into()
+    }
+
+    fn outcome_value(o: &DirectOutcomeDto) -> Value {
+        match o {
+            DirectOutcomeDto::Proceed => json!({"kind": "proceed"}),
+            DirectOutcomeDto::NotSupported => json!({"kind": "not_supported"}),
+            DirectOutcomeDto::UseApiNow => json!({"kind": "use_api_now"}),
+            DirectOutcomeDto::ApiForThisFile => json!({"kind": "api_for_this_file"}),
+            DirectOutcomeDto::Restart => json!({"kind": "restart"}),
+            DirectOutcomeDto::Backoff { millis } => json!({"kind": "backoff", "millis": millis}),
+            DirectOutcomeDto::Terminal { status, error } => {
+                json!({"kind": "terminal", "status": status, "error": error})
+            }
+            DirectOutcomeDto::Retry => json!({"kind": "retry"}),
+        }
+    }
+
+    fn outcome_dto(v: &Value) -> DirectOutcomeDto {
+        match v["kind"].as_str().unwrap() {
+            "proceed" => DirectOutcomeDto::Proceed,
+            "not_supported" => DirectOutcomeDto::NotSupported,
+            "use_api_now" => DirectOutcomeDto::UseApiNow,
+            "api_for_this_file" => DirectOutcomeDto::ApiForThisFile,
+            "restart" => DirectOutcomeDto::Restart,
+            "retry" => DirectOutcomeDto::Retry,
+            "backoff" => DirectOutcomeDto::Backoff {
+                millis: v["millis"].as_u64().unwrap(),
+            },
+            "terminal" => DirectOutcomeDto::Terminal {
+                status: v["status"].as_u64().unwrap() as u16,
+                error: v["error"].as_str().map(str::to_owned),
+            },
+            other => panic!("unknown outcome {other}"),
+        }
+    }
+
+    fn poll_value(p: DirectPollDto) -> Value {
+        match p {
+            DirectPollDto::RequestWindow { request } => json!({"kind": "request_window", "request": {
+                "object_version_id": request.object_version_id, "start_index": request.start_index,
+                "count": request.count, "renewal": request.renewal}}),
+            DirectPollDto::Fetch { index, grant } => {
+                json!({"kind": "fetch", "index": index, "url": grant.url.raw(), "length": grant.length})
+            }
+            DirectPollDto::FetchViaApi {
+                index,
+                object_version_id,
+            } => json!({"kind": "fetch_via_api", "index": index, "object_version_id": object_version_id}),
+            DirectPollDto::Wait { until_ms } => json!({"kind": "wait", "until_ms": until_ms}),
+            DirectPollDto::Done => json!({"kind": "done"}),
+            DirectPollDto::Stop { verdict } => {
+                let v = match verdict {
+                    DirectVerdictDto::ApiForFile => json!({"kind": "api_for_file"}),
+                    DirectVerdictDto::Restart => json!({"kind": "restart"}),
+                    DirectVerdictDto::Terminal { status, error } => {
+                        json!({"kind": "terminal", "status": status, "error": error})
+                    }
+                    DirectVerdictDto::Corrupt => json!({"kind": "corrupt"}),
+                };
+                json!({"kind": "stop", "verdict": v})
+            }
+        }
+    }
+
+    fn plan_code(e: DirectTransferError) -> String {
+        match e {
+            DirectTransferError::Plan { code } => code,
+            other => panic!("unexpected error {other:?}"),
+        }
+    }
+
+    impl Surface for UniffiSurface {
+        type Planner = UniffiPlanner;
+        type Cache = UniffiCache;
+
+        fn cache(&self) -> UniffiCache {
+            UniffiCache(DirectDiscoveryCacheHandle::new())
+        }
+
+        fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String> {
+            direct_check_storage_url(url.to_owned(), discovery_dto(discovery), api_base.to_owned()).map_err(|e| match e
+            {
+                DirectTransferError::LinkRefused { code } => code,
+                other => panic!("unexpected error {other:?}"),
+            })
+        }
+
+        fn classify(
+            &self,
+            call: &str,
+            status: u16,
+            content_type: Option<&str>,
+            body: &[u8],
+            retry_after: Option<&str>,
+        ) -> Value {
+            let outcome = classify_direct_answer(
+                call.to_owned(),
+                status,
+                content_type.map(str::to_owned),
+                body.to_vec(),
+                retry_after.map(str::to_owned),
+            )
+            .expect("known call");
+            outcome_value(&outcome)
+        }
+
+        fn redact(&self, input: &str) -> String {
+            direct_redact_url(input.to_owned())
+        }
+
+        fn pinned_retry(&self, outcome: &Value, attempt: u32, waited_ms: u64) -> Value {
+            match direct_pinned_retry_decision(outcome_dto(outcome), attempt, waited_ms) {
+                DirectRetryDecisionDto::Wait { millis } => json!({"kind": "wait", "millis": millis}),
+                DirectRetryDecisionDto::GiveUp => json!({"kind": "give_up"}),
+            }
+        }
+
+        fn scrub(&self, input: &str) -> String {
+            direct_scrub_text(input.to_owned())
+        }
+
+        fn chunk_length(&self, chunk_count: u32, chunk_size: u64, encrypted_size: u64, index: u32) -> Option<u64> {
+            // Not exported on its own: reached through the planner's length check. Core's value is the contract.
+            dt::Geometry {
+                chunk_count,
+                chunk_size,
+                encrypted_size,
+                original_size: 0,
+            }
+            .chunk_length(index)
+        }
+
+        fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> UniffiPlanner {
+            UniffiPlanner(DirectDownloadPlannerHandle::new(
+                discovery_dto(discovery),
+                api_base.to_owned(),
+                file_id.to_owned(),
+                seed,
+            ))
+        }
+    }
+
+    impl PlannerSurface for UniffiPlanner {
+        fn poll(&mut self, now_ms: i64) -> Value {
+            poll_value(self.0.poll(now_ms))
+        }
+
+        fn window_answered(&mut self, body: &[u8], now_ms: i64) -> Result<(), String> {
+            match self.0.window_answered(body.to_vec(), now_ms) {
+                DirectWindowAnswerDto::Accepted => Ok(()),
+                DirectWindowAnswerDto::Malformed => Err("malformed".to_owned()),
+                DirectWindowAnswerDto::Refused { code } => Err(code),
+            }
+        }
+
+        fn window_failed(&mut self, outcome: &Value, now_ms: i64) {
+            self.0.window_failed(outcome_dto(outcome), now_ms);
+        }
+
+        fn window_malformed(&mut self) {
+            self.0.window_malformed();
+        }
+
+        fn fetch_ok(&mut self, index: u32) -> Result<(), String> {
+            self.0.fetch_ok(index).map_err(plan_code)
+        }
+
+        fn fetch_failed(&mut self, index: u32, now_ms: i64) -> Result<(), String> {
+            self.0.fetch_failed(index, now_ms).map_err(plan_code)
+        }
+
+        fn api_fetch_failed(&mut self, index: u32) -> Result<(), String> {
+            self.0.api_fetch_failed(index).map_err(plan_code)
+        }
+
+        fn chunk_unauthentic(&mut self, index: u32) -> Result<(), String> {
+            self.0.chunk_unauthentic(index).map_err(plan_code)
+        }
+
+        fn consumed(&mut self, index: u32) -> Result<(), String> {
+            self.0.consumed(index).map_err(plan_code)
+        }
+
+        fn inspect(&self) -> Value {
+            json!({
+                "geometry": self.0.geometry().map(|g| json!({
+                    "chunk_count": g.chunk_count, "chunk_size": g.chunk_size,
+                    "encrypted_size": g.encrypted_size, "original_size": g.original_size})),
+                "pinned_version": self.0.pinned_version(),
+                "consumed": self.0.consumed_count(),
+                "in_flight": self.0.in_flight(),
+            })
+        }
+    }
+
+    #[test]
+    fn the_exported_surface_passes_every_row_of_the_vectors() {
+        let report = vectors::run_all(&UniffiSurface);
+        assert_eq!(
+            report,
+            vectors::expected_report(),
+            "a section that did not run is a failure"
+        );
+    }
+
+    #[test]
+    fn constants_discovery_and_the_cache_follow_core() {
+        let c = direct_transfer_constants();
+        assert_eq!(c.cap_object_download_v1, "object-download-v1");
+        assert_eq!(c.capabilities_header, "X-Beebeeb-Capabilities");
+        assert_eq!((c.max_window, c.default_window, c.chunk_overhead), (32, 8, 28));
+        assert_eq!(
+            direct_download_grants_path("f".to_owned()),
+            "/api/v1/files/f/download-grants"
+        );
+
+        let body =
+            br#"{"download":["object-download-v1"],"upload":null,"storage_hosts":["s3.storage.test"],"future":1}"#;
+        let d = parse_direct_discovery(body.to_vec()).unwrap();
+        assert!(direct_discovery_offers_download(d.clone()) && d.upload.is_empty());
+        assert!(matches!(
+            parse_direct_discovery(b"[]".to_vec()),
+            Err(DirectTransferError::Discovery { code }) if code == "discovery_malformed"
+        ));
+        assert!(matches!(
+            parse_direct_discovery(vec![b' '; dt::wire::MAX_DISCOVERY_BYTES + 1]),
+            Err(DirectTransferError::Discovery { code }) if code == "discovery_too_large"
+        ));
+
+        let cache = DirectDiscoveryCacheHandle::new();
+        assert_eq!(cache.lookup(0), DirectLookupDto::Fetch);
+        cache.record(DirectOutcomeDto::Proceed, Some(body.to_vec()), 1_000);
+        assert!(matches!(cache.lookup(1_000), DirectLookupDto::Cached { .. }));
+        assert_eq!(
+            cache.lookup(1_000 + 10 * 60 * 1000),
+            DirectLookupDto::Fetch,
+            "trusted for 10 minutes"
+        );
+        let gone = DirectDiscoveryCacheHandle::new();
+        gone.record(DirectOutcomeDto::NotSupported, None, 0);
+        assert_eq!(gone.lookup(1), DirectLookupDto::UseApi, "NotSupported is remembered");
+    }
+
+    #[test]
+    fn the_jitter_seed_reaches_the_planner() {
+        // The same failure, on planners seeded differently, waits different times (equal jitter);
+        // the same seed repeats. A binding that drops the seed would give every client one schedule.
+        let vectors = vectors::vectors();
+        let t0 = vectors["t0_ms"].as_i64().unwrap();
+        let file_id = vectors["file_id"].as_str().unwrap().to_owned();
+        let wait_after_a_failure = |seed: u64| -> i64 {
+            let p = DirectDownloadPlannerHandle::new(
+                discovery_dto(&vectors["discoveries"]["std"]),
+                "https://api.beebeeb.test".to_owned(),
+                file_id.clone(),
+                seed,
+            );
+            p.poll(t0);
+            let window = vectors["planner"][0]["steps"][2]["response"].clone();
+            assert_eq!(
+                p.window_answered(serde_json::to_vec(&window).unwrap(), t0),
+                DirectWindowAnswerDto::Accepted
+            );
+            for _ in 0..3 {
+                p.poll(t0);
+            }
+            p.fetch_failed(0, t0).unwrap();
+            match p.poll(t0) {
+                DirectPollDto::Wait { until_ms: Some(t) } => t,
+                other => panic!("expected a wait for the renewal, got {other:?}"),
+            }
+        };
+        let waits: Vec<i64> = (1..=6).map(wait_after_a_failure).collect();
+        assert!(waits.iter().any(|w| *w != waits[0]), "{waits:?}");
+        assert_eq!(wait_after_a_failure(3), wait_after_a_failure(3));
+    }
+
+    #[test]
+    fn unknown_calls_and_driving_errors_are_typed() {
+        assert!(matches!(
+            classify_direct_answer("nope".to_owned(), 200, None, vec![], None),
+            Err(DirectTransferError::UnknownCall)
+        ));
+        let p = DirectDownloadPlannerHandle::new(
+            DirectDiscoveryDto::from(dt::Discovery::default()),
+            "https://api.beebeeb.test".to_owned(),
+            "f".to_owned(),
+            1,
+        );
+        assert!(matches!(p.fetch_ok(0), Err(DirectTransferError::Plan { code }) if code == "not_in_flight"));
+        assert!(
+            matches!(p.consumed(0), Err(DirectTransferError::Plan { code }) if code == "out_of_order" || code == "not_fetched")
+        );
+    }
+
+    #[test]
+    fn a_grant_never_prints_its_signature() {
+        let link = "https://s3.storage.test/bb-01/k?X-Amz-Signature=SECRETSIG";
+        let grant = DirectChunkGrantDto {
+            index: 0,
+            method: "GET".to_owned(),
+            url: DirectSignedUrl::new(link.to_owned()),
+            length: 1,
+            expires_at: "2027-01-15T08:05:00Z".to_owned(),
+        };
+        // Everything a generated binding can print: the record's Debug (what Kotlin's data-class
+        // `toString()` and Swift's reflection reach through the object), the object's own Debug and
+        // Display (what the exported `toString()` / `description` call), and the enum around it.
+        let shown = format!(
+            "{grant:?} {:?} {} {:?} {}",
+            DirectPollDto::Fetch {
+                index: 0,
+                grant: grant.clone()
+            },
+            grant.url,
+            grant.url,
+            grant.url.redacted(),
+        );
+        assert!(!shown.contains("SECRETSIG") && !shown.contains("X-Amz"), "{shown}");
+        assert!(
+            shown.contains("s3.storage.test"),
+            "the host is still visible for a log line: {shown}"
+        );
+        // The one way to the link is explicit, by name.
+        assert_eq!(grant.url.raw(), link);
+        let err = direct_check_storage_url(
+            "https://evil.test@s3.storage.test/bb-01/k?X-Amz-Signature=SECRETSIG".to_owned(),
+            DirectDiscoveryDto::from(dt::Discovery::default()),
+            "https://api.beebeeb.test".to_owned(),
+        )
+        .unwrap_err();
+        assert!(
+            !err.to_string().contains("SECRETSIG") && !err.to_string().contains("evil.test"),
+            "{err}"
+        );
     }
 }
