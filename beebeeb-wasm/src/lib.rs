@@ -2209,8 +2209,10 @@ pub fn scrub_text(text: &str) -> String {
 /// What an API answer means, as `{ kind, millis?, status?, error? }` with `kind`
 /// one of `proceed`, `not_supported`, `use_api_now`, `api_for_this_file`,
 /// `restart`, `backoff` (with `millis`), `terminal` (with `status`, `error`),
-/// `retry` (the pinned chunk route only: a failure that may pass).
-/// `call` is `"discovery"`, `"download_grant"` or `"pinned_chunk"`; pass `status` 0 when there was
+/// `retry` (the pinned chunk route and the upload calls: a failure that may pass), `regrant`
+/// (`upload_commit` only: the staged chunk is not there, ask for a new link and send it again).
+/// `call` is `"discovery"`, `"download_grant"`, `"pinned_chunk"`, `"upload_grant"` or
+/// `"upload_commit"`; pass `status` 0 when there was
 /// no HTTP answer. `body` is whatever was read of the body (at most 64 KiB is
 /// looked at); `retry_after` is the raw header value.
 #[wasm_bindgen(js_name = classifyDirectAnswer)]
@@ -2233,9 +2235,16 @@ enum DirectOutcomeJs {
     UseApiNow,
     ApiForThisFile,
     Restart,
-    Backoff { millis: f64 },
-    Terminal { status: u16, error: Option<String> },
+    Backoff {
+        millis: f64,
+    },
+    Terminal {
+        status: u16,
+        error: Option<String>,
+    },
     Retry,
+    /// `upload_commit` only: the staged chunk is not there; ask for a new link and send it again.
+    Regrant,
 }
 
 impl DirectOutcomeJs {
@@ -2254,6 +2263,7 @@ impl DirectOutcomeJs {
                 error: t.error.clone(),
             },
             dt::Outcome::Retry => Self::Retry,
+            dt::Outcome::Regrant => Self::Regrant,
             // `Outcome` is non-exhaustive: a variant added later is the safe one.
             _ => Self::UseApiNow,
         }
@@ -2272,6 +2282,7 @@ impl DirectOutcomeJs {
                 error: error.clone(),
             }),
             Self::Retry => dt::Outcome::Retry,
+            Self::Regrant => dt::Outcome::Regrant,
         }
     }
 }

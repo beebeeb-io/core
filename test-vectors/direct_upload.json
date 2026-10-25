@@ -1,0 +1,1238 @@
+{
+  "_provenance": "Task 2173 vectors for beebeeb_core::direct_transfer::upload: the grant and commit answer parsers, the init transport rule and the per-chunk retry policy. Hand-authored from the spec (R1.1, R1.6, R2.4, R2.6, R3.4) and the merged server's real bodies (#331, routes/direct_transfer.rs). Run by the core tests; the WASM and UniFFI exports take the parsers and the policy when web/mobile ship uploads.",
+  "version": 1,
+  "api_bases": {
+    "prod": "https://api.beebeeb.test",
+    "dev": "http://localhost:3001"
+  },
+  "discoveries": {
+    "std": {
+      "download": [
+        "object-download-v1"
+      ],
+      "upload": [
+        "object-upload-v1"
+      ],
+      "storage_hosts": [
+        "s3.storage.test"
+      ],
+      "storage_buckets": [
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-01"
+        }
+      ],
+      "max_window": 32,
+      "url_ttl_seconds": 300
+    },
+    "dev": {
+      "download": [],
+      "upload": [
+        "object-upload-v1"
+      ],
+      "storage_hosts": [
+        "localhost:9000"
+      ],
+      "storage_buckets": [
+        {
+          "host": "localhost:9000",
+          "bucket": "bb-dev"
+        }
+      ],
+      "max_window": 32,
+      "url_ttl_seconds": 300
+    }
+  },
+  "grant_answers": [
+    {
+      "name": "the server's grant",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "link",
+        "index": 3,
+        "content_type": "application/octet-stream"
+      },
+      "source": "server ed7ae138 routes/direct_transfer.rs:870 (upload_grant); tests/direct_upload_2173.rs:402-403"
+    },
+    {
+      "name": "a skipped chunk carries no link (R1.1)",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"skipped\":true}",
+      "expect": {
+        "kind": "skipped"
+      },
+      "source": "server ed7ae138 routes/direct_transfer.rs:673; tests/direct_upload_2173.rs:505"
+    },
+    {
+      "name": "a header name in another case",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"Content-Type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "link",
+        "index": 3,
+        "content_type": "application/octet-stream"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "dev: http to the local MinIO",
+      "index": 3,
+      "api_base": "dev",
+      "discovery": "dev",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"http://localhost:9000/bb-dev/k?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "link",
+        "index": 3,
+        "content_type": "application/octet-stream"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "not json",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{nope",
+      "expect": {
+        "kind": "violation",
+        "code": "malformed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "an array",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "[]",
+      "expect": {
+        "kind": "violation",
+        "code": "malformed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "an empty object",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{}",
+      "expect": {
+        "kind": "violation",
+        "code": "malformed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "another transport",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v2\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "transport"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "the api transport",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"api\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "transport"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "another chunk",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":4,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "index"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "a GET",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"GET\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "method"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "no method",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "method"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "no url",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "malformed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "an extra header",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\",\"x-amz-acl\":\"public-read\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "headers"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "another content type",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"text/html\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "headers"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "an authorization header",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"authorization\":\"Bearer x\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "headers"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "no headers",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "headers"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "an unreadable expiry",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"tomorrow\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "expiry"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "no expiry",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"}}",
+      "expect": {
+        "kind": "violation",
+        "code": "expiry"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "a host that is not listed",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://evil.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "authority_host_not_listed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "a bucket that is not listed",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/other/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "authority_bucket_not_listed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "plain http to a public host",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"http://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "authority_not_https"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "userinfo in the link",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://evil@s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "authority_userinfo"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "an IP literal",
+      "index": 3,
+      "api_base": "prod",
+      "discovery": "std",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://203.0.113.9/bb-01/k?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "expect": {
+        "kind": "violation",
+        "code": "authority_ip_literal"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    }
+  ],
+  "commit_answers": [
+    {
+      "name": "the server's commit",
+      "index": 3,
+      "size": 4194332,
+      "body": "{\"index\":3,\"size\":4194332,\"skipped\":false,\"object_key\":\"tenants/t/files/f/versions/v/3.bin\"}",
+      "expect": {
+        "kind": "committed",
+        "skipped": false
+      },
+      "source": "server ed7ae138 routes/direct_transfer.rs:1104 (commit_locked); tests/direct_upload_2173.rs:472"
+    },
+    {
+      "name": "a repeated commit is skipped (R1.1)",
+      "index": 3,
+      "size": 4194332,
+      "body": "{\"index\":3,\"size\":4194332,\"skipped\":true,\"object_key\":\"tenants/t/files/f/versions/v/3.bin\"}",
+      "expect": {
+        "kind": "committed",
+        "skipped": true
+      },
+      "source": "server ed7ae138 routes/direct_transfer.rs:974-975 (skipped_commit); tests/direct_upload_2173.rs:496"
+    },
+    {
+      "name": "no skipped field",
+      "index": 3,
+      "size": 4194332,
+      "body": "{\"index\":3,\"size\":4194332}",
+      "expect": {
+        "kind": "committed",
+        "skipped": false
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "another chunk",
+      "index": 3,
+      "size": 4194332,
+      "body": "{\"index\":4,\"size\":4194332,\"skipped\":false}",
+      "expect": {
+        "kind": "violation",
+        "code": "index"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "another size",
+      "index": 3,
+      "size": 4194332,
+      "body": "{\"index\":3,\"size\":4194331,\"skipped\":false}",
+      "expect": {
+        "kind": "violation",
+        "code": "size"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "not json",
+      "index": 3,
+      "size": 4194332,
+      "body": "{nope",
+      "expect": {
+        "kind": "violation",
+        "code": "malformed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "an empty object",
+      "index": 3,
+      "size": 4194332,
+      "body": "{}",
+      "expect": {
+        "kind": "violation",
+        "code": "malformed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    },
+    {
+      "name": "an array",
+      "index": 3,
+      "size": 4194332,
+      "body": "[]",
+      "expect": {
+        "kind": "violation",
+        "code": "malformed"
+      },
+      "source": "synthetic: a server (or a proxy) that breaks the contract; the client must refuse it"
+    }
+  ],
+  "constants": {
+    "max_grants_per_chunk": 4,
+    "max_grants_per_chunk_source": "server ed7ae138 beebeeb-api/src/direct_transfer.rs:400 (MAX_GRANTS_PER_CHUNK), enforced at routes/direct_transfer.rs:745; tests/direct_upload_2173.rs:1475 (the fifth grant is a 429, x-ratelimit-limit 4)",
+    "content_type": "application/octet-stream",
+    "content_type_source": "server ed7ae138 beebeeb-api/src/direct_transfer.rs:393 (CHUNK_CONTENT_TYPE), routes/direct_transfer.rs:874; tests/direct_upload_2173.rs:403"
+  },
+  "init_transport": [
+    {
+      "name": "the server selected direct",
+      "field": "object-upload-v1",
+      "direct": true
+    },
+    {
+      "name": "no transport field: today's chunk PUT route",
+      "field": null,
+      "direct": false
+    },
+    {
+      "name": "any other value: today's chunk PUT route",
+      "field": "api",
+      "direct": false
+    },
+    {
+      "name": "a transport nobody asked for",
+      "field": "object-upload-v2",
+      "direct": false
+    },
+    {
+      "name": "another case",
+      "field": "Object-Upload-V1",
+      "direct": false
+    }
+  ],
+  "policy": [
+    {
+      "name": "a PUT that fails is regranted with a doubling wait, and the fourth link is the last",
+      "steps": [
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "put",
+            "status": 403
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 1000,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "put",
+            "status": 500
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 2000,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "put",
+            "status": 0
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 4000,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "may_ask",
+          "expect": false
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "put",
+            "status": 403
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a commit that is busy waits the stated time, then again, and is not tied to the grants",
+      "steps": [
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 5000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 5000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 2000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 3000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 3000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "may_ask",
+          "expect": true
+        }
+      ]
+    },
+    {
+      "name": "a chunk that was not stored is granted again at once",
+      "steps": [
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "regrant"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 0,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "may_ask",
+          "expect": false
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "regrant"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a grant that is rate limited waits what the server says, within the budget",
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 60000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 60000,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 60000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 60000,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 60000
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "the budget is spent up to and including its last millisecond",
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 90000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 90000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 60000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 60000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 1
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a grant that is unwell is asked for again",
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 1000,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 3000
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 3000,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 4000,
+            "call": "upload_grant"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a grant answer of 'api_for_this_file' means this session cannot go direct",
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "api_for_this_file"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a commit answer of 'api_for_this_file' means this session cannot go direct",
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "api_for_this_file"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a grant answer of 'use_api_now' means this session cannot go direct",
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "use_api_now"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a commit answer of 'use_api_now' means this session cannot go direct",
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "use_api_now"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a grant answer of 'not_supported' means this session cannot go direct",
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "not_supported"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a commit answer of 'not_supported' means this session cannot go direct",
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "not_supported"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a grant answer of 'restart' means this session cannot go direct",
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "restart"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a commit answer of 'restart' means this session cannot go direct",
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "restart"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "an authorization answer on a grant is terminal",
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "terminal",
+              "status": 403,
+              "error": "forbidden"
+            }
+          },
+          "expect": {
+            "kind": "terminal",
+            "status": 403,
+            "error": "forbidden"
+          }
+        }
+      ]
+    },
+    {
+      "name": "an authorization answer on a commit is terminal",
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "terminal",
+              "status": 403,
+              "error": "forbidden"
+            }
+          },
+          "expect": {
+            "kind": "terminal",
+            "status": 403,
+            "error": "forbidden"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a session that is gone is terminal for the caller's recovery",
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "grant",
+            "outcome": {
+              "kind": "terminal",
+              "status": 404,
+              "error": "not found"
+            }
+          },
+          "expect": {
+            "kind": "terminal",
+            "status": 404,
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "name": "eight failures are the most it rides out, however short the waits",
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 0
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 0,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 0
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 0,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 0
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 0,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 0
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 0,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 0
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 0,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 0
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 0,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 0
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 0,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "backoff",
+              "millis": 0
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a doubling wait is also bounded by the budget: the seventh failure still fits, the eighth does not",
+      "steps": [
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 1000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 2000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 4000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 8000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 16000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 32000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 64000,
+            "call": "upload_commit"
+          }
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "commit",
+            "outcome": {
+              "kind": "retry"
+            }
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ]
+    }
+  ]
+}

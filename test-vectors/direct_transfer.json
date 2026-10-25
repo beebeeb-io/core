@@ -1234,6 +1234,628 @@
       "expect": {
         "kind": "api_for_this_file"
       }
+    },
+    {
+      "name": "upload grant 200",
+      "call": "upload_grant",
+      "status": 200,
+      "content_type": "application/json",
+      "body": "{\"transport\":\"object-upload-v1\",\"index\":3,\"method\":\"PUT\",\"url\":\"https://s3.storage.test/bb-01/tenants/t/files/f/versions/v/staging/3/g.bin?X-Amz-Signature=SIG\",\"headers\":{\"content-type\":\"application/octet-stream\"},\"expires_at\":\"2027-01-15T08:05:00Z\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "proceed"
+      },
+      "source": "routes/direct_transfer.rs:870 (upload_grant); tests/direct_upload_2173.rs:402-403"
+    },
+    {
+      "name": "upload grant 401",
+      "call": "upload_grant",
+      "status": 401,
+      "content_type": "application/json",
+      "body": "{\"error\":\"unauthorized\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 401,
+        "error": "unauthorized"
+      },
+      "source": "error.rs:1012 (ApiError::Unauthorized)"
+    },
+    {
+      "name": "upload grant 403",
+      "call": "upload_grant",
+      "status": 403,
+      "content_type": "application/json",
+      "body": "{\"error\":\"forbidden\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 403,
+        "error": "forbidden"
+      },
+      "source": "error.rs:1013 (ApiError::Forbidden)"
+    },
+    {
+      "name": "upload grant JSON 404: the session is gone",
+      "call": "upload_grant",
+      "status": 404,
+      "content_type": "application/json",
+      "body": "{\"error\":\"not found\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 404,
+        "error": "not found"
+      },
+      "source": "error.rs:1008 (ApiError::NotFound: the session is not the caller's or is gone); tests/direct_upload_2173.rs:360"
+    },
+    {
+      "name": "upload grant bare 404: a node without the route",
+      "call": "upload_grant",
+      "status": 404,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "no handler sends it: axum's unknown-route fallback (spec R1.6), a node without the route"
+    },
+    {
+      "name": "upload grant HTML 404",
+      "call": "upload_grant",
+      "status": 404,
+      "content_type": "text/html; charset=utf-8",
+      "body": "<h1>Not Found</h1>",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "no handler sends it: a front proxy's page (spec R1.6)"
+    },
+    {
+      "name": "upload grant 405",
+      "call": "upload_grant",
+      "status": 405,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "no handler sends it: axum's method-not-allowed fallback, empty body (spec R1.6)"
+    },
+    {
+      "name": "upload grant 409 direct_unavailable: this session cannot go direct",
+      "call": "upload_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"direct_unavailable\",\"reason\":\"disabled\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "routes/direct_transfer.rs:55-63 (direct_unavailable); tests/direct_upload_2173.rs:982-1016 (the reasons)"
+    },
+    {
+      "name": "upload grant 409 transport_mismatch",
+      "call": "upload_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"transport_mismatch\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "routes/direct_transfer.rs:572 + error.rs:1014 (ApiError::Conflict); tests/direct_upload_2173.rs:344"
+    },
+    {
+      "name": "upload grant 409 with any other code",
+      "call": "upload_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"something the server may say tomorrow\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "synthetic: a code no handler sends today (spec R1.6: an unknown 409 is the API's to judge)"
+    },
+    {
+      "name": "upload grant bare 409",
+      "call": "upload_grant",
+      "status": 409,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "synthetic: a 409 with no body (a proxy); spec R1.6"
+    },
+    {
+      "name": "upload grant 409 commit_in_progress: wait and ask again",
+      "call": "upload_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      },
+      "source": "routes/direct_transfer.rs:886-888 (commit_in_progress); tests/direct_upload_2173.rs:1427"
+    },
+    {
+      "name": "upload grant 409 commit_in_progress keeps a stated wait",
+      "call": "upload_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": "3",
+      "expect": {
+        "kind": "backoff",
+        "millis": 3000
+      },
+      "source": "routes/direct_transfer.rs:886-888 (commit_in_progress); tests/direct_upload_2173.rs:1427 (the header is the client-side case: the server sends none today)"
+    },
+    {
+      "name": "upload grant 429 with the real limiter body",
+      "call": "upload_grant",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"rate_limited\",\"message\":\"Too many requests. Try again in 60 seconds.\",\"retry_after\":60}",
+      "retry_after": "60",
+      "expect": {
+        "kind": "backoff",
+        "millis": 60000
+      },
+      "source": "rate_limit.rs:2028-2037 (too_many_requests: body and Retry-After); tests/direct_upload_2173.rs:1011 (budget), 1475-1477 (the fifth grant), 1530 (staged bytes full)"
+    },
+    {
+      "name": "upload grant 429 states more than a client will wait",
+      "call": "upload_grant",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"rate_limited\",\"message\":\"Too many requests. Try again in 300 seconds.\",\"retry_after\":300}",
+      "retry_after": "300",
+      "expect": {
+        "kind": "backoff",
+        "millis": 120000
+      },
+      "source": "rate_limit.rs:2028-2037 (too_many_requests: body and Retry-After); tests/direct_upload_2173.rs:1011 (budget), 1475-1477 (the fifth grant), 1530 (staged bytes full) (the per-chunk grant cap states the link's remaining life)"
+    },
+    {
+      "name": "upload grant 400: a size the geometry does not allow",
+      "call": "upload_grant",
+      "status": 400,
+      "content_type": "application/json",
+      "body": "{\"error\":\"size must be 4194332 bytes for chunk 3\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "routes/direct_transfer.rs:601 (size) + error.rs:1010 (ApiError::BadRequest)"
+    },
+    {
+      "name": "upload grant 400: the session is not writable",
+      "call": "upload_grant",
+      "status": 400,
+      "content_type": "application/json",
+      "body": "{\"error\":\"upload session is not writable: expired\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "routes/direct_transfer.rs:579 + error.rs:1010; the caller's session recovery reads this text before the classifier (CLI is_upload_session_gone)"
+    },
+    {
+      "name": "upload grant 413 quota",
+      "call": "upload_grant",
+      "status": 413,
+      "content_type": "application/json",
+      "body": "{\"error\":\"quota_exceeded\",\"limit_bytes\":5368709120,\"used_bytes\":5368709000,\"is_trial_cap\":false}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "error.rs:603-632 (ApiError::QuotaExceeded: error, limit_bytes, used_bytes, is_trial_cap)"
+    },
+    {
+      "name": "upload grant 500 may pass",
+      "call": "upload_grant",
+      "status": 500,
+      "content_type": "application/json",
+      "body": "{\"error\":\"Something went wrong.\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "error.rs:1025-1044 (ApiError::Internal: 'Something went wrong.')"
+    },
+    {
+      "name": "upload grant 502 may pass",
+      "call": "upload_grant",
+      "status": 502,
+      "content_type": "text/html",
+      "body": "<html>Bad Gateway</html>",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "no handler sends it: an edge proxy's page"
+    },
+    {
+      "name": "upload grant 503 from storage, no Retry-After",
+      "call": "upload_grant",
+      "status": 503,
+      "content_type": "application/json",
+      "body": "{\"error\":\"File could not be saved. Our storage is having trouble — please try again.\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "error.rs:1075 (ApiError::Storage -> 503, no Retry-After) + routes/direct_transfer.rs:889 (storage_failed)"
+    },
+    {
+      "name": "upload grant 503 states its wait",
+      "call": "upload_grant",
+      "status": 503,
+      "content_type": "application/json",
+      "body": "{\"error\":\"statement_timeout\",\"message\":\"This took too long, so the server stopped it. Try again in a moment.\"}",
+      "retry_after": "5",
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      },
+      "source": "error.rs:970-984 (a statement_timeout: 503 with Retry-After: 5)"
+    },
+    {
+      "name": "upload grant no answer may pass",
+      "call": "upload_grant",
+      "status": 0,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "no API answer: a network failure or timeout"
+    },
+    {
+      "name": "upload grant 302 may pass",
+      "call": "upload_grant",
+      "status": 302,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "no handler sends it: a proxy redirect"
+    },
+    {
+      "name": "upload commit 200",
+      "call": "upload_commit",
+      "status": 200,
+      "content_type": "application/json",
+      "body": "{\"index\":3,\"size\":4194332,\"skipped\":false,\"object_key\":\"tenants/t/files/f/versions/v/3.bin\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "proceed"
+      },
+      "source": "routes/direct_transfer.rs:1104 (commit_locked); tests/direct_upload_2173.rs:472"
+    },
+    {
+      "name": "upload commit 401",
+      "call": "upload_commit",
+      "status": 401,
+      "content_type": "application/json",
+      "body": "{\"error\":\"unauthorized\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 401,
+        "error": "unauthorized"
+      },
+      "source": "error.rs:1012 (ApiError::Unauthorized)"
+    },
+    {
+      "name": "upload commit 403",
+      "call": "upload_commit",
+      "status": 403,
+      "content_type": "application/json",
+      "body": "{\"error\":\"forbidden\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 403,
+        "error": "forbidden"
+      },
+      "source": "error.rs:1013 (ApiError::Forbidden)"
+    },
+    {
+      "name": "upload commit JSON 404: the session is gone",
+      "call": "upload_commit",
+      "status": 404,
+      "content_type": "application/json",
+      "body": "{\"error\":\"not found\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 404,
+        "error": "not found"
+      },
+      "source": "error.rs:1008 (ApiError::NotFound: the session is not the caller's or is gone); tests/direct_upload_2173.rs:360"
+    },
+    {
+      "name": "upload commit bare 404: a node without the route",
+      "call": "upload_commit",
+      "status": 404,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "no handler sends it: axum's unknown-route fallback (spec R1.6), a node without the route"
+    },
+    {
+      "name": "upload commit HTML 404",
+      "call": "upload_commit",
+      "status": 404,
+      "content_type": "text/html; charset=utf-8",
+      "body": "<h1>Not Found</h1>",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "no handler sends it: a front proxy's page (spec R1.6)"
+    },
+    {
+      "name": "upload commit 405",
+      "call": "upload_commit",
+      "status": 405,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "no handler sends it: axum's method-not-allowed fallback, empty body (spec R1.6)"
+    },
+    {
+      "name": "upload commit 409 direct_unavailable: this session cannot go direct",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"direct_unavailable\",\"reason\":\"disabled\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "routes/direct_transfer.rs:55-63 (direct_unavailable); tests/direct_upload_2173.rs:982-1016 (the reasons)"
+    },
+    {
+      "name": "upload commit 409 transport_mismatch",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"transport_mismatch\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "routes/direct_transfer.rs:572 + error.rs:1014 (ApiError::Conflict); tests/direct_upload_2173.rs:344"
+    },
+    {
+      "name": "upload commit 409 with any other code",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"something the server may say tomorrow\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "synthetic: a code no handler sends today (spec R1.6: an unknown 409 is the API's to judge)"
+    },
+    {
+      "name": "upload commit bare 409",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "synthetic: a 409 with no body (a proxy); spec R1.6"
+    },
+    {
+      "name": "upload commit 409 commit_in_progress: wait and ask again",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      },
+      "source": "routes/direct_transfer.rs:886-888 (commit_in_progress); tests/direct_upload_2173.rs:1427"
+    },
+    {
+      "name": "upload commit 409 commit_in_progress keeps a stated wait",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": "3",
+      "expect": {
+        "kind": "backoff",
+        "millis": 3000
+      },
+      "source": "routes/direct_transfer.rs:886-888 (commit_in_progress); tests/direct_upload_2173.rs:1427 (the header is the client-side case: the server sends none today)"
+    },
+    {
+      "name": "upload commit 429 with the real limiter body",
+      "call": "upload_commit",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"rate_limited\",\"message\":\"Too many requests. Try again in 60 seconds.\",\"retry_after\":60}",
+      "retry_after": "60",
+      "expect": {
+        "kind": "backoff",
+        "millis": 60000
+      },
+      "source": "rate_limit.rs:2028-2037 (too_many_requests: body and Retry-After); tests/direct_upload_2173.rs:1011 (budget), 1475-1477 (the fifth grant), 1530 (staged bytes full)"
+    },
+    {
+      "name": "upload commit 429 states more than a client will wait",
+      "call": "upload_commit",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"rate_limited\",\"message\":\"Too many requests. Try again in 300 seconds.\",\"retry_after\":300}",
+      "retry_after": "300",
+      "expect": {
+        "kind": "backoff",
+        "millis": 120000
+      },
+      "source": "rate_limit.rs:2028-2037 (too_many_requests: body and Retry-After); tests/direct_upload_2173.rs:1011 (budget), 1475-1477 (the fifth grant), 1530 (staged bytes full) (the per-chunk grant cap states the link's remaining life)"
+    },
+    {
+      "name": "upload commit 400: a size the geometry does not allow",
+      "call": "upload_commit",
+      "status": 400,
+      "content_type": "application/json",
+      "body": "{\"error\":\"size must be 4194332 bytes for chunk 3\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "routes/direct_transfer.rs:601 (size) + error.rs:1010 (ApiError::BadRequest)"
+    },
+    {
+      "name": "upload commit 400: the session is not writable",
+      "call": "upload_commit",
+      "status": 400,
+      "content_type": "application/json",
+      "body": "{\"error\":\"upload session is not writable: expired\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "routes/direct_transfer.rs:579 + error.rs:1010; the caller's session recovery reads this text before the classifier (CLI is_upload_session_gone)"
+    },
+    {
+      "name": "upload commit 413 quota",
+      "call": "upload_commit",
+      "status": 413,
+      "content_type": "application/json",
+      "body": "{\"error\":\"quota_exceeded\",\"limit_bytes\":5368709120,\"used_bytes\":5368709000,\"is_trial_cap\":false}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "error.rs:603-632 (ApiError::QuotaExceeded: error, limit_bytes, used_bytes, is_trial_cap)"
+    },
+    {
+      "name": "upload commit 500 may pass",
+      "call": "upload_commit",
+      "status": 500,
+      "content_type": "application/json",
+      "body": "{\"error\":\"Something went wrong.\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "error.rs:1025-1044 (ApiError::Internal: 'Something went wrong.')"
+    },
+    {
+      "name": "upload commit 502 may pass",
+      "call": "upload_commit",
+      "status": 502,
+      "content_type": "text/html",
+      "body": "<html>Bad Gateway</html>",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "no handler sends it: an edge proxy's page"
+    },
+    {
+      "name": "upload commit 503 from storage, no Retry-After",
+      "call": "upload_commit",
+      "status": 503,
+      "content_type": "application/json",
+      "body": "{\"error\":\"File could not be saved. Our storage is having trouble — please try again.\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "error.rs:1075 (ApiError::Storage -> 503, no Retry-After) + routes/direct_transfer.rs:889 (storage_failed)"
+    },
+    {
+      "name": "upload commit 503 states its wait",
+      "call": "upload_commit",
+      "status": 503,
+      "content_type": "application/json",
+      "body": "{\"error\":\"statement_timeout\",\"message\":\"This took too long, so the server stopped it. Try again in a moment.\"}",
+      "retry_after": "5",
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      },
+      "source": "error.rs:970-984 (a statement_timeout: 503 with Retry-After: 5)"
+    },
+    {
+      "name": "upload commit no answer may pass",
+      "call": "upload_commit",
+      "status": 0,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "no API answer: a network failure or timeout"
+    },
+    {
+      "name": "upload commit 302 may pass",
+      "call": "upload_commit",
+      "status": 302,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      },
+      "source": "no handler sends it: a proxy redirect"
+    },
+    {
+      "name": "upload commit 409 chunk_not_stored: nothing was committed, grant again",
+      "call": "upload_commit",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"chunk_not_stored\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "regrant"
+      },
+      "source": "routes/direct_transfer.rs:880-882 (chunk_not_stored); tests/direct_upload_2173.rs:414"
+    },
+    {
+      "name": "upload grant 409 chunk_not_stored is not a grant answer",
+      "call": "upload_grant",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"chunk_not_stored\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      },
+      "source": "synthetic: only the commit route sends it (routes/direct_transfer.rs:999,1019,1088)"
     }
   ],
   "redact": [

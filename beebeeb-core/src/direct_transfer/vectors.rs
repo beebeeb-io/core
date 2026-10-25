@@ -417,6 +417,7 @@ pub fn outcome_from_json(v: &Value) -> Outcome {
         "api_for_this_file" => Outcome::ApiForThisFile,
         "restart" => Outcome::Restart,
         "retry" => Outcome::Retry,
+        "regrant" => Outcome::Regrant,
         "backoff" => Outcome::Backoff(std::time::Duration::from_millis(v["millis"].as_u64().unwrap())),
         "terminal" => Outcome::Terminal(Terminal {
             status: v["status"].as_u64().unwrap() as u16,
@@ -703,7 +704,7 @@ mod tests {
         // Counts, not adjectives: the file is not empty and the sections are what the review asked for.
         assert!(
             report.authority >= 59
-                && report.classify >= 63
+                && report.classify >= 109
                 && report.chunk_length >= 8
                 && report.pinned_retry >= 20
                 && report.cache_scenarios >= 9

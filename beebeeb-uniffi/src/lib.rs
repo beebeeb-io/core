@@ -4501,9 +4501,11 @@ pub enum DirectOutcomeDto {
     Backoff { millis: u64 },
     /// 401, 403 or a JSON 404: do not fall back.
     Terminal { status: u16, error: Option<String> },
-    /// The pinned chunk route only: a failure that may pass (5xx, no answer); retry after the
-    /// bounded backoff of `direct_pinned_retry_decision`.
+    /// The pinned chunk route and the upload calls: a failure that may pass (5xx, no answer); retry
+    /// after the bounded backoff of `direct_pinned_retry_decision`.
     Retry,
+    /// `upload_commit` only: the staged chunk is not there; ask for a new link and send it again.
+    Regrant,
 }
 
 impl DirectOutcomeDto {
@@ -4522,6 +4524,7 @@ impl DirectOutcomeDto {
                 error: t.error.clone(),
             },
             dt::Outcome::Retry => Self::Retry,
+            dt::Outcome::Regrant => Self::Regrant,
             // `Outcome` is non-exhaustive: a variant added later is the safe one.
             _ => Self::UseApiNow,
         }
@@ -4540,6 +4543,7 @@ impl DirectOutcomeDto {
                 error: error.clone(),
             }),
             Self::Retry => dt::Outcome::Retry,
+            Self::Regrant => dt::Outcome::Regrant,
         }
     }
 }
@@ -4567,8 +4571,8 @@ pub fn direct_pinned_retry_decision(outcome: DirectOutcomeDto, attempt: u32, wai
     }
 }
 
-/// Classify an API answer. `call` is `"discovery"`, `"download_grant"` or `"pinned_chunk"`; pass
-/// `status` 0 when there was no HTTP answer. `body` is whatever was read of the
+/// Classify an API answer. `call` is `"discovery"`, `"download_grant"`, `"pinned_chunk"`,
+/// `"upload_grant"` or `"upload_commit"`; pass `status` 0 when there was no HTTP answer. `body` is whatever was read of the
 /// body (at most 64 KiB is looked at); `retry_after` is the raw header value.
 #[uniffi::export]
 pub fn classify_direct_answer(
@@ -5260,6 +5264,7 @@ mod direct_transfer_binding_tests {
                 json!({"kind": "terminal", "status": status, "error": error})
             }
             DirectOutcomeDto::Retry => json!({"kind": "retry"}),
+            DirectOutcomeDto::Regrant => json!({"kind": "regrant"}),
         }
     }
 
@@ -5271,6 +5276,7 @@ mod direct_transfer_binding_tests {
             "api_for_this_file" => DirectOutcomeDto::ApiForThisFile,
             "restart" => DirectOutcomeDto::Restart,
             "retry" => DirectOutcomeDto::Retry,
+            "regrant" => DirectOutcomeDto::Regrant,
             "backoff" => DirectOutcomeDto::Backoff {
                 millis: v["millis"].as_u64().unwrap(),
             },

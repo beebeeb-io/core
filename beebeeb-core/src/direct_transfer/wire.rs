@@ -218,13 +218,27 @@ impl DownloadGrantResponse {
     }
 }
 
-// ─────────────────────────────── upload (frozen, not yet served) ───────────────────────────────
+// ─────────────────────────────── upload ───────────────────────────────
 //
-// FROZEN BY THE SPEC, NOT YET EXERCISED AGAINST A SERVER. The server's upload
-// routes are task 2173 PR 2 (s3-server lane), not merged when this module was
-// written. The shapes below are the spec's text; they get verified against the
-// real routes (and may change with the server's PR) before any client sends
-// them. Nothing in this crate's planner uses them yet.
+// The spec's text, checked against the merged server (task 2173 PR 2, #331,
+// `routes/direct_transfer.rs` at 3e7ca039: `upload_grant`, `upload_commit`,
+// `skipped_commit`, `direct_unavailable`). The rules a client applies to these
+// shapes (validation, classification, the per-chunk retry policy) are in
+// [`super::upload`].
+
+/// `/api/v1/uploads/{session}/chunks/{index}/grant`.
+pub fn upload_grant_path(upload_session_id: &str, index: u32) -> String {
+    format!("/api/v1/uploads/{upload_session_id}/chunks/{index}/grant")
+}
+
+/// `/api/v1/uploads/{session}/chunks/{index}/commit`.
+pub fn upload_commit_path(upload_session_id: &str, index: u32) -> String {
+    format!("/api/v1/uploads/{upload_session_id}/chunks/{index}/commit")
+}
+
+/// Largest upload grant or commit body a client should read: one link and a few
+/// short fields.
+pub const MAX_UPLOAD_BODY_BYTES: usize = 64 * 1024;
 
 /// `transport` value the server adds to the `POST /uploads/init` 201 body.
 /// A body without it (or with any other value) means today's chunk PUT route.
@@ -259,6 +273,15 @@ pub struct UploadGrantResponse {
     pub expires_at: Option<String>,
 }
 
+impl UploadGrantResponse {
+    pub fn from_json(body: &[u8]) -> Result<Self, WireError> {
+        if body.len() > MAX_UPLOAD_BODY_BYTES {
+            return Err(WireError::TooLarge(MAX_UPLOAD_BODY_BYTES));
+        }
+        object_from_slice(body)
+    }
+}
+
 impl fmt::Debug for UploadGrantResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("UploadGrantResponse")
@@ -291,6 +314,15 @@ pub struct UploadCommitResponse {
     /// so a client must not log or display it.
     #[serde(default)]
     pub object_key: Option<String>,
+}
+
+impl UploadCommitResponse {
+    pub fn from_json(body: &[u8]) -> Result<Self, WireError> {
+        if body.len() > MAX_UPLOAD_BODY_BYTES {
+            return Err(WireError::TooLarge(MAX_UPLOAD_BODY_BYTES));
+        }
+        object_from_slice(body)
+    }
 }
 
 impl fmt::Debug for UploadCommitResponse {
