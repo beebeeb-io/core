@@ -2652,6 +2652,29 @@ mod tests {
     use super::*;
     use beebeeb_core::chunk_stream::ChunkDecryptor;
 
+    /// Doc comments are copied into the generated glue (JSDoc in the `.js` and `.d.ts`, Kotlin and Swift doc
+    /// comments in the UniFFI bindings). A block-comment closer inside one ends the comment early, which
+    /// is a SyntaxError in the glue; an opener starts a nested comment that Kotlin and Swift then wait to
+    /// see closed. Neither can be seen by `cargo test` of the generated code, so the source is checked.
+    #[test]
+    fn no_doc_comment_contains_a_block_comment_token() {
+        let offending: Vec<String> = include_str!("lib.rs")
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| {
+                let line = line.trim_start();
+                line.starts_with("///") || line.starts_with("//!")
+            })
+            .filter(|(_, line)| line.contains("/*") || line.contains("*/"))
+            .map(|(i, line)| format!("lib.rs:{}: {}", i + 1, line.trim()))
+            .collect();
+        assert!(
+            offending.is_empty(),
+            "use line comments (or words) inside doc comments, never a block-comment token:\n{}",
+            offending.join("\n")
+        );
+    }
+
     /// Deterministic, non-trivial test data.
     fn pattern(len: usize) -> Vec<u8> {
         (0..len).map(|i| (i % 251) as u8).collect()

@@ -1,11 +1,34 @@
 #!/usr/bin/env bash
-# Node test of the WASM bindings' JS-facing paths, which `cargo test` cannot execute (it has no JS engine).
-# Needs wasm-pack and node >= 20. Builds the nodejs package into a temp dir, runs node:test against it.
+# The JS surface of beebeeb-wasm, judged the way a web client sees it. `cargo test` cannot: it has no JS engine and
+# never parses the glue wasm-bindgen generates.
+#   1. builds the package for BOTH targets (nodejs, web) into a temp dir;
+#   2. `node --check` on both glue files (the web one is an ES module, checked as .mjs);
+#   3. `tsc --noEmit --strict` on both .d.ts files;
+#   4. runs the node:test suite against the nodejs build.
+# Needs wasm-pack, node >= 20 and tsc (or npx, which fetches the pinned typescript below).
 #   beebeeb-wasm/js-tests/run.sh
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 workspace=$(cd "$here/../.." && pwd)
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
-(cd "$workspace" && wasm-pack build beebeeb-wasm --target nodejs --dev --no-opt --out-dir "$out/pkg" --out-name beebeeb_wasm)
-BB_WASM_PKG="$out/pkg" node --test "$here/direct_signed_url.test.cjs"
+
+for target in nodejs web; do
+  (cd "$workspace" && wasm-pack build beebeeb-wasm --target "$target" --dev --no-opt --out-dir "$out/$target" --out-name beebeeb_wasm)
+done
+
+echo "== node --check: the generated glue parses"
+node --check "$out/nodejs/beebeeb_wasm.js"
+cp "$out/web/beebeeb_wasm.js" "$out/web/beebeeb_wasm.mjs"
+node --check "$out/web/beebeeb_wasm.mjs"
+
+echo "== tsc --noEmit: the generated declarations parse and type-check"
+if command -v tsc >/dev/null 2>&1; then
+  tsc=(tsc)
+else
+  tsc=(npx --yes --package typescript@5.6.3 tsc)
+fi
+(cd "$out" && "${tsc[@]}" --noEmit --strict --target es2022 --lib es2022,dom,esnext.disposable nodejs/beebeeb_wasm.d.ts web/beebeeb_wasm.d.ts)
+
+echo "== node --test: the real module"
+BB_WASM_PKG="$out/nodejs" node --test "$here/direct_signed_url.test.cjs"
