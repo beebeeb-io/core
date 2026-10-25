@@ -252,6 +252,9 @@ pub fn classify(call: Call, answer: &ApiAnswer) -> Outcome {
                 _ => Outcome::Restart,
             },
             429 => Outcome::Backoff(answer.wait()),
+            // A 5xx may say how long it needs (the server's 503 sends `Retry-After: 5`): then that
+            // is a stated wait, the same as for a 429. Without it, the client's own backoff.
+            500..=599 if answer.retry_after.is_some() => Outcome::Backoff(answer.wait()),
             500..=599 => Outcome::Retry,
             // 400 (an index out of range), 410, 413, 422 …: a retry will not change it. The
             // API stream serves the file.
@@ -756,6 +759,15 @@ mod tests {
         for status in [0, 500, 502, 503, 504, 302] {
             assert_eq!(pinned(status, "", None), Outcome::Retry, "{status}");
         }
+        // ... but a 5xx that names its wait is a stated wait (clamped like any other).
+        assert_eq!(pinned(503, "", Some("5")), Outcome::Backoff(secs(5)));
+        assert_eq!(pinned(500, "", Some("0")), Outcome::Backoff(secs(1)));
+        assert_eq!(pinned(502, "", Some("86400")), Outcome::Backoff(MAX_RETRY_AFTER));
+        assert_eq!(
+            pinned(503, "", Some("soon")),
+            Outcome::Retry,
+            "an unreadable Retry-After names nothing"
+        );
         assert_eq!(
             classify(Call::PinnedChunk, &ApiAnswer::from_parts(404, None, b"", None)),
             Outcome::Retry,

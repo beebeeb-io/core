@@ -1055,7 +1055,54 @@
       "status": 503,
       "content_type": null,
       "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      }
+    },
+    {
+      "name": "pinned 503 with the server's Retry-After: 5 is a stated wait",
+      "call": "pinned_chunk",
+      "status": 503,
+      "content_type": "application/json",
+      "body": "{\"error\":\"statement_timeout\"}",
       "retry_after": "5",
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      }
+    },
+    {
+      "name": "pinned 500 with Retry-After 0 waits a second",
+      "call": "pinned_chunk",
+      "status": 500,
+      "content_type": null,
+      "body": "",
+      "retry_after": "0",
+      "expect": {
+        "kind": "backoff",
+        "millis": 1000
+      }
+    },
+    {
+      "name": "pinned 502 with a huge Retry-After is capped",
+      "call": "pinned_chunk",
+      "status": 502,
+      "content_type": null,
+      "body": "",
+      "retry_after": "86400",
+      "expect": {
+        "kind": "backoff",
+        "millis": 120000
+      }
+    },
+    {
+      "name": "pinned 503 with an unreadable Retry-After names nothing",
+      "call": "pinned_chunk",
+      "status": 503,
+      "content_type": null,
+      "body": "",
+      "retry_after": "soon",
       "expect": {
         "kind": "retry"
       }
