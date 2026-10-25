@@ -137,7 +137,8 @@ impl Geometry {
     /// `None` for an index outside the file and for numbers no real version
     /// has (checked arithmetic: nothing here can panic on a hostile geometry).
     pub fn chunk_length(&self, index: u32) -> Option<u64> {
-        if self.chunk_count == 0 || index >= self.chunk_count {
+        // (No chunks at all is covered here too: every index is >= 0.)
+        if index >= self.chunk_count {
             return None;
         }
         let full = self.chunk_size.checked_add(CHUNK_OVERHEAD)?;
@@ -1681,6 +1682,22 @@ mod tests {
     }
 
     #[test]
+    fn a_grant_that_ages_out_after_grants_stopped_goes_to_the_api_route() {
+        let mut p = started();
+        for _ in 0..4 {
+            expect_fetch(&mut p, T0);
+        }
+        for i in 0..4 {
+            finish(&mut p, i);
+        }
+        p.window_malformed(); // grants stop; 4..8 are held and unused
+        match p.poll(T0 + 300_000) {
+            Poll::FetchViaApi { index: 4, .. } => {}
+            other => panic!("an aged-out grant must not wait for a renewal that cannot come, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn a_chunk_waiting_for_a_renewal_goes_to_the_api_route_when_grants_stop() {
         let mut p = started();
         for _ in 0..4 {
@@ -1946,6 +1963,14 @@ mod tests {
             original_size: 44,
         };
         assert_eq!(stride_overflow.chunk_length(0), None);
+        // A stride that fits, times a chunk count that does not.
+        let product_overflow = Geometry {
+            chunk_count: u32::MAX,
+            chunk_size: 1 << 40,
+            encrypted_size: u64::MAX,
+            original_size: 0,
+        };
+        assert_eq!(product_overflow.chunk_length(u32::MAX - 1), None);
         // A total smaller than the full chunks before the last is no geometry.
         let short = Geometry {
             chunk_count: 3,
