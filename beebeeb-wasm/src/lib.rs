@@ -2048,6 +2048,61 @@ impl From<dt::PlanError> for DirectFailure {
     }
 }
 
+/// A jitter seed from the JS number the caller gave: its bits. A plain `as u64` turns every
+/// `Math.random()` (a number below 1) into 0, i.e. one retry schedule for every browser tab.
+fn direct_seed(seed: f64) -> u64 {
+    seed.to_bits()
+}
+
+/// A presigned storage link as the `fetch` step carries it: a bearer capability until it expires. It
+/// is an object, not a string, so that `console.log`, `String(url)`, a template literal and
+/// `JSON.stringify(step)` can never show it: all of them give the redacted form (scheme and host).
+/// The only way to the link is `raw()`, by name.
+#[wasm_bindgen]
+pub struct WasmSignedUrl {
+    url: String,
+}
+
+#[wasm_bindgen]
+impl WasmSignedUrl {
+    /// The full presigned link, to hand to `fetch`. Never log it.
+    pub fn raw(&self) -> String {
+        self.url.clone()
+    }
+
+    /// Scheme and host only: safe for a log line.
+    pub fn redacted(&self) -> String {
+        dt::redact(&self.url)
+    }
+
+    /// `String(url)` and template literals.
+    #[wasm_bindgen(js_name = toString)]
+    pub fn to_string_redacted(&self) -> String {
+        dt::redact(&self.url)
+    }
+
+    /// `JSON.stringify(step)`.
+    #[wasm_bindgen(js_name = toJSON)]
+    pub fn to_json_redacted(&self) -> String {
+        dt::redact(&self.url)
+    }
+}
+
+/// The poll as a JS object. The serializer writes the link as a plain string; it is replaced at once by
+/// a [`WasmSignedUrl`] (JS never holds the string in the object it is handed).
+fn direct_poll_to_js(dto: DirectPollJs) -> Result<JsValue, JsError> {
+    let link = match &dto {
+        DirectPollJs::Fetch { url, .. } => Some(url.clone()),
+        _ => None,
+    };
+    let object = direct_to_js(&dto)?;
+    if let Some(url) = link {
+        js_sys::Reflect::set(&object, &"url".into(), &JsValue::from(WasmSignedUrl { url }))
+            .map_err(|_| JsError::new("could not build the fetch step"))?;
+    }
+    Ok(object)
+}
+
 /// Milliseconds since the epoch cross as `f64` (a JS number); core counts in `i64`.
 fn direct_ms(now_ms: f64) -> i64 {
     now_ms as i64
@@ -2134,8 +2189,9 @@ pub fn scrub_text(text: &str) -> String {
 
 /// What an API answer means, as `{ kind, millis?, status?, error? }` with `kind`
 /// one of `proceed`, `not_supported`, `use_api_now`, `api_for_this_file`,
-/// `restart`, `backoff` (with `millis`), `terminal` (with `status`, `error`).
-/// `call` is `"discovery"` or `"download_grant"`; pass `status` 0 when there was
+/// `restart`, `backoff` (with `millis`), `terminal` (with `status`, `error`),
+/// `retry` (the pinned chunk route only: a failure that may pass).
+/// `call` is `"discovery"`, `"download_grant"` or `"pinned_chunk"`; pass `status` 0 when there was
 /// no HTTP answer. `body` is whatever was read of the body (at most 64 KiB is
 /// looked at); `retry_after` is the raw header value.
 #[wasm_bindgen(js_name = classifyDirectAnswer)]
@@ -2210,7 +2266,7 @@ enum DirectRetryJs {
     GiveUp,
 }
 
-/// The shared retry policy of the pinned per-chunk route (4 attempts, 60 s of waiting in all, a
+/// The shared retry policy of the pinned per-chunk route (4 attempts, 150 s of waiting in all, a
 /// stated `Retry-After` kept, otherwise 1 s doubling). `outcome` is what `classifyDirectAnswer`
 /// returned for `call: "pinned_chunk"`; `attempt` is the 1-based number of the attempt that just
 /// failed; `waitedMs` is the total waited so far.
@@ -2391,8 +2447,8 @@ pub struct WasmDownloadPlanner {
 
 #[wasm_bindgen]
 impl WasmDownloadPlanner {
-    /// `discovery` is the object `parseDirectDiscovery` returned; `jitter_seed`
-    /// any integer (use random bytes in production).
+    /// `discovery` is the object `parseDirectDiscovery` returned; `jitter_seed` is any number
+    /// (`Math.random()` is fine: every distinct value is a distinct seed).
     #[wasm_bindgen(constructor)]
     pub fn new(
         discovery: JsValue,
@@ -2401,12 +2457,13 @@ impl WasmDownloadPlanner {
         jitter_seed: f64,
     ) -> Result<WasmDownloadPlanner, JsValue> {
         let discovery = direct_discovery_from_js(discovery)?;
-        Ok(Self::from_parts(discovery, api_base, file_id, jitter_seed as u64))
+        Ok(Self::from_parts(discovery, api_base, file_id, direct_seed(jitter_seed)))
     }
 
-    /// What to do now: `{ kind, ... }` (see the class docs).
+    /// What to do now: `{ kind, ... }` (see the class docs). For `kind: "fetch"` the `url` is a
+    /// `WasmSignedUrl`, not a string: pass `url.raw()` to `fetch` and nothing else.
     pub fn poll(&mut self, now_ms: f64) -> Result<JsValue, JsError> {
-        direct_to_js(&self.poll_dto(direct_ms(now_ms)))
+        direct_poll_to_js(self.poll_dto(direct_ms(now_ms)))
     }
 
     /// The window answer for the outstanding request, as the raw response body
@@ -3175,6 +3232,35 @@ mod direct_vector_tests {
                 outcome
             );
         }
+    }
+
+    #[test]
+    fn a_math_random_seed_is_not_zero_and_distinct_numbers_are_distinct_seeds() {
+        let seeds: Vec<u64> = [0.0, 0.1, 0.25, 0.5, 0.75, 0.999_999]
+            .iter()
+            .map(|s| direct_seed(*s))
+            .collect();
+        for (i, a) in seeds.iter().enumerate() {
+            for b in &seeds[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        assert!(
+            seeds[1..].iter().all(|s| *s != 0),
+            "a number below 1 must not collapse to 0"
+        );
+        assert_eq!(direct_seed(42.0), direct_seed(42.0));
+    }
+
+    #[test]
+    fn a_signed_url_object_prints_only_scheme_and_host() {
+        let link = "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SECRETSIG";
+        let url = WasmSignedUrl { url: link.to_string() };
+        for shown in [url.to_string_redacted(), url.to_json_redacted(), url.redacted()] {
+            assert!(!shown.contains("SECRETSIG") && !shown.contains("X-Amz"), "{shown}");
+            assert!(shown.contains("s3.storage.test"), "{shown}");
+        }
+        assert_eq!(url.raw(), link, "the one way to the link is explicit");
     }
 
     #[test]

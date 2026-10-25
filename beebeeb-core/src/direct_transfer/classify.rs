@@ -156,7 +156,7 @@ pub enum Outcome {
     /// 2xx: decode the body and go on.
     Proceed,
     /// Discovery only: this server has no direct transport. Cache that for the
-    /// process; use the API.
+    /// trust period ([`DISCOVERY_TTL_MS`](super::DISCOVERY_TTL_MS)); use the API.
     NotSupported,
     /// No direct transport right now (bare 404/405, 5xx, redirect, network
     /// failure, anything unrecognised): use the API for this file now and ask
@@ -274,7 +274,10 @@ pub fn classify(call: Call, answer: &ApiAnswer) -> Outcome {
 pub struct PinnedRetry {
     /// Attempts in all, the first one included.
     pub attempts: u32,
-    /// The most the retries may wait in total; a wait that would pass it ends them.
+    /// The most the retries may wait in total; a wait that would pass it ends them. It must hold the
+    /// longest wait a server can state ([`MAX_RETRY_AFTER`], 120 s) plus a margin: the server's real
+    /// 429 on `/api/v1/files/*` says `Retry-After: 60`, so a budget of 60 s would give up on a second
+    /// 429, or on any stated wait that follows an earlier one, and restart the whole file.
     pub budget: Duration,
     /// The wait before the second attempt when the server named none; it doubles each time.
     pub base: Duration,
@@ -284,7 +287,7 @@ impl Default for PinnedRetry {
     fn default() -> Self {
         PinnedRetry {
             attempts: 4,
-            budget: Duration::from_secs(60),
+            budget: Duration::from_secs(150),
             base: Duration::from_secs(1),
         }
     }
@@ -311,13 +314,15 @@ impl RetryDecision {
 
 impl PinnedRetry {
     /// `attempt` is the 1-based number of the attempt that just failed with `outcome`
-    /// ([`classify`] of [`Call::PinnedChunk`]); `waited` is the total wait so far. Only
-    /// [`Outcome::Backoff`] (the server's own wait) and [`Outcome::Retry`] (base, 2 x base, 4 x
-    /// base …) are worth another try, and only while the attempts and the time budget last.
+    /// ([`classify`] of [`Call::PinnedChunk`]; `0` is read as `1`, the first attempt); `waited` is
+    /// the total wait so far. Only [`Outcome::Backoff`] (the server's own wait) and
+    /// [`Outcome::Retry`] (base, 2 x base, 4 x base …) are worth another try, and only while the
+    /// attempts and the time budget last.
     pub fn decide(&self, attempt: u32, waited: Duration, outcome: &Outcome) -> RetryDecision {
+        let attempt = attempt.max(1);
         let wait = match outcome {
             Outcome::Backoff(d) => *d,
-            Outcome::Retry => self.base.saturating_mul(2u32.saturating_pow(attempt.saturating_sub(1))),
+            Outcome::Retry => self.base.saturating_mul(2u32.saturating_pow(attempt - 1)),
             _ => return RetryDecision::GiveUp,
         };
         if attempt >= self.attempts || waited.saturating_add(wait) > self.budget {
@@ -801,23 +806,34 @@ mod tests {
         assert_eq!(policy.decide(2, secs(1), &Outcome::Retry), RetryDecision::Wait(secs(2)));
         assert_eq!(policy.decide(3, secs(3), &Outcome::Retry), RetryDecision::Wait(secs(4)));
         assert_eq!(policy.decide(4, secs(7), &Outcome::Retry), RetryDecision::GiveUp);
-        // What the server named is kept, up to the budget (60 s in all, the boundary included).
-        assert_eq!(
-            policy.decide(1, none, &Outcome::Backoff(secs(3))),
-            RetryDecision::Wait(secs(3))
-        );
-        assert_eq!(
-            policy.decide(2, secs(30), &Outcome::Backoff(secs(30))),
-            RetryDecision::Wait(secs(30))
-        );
-        assert_eq!(
-            policy.decide(2, secs(31), &Outcome::Backoff(secs(30))),
-            RetryDecision::GiveUp
-        );
+        // The server's real 429 on /api/v1/files/* says `Retry-After: 60`: waited for at attempt 1
+        // (nothing waited yet) and at attempt 2 (1 s waited), and again for a second 429.
+        let limited = Outcome::Backoff(secs(60));
+        assert_eq!(policy.decide(1, none, &limited), RetryDecision::Wait(secs(60)));
+        assert_eq!(policy.decide(2, secs(1), &limited), RetryDecision::Wait(secs(60)));
+        assert_eq!(policy.decide(2, secs(60), &limited), RetryDecision::Wait(secs(60)));
+        // A ban (clamped to 120 s) is waited for once; a third wait of 60 s (180 s in all) is not.
         assert_eq!(
             policy.decide(1, none, &Outcome::Backoff(secs(120))),
-            RetryDecision::GiveUp
+            RetryDecision::Wait(secs(120))
         );
+        assert_eq!(policy.decide(3, secs(120), &limited), RetryDecision::GiveUp);
+        // The budget (150 s in all) is taken up to and including its last second, not beyond.
+        assert_eq!(
+            policy.decide(2, secs(90), &Outcome::Backoff(secs(60))),
+            RetryDecision::Wait(secs(60))
+        );
+        assert_eq!(policy.decide(2, secs(91), &limited), RetryDecision::GiveUp);
+        assert!(
+            policy.budget >= MAX_RETRY_AFTER + secs(30),
+            "room for the longest stated wait"
+        );
+        // `attempt == 0` is read as the first attempt, not as an underflow.
+        assert_eq!(
+            policy.decide(0, none, &Outcome::Retry),
+            policy.decide(1, none, &Outcome::Retry)
+        );
+        assert_eq!(policy.decide(0, none, &limited), policy.decide(1, none, &limited));
         // Nothing else is worth another try.
         for outcome in [
             Outcome::Proceed,

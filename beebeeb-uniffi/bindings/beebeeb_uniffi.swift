@@ -1607,7 +1607,8 @@ public func FfiConverterTypeConstellationDecoderHandle_lower(_ value: Constellat
 
 /**
  * How long a discovery answer is trusted (10 minutes), and whether to ask
- * again (a JSON 404 is remembered; other failures are retried once).
+ * again. A JSON 404 and two failed attempts are each remembered for the same ten minutes, then the
+ * client probes again; within a trust period a failed attempt is retried once.
  */
 public protocol DirectDiscoveryCacheHandleProtocol: AnyObject, Sendable {
     
@@ -1622,7 +1623,8 @@ public protocol DirectDiscoveryCacheHandleProtocol: AnyObject, Sendable {
 }
 /**
  * How long a discovery answer is trusted (10 minutes), and whether to ask
- * again (a JSON 404 is remembered; other failures are retried once).
+ * again. A JSON 404 and two failed attempts are each remembered for the same ten minutes, then the
+ * client probes again; within a trust period a failed attempt is retried once.
  */
 open class DirectDiscoveryCacheHandle: DirectDiscoveryCacheHandleProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
@@ -2103,6 +2105,180 @@ public func FfiConverterTypeDirectDownloadPlannerHandle_lift(_ handle: UInt64) t
 #endif
 public func FfiConverterTypeDirectDownloadPlannerHandle_lower(_ value: DirectDownloadPlannerHandle) -> UInt64 {
     return FfiConverterTypeDirectDownloadPlannerHandle.lower(value)
+}
+
+
+
+
+
+
+/**
+ * A presigned storage link: a bearer capability until it expires (it carries the signature in its
+ * query). It is an OBJECT, not a string, so that no generated `toString()` (Kotlin), `description`
+ * (Swift) or `print` can show it: its `Debug` and `Display` are the redacted form (scheme and host),
+ * and so is the derived `Debug`/`toString()` of every record that holds one. The only way to the
+ * link is [`DirectSignedUrl::raw`], by name, so it shows up in a review: pass it to the HTTP client
+ * and nowhere else.
+ */
+public protocol DirectSignedUrlProtocol: AnyObject, Sendable {
+    
+    /**
+     * The full presigned link, to hand to the HTTP client. Never log it.
+     */
+    func raw()  -> String
+    
+    /**
+     * Scheme and host only: safe for a log line.
+     */
+    func redacted()  -> String
+    
+}
+/**
+ * A presigned storage link: a bearer capability until it expires (it carries the signature in its
+ * query). It is an OBJECT, not a string, so that no generated `toString()` (Kotlin), `description`
+ * (Swift) or `print` can show it: its `Debug` and `Display` are the redacted form (scheme and host),
+ * and so is the derived `Debug`/`toString()` of every record that holds one. The only way to the
+ * link is [`DirectSignedUrl::raw`], by name, so it shows up in a review: pass it to the HTTP client
+ * and nowhere else.
+ */
+open class DirectSignedUrl: DirectSignedUrlProtocol, @unchecked Sendable, CustomDebugStringConvertible, CustomStringConvertible {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_directsignedurl(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_directsignedurl(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * The full presigned link, to hand to the HTTP client. Never log it.
+     */
+open func raw() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directsignedurl_raw(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Scheme and host only: safe for a log line.
+     */
+open func redacted() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directsignedurl_redacted(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+
+    
+// The local Rust `Debug` implementation.
+public var debugDescription: String {
+    return try!  FfiConverterString.lift(
+        try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directsignedurl_uniffi_trait_debug(
+            self.uniffiCloneHandle(),$0
+    )
+}
+    )
+}
+// The local Rust `Display` implementation.
+public var description: String {
+    return try!  FfiConverterString.lift(
+        try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directsignedurl_uniffi_trait_display(
+            self.uniffiCloneHandle(),$0
+    )
+}
+    )
+}
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDirectSignedUrl: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = DirectSignedUrl
+
+    public static func lift(_ handle: UInt64) throws -> DirectSignedUrl {
+        return DirectSignedUrl(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: DirectSignedUrl) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DirectSignedUrl {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: DirectSignedUrl, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectSignedUrl_lift(_ handle: UInt64) throws -> DirectSignedUrl {
+    return try FfiConverterTypeDirectSignedUrl.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectSignedUrl_lower(_ value: DirectSignedUrl) -> UInt64 {
+    return FfiConverterTypeDirectSignedUrl.lower(value)
 }
 
 
@@ -4886,18 +5062,19 @@ public func FfiConverterTypeDecryptedNameWithMime_lower(_ value: DecryptedNameWi
 
 
 /**
- * One presigned link. `url` is a bearer capability: never log it.
+ * One presigned link. `url` is a bearer capability, and cannot be printed by accident: see
+ * [`DirectSignedUrl`].
  */
-public struct DirectChunkGrantDto: Equatable, Hashable {
+public struct DirectChunkGrantDto {
     public var index: UInt32
     public var method: String
-    public var url: String
+    public var url: DirectSignedUrl
     public var length: UInt64
     public var expiresAt: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(index: UInt32, method: String, url: String, length: UInt64, expiresAt: String) {
+    public init(index: UInt32, method: String, url: DirectSignedUrl, length: UInt64, expiresAt: String) {
         self.index = index
         self.method = method
         self.url = url
@@ -4923,7 +5100,7 @@ public struct FfiConverterTypeDirectChunkGrantDto: FfiConverterRustBuffer {
             try DirectChunkGrantDto(
                 index: FfiConverterUInt32.read(from: &buf), 
                 method: FfiConverterString.read(from: &buf), 
-                url: FfiConverterString.read(from: &buf), 
+                url: FfiConverterTypeDirectSignedUrl.read(from: &buf), 
                 length: FfiConverterUInt64.read(from: &buf), 
                 expiresAt: FfiConverterString.read(from: &buf)
         )
@@ -4932,7 +5109,7 @@ public struct FfiConverterTypeDirectChunkGrantDto: FfiConverterRustBuffer {
     public static func write(_ value: DirectChunkGrantDto, into buf: inout [UInt8]) {
         FfiConverterUInt32.write(value.index, into: &buf)
         FfiConverterString.write(value.method, into: &buf)
-        FfiConverterString.write(value.url, into: &buf)
+        FfiConverterTypeDirectSignedUrl.write(value.url, into: &buf)
         FfiConverterUInt64.write(value.length, into: &buf)
         FfiConverterString.write(value.expiresAt, into: &buf)
     }
@@ -7325,7 +7502,7 @@ public func FfiConverterTypeDirectOutcomeDto_lower(_ value: DirectOutcomeDto) ->
  * What the app must do now.
  */
 
-public enum DirectPollDto: Equatable, Hashable {
+public enum DirectPollDto {
     
     /**
      * `POST` this body to `direct_download_grants_path(file_id)` with the
@@ -7564,7 +7741,7 @@ public enum DirectTransferError: Swift.Error, Equatable, Hashable, Foundation.Lo
     case Plan(code: String
     )
     /**
-     * `call` was neither `discovery` nor `download_grant`.
+     * `call` was none of `discovery`, `download_grant`, `pinned_chunk`.
      */
     case UnknownCall
 
@@ -9853,7 +10030,7 @@ public func ceremonyStepSpecId(step: CeremonyStepDto) -> String  {
 })
 }
 /**
- * Classify an API answer. `call` is `"discovery"` or `"download_grant"`; pass
+ * Classify an API answer. `call` is `"discovery"`, `"download_grant"` or `"pinned_chunk"`; pass
  * `status` 0 when there was no HTTP answer. `body` is whatever was read of the
  * body (at most 64 KiB is looked at); `retry_after` is the raw header value.
  */
@@ -10180,7 +10357,7 @@ public func directDownloadGrantsPath(fileId: String) -> String  {
 })
 }
 /**
- * The shared retry policy of the pinned per-chunk route (4 attempts, 60 s of waiting in all, a
+ * The shared retry policy of the pinned per-chunk route (4 attempts, 150 s of waiting in all, a
  * stated `Retry-After` kept, otherwise 1 s doubling). `outcome` is `classify_direct_answer`'s
  * answer for `"pinned_chunk"`; `attempt` is the 1-based number of the attempt that just failed;
  * `waited_ms` is the total waited so far.
@@ -10788,7 +10965,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_ceremony_step_spec_id() != 23509) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_func_classify_direct_answer() != 20935) {
+    if (uniffi_beebeeb_uniffi_checksum_func_classify_direct_answer() != 30307) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_compute_recovery_check() != 28278) {
@@ -10857,7 +11034,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_direct_download_grants_path() != 38361) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_func_direct_pinned_retry_decision() != 44156) {
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_pinned_retry_decision() != 23908) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_redact_url() != 8126) {
@@ -11104,6 +11281,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_window_malformed() != 62818) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_directsignedurl_raw() != 23451) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_directsignedurl_redacted() != 58321) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk() != 50441) {

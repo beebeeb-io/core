@@ -4352,7 +4352,7 @@ pub enum DirectTransferError {
     #[error("the planner was driven out of order: {code}")]
     Plan { code: String },
 
-    /// `call` was neither `discovery` nor `download_grant`.
+    /// `call` was none of `discovery`, `download_grant`, `pinned_chunk`.
     #[error("unknown call")]
     UnknownCall,
 }
@@ -4530,7 +4530,7 @@ pub enum DirectRetryDecisionDto {
     GiveUp,
 }
 
-/// The shared retry policy of the pinned per-chunk route (4 attempts, 60 s of waiting in all, a
+/// The shared retry policy of the pinned per-chunk route (4 attempts, 150 s of waiting in all, a
 /// stated `Retry-After` kept, otherwise 1 s doubling). `outcome` is `classify_direct_answer`'s
 /// answer for `"pinned_chunk"`; `attempt` is the 1-based number of the attempt that just failed;
 /// `waited_ms` is the total waited so far.
@@ -4544,7 +4544,7 @@ pub fn direct_pinned_retry_decision(outcome: DirectOutcomeDto, attempt: u32, wai
     }
 }
 
-/// Classify an API answer. `call` is `"discovery"` or `"download_grant"`; pass
+/// Classify an API answer. `call` is `"discovery"`, `"download_grant"` or `"pinned_chunk"`; pass
 /// `status` 0 when there was no HTTP answer. `body` is whatever was read of the
 /// body (at most 64 KiB is looked at); `retry_after` is the raw header value.
 #[uniffi::export]
@@ -4569,26 +4569,58 @@ pub struct DirectGrantRequestDto {
     pub renewal: bool,
 }
 
-/// One presigned link. `url` is a bearer capability: never log it.
-#[derive(uniffi::Record, Clone, PartialEq, Eq)]
+/// A presigned storage link: a bearer capability until it expires (it carries the signature in its
+/// query). It is an OBJECT, not a string, so that no generated `toString()` (Kotlin), `description`
+/// (Swift) or `print` can show it: its `Debug` and `Display` are the redacted form (scheme and host),
+/// and so is the derived `Debug`/`toString()` of every record that holds one. The only way to the
+/// link is [`DirectSignedUrl::raw`], by name, so it shows up in a review: pass it to the HTTP client
+/// and nowhere else.
+#[derive(uniffi::Object, PartialEq, Eq)]
+#[uniffi::export(Debug, Display)]
+pub struct DirectSignedUrl {
+    url: String,
+}
+
+impl DirectSignedUrl {
+    fn new(url: String) -> Arc<Self> {
+        Arc::new(Self { url })
+    }
+}
+
+impl std::fmt::Display for DirectSignedUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&dt::redact(&self.url))
+    }
+}
+
+impl std::fmt::Debug for DirectSignedUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DirectSignedUrl({})", dt::redact(&self.url))
+    }
+}
+
+#[uniffi::export]
+impl DirectSignedUrl {
+    /// The full presigned link, to hand to the HTTP client. Never log it.
+    pub fn raw(&self) -> String {
+        self.url.clone()
+    }
+
+    /// Scheme and host only: safe for a log line.
+    pub fn redacted(&self) -> String {
+        dt::redact(&self.url)
+    }
+}
+
+/// One presigned link. `url` is a bearer capability, and cannot be printed by accident: see
+/// [`DirectSignedUrl`].
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
 pub struct DirectChunkGrantDto {
     pub index: u32,
     pub method: String,
-    pub url: String,
+    pub url: Arc<DirectSignedUrl>,
     pub length: u64,
     pub expires_at: String,
-}
-
-impl std::fmt::Debug for DirectChunkGrantDto {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DirectChunkGrantDto")
-            .field("index", &self.index)
-            .field("method", &self.method)
-            .field("url", &dt::redact(&self.url))
-            .field("length", &self.length)
-            .field("expires_at", &self.expires_at)
-            .finish()
-    }
 }
 
 /// How a file ends when it cannot go on directly.
@@ -4641,7 +4673,7 @@ impl DirectPollDto {
                 grant: DirectChunkGrantDto {
                     index: grant.index,
                     method: grant.method.clone(),
-                    url: grant.url.clone(),
+                    url: DirectSignedUrl::new(grant.url.clone()),
                     length: grant.length,
                     expires_at: grant.expires_at.clone(),
                 },
@@ -4817,7 +4849,8 @@ pub enum DirectLookupDto {
 }
 
 /// How long a discovery answer is trusted (10 minutes), and whether to ask
-/// again (a JSON 404 is remembered; other failures are retried once).
+/// again. A JSON 404 and two failed attempts are each remembered for the same ten minutes, then the
+/// client probes again; within a trust period a failed attempt is retried once.
 #[derive(uniffi::Object)]
 pub struct DirectDiscoveryCacheHandle {
     inner: Mutex<dt::DiscoveryCache>,
@@ -5222,7 +5255,7 @@ mod direct_transfer_binding_tests {
                 "object_version_id": request.object_version_id, "start_index": request.start_index,
                 "count": request.count, "renewal": request.renewal}}),
             DirectPollDto::Fetch { index, grant } => {
-                json!({"kind": "fetch", "index": index, "url": grant.url, "length": grant.length})
+                json!({"kind": "fetch", "index": index, "url": grant.url.raw(), "length": grant.length})
             }
             DirectPollDto::FetchViaApi {
                 index,
@@ -5477,21 +5510,34 @@ mod direct_transfer_binding_tests {
 
     #[test]
     fn a_grant_never_prints_its_signature() {
+        let link = "https://s3.storage.test/bb-01/k?X-Amz-Signature=SECRETSIG";
         let grant = DirectChunkGrantDto {
             index: 0,
             method: "GET".to_owned(),
-            url: "https://s3.storage.test/bb-01/k?X-Amz-Signature=SECRETSIG".to_owned(),
+            url: DirectSignedUrl::new(link.to_owned()),
             length: 1,
             expires_at: "2027-01-15T08:05:00Z".to_owned(),
         };
+        // Everything a generated binding can print: the record's Debug (what Kotlin's data-class
+        // `toString()` and Swift's reflection reach through the object), the object's own Debug and
+        // Display (what the exported `toString()` / `description` call), and the enum around it.
         let shown = format!(
-            "{grant:?} {:?}",
+            "{grant:?} {:?} {} {:?} {}",
             DirectPollDto::Fetch {
                 index: 0,
                 grant: grant.clone()
-            }
+            },
+            grant.url,
+            grant.url,
+            grant.url.redacted(),
         );
         assert!(!shown.contains("SECRETSIG") && !shown.contains("X-Amz"), "{shown}");
+        assert!(
+            shown.contains("s3.storage.test"),
+            "the host is still visible for a log line: {shown}"
+        );
+        // The one way to the link is explicit, by name.
+        assert_eq!(grant.url.raw(), link);
         let err = direct_check_storage_url(
             "https://evil.test@s3.storage.test/bb-01/k?X-Amz-Signature=SECRETSIG".to_owned(),
             DirectDiscoveryDto::from(dt::Discovery::default()),

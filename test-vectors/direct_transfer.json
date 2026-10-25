@@ -992,11 +992,23 @@
       }
     },
     {
-      "name": "pinned 429 with Retry-After",
+      "name": "pinned 429, the server's real limiter body and Retry-After: 60",
       "call": "pinned_chunk",
       "status": 429,
       "content_type": "application/json",
-      "body": "{\"error\":\"server_busy\",\"retry_after\":7}",
+      "body": "{\"error\":\"rate_limited\",\"message\":\"Too many requests. Try again in 60 seconds.\",\"retry_after\":60}",
+      "retry_after": "60",
+      "expect": {
+        "kind": "backoff",
+        "millis": 60000
+      }
+    },
+    {
+      "name": "pinned 429 with a shorter Retry-After",
+      "call": "pinned_chunk",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"rate_limited\",\"message\":\"Too many requests. Try again in 60 seconds.\",\"retry_after\":60}",
       "retry_after": "7",
       "expect": {
         "kind": "backoff",
@@ -1008,7 +1020,7 @@
       "call": "pinned_chunk",
       "status": 429,
       "content_type": "application/json",
-      "body": "{\"error\":\"server_busy\"}",
+      "body": "{\"error\":\"rate_limited\",\"message\":\"Too many requests. Try again in 60 seconds.\",\"retry_after\":60}",
       "retry_after": null,
       "expect": {
         "kind": "backoff",
@@ -1396,32 +1408,46 @@
       }
     },
     {
-      "name": "a stated wait that ends exactly at the budget is taken",
+      "name": "the server's real 429 (Retry-After: 60) at attempt 1, nothing waited",
       "outcome": {
         "kind": "backoff",
-        "millis": 30000
+        "millis": 60000
       },
-      "attempt": 2,
-      "waited_ms": 30000,
+      "attempt": 1,
+      "waited_ms": 0,
       "expect": {
         "kind": "wait",
-        "millis": 30000
+        "millis": 60000
       }
     },
     {
-      "name": "a stated wait one millisecond past the budget is not",
+      "name": "the same 429 at attempt 2 after a 1 s hiccup",
       "outcome": {
         "kind": "backoff",
-        "millis": 30000
+        "millis": 60000
       },
       "attempt": 2,
-      "waited_ms": 30001,
+      "waited_ms": 1000,
       "expect": {
-        "kind": "give_up"
+        "kind": "wait",
+        "millis": 60000
       }
     },
     {
-      "name": "a stated wait longer than the whole budget is not",
+      "name": "a second 429 right after the first",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 60000
+      },
+      "attempt": 2,
+      "waited_ms": 60000,
+      "expect": {
+        "kind": "wait",
+        "millis": 60000
+      }
+    },
+    {
+      "name": "a ban clamped to 120 s is waited for once",
       "outcome": {
         "kind": "backoff",
         "millis": 120000
@@ -1429,7 +1455,69 @@
       "attempt": 1,
       "waited_ms": 0,
       "expect": {
+        "kind": "wait",
+        "millis": 120000
+      }
+    },
+    {
+      "name": "a third 60 s wait (180 s in all) is past the budget",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 60000
+      },
+      "attempt": 3,
+      "waited_ms": 120000,
+      "expect": {
         "kind": "give_up"
+      }
+    },
+    {
+      "name": "a stated wait ending exactly at the budget (150 s) is taken",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 60000
+      },
+      "attempt": 2,
+      "waited_ms": 90000,
+      "expect": {
+        "kind": "wait",
+        "millis": 60000
+      }
+    },
+    {
+      "name": "one millisecond past the budget is not",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 60000
+      },
+      "attempt": 2,
+      "waited_ms": 90001,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "a ban after a long wait does not fit",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 120000
+      },
+      "attempt": 2,
+      "waited_ms": 31000,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "attempt 0 is read as the first attempt",
+      "outcome": {
+        "kind": "retry"
+      },
+      "attempt": 0,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "wait",
+        "millis": 1000
       }
     },
     {

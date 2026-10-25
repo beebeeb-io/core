@@ -25,6 +25,15 @@ const API_DEV: &str = "http://127.0.0.1:3001";
 /// The vectors file, embedded.
 pub const VECTORS_JSON: &str = include_str!("../../../test-vectors/direct_transfer.json");
 
+/// The API base a row names. An unknown one is a broken row, not "the dev one".
+fn api_base_of(named: &str, row: &str) -> &'static str {
+    match named {
+        API_PROD => API_PROD,
+        API_DEV => API_DEV,
+        other => panic!("authority row {row:?}: unknown api_base {other:?}"),
+    }
+}
+
 /// A surface the rules are exported through. Values cross as `serde_json`
 /// values shaped like the file; failures cross as the stable `code` strings.
 pub trait Surface {
@@ -152,11 +161,7 @@ pub fn run_all<S: Surface>(surface: &S) -> Report {
 
     for row in v["authority"].as_array().expect("authority") {
         let name = row["name"].as_str().unwrap();
-        let api = if row["api_base"].as_str().unwrap() == API_PROD {
-            API_PROD
-        } else {
-            API_DEV
-        };
+        let api = api_base_of(row["api_base"].as_str().unwrap(), name);
         let disc = &v["discoveries"][row["discovery"].as_str().unwrap()];
         let got = surface.check_storage_url(row["url"].as_str().unwrap(), disc, api);
         let want = row["expect"].as_str().unwrap();
@@ -698,9 +703,9 @@ mod tests {
         // Counts, not adjectives: the file is not empty and the sections are what the review asked for.
         assert!(
             report.authority >= 59
-                && report.classify >= 62
+                && report.classify >= 63
                 && report.chunk_length >= 8
-                && report.pinned_retry >= 14
+                && report.pinned_retry >= 20
                 && report.cache_scenarios >= 9
                 && report.cache_steps >= 45,
             "{report:?}"
@@ -712,9 +717,24 @@ mod tests {
     }
 
     #[test]
+    fn an_unknown_api_base_is_a_broken_row_not_the_dev_one() {
+        assert_eq!(api_base_of(API_PROD, "r"), API_PROD);
+        assert_eq!(api_base_of(API_DEV, "r"), API_DEV);
+        let result = catch_unwind(AssertUnwindSafe(|| api_base_of("https://api.example.invalid", "r")));
+        assert!(result.is_err(), "an unknown api_base must fail the run");
+    }
+
+    #[test]
     fn every_row_has_a_distinct_name() {
         let v = vectors();
-        for section in ["authority", "classify", "chunk_length", "planner"] {
+        for section in [
+            "authority",
+            "classify",
+            "chunk_length",
+            "pinned_retry",
+            "discovery_cache",
+            "planner",
+        ] {
             let mut names: Vec<&str> = v[section]
                 .as_array()
                 .unwrap()
