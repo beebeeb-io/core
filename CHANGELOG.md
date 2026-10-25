@@ -127,7 +127,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (including any `design/` folder), so a false audit or compliance claim fails the build.
 
 ### Changed
-- Nothing yet.
+- Direct transfer bindings (task 2173; the surface is unreleased, so this is breaking only for a branch that
+  already read it): the presigned link of a `fetch` step is an OBJECT, not a string, so that no habitual
+  logging shows its signature. WASM: `WasmSignedUrl` (`raw()` is the link; `redacted()`, `toString()` and
+  `toJSON()` are scheme and host); `poll()` is typed `DirectPoll` in the `.d.ts`. UniFFI: `DirectSignedUrl`
+  (redacted `Display`/`Debug`, hence Swift `description` and Kotlin `toString()`; compares and hashes by its
+  text; `DirectSignedUrl(url:)` builds one for an app's tests), and `DirectChunkGrantDto.url` is one. Read the
+  link with `.raw()` and pass that to the HTTP client, nothing else. Notes for consumers:
+  - A `WasmSignedUrl` holds a pointer into wasm memory and is not structured-cloneable: `structuredClone` /
+    `postMessage` gives `{ __wbg_ptr: <number> }`, no methods and no link. Send a worker the string
+    `step.url.raw()` at the moment it fetches.
+  - Kotlin: `toString()` of a `DirectSignedUrl`, or of a record holding one, throws `IllegalStateException`
+    once it has been `destroy()`ed or `close()`d (as any call on a released object does).
+  - Swift: `DirectChunkGrantDto` and `DirectPollDto` are `Equatable, Hashable` again.
+  - The `Eq`/`Hash` exports and the constructor add FFI symbols; the four generated binding files are
+    regenerated.
+- `DownloadPlanner`: the file's first verdict stands. A stale or repeated window answer, or a failure report
+  out of order, can no longer turn a `Restart`, `Terminal` or `Corrupt` into "use the API"
+  (`window_answered`, `window_answered_bytes`, `window_malformed`, and the unusable paths of `window_failed`).
 
 ### Fixed
 - `beebeeb-wasm`: the generated `beebeeb_wasm.js` and `beebeeb_wasm.d.ts` did not parse since core #34

@@ -2119,6 +2119,11 @@ public func FfiConverterTypeDirectDownloadPlannerHandle_lower(_ value: DirectDow
  * and so is the derived `Debug`/`toString()` of every record that holds one. The only way to the
  * link is [`DirectSignedUrl::raw`], by name, so it shows up in a review: pass it to the HTTP client
  * and nowhere else.
+ *
+ * Two links are equal when their text is (so the records that hold one compare by value in Swift
+ * and Kotlin). On Kotlin, `toString()` of the object, or of a record that holds one, throws
+ * `IllegalStateException` once the object has been `destroy()`ed or `close()`d, like any call on a
+ * released object: do not log a grant after releasing it.
  */
 public protocol DirectSignedUrlProtocol: AnyObject, Sendable {
     
@@ -2140,8 +2145,13 @@ public protocol DirectSignedUrlProtocol: AnyObject, Sendable {
  * and so is the derived `Debug`/`toString()` of every record that holds one. The only way to the
  * link is [`DirectSignedUrl::raw`], by name, so it shows up in a review: pass it to the HTTP client
  * and nowhere else.
+ *
+ * Two links are equal when their text is (so the records that hold one compare by value in Swift
+ * and Kotlin). On Kotlin, `toString()` of the object, or of a record that holds one, throws
+ * `IllegalStateException` once the object has been `destroy()`ed or `close()`d, like any call on a
+ * released object: do not log a grant after releasing it.
  */
-open class DirectSignedUrl: DirectSignedUrlProtocol, @unchecked Sendable, CustomDebugStringConvertible, CustomStringConvertible {
+open class DirectSignedUrl: DirectSignedUrlProtocol, @unchecked Sendable, Equatable, Hashable, CustomDebugStringConvertible, CustomStringConvertible {
     fileprivate let handle: UInt64
 
     /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
@@ -2180,7 +2190,19 @@ open class DirectSignedUrl: DirectSignedUrlProtocol, @unchecked Sendable, Custom
     public func uniffiCloneHandle() -> UInt64 {
         return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_directsignedurl(self.handle, $0) }
     }
-    // No primary constructor declared for this class.
+    /**
+     * A link from its text. The engine builds its own; this is for an app's tests (a `Fetch` poll
+     * made by hand). The text is not checked: `direct_check_storage_url` is the check.
+     */
+public convenience init(url: String) {
+    let handle =
+        try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_constructor_directsignedurl_new(
+        FfiConverterString.lower(url),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
 
     deinit {
         if handle == 0 {
@@ -2237,6 +2259,28 @@ public var description: String {
     )
 }
     )
+}
+// The local Rust `Eq` implementation - only `eq` is used.
+public static func == (self: DirectSignedUrl, other: DirectSignedUrl) -> Bool {
+    return try!  FfiConverterBool.lift(
+        try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directsignedurl_uniffi_trait_eq_eq(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeDirectSignedUrl_lower(other),$0
+    )
+}
+    )
+}
+// The local Rust `Hash` implementation
+public func hash(into hasher: inout Hasher) {
+    let val = try!  FfiConverterUInt64.lift(
+        try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directsignedurl_uniffi_trait_hash(
+            self.uniffiCloneHandle(),$0
+    )
+}
+    )
+    hasher.combine(val)
 }
 }
 
@@ -5065,7 +5109,7 @@ public func FfiConverterTypeDecryptedNameWithMime_lower(_ value: DecryptedNameWi
  * One presigned link. `url` is a bearer capability, and cannot be printed by accident: see
  * [`DirectSignedUrl`].
  */
-public struct DirectChunkGrantDto {
+public struct DirectChunkGrantDto: Equatable, Hashable {
     public var index: UInt32
     public var method: String
     public var url: DirectSignedUrl
@@ -5085,6 +5129,28 @@ public struct DirectChunkGrantDto {
     
 
     
+// The local Rust `Eq` implementation - only `eq` is used.
+public static func == (self: DirectChunkGrantDto, other: DirectChunkGrantDto) -> Bool {
+    return try!  FfiConverterBool.lift(
+        try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directchunkgrantdto_uniffi_trait_eq_eq(
+            FfiConverterTypeDirectChunkGrantDto_lower(self),
+        FfiConverterTypeDirectChunkGrantDto_lower(other),$0
+    )
+}
+    )
+}
+// The local Rust `Hash` implementation
+public func hash(into hasher: inout Hasher) {
+    let val = try!  FfiConverterUInt64.lift(
+        try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directchunkgrantdto_uniffi_trait_hash(
+            FfiConverterTypeDirectChunkGrantDto_lower(self),$0
+    )
+}
+    )
+    hasher.combine(val)
+}
 }
 
 #if compiler(>=6)
@@ -7502,7 +7568,7 @@ public func FfiConverterTypeDirectOutcomeDto_lower(_ value: DirectOutcomeDto) ->
  * What the app must do now.
  */
 
-public enum DirectPollDto {
+public enum DirectPollDto: Equatable, Hashable {
     
     /**
      * `POST` this body to `direct_download_grants_path(file_id)` with the
@@ -7511,9 +7577,9 @@ public enum DirectPollDto {
     case requestWindow(request: DirectGrantRequestDto
     )
     /**
-     * `GET grant.url` with a client that sends nothing else (no cookies, no
-     * `Authorization`), redirects off; accept only `200` whose `Content-Length`
-     * is `grant.length`.
+     * `GET grant.url.raw()` (`grant.url` is a `DirectSignedUrl`, not a string) with a client that
+     * sends nothing else (no cookies, no `Authorization`), redirects off; accept only `200` whose
+     * `Content-Length` is `grant.length`.
      */
     case fetch(index: UInt32, grant: DirectChunkGrantDto
     )
@@ -7542,6 +7608,28 @@ public enum DirectPollDto {
 
 
 
+// The local Rust `Eq` implementation - only `eq` is used.
+public static func == (self: DirectPollDto, other: DirectPollDto) -> Bool {
+    return try!  FfiConverterBool.lift(
+        try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_eq_eq(
+            FfiConverterTypeDirectPollDto_lower(self),
+        FfiConverterTypeDirectPollDto_lower(other),$0
+    )
+}
+    )
+}
+// The local Rust `Hash` implementation
+public func hash(into hasher: inout Hasher) {
+    let val = try!  FfiConverterUInt64.lift(
+        try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_hash(
+            FfiConverterTypeDirectPollDto_lower(self),$0
+    )
+}
+    )
+    hasher.combine(val)
+}
 }
 
 #if compiler(>=6)
@@ -11485,6 +11573,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_directdownloadplannerhandle_new() != 18802) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_directsignedurl_new() != 57713) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_key_bytes() != 50246) {

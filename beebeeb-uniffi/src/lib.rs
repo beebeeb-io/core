@@ -4584,7 +4584,7 @@ pub fn classify_direct_answer(
 }
 
 /// `POST /api/v1/files/{id}/download-grants` body.
-#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct DirectGrantRequestDto {
     pub object_version_id: Option<String>,
     pub start_index: u32,
@@ -4598,16 +4598,15 @@ pub struct DirectGrantRequestDto {
 /// and so is the derived `Debug`/`toString()` of every record that holds one. The only way to the
 /// link is [`DirectSignedUrl::raw`], by name, so it shows up in a review: pass it to the HTTP client
 /// and nowhere else.
-#[derive(uniffi::Object, PartialEq, Eq)]
-#[uniffi::export(Debug, Display)]
+///
+/// Two links are equal when their text is (so the records that hold one compare by value in Swift
+/// and Kotlin). On Kotlin, `toString()` of the object, or of a record that holds one, throws
+/// `IllegalStateException` once the object has been `destroy()`ed or `close()`d, like any call on a
+/// released object: do not log a grant after releasing it.
+#[derive(uniffi::Object, PartialEq, Eq, Hash)]
+#[uniffi::export(Debug, Display, Eq, Hash)]
 pub struct DirectSignedUrl {
     url: String,
-}
-
-impl DirectSignedUrl {
-    fn new(url: String) -> Arc<Self> {
-        Arc::new(Self { url })
-    }
 }
 
 impl std::fmt::Display for DirectSignedUrl {
@@ -4624,6 +4623,13 @@ impl std::fmt::Debug for DirectSignedUrl {
 
 #[uniffi::export]
 impl DirectSignedUrl {
+    /// A link from its text. The engine builds its own; this is for an app's tests (a `Fetch` poll
+    /// made by hand). The text is not checked: `direct_check_storage_url` is the check.
+    #[uniffi::constructor]
+    pub fn new(url: String) -> Arc<Self> {
+        Arc::new(Self { url })
+    }
+
     /// The full presigned link, to hand to the HTTP client. Never log it.
     pub fn raw(&self) -> String {
         self.url.clone()
@@ -4637,7 +4643,8 @@ impl DirectSignedUrl {
 
 /// One presigned link. `url` is a bearer capability, and cannot be printed by accident: see
 /// [`DirectSignedUrl`].
-#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq, Hash)]
+#[uniffi::export(Eq, Hash)]
 pub struct DirectChunkGrantDto {
     pub index: u32,
     pub method: String,
@@ -4647,7 +4654,7 @@ pub struct DirectChunkGrantDto {
 }
 
 /// How a file ends when it cannot go on directly.
-#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum DirectVerdictDto {
     /// Discard any partial output and download the file again on the API path.
     ApiForFile,
@@ -4660,14 +4667,15 @@ pub enum DirectVerdictDto {
 }
 
 /// What the app must do now.
-#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq, Hash)]
+#[uniffi::export(Eq, Hash)]
 pub enum DirectPollDto {
     /// `POST` this body to `direct_download_grants_path(file_id)` with the
     /// capability header, then report the answer.
     RequestWindow { request: DirectGrantRequestDto },
-    /// `GET grant.url` with a client that sends nothing else (no cookies, no
-    /// `Authorization`), redirects off; accept only `200` whose `Content-Length`
-    /// is `grant.length`.
+    /// `GET grant.url.raw()` (`grant.url` is a `DirectSignedUrl`, not a string) with a client that
+    /// sends nothing else (no cookies, no `Authorization`), redirects off; accept only `200` whose
+    /// `Content-Length` is `grant.length`.
     Fetch { index: u32, grant: DirectChunkGrantDto },
     /// `GET /api/v1/files/{id}/chunks/{index}?object_version_id=<pinned>`.
     FetchViaApi { index: u32, object_version_id: String },
@@ -5529,6 +5537,82 @@ mod direct_transfer_binding_tests {
         assert!(
             matches!(p.consumed(0), Err(DirectTransferError::Plan { code }) if code == "out_of_order" || code == "not_fetched")
         );
+    }
+
+    #[test]
+    fn a_signed_url_is_built_from_text_and_compares_and_hashes_by_it() {
+        use std::collections::HashSet;
+        let text = "https://s3.storage.test/bb-01/k?X-Amz-Signature=SECRETSIG";
+        let a = DirectSignedUrl::new(text.to_owned());
+        let b = DirectSignedUrl::new(text.to_owned());
+        let other = DirectSignedUrl::new(format!("{text}x"));
+        assert_eq!(a.raw(), text);
+        assert_eq!(*a, *b, "equal text is an equal link");
+        assert_ne!(*a, *other);
+        // The records that hold one compare by value too.
+        let grant = |url: Arc<DirectSignedUrl>| DirectChunkGrantDto {
+            index: 0,
+            method: "GET".to_owned(),
+            url,
+            length: 1,
+            expires_at: "2027-01-15T08:05:00Z".to_owned(),
+        };
+        assert_eq!(grant(a.clone()), grant(b.clone()));
+        assert_ne!(grant(a.clone()), grant(other.clone()));
+        let set: HashSet<DirectSignedUrl> = [text.to_owned(), text.to_owned(), format!("{text}x")]
+            .into_iter()
+            .map(|t| Arc::try_unwrap(DirectSignedUrl::new(t)).ok().unwrap())
+            .collect();
+        assert_eq!(set.len(), 2, "equal links hash alike");
+        // Whatever it is compared by, it is not printed by it.
+        assert!(!format!("{a:?} {a}").contains("SECRETSIG"));
+    }
+
+    /// The committed Swift and Kotlin are what the apps compile. A change to the exported surface of the link
+    /// (its redacted `toString`, value equality, the constructor) must come with regenerated files.
+    #[test]
+    fn the_committed_bindings_carry_the_signed_url_surface() {
+        let swift = include_str!("../bindings/beebeeb_uniffi.swift");
+        assert!(
+            swift.contains(
+                "open class DirectSignedUrl: DirectSignedUrlProtocol, @unchecked Sendable, Equatable, Hashable, \
+                 CustomDebugStringConvertible, CustomStringConvertible"
+            ),
+            "Swift: DirectSignedUrl has value semantics and is printed through its Rust Display/Debug"
+        );
+        assert!(
+            swift.contains("public convenience init(url: String)"),
+            "Swift: the constructor"
+        );
+        for held_in in [
+            "public struct DirectChunkGrantDto: Equatable, Hashable",
+            "public enum DirectPollDto: Equatable, Hashable",
+        ] {
+            assert!(
+                swift.contains(held_in),
+                "Swift: a type that holds the link compares by value: {held_in}"
+            );
+        }
+        for path in [
+            include_str!("../bindings/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
+            include_str!("../../bindings/kotlin/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
+        ] {
+            let class = path
+                .split("open class DirectSignedUrl")
+                .nth(1)
+                .expect("Kotlin: DirectSignedUrl is generated")
+                .split("object FfiConverterTypeDirectSignedUrl")
+                .next()
+                .unwrap();
+            for needed in [
+                "override fun toString()",
+                "override fun equals(",
+                "override fun hashCode()",
+                "constructor(`url`: kotlin.String)",
+            ] {
+                assert!(class.contains(needed), "Kotlin: DirectSignedUrl lacks {needed}");
+            }
+        }
     }
 
     #[test]

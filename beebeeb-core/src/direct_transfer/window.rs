@@ -263,6 +263,39 @@ impl Violation {
     }
 }
 
+/// Why [`DownloadPlanner`] refuses the content of a window answer: [`Violation`] without `Unexpected`, which
+/// is a caller's bug (an answer nobody asked for) and never a property of an answer's content. A separate
+/// type makes the compiler prove that checking an answer cannot produce it, so `window_answered` has no
+/// arm for it that could quietly come to be relied on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Rejected {
+    Transport,
+    FileMismatch,
+    VersionChanged,
+    Geometry,
+    Grants,
+    Length,
+    Method,
+    Authority(Refusal),
+    Expiry,
+}
+
+impl From<Rejected> for Violation {
+    fn from(rejected: Rejected) -> Self {
+        match rejected {
+            Rejected::Transport => Violation::Transport,
+            Rejected::FileMismatch => Violation::FileMismatch,
+            Rejected::VersionChanged => Violation::VersionChanged,
+            Rejected::Geometry => Violation::Geometry,
+            Rejected::Grants => Violation::Grants,
+            Rejected::Length => Violation::Length,
+            Rejected::Method => Violation::Method,
+            Rejected::Authority(refusal) => Violation::Authority(refusal),
+            Rejected::Expiry => Violation::Expiry,
+        }
+    }
+}
+
 /// What became of the body of a window answer ([`DownloadPlanner::window_answered_bytes`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowAnswer {
@@ -682,11 +715,21 @@ impl DownloadPlanner {
         wake
     }
 
+    /// The file's first verdict stands. A later answer (a stale or repeated window, a call out of order)
+    /// must not turn a `Restart`, a `Terminal` or a `Corrupt` into "use the API": that would hide a
+    /// revoked grant, a changed version or a chunk that does not authenticate.
+    fn set_verdict_once(&mut self, verdict: Verdict) {
+        if self.verdict.is_none() {
+            self.verdict = Some(verdict);
+        }
+    }
+
     /// The window answer for the outstanding request. `Err` means the answer
-    /// was refused and the file's verdict is set (see [`DownloadPlanner::poll`]).
+    /// was refused and the file's verdict is set (see [`DownloadPlanner::poll`]);
+    /// a verdict that was already set stands.
     pub fn window_answered(&mut self, response: DownloadGrantResponse, now_ms: i64) -> Result<(), Violation> {
         let Some(request) = self.window.take() else {
-            self.verdict = Some(Verdict::ApiForFile);
+            self.set_verdict_once(Verdict::ApiForFile);
             return Err(Violation::Unexpected);
         };
         match self.accept(&request, response, now_ms) {
@@ -694,17 +737,13 @@ impl DownloadPlanner {
                 self.rate_limits = 0;
                 Ok(())
             }
-            Err(Violation::VersionChanged) => {
-                self.verdict = Some(Verdict::Restart);
+            Err(Rejected::VersionChanged) => {
+                self.set_verdict_once(Verdict::Restart);
                 Err(Violation::VersionChanged)
             }
-            Err(Violation::Unexpected) => {
-                self.verdict = Some(Verdict::ApiForFile);
-                Err(Violation::Unexpected)
-            }
-            Err(violation) => {
+            Err(rejected) => {
                 self.window_unusable();
-                Err(violation)
+                Err(rejected.into())
             }
         }
     }
@@ -720,7 +759,7 @@ impl DownloadPlanner {
     /// does not carry on through the pinned route).
     pub fn window_answered_bytes(&mut self, body: &[u8], now_ms: i64) -> WindowAnswer {
         if self.window.is_none() {
-            self.verdict = Some(Verdict::ApiForFile);
+            self.set_verdict_once(Verdict::ApiForFile);
             return WindowAnswer::Refused(Violation::Unexpected);
         }
         match DownloadGrantResponse::from_json(body) {
@@ -749,7 +788,7 @@ impl DownloadPlanner {
     /// and what was written stays (R1.6: the mixed-node rollout case).
     fn window_unusable(&mut self) {
         if self.pinned.is_none() {
-            self.verdict = Some(Verdict::ApiForFile);
+            self.set_verdict_once(Verdict::ApiForFile);
             return;
         }
         self.api_only = true;
@@ -765,20 +804,20 @@ impl DownloadPlanner {
         request: &DownloadGrantRequest,
         response: DownloadGrantResponse,
         now_ms: i64,
-    ) -> Result<(), Violation> {
+    ) -> Result<(), Rejected> {
         if response.transport != CAP_OBJECT_DOWNLOAD_V1 {
-            return Err(Violation::Transport);
+            return Err(Rejected::Transport);
         }
         if !response.file_id.eq_ignore_ascii_case(&self.file_id) {
-            return Err(Violation::FileMismatch);
+            return Err(Rejected::FileMismatch);
         }
         if response.object_version_id.is_empty() {
-            return Err(Violation::Geometry);
+            return Err(Rejected::Geometry);
         }
         if let Some(pin) = request.object_version_id.as_ref().or(self.pinned.as_ref())
             && !response.object_version_id.eq_ignore_ascii_case(pin)
         {
-            return Err(Violation::VersionChanged);
+            return Err(Rejected::VersionChanged);
         }
         let geometry = Geometry {
             chunk_count: response.chunk_count,
@@ -787,33 +826,33 @@ impl DownloadPlanner {
             original_size: response.original_size,
         };
         if !geometry.is_consistent() || self.geometry.is_some_and(|known| known != geometry) {
-            return Err(Violation::Geometry);
+            return Err(Rejected::Geometry);
         }
 
         let start = request.start_index;
         if start >= geometry.chunk_count {
-            return Err(Violation::Grants);
+            return Err(Rejected::Grants);
         }
         let end = (u64::from(start) + u64::from(request.count)).min(u64::from(geometry.chunk_count)) as u32;
         if response.grants.len() != (end - start) as usize {
-            return Err(Violation::Grants);
+            return Err(Rejected::Grants);
         }
         if response.next_index != (end < geometry.chunk_count).then_some(end) {
-            return Err(Violation::Grants);
+            return Err(Rejected::Grants);
         }
 
         let mut accepted = Vec::with_capacity(response.grants.len());
         for (offset, grant) in response.grants.into_iter().enumerate() {
             if grant.index != start + offset as u32 {
-                return Err(Violation::Grants);
+                return Err(Rejected::Grants);
             }
             if grant.method != "GET" {
-                return Err(Violation::Method);
+                return Err(Rejected::Method);
             }
             if Some(grant.length) != geometry.chunk_length(grant.index) {
-                return Err(Violation::Length);
+                return Err(Rejected::Length);
             }
-            check_storage_url(&grant.url, &self.discovery, &self.api_base).map_err(Violation::Authority)?;
+            check_storage_url(&grant.url, &self.discovery, &self.api_base).map_err(Rejected::Authority)?;
             let usable_until_ms = self.usable_until(&grant.expires_at, now_ms)?;
             accepted.push((grant, usable_until_ms));
         }
@@ -848,9 +887,9 @@ impl DownloadPlanner {
     }
 
     /// When a grant that arrived at `now_ms` stops being usable, on the client clock.
-    fn usable_until(&self, expires_at: &str, now_ms: i64) -> Result<i64, Violation> {
+    fn usable_until(&self, expires_at: &str, now_ms: i64) -> Result<i64, Rejected> {
         let expires_ms = DateTime::parse_from_rfc3339(expires_at)
-            .map_err(|_| Violation::Expiry)?
+            .map_err(|_| Rejected::Expiry)?
             .timestamp_millis();
         let ttl = self.cfg.url_ttl_ms;
         let skew = self.cfg.renew_skew_ms;
@@ -865,7 +904,7 @@ impl DownloadPlanner {
         };
         let usable_until = now_ms.saturating_add(lifetime).saturating_sub(skew);
         if usable_until <= now_ms {
-            return Err(Violation::Expiry);
+            return Err(Rejected::Expiry);
         }
         Ok(usable_until)
     }
@@ -2458,5 +2497,86 @@ mod tests {
             WindowAnswer::Refused(Violation::Unexpected)
         );
         assert_eq!(p.poll(T0), Poll::Stop(Verdict::ApiForFile));
+    }
+
+    // ── a verdict that is set stands ──
+
+    #[test]
+    fn a_late_answer_does_not_replace_a_terminal_or_restart_verdict() {
+        let terminal = Terminal {
+            status: 403,
+            error: None,
+        };
+        for (what, set_verdict, expected) in [
+            (
+                "terminal",
+                (|p: &mut DownloadPlanner, t: &Terminal| p.window_failed(Outcome::Terminal(t.clone()), T0))
+                    as fn(&mut DownloadPlanner, &Terminal),
+                Verdict::Terminal(terminal.clone()),
+            ),
+            (
+                "restart",
+                |p, _| p.window_failed(Outcome::Restart, T0),
+                Verdict::Restart,
+            ),
+        ] {
+            let mut p = planner();
+            let first = expect_window(&mut p, T0);
+            let valid = serde_json::to_vec(&answer(&first, T0)).unwrap();
+            set_verdict(&mut p, &terminal);
+            assert_eq!(p.poll(T0), Poll::Stop(expected.clone()), "{what}");
+            // The request is gone; every late answer is a caller bug and changes nothing.
+            assert_eq!(
+                p.window_answered_bytes(&valid, T0),
+                WindowAnswer::Refused(Violation::Unexpected),
+                "{what}"
+            );
+            assert_eq!(
+                p.window_answered_bytes(b"{not json", T0),
+                WindowAnswer::Refused(Violation::Unexpected),
+                "{what}"
+            );
+            assert_eq!(
+                p.window_answered(answer(&first, T0), T0),
+                Err(Violation::Unexpected),
+                "{what}"
+            );
+            assert_eq!(
+                p.poll(T0),
+                Poll::Stop(expected.clone()),
+                "{what}: the first verdict stands"
+            );
+            // A stray failure report is not a new verdict either.
+            p.window_failed(Outcome::UseApiNow, T0);
+            p.window_malformed();
+            assert_eq!(p.poll(T0), Poll::Stop(expected), "{what}: after stray failure reports");
+        }
+    }
+
+    #[test]
+    fn a_chunk_that_does_not_authenticate_stays_a_hard_error_when_a_stale_window_arrives() {
+        // The next window is outstanding when the chunk fails twice; the window then answers for
+        // another version (a Restart on its own). The file stays Corrupt: never publish plaintext.
+        let mut p = started();
+        let next = drive_to_next_window(&mut p, T0);
+        let index = expect_fetch(&mut p, T0);
+        p.fetch_ok(index).unwrap();
+        p.chunk_unauthentic(index).unwrap();
+        match p.poll(T0) {
+            Poll::FetchViaApi { index: again, .. } => assert_eq!(again, index),
+            other => panic!("expected the API re-fetch, got {other:?}"),
+        }
+        p.fetch_ok(index).unwrap();
+        p.chunk_unauthentic(index).unwrap();
+        assert_eq!(p.poll(T0), Poll::Stop(Verdict::Corrupt));
+
+        let mut elsewhere = answer(&next, T0);
+        elsewhere.object_version_id = "44444444-4444-4444-8444-444444444444".into();
+        assert_eq!(p.window_answered(elsewhere, T0), Err(Violation::VersionChanged));
+        assert_eq!(
+            p.poll(T0),
+            Poll::Stop(Verdict::Corrupt),
+            "Restart did not replace Corrupt"
+        );
     }
 }

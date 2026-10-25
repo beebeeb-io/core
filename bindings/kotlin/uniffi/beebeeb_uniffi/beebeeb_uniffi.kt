@@ -1080,6 +1080,8 @@ external fun uniffi_beebeeb_uniffi_checksum_constructor_directdiscoverycachehand
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_directdownloadplannerhandle_new(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_directsignedurl_new(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_key_bytes(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_fileprovidercachehandle_open(
@@ -1251,6 +1253,8 @@ external fun uniffi_beebeeb_uniffi_fn_clone_directsignedurl(`handle`: Long,uniff
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_directsignedurl(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_directsignedurl_new(`url`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
 external fun uniffi_beebeeb_uniffi_fn_method_directsignedurl_raw(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_directsignedurl_redacted(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1259,6 +1263,12 @@ external fun uniffi_beebeeb_uniffi_fn_method_directsignedurl_uniffi_trait_debug(
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_directsignedurl_uniffi_trait_display(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_directsignedurl_uniffi_trait_eq_eq(`ptr`: Long,`other`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun uniffi_beebeeb_uniffi_fn_method_directsignedurl_uniffi_trait_eq_ne(`ptr`: Long,`other`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun uniffi_beebeeb_uniffi_fn_method_directsignedurl_uniffi_trait_hash(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
 external fun uniffi_beebeeb_uniffi_fn_clone_filekeyhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_filekeyhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1413,6 +1423,18 @@ external fun uniffi_beebeeb_uniffi_fn_init_callback_vtable_fileprogresscallback(
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_init_callback_vtable_uploadprogresscallback(`vtable`: UniffiVTableCallbackInterfaceUploadProgressCallback,
 ): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_eq_eq(`ptr`: RustBuffer.ByValue,`other`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_eq_ne(`ptr`: RustBuffer.ByValue,`other`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_hash(`ptr`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_directchunkgrantdto_uniffi_trait_eq_eq(`ptr`: RustBuffer.ByValue,`other`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun uniffi_beebeeb_uniffi_fn_method_directchunkgrantdto_uniffi_trait_eq_ne(`ptr`: RustBuffer.ByValue,`other`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun uniffi_beebeeb_uniffi_fn_method_directchunkgrantdto_uniffi_trait_hash(`ptr`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
 external fun uniffi_beebeeb_uniffi_fn_func_breach_verdict_allows_proceeding(`verdict`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 external fun uniffi_beebeeb_uniffi_fn_func_breach_verdict_check_failed(`verdict`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -2207,6 +2229,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_directdownloadplannerhandle_new() != 18802.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_directsignedurl_new() != 57713.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_key_bytes() != 50246.toShort()) {
@@ -5244,6 +5269,11 @@ public object FfiConverterTypeDirectDownloadPlannerHandle: FfiConverter<DirectDo
  * and so is the derived `Debug`/`toString()` of every record that holds one. The only way to the
  * link is [`DirectSignedUrl::raw`], by name, so it shows up in a review: pass it to the HTTP client
  * and nowhere else.
+ *
+ * Two links are equal when their text is (so the records that hold one compare by value in Swift
+ * and Kotlin). On Kotlin, `toString()` of the object, or of a record that holds one, throws
+ * `IllegalStateException` once the object has been `destroy()`ed or `close()`d, like any call on a
+ * released object: do not log a grant after releasing it.
  */
 public interface DirectSignedUrlInterface {
     
@@ -5267,6 +5297,11 @@ public interface DirectSignedUrlInterface {
  * and so is the derived `Debug`/`toString()` of every record that holds one. The only way to the
  * link is [`DirectSignedUrl::raw`], by name, so it shows up in a review: pass it to the HTTP client
  * and nowhere else.
+ *
+ * Two links are equal when their text is (so the records that hold one compare by value in Swift
+ * and Kotlin). On Kotlin, `toString()` of the object, or of a record that holds one, throws
+ * `IllegalStateException` once the object has been `destroy()`ed or `close()`d, like any call on a
+ * released object: do not log a grant after releasing it.
  */
 open class DirectSignedUrl: Disposable, AutoCloseable, DirectSignedUrlInterface
 {
@@ -5292,6 +5327,18 @@ open class DirectSignedUrl: Disposable, AutoCloseable, DirectSignedUrlInterface
         this.handle = 0
         this.cleanable = null
     }
+    /**
+     * A link from its text. The engine builds its own; this is for an app's tests (a `Fetch` poll
+     * made by hand). The text is not checked: `direct_check_storage_url` is the check.
+     */
+    constructor(`url`: kotlin.String) :
+        this(UniffiWithHandle, 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_directsignedurl_new(
+    
+        FfiConverterString.lower(`url`),_status)
+}
+    )
 
     protected val handle: Long
     protected val cleanable: UniffiCleaner.Cleanable?
@@ -5411,6 +5458,31 @@ open class DirectSignedUrl: Disposable, AutoCloseable, DirectSignedUrlInterface
 }
     }
     )
+    }
+    // The local Rust `Eq` implementation - only `eq` is used.
+    override fun equals(other: Any?): Boolean {
+        if (other !is DirectSignedUrl) return false
+        return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directsignedurl_uniffi_trait_eq_eq(
+        it,
+        FfiConverterTypeDirectSignedUrl.lower(`other`),_status)
+}
+    }
+    )
+    }
+    // The local Rust `Hash` implementation
+    override fun hashCode(): Int {
+        return FfiConverterULong.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directsignedurl_uniffi_trait_hash(
+        it,
+        _status)
+}
+    }
+    ).toInt()
     }
 
     
@@ -8930,6 +9002,25 @@ data class DirectChunkGrantDto (
 
     
 
+    // The local Rust `Eq` implementation - only `eq` is used.
+    override fun equals(other: Any?): Boolean {
+        if (other !is DirectChunkGrantDto) return false
+        return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directchunkgrantdto_uniffi_trait_eq_eq(FfiConverterTypeDirectChunkGrantDto.lower(this),
+        FfiConverterTypeDirectChunkGrantDto.lower(`other`),_status)
+}
+    )
+    }
+    // The local Rust `Hash` implementation
+    override fun hashCode(): Int {
+        return FfiConverterULong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directchunkgrantdto_uniffi_trait_hash(FfiConverterTypeDirectChunkGrantDto.lower(this),
+        _status)
+}
+    ).toInt()
+    }
     
     @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
     override fun destroy() {
@@ -11020,13 +11111,32 @@ sealed class DirectPollDto: Disposable  {
     {
         
 
+    // The local Rust `Eq` implementation - only `eq` is used.
+    override fun equals(other: Any?): Boolean {
+        if (other !is DirectPollDto) return false
+        return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_eq_eq(FfiConverterTypeDirectPollDto.lower(this),
+        FfiConverterTypeDirectPollDto.lower(`other`),_status)
+}
+    )
+    }
+    // The local Rust `Hash` implementation
+    override fun hashCode(): Int {
+        return FfiConverterULong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_hash(FfiConverterTypeDirectPollDto.lower(this),
+        _status)
+}
+    ).toInt()
+    }
         companion object
     }
     
     /**
-     * `GET grant.url` with a client that sends nothing else (no cookies, no
-     * `Authorization`), redirects off; accept only `200` whose `Content-Length`
-     * is `grant.length`.
+     * `GET grant.url.raw()` (`grant.url` is a `DirectSignedUrl`, not a string) with a client that
+     * sends nothing else (no cookies, no `Authorization`), redirects off; accept only `200` whose
+     * `Content-Length` is `grant.length`.
      */
     data class Fetch(
         val `index`: kotlin.UInt, 
@@ -11035,6 +11145,25 @@ sealed class DirectPollDto: Disposable  {
     {
         
 
+    // The local Rust `Eq` implementation - only `eq` is used.
+    override fun equals(other: Any?): Boolean {
+        if (other !is DirectPollDto) return false
+        return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_eq_eq(FfiConverterTypeDirectPollDto.lower(this),
+        FfiConverterTypeDirectPollDto.lower(`other`),_status)
+}
+    )
+    }
+    // The local Rust `Hash` implementation
+    override fun hashCode(): Int {
+        return FfiConverterULong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_hash(FfiConverterTypeDirectPollDto.lower(this),
+        _status)
+}
+    ).toInt()
+    }
         companion object
     }
     
@@ -11048,6 +11177,25 @@ sealed class DirectPollDto: Disposable  {
     {
         
 
+    // The local Rust `Eq` implementation - only `eq` is used.
+    override fun equals(other: Any?): Boolean {
+        if (other !is DirectPollDto) return false
+        return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_eq_eq(FfiConverterTypeDirectPollDto.lower(this),
+        FfiConverterTypeDirectPollDto.lower(`other`),_status)
+}
+    )
+    }
+    // The local Rust `Hash` implementation
+    override fun hashCode(): Int {
+        return FfiConverterULong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_hash(FfiConverterTypeDirectPollDto.lower(this),
+        _status)
+}
+    ).toInt()
+    }
         companion object
     }
     
@@ -11061,6 +11209,25 @@ sealed class DirectPollDto: Disposable  {
     {
         
 
+    // The local Rust `Eq` implementation - only `eq` is used.
+    override fun equals(other: Any?): Boolean {
+        if (other !is DirectPollDto) return false
+        return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_eq_eq(FfiConverterTypeDirectPollDto.lower(this),
+        FfiConverterTypeDirectPollDto.lower(`other`),_status)
+}
+    )
+    }
+    // The local Rust `Hash` implementation
+    override fun hashCode(): Int {
+        return FfiConverterULong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_hash(FfiConverterTypeDirectPollDto.lower(this),
+        _status)
+}
+    ).toInt()
+    }
         companion object
     }
     
@@ -11079,6 +11246,25 @@ sealed class DirectPollDto: Disposable  {
     {
         
 
+    // The local Rust `Eq` implementation - only `eq` is used.
+    override fun equals(other: Any?): Boolean {
+        if (other !is DirectPollDto) return false
+        return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_eq_eq(FfiConverterTypeDirectPollDto.lower(this),
+        FfiConverterTypeDirectPollDto.lower(`other`),_status)
+}
+    )
+    }
+    // The local Rust `Hash` implementation
+    override fun hashCode(): Int {
+        return FfiConverterULong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_hash(FfiConverterTypeDirectPollDto.lower(this),
+        _status)
+}
+    ).toInt()
+    }
         companion object
     }
     
@@ -11133,6 +11319,25 @@ sealed class DirectPollDto: Disposable  {
     
     
 
+    // The local Rust `Eq` implementation - only `eq` is used.
+    override fun equals(other: Any?): Boolean {
+        if (other !is DirectPollDto) return false
+        return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_eq_eq(FfiConverterTypeDirectPollDto.lower(this),
+        FfiConverterTypeDirectPollDto.lower(`other`),_status)
+}
+    )
+    }
+    // The local Rust `Hash` implementation
+    override fun hashCode(): Int {
+        return FfiConverterULong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directpolldto_uniffi_trait_hash(FfiConverterTypeDirectPollDto.lower(this),
+        _status)
+}
+    ).toInt()
+    }
 
     companion object
 }
