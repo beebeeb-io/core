@@ -30,5 +30,11 @@ else
 fi
 (cd "$out" && "${tsc[@]}" --noEmit --strict --target es2022 --lib es2022,dom,esnext.disposable nodejs/beebeeb_wasm.d.ts web/beebeeb_wasm.d.ts)
 
+echo "== tsc --noEmit: what a TypeScript consumer sees of poll()"
+for target in nodejs web; do
+  sed "s|./PKG/|./$target/|" "$here/types.check.ts" > "$out/types.$target.check.ts"
+done
+(cd "$out" && "${tsc[@]}" --noEmit --strict --target es2022 --lib es2022,dom,esnext.disposable types.nodejs.check.ts types.web.check.ts)
+
 echo "== node --test: the real module"
-BB_WASM_PKG="$out/nodejs" node --test "$here/direct_signed_url.test.cjs"
+BB_WASM_PKG="$out/nodejs" node --test "$here/direct_signed_url.test.cjs" "$here/direct_poll_shape.test.cjs"

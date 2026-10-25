@@ -1080,6 +1080,8 @@ external fun uniffi_beebeeb_uniffi_checksum_constructor_directdiscoverycachehand
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_directdownloadplannerhandle_new(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_directsignedurl_new(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_key_bytes(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_fileprovidercachehandle_open(
@@ -1251,6 +1253,8 @@ external fun uniffi_beebeeb_uniffi_fn_clone_directsignedurl(`handle`: Long,uniff
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_directsignedurl(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_directsignedurl_new(`url`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
 external fun uniffi_beebeeb_uniffi_fn_method_directsignedurl_raw(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_directsignedurl_redacted(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -2207,6 +2211,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_directdownloadplannerhandle_new() != 18802.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_directsignedurl_new() != 57713.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_key_bytes() != 50246.toShort()) {
@@ -5244,6 +5251,15 @@ public object FfiConverterTypeDirectDownloadPlannerHandle: FfiConverter<DirectDo
  * and so is the derived `Debug`/`toString()` of every record that holds one. The only way to the
  * link is [`DirectSignedUrl::raw`], by name, so it shows up in a review: pass it to the HTTP client
  * and nowhere else.
+ *
+ * On Kotlin, `toString()` of the object, or of a record that holds one, throws
+ * `IllegalStateException` once the object has been `destroy()`ed or `close()`d, like any call on a
+ * released object: do not log a grant after releasing it.
+ *
+ * It exports no `Eq` or `Hash` on purpose. UniFFI 0.31.1 generates Kotlin `equals` and `hashCode`
+ * that lower the object's handle with no check that it was destroyed, so comparing or hashing a
+ * released link (or a grant or poll that holds one) would be a use-after-free in native code.
+ * Compare the links' text (`raw()`) when a comparison is needed.
  */
 public interface DirectSignedUrlInterface {
     
@@ -5267,6 +5283,15 @@ public interface DirectSignedUrlInterface {
  * and so is the derived `Debug`/`toString()` of every record that holds one. The only way to the
  * link is [`DirectSignedUrl::raw`], by name, so it shows up in a review: pass it to the HTTP client
  * and nowhere else.
+ *
+ * On Kotlin, `toString()` of the object, or of a record that holds one, throws
+ * `IllegalStateException` once the object has been `destroy()`ed or `close()`d, like any call on a
+ * released object: do not log a grant after releasing it.
+ *
+ * It exports no `Eq` or `Hash` on purpose. UniFFI 0.31.1 generates Kotlin `equals` and `hashCode`
+ * that lower the object's handle with no check that it was destroyed, so comparing or hashing a
+ * released link (or a grant or poll that holds one) would be a use-after-free in native code.
+ * Compare the links' text (`raw()`) when a comparison is needed.
  */
 open class DirectSignedUrl: Disposable, AutoCloseable, DirectSignedUrlInterface
 {
@@ -5292,6 +5317,18 @@ open class DirectSignedUrl: Disposable, AutoCloseable, DirectSignedUrlInterface
         this.handle = 0
         this.cleanable = null
     }
+    /**
+     * A link from its text. The engine builds its own; this is for an app's tests (a `Fetch` poll
+     * made by hand). The text is not checked: `direct_check_storage_url` is the check.
+     */
+    constructor(`url`: kotlin.String) :
+        this(UniffiWithHandle, 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_directsignedurl_new(
+    
+        FfiConverterString.lower(`url`),_status)
+}
+    )
 
     protected val handle: Long
     protected val cleanable: UniffiCleaner.Cleanable?
@@ -11024,9 +11061,9 @@ sealed class DirectPollDto: Disposable  {
     }
     
     /**
-     * `GET grant.url` with a client that sends nothing else (no cookies, no
-     * `Authorization`), redirects off; accept only `200` whose `Content-Length`
-     * is `grant.length`.
+     * `GET grant.url.raw()` (`grant.url` is a `DirectSignedUrl`, not a string) with a client that
+     * sends nothing else (no cookies, no `Authorization`), redirects off; accept only `200` whose
+     * `Content-Length` is `grant.length`.
      */
     data class Fetch(
         val `index`: kotlin.UInt, 

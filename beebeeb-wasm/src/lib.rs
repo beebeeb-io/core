@@ -2054,6 +2054,25 @@ fn direct_seed(seed: f64) -> u64 {
     seed.to_bits()
 }
 
+// The shape of what `WasmDownloadPlanner.poll` returns, for the generated `.d.ts` (the JS values are
+// serialised from `DirectPollJs`: `kind` is the snake_case variant name, absent values are `null`).
+#[wasm_bindgen(typescript_custom_section)]
+const DIRECT_POLL_TS: &'static str = r#"
+export type DirectVerdict =
+    | { kind: "api_for_file" }
+    | { kind: "restart" }
+    | { kind: "terminal"; status: number; error: string | null }
+    | { kind: "corrupt" };
+
+export type DirectPoll =
+    | { kind: "request_window"; request: { object_version_id: string | null; start_index: number; count: number; renewal: boolean } }
+    | { kind: "fetch"; index: number; method: string; url: WasmSignedUrl; length: number; expires_at: string }
+    | { kind: "fetch_via_api"; index: number; object_version_id: string }
+    | { kind: "wait"; until_ms: number | null }
+    | { kind: "done" }
+    | { kind: "stop"; verdict: DirectVerdict };
+"#;
+
 /// A presigned storage link as the `fetch` step carries it: a bearer capability until it expires. It
 /// is an object, not a string, so that `console.log`, `String(url)`, a template literal and
 /// `JSON.stringify(step)` can never show it: all of them give the redacted form (scheme and host).
@@ -2339,9 +2358,9 @@ enum DirectPollJs {
     RequestWindow {
         request: DirectGrantRequestJs,
     },
-    /// `GET url` with a client that sends nothing else (no cookies, no
-    /// `Authorization`), `redirect: "error"`; accept only `200` whose
-    /// `Content-Length` is `length`.
+    /// `GET url.raw()` (`url` is a `WasmSignedUrl`, not a string) with a client that sends
+    /// nothing else (no cookies, no `Authorization`), `redirect: "error"`; accept only `200`
+    /// whose `Content-Length` is `length`.
     Fetch {
         index: u32,
         method: String,
@@ -2451,8 +2470,10 @@ pub struct WasmDownloadPlanner {
 
 #[wasm_bindgen]
 impl WasmDownloadPlanner {
-    /// `discovery` is the object `parseDirectDiscovery` returned; `jitter_seed` is any number
-    /// (`Math.random()` is fine: every distinct value is a distinct seed).
+    /// `discovery` is the object `parseDirectDiscovery` returned; `jitter_seed` is any number.
+    /// The seed is the number's IEEE-754 bits (`f64::to_bits`): `Math.random()` is fine, every
+    /// distinct number is a distinct seed (so two tabs do not share a retry schedule), the same
+    /// number repeats its schedule, and `0` and `-0` are two seeds. It is not a secret.
     #[wasm_bindgen(constructor)]
     pub fn new(
         discovery: JsValue,
@@ -2464,8 +2485,9 @@ impl WasmDownloadPlanner {
         Ok(Self::from_parts(discovery, api_base, file_id, direct_seed(jitter_seed)))
     }
 
-    /// What to do now: `{ kind, ... }` (see the class docs). For `kind: "fetch"` the `url` is a
-    /// `WasmSignedUrl`, not a string: pass `url.raw()` to `fetch` and nothing else.
+    /// What to do now: a `DirectPoll` (`{ kind, ... }`, see the class docs). For `kind: "fetch"` the
+    /// `url` is a `WasmSignedUrl`, not a string: pass `url.raw()` to `fetch` and nothing else.
+    #[wasm_bindgen(unchecked_return_type = "DirectPoll")]
     pub fn poll(&mut self, now_ms: f64) -> Result<JsValue, JsError> {
         direct_poll_to_js(self.poll_dto(direct_ms(now_ms)))
     }

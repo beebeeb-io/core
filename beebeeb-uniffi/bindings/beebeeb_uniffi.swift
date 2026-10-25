@@ -2119,6 +2119,15 @@ public func FfiConverterTypeDirectDownloadPlannerHandle_lower(_ value: DirectDow
  * and so is the derived `Debug`/`toString()` of every record that holds one. The only way to the
  * link is [`DirectSignedUrl::raw`], by name, so it shows up in a review: pass it to the HTTP client
  * and nowhere else.
+ *
+ * On Kotlin, `toString()` of the object, or of a record that holds one, throws
+ * `IllegalStateException` once the object has been `destroy()`ed or `close()`d, like any call on a
+ * released object: do not log a grant after releasing it.
+ *
+ * It exports no `Eq` or `Hash` on purpose. UniFFI 0.31.1 generates Kotlin `equals` and `hashCode`
+ * that lower the object's handle with no check that it was destroyed, so comparing or hashing a
+ * released link (or a grant or poll that holds one) would be a use-after-free in native code.
+ * Compare the links' text (`raw()`) when a comparison is needed.
  */
 public protocol DirectSignedUrlProtocol: AnyObject, Sendable {
     
@@ -2140,6 +2149,15 @@ public protocol DirectSignedUrlProtocol: AnyObject, Sendable {
  * and so is the derived `Debug`/`toString()` of every record that holds one. The only way to the
  * link is [`DirectSignedUrl::raw`], by name, so it shows up in a review: pass it to the HTTP client
  * and nowhere else.
+ *
+ * On Kotlin, `toString()` of the object, or of a record that holds one, throws
+ * `IllegalStateException` once the object has been `destroy()`ed or `close()`d, like any call on a
+ * released object: do not log a grant after releasing it.
+ *
+ * It exports no `Eq` or `Hash` on purpose. UniFFI 0.31.1 generates Kotlin `equals` and `hashCode`
+ * that lower the object's handle with no check that it was destroyed, so comparing or hashing a
+ * released link (or a grant or poll that holds one) would be a use-after-free in native code.
+ * Compare the links' text (`raw()`) when a comparison is needed.
  */
 open class DirectSignedUrl: DirectSignedUrlProtocol, @unchecked Sendable, CustomDebugStringConvertible, CustomStringConvertible {
     fileprivate let handle: UInt64
@@ -2180,7 +2198,19 @@ open class DirectSignedUrl: DirectSignedUrlProtocol, @unchecked Sendable, Custom
     public func uniffiCloneHandle() -> UInt64 {
         return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_directsignedurl(self.handle, $0) }
     }
-    // No primary constructor declared for this class.
+    /**
+     * A link from its text. The engine builds its own; this is for an app's tests (a `Fetch` poll
+     * made by hand). The text is not checked: `direct_check_storage_url` is the check.
+     */
+public convenience init(url: String) {
+    let handle =
+        try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_constructor_directsignedurl_new(
+        FfiConverterString.lower(url),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
 
     deinit {
         if handle == 0 {
@@ -7511,9 +7541,9 @@ public enum DirectPollDto {
     case requestWindow(request: DirectGrantRequestDto
     )
     /**
-     * `GET grant.url` with a client that sends nothing else (no cookies, no
-     * `Authorization`), redirects off; accept only `200` whose `Content-Length`
-     * is `grant.length`.
+     * `GET grant.url.raw()` (`grant.url` is a `DirectSignedUrl`, not a string) with a client that
+     * sends nothing else (no cookies, no `Authorization`), redirects off; accept only `200` whose
+     * `Content-Length` is `grant.length`.
      */
     case fetch(index: UInt32, grant: DirectChunkGrantDto
     )
@@ -11485,6 +11515,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_directdownloadplannerhandle_new() != 18802) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_directsignedurl_new() != 57713) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_key_bytes() != 50246) {

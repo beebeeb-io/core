@@ -263,6 +263,39 @@ impl Violation {
     }
 }
 
+/// Why [`DownloadPlanner`] refuses the content of a window answer: [`Violation`] without `Unexpected`, which
+/// is a caller's bug (an answer nobody asked for) and never a property of an answer's content. A separate
+/// type makes the compiler prove that checking an answer cannot produce it, so `window_answered` has no
+/// arm for it that could quietly come to be relied on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Rejected {
+    Transport,
+    FileMismatch,
+    VersionChanged,
+    Geometry,
+    Grants,
+    Length,
+    Method,
+    Authority(Refusal),
+    Expiry,
+}
+
+impl From<Rejected> for Violation {
+    fn from(rejected: Rejected) -> Self {
+        match rejected {
+            Rejected::Transport => Violation::Transport,
+            Rejected::FileMismatch => Violation::FileMismatch,
+            Rejected::VersionChanged => Violation::VersionChanged,
+            Rejected::Geometry => Violation::Geometry,
+            Rejected::Grants => Violation::Grants,
+            Rejected::Length => Violation::Length,
+            Rejected::Method => Violation::Method,
+            Rejected::Authority(refusal) => Violation::Authority(refusal),
+            Rejected::Expiry => Violation::Expiry,
+        }
+    }
+}
+
 /// What became of the body of a window answer ([`DownloadPlanner::window_answered_bytes`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowAnswer {
@@ -307,6 +340,17 @@ impl Verdict {
             Verdict::Restart => "restart",
             Verdict::Terminal(_) => "terminal",
             Verdict::Corrupt => "corrupt",
+        }
+    }
+
+    /// How firmly a verdict ends the file: `Corrupt` > `Terminal` > `Restart` > `ApiForFile`. A file
+    /// that comes to two verdicts keeps the stronger ([`DownloadPlanner::set_verdict`]).
+    fn strength(&self) -> u8 {
+        match self {
+            Verdict::ApiForFile => 0,
+            Verdict::Restart => 1,
+            Verdict::Terminal(_) => 2,
+            Verdict::Corrupt => 3,
         }
     }
 }
@@ -682,11 +726,28 @@ impl DownloadPlanner {
         wake
     }
 
+    /// The one place a verdict is written. A file can come to more than one (a stale or repeated
+    /// window answer, a failure reported out of order, a chunk that fails after the window did), and
+    /// the strongest stands: `Corrupt` > `Terminal` > `Restart` > `ApiForFile`. A stronger verdict may
+    /// replace a weaker one; a weaker or equal one never replaces what is there. Otherwise a late
+    /// answer could turn a chunk that does not authenticate, a revoked grant or a changed version
+    /// into "use the API", which would hide it.
+    fn set_verdict(&mut self, verdict: Verdict) {
+        let stronger = self
+            .verdict
+            .as_ref()
+            .is_none_or(|current| verdict.strength() > current.strength());
+        if stronger {
+            self.verdict = Some(verdict);
+        }
+    }
+
     /// The window answer for the outstanding request. `Err` means the answer
-    /// was refused and the file's verdict is set (see [`DownloadPlanner::poll`]).
+    /// was refused and the file's verdict is set (see [`DownloadPlanner::poll`]);
+    /// a stronger verdict that was already set stands (`Corrupt` > `Terminal` > `Restart` > `ApiForFile`).
     pub fn window_answered(&mut self, response: DownloadGrantResponse, now_ms: i64) -> Result<(), Violation> {
         let Some(request) = self.window.take() else {
-            self.verdict = Some(Verdict::ApiForFile);
+            self.set_verdict(Verdict::ApiForFile);
             return Err(Violation::Unexpected);
         };
         match self.accept(&request, response, now_ms) {
@@ -694,17 +755,13 @@ impl DownloadPlanner {
                 self.rate_limits = 0;
                 Ok(())
             }
-            Err(Violation::VersionChanged) => {
-                self.verdict = Some(Verdict::Restart);
+            Err(Rejected::VersionChanged) => {
+                self.set_verdict(Verdict::Restart);
                 Err(Violation::VersionChanged)
             }
-            Err(Violation::Unexpected) => {
-                self.verdict = Some(Verdict::ApiForFile);
-                Err(Violation::Unexpected)
-            }
-            Err(violation) => {
+            Err(rejected) => {
                 self.window_unusable();
-                Err(violation)
+                Err(rejected.into())
             }
         }
     }
@@ -720,7 +777,7 @@ impl DownloadPlanner {
     /// does not carry on through the pinned route).
     pub fn window_answered_bytes(&mut self, body: &[u8], now_ms: i64) -> WindowAnswer {
         if self.window.is_none() {
-            self.verdict = Some(Verdict::ApiForFile);
+            self.set_verdict(Verdict::ApiForFile);
             return WindowAnswer::Refused(Violation::Unexpected);
         }
         match DownloadGrantResponse::from_json(body) {
@@ -749,7 +806,7 @@ impl DownloadPlanner {
     /// and what was written stays (R1.6: the mixed-node rollout case).
     fn window_unusable(&mut self) {
         if self.pinned.is_none() {
-            self.verdict = Some(Verdict::ApiForFile);
+            self.set_verdict(Verdict::ApiForFile);
             return;
         }
         self.api_only = true;
@@ -765,20 +822,20 @@ impl DownloadPlanner {
         request: &DownloadGrantRequest,
         response: DownloadGrantResponse,
         now_ms: i64,
-    ) -> Result<(), Violation> {
+    ) -> Result<(), Rejected> {
         if response.transport != CAP_OBJECT_DOWNLOAD_V1 {
-            return Err(Violation::Transport);
+            return Err(Rejected::Transport);
         }
         if !response.file_id.eq_ignore_ascii_case(&self.file_id) {
-            return Err(Violation::FileMismatch);
+            return Err(Rejected::FileMismatch);
         }
         if response.object_version_id.is_empty() {
-            return Err(Violation::Geometry);
+            return Err(Rejected::Geometry);
         }
         if let Some(pin) = request.object_version_id.as_ref().or(self.pinned.as_ref())
             && !response.object_version_id.eq_ignore_ascii_case(pin)
         {
-            return Err(Violation::VersionChanged);
+            return Err(Rejected::VersionChanged);
         }
         let geometry = Geometry {
             chunk_count: response.chunk_count,
@@ -787,33 +844,33 @@ impl DownloadPlanner {
             original_size: response.original_size,
         };
         if !geometry.is_consistent() || self.geometry.is_some_and(|known| known != geometry) {
-            return Err(Violation::Geometry);
+            return Err(Rejected::Geometry);
         }
 
         let start = request.start_index;
         if start >= geometry.chunk_count {
-            return Err(Violation::Grants);
+            return Err(Rejected::Grants);
         }
         let end = (u64::from(start) + u64::from(request.count)).min(u64::from(geometry.chunk_count)) as u32;
         if response.grants.len() != (end - start) as usize {
-            return Err(Violation::Grants);
+            return Err(Rejected::Grants);
         }
         if response.next_index != (end < geometry.chunk_count).then_some(end) {
-            return Err(Violation::Grants);
+            return Err(Rejected::Grants);
         }
 
         let mut accepted = Vec::with_capacity(response.grants.len());
         for (offset, grant) in response.grants.into_iter().enumerate() {
             if grant.index != start + offset as u32 {
-                return Err(Violation::Grants);
+                return Err(Rejected::Grants);
             }
             if grant.method != "GET" {
-                return Err(Violation::Method);
+                return Err(Rejected::Method);
             }
             if Some(grant.length) != geometry.chunk_length(grant.index) {
-                return Err(Violation::Length);
+                return Err(Rejected::Length);
             }
-            check_storage_url(&grant.url, &self.discovery, &self.api_base).map_err(Violation::Authority)?;
+            check_storage_url(&grant.url, &self.discovery, &self.api_base).map_err(Rejected::Authority)?;
             let usable_until_ms = self.usable_until(&grant.expires_at, now_ms)?;
             accepted.push((grant, usable_until_ms));
         }
@@ -848,9 +905,9 @@ impl DownloadPlanner {
     }
 
     /// When a grant that arrived at `now_ms` stops being usable, on the client clock.
-    fn usable_until(&self, expires_at: &str, now_ms: i64) -> Result<i64, Violation> {
+    fn usable_until(&self, expires_at: &str, now_ms: i64) -> Result<i64, Rejected> {
         let expires_ms = DateTime::parse_from_rfc3339(expires_at)
-            .map_err(|_| Violation::Expiry)?
+            .map_err(|_| Rejected::Expiry)?
             .timestamp_millis();
         let ttl = self.cfg.url_ttl_ms;
         let skew = self.cfg.renew_skew_ms;
@@ -865,7 +922,7 @@ impl DownloadPlanner {
         };
         let usable_until = now_ms.saturating_add(lifetime).saturating_sub(skew);
         if usable_until <= now_ms {
-            return Err(Violation::Expiry);
+            return Err(Rejected::Expiry);
         }
         Ok(usable_until)
     }
@@ -884,8 +941,8 @@ impl DownloadPlanner {
                     self.window_not_before_ms = self.window_not_before_ms.max(now_ms.saturating_add(wait_ms));
                 }
             }
-            Outcome::Restart => self.verdict = Some(Verdict::Restart),
-            Outcome::Terminal(terminal) => self.verdict = Some(Verdict::Terminal(terminal)),
+            Outcome::Restart => self.set_verdict(Verdict::Restart),
+            Outcome::Terminal(terminal) => self.set_verdict(Verdict::Terminal(terminal)),
             // Not a failure (a caller bug), or any routing answer: the API serves this file.
             _ => self.window_unusable(),
         }
@@ -944,7 +1001,7 @@ impl DownloadPlanner {
         match self.slots.get(&index) {
             Some(Slot::Fetching { via_api: true, .. }) => {
                 self.slots.remove(&index);
-                self.verdict = Some(Verdict::ApiForFile);
+                self.set_verdict(Verdict::ApiForFile);
                 Ok(())
             }
             _ => Err(PlanError::NotInFlight(index)),
@@ -962,7 +1019,7 @@ impl DownloadPlanner {
         let mut attempts = *attempts;
         attempts.auth_failures = attempts.auth_failures.saturating_add(1);
         if attempts.auth_failures >= 2 {
-            self.verdict = Some(Verdict::Corrupt);
+            self.set_verdict(Verdict::Corrupt);
             self.slots.remove(&index);
         } else {
             self.slots.insert(index, Slot::ApiPending { attempts });
@@ -2458,5 +2515,289 @@ mod tests {
             WindowAnswer::Refused(Violation::Unexpected)
         );
         assert_eq!(p.poll(T0), Poll::Stop(Verdict::ApiForFile));
+    }
+
+    // ── a verdict that is set stands ──
+
+    #[test]
+    fn a_late_answer_does_not_replace_a_terminal_or_restart_verdict() {
+        let terminal = Terminal {
+            status: 403,
+            error: None,
+        };
+        for (what, set_verdict, expected) in [
+            (
+                "terminal",
+                (|p: &mut DownloadPlanner, t: &Terminal| p.window_failed(Outcome::Terminal(t.clone()), T0))
+                    as fn(&mut DownloadPlanner, &Terminal),
+                Verdict::Terminal(terminal.clone()),
+            ),
+            (
+                "restart",
+                |p, _| p.window_failed(Outcome::Restart, T0),
+                Verdict::Restart,
+            ),
+        ] {
+            let mut p = planner();
+            let first = expect_window(&mut p, T0);
+            let valid = serde_json::to_vec(&answer(&first, T0)).unwrap();
+            set_verdict(&mut p, &terminal);
+            assert_eq!(p.poll(T0), Poll::Stop(expected.clone()), "{what}");
+            // The request is gone; every late answer is a caller bug and changes nothing.
+            assert_eq!(
+                p.window_answered_bytes(&valid, T0),
+                WindowAnswer::Refused(Violation::Unexpected),
+                "{what}"
+            );
+            assert_eq!(
+                p.window_answered_bytes(b"{not json", T0),
+                WindowAnswer::Refused(Violation::Unexpected),
+                "{what}"
+            );
+            assert_eq!(
+                p.window_answered(answer(&first, T0), T0),
+                Err(Violation::Unexpected),
+                "{what}"
+            );
+            assert_eq!(
+                p.poll(T0),
+                Poll::Stop(expected.clone()),
+                "{what}: the first verdict stands"
+            );
+            // A stray failure report is not a new verdict either.
+            p.window_failed(Outcome::UseApiNow, T0);
+            p.window_malformed();
+            assert_eq!(p.poll(T0), Poll::Stop(expected), "{what}: after stray failure reports");
+        }
+    }
+
+    #[test]
+    fn a_chunk_that_does_not_authenticate_stays_a_hard_error_when_a_stale_window_arrives() {
+        // The next window is outstanding when the chunk fails twice; the window then answers for
+        // another version (a Restart on its own). The file stays Corrupt: never publish plaintext.
+        let mut p = started();
+        let next = drive_to_next_window(&mut p, T0);
+        let index = expect_fetch(&mut p, T0);
+        p.fetch_ok(index).unwrap();
+        p.chunk_unauthentic(index).unwrap();
+        match p.poll(T0) {
+            Poll::FetchViaApi { index: again, .. } => assert_eq!(again, index),
+            other => panic!("expected the API re-fetch, got {other:?}"),
+        }
+        p.fetch_ok(index).unwrap();
+        p.chunk_unauthentic(index).unwrap();
+        assert_eq!(p.poll(T0), Poll::Stop(Verdict::Corrupt));
+
+        let mut elsewhere = answer(&next, T0);
+        elsewhere.object_version_id = "44444444-4444-4444-8444-444444444444".into();
+        assert_eq!(p.window_answered(elsewhere, T0), Err(Violation::VersionChanged));
+        assert_eq!(
+            p.poll(T0),
+            Poll::Stop(Verdict::Corrupt),
+            "Restart did not replace Corrupt"
+        );
+    }
+
+    // ── precedence: Corrupt > Terminal > Restart > ApiForFile ──
+
+    fn forbidden() -> Terminal {
+        Terminal {
+            status: 403,
+            error: Some("forbidden".into()),
+        }
+    }
+
+    fn all_verdicts() -> Vec<Verdict> {
+        vec![
+            Verdict::ApiForFile,
+            Verdict::Restart,
+            Verdict::Terminal(forbidden()),
+            Verdict::Corrupt,
+        ]
+    }
+
+    #[test]
+    fn the_strongest_verdict_stands_whatever_order_they_come_in() {
+        // The rule itself, all sixteen pairs: a stronger verdict replaces, a weaker or equal one does not.
+        for first in all_verdicts() {
+            for then in all_verdicts() {
+                let mut p = planner();
+                p.set_verdict(first.clone());
+                p.set_verdict(then.clone());
+                let want = if then.strength() > first.strength() {
+                    &then
+                } else {
+                    &first
+                };
+                assert_eq!(p.poll(T0), Poll::Stop(want.clone()), "{first:?} then {then:?}");
+            }
+        }
+        // Among equals the first stands (the status the caller saw first is the one it reports).
+        let mut p = planner();
+        p.set_verdict(Verdict::Terminal(forbidden()));
+        p.set_verdict(Verdict::Terminal(Terminal {
+            status: 401,
+            error: None,
+        }));
+        assert_eq!(p.poll(T0), Poll::Stop(Verdict::Terminal(forbidden())));
+    }
+
+    /// A pinned planner whose chunk 0 is in flight on the pinned API route.
+    fn with_chunk_zero_on_the_api_route() -> DownloadPlanner {
+        let mut p = started();
+        assert_eq!(expect_fetch(&mut p, T0), 0);
+        p.fetch_ok(0).unwrap();
+        p.chunk_unauthentic(0).unwrap();
+        match p.poll(T0) {
+            Poll::FetchViaApi { index: 0, .. } => {}
+            other => panic!("expected chunk 0 on the API route, got {other:?}"),
+        }
+        p
+    }
+
+    /// A chunk that has failed authentication once and has come back from the API route: one more
+    /// failure and the file is Corrupt. Done with `poll`, so call it BEFORE any other verdict is set.
+    fn chunk_that_failed_once(p: &mut DownloadPlanner) -> u32 {
+        let index = expect_fetch(p, T0);
+        p.fetch_ok(index).unwrap();
+        p.chunk_unauthentic(index).unwrap();
+        match p.poll(T0) {
+            Poll::FetchViaApi { index: again, .. } => assert_eq!(again, index),
+            other => panic!("expected the API re-fetch, got {other:?}"),
+        }
+        p.fetch_ok(index).unwrap();
+        index
+    }
+
+    /// The file is Corrupt: a chunk fails authentication twice.
+    fn make_corrupt(p: &mut DownloadPlanner) {
+        let index = chunk_that_failed_once(p);
+        p.chunk_unauthentic(index).unwrap();
+    }
+
+    /// Bring a planner to `verdict` the way a client would, through the public calls.
+    fn reach(p: &mut DownloadPlanner, verdict: &Verdict) {
+        match verdict {
+            Verdict::ApiForFile => {}
+            Verdict::Restart => p.window_failed(Outcome::Restart, T0),
+            Verdict::Terminal(t) => p.window_failed(Outcome::Terminal(t.clone()), T0),
+            Verdict::Corrupt => make_corrupt(p),
+        }
+    }
+
+    #[test]
+    fn a_failed_api_fetch_never_downgrades_a_stronger_verdict() {
+        for existing in all_verdicts().into_iter().skip(1) {
+            let mut p = with_chunk_zero_on_the_api_route();
+            reach(&mut p, &existing);
+            assert_eq!(p.poll(T0), Poll::Stop(existing.clone()), "{existing:?}");
+            p.api_fetch_failed(0).unwrap();
+            assert_eq!(
+                p.poll(T0),
+                Poll::Stop(existing.clone()),
+                "api_fetch_failed after {existing:?}"
+            );
+        }
+        // With nothing before it, it is "use the API".
+        let mut p = with_chunk_zero_on_the_api_route();
+        p.api_fetch_failed(0).unwrap();
+        assert_eq!(p.poll(T0), Poll::Stop(Verdict::ApiForFile));
+    }
+
+    #[test]
+    fn a_window_failure_never_downgrades_a_stronger_verdict_and_escalates_a_weaker_one() {
+        let other_terminal = Terminal {
+            status: 401,
+            error: None,
+        };
+        // After Corrupt neither a Restart nor a Terminal replaces it.
+        let mut p = with_chunk_zero_on_the_api_route();
+        make_corrupt(&mut p);
+        p.window_failed(Outcome::Restart, T0);
+        p.window_failed(Outcome::Terminal(other_terminal.clone()), T0);
+        assert_eq!(p.poll(T0), Poll::Stop(Verdict::Corrupt), "after Corrupt");
+        // After Terminal a Restart does not replace it, and a second Terminal does not either.
+        let mut p = planner();
+        expect_window(&mut p, T0);
+        p.window_failed(Outcome::Terminal(forbidden()), T0);
+        p.window_failed(Outcome::Restart, T0);
+        p.window_failed(Outcome::Terminal(other_terminal.clone()), T0);
+        assert_eq!(p.poll(T0), Poll::Stop(Verdict::Terminal(forbidden())), "after Terminal");
+        // The other way round, the stronger replaces: Restart, then Terminal.
+        let mut p = planner();
+        expect_window(&mut p, T0);
+        p.window_failed(Outcome::Restart, T0);
+        assert_eq!(p.poll(T0), Poll::Stop(Verdict::Restart));
+        p.window_failed(Outcome::Terminal(other_terminal.clone()), T0);
+        assert_eq!(
+            p.poll(T0),
+            Poll::Stop(Verdict::Terminal(other_terminal)),
+            "Restart, then Terminal"
+        );
+        // "Use the API" is replaced by Restart.
+        let mut p = planner();
+        expect_window(&mut p, T0);
+        p.window_failed(Outcome::UseApiNow, T0);
+        assert_eq!(p.poll(T0), Poll::Stop(Verdict::ApiForFile));
+        p.window_failed(Outcome::Restart, T0);
+        assert_eq!(p.poll(T0), Poll::Stop(Verdict::Restart), "ApiForFile, then Restart");
+    }
+
+    #[test]
+    fn a_stray_window_failure_with_no_window_outstanding_changes_no_verdict() {
+        for existing in all_verdicts().into_iter().skip(1) {
+            for outcome in [
+                Outcome::UseApiNow,
+                Outcome::ApiForThisFile,
+                Outcome::NotSupported,
+                Outcome::Retry,
+                Outcome::Backoff(Duration::from_secs(1)),
+            ] {
+                let mut p = with_chunk_zero_on_the_api_route();
+                reach(&mut p, &existing);
+                // No window request is outstanding (the first one was answered long ago).
+                p.window_failed(outcome.clone(), T0);
+                p.window_malformed();
+                assert_eq!(
+                    p.poll(T0),
+                    Poll::Stop(existing.clone()),
+                    "{outcome:?} after {existing:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_chunk_that_does_not_authenticate_escalates_every_other_verdict_to_corrupt() {
+        for existing in all_verdicts().into_iter().take(3) {
+            let mut p = with_chunk_zero_on_the_api_route();
+            let index = chunk_that_failed_once(&mut p);
+            reach(&mut p, &existing);
+            p.chunk_unauthentic(index).unwrap();
+            assert_eq!(p.poll(T0), Poll::Stop(Verdict::Corrupt), "Corrupt after {existing:?}");
+        }
+    }
+
+    #[test]
+    fn every_rejection_maps_to_its_own_violation() {
+        for (rejected, want, code) in [
+            (Rejected::Transport, Violation::Transport, "transport"),
+            (Rejected::FileMismatch, Violation::FileMismatch, "file_mismatch"),
+            (Rejected::VersionChanged, Violation::VersionChanged, "version_changed"),
+            (Rejected::Geometry, Violation::Geometry, "geometry"),
+            (Rejected::Grants, Violation::Grants, "grants"),
+            (Rejected::Length, Violation::Length, "length"),
+            (Rejected::Method, Violation::Method, "method"),
+            (
+                Rejected::Authority(Refusal::HostNotListed),
+                Violation::Authority(Refusal::HostNotListed),
+                "authority_host_not_listed",
+            ),
+            (Rejected::Expiry, Violation::Expiry, "expiry"),
+        ] {
+            let got = Violation::from(rejected);
+            assert_eq!(got, want, "{rejected:?}");
+            assert_eq!(got.code(), code, "{rejected:?}");
+        }
     }
 }
