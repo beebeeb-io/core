@@ -5252,6 +5252,32 @@ mod direct_transfer_binding_tests {
         d.into()
     }
 
+    /// The host hands outcomes back to core (a planner's `window_failed`, the pinned retry decision, the
+    /// discovery cache): every kind must come back as itself, `Regrant` and `Retry` included.
+    #[test]
+    fn every_outcome_survives_a_round_trip_through_core() {
+        for outcome in [
+            DirectOutcomeDto::Proceed,
+            DirectOutcomeDto::NotSupported,
+            DirectOutcomeDto::UseApiNow,
+            DirectOutcomeDto::ApiForThisFile,
+            DirectOutcomeDto::Restart,
+            DirectOutcomeDto::Backoff { millis: 1500 },
+            DirectOutcomeDto::Terminal {
+                status: 403,
+                error: None,
+            },
+            DirectOutcomeDto::Terminal {
+                status: 404,
+                error: Some("not found".to_string()),
+            },
+            DirectOutcomeDto::Retry,
+            DirectOutcomeDto::Regrant,
+        ] {
+            assert_eq!(DirectOutcomeDto::from_core(&outcome.to_core()), outcome);
+        }
+    }
+
     fn outcome_value(o: &DirectOutcomeDto) -> Value {
         match o {
             DirectOutcomeDto::Proceed => json!({"kind": "proceed"}),

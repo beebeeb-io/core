@@ -3285,6 +3285,10 @@ mod direct_vector_tests {
             json!({"kind": "backoff", "millis": 1500.0}),
             json!({"kind": "terminal", "status": 403, "error": null}),
             json!({"kind": "restart"}),
+            json!({"kind": "retry"}),
+            // The upload commit's "the staged chunk is not there": the JS side hands it back to core
+            // (a planner or a retry decision), where it must still be a regrant and not a catch-all.
+            json!({"kind": "regrant"}),
         ] {
             let parsed: DirectOutcomeJs = serde_json::from_value(outcome.clone()).unwrap();
             assert_eq!(
