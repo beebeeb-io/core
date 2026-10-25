@@ -570,7 +570,7 @@
       "call": "discovery",
       "status": 500,
       "content_type": "application/json",
-      "body": "{\"error\":\"internal\"}",
+      "body": "{\"error\":\"Something went wrong.\"}",
       "retry_after": null,
       "expect": {
         "kind": "use_api_now"
@@ -861,7 +861,7 @@
       "call": "download_grant",
       "status": 500,
       "content_type": "application/json",
-      "body": "{\"error\":\"internal\"}",
+      "body": "{\"error\":\"Something went wrong.\"}",
       "retry_after": null,
       "expect": {
         "kind": "use_api_now"
@@ -895,6 +895,282 @@
       "status": 400,
       "content_type": "application/json",
       "body": "{\"error\":\"count must be between 1 and 32\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      }
+    },
+    {
+      "name": "pinned 200",
+      "call": "pinned_chunk",
+      "status": 200,
+      "content_type": "application/octet-stream",
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "proceed"
+      }
+    },
+    {
+      "name": "pinned 409 with the server's real body: the pin is gone",
+      "call": "pinned_chunk",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"download version unavailable; restart download from fresh metadata\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "restart"
+      }
+    },
+    {
+      "name": "pinned bare 409: the pin is gone",
+      "call": "pinned_chunk",
+      "status": 409,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "restart"
+      }
+    },
+    {
+      "name": "pinned 409 with the grant route's code: the pin is gone",
+      "call": "pinned_chunk",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"version_unavailable\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "restart"
+      }
+    },
+    {
+      "name": "pinned 409 with any other text: the pin is gone",
+      "call": "pinned_chunk",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"something the server may say tomorrow\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "restart"
+      }
+    },
+    {
+      "name": "pinned 409 replace_in_progress is a wait",
+      "call": "pinned_chunk",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"replace_in_progress\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      }
+    },
+    {
+      "name": "pinned 409 replace_in_progress with Retry-After",
+      "call": "pinned_chunk",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"replace_in_progress\"}",
+      "retry_after": "3",
+      "expect": {
+        "kind": "backoff",
+        "millis": 3000
+      }
+    },
+    {
+      "name": "pinned 409 commit_in_progress is a wait",
+      "call": "pinned_chunk",
+      "status": 409,
+      "content_type": "application/json",
+      "body": "{\"error\":\"commit_in_progress\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      }
+    },
+    {
+      "name": "pinned 429 with Retry-After",
+      "call": "pinned_chunk",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"server_busy\",\"retry_after\":7}",
+      "retry_after": "7",
+      "expect": {
+        "kind": "backoff",
+        "millis": 7000
+      }
+    },
+    {
+      "name": "pinned 429 without Retry-After",
+      "call": "pinned_chunk",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{\"error\":\"server_busy\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "backoff",
+        "millis": 5000
+      }
+    },
+    {
+      "name": "pinned 429 with a huge Retry-After is capped",
+      "call": "pinned_chunk",
+      "status": 429,
+      "content_type": "application/json",
+      "body": "{}",
+      "retry_after": "86400",
+      "expect": {
+        "kind": "backoff",
+        "millis": 120000
+      }
+    },
+    {
+      "name": "pinned 500 may pass",
+      "call": "pinned_chunk",
+      "status": 500,
+      "content_type": "application/json",
+      "body": "{\"error\":\"Something went wrong.\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      }
+    },
+    {
+      "name": "pinned HTML 502 may pass",
+      "call": "pinned_chunk",
+      "status": 502,
+      "content_type": "text/html",
+      "body": "<html>Bad Gateway</html>",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      }
+    },
+    {
+      "name": "pinned 503 may pass",
+      "call": "pinned_chunk",
+      "status": 503,
+      "content_type": null,
+      "body": "",
+      "retry_after": "5",
+      "expect": {
+        "kind": "retry"
+      }
+    },
+    {
+      "name": "pinned no answer may pass",
+      "call": "pinned_chunk",
+      "status": 0,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      }
+    },
+    {
+      "name": "pinned 302 may pass",
+      "call": "pinned_chunk",
+      "status": 302,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      }
+    },
+    {
+      "name": "pinned bare 404: a node without the route may pass",
+      "call": "pinned_chunk",
+      "status": 404,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      }
+    },
+    {
+      "name": "pinned 405 may pass",
+      "call": "pinned_chunk",
+      "status": 405,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "retry"
+      }
+    },
+    {
+      "name": "pinned JSON 404 is a real not-found",
+      "call": "pinned_chunk",
+      "status": 404,
+      "content_type": "application/json",
+      "body": "{\"error\":\"not found\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 404,
+        "error": "not found"
+      }
+    },
+    {
+      "name": "pinned 401",
+      "call": "pinned_chunk",
+      "status": 401,
+      "content_type": "application/json",
+      "body": "{\"error\":\"unauthorized\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "pinned 403",
+      "call": "pinned_chunk",
+      "status": 403,
+      "content_type": "application/json",
+      "body": "{\"error\":\"forbidden\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "terminal",
+        "status": 403,
+        "error": "forbidden"
+      }
+    },
+    {
+      "name": "pinned 400: an index out of range will not change",
+      "call": "pinned_chunk",
+      "status": 400,
+      "content_type": "application/json",
+      "body": "{\"error\":\"chunk index 9 out of range (version has 3 chunk(s))\"}",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      }
+    },
+    {
+      "name": "pinned 410",
+      "call": "pinned_chunk",
+      "status": 410,
+      "content_type": null,
+      "body": "",
+      "retry_after": null,
+      "expect": {
+        "kind": "api_for_this_file"
+      }
+    },
+    {
+      "name": "pinned 413",
+      "call": "pinned_chunk",
+      "status": 413,
+      "content_type": null,
+      "body": "",
       "retry_after": null,
       "expect": {
         "kind": "api_for_this_file"
@@ -1009,6 +1285,174 @@
       "encrypted_size": "18446744073709551615",
       "index": 4294967294,
       "expect": null
+    }
+  ],
+  "pinned_retry": [
+    {
+      "name": "first failure of a server hiccup waits 1 s",
+      "outcome": {
+        "kind": "retry"
+      },
+      "attempt": 1,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "wait",
+        "millis": 1000
+      }
+    },
+    {
+      "name": "second doubles",
+      "outcome": {
+        "kind": "retry"
+      },
+      "attempt": 2,
+      "waited_ms": 1000,
+      "expect": {
+        "kind": "wait",
+        "millis": 2000
+      }
+    },
+    {
+      "name": "third doubles again",
+      "outcome": {
+        "kind": "retry"
+      },
+      "attempt": 3,
+      "waited_ms": 3000,
+      "expect": {
+        "kind": "wait",
+        "millis": 4000
+      }
+    },
+    {
+      "name": "the fourth attempt was the last",
+      "outcome": {
+        "kind": "retry"
+      },
+      "attempt": 4,
+      "waited_ms": 7000,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "a stated wait is kept",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 3000
+      },
+      "attempt": 1,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "wait",
+        "millis": 3000
+      }
+    },
+    {
+      "name": "a stated wait that ends exactly at the budget is taken",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 30000
+      },
+      "attempt": 2,
+      "waited_ms": 30000,
+      "expect": {
+        "kind": "wait",
+        "millis": 30000
+      }
+    },
+    {
+      "name": "a stated wait one millisecond past the budget is not",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 30000
+      },
+      "attempt": 2,
+      "waited_ms": 30001,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "a stated wait longer than the whole budget is not",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 120000
+      },
+      "attempt": 1,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "a stated wait on the last attempt is not taken",
+      "outcome": {
+        "kind": "backoff",
+        "millis": 1000
+      },
+      "attempt": 4,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "a gone pin is not retried",
+      "outcome": {
+        "kind": "restart"
+      },
+      "attempt": 1,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "an authorization answer is not retried",
+      "outcome": {
+        "kind": "terminal",
+        "status": 403,
+        "error": "forbidden"
+      },
+      "attempt": 1,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "a refusal a retry cannot change is not retried",
+      "outcome": {
+        "kind": "api_for_this_file"
+      },
+      "attempt": 1,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "a success needs no retry",
+      "outcome": {
+        "kind": "proceed"
+      },
+      "attempt": 1,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "give_up"
+      }
+    },
+    {
+      "name": "the doubling cannot overflow",
+      "outcome": {
+        "kind": "retry"
+      },
+      "attempt": 4000000000,
+      "waited_ms": 0,
+      "expect": {
+        "kind": "give_up"
+      }
     }
   ],
   "planner": [

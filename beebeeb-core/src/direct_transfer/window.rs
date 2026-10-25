@@ -1657,6 +1657,7 @@ mod tests {
             (Outcome::Restart, Verdict::Restart),
             (Outcome::Terminal(t(403)), Verdict::Terminal(t(403))),
             (Outcome::Proceed, Verdict::ApiForFile),
+            (Outcome::Retry, Verdict::ApiForFile),
         ];
         for (outcome, want) in cases {
             let mut p = planner();

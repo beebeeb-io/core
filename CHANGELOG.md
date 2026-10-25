@@ -119,6 +119,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Stable `code()`/`kind()` names on `Refusal`, `Call`, `Outcome`, `Violation`, `PlanError`,
   `Verdict`, `Poll`. `test-vectors/direct_transfer.json` is run by core, the WASM seams and the
   UniFFI exports through one interpreter (`direct_transfer::vectors`, `test-support`).
+  `Call::PinnedChunk` classifies the pinned per-chunk route (any 409 except a held file is a gone
+  pin; `Outcome::Retry` for what may pass) and `PinnedRetry::decide` is the shared retry policy
+  (WASM `pinnedRetryDecision`, UniFFI `direct_pinned_retry_decision`).
 - CI `Claims guard` job: runs the shared claims-guard engine plus
   `scripts/claims-guard/canon-sweep.sh`, the canon CLAIM_SWEEP over the whole tree
   (including any `design/` folder), so a false audit or compliance claim fails the build.

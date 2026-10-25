@@ -7213,6 +7213,11 @@ public enum DirectOutcomeDto: Equatable, Hashable {
      */
     case terminal(status: UInt16, error: String?
     )
+    /**
+     * The pinned chunk route only: a failure that may pass (5xx, no answer); retry after the
+     * bounded backoff of `direct_pinned_retry_decision`.
+     */
+    case retry
 
 
 
@@ -7249,6 +7254,8 @@ public struct FfiConverterTypeDirectOutcomeDto: FfiConverterRustBuffer {
         
         case 7: return .terminal(status: try FfiConverterUInt16.read(from: &buf), error: try FfiConverterOptionString.read(from: &buf)
         )
+        
+        case 8: return .retry
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -7288,6 +7295,10 @@ public struct FfiConverterTypeDirectOutcomeDto: FfiConverterRustBuffer {
             FfiConverterUInt16.write(status, into: &buf)
             FfiConverterOptionString.write(error, into: &buf)
             
+        
+        case .retry:
+            writeInt(&buf, Int32(8))
+        
         }
     }
 }
@@ -7442,6 +7453,85 @@ public func FfiConverterTypeDirectPollDto_lift(_ buf: RustBuffer) throws -> Dire
 #endif
 public func FfiConverterTypeDirectPollDto_lower(_ value: DirectPollDto) -> RustBuffer {
     return FfiConverterTypeDirectPollDto.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * What to do after a failed attempt on the pinned per-chunk route.
+ */
+
+public enum DirectRetryDecisionDto: Equatable, Hashable {
+    
+    /**
+     * Wait this long, then try again.
+     */
+    case wait(millis: UInt64
+    )
+    /**
+     * Stop: act on the outcome (restart, terminal) or hand the file to the API stream.
+     */
+    case giveUp
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension DirectRetryDecisionDto: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDirectRetryDecisionDto: FfiConverterRustBuffer {
+    typealias SwiftType = DirectRetryDecisionDto
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DirectRetryDecisionDto {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .wait(millis: try FfiConverterUInt64.read(from: &buf)
+        )
+        
+        case 2: return .giveUp
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DirectRetryDecisionDto, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .wait(millis):
+            writeInt(&buf, Int32(1))
+            FfiConverterUInt64.write(millis, into: &buf)
+            
+        
+        case .giveUp:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectRetryDecisionDto_lift(_ buf: RustBuffer) throws -> DirectRetryDecisionDto {
+    return try FfiConverterTypeDirectRetryDecisionDto.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectRetryDecisionDto_lower(_ value: DirectRetryDecisionDto) -> RustBuffer {
+    return FfiConverterTypeDirectRetryDecisionDto.lower(value)
 }
 
 
@@ -10090,6 +10180,21 @@ public func directDownloadGrantsPath(fileId: String) -> String  {
 })
 }
 /**
+ * The shared retry policy of the pinned per-chunk route (4 attempts, 60 s of waiting in all, a
+ * stated `Retry-After` kept, otherwise 1 s doubling). `outcome` is `classify_direct_answer`'s
+ * answer for `"pinned_chunk"`; `attempt` is the 1-based number of the attempt that just failed;
+ * `waited_ms` is the total waited so far.
+ */
+public func directPinnedRetryDecision(outcome: DirectOutcomeDto, attempt: UInt32, waitedMs: UInt64) -> DirectRetryDecisionDto  {
+    return try!  FfiConverterTypeDirectRetryDecisionDto_lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_direct_pinned_retry_decision(
+        FfiConverterTypeDirectOutcomeDto_lower(outcome),
+        FfiConverterUInt32.lower(attempt),
+        FfiConverterUInt64.lower(waitedMs),$0
+    )
+})
+}
+/**
  * A URL for a log line: scheme and host only.
  */
 public func directRedactUrl(url: String) -> String  {
@@ -10750,6 +10855,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_download_grants_path() != 38361) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_pinned_retry_decision() != 44156) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_redact_url() != 8126) {

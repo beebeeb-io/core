@@ -4478,6 +4478,9 @@ pub enum DirectOutcomeDto {
     Backoff { millis: u64 },
     /// 401, 403 or a JSON 404: do not fall back.
     Terminal { status: u16, error: Option<String> },
+    /// The pinned chunk route only: a failure that may pass (5xx, no answer); retry after the
+    /// bounded backoff of `direct_pinned_retry_decision`.
+    Retry,
 }
 
 impl DirectOutcomeDto {
@@ -4495,6 +4498,7 @@ impl DirectOutcomeDto {
                 status: t.status,
                 error: t.error.clone(),
             },
+            dt::Outcome::Retry => Self::Retry,
             // `Outcome` is non-exhaustive: a variant added later is the safe one.
             _ => Self::UseApiNow,
         }
@@ -4512,7 +4516,31 @@ impl DirectOutcomeDto {
                 status: *status,
                 error: error.clone(),
             }),
+            Self::Retry => dt::Outcome::Retry,
         }
+    }
+}
+
+/// What to do after a failed attempt on the pinned per-chunk route.
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+pub enum DirectRetryDecisionDto {
+    /// Wait this long, then try again.
+    Wait { millis: u64 },
+    /// Stop: act on the outcome (restart, terminal) or hand the file to the API stream.
+    GiveUp,
+}
+
+/// The shared retry policy of the pinned per-chunk route (4 attempts, 60 s of waiting in all, a
+/// stated `Retry-After` kept, otherwise 1 s doubling). `outcome` is `classify_direct_answer`'s
+/// answer for `"pinned_chunk"`; `attempt` is the 1-based number of the attempt that just failed;
+/// `waited_ms` is the total waited so far.
+#[uniffi::export]
+pub fn direct_pinned_retry_decision(outcome: DirectOutcomeDto, attempt: u32, waited_ms: u64) -> DirectRetryDecisionDto {
+    match dt::PinnedRetry::default().decide(attempt, std::time::Duration::from_millis(waited_ms), &outcome.to_core()) {
+        dt::RetryDecision::Wait(d) => DirectRetryDecisionDto::Wait {
+            millis: d.as_millis() as u64,
+        },
+        dt::RetryDecision::GiveUp => DirectRetryDecisionDto::GiveUp,
     }
 }
 
@@ -5148,6 +5176,7 @@ mod direct_transfer_binding_tests {
             DirectOutcomeDto::Terminal { status, error } => {
                 json!({"kind": "terminal", "status": status, "error": error})
             }
+            DirectOutcomeDto::Retry => json!({"kind": "retry"}),
         }
     }
 
@@ -5158,6 +5187,7 @@ mod direct_transfer_binding_tests {
             "use_api_now" => DirectOutcomeDto::UseApiNow,
             "api_for_this_file" => DirectOutcomeDto::ApiForThisFile,
             "restart" => DirectOutcomeDto::Restart,
+            "retry" => DirectOutcomeDto::Retry,
             "backoff" => DirectOutcomeDto::Backoff {
                 millis: v["millis"].as_u64().unwrap(),
             },
@@ -5236,6 +5266,13 @@ mod direct_transfer_binding_tests {
 
         fn redact(&self, input: &str) -> String {
             direct_redact_url(input.to_owned())
+        }
+
+        fn pinned_retry(&self, outcome: &Value, attempt: u32, waited_ms: u64) -> Value {
+            match direct_pinned_retry_decision(outcome_dto(outcome), attempt, waited_ms) {
+                DirectRetryDecisionDto::Wait { millis } => json!({"kind": "wait", "millis": millis}),
+                DirectRetryDecisionDto::GiveUp => json!({"kind": "give_up"}),
+            }
         }
 
         fn scrub(&self, input: &str) -> String {

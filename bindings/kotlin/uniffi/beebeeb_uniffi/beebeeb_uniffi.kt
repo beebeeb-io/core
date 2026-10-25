@@ -778,6 +778,8 @@ external fun uniffi_beebeeb_uniffi_checksum_func_direct_discovery_offers_downloa
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_download_grants_path(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_direct_pinned_retry_decision(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_redact_url(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_scrub_text(
@@ -1447,6 +1449,8 @@ external fun uniffi_beebeeb_uniffi_fn_func_direct_discovery_offers_download(`dis
 ): Byte
 external fun uniffi_beebeeb_uniffi_fn_func_direct_download_grants_path(`fileId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_direct_pinned_retry_decision(`outcome`: RustBuffer.ByValue,`attempt`: Int,`waitedMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_direct_redact_url(`url`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_direct_scrub_text(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1734,6 +1738,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_download_grants_path() != 38361.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_pinned_retry_decision() != 44156.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_redact_url() != 8126.toShort()) {
@@ -10517,6 +10524,13 @@ sealed class DirectOutcomeDto {
         companion object
     }
     
+    /**
+     * The pinned chunk route only: a failure that may pass (5xx, no answer); retry after the
+     * bounded backoff of `direct_pinned_retry_decision`.
+     */
+    object Retry : DirectOutcomeDto()
+    
+    
 
     
 
@@ -10545,6 +10559,7 @@ public object FfiConverterTypeDirectOutcomeDto : FfiConverterRustBuffer<DirectOu
                 FfiConverterUShort.read(buf),
                 FfiConverterOptionalString.read(buf),
                 )
+            8 -> DirectOutcomeDto.Retry
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
         }
     }
@@ -10595,6 +10610,12 @@ public object FfiConverterTypeDirectOutcomeDto : FfiConverterRustBuffer<DirectOu
                 + FfiConverterOptionalString.allocationSize(value.`error`)
             )
         }
+        is DirectOutcomeDto.Retry -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
     }
 
     override fun write(value: DirectOutcomeDto, buf: ByteBuffer) {
@@ -10628,6 +10649,10 @@ public object FfiConverterTypeDirectOutcomeDto : FfiConverterRustBuffer<DirectOu
                 buf.putInt(7)
                 FfiConverterUShort.write(value.`status`, buf)
                 FfiConverterOptionalString.write(value.`error`, buf)
+                Unit
+            }
+            is DirectOutcomeDto.Retry -> {
+                buf.putInt(8)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -10830,6 +10855,88 @@ public object FfiConverterTypeDirectPollDto : FfiConverterRustBuffer<DirectPollD
             is DirectPollDto.Stop -> {
                 buf.putInt(6)
                 FfiConverterTypeDirectVerdictDto.write(value.`verdict`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+/**
+ * What to do after a failed attempt on the pinned per-chunk route.
+ */
+sealed class DirectRetryDecisionDto {
+    
+    /**
+     * Wait this long, then try again.
+     */
+    data class Wait(
+        val `millis`: kotlin.ULong) : DirectRetryDecisionDto()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * Stop: act on the outcome (restart, terminal) or hand the file to the API stream.
+     */
+    object GiveUp : DirectRetryDecisionDto()
+    
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDirectRetryDecisionDto : FfiConverterRustBuffer<DirectRetryDecisionDto>{
+    override fun read(buf: ByteBuffer): DirectRetryDecisionDto {
+        return when(buf.getInt()) {
+            1 -> DirectRetryDecisionDto.Wait(
+                FfiConverterULong.read(buf),
+                )
+            2 -> DirectRetryDecisionDto.GiveUp
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: DirectRetryDecisionDto) = when(value) {
+        is DirectRetryDecisionDto.Wait -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterULong.allocationSize(value.`millis`)
+            )
+        }
+        is DirectRetryDecisionDto.GiveUp -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+    }
+
+    override fun write(value: DirectRetryDecisionDto, buf: ByteBuffer) {
+        when(value) {
+            is DirectRetryDecisionDto.Wait -> {
+                buf.putInt(1)
+                FfiConverterULong.write(value.`millis`, buf)
+                Unit
+            }
+            is DirectRetryDecisionDto.GiveUp -> {
+                buf.putInt(2)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -13583,6 +13690,22 @@ public object FfiConverterSequenceTypeCeremonyStepDto: FfiConverterRustBuffer<Li
     UniffiLib.uniffi_beebeeb_uniffi_fn_func_direct_download_grants_path(
     
         FfiConverterString.lower(`fileId`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The shared retry policy of the pinned per-chunk route (4 attempts, 60 s of waiting in all, a
+         * stated `Retry-After` kept, otherwise 1 s doubling). `outcome` is `classify_direct_answer`'s
+         * answer for `"pinned_chunk"`; `attempt` is the 1-based number of the attempt that just failed;
+         * `waited_ms` is the total waited so far.
+         */ fun `directPinnedRetryDecision`(`outcome`: DirectOutcomeDto, `attempt`: kotlin.UInt, `waitedMs`: kotlin.ULong): DirectRetryDecisionDto {
+            return FfiConverterTypeDirectRetryDecisionDto.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_direct_pinned_retry_decision(
+    
+        FfiConverterTypeDirectOutcomeDto.lower(`outcome`),FfiConverterUInt.lower(`attempt`),FfiConverterULong.lower(`waitedMs`),_status)
 }
     )
     }

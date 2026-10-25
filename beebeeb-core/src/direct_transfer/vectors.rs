@@ -15,8 +15,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    ApiAnswer, Call, Discovery, DownloadPlanner, Geometry, Outcome, PlannerConfig, Poll, Terminal, WindowAnswer,
-    check_storage_url, classify, redact, scrub,
+    ApiAnswer, Call, Discovery, DownloadPlanner, Geometry, Outcome, PinnedRetry, PlannerConfig, Poll, RetryDecision,
+    Terminal, WindowAnswer, check_storage_url, classify, redact, scrub,
 };
 
 const API_PROD: &str = "https://api.beebeeb.test";
@@ -41,6 +41,9 @@ pub trait Surface {
     ) -> Value;
     fn redact(&self, input: &str) -> String;
     fn scrub(&self, input: &str) -> String;
+    /// [`PinnedRetry::decide`] with the default policy: `outcome` is `{kind, millis?, ...}`, the
+    /// answer `{kind: "wait", millis}` or `{kind: "give_up"}`.
+    fn pinned_retry(&self, outcome: &Value, attempt: u32, waited_ms: u64) -> Value;
     fn chunk_length(&self, chunk_count: u32, chunk_size: u64, encrypted_size: u64, index: u32) -> Option<u64>;
     fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> Self::Planner;
 }
@@ -73,6 +76,7 @@ pub struct Report {
     pub redact: usize,
     pub scrub: usize,
     pub chunk_length: usize,
+    pub pinned_retry: usize,
     pub scenarios: usize,
     pub steps: usize,
     pub refusals: usize,
@@ -88,6 +92,7 @@ pub fn expected_report() -> Report {
         redact: len("redact"),
         scrub: len("scrub"),
         chunk_length: len("chunk_length"),
+        pinned_retry: len("pinned_retry"),
         scenarios: len("planner"),
         ..Report::default()
     };
@@ -193,6 +198,16 @@ pub fn run_all<S: Surface>(surface: &S) -> Report {
         let want = row["expect"].as_u64();
         assert_eq!(got, want, "chunk_length row {:?}", row["name"]);
         report.chunk_length += 1;
+    }
+
+    for row in v["pinned_retry"].as_array().expect("pinned_retry") {
+        let got = surface.pinned_retry(
+            &row["outcome"],
+            row["attempt"].as_u64().unwrap() as u32,
+            as_u64(&row["waited_ms"]),
+        );
+        assert_eq!(got, row["expect"], "pinned_retry row {:?}", row["name"]);
+        report.pinned_retry += 1;
     }
 
     let file_id = v["file_id"].as_str().unwrap();
@@ -351,12 +366,21 @@ pub fn outcome_from_json(v: &Value) -> Outcome {
         "use_api_now" => Outcome::UseApiNow,
         "api_for_this_file" => Outcome::ApiForThisFile,
         "restart" => Outcome::Restart,
+        "retry" => Outcome::Retry,
         "backoff" => Outcome::Backoff(std::time::Duration::from_millis(v["millis"].as_u64().unwrap())),
         "terminal" => Outcome::Terminal(Terminal {
             status: v["status"].as_u64().unwrap() as u16,
             error: v["error"].as_str().map(str::to_string),
         }),
         other => panic!("unknown outcome kind {other}"),
+    }
+}
+
+/// `{kind: "wait", millis}` or `{kind: "give_up"}` for a retry decision.
+pub fn decision_json(decision: &RetryDecision) -> Value {
+    match decision {
+        RetryDecision::Wait(d) => json!({"kind": decision.kind(), "millis": d.as_millis() as u64}),
+        RetryDecision::GiveUp => json!({"kind": decision.kind()}),
     }
 }
 
@@ -432,6 +456,13 @@ impl Surface for CoreSurface {
     fn scrub(&self, input: &str) -> String {
         scrub(input)
     }
+    fn pinned_retry(&self, outcome: &Value, attempt: u32, waited_ms: u64) -> Value {
+        decision_json(&PinnedRetry::default().decide(
+            attempt,
+            std::time::Duration::from_millis(waited_ms),
+            &outcome_from_json(outcome),
+        ))
+    }
     fn chunk_length(&self, chunk_count: u32, chunk_size: u64, encrypted_size: u64, index: u32) -> Option<u64> {
         Geometry {
             chunk_count,
@@ -484,6 +515,13 @@ mod tests {
         }
         fn scrub(&self, input: &str) -> String {
             CoreSurface.scrub(input)
+        }
+        fn pinned_retry(&self, outcome: &Value, attempt: u32, waited_ms: u64) -> Value {
+            let mut v = CoreSurface.pinned_retry(outcome, attempt, waited_ms);
+            if self.0 == "retry" && v["kind"] == "wait" {
+                v["millis"] = json!(v["millis"].as_u64().unwrap() + 1); // a binding that mangles the wait
+            }
+            v
         }
         fn chunk_length(&self, n: u32, s: u64, e: u64, i: u32) -> Option<u64> {
             if self.0 == "geometry" {
@@ -558,6 +596,9 @@ mod tests {
         fn scrub(&self, i: &str) -> String {
             CoreSurface.scrub(i)
         }
+        fn pinned_retry(&self, o: &Value, a: u32, w: u64) -> Value {
+            CoreSurface.pinned_retry(o, a, w)
+        }
         fn chunk_length(&self, n: u32, s: u64, e: u64, i: u32) -> Option<u64> {
             CoreSurface.chunk_length(n, s, e, i)
         }
@@ -572,7 +613,7 @@ mod tests {
         assert_eq!(report, expected_report(), "a section that did not run is a failure");
         // Counts, not adjectives: the file is not empty and the sections are what the review asked for.
         assert!(
-            report.authority >= 59 && report.classify >= 34 && report.chunk_length >= 8,
+            report.authority >= 59 && report.classify >= 58 && report.chunk_length >= 8 && report.pinned_retry >= 14,
             "{report:?}"
         );
         assert!(
@@ -600,7 +641,7 @@ mod tests {
 
     #[test]
     fn the_runner_goes_red_when_a_surface_drifts() {
-        for what in ["authority", "classify", "millis", "redact", "geometry"] {
+        for what in ["authority", "classify", "millis", "retry", "redact", "geometry"] {
             let result = catch_unwind(AssertUnwindSafe(|| run_all(&Drift(what))));
             assert!(
                 result.is_err(),

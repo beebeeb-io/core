@@ -2160,6 +2160,7 @@ enum DirectOutcomeJs {
     Restart,
     Backoff { millis: f64 },
     Terminal { status: u16, error: Option<String> },
+    Retry,
 }
 
 impl DirectOutcomeJs {
@@ -2177,6 +2178,7 @@ impl DirectOutcomeJs {
                 status: t.status,
                 error: t.error.clone(),
             },
+            dt::Outcome::Retry => Self::Retry,
             // `Outcome` is non-exhaustive: a variant added later is the safe one.
             _ => Self::UseApiNow,
         }
@@ -2194,8 +2196,28 @@ impl DirectOutcomeJs {
                 status: *status,
                 error: error.clone(),
             }),
+            Self::Retry => dt::Outcome::Retry,
         }
     }
+}
+
+/// What to do after a failed attempt on the pinned per-chunk route: `{ kind: "wait", millis }` or
+/// `{ kind: "give_up" }`.
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum DirectRetryJs {
+    Wait { millis: f64 },
+    GiveUp,
+}
+
+/// The shared retry policy of the pinned per-chunk route (4 attempts, 60 s of waiting in all, a
+/// stated `Retry-After` kept, otherwise 1 s doubling). `outcome` is what `classifyDirectAnswer`
+/// returned for `call: "pinned_chunk"`; `attempt` is the 1-based number of the attempt that just
+/// failed; `waitedMs` is the total waited so far.
+#[wasm_bindgen(js_name = pinnedRetryDecision)]
+pub fn pinned_retry_decision(outcome: JsValue, attempt: u32, waited_ms: f64) -> Result<JsValue, JsValue> {
+    let outcome = direct_outcome_from_js(outcome)?;
+    direct_to_js(&direct_pinned_retry(&outcome, attempt, waited_ms)).map_err(JsValue::from)
 }
 
 // ── seams: plain Rust (no `JsValue`), used by the wrappers and by the tests ──
@@ -2208,6 +2230,16 @@ fn direct_parse_discovery(body: &[u8]) -> Result<dt::Discovery, DirectFailure> {
         };
         DirectFailure::new(e.to_string(), code)
     })
+}
+
+fn direct_pinned_retry(outcome: &DirectOutcomeJs, attempt: u32, waited_ms: f64) -> DirectRetryJs {
+    let waited = std::time::Duration::from_millis(waited_ms.max(0.0) as u64);
+    match dt::PinnedRetry::default().decide(attempt, waited, &outcome.to_core()) {
+        dt::RetryDecision::Wait(d) => DirectRetryJs::Wait {
+            millis: d.as_millis() as f64,
+        },
+        dt::RetryDecision::GiveUp => DirectRetryJs::GiveUp,
+    }
 }
 
 fn direct_check_url(url: &str, discovery: &dt::Discovery, api_base: &str) -> Result<(), DirectFailure> {
@@ -2976,6 +3008,13 @@ mod direct_vector_tests {
 
         fn redact(&self, input: &str) -> String {
             redact_url(input)
+        }
+
+        fn pinned_retry(&self, outcome: &Value, attempt: u32, waited_ms: u64) -> Value {
+            let outcome: DirectOutcomeJs = serde_json::from_value(outcome.clone()).unwrap();
+            vectors::normalize_numbers(
+                serde_json::to_value(direct_pinned_retry(&outcome, attempt, waited_ms as f64)).unwrap(),
+            )
         }
 
         fn scrub(&self, input: &str) -> String {
