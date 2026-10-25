@@ -11,7 +11,7 @@ Cryptographic core, shared types, and sync engine. This is the trust anchor — 
 ## Build & test
 
 ```sh
-cargo test -p beebeeb-core   # unit + suite binaries (chunk_stream_parity, cli_auth_vectors, cross_client_vectors, cross_platform_vectors, integration, transfer_vectors, zip_tests) + doctests
+cargo test -p beebeeb-core   # unit + suite binaries (chunk_stream_parity, cli_auth_vectors, cross_client_vectors, cross_platform_vectors, direct_transfer_authority, integration, transfer_vectors, zip_tests) + doctests
 cargo test --workspace       # full workspace (core + sync + types + upload + uniffi + wasm)
 cargo clippy --workspace -- -D warnings
 cargo fmt -- --check
@@ -106,6 +106,16 @@ Signup ceremony state machine driven by the server's onboarding document; no new
 - `onboarding::breach` — k-anonymity (SHA-1 prefix only; suffix never leaves the device). **The HTTP call stays in each client and goes to Beebeeb's own endpoint** (`GET /api/v1/auth/pwned-range/{prefix}`) — the public HaveIBeenPwned API violates the no-US-systems rule (task 0995). Empty/whitespace body, body > 256 KiB, non-2xx, or a malformed line is an OUTAGE (a captive portal must not read as clean); `fail_open` from the document picks Allowed vs Blocked. `BreachCheck::record` refuses a prefix that isn't this password's (`breach_prefix_mismatch`).
 - `SignupCeremony` steps: VerifyEmail (if required) → SetPassword → SavePhrase → ConfirmPhrase → CreateAccount → Done; ONLY `create_account` is gated. The breach gate is enforced here, once: a stale (`breach_check_stale`) or answer-less (`breach_check_missing`) check is refused and the verdict is computed from the stored password — a client cannot pick `fail_open`. No notion of email address in the ceremony.
 - Memory: password/phrase are `Zeroizing`; **clients must call `wipe()` (`abandon()` in the bindings) on back, cancel and error exits** (binding handles are freed on the host's schedule). `phrase()` copies are render-only. Bindings: WASM (`WasmSignupCeremony`, `WasmBreachCheck`, `evaluate_password`; owned strings in `Zeroizing`) and UniFFI (`SignupCeremonyHandle`, `BreachCheckHandle`, separate `OnboardingError`). Tests are trusted only after mutation.
+
+## Direct S3 transfer rules (`direct_transfer/`) — task 2173
+
+The client-side rules of the direct S3 transfer contract v1 (workspace spec `docs/specs/2026-10-23-direct-download-hosts.md`, amendments R1.1–R1.18) as **pure Rust**: no I/O, no HTTP client, no clock, no async runtime. Each client keeps its own HTTP stack (CLI reqwest, desktop `beebeeb-sync`, iOS `URLSession`, web `fetch`) and calls these, so five clients do not re-implement them. Plain owned data only, so WASM/UniFFI can export it unchanged (not exported yet).
+
+- `wire`: tokens `object-download-v1` / `object-upload-v1`; `X-Beebeeb-Capabilities` goes on grant/init requests ONLY, never globally; serde types. The upload types are frozen by the spec but not yet served: verify them against the real routes before a client sends them. Grant types `Debug`-print their URL without its query.
+- `authority::check_storage_url`: a strict printable-ASCII grammar, so what was checked is what any URL parser connects to (https; a listed `{host, bucket}` in path style; no userinfo, IP-looking host, unlisted port or dot segment; http only to loopback when the API base is loopback http). `redact` / `scrub` are the only ways a URL, or text that may contain one, reaches a log, error or progress line.
+- `classify`: R1.6. Only a JSON-bodied 404 (JSON content type AND an `error` string) is terminal; a bare/HTML 404, 405, 5xx or no answer means "no direct transport on this node". 409 `direct_unavailable` / `replace_in_progress` / unknown → API for this file; `version_unavailable` → restart; 429 → back off (Retry-After clamped 1–120 s); 401/403 → terminal.
+- `window::DownloadPlanner`: windows of grants (refill at ≤ 2 unused), ≤ 4 chunk requests in flight and no chunk further ahead than that (the decryptor is in-order), grants unused inside a 30 s margin, ≤ 3 renewals per chunk then the pinned API route, one API re-fetch of a chunk that fails authentication before `Verdict::Corrupt`. Every grant is checked against the response geometry and `check_storage_url` before the caller sees it. Time and jitter are injected.
+- Tests: the `direct_transfer::` unit tests and `tests/direct_transfer_authority.rs` (hostile-URL table; a differential fuzz against the `url` crate). Every rule has a recorded mutation that fails a named test (task 2173 notes); a new rule needs one.
 
 ## Security invariants
 

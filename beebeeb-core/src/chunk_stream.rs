@@ -78,8 +78,9 @@ use crate::CoreError;
 use crate::encrypt::{NONCE_LEN, TAG_LEN, open_raw_with_aad, random_nonce, seal_raw_with_aad, seal_raw_with_nonce};
 use crate::kdf::{FileKey, MasterKey, derive_file_key};
 
-/// Per-chunk AEAD overhead on the wire: `nonce(12) + tag(16)`.
-const CHUNK_OVERHEAD: u64 = (NONCE_LEN + TAG_LEN) as u64;
+/// Per-chunk AEAD overhead on the wire: `nonce(12) + tag(16)` = 28 bytes. The ONE
+/// definition: `direct_transfer` sizes chunk lengths from it.
+pub const CHUNK_OVERHEAD: u64 = (NONCE_LEN + TAG_LEN) as u64;
 
 /// Hard upper bound on an explicit (server-dictated or concurrency-derived)
 /// `chunk_size_bytes`. Matches the top of the `ChunkProfile` ladder (256 MiB,

@@ -60,3 +60,5 @@ test-support = []
 
 [dev-dependencies]
 hex = "0.4"
+# Differential test only: the authority check must agree with the WHATWG parser reqwest connects with.
+url = "2"

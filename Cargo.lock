@@ -241,6 +241,7 @@ dependencies = [
  "sha2",
  "thiserror",
  "unicode-normalization",
+ "url",
  "uuid",
  "webp",
  "x25519-dalek",
