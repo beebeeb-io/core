@@ -702,7 +702,11 @@ mod tests {
 
     #[test]
     fn call_codes_are_stable_and_invertible() {
-        for (call, code) in [(Call::Discovery, "discovery"), (Call::DownloadGrant, "download_grant")] {
+        for (call, code) in [
+            (Call::Discovery, "discovery"),
+            (Call::DownloadGrant, "download_grant"),
+            (Call::PinnedChunk, "pinned_chunk"),
+        ] {
             assert_eq!(call.code(), code);
             assert_eq!(Call::from_code(code), Some(call));
         }

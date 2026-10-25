@@ -701,12 +701,12 @@ mod tests {
                 && report.classify >= 58
                 && report.chunk_length >= 8
                 && report.pinned_retry >= 14
-                && report.cache_scenarios >= 8
-                && report.cache_steps >= 40,
+                && report.cache_scenarios >= 9
+                && report.cache_steps >= 45,
             "{report:?}"
         );
         assert!(
-            report.scenarios >= 18 && report.steps >= 149 && report.refusals >= 21,
+            report.scenarios >= 19 && report.steps >= 152 && report.refusals >= 21,
             "{report:?}"
         );
     }
