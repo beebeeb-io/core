@@ -4584,7 +4584,7 @@ pub fn classify_direct_answer(
 }
 
 /// `POST /api/v1/files/{id}/download-grants` body.
-#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
 pub struct DirectGrantRequestDto {
     pub object_version_id: Option<String>,
     pub start_index: u32,
@@ -4599,12 +4599,16 @@ pub struct DirectGrantRequestDto {
 /// link is [`DirectSignedUrl::raw`], by name, so it shows up in a review: pass it to the HTTP client
 /// and nowhere else.
 ///
-/// Two links are equal when their text is (so the records that hold one compare by value in Swift
-/// and Kotlin). On Kotlin, `toString()` of the object, or of a record that holds one, throws
+/// On Kotlin, `toString()` of the object, or of a record that holds one, throws
 /// `IllegalStateException` once the object has been `destroy()`ed or `close()`d, like any call on a
 /// released object: do not log a grant after releasing it.
-#[derive(uniffi::Object, PartialEq, Eq, Hash)]
-#[uniffi::export(Debug, Display, Eq, Hash)]
+///
+/// It exports no `Eq` or `Hash` on purpose. UniFFI 0.31.1 generates Kotlin `equals` and `hashCode`
+/// that lower the object's handle with no check that it was destroyed, so comparing or hashing a
+/// released link (or a grant or poll that holds one) would be a use-after-free in native code.
+/// Compare the links' text (`raw()`) when a comparison is needed.
+#[derive(uniffi::Object, PartialEq, Eq)]
+#[uniffi::export(Debug, Display)]
 pub struct DirectSignedUrl {
     url: String,
 }
@@ -4643,8 +4647,7 @@ impl DirectSignedUrl {
 
 /// One presigned link. `url` is a bearer capability, and cannot be printed by accident: see
 /// [`DirectSignedUrl`].
-#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq, Hash)]
-#[uniffi::export(Eq, Hash)]
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
 pub struct DirectChunkGrantDto {
     pub index: u32,
     pub method: String,
@@ -4654,7 +4657,7 @@ pub struct DirectChunkGrantDto {
 }
 
 /// How a file ends when it cannot go on directly.
-#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
 pub enum DirectVerdictDto {
     /// Discard any partial output and download the file again on the API path.
     ApiForFile,
@@ -4667,8 +4670,7 @@ pub enum DirectVerdictDto {
 }
 
 /// What the app must do now.
-#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq, Hash)]
-#[uniffi::export(Eq, Hash)]
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
 pub enum DirectPollDto {
     /// `POST` this body to `direct_download_grants_path(file_id)` with the
     /// capability header, then report the answer.
@@ -5540,77 +5542,73 @@ mod direct_transfer_binding_tests {
     }
 
     #[test]
-    fn a_signed_url_is_built_from_text_and_compares_and_hashes_by_it() {
-        use std::collections::HashSet;
+    fn a_signed_url_is_built_from_text_and_prints_none_of_it() {
         let text = "https://s3.storage.test/bb-01/k?X-Amz-Signature=SECRETSIG";
         let a = DirectSignedUrl::new(text.to_owned());
-        let b = DirectSignedUrl::new(text.to_owned());
         let other = DirectSignedUrl::new(format!("{text}x"));
         assert_eq!(a.raw(), text);
-        assert_eq!(*a, *b, "equal text is an equal link");
+        // Rust-side equality exists (the derives of the records need it); the bindings do not export it.
+        assert_eq!(*a, *DirectSignedUrl::new(text.to_owned()));
         assert_ne!(*a, *other);
-        // The records that hold one compare by value too.
-        let grant = |url: Arc<DirectSignedUrl>| DirectChunkGrantDto {
-            index: 0,
-            method: "GET".to_owned(),
-            url,
-            length: 1,
-            expires_at: "2027-01-15T08:05:00Z".to_owned(),
-        };
-        assert_eq!(grant(a.clone()), grant(b.clone()));
-        assert_ne!(grant(a.clone()), grant(other.clone()));
-        let set: HashSet<DirectSignedUrl> = [text.to_owned(), text.to_owned(), format!("{text}x")]
-            .into_iter()
-            .map(|t| Arc::try_unwrap(DirectSignedUrl::new(t)).ok().unwrap())
-            .collect();
-        assert_eq!(set.len(), 2, "equal links hash alike");
-        // Whatever it is compared by, it is not printed by it.
         assert!(!format!("{a:?} {a}").contains("SECRETSIG"));
     }
 
     /// The committed Swift and Kotlin are what the apps compile. A change to the exported surface of the link
-    /// (its redacted `toString`, value equality, the constructor) must come with regenerated files.
+    /// (its redacted `toString`, the constructor, the traits it must NOT export) must come with regenerated files.
     #[test]
     fn the_committed_bindings_carry_the_signed_url_surface() {
         let swift = include_str!("../bindings/beebeeb_uniffi.swift");
         assert!(
             swift.contains(
-                "open class DirectSignedUrl: DirectSignedUrlProtocol, @unchecked Sendable, Equatable, Hashable, \
-                 CustomDebugStringConvertible, CustomStringConvertible"
+                "open class DirectSignedUrl: DirectSignedUrlProtocol, @unchecked Sendable, \
+                 CustomDebugStringConvertible, CustomStringConvertible {"
             ),
-            "Swift: DirectSignedUrl has value semantics and is printed through its Rust Display/Debug"
+            "Swift: DirectSignedUrl is printed through its Rust Display/Debug, and is not Equatable or Hashable"
         );
         assert!(
             swift.contains("public convenience init(url: String)"),
             "Swift: the constructor"
         );
-        for held_in in [
-            "public struct DirectChunkGrantDto: Equatable, Hashable",
-            "public enum DirectPollDto: Equatable, Hashable",
-        ] {
-            assert!(
-                swift.contains(held_in),
-                "Swift: a type that holds the link compares by value: {held_in}"
-            );
-        }
-        for path in [
+        let header = include_str!("../bindings/beebeeb_uniffiFFI.h");
+        let kotlin_sources = [
             include_str!("../bindings/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
             include_str!("../../bindings/kotlin/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
+        ];
+        // UniFFI 0.31.1's Kotlin `equals`/`hashCode` lower the object's handle with no destroyed check: comparing
+        // or hashing a released link, grant or poll would be a use-after-free in native code. None is exported.
+        for exported in [
+            "directsignedurl_uniffi_trait_eq",
+            "directsignedurl_uniffi_trait_hash",
+            "directchunkgrantdto_uniffi_trait",
+            "directpolldto_uniffi_trait",
         ] {
-            let class = path
+            assert!(!header.contains(exported), "C header exports {exported}");
+            assert!(!swift.contains(exported), "Swift calls {exported}");
+            for kotlin in kotlin_sources {
+                assert!(!kotlin.contains(exported), "Kotlin calls {exported}");
+            }
+        }
+        for held_in in [
+            "public struct DirectChunkGrantDto: Equatable",
+            "public struct DirectChunkGrantDto: Hashable",
+            "public enum DirectPollDto: Equatable",
+            "public enum DirectPollDto: Hashable",
+        ] {
+            assert!(!swift.contains(held_in), "Swift: {held_in}");
+        }
+        for kotlin in kotlin_sources {
+            let class = kotlin
                 .split("open class DirectSignedUrl")
                 .nth(1)
                 .expect("Kotlin: DirectSignedUrl is generated")
                 .split("object FfiConverterTypeDirectSignedUrl")
                 .next()
                 .unwrap();
-            for needed in [
-                "override fun toString()",
-                "override fun equals(",
-                "override fun hashCode()",
-                "constructor(`url`: kotlin.String)",
-            ] {
+            for needed in ["override fun toString()", "constructor(`url`: kotlin.String)"] {
                 assert!(class.contains(needed), "Kotlin: DirectSignedUrl lacks {needed}");
+            }
+            for forbidden in ["override fun equals(", "override fun hashCode("] {
+                assert!(!class.contains(forbidden), "Kotlin: DirectSignedUrl has {forbidden}");
             }
         }
     }

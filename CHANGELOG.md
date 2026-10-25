@@ -131,20 +131,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already read it): the presigned link of a `fetch` step is an OBJECT, not a string, so that no habitual
   logging shows its signature. WASM: `WasmSignedUrl` (`raw()` is the link; `redacted()`, `toString()` and
   `toJSON()` are scheme and host); `poll()` is typed `DirectPoll` in the `.d.ts`. UniFFI: `DirectSignedUrl`
-  (redacted `Display`/`Debug`, hence Swift `description` and Kotlin `toString()`; compares and hashes by its
-  text; `DirectSignedUrl(url:)` builds one for an app's tests), and `DirectChunkGrantDto.url` is one. Read the
+  (redacted `Display`/`Debug`, hence Swift `description` and Kotlin `toString()`; `DirectSignedUrl(url:)`
+  builds one for an app's tests), and `DirectChunkGrantDto.url` is one. Read the
   link with `.raw()` and pass that to the HTTP client, nothing else. Notes for consumers:
   - A `WasmSignedUrl` holds a pointer into wasm memory and is not structured-cloneable: `structuredClone` /
     `postMessage` gives `{ __wbg_ptr: <number> }`, no methods and no link. Send a worker the string
     `step.url.raw()` at the moment it fetches.
   - Kotlin: `toString()` of a `DirectSignedUrl`, or of a record holding one, throws `IllegalStateException`
     once it has been `destroy()`ed or `close()`d (as any call on a released object does).
-  - Swift: `DirectChunkGrantDto` and `DirectPollDto` are `Equatable, Hashable` again.
-  - The `Eq`/`Hash` exports and the constructor add FFI symbols; the four generated binding files are
-    regenerated.
-- `DownloadPlanner`: the file's first verdict stands. A stale or repeated window answer, or a failure report
-  out of order, can no longer turn a `Restart`, `Terminal` or `Corrupt` into "use the API"
-  (`window_answered`, `window_answered_bytes`, `window_malformed`, and the unusable paths of `window_failed`).
+  - `DirectSignedUrl`, `DirectChunkGrantDto` and `DirectPollDto` export no `Eq` or `Hash`, on purpose.
+    UniFFI 0.31.1's generated Kotlin `equals` and `hashCode` lower the object's handle with no check that it
+    was destroyed, so comparing or hashing a released link, grant or poll would be a use-after-free in native
+    code. The Swift types that hold the link are therefore not `Equatable` or `Hashable`; compare the links'
+    text (`raw()`). A test pins that the generated Kotlin has no `equals`/`hashCode` that lowers a handle.
+  - The constructor adds one FFI function; the four generated binding files are regenerated.
+- `DownloadPlanner`: a file that comes to more than one verdict keeps the strongest: `Corrupt` > `Terminal` >
+  `Restart` > `ApiForFile`, and among equals the first. Every writer (`window_answered`,
+  `window_answered_bytes`, `window_malformed`, `window_failed`, `api_fetch_failed`, `chunk_unauthentic`)
+  goes through one setter, so a stale or repeated window answer or a failure reported out of order can no
+  longer turn a chunk that does not authenticate, a revoked grant or a changed version into "use the API".
 
 ### Fixed
 - `beebeeb-wasm`: the generated `beebeeb_wasm.js` and `beebeeb_wasm.d.ts` did not parse since core #34
