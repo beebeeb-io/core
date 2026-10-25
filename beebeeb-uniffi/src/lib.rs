@@ -5151,7 +5151,7 @@ mod direct_transfer_binding_tests {
     //! crate. The same file `beebeeb-core` runs through core directly: a binding that drifts
     //! from core fails here.
 
-    use beebeeb_core::direct_transfer::vectors::{self, PlannerSurface, Surface};
+    use beebeeb_core::direct_transfer::vectors::{self, CacheSurface, PlannerSurface, Surface};
     use serde_json::{Value, json};
 
     use super::*;
@@ -5159,6 +5159,23 @@ mod direct_transfer_binding_tests {
     struct UniffiSurface;
 
     struct UniffiPlanner(Arc<DirectDownloadPlannerHandle>);
+
+    struct UniffiCache(Arc<DirectDiscoveryCacheHandle>);
+
+    impl CacheSurface for UniffiCache {
+        fn lookup(&self, now_ms: i64) -> String {
+            match self.0.lookup(now_ms) {
+                DirectLookupDto::Fetch => "fetch",
+                DirectLookupDto::Cached { .. } => "cached",
+                DirectLookupDto::UseApi => "use_api",
+            }
+            .to_string()
+        }
+
+        fn record(&mut self, outcome: &Value, body: Option<&[u8]>, now_ms: i64) {
+            self.0.record(outcome_dto(outcome), body.map(<[u8]>::to_vec), now_ms);
+        }
+    }
 
     fn discovery_dto(v: &Value) -> DirectDiscoveryDto {
         let d: dt::Discovery = serde_json::from_value(v.clone()).expect("discovery");
@@ -5236,6 +5253,11 @@ mod direct_transfer_binding_tests {
 
     impl Surface for UniffiSurface {
         type Planner = UniffiPlanner;
+        type Cache = UniffiCache;
+
+        fn cache(&self) -> UniffiCache {
+            UniffiCache(DirectDiscoveryCacheHandle::new())
+        }
 
         fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String> {
             direct_check_storage_url(url.to_owned(), discovery_dto(discovery), api_base.to_owned()).map_err(|e| match e

@@ -15,8 +15,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    ApiAnswer, Call, Discovery, DownloadPlanner, Geometry, Outcome, PinnedRetry, PlannerConfig, Poll, RetryDecision,
-    Terminal, WindowAnswer, check_storage_url, classify, redact, scrub,
+    ApiAnswer, Call, Discovery, DiscoveryCache, DownloadPlanner, Geometry, Lookup, Outcome, PinnedRetry, PlannerConfig,
+    Poll, RetryDecision, Terminal, WindowAnswer, check_storage_url, classify, redact, scrub,
 };
 
 const API_PROD: &str = "https://api.beebeeb.test";
@@ -29,6 +29,7 @@ pub const VECTORS_JSON: &str = include_str!("../../../test-vectors/direct_transf
 /// values shaped like the file; failures cross as the stable `code` strings.
 pub trait Surface {
     type Planner: PlannerSurface;
+    type Cache: CacheSurface;
 
     fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String>;
     fn classify(
@@ -46,6 +47,15 @@ pub trait Surface {
     fn pinned_retry(&self, outcome: &Value, attempt: u32, waited_ms: u64) -> Value;
     fn chunk_length(&self, chunk_count: u32, chunk_size: u64, encrypted_size: u64, index: u32) -> Option<u64>;
     fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> Self::Planner;
+    fn cache(&self) -> Self::Cache;
+}
+
+/// The discovery cache as a surface exports it.
+pub trait CacheSurface {
+    /// `"fetch"`, `"cached"` or `"use_api"`.
+    fn lookup(&self, now_ms: i64) -> String;
+    /// `outcome` is `{kind, ...}`; `body` is the discovery answer's body, as the client read it.
+    fn record(&mut self, outcome: &Value, body: Option<&[u8]>, now_ms: i64);
 }
 
 /// The planner as a surface exports it.
@@ -77,6 +87,8 @@ pub struct Report {
     pub scrub: usize,
     pub chunk_length: usize,
     pub pinned_retry: usize,
+    pub cache_scenarios: usize,
+    pub cache_steps: usize,
     pub scenarios: usize,
     pub steps: usize,
     pub refusals: usize,
@@ -93,9 +105,13 @@ pub fn expected_report() -> Report {
         scrub: len("scrub"),
         chunk_length: len("chunk_length"),
         pinned_retry: len("pinned_retry"),
+        cache_scenarios: len("discovery_cache"),
         scenarios: len("planner"),
         ..Report::default()
     };
+    for s in v["discovery_cache"].as_array().into_iter().flatten() {
+        r.cache_steps += s["steps"].as_array().map_or(0, Vec::len);
+    }
     for s in v["planner"].as_array().into_iter().flatten() {
         r.steps += s["steps"].as_array().map_or(0, Vec::len);
         r.refusals += s["refusals"].as_array().map_or(0, Vec::len);
@@ -208,6 +224,35 @@ pub fn run_all<S: Surface>(surface: &S) -> Report {
         );
         assert_eq!(got, row["expect"], "pinned_retry row {:?}", row["name"]);
         report.pinned_retry += 1;
+    }
+
+    for scenario in v["discovery_cache"].as_array().expect("discovery_cache") {
+        let name = scenario["name"].as_str().unwrap();
+        let mut cache = surface.cache();
+        for (i, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
+            let now = step["now"].as_i64().unwrap();
+            match step["op"].as_str().unwrap() {
+                "lookup" => assert_eq!(
+                    cache.lookup(now),
+                    step["expect"].as_str().unwrap(),
+                    "cache scenario {name:?}, step {i} {step}"
+                ),
+                "record" => {
+                    let body: Option<Vec<u8>> = match step["body"].as_str() {
+                        None => None,
+                        // `@name`: that discovery document; anything else is sent as it is.
+                        Some(name) if name.starts_with('@') => {
+                            Some(serde_json::to_vec(&v["discoveries"][&name[1..]]).expect("discovery"))
+                        }
+                        Some(raw) => Some(raw.as_bytes().to_vec()),
+                    };
+                    cache.record(&step["outcome"], body.as_deref(), now);
+                }
+                other => panic!("unknown cache op {other}"),
+            }
+            report.cache_steps += 1;
+        }
+        report.cache_scenarios += 1;
     }
 
     let file_id = v["file_id"].as_str().unwrap();
@@ -432,8 +477,24 @@ impl PlannerSurface for DownloadPlanner {
     }
 }
 
+impl CacheSurface for DiscoveryCache {
+    fn lookup(&self, now_ms: i64) -> String {
+        match DiscoveryCache::lookup(self, now_ms) {
+            Lookup::Fetch => "fetch",
+            Lookup::Cached(_) => "cached",
+            Lookup::UseApi => "use_api",
+        }
+        .to_string()
+    }
+    fn record(&mut self, outcome: &Value, body: Option<&[u8]>, now_ms: i64) {
+        let discovery = body.and_then(|b| Discovery::from_json(b).ok());
+        DiscoveryCache::record(self, &outcome_from_json(outcome), discovery, now_ms);
+    }
+}
+
 impl Surface for CoreSurface {
     type Planner = DownloadPlanner;
+    type Cache = DiscoveryCache;
 
     fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String> {
         let d: Discovery = serde_json::from_value(discovery.clone()).map_err(|e| e.to_string())?;
@@ -476,6 +537,9 @@ impl Surface for CoreSurface {
         let d: Discovery = serde_json::from_value(discovery.clone()).expect("discovery");
         DownloadPlanner::new(PlannerConfig::from_discovery(&d, seed), d, api_base, file_id)
     }
+    fn cache(&self) -> DiscoveryCache {
+        DiscoveryCache::new()
+    }
 }
 
 #[cfg(test)]
@@ -488,8 +552,24 @@ mod tests {
     /// failed is not trusted).
     struct Drift(&'static str);
 
+    /// A cache that never expires (it reads every lookup as if no time had passed).
+    struct StickyCache(DiscoveryCache, bool);
+
+    impl CacheSurface for StickyCache {
+        fn lookup(&self, now_ms: i64) -> String {
+            CacheSurface::lookup(&self.0, if self.1 { 0 } else { now_ms })
+        }
+        fn record(&mut self, outcome: &Value, body: Option<&[u8]>, now_ms: i64) {
+            CacheSurface::record(&mut self.0, outcome, body, now_ms)
+        }
+    }
+
     impl Surface for Drift {
         type Planner = DownloadPlanner;
+        type Cache = StickyCache;
+        fn cache(&self) -> StickyCache {
+            StickyCache(DiscoveryCache::new(), self.0 == "cache")
+        }
         fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String> {
             if self.0 == "authority" && url.contains("evil.test") {
                 return Ok(()); // a binding that lets an unlisted host through
@@ -584,6 +664,10 @@ mod tests {
 
     impl Surface for Forgetful {
         type Planner = ForgetfulPlanner;
+        type Cache = DiscoveryCache;
+        fn cache(&self) -> DiscoveryCache {
+            DiscoveryCache::new()
+        }
         fn check_storage_url(&self, u: &str, d: &Value, a: &str) -> Result<(), String> {
             CoreSurface.check_storage_url(u, d, a)
         }
@@ -613,7 +697,12 @@ mod tests {
         assert_eq!(report, expected_report(), "a section that did not run is a failure");
         // Counts, not adjectives: the file is not empty and the sections are what the review asked for.
         assert!(
-            report.authority >= 59 && report.classify >= 58 && report.chunk_length >= 8 && report.pinned_retry >= 14,
+            report.authority >= 59
+                && report.classify >= 58
+                && report.chunk_length >= 8
+                && report.pinned_retry >= 14
+                && report.cache_scenarios >= 8
+                && report.cache_steps >= 40,
             "{report:?}"
         );
         assert!(
@@ -641,7 +730,15 @@ mod tests {
 
     #[test]
     fn the_runner_goes_red_when_a_surface_drifts() {
-        for what in ["authority", "classify", "millis", "retry", "redact", "geometry"] {
+        for what in [
+            "authority",
+            "classify",
+            "millis",
+            "retry",
+            "cache",
+            "redact",
+            "geometry",
+        ] {
             let result = catch_unwind(AssertUnwindSafe(|| run_all(&Drift(what))));
             assert!(
                 result.is_err(),

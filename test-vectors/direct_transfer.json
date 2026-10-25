@@ -1455,6 +1455,316 @@
       }
     }
   ],
+  "discovery_cache": [
+    {
+      "name": "a good answer is reused for ten minutes, then asked for again",
+      "steps": [
+        {
+          "op": "lookup",
+          "now": 1800000000000,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "proceed"
+          },
+          "body": "@std"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000000,
+          "expect": "cached"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000599999,
+          "expect": "cached"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600000,
+          "expect": "fetch"
+        },
+        {
+          "op": "lookup",
+          "now": 1799999999999,
+          "expect": "fetch"
+        }
+      ]
+    },
+    {
+      "name": "a JSON 404 is remembered for ten minutes, not for ever",
+      "steps": [
+        {
+          "op": "lookup",
+          "now": 1800000000000,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "not_supported"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000001,
+          "expect": "use_api"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000599999,
+          "expect": "use_api"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600000,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000600000,
+          "outcome": {
+            "kind": "not_supported"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600001,
+          "expect": "use_api"
+        },
+        {
+          "op": "lookup",
+          "now": 1800001200000,
+          "expect": "fetch"
+        }
+      ]
+    },
+    {
+      "name": "two failed attempts stop the asking for ten minutes, then it asks again",
+      "steps": [
+        {
+          "op": "lookup",
+          "now": 1800000000000,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000001,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000000001,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000002,
+          "expect": "use_api"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600000,
+          "expect": "use_api"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600001,
+          "expect": "fetch"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000000,
+          "expect": "fetch"
+        }
+      ]
+    },
+    {
+      "name": "the re-probe gets a fresh allowance of two",
+      "steps": [
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "record",
+          "now": 1800000000001,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000002,
+          "expect": "use_api"
+        },
+        {
+          "op": "record",
+          "now": 1800000600001,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600002,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000600002,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600003,
+          "expect": "use_api"
+        }
+      ]
+    },
+    {
+      "name": "failures further apart than ten minutes do not add up",
+      "steps": [
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "record",
+          "now": 1800000600005,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600006,
+          "expect": "fetch"
+        }
+      ]
+    },
+    {
+      "name": "a success after a failure clears the count",
+      "steps": [
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "record",
+          "now": 1800000000001,
+          "outcome": {
+            "kind": "proceed"
+          },
+          "body": "@std"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000002,
+          "expect": "cached"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600001,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000000002,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600001,
+          "expect": "fetch"
+        }
+      ]
+    },
+    {
+      "name": "a success whose body does not decode is a failed attempt",
+      "steps": [
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "proceed"
+          },
+          "body": "not json"
+        },
+        {
+          "op": "record",
+          "now": 1800000000001,
+          "outcome": {
+            "kind": "proceed"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000002,
+          "expect": "use_api"
+        }
+      ]
+    },
+    {
+      "name": "an authorization answer counts as a failed attempt only",
+      "steps": [
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "terminal",
+            "status": 401,
+            "error": "unauthorized"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000001,
+          "expect": "fetch"
+        }
+      ]
+    }
+  ],
   "planner": [
     {
       "name": "one window, three chunks",

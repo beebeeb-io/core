@@ -2967,7 +2967,7 @@ mod direct_vector_tests {
     //! `JsValue` wrapper calls. The same file `beebeeb-core` runs through core directly: a
     //! wrapper that drifts from core fails here.
 
-    use beebeeb_core::direct_transfer::vectors::{self, PlannerSurface, Surface};
+    use beebeeb_core::direct_transfer::vectors::{self, CacheSurface, PlannerSurface, Surface};
     use serde_json::{Value, json};
 
     use super::*;
@@ -2975,6 +2975,24 @@ mod direct_vector_tests {
     struct WasmSurface;
 
     struct WasmPlannerSurface(WasmDownloadPlanner);
+
+    struct WasmCacheSurface(WasmDirectDiscoveryCache);
+
+    impl CacheSurface for WasmCacheSurface {
+        fn lookup(&self, now_ms: i64) -> String {
+            match self.0.lookup_dto(now_ms) {
+                DirectLookupJs::Fetch => "fetch",
+                DirectLookupJs::Cached { .. } => "cached",
+                DirectLookupJs::UseApi => "use_api",
+            }
+            .to_string()
+        }
+
+        fn record(&mut self, outcome: &Value, body: Option<&[u8]>, now_ms: i64) {
+            let outcome: DirectOutcomeJs = serde_json::from_value(outcome.clone()).unwrap();
+            self.0.record_core(&outcome, body, now_ms);
+        }
+    }
 
     /// The shape the vectors use: the flat fetch has no `method`/`expires_at`, numbers are integers.
     fn poll_value(dto: DirectPollJs) -> Value {
@@ -2988,6 +3006,11 @@ mod direct_vector_tests {
 
     impl Surface for WasmSurface {
         type Planner = WasmPlannerSurface;
+        type Cache = WasmCacheSurface;
+
+        fn cache(&self) -> WasmCacheSurface {
+            WasmCacheSurface(WasmDirectDiscoveryCache::new())
+        }
 
         fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String> {
             let d: dt::Discovery = serde_json::from_value(discovery.clone()).map_err(|e| e.to_string())?;
