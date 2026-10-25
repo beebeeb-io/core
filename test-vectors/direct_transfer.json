@@ -4523,6 +4523,132 @@
           }
         }
       ]
+    },
+    {
+      "name": "a late undecodable window answer after the version is pinned",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "body": "{\"transport\": \"object-download-v1\", \"file_id\": \"11111111-1111-4111-8111-111111111111\", \"object_version_id\": \"22222222-2222-4222-8222-222222222222\", \"chunk_count\": 3, \"chunk_size\": 1000, \"encrypted_size\": 2584, \"original_size\": 2500, \"grants\": [{\"index\": 0, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 1, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 2, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2\", \"length\": 528, \"expires_at\": \"2027-01-15T08:05:00Z\"}], \"next_index\": null}",
+          "expect": "ok"
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "body": "{not json",
+          "expect": "unexpected"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "stop",
+            "verdict": {
+              "kind": "api_for_file"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a late empty window answer after the version is pinned",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "body": "{\"transport\": \"object-download-v1\", \"file_id\": \"11111111-1111-4111-8111-111111111111\", \"object_version_id\": \"22222222-2222-4222-8222-222222222222\", \"chunk_count\": 3, \"chunk_size\": 1000, \"encrypted_size\": 2584, \"original_size\": 2500, \"grants\": [{\"index\": 0, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 1, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 2, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2\", \"length\": 528, \"expires_at\": \"2027-01-15T08:05:00Z\"}], \"next_index\": null}",
+          "expect": "ok"
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "body": "",
+          "expect": "unexpected"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "stop",
+            "verdict": {
+              "kind": "api_for_file"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a late valid window answer after the version is pinned",
+      "discovery": "std",
+      "seed": 7,
+      "steps": [
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "request_window",
+            "request": {
+              "object_version_id": null,
+              "start_index": 0,
+              "count": 8,
+              "renewal": false
+            }
+          }
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "body": "{\"transport\": \"object-download-v1\", \"file_id\": \"11111111-1111-4111-8111-111111111111\", \"object_version_id\": \"22222222-2222-4222-8222-222222222222\", \"chunk_count\": 3, \"chunk_size\": 1000, \"encrypted_size\": 2584, \"original_size\": 2500, \"grants\": [{\"index\": 0, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 1, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 2, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2\", \"length\": 528, \"expires_at\": \"2027-01-15T08:05:00Z\"}], \"next_index\": null}",
+          "expect": "ok"
+        },
+        {
+          "op": "window_answered",
+          "now": 1800000000000,
+          "body": "{\"transport\": \"object-download-v1\", \"file_id\": \"11111111-1111-4111-8111-111111111111\", \"object_version_id\": \"22222222-2222-4222-8222-222222222222\", \"chunk_count\": 3, \"chunk_size\": 1000, \"encrypted_size\": 2584, \"original_size\": 2500, \"grants\": [{\"index\": 0, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SIG0\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 1, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/1.bin?X-Amz-Signature=SIG1\", \"length\": 1028, \"expires_at\": \"2027-01-15T08:05:00Z\"}, {\"index\": 2, \"method\": \"GET\", \"url\": \"https://s3.storage.test/bb-01/t/v/2.bin?X-Amz-Signature=SIG2\", \"length\": 528, \"expires_at\": \"2027-01-15T08:05:00Z\"}], \"next_index\": null}",
+          "expect": "unexpected"
+        },
+        {
+          "op": "poll",
+          "now": 1800000000000,
+          "expect": {
+            "kind": "stop",
+            "verdict": {
+              "kind": "api_for_file"
+            }
+          }
+        }
+      ]
     }
   ]
 }

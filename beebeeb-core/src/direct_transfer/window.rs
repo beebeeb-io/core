@@ -713,7 +713,16 @@ impl DownloadPlanner {
     /// decode it and judge it. A body that is not the contract's JSON is handled
     /// like any window the server could not serve ([`DownloadPlanner::window_malformed`]),
     /// so no client decides that for itself.
+    ///
+    /// An answer with no window request outstanding is a bug in the caller, and gets the verdict
+    /// [`DownloadPlanner::window_answered`] gives it whatever the body is: [`Violation::Unexpected`],
+    /// and the file goes to the API path (undecodable bytes are not "malformed" then, and the file
+    /// does not carry on through the pinned route).
     pub fn window_answered_bytes(&mut self, body: &[u8], now_ms: i64) -> WindowAnswer {
+        if self.window.is_none() {
+            self.verdict = Some(Verdict::ApiForFile);
+            return WindowAnswer::Refused(Violation::Unexpected);
+        }
         match DownloadGrantResponse::from_json(body) {
             Err(_) => {
                 self.window_malformed();
@@ -2413,5 +2422,41 @@ mod tests {
         assert_eq!(got.code(), "transport");
         assert_eq!(WindowAnswer::Accepted.code(), "accepted");
         assert_eq!(WindowAnswer::Malformed.code(), "malformed");
+    }
+
+    #[test]
+    fn a_late_window_answer_is_the_same_caller_bug_whatever_the_body() {
+        // The first window is answered; a second answer arrives with no request outstanding. The
+        // planner is pinned, so junk used to read as "malformed" and let the file carry on through
+        // the pinned route, while valid JSON sent it to the API path.
+        let bodies: Vec<(&str, Vec<u8>)> = {
+            let mut p = planner();
+            let first = expect_window(&mut p, T0);
+            vec![
+                ("junk", b"{not json".to_vec()),
+                ("empty", Vec::new()),
+                ("valid", serde_json::to_vec(&answer(&first, T0)).unwrap()),
+            ]
+        };
+        for (what, body) in bodies {
+            let mut p = planner();
+            let first = expect_window(&mut p, T0);
+            let ok = serde_json::to_vec(&answer(&first, T0)).unwrap();
+            assert_eq!(p.window_answered_bytes(&ok, T0), WindowAnswer::Accepted);
+            assert_eq!(p.pinned_version(), Some(VERSION), "{what}: the version is pinned");
+            assert_eq!(
+                p.window_answered_bytes(&body, T0),
+                WindowAnswer::Refused(Violation::Unexpected),
+                "{what}"
+            );
+            assert_eq!(p.poll(T0), Poll::Stop(Verdict::ApiForFile), "{what}");
+        }
+        // Before the first request is even made, too.
+        let mut p = planner();
+        assert_eq!(
+            p.window_answered_bytes(b"{not json", T0),
+            WindowAnswer::Refused(Violation::Unexpected)
+        );
+        assert_eq!(p.poll(T0), Poll::Stop(Verdict::ApiForFile));
     }
 }
