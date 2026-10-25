@@ -7421,10 +7421,14 @@ public enum DirectOutcomeDto: Equatable, Hashable {
     case terminal(status: UInt16, error: String?
     )
     /**
-     * The pinned chunk route only: a failure that may pass (5xx, no answer); retry after the
-     * bounded backoff of `direct_pinned_retry_decision`.
+     * The pinned chunk route and the upload calls: a failure that may pass (5xx, no answer); retry
+     * after the bounded backoff of `direct_pinned_retry_decision`.
      */
     case retry
+    /**
+     * `upload_commit` only: the staged chunk is not there; ask for a new link and send it again.
+     */
+    case regrant
 
 
 
@@ -7463,6 +7467,8 @@ public struct FfiConverterTypeDirectOutcomeDto: FfiConverterRustBuffer {
         )
         
         case 8: return .retry
+        
+        case 9: return .regrant
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -7505,6 +7511,10 @@ public struct FfiConverterTypeDirectOutcomeDto: FfiConverterRustBuffer {
         
         case .retry:
             writeInt(&buf, Int32(8))
+        
+        
+        case .regrant:
+            writeInt(&buf, Int32(9))
         
         }
     }
@@ -10060,8 +10070,8 @@ public func ceremonyStepSpecId(step: CeremonyStepDto) -> String  {
 })
 }
 /**
- * Classify an API answer. `call` is `"discovery"`, `"download_grant"` or `"pinned_chunk"`; pass
- * `status` 0 when there was no HTTP answer. `body` is whatever was read of the
+ * Classify an API answer. `call` is `"discovery"`, `"download_grant"`, `"pinned_chunk"`,
+ * `"upload_grant"` or `"upload_commit"`; pass `status` 0 when there was no HTTP answer. `body` is whatever was read of the
  * body (at most 64 KiB is looked at); `retry_after` is the raw header value.
  */
 public func classifyDirectAnswer(call: String, status: UInt16, contentType: String?, body: Data, retryAfter: String?)throws  -> DirectOutcomeDto  {
@@ -10995,7 +11005,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_ceremony_step_spec_id() != 23509) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_func_classify_direct_answer() != 30307) {
+    if (uniffi_beebeeb_uniffi_checksum_func_classify_direct_answer() != 47917) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_compute_recovery_check() != 28278) {

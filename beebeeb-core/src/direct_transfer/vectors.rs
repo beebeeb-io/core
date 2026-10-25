@@ -704,7 +704,7 @@ mod tests {
         // Counts, not adjectives: the file is not empty and the sections are what the review asked for.
         assert!(
             report.authority >= 59
-                && report.classify >= 109
+                && report.classify >= 113
                 && report.chunk_length >= 8
                 && report.pinned_retry >= 20
                 && report.cache_scenarios >= 9

@@ -1691,7 +1691,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_func_ceremony_step_spec_id() != 23509.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_func_classify_direct_answer() != 30307.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_classify_direct_answer() != 47917.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_compute_recovery_check() != 28278.toShort()) {
@@ -10904,10 +10904,16 @@ sealed class DirectOutcomeDto {
     }
     
     /**
-     * The pinned chunk route only: a failure that may pass (5xx, no answer); retry after the
-     * bounded backoff of `direct_pinned_retry_decision`.
+     * The pinned chunk route and the upload calls: a failure that may pass (5xx, no answer); retry
+     * after the bounded backoff of `direct_pinned_retry_decision`.
      */
     object Retry : DirectOutcomeDto()
+    
+    
+    /**
+     * `upload_commit` only: the staged chunk is not there; ask for a new link and send it again.
+     */
+    object Regrant : DirectOutcomeDto()
     
     
 
@@ -10939,6 +10945,7 @@ public object FfiConverterTypeDirectOutcomeDto : FfiConverterRustBuffer<DirectOu
                 FfiConverterOptionalString.read(buf),
                 )
             8 -> DirectOutcomeDto.Retry
+            9 -> DirectOutcomeDto.Regrant
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
         }
     }
@@ -10995,6 +11002,12 @@ public object FfiConverterTypeDirectOutcomeDto : FfiConverterRustBuffer<DirectOu
                 4UL
             )
         }
+        is DirectOutcomeDto.Regrant -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
     }
 
     override fun write(value: DirectOutcomeDto, buf: ByteBuffer) {
@@ -11032,6 +11045,10 @@ public object FfiConverterTypeDirectOutcomeDto : FfiConverterRustBuffer<DirectOu
             }
             is DirectOutcomeDto.Retry -> {
                 buf.putInt(8)
+                Unit
+            }
+            is DirectOutcomeDto.Regrant -> {
+                buf.putInt(9)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -13738,8 +13755,8 @@ public object FfiConverterSequenceTypeCeremonyStepDto: FfiConverterRustBuffer<Li
     
 
         /**
-         * Classify an API answer. `call` is `"discovery"`, `"download_grant"` or `"pinned_chunk"`; pass
-         * `status` 0 when there was no HTTP answer. `body` is whatever was read of the
+         * Classify an API answer. `call` is `"discovery"`, `"download_grant"`, `"pinned_chunk"`,
+         * `"upload_grant"` or `"upload_commit"`; pass `status` 0 when there was no HTTP answer. `body` is whatever was read of the
          * body (at most 64 KiB is looked at); `retry_after` is the raw header value.
          */
     @Throws(DirectTransferException::class) fun `classifyDirectAnswer`(`call`: kotlin.String, `status`: kotlin.UShort, `contentType`: kotlin.String?, `body`: kotlin.ByteArray, `retryAfter`: kotlin.String?): DirectOutcomeDto {

@@ -122,6 +122,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Call::PinnedChunk` classifies the pinned per-chunk route (any 409 except a held file is a gone
   pin; `Outcome::Retry` for what may pass) and `PinnedRetry::decide` is the shared retry policy
   (WASM `pinnedRetryDecision`, UniFFI `direct_pinned_retry_decision`).
+- Direct upload rules (task 2173, `direct_transfer::upload`): what a client may believe of the
+  server's `object-upload-v1` answers and how hard it tries one chunk before the file goes back to
+  the API. `UploadGrant::from_answer`, `UploadCommitted::from_answer`, `put_stored`,
+  `UploadChunkState` (`UploadChunkPolicy`: at most 4 grants per chunk, 8 attempts, 150 s of
+  waiting), `UploadFailure`, `UploadNext`; `Call::UploadGrant` and `Call::UploadCommit` in
+  `classify`, with a new `Outcome::Regrant` (kind `regrant`) for a commit `409 chunk_not_stored`.
+  `Outcome::Regrant` is exported through WASM (`DirectOutcomeJs`) and UniFFI
+  (`DirectOutcomeDto`); the Swift, Kotlin and header bindings are regenerated for it. The
+  vectors are the server's real bodies (`test-vectors/direct_upload.json`, new, and 50 more
+  `classify` rows in `direct_transfer.json`: 63 -> 113), run by core, the WASM seams and the
+  UniFFI exports; the server's 4-grant cap is pinned by a test against the vectors' `constants`.
+  Not yet exported through WASM or UniFFI as functions: the CLI uses the Rust module directly;
+  desktop, iOS and web adopt it in their own tasks.
 - CI `Claims guard` job: runs the shared claims-guard engine plus
   `scripts/claims-guard/canon-sweep.sh`, the canon CLAIM_SWEEP over the whole tree
   (including any `design/` folder), so a false audit or compliance claim fails the build.
