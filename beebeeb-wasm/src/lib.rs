@@ -2429,12 +2429,16 @@ struct DirectGeometryJs {
 /// for (;;) {
 ///   const w = p.poll(Date.now())
 ///   switch (w.kind) {
-///     case "request_window": /* POST, then windowAnswered(body) or windowFailed(outcome) */ break
-///     case "fetch": /* GET w.url, then fetchOk(w.index) or fetchFailed(w.index) */ break
-///     case "fetch_via_api": /* pinned route, then fetchOk or apiFetchFailed */ break
-///     case "wait": /* sleep until w.until_ms or until a request returns */ break
+///     case "request_window": // POST, then windowAnswered(body) or windowFailed(outcome)
+///       break
+///     case "fetch": // GET w.url.raw() (w.url is a WasmSignedUrl, not a string), then fetchOk(w.index) or fetchFailed(w.index)
+///       break
+///     case "fetch_via_api": // pinned route, then fetchOk or apiFetchFailed
+///       break
+///     case "wait": // sleep until w.until_ms or until a request returns
+///       break
 ///     case "done": return
-///     case "stop": /* discard partial output and act on w.verdict.kind */ return
+///     case "stop": return // discard partial output and act on w.verdict.kind
 ///   }
 ///   // chunks are decrypted IN ORDER: after each, consumed(index); if one does
 ///   // not authenticate, chunkUnauthentic(index)
