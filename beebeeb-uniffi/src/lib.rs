@@ -4923,6 +4923,19 @@ impl DirectDownloadPlannerHandle {
     pub fn in_flight(&self) -> u32 {
         lock_tolerant(&self.inner).in_flight() as u32
     }
+
+    /// Cap the ciphertext bytes held at once (fetching, or fetched and waiting to be decrypted in order):
+    /// the planner then holds `clamp(floor(bytes / (chunk_size + 28)), 1, 4)` chunks. Call it before the first `poll`.
+    pub fn set_max_in_flight_bytes(&self, bytes: u64) {
+        lock_tolerant(&self.inner).set_max_in_flight_bytes(Some(bytes));
+    }
+
+    /// Did the storage breaker trip? It does when a chunk used up its renewals and no chunk of this transfer has
+    /// come whole from storage: from then on every remaining chunk is a `FetchViaApi` poll. When the file ends
+    /// with this `true`, record `DirectHealthHandle.gave_up(Download, now_ms)`.
+    pub fn storage_given_up(&self) -> bool {
+        lock_tolerant(&self.inner).storage_given_up()
+    }
 }
 
 /// What to do about discovery right now.
@@ -4966,6 +4979,127 @@ impl DirectDiscoveryCacheHandle {
     pub fn record(&self, outcome: DirectOutcomeDto, body: Option<Vec<u8>>, now_ms: i64) {
         let discovery = body.and_then(|b| dt::Discovery::from_json(&b).ok());
         lock_tolerant(&self.inner).record(&outcome.to_core(), discovery, now_ms);
+    }
+}
+
+/// Which way the bytes go.
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirectDirectionDto {
+    Download,
+    Upload,
+}
+
+impl From<DirectDirectionDto> for dt::Direction {
+    fn from(d: DirectDirectionDto) -> Self {
+        match d {
+            DirectDirectionDto::Download => dt::Direction::Download,
+            DirectDirectionDto::Upload => dt::Direction::Upload,
+        }
+    }
+}
+
+/// Whether this client may start a direct transfer now, per direction: after a transfer gave up direct, no
+/// new one of that direction starts for ten minutes. One per API base and account. `now_ms` is Unix
+/// milliseconds (or a monotonic clock, used consistently). `last_gave_up_ms` / `restore` let a client that
+/// relaunches often persist the two timestamps. A recorded time later than "now" counts as expired.
+#[derive(uniffi::Object)]
+pub struct DirectHealthHandle {
+    inner: Mutex<dt::DirectHealth>,
+}
+
+#[uniffi::export]
+impl DirectHealthHandle {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            inner: Mutex::new(dt::DirectHealth::new()),
+        })
+    }
+
+    /// A transfer of `direction` gave up direct.
+    pub fn gave_up(&self, direction: DirectDirectionDto, now_ms: i64) {
+        lock_tolerant(&self.inner).gave_up(direction.into(), now_ms);
+    }
+
+    /// May a new direct transfer of `direction` start now?
+    pub fn may_start(&self, direction: DirectDirectionDto, now_ms: i64) -> bool {
+        lock_tolerant(&self.inner).may_start(direction.into(), now_ms)
+    }
+
+    /// As `may_start`, for a file that may already have given up direct: it never may again (`file_gave_up`).
+    pub fn may_start_file(&self, direction: DirectDirectionDto, now_ms: i64, file_gave_up: bool) -> bool {
+        lock_tolerant(&self.inner).may_start_file(direction.into(), now_ms, file_gave_up)
+    }
+
+    /// When the last give-up of `direction` was recorded.
+    pub fn last_gave_up_ms(&self, direction: DirectDirectionDto) -> Option<i64> {
+        lock_tolerant(&self.inner).last_gave_up_ms(direction.into())
+    }
+
+    /// Put back a timestamp `last_gave_up_ms` returned earlier.
+    pub fn restore(&self, direction: DirectDirectionDto, last_gave_up_ms: i64) {
+        lock_tolerant(&self.inner).restore(direction.into(), last_gave_up_ms);
+    }
+}
+
+/// The transport a resume record names.
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirectRecordedTransportDto {
+    Api,
+    Direct,
+}
+
+/// What the client learned from discovery when it asked just now.
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirectDiscoveryStateDto {
+    /// The server answered; `upload`: it lists the direct upload transport.
+    Offers { upload: bool },
+    /// A JSON 404: the server has no direct transfer at all.
+    NotSupported,
+    /// No usable answer (a 5xx, a timeout, a bare 404, a body that did not decode).
+    Unknown,
+    /// 401 or 403: the login is not valid.
+    Unauthorized,
+}
+
+/// What to do with the unfinished upload.
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirectResumeActionDto {
+    ContinueApi,
+    ContinueDirect,
+    /// Abandon the session, clear the record, start again on the API.
+    AbandonToApi,
+    /// Keep the record and fail the file for this run.
+    KeepRecordAndFail,
+    /// Keep the record and ask the user to sign in again.
+    KeepRecordAndReauthenticate,
+}
+
+/// What to do with an unfinished upload found on disk. A recorded direct session is given up only on a
+/// definite no: the user forced the API (`forced_api`), or the server says it offers no direct uploads. It is
+/// never given up because discovery could not be read this time. One rule, so no client writes it by hand.
+#[uniffi::export]
+pub fn direct_resume_transport(
+    recorded: DirectRecordedTransportDto,
+    discovery: DirectDiscoveryStateDto,
+    forced_api: bool,
+) -> DirectResumeActionDto {
+    let recorded = match recorded {
+        DirectRecordedTransportDto::Api => dt::RecordedTransport::Api,
+        DirectRecordedTransportDto::Direct => dt::RecordedTransport::Direct,
+    };
+    let discovery = match discovery {
+        DirectDiscoveryStateDto::Offers { upload } => dt::DiscoveryState::Offers { upload },
+        DirectDiscoveryStateDto::NotSupported => dt::DiscoveryState::NotSupported,
+        DirectDiscoveryStateDto::Unknown => dt::DiscoveryState::Unknown,
+        DirectDiscoveryStateDto::Unauthorized => dt::DiscoveryState::Unauthorized,
+    };
+    match dt::resume_transport(recorded, discovery, forced_api) {
+        dt::ResumeAction::ContinueApi => DirectResumeActionDto::ContinueApi,
+        dt::ResumeAction::ContinueDirect => DirectResumeActionDto::ContinueDirect,
+        dt::ResumeAction::AbandonToApi => DirectResumeActionDto::AbandonToApi,
+        dt::ResumeAction::KeepRecordAndFail => DirectResumeActionDto::KeepRecordAndFail,
+        dt::ResumeAction::KeepRecordAndReauthenticate => DirectResumeActionDto::KeepRecordAndReauthenticate,
     }
 }
 
@@ -5272,7 +5406,7 @@ mod direct_transfer_binding_tests {
     //! crate. The same file `beebeeb-core` runs through core directly: a binding that drifts
     //! from core fails here.
 
-    use beebeeb_core::direct_transfer::vectors::{self, CacheSurface, PlannerSurface, Surface};
+    use beebeeb_core::direct_transfer::vectors::{self, CacheSurface, HealthSurface, PlannerSurface, Surface};
     use serde_json::{Value, json};
 
     use super::*;
@@ -5282,6 +5416,34 @@ mod direct_transfer_binding_tests {
     struct UniffiPlanner(Arc<DirectDownloadPlannerHandle>);
 
     struct UniffiCache(Arc<DirectDiscoveryCacheHandle>);
+
+    struct UniffiHealth(Arc<DirectHealthHandle>);
+
+    fn direction_dto(code: &str) -> DirectDirectionDto {
+        match code {
+            "download" => DirectDirectionDto::Download,
+            "upload" => DirectDirectionDto::Upload,
+            other => panic!("unknown direction {other:?}"),
+        }
+    }
+
+    impl HealthSurface for UniffiHealth {
+        fn gave_up(&mut self, direction: &str, now_ms: i64) {
+            self.0.gave_up(direction_dto(direction), now_ms);
+        }
+        fn may_start(&self, direction: &str, now_ms: i64) -> bool {
+            self.0.may_start(direction_dto(direction), now_ms)
+        }
+        fn may_start_file(&self, direction: &str, now_ms: i64, file_gave_up: bool) -> bool {
+            self.0.may_start_file(direction_dto(direction), now_ms, file_gave_up)
+        }
+        fn last_gave_up_ms(&self, direction: &str) -> Option<i64> {
+            self.0.last_gave_up_ms(direction_dto(direction))
+        }
+        fn restore(&mut self, direction: &str, last_gave_up_ms: i64) {
+            self.0.restore(direction_dto(direction), last_gave_up_ms);
+        }
+    }
 
     impl CacheSurface for UniffiCache {
         fn lookup(&self, now_ms: i64) -> String {
@@ -5409,9 +5571,39 @@ mod direct_transfer_binding_tests {
     impl Surface for UniffiSurface {
         type Planner = UniffiPlanner;
         type Cache = UniffiCache;
+        type Health = UniffiHealth;
 
         fn cache(&self) -> UniffiCache {
             UniffiCache(DirectDiscoveryCacheHandle::new())
+        }
+
+        fn health(&self) -> UniffiHealth {
+            UniffiHealth(DirectHealthHandle::new())
+        }
+
+        fn resume_transport(&self, recorded: &str, discovery: &Value, forced_api: bool) -> String {
+            let recorded = match recorded {
+                "api" => DirectRecordedTransportDto::Api,
+                "direct" => DirectRecordedTransportDto::Direct,
+                other => panic!("unknown recorded transport {other:?}"),
+            };
+            let state = match discovery["kind"].as_str().unwrap() {
+                "offers" => DirectDiscoveryStateDto::Offers {
+                    upload: discovery["upload"].as_bool().unwrap(),
+                },
+                "not_supported" => DirectDiscoveryStateDto::NotSupported,
+                "unknown" => DirectDiscoveryStateDto::Unknown,
+                "unauthorized" => DirectDiscoveryStateDto::Unauthorized,
+                other => panic!("unknown discovery state {other:?}"),
+            };
+            match direct_resume_transport(recorded, state, forced_api) {
+                DirectResumeActionDto::ContinueApi => "continue_api",
+                DirectResumeActionDto::ContinueDirect => "continue_direct",
+                DirectResumeActionDto::AbandonToApi => "abandon_to_api",
+                DirectResumeActionDto::KeepRecordAndFail => "keep_record_and_fail",
+                DirectResumeActionDto::KeepRecordAndReauthenticate => "keep_record_and_reauthenticate",
+            }
+            .to_string()
         }
 
         fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String> {
@@ -5527,6 +5719,14 @@ mod direct_transfer_binding_tests {
                 "consumed": self.0.consumed_count(),
                 "in_flight": self.0.in_flight(),
             })
+        }
+
+        fn set_max_in_flight_bytes(&mut self, bytes: u64) {
+            self.0.set_max_in_flight_bytes(bytes);
+        }
+
+        fn storage_given_up(&self) -> bool {
+            self.0.storage_given_up()
         }
     }
 

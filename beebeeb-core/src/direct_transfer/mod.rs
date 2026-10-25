@@ -17,6 +17,8 @@
 //! | [`authority`] | [`check_storage_url`] (may this link be followed), [`redact`] / [`scrub`] (how a link may be shown) |
 //! | [`classify`] | [`classify()`]: what an API answer on a discovery or grant call means (R1.6) |
 //! | [`window`] | [`DownloadPlanner`]: windows, in-flight cap, renewals, per-chunk fallback |
+//! | [`health`] | [`DirectHealth`]: after a transfer gave up direct, no new one of that direction starts for one trust period |
+//! | [`resume`] | [`resume_transport()`]: what to do with an unfinished upload (a recorded direct session is given up only on a definite no) |
 //! | [`timeouts`] | the time bounds every client applies: connect, idle, API calls, and the storage totals (`60 s + len / 1 Mbit/s`) kept under the server's late-write fence |
 //! | [`upload`] | the direct upload: [`UploadGrant`] / [`UploadCommitted`] validation, [`UploadChunkState`] (grants, waits, fallback per chunk) |
 //! | this file | [`DiscoveryCache`]: how long discovery's answer is trusted |
@@ -44,6 +46,8 @@
 
 pub mod authority;
 pub mod classify;
+pub mod health;
+pub mod resume;
 pub mod timeouts;
 pub mod upload;
 pub mod window;
@@ -55,6 +59,8 @@ pub mod vectors;
 
 pub use authority::{MAX_URL_LEN, Refusal, check_storage_url, redact, scrub};
 pub use classify::{ApiAnswer, Call, Outcome, PinnedRetry, RetryDecision, Terminal, classify};
+pub use health::{DirectHealth, Direction, HEALTH_TRUST_MS};
+pub use resume::{DiscoveryState, RecordedTransport, ResumeAction, resume_transport};
 pub use timeouts::{
     API_CALL_TIMEOUT, BACKGROUND_PUT_RESOURCE_TIMEOUT, DISCOVERY_TIMEOUT, STORAGE_CONNECT_TIMEOUT, STORAGE_GET_IDLE,
     storage_get_total, storage_put_total,

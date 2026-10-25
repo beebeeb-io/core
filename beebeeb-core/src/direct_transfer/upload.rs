@@ -1091,7 +1091,11 @@ mod tests {
         use super::super::vectors::outcome_from_json;
         let v = vectors();
         let scenarios = v["policy"].as_array().unwrap();
-        assert_eq!(scenarios.len(), 27, "policy scenarios");
+        assert_eq!(
+            scenarios.len(),
+            29,
+            "policy scenarios (27, and the two Put 403 / Put 0 rows of clients plan A1)"
+        );
         for scenario in scenarios {
             let name = scenario["name"].as_str().unwrap();
             let mut state =

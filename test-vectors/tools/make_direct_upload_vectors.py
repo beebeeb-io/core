@@ -200,6 +200,16 @@ scen("a PUT that fails is regranted with a doubling wait (equal jitter), and the
     may(True), issued, fail("put", 0, retry(w3, GR)),
     may(True), issued, may(False), fail("put", 403, USE_API),
 ], seed=11)
+# Review E2 (clients plan A1): a PUT that storage refused (403) and a PUT that got no answer (status 0) are decided alike.
+for what, status in (("403", 403), ("status 0, no answer", 0)):
+    sim = Sim(11)
+    ws = [sim.failure() for _ in range(3)]
+    scen(f"a PUT that storage refused ({what}) is decided like any failed PUT: the same jittered waits (equal jitter) and the fourth link is the last", [
+        may(True), issued, fail("put", status, retry(ws[0], GR)),
+        may(True), issued, fail("put", status, retry(ws[1], GR)),
+        may(True), issued, fail("put", status, retry(ws[2], GR)),
+        may(True), issued, may(False), fail("put", status, USE_API),
+    ], seed=11)
 sim = Sim(5)
 sim.stated()
 second = sim.failure()

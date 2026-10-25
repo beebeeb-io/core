@@ -568,6 +568,176 @@
       "source": "client policy (core's UploadChunkState; no server body): spec R4 'exponential backoff and jitter'; the jittered waits are computed by test-vectors/tools/jitter_port.py, not by running the Rust"
     },
     {
+      "name": "a PUT that storage refused (403) is decided like any failed PUT: the same jittered waits (equal jitter) and the fourth link is the last",
+      "seed": 11,
+      "steps": [
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "put",
+            "status": 403
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 822,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "put",
+            "status": 403
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 1976,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "put",
+            "status": 403
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 2467,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "may_ask",
+          "expect": false
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "put",
+            "status": 403
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R4 'exponential backoff and jitter'; the jittered waits are computed by test-vectors/tools/jitter_port.py, not by running the Rust"
+    },
+    {
+      "name": "a PUT that storage refused (status 0, no answer) is decided like any failed PUT: the same jittered waits (equal jitter) and the fourth link is the last",
+      "seed": 11,
+      "steps": [
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "put",
+            "status": 0
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 822,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "put",
+            "status": 0
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 1976,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "put",
+            "status": 0
+          },
+          "expect": {
+            "kind": "retry",
+            "millis": 2467,
+            "call": "upload_grant"
+          }
+        },
+        {
+          "op": "may_ask",
+          "expect": true
+        },
+        {
+          "op": "link_issued"
+        },
+        {
+          "op": "may_ask",
+          "expect": false
+        },
+        {
+          "op": "failed",
+          "failure": {
+            "kind": "put",
+            "status": 0
+          },
+          "expect": {
+            "kind": "use_api"
+          }
+        }
+      ],
+      "source": "client policy (core's UploadChunkState; no server body): spec R4 'exponential backoff and jitter'; the jittered waits are computed by test-vectors/tools/jitter_port.py, not by running the Rust"
+    },
+    {
       "name": "a commit that is busy waits the stated time exactly, a plain failure waits a jittered 2 s at most, and none of it is tied to the grants",
       "seed": 5,
       "steps": [
