@@ -924,8 +924,8 @@ mod tests {
                 && report.classify >= 121
                 && report.chunk_length >= 8
                 && report.pinned_retry >= 20
-                && report.cache_scenarios >= 9
-                && report.cache_steps >= 45,
+                && report.cache_scenarios >= 11
+                && report.cache_steps >= 60,
             "{report:?}"
         );
         assert!(
