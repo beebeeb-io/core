@@ -67,6 +67,12 @@ AAD = "beebeeb/chunk/v2"         16 bytes: domain tag + version
 - Generic no-AAD (`encrypt_chunk`/`decrypt_chunk`/`*_raw`, WASM `decrypt_chunks`) stays for key wrap, search shards, v1 content — never to SEAL a name/thumbnail/note under a per-file key.
 - **Residual (decision 1912):** pre-switch legacy names/thumbnails under the same raw key as v1 content remain servable as content; old blobs cannot be retired by rewriting.
 
+### Legacy-file policy (L7 ruling, 2026-10-26; tasks 1908/1778/1912)
+
+Flag **legacy or unpinned integrity** when authenticated file metadata yields `ExpectedChunkFormat::Unrecorded`. Do not automatically re-encrypt a file on access, upgrade its pin after detection, or reject genuine v1 content using plaintext-shape heuristics. The flag is a disclosure, not protection against a malicious server. A v2 pin binds the presented stream; whole-version and metadata rollback remain outside this guarantee.
+
+Resealing stays opt-in, per Guus's 1912 ruling, under the separate manifest/reseal design (new file id and key). Rewriting the same id cannot retire old raw-key blobs and a file-wide v2 pin must not strand v1 history. Keep `WRITE_FORMAT = V1Legacy` until all client readers/writers, old-writer server gates, and version-restore semantics are ready. A restore protocol must preserve readable history as well as the current version; it is not resolved by changing the current name pin alone.
+
 ### Client adoption checklist (every client, before it ships on this core)
 
 1. Read the content pin with `decrypt_file_metadata[_with_key]` (never `decrypt_name_metadata`, never a server field) and pass `chunk_format` to every content reader.
