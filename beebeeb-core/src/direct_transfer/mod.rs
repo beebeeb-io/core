@@ -71,9 +71,10 @@ pub use upload::{
     UploadChunkState, UploadCommitted, UploadFailure, UploadGrant, UploadLink, UploadNext, UploadViolation, put_stored,
 };
 pub use upload_pipeline::{
-    UPLOAD_API_BURST, UPLOAD_API_REQUESTS_PER_SECOND_MAX, UPLOAD_COMMIT_SLOTS_LARGE, UPLOAD_COMMIT_SLOTS_SMALL,
+    GiveUpReason, GrantVersion, PipelineAction, PipelineEvent, PipelinePlan, UPLOAD_API_BURST,
+    UPLOAD_API_REQUESTS_PER_SECOND_MAX, UPLOAD_COMMIT_SLOTS_LARGE, UPLOAD_COMMIT_SLOTS_SMALL,
     UPLOAD_COMMIT_SLOTS_SMALL_BELOW, UPLOAD_FILE_CONCURRENCY_DEFAULT, UPLOAD_FILE_CONCURRENCY_MAX, UPLOAD_PUT_LANES,
-    UPLOAD_TAIL_FILES_MAX, commit_slots,
+    UPLOAD_TAIL_FILES_MAX, WaitKind, commit_slots,
 };
 pub use window::{DownloadPlanner, Geometry, PlanError, PlannerConfig, Poll, Verdict, Violation, WindowAnswer};
 pub use wire::{

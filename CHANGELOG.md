@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Pure direct-upload pipeline planner (task 2173 C1-C2): one PUT lane per file, bounded
+  commit overlap and ciphertext retention, per-chunk retries, separate ack/hold waits,
+  interrupt draining, and grant-version-aware replay handling. Shared PUT totals scale
+  with concurrent PUTs while staying thirty seconds below the server fence. This exposes
+  Rust rules only; client drivers and the combined upload bindings follow separately,
+  and the server's upload flag remains off.
+
 ### Security
 - Chunk format v2 (task 1908): file-content frames authenticate their position as AES-GCM
   associated data — `"beebeeb/chunk/v2" || len(file_id) || file_id || version_id(12) ||
