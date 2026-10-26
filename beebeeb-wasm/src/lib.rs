@@ -2765,6 +2765,16 @@ impl WasmDirectDiscoveryCache {
     }
 }
 
+/// A time that crossed as a JS number: finite. A NaN or infinity would become 0 or a saturated number and make the
+/// ten-minute hold silently ineffective, so the health methods refuse it with a stable code.
+fn direct_time(ms: f64) -> Result<i64, DirectFailure> {
+    if ms.is_finite() {
+        Ok(direct_ms(ms))
+    } else {
+        Err(DirectFailure::new("not a time in milliseconds", "time_invalid"))
+    }
+}
+
 /// The direction a JS string names: `"download"` or `"upload"`.
 fn direct_direction(direction: &str) -> Result<dt::Direction, DirectFailure> {
     dt::Direction::from_code(direction)
@@ -2799,14 +2809,14 @@ impl WasmDirectHealth {
     /// `"download"` or `"upload"` (as every method here does).
     #[wasm_bindgen(js_name = gaveUp)]
     pub fn gave_up(&mut self, direction: &str, now_ms: f64) -> Result<(), DirectFailure> {
-        self.inner.gave_up(direct_direction(direction)?, direct_ms(now_ms));
+        self.inner.gave_up(direct_direction(direction)?, direct_time(now_ms)?);
         Ok(())
     }
 
     /// May a new direct transfer of `direction` start now?
     #[wasm_bindgen(js_name = mayStart)]
     pub fn may_start(&self, direction: &str, now_ms: f64) -> Result<bool, DirectFailure> {
-        Ok(self.inner.may_start(direct_direction(direction)?, direct_ms(now_ms)))
+        Ok(self.inner.may_start(direct_direction(direction)?, direct_time(now_ms)?))
     }
 
     /// As `mayStart`, for a file that may already have given up direct: it never may again (`fileGaveUp`).
@@ -2814,7 +2824,7 @@ impl WasmDirectHealth {
     pub fn may_start_file(&self, direction: &str, now_ms: f64, file_gave_up: bool) -> Result<bool, DirectFailure> {
         Ok(self
             .inner
-            .may_start_file(direct_direction(direction)?, direct_ms(now_ms), file_gave_up))
+            .may_start_file(direct_direction(direction)?, direct_time(now_ms)?, file_gave_up))
     }
 
     /// When the last give-up of `direction` was recorded, or `null`.
@@ -2829,7 +2839,7 @@ impl WasmDirectHealth {
     /// Put back a timestamp `lastGaveUpMs` returned earlier.
     pub fn restore(&mut self, direction: &str, last_gave_up_ms: f64) -> Result<(), DirectFailure> {
         self.inner
-            .restore(direct_direction(direction)?, direct_ms(last_gave_up_ms));
+            .restore(direct_direction(direction)?, direct_time(last_gave_up_ms)?);
         Ok(())
     }
 }
@@ -3503,6 +3513,23 @@ mod direct_vector_tests {
         // Nothing was recorded by the refused calls.
         assert_eq!(h.last_gave_up_ms("download").unwrap(), None);
         assert_eq!(h.last_gave_up_ms("upload").unwrap(), None);
+    }
+
+    #[test]
+    fn health_refuses_a_time_that_is_not_a_number() {
+        // A NaN or infinite time would be turned into 0 or a saturated number, which makes the ten-minute hold silently
+        // ineffective (a give-up recorded at the epoch is 56 years old).
+        let mut h = WasmDirectHealth::new();
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(h.gave_up("download", bad).unwrap_err().code, "time_invalid", "{bad}");
+            assert_eq!(h.may_start("download", bad).unwrap_err().code, "time_invalid");
+            assert_eq!(
+                h.may_start_file("download", bad, false).unwrap_err().code,
+                "time_invalid"
+            );
+            assert_eq!(h.restore("download", bad).unwrap_err().code, "time_invalid");
+        }
+        assert_eq!(h.last_gave_up_ms("download").unwrap(), None, "nothing was recorded");
     }
 
     #[test]

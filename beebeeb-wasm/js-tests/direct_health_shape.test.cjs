@@ -48,7 +48,12 @@ test('directTransferConstants carries the five time bounds', () => {
 // ── DirectHealth ──
 
 function runHealthStep(h, step) {
-  const now = step.now ?? 0
+  // `now` is mandatory for every op that reads the clock, `expect` for last_gave_up (a number or an explicit null):
+  // a typo must fail the step, not become 0 or "nothing recorded".
+  const needsNow = ['gave_up', 'may_start', 'may_start_file'].includes(step.op)
+  if (needsNow && typeof step.now !== 'number') throw new Error(`no numeric now in ${JSON.stringify(step)}`)
+  if (step.op === 'last_gave_up' && !('expect' in step)) throw new Error(`no expect in ${JSON.stringify(step)}`)
+  const now = step.now
   switch (step.op) {
     case 'gave_up':
       return h.gaveUp(step.direction, now)
@@ -59,9 +64,9 @@ function runHealthStep(h, step) {
     case 'may_start_file':
       return assert.equal(h.mayStartFile(step.direction, now, step.file_gave_up), step.expect, JSON.stringify(step))
     case 'last_gave_up': {
-      // The generator drops a null `expect`: absent means "nothing recorded", which crosses as undefined here.
+      // An explicit null means "nothing recorded", which crosses as undefined here.
       const got = h.lastGaveUpMs(step.direction)
-      return assert.equal(got ?? null, step.expect ?? null, JSON.stringify(step))
+      return assert.equal(got ?? null, step.expect, JSON.stringify(step))
     }
     default:
       throw new Error(`unknown health op ${step.op}`)
@@ -92,6 +97,17 @@ test('health refuses a direction that is not one, and records nothing for it', (
   }
   assert.equal(h.lastGaveUpMs('download') ?? null, null)
   assert.equal(h.lastGaveUpMs('upload') ?? null, null)
+})
+
+test('health refuses a time that is not a number, and records nothing for it', () => {
+  const h = new wasm.WasmDirectHealth()
+  for (const bad of [NaN, Infinity, -Infinity]) {
+    assert.equal(codeOf(() => h.gaveUp('download', bad)), 'time_invalid', `${bad}`)
+    assert.equal(codeOf(() => h.mayStart('download', bad)), 'time_invalid')
+    assert.equal(codeOf(() => h.mayStartFile('download', bad, false)), 'time_invalid')
+    assert.equal(codeOf(() => h.restore('download', bad)), 'time_invalid')
+  }
+  assert.equal(h.lastGaveUpMs('download') ?? null, null)
 })
 
 // ── resumeTransport ──

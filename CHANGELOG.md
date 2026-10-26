@@ -172,7 +172,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     record and asks for a new login.
   - `DownloadPlanner`: a storage breaker (`storage_given_up()`): when a chunk uses up its renewals and
     no chunk of the transfer has come whole from storage, the rest of the file goes through the pinned
-    API route (the existing `api_only` mode) and the caller records `gave_up(Download)`. A fetch through
+    API route (the existing `api_only` mode) and the caller records `gave_up(Download)`; the report is
+    cleared if a chunk already in flight then arrives from storage. A fetch through
     the pinned route is not a storage success. And a byte ceiling on held chunks
     (`PlannerConfig::max_in_flight_bytes`, `set_max_in_flight_bytes`): the reorder window becomes
     `clamp(floor(bytes / (chunk_size + 28)), 1, 4)`; `None` keeps today's four.
@@ -184,7 +185,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `storage_given_up`, and the same five bounds in `DirectConstantsDto` (the Swift and Kotlin bindings
     are regenerated).
   - Vectors: `direct_transfer.json` gains `health` (8 scenarios, 37 steps) and `resume_transport` (20
-    rows) sections and 15 planner scenarios (the breaker, the byte cap, a client clock ten minutes off);
+    rows) sections and 16 planner scenarios (the breaker, the byte cap, a client clock ten minutes off);
     `direct_upload.json` gains the time-bound constants and two policy rows showing a refused PUT (403)
     and a PUT with no answer (status 0) are decided alike. Each surface (core, WASM, UniFFI) runs them
     all through the one interpreter.

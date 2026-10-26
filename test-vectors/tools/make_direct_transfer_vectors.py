@@ -701,6 +701,25 @@ steps += [{"op": "fetch_failed", "index": 1, "now": now, "expect": "ok"}, poll(n
           {"op": "storage_given_up", "expect": False}]
 scenarios.append({"name": "after one chunk from storage, the failures of another chunk do not trip the breaker", "discovery": "std", "seed": 7, "steps": steps})
 
+# 16b. a chunk already in flight when the breaker trips arrives from storage: the report is cleared (no hold for the next file)
+steps = [poll(T0, req(None, 0, 8, False)), {"op": "window_answered", "now": T0, "response": window(0, 3, None), "expect": "ok"},
+         poll(T0, fetch(0)), poll(T0, fetch(1)), poll(T0, fetch(2))]
+now = T0
+for n in range(1, 4):
+    steps += [{"op": "fetch_failed", "index": 0, "now": now, "expect": "ok"}]
+    now += 10_000
+    steps += [poll(now, req(VER, 0, 1, True)),
+              {"op": "window_answered", "now": now, "response": renewal_answer(n), "expect": "ok"},
+              poll(now, RENEWED(n))]
+steps += [{"op": "fetch_failed", "index": 0, "now": now, "expect": "ok"}, {"op": "storage_given_up", "expect": True},
+          {"op": "fetch_ok", "index": 1, "expect": "ok"}, {"op": "storage_given_up", "expect": False},
+          poll(now, api(0)), {"op": "fetch_failed", "index": 2, "now": now, "expect": "ok"}, poll(now, api(2))]
+for i in range(3):
+    steps += [{"op": "fetch_ok", "index": i, "expect": "ok"} for _ in [0] if i != 1]
+    steps += [{"op": "consumed", "index": i, "expect": "ok"}]
+steps += [poll(now, DONE), {"op": "storage_given_up", "expect": False}]
+scenarios.append({"name": "a chunk already in flight when the breaker trips arrives from storage: the report is cleared", "discovery": "std", "seed": 7, "steps": steps})
+
 # 17. the byte cap (decision D23): the reorder window is the cap divided by the CIPHERTEXT chunk length (stride + 28), clamped to 1..4
 MIB = 1024 * 1024
 
@@ -785,8 +804,8 @@ def hs(op, direction, now=None, expect=None, **kw):
     step = {"op": op, "direction": direction}
     if now is not None:
         step["now"] = now
-    if expect is not None:
-        step["expect"] = expect
+    if expect is not None or op == "last_gave_up":
+        step["expect"] = expect  # an explicit null means "nothing recorded"
     step.update(kw)
     return step
 

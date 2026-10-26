@@ -365,27 +365,37 @@ fn vectors_t0(v: &Value) -> i64 {
 /// One step of a health scenario. `expect` is a bool for `may_start*` and a number or null for `last_gave_up`.
 fn run_health_step<H: HealthSurface>(h: &mut H, step: &Value) -> Result<(), String> {
     let direction = step["direction"].as_str().ok_or("no direction")?;
-    let now = step["now"].as_i64().unwrap_or(0);
+    // `now` is mandatory for every op that reads the clock: a typo must fail the step, not become 0.
+    let now = || step["now"].as_i64().ok_or("no `now` (a number)");
     match step["op"].as_str().unwrap() {
-        "gave_up" => h.gave_up(direction, now),
+        "gave_up" => h.gave_up(direction, now()?),
         "restore" => h.restore(direction, step["ms"].as_i64().ok_or("no ms")?),
         "may_start" => {
-            let got = h.may_start(direction, now);
+            let got = h.may_start(direction, now()?);
             if Some(got) != step["expect"].as_bool() {
                 return Err(format!("expected {}, got {got}", step["expect"]));
             }
         }
         "may_start_file" => {
-            let got = h.may_start_file(direction, now, step["file_gave_up"].as_bool().ok_or("no file_gave_up")?);
+            let got = h.may_start_file(
+                direction,
+                now()?,
+                step["file_gave_up"].as_bool().ok_or("no file_gave_up")?,
+            );
             if Some(got) != step["expect"].as_bool() {
                 return Err(format!("expected {}, got {got}", step["expect"]));
             }
         }
         "last_gave_up" => {
             let got = h.last_gave_up_ms(direction);
-            // `expect` omitted in the file means "nothing recorded" (the generator drops a null).
-            if got != step["expect"].as_i64() {
-                return Err(format!("expected {}, got {got:?}", step["expect"]));
+            // `expect` is mandatory: a number, or an explicit null for "nothing recorded".
+            let want = match step.get("expect") {
+                Some(Value::Null) => None,
+                Some(v) => Some(v.as_i64().ok_or("`expect` is neither a number nor null")?),
+                None => return Err("no `expect` (a number, or null)".to_string()),
+            };
+            if got != want {
+                return Err(format!("expected {want:?}, got {got:?}"));
             }
         }
         other => return Err(format!("unknown health op {other}")),
@@ -919,12 +929,36 @@ mod tests {
             "{report:?}"
         );
         assert!(
-            report.scenarios >= 41 && report.steps >= 336 && report.refusals >= 21,
+            report.scenarios >= 42 && report.steps >= 367 && report.refusals >= 21,
             "{report:?}"
         );
         assert!(
             report.health_scenarios >= 8 && report.health_steps >= 37 && report.resume_transport >= 20,
             "{report:?}"
+        );
+    }
+
+    #[test]
+    fn a_malformed_health_step_is_an_error_not_a_pass() {
+        let mut h = DirectHealth::new();
+        for step in [
+            json!({"op": "gave_up", "direction": "upload"}), // no `now`
+            json!({"op": "may_start", "direction": "upload", "expect": true}), // no `now`
+            json!({"op": "may_start_file", "direction": "upload", "now": 1, "expect": true}), // no `file_gave_up`
+            json!({"op": "last_gave_up", "direction": "upload"}), // no `expect`
+            json!({"op": "last_gave_up", "direction": "upload", "expect": "none"}), // wrong type
+            json!({"op": "may_start", "direction": "upload", "now": "1", "expect": true}), // `now` not a number
+            json!({"op": "restore", "direction": "upload"}), // no `ms`
+        ] {
+            assert!(run_health_step(&mut h, &step).is_err(), "{step} must not pass");
+        }
+        // And a well-formed one still passes, including an explicit null for "nothing recorded".
+        assert!(
+            run_health_step(
+                &mut h,
+                &json!({"op": "last_gave_up", "direction": "upload", "expect": null})
+            )
+            .is_ok()
         );
     }
 

@@ -485,8 +485,12 @@ impl DownloadPlanner {
     /// causes). The caller records it with `DirectHealth::gave_up(Download, ..)` when the file ends, so no
     /// new direct download starts for one trust period. After one chunk has arrived from storage the
     /// per-chunk rules alone apply and this stays `false`.
+    ///
+    /// The report is cleared if a chunk that was already in flight when the breaker tripped then arrives from
+    /// storage: storage delivered bytes in this very transfer, so the caller must not hold the next file off
+    /// direct (the rest of this file still goes through the pinned route).
     pub fn storage_given_up(&self) -> bool {
-        self.storage_given_up
+        self.storage_given_up && !self.storage_ok
     }
 
     /// Set (or clear) the byte ceiling on held chunks ([`PlannerConfig::max_in_flight_bytes`]). Call it
@@ -3206,6 +3210,28 @@ mod tests {
         assert!(
             !p.storage_given_up(),
             "the file was already on the API route for another reason"
+        );
+    }
+
+    #[test]
+    fn a_storage_fetch_that_arrives_after_the_trip_clears_the_report() {
+        // Chunks 0-3 are in flight; chunk 0 exhausts its renewals and the breaker trips. Chunk 1 was already on its way
+        // and arrives: storage delivered bytes in this very transfer, so the caller must not hold the next file off direct.
+        let mut p = started();
+        for _ in 0..4 {
+            expect_fetch(&mut p, T0);
+        }
+        spend_renewals(&mut p, 0, 3);
+        p.fetch_failed(0, T0).unwrap();
+        assert!(p.storage_given_up(), "tripped: nothing has arrived from storage yet");
+        p.fetch_ok(1).unwrap();
+        assert!(
+            !p.storage_given_up(),
+            "a chunk arrived from storage: the report is cleared, no ten-minute hold"
+        );
+        assert!(
+            matches!(p.poll(T0), Poll::FetchViaApi { index: 0, .. }),
+            "the rest of this file still goes through the pinned route"
         );
     }
 
