@@ -102,6 +102,23 @@ constants = {
     "content_type_source": RS + "direct_transfer.rs:395 (CHUNK_CONTENT_TYPE), routes/direct_transfer.rs:900; tests/direct_upload_2173.rs:403",
     "commit_lock_ttl_seconds": 420,
     "commit_lock_ttl_source": RS + "direct_transfer.rs:410-412 (commit_lock_secs() = 4 * s3_op_timeout_secs() + 60), storage.rs:1952-1958 (s3_op_timeout_secs() = 90 unless S3_PUT_OP_TIMEOUT_SECS); the lock is held for its whole TTL after a copy was issued: routes/direct_transfer.rs:1079-1086 (mutation_issued .. mutation_settled, R3.1)",
+    # Clients plan A2: the server numbers the client time bounds must fit under (the late-write fence of a PUT), then the bounds.
+    "url_ttl_seconds": 300,
+    "url_ttl_seconds_source": RS + "direct_transfer.rs:33 (URL_TTL_SECS); the shortest link a server issues is MIN_URL_LIFETIME_SECS = 60 (:36)",
+    "put_allowance_floor_seconds": 300,
+    "put_allowance_floor_seconds_source": RS + "direct_transfer.rs:399 (PUT_ALLOWANCE_SECS), used by put_allowance_secs() at :434-437 = max(300, ceil(length * 8 / min_uplink_bps) + 60)",
+    "upload_lease_seconds": 3600,
+    "upload_lease_seconds_source": RS + "upload_lease.rs:151 (DEFAULT_LEASE_SECS); min_uplink_bps_for_chunk() at :248 = ceil(chunk_bytes * 8 / lease_secs), applied to the largest chunk by direct_transfer.rs:424-429 (min_uplink_bps)",
+    "max_ciphertext_chunk_bytes": 268435484,
+    "max_ciphertext_chunk_bytes_source": RS + "routes/files.rs:98-100 (max_ciphertext_chunk_bytes(u64::MAX)); asserted as 256 * MIB + 28 at routes/files.rs:8130",
+    "storage_connect_timeout_seconds": 15,
+    "storage_get_idle_seconds": 30,
+    "discovery_timeout_seconds": 15,
+    "api_call_timeout_seconds": 60,
+    "background_put_resource_timeout_seconds": 240,
+    "storage_total_base_seconds": 60,
+    "storage_total_bytes_per_second": 131072,
+    "client_timeouts_source": "client policy: docs/superpowers/specs/2026-10-25-direct-transfer-clients-design.md 6.2 (the per-stack bounds) and 6.3 (the invariants that tie them to the server numbers above); background_put_resource_timeout_seconds is review BL1 (a start as late as link expiry must end before the allowance floor, 300 - 60)",
 }
 
 INIT_SRC = RS + "routes/uploads.rs:789-792 (direct_wanted: the flag, the declared token, no upload cap, a live Redis; only then does the 201 carry transport = object-upload-v1); core wire.rs upload_init_selects_direct"
@@ -183,6 +200,16 @@ scen("a PUT that fails is regranted with a doubling wait (equal jitter), and the
     may(True), issued, fail("put", 0, retry(w3, GR)),
     may(True), issued, may(False), fail("put", 403, USE_API),
 ], seed=11)
+# Review E2 (clients plan A1): a PUT that storage refused (403) and a PUT that got no answer (status 0) are decided alike.
+for what, status in (("403", 403), ("status 0, no answer", 0)):
+    sim = Sim(11)
+    ws = [sim.failure() for _ in range(3)]
+    scen(f"a PUT that storage refused ({what}) is decided like any failed PUT: the same jittered waits (equal jitter) and the fourth link is the last", [
+        may(True), issued, fail("put", status, retry(ws[0], GR)),
+        may(True), issued, fail("put", status, retry(ws[1], GR)),
+        may(True), issued, fail("put", status, retry(ws[2], GR)),
+        may(True), issued, may(False), fail("put", status, USE_API),
+    ], seed=11)
 sim = Sim(5)
 sim.stated()
 second = sim.failure()

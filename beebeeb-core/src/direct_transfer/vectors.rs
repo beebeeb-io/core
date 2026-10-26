@@ -15,8 +15,9 @@
 use serde_json::{Value, json};
 
 use super::{
-    ApiAnswer, Call, Discovery, DiscoveryCache, DownloadPlanner, Geometry, Lookup, Outcome, PinnedRetry, PlannerConfig,
-    Poll, RetryDecision, Terminal, WindowAnswer, check_storage_url, classify, redact, scrub,
+    ApiAnswer, Call, DirectHealth, Direction, Discovery, DiscoveryCache, DiscoveryState, DownloadPlanner, Geometry,
+    Lookup, Outcome, PinnedRetry, PlannerConfig, Poll, RecordedTransport, RetryDecision, Terminal, WindowAnswer,
+    check_storage_url, classify, redact, resume_transport, scrub,
 };
 
 const API_PROD: &str = "https://api.beebeeb.test";
@@ -39,6 +40,7 @@ fn api_base_of(named: &str, row: &str) -> &'static str {
 pub trait Surface {
     type Planner: PlannerSurface;
     type Cache: CacheSurface;
+    type Health: HealthSurface;
 
     fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String>;
     fn classify(
@@ -57,6 +59,19 @@ pub trait Surface {
     fn chunk_length(&self, chunk_count: u32, chunk_size: u64, encrypted_size: u64, index: u32) -> Option<u64>;
     fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> Self::Planner;
     fn cache(&self) -> Self::Cache;
+    fn health(&self) -> Self::Health;
+    /// [`resume_transport`]: `recorded` is `"api"` or `"direct"`, `discovery` is `{kind, upload?}` with `kind` one of
+    /// `offers`, `not_supported`, `unknown`, `unauthorized`; the answer is the action's code.
+    fn resume_transport(&self, recorded: &str, discovery: &Value, forced_api: bool) -> String;
+}
+
+/// The give-up memory as a surface exports it. Directions cross as their codes (`"download"`, `"upload"`).
+pub trait HealthSurface {
+    fn gave_up(&mut self, direction: &str, now_ms: i64);
+    fn may_start(&self, direction: &str, now_ms: i64) -> bool;
+    fn may_start_file(&self, direction: &str, now_ms: i64, file_gave_up: bool) -> bool;
+    fn last_gave_up_ms(&self, direction: &str) -> Option<i64>;
+    fn restore(&mut self, direction: &str, last_gave_up_ms: i64);
 }
 
 /// The discovery cache as a surface exports it.
@@ -84,6 +99,10 @@ pub trait PlannerSurface {
     fn consumed(&mut self, index: u32) -> Result<(), String>;
     /// What the planner reports about itself, as [`inspect_json`].
     fn inspect(&self) -> Value;
+    /// Set the byte ceiling on held chunks (`PlannerConfig::max_in_flight_bytes`) before the first poll.
+    fn set_max_in_flight_bytes(&mut self, bytes: u64);
+    /// Did the storage breaker trip?
+    fn storage_given_up(&self) -> bool;
 }
 
 /// How many rows of each kind ran. A runner asserts these equal the file's
@@ -101,6 +120,9 @@ pub struct Report {
     pub scenarios: usize,
     pub steps: usize,
     pub refusals: usize,
+    pub health_scenarios: usize,
+    pub health_steps: usize,
+    pub resume_transport: usize,
 }
 
 /// The counts the file itself contains.
@@ -116,8 +138,13 @@ pub fn expected_report() -> Report {
         pinned_retry: len("pinned_retry"),
         cache_scenarios: len("discovery_cache"),
         scenarios: len("planner"),
+        health_scenarios: len("health"),
+        resume_transport: len("resume_transport"),
         ..Report::default()
     };
+    for s in v["health"].as_array().into_iter().flatten() {
+        r.health_steps += s["steps"].as_array().map_or(0, Vec::len);
+    }
     for s in v["discovery_cache"].as_array().into_iter().flatten() {
         r.cache_steps += s["steps"].as_array().map_or(0, Vec::len);
     }
@@ -260,6 +287,32 @@ pub fn run_all<S: Surface>(surface: &S) -> Report {
         report.cache_scenarios += 1;
     }
 
+    for scenario in v["health"].as_array().expect("health") {
+        let name = scenario["name"].as_str().unwrap();
+        let mut health = surface.health();
+        for (i, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
+            run_health_step(&mut health, step)
+                .unwrap_or_else(|e| panic!("health scenario {name:?}, step {i} {step}: {e}"));
+            report.health_steps += 1;
+        }
+        report.health_scenarios += 1;
+    }
+
+    for row in v["resume_transport"].as_array().expect("resume_transport") {
+        let got = surface.resume_transport(
+            row["recorded"].as_str().unwrap(),
+            &row["discovery"],
+            row["forced_api"].as_bool().unwrap(),
+        );
+        assert_eq!(
+            got,
+            row["expect"].as_str().unwrap(),
+            "resume_transport row {:?}",
+            row["name"]
+        );
+        report.resume_transport += 1;
+    }
+
     let file_id = v["file_id"].as_str().unwrap();
     for scenario in v["planner"].as_array().expect("planner") {
         let name = scenario["name"].as_str().unwrap();
@@ -283,6 +336,9 @@ pub fn run_all<S: Surface>(surface: &S) -> Report {
         }
         if let Some(steps) = scenario["steps"].as_array() {
             let mut p = surface.planner(disc, API_PROD, file_id, seed);
+            if let Some(bytes) = scenario.get("max_in_flight_bytes") {
+                p.set_max_in_flight_bytes(as_u64(bytes));
+            }
             for (i, step) in steps.iter().enumerate() {
                 run_step(&mut p, step).unwrap_or_else(|e| panic!("scenario {name:?}, step {i} {step}: {e}"));
                 report.steps += 1;
@@ -304,6 +360,47 @@ fn body_bytes(row: &Value) -> Vec<u8> {
 
 fn vectors_t0(v: &Value) -> i64 {
     v["t0_ms"].as_i64().unwrap()
+}
+
+/// One step of a health scenario. `expect` is a bool for `may_start*` and a number or null for `last_gave_up`.
+fn run_health_step<H: HealthSurface>(h: &mut H, step: &Value) -> Result<(), String> {
+    let direction = step["direction"].as_str().ok_or("no direction")?;
+    // `now` is mandatory for every op that reads the clock: a typo must fail the step, not become 0.
+    let now = || step["now"].as_i64().ok_or("no `now` (a number)");
+    match step["op"].as_str().unwrap() {
+        "gave_up" => h.gave_up(direction, now()?),
+        "restore" => h.restore(direction, step["ms"].as_i64().ok_or("no ms")?),
+        "may_start" => {
+            let got = h.may_start(direction, now()?);
+            if Some(got) != step["expect"].as_bool() {
+                return Err(format!("expected {}, got {got}", step["expect"]));
+            }
+        }
+        "may_start_file" => {
+            let got = h.may_start_file(
+                direction,
+                now()?,
+                step["file_gave_up"].as_bool().ok_or("no file_gave_up")?,
+            );
+            if Some(got) != step["expect"].as_bool() {
+                return Err(format!("expected {}, got {got}", step["expect"]));
+            }
+        }
+        "last_gave_up" => {
+            let got = h.last_gave_up_ms(direction);
+            // `expect` is mandatory: a number, or an explicit null for "nothing recorded".
+            let want = match step.get("expect") {
+                Some(Value::Null) => None,
+                Some(v) => Some(v.as_i64().ok_or("`expect` is neither a number nor null")?),
+                None => return Err("no `expect` (a number, or null)".to_string()),
+            };
+            if got != want {
+                return Err(format!("expected {want:?}, got {got:?}"));
+            }
+        }
+        other => return Err(format!("unknown health op {other}")),
+    }
+    Ok(())
 }
 
 fn run_step<P: PlannerSurface>(p: &mut P, step: &Value) -> Result<(), String> {
@@ -351,6 +448,14 @@ fn run_step<P: PlannerSurface>(p: &mut P, step: &Value) -> Result<(), String> {
         "api_fetch_failed" => expect(p.api_fetch_failed(index)),
         "chunk_unauthentic" => expect(p.chunk_unauthentic(index)),
         "consumed" => expect(p.consumed(index)),
+        "storage_given_up" => {
+            let got = p.storage_given_up();
+            if Some(got) == step["expect"].as_bool() {
+                Ok(())
+            } else {
+                Err(format!("expected storage_given_up {}, got {got}", step["expect"]))
+            }
+        }
         "inspect" => {
             let got = p.inspect();
             if got == step["expect"] {
@@ -485,6 +590,40 @@ impl PlannerSurface for DownloadPlanner {
     fn inspect(&self) -> Value {
         inspect_json(self)
     }
+    fn set_max_in_flight_bytes(&mut self, bytes: u64) {
+        DownloadPlanner::set_max_in_flight_bytes(self, Some(bytes));
+    }
+    fn storage_given_up(&self) -> bool {
+        DownloadPlanner::storage_given_up(self)
+    }
+}
+
+fn direction_of(code: &str) -> Direction {
+    Direction::from_code(code).unwrap_or_else(|| panic!("unknown direction {code:?}"))
+}
+
+impl HealthSurface for DirectHealth {
+    fn gave_up(&mut self, direction: &str, now_ms: i64) {
+        DirectHealth::gave_up(self, direction_of(direction), now_ms);
+    }
+    fn may_start(&self, direction: &str, now_ms: i64) -> bool {
+        DirectHealth::may_start(self, direction_of(direction), now_ms)
+    }
+    fn may_start_file(&self, direction: &str, now_ms: i64, file_gave_up: bool) -> bool {
+        DirectHealth::may_start_file(self, direction_of(direction), now_ms, file_gave_up)
+    }
+    fn last_gave_up_ms(&self, direction: &str) -> Option<i64> {
+        DirectHealth::last_gave_up_ms(self, direction_of(direction))
+    }
+    fn restore(&mut self, direction: &str, last_gave_up_ms: i64) {
+        DirectHealth::restore(self, direction_of(direction), last_gave_up_ms);
+    }
+}
+
+/// The discovery state a row names: `{kind, upload?}`.
+pub fn discovery_state_from_json(v: &Value) -> DiscoveryState {
+    DiscoveryState::from_parts(v["kind"].as_str().unwrap(), v["upload"].as_bool())
+        .unwrap_or_else(|| panic!("unknown discovery state {v}"))
 }
 
 impl CacheSurface for DiscoveryCache {
@@ -505,6 +644,7 @@ impl CacheSurface for DiscoveryCache {
 impl Surface for CoreSurface {
     type Planner = DownloadPlanner;
     type Cache = DiscoveryCache;
+    type Health = DirectHealth;
 
     fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String> {
         let d: Discovery = serde_json::from_value(discovery.clone()).map_err(|e| e.to_string())?;
@@ -550,6 +690,18 @@ impl Surface for CoreSurface {
     fn cache(&self) -> DiscoveryCache {
         DiscoveryCache::new()
     }
+    fn health(&self) -> DirectHealth {
+        DirectHealth::new()
+    }
+    fn resume_transport(&self, recorded: &str, discovery: &Value, forced_api: bool) -> String {
+        resume_transport(
+            RecordedTransport::from_code(recorded).unwrap_or_else(|| panic!("unknown recorded transport {recorded:?}")),
+            discovery_state_from_json(discovery),
+            forced_api,
+        )
+        .code()
+        .to_string()
+    }
 }
 
 #[cfg(test)]
@@ -574,11 +726,57 @@ mod tests {
         }
     }
 
+    /// A health memory that drifts in ONE way: `"direction"` ignores the direction (one hold for both),
+    /// `"file_bit"` ignores the file's own bit, `"future"` trusts a recorded time in the future.
+    struct DriftingHealth(DirectHealth, &'static str);
+
+    impl HealthSurface for DriftingHealth {
+        fn gave_up(&mut self, direction: &str, now_ms: i64) {
+            let direction = if self.1 == "direction" { "download" } else { direction };
+            HealthSurface::gave_up(&mut self.0, direction, now_ms)
+        }
+        fn may_start(&self, direction: &str, now_ms: i64) -> bool {
+            let direction = if self.1 == "direction" { "download" } else { direction };
+            if self.1 == "future"
+                && self
+                    .0
+                    .last_gave_up_ms(direction_of(direction))
+                    .is_some_and(|at| at > now_ms)
+            {
+                return false;
+            }
+            HealthSurface::may_start(&self.0, direction, now_ms)
+        }
+        fn may_start_file(&self, direction: &str, now_ms: i64, file_gave_up: bool) -> bool {
+            let file_gave_up = file_gave_up && self.1 != "file_bit";
+            HealthSurface::may_start_file(&self.0, direction, now_ms, file_gave_up)
+        }
+        fn last_gave_up_ms(&self, direction: &str) -> Option<i64> {
+            HealthSurface::last_gave_up_ms(&self.0, direction)
+        }
+        fn restore(&mut self, direction: &str, ms: i64) {
+            HealthSurface::restore(&mut self.0, direction, ms)
+        }
+    }
+
     impl Surface for Drift {
         type Planner = DownloadPlanner;
         type Cache = StickyCache;
+        type Health = DriftingHealth;
         fn cache(&self) -> StickyCache {
             StickyCache(DiscoveryCache::new(), self.0 == "cache")
+        }
+        fn health(&self) -> DriftingHealth {
+            DriftingHealth(DirectHealth::new(), self.0)
+        }
+        fn resume_transport(&self, recorded: &str, discovery: &Value, forced_api: bool) -> String {
+            let got = CoreSurface.resume_transport(recorded, discovery, forced_api);
+            // a binding that reads "could not be read" as a no
+            if self.0 == "resume" && got == "keep_record_and_fail" {
+                "abandon_to_api".to_string()
+            } else {
+                got
+            }
         }
         fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String> {
             if self.0 == "authority" && url.contains("evil.test") {
@@ -626,7 +824,7 @@ mod tests {
     }
 
     /// A planner that drifts in ONE way: `"pin"` forgets the pin on renewals, `"inspect"` reports
-    /// a wrong count of consumed chunks.
+    /// a wrong count of consumed chunks, `"breaker"` never reports the storage breaker, `"cap"` ignores the byte cap.
     struct ForgetfulPlanner(DownloadPlanner, &'static str);
 
     impl PlannerSurface for ForgetfulPlanner {
@@ -668,6 +866,14 @@ mod tests {
             }
             v
         }
+        fn set_max_in_flight_bytes(&mut self, bytes: u64) {
+            if self.1 != "cap" {
+                PlannerSurface::set_max_in_flight_bytes(&mut self.0, bytes);
+            }
+        }
+        fn storage_given_up(&self) -> bool {
+            self.1 != "breaker" && PlannerSurface::storage_given_up(&self.0)
+        }
     }
 
     struct Forgetful(&'static str);
@@ -675,8 +881,15 @@ mod tests {
     impl Surface for Forgetful {
         type Planner = ForgetfulPlanner;
         type Cache = DiscoveryCache;
+        type Health = DirectHealth;
         fn cache(&self) -> DiscoveryCache {
             DiscoveryCache::new()
+        }
+        fn health(&self) -> DirectHealth {
+            DirectHealth::new()
+        }
+        fn resume_transport(&self, recorded: &str, discovery: &Value, forced_api: bool) -> String {
+            CoreSurface.resume_transport(recorded, discovery, forced_api)
         }
         fn check_storage_url(&self, u: &str, d: &Value, a: &str) -> Result<(), String> {
             CoreSurface.check_storage_url(u, d, a)
@@ -716,8 +929,36 @@ mod tests {
             "{report:?}"
         );
         assert!(
-            report.scenarios >= 19 && report.steps >= 152 && report.refusals >= 21,
+            report.scenarios >= 42 && report.steps >= 367 && report.refusals >= 21,
             "{report:?}"
+        );
+        assert!(
+            report.health_scenarios >= 8 && report.health_steps >= 37 && report.resume_transport >= 20,
+            "{report:?}"
+        );
+    }
+
+    #[test]
+    fn a_malformed_health_step_is_an_error_not_a_pass() {
+        let mut h = DirectHealth::new();
+        for step in [
+            json!({"op": "gave_up", "direction": "upload"}), // no `now`
+            json!({"op": "may_start", "direction": "upload", "expect": true}), // no `now`
+            json!({"op": "may_start_file", "direction": "upload", "now": 1, "expect": true}), // no `file_gave_up`
+            json!({"op": "last_gave_up", "direction": "upload"}), // no `expect`
+            json!({"op": "last_gave_up", "direction": "upload", "expect": "none"}), // wrong type
+            json!({"op": "may_start", "direction": "upload", "now": "1", "expect": true}), // `now` not a number
+            json!({"op": "restore", "direction": "upload"}), // no `ms`
+        ] {
+            assert!(run_health_step(&mut h, &step).is_err(), "{step} must not pass");
+        }
+        // And a well-formed one still passes, including an explicit null for "nothing recorded".
+        assert!(
+            run_health_step(
+                &mut h,
+                &json!({"op": "last_gave_up", "direction": "upload", "expect": null})
+            )
+            .is_ok()
         );
     }
 
@@ -739,6 +980,8 @@ mod tests {
             "pinned_retry",
             "discovery_cache",
             "planner",
+            "health",
+            "resume_transport",
         ] {
             let mut names: Vec<&str> = v[section]
                 .as_array()
@@ -763,6 +1006,10 @@ mod tests {
             "cache",
             "redact",
             "geometry",
+            "direction",
+            "file_bit",
+            "future",
+            "resume",
         ] {
             let result = catch_unwind(AssertUnwindSafe(|| run_all(&Drift(what))));
             assert!(
@@ -770,7 +1017,7 @@ mod tests {
                 "a surface that drifted on {what} must fail the vectors"
             );
         }
-        for what in ["pin", "inspect"] {
+        for what in ["pin", "inspect", "breaker", "cap"] {
             let result = catch_unwind(AssertUnwindSafe(|| run_all(&Forgetful(what))));
             assert!(result.is_err(), "a planner that drifts on {what} must fail the vectors");
         }

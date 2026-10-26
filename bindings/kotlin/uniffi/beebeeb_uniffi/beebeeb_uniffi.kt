@@ -772,6 +772,8 @@ external fun uniffi_beebeeb_uniffi_checksum_func_derive_x25519_private(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_derive_x25519_public(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_direct_background_put_resource_timeout_ms(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_url(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_discovery_offers_download(
@@ -782,7 +784,13 @@ external fun uniffi_beebeeb_uniffi_checksum_func_direct_pinned_retry_decision(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_redact_url(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_direct_resume_transport(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_scrub_text(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_direct_storage_get_total_ms(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_direct_storage_put_total_ms(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_transfer_constants(
 ): Short
@@ -938,11 +946,25 @@ external fun uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_p
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_poll(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_set_max_in_flight_bytes(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_storage_given_up(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_window_answered(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_window_failed(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_window_malformed(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_directhealthhandle_gave_up(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_directhealthhandle_last_gave_up_ms(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_directhealthhandle_may_start(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_directhealthhandle_may_start_file(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_directhealthhandle_restore(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_directsignedurl_raw(
 ): Short
@@ -1079,6 +1101,8 @@ external fun uniffi_beebeeb_uniffi_checksum_constructor_constellationdecoderhand
 external fun uniffi_beebeeb_uniffi_checksum_constructor_directdiscoverycachehandle_new(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_directdownloadplannerhandle_new(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_directhealthhandle_new(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_directsignedurl_new(
 ): Short
@@ -1243,11 +1267,31 @@ external fun uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_pinned_
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_poll(`ptr`: Long,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_set_max_in_flight_bytes(`ptr`: Long,`bytes`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_storage_given_up(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
 external fun uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_window_answered(`ptr`: Long,`body`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_window_failed(`ptr`: Long,`outcome`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_window_malformed(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_clone_directhealthhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_directhealthhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_directhealthhandle_new(uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_directhealthhandle_gave_up(`ptr`: Long,`direction`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_directhealthhandle_last_gave_up_ms(`ptr`: Long,`direction`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_directhealthhandle_may_start(`ptr`: Long,`direction`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun uniffi_beebeeb_uniffi_fn_method_directhealthhandle_may_start_file(`ptr`: Long,`direction`: RustBuffer.ByValue,`nowMs`: Long,`fileGaveUp`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun uniffi_beebeeb_uniffi_fn_method_directhealthhandle_restore(`ptr`: Long,`direction`: RustBuffer.ByValue,`lastGaveUpMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_clone_directsignedurl(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
@@ -1463,6 +1507,8 @@ external fun uniffi_beebeeb_uniffi_fn_func_derive_x25519_private(`masterKey`: Ru
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_derive_x25519_public(`privateKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_direct_background_put_resource_timeout_ms(uniffi_out_err: UniffiRustCallStatus, 
+): Long
 external fun uniffi_beebeeb_uniffi_fn_func_direct_check_storage_url(`url`: RustBuffer.ByValue,`discovery`: RustBuffer.ByValue,`apiBase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_func_direct_discovery_offers_download(`discovery`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1473,8 +1519,14 @@ external fun uniffi_beebeeb_uniffi_fn_func_direct_pinned_retry_decision(`outcome
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_direct_redact_url(`url`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_direct_resume_transport(`recorded`: RustBuffer.ByValue,`discovery`: RustBuffer.ByValue,`forcedApi`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_direct_scrub_text(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_direct_storage_get_total_ms(`len`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_func_direct_storage_put_total_ms(`len`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
 external fun uniffi_beebeeb_uniffi_fn_func_direct_transfer_constants(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_download_and_decrypt_file(`apiUrl`: RustBuffer.ByValue,`token`: RustBuffer.ByValue,`masterKeyHandle`: Long,`fileId`: RustBuffer.ByValue,`expectedChunkFormat`: Byte,`outputPath`: RustBuffer.ByValue,`callback`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1751,6 +1803,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_func_derive_x25519_public() != 3860.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_background_put_resource_timeout_ms() != 64703.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_url() != 37576.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1766,7 +1821,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_redact_url() != 8126.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_resume_transport() != 37116.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_scrub_text() != 49435.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_storage_get_total_ms() != 62965.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_storage_put_total_ms() != 48397.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_transfer_constants() != 20976.toShort()) {
@@ -2000,6 +2064,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_poll() != 20104.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_set_max_in_flight_bytes() != 8572.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_storage_given_up() != 43725.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_window_answered() != 10453.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2007,6 +2077,21 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_window_malformed() != 62818.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_directhealthhandle_gave_up() != 51195.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_directhealthhandle_last_gave_up_ms() != 18887.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_directhealthhandle_may_start() != 51037.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_directhealthhandle_may_start_file() != 45343.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_directhealthhandle_restore() != 16132.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_directsignedurl_raw() != 23451.toShort()) {
@@ -2211,6 +2296,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_directdownloadplannerhandle_new() != 18802.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_directhealthhandle_new() != 34232.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_directsignedurl_new() != 57713.toShort()) {
@@ -4768,6 +4856,19 @@ public interface DirectDownloadPlannerHandleInterface {
     fun `poll`(`nowMs`: kotlin.Long): DirectPollDto
     
     /**
+     * Cap the ciphertext bytes held at once (fetching, or fetched and waiting to be decrypted in order):
+     * the planner then holds `clamp(floor(bytes / (chunk_size + 28)), 1, 4)` chunks. Call it before the first `poll`.
+     */
+    fun `setMaxInFlightBytes`(`bytes`: kotlin.ULong)
+    
+    /**
+     * Did the storage breaker trip? It does when a chunk used up its renewals and no chunk of this transfer has
+     * come whole from storage: from then on every remaining chunk is a `FetchViaApi` poll. When the file ends
+     * with this `true`, record `DirectHealthHandle.gave_up(Download, now_ms)`.
+     */
+    fun `storageGivenUp`(): kotlin.Boolean
+    
+    /**
      * The window answer for the outstanding request, as the raw response body.
      */
     fun `windowAnswered`(`body`: kotlin.ByteArray, `nowMs`: kotlin.Long): DirectWindowAnswerDto
@@ -5065,6 +5166,40 @@ open class DirectDownloadPlannerHandle: Disposable, AutoCloseable, DirectDownloa
 
     
     /**
+     * Cap the ciphertext bytes held at once (fetching, or fetched and waiting to be decrypted in order):
+     * the planner then holds `clamp(floor(bytes / (chunk_size + 28)), 1, 4)` chunks. Call it before the first `poll`.
+     */override fun `setMaxInFlightBytes`(`bytes`: kotlin.ULong)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_set_max_in_flight_bytes(
+        it,
+        FfiConverterULong.lower(`bytes`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Did the storage breaker trip? It does when a chunk used up its renewals and no chunk of this transfer has
+     * come whole from storage: from then on every remaining chunk is a `FetchViaApi` poll. When the file ends
+     * with this `true`, record `DirectHealthHandle.gave_up(Download, now_ms)`.
+     */override fun `storageGivenUp`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_storage_given_up(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * The window answer for the outstanding request, as the raw response body.
      */override fun `windowAnswered`(`body`: kotlin.ByteArray, `nowMs`: kotlin.Long): DirectWindowAnswerDto {
             return FfiConverterTypeDirectWindowAnswerDto.lift(
@@ -5144,6 +5279,364 @@ public object FfiConverterTypeDirectDownloadPlannerHandle: FfiConverter<DirectDo
     override fun allocationSize(value: DirectDownloadPlannerHandle) = 8UL
 
     override fun write(value: DirectDownloadPlannerHandle, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+/**
+ * Whether this client may start a direct transfer now, per direction: after a transfer gave up direct, no
+ * new one of that direction starts for ten minutes. One per API base and account. `now_ms` is Unix
+ * milliseconds (or a monotonic clock, used consistently). `last_gave_up_ms` / `restore` let a client that
+ * relaunches often persist the two timestamps. A recorded time later than "now" counts as expired.
+ */
+public interface DirectHealthHandleInterface {
+    
+    /**
+     * A transfer of `direction` gave up direct.
+     */
+    fun `gaveUp`(`direction`: DirectDirectionDto, `nowMs`: kotlin.Long)
+    
+    /**
+     * When the last give-up of `direction` was recorded.
+     */
+    fun `lastGaveUpMs`(`direction`: DirectDirectionDto): kotlin.Long?
+    
+    /**
+     * May a new direct transfer of `direction` start now?
+     */
+    fun `mayStart`(`direction`: DirectDirectionDto, `nowMs`: kotlin.Long): kotlin.Boolean
+    
+    /**
+     * As `may_start`, for a file that may already have given up direct: it never may again (`file_gave_up`).
+     */
+    fun `mayStartFile`(`direction`: DirectDirectionDto, `nowMs`: kotlin.Long, `fileGaveUp`: kotlin.Boolean): kotlin.Boolean
+    
+    /**
+     * Put back a timestamp `last_gave_up_ms` returned earlier.
+     */
+    fun `restore`(`direction`: DirectDirectionDto, `lastGaveUpMs`: kotlin.Long)
+    
+    companion object
+}
+
+/**
+ * Whether this client may start a direct transfer now, per direction: after a transfer gave up direct, no
+ * new one of that direction starts for ten minutes. One per API base and account. `now_ms` is Unix
+ * milliseconds (or a monotonic clock, used consistently). `last_gave_up_ms` / `restore` let a client that
+ * relaunches often persist the two timestamps. A recorded time later than "now" counts as expired.
+ */
+open class DirectHealthHandle: Disposable, AutoCloseable, DirectHealthHandleInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+    constructor() :
+        this(UniffiWithHandle, 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_directhealthhandle_new(
+    
+        _status)
+}
+    )
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_beebeeb_uniffi_fn_free_directhealthhandle(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_beebeeb_uniffi_fn_clone_directhealthhandle(handle, status)
+        }
+    }
+
+    
+    /**
+     * A transfer of `direction` gave up direct.
+     */override fun `gaveUp`(`direction`: DirectDirectionDto, `nowMs`: kotlin.Long)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directhealthhandle_gave_up(
+        it,
+        FfiConverterTypeDirectDirectionDto.lower(`direction`),FfiConverterLong.lower(`nowMs`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * When the last give-up of `direction` was recorded.
+     */override fun `lastGaveUpMs`(`direction`: DirectDirectionDto): kotlin.Long? {
+            return FfiConverterOptionalLong.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directhealthhandle_last_gave_up_ms(
+        it,
+        FfiConverterTypeDirectDirectionDto.lower(`direction`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * May a new direct transfer of `direction` start now?
+     */override fun `mayStart`(`direction`: DirectDirectionDto, `nowMs`: kotlin.Long): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directhealthhandle_may_start(
+        it,
+        FfiConverterTypeDirectDirectionDto.lower(`direction`),FfiConverterLong.lower(`nowMs`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * As `may_start`, for a file that may already have given up direct: it never may again (`file_gave_up`).
+     */override fun `mayStartFile`(`direction`: DirectDirectionDto, `nowMs`: kotlin.Long, `fileGaveUp`: kotlin.Boolean): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directhealthhandle_may_start_file(
+        it,
+        FfiConverterTypeDirectDirectionDto.lower(`direction`),FfiConverterLong.lower(`nowMs`),FfiConverterBoolean.lower(`fileGaveUp`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Put back a timestamp `last_gave_up_ms` returned earlier.
+     */override fun `restore`(`direction`: DirectDirectionDto, `lastGaveUpMs`: kotlin.Long)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directhealthhandle_restore(
+        it,
+        FfiConverterTypeDirectDirectionDto.lower(`direction`),FfiConverterLong.lower(`lastGaveUpMs`),_status)
+}
+    }
+    
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDirectHealthHandle: FfiConverter<DirectHealthHandle, Long> {
+    override fun lower(value: DirectHealthHandle): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): DirectHealthHandle {
+        return DirectHealthHandle(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): DirectHealthHandle {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: DirectHealthHandle) = 8UL
+
+    override fun write(value: DirectHealthHandle, buf: ByteBuffer) {
         buf.putLong(lower(value))
     }
 }
@@ -9033,6 +9526,19 @@ data class DirectConstantsDto (
     var `defaultWindow`: kotlin.UInt
     , 
     var `chunkOverhead`: kotlin.UInt
+    , 
+    /**
+     * The time bounds every client applies (clients design 6.2), in milliseconds.
+     */
+    var `storageConnectTimeoutMs`: kotlin.UInt
+    , 
+    var `storageGetIdleMs`: kotlin.UInt
+    , 
+    var `discoveryTimeoutMs`: kotlin.UInt
+    , 
+    var `apiCallTimeoutMs`: kotlin.UInt
+    , 
+    var `backgroundPutResourceTimeoutMs`: kotlin.UInt
     
 ){
     
@@ -9056,6 +9562,11 @@ public object FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer<DirectC
             FfiConverterUInt.read(buf),
             FfiConverterUInt.read(buf),
             FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
         )
     }
 
@@ -9066,7 +9577,12 @@ public object FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer<DirectC
             FfiConverterString.allocationSize(value.`discoveryPath`) +
             FfiConverterUInt.allocationSize(value.`maxWindow`) +
             FfiConverterUInt.allocationSize(value.`defaultWindow`) +
-            FfiConverterUInt.allocationSize(value.`chunkOverhead`)
+            FfiConverterUInt.allocationSize(value.`chunkOverhead`) +
+            FfiConverterUInt.allocationSize(value.`storageConnectTimeoutMs`) +
+            FfiConverterUInt.allocationSize(value.`storageGetIdleMs`) +
+            FfiConverterUInt.allocationSize(value.`discoveryTimeoutMs`) +
+            FfiConverterUInt.allocationSize(value.`apiCallTimeoutMs`) +
+            FfiConverterUInt.allocationSize(value.`backgroundPutResourceTimeoutMs`)
     )
 
     override fun write(value: DirectConstantsDto, buf: ByteBuffer) {
@@ -9077,6 +9593,11 @@ public object FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer<DirectC
             FfiConverterUInt.write(value.`maxWindow`, buf)
             FfiConverterUInt.write(value.`defaultWindow`, buf)
             FfiConverterUInt.write(value.`chunkOverhead`, buf)
+            FfiConverterUInt.write(value.`storageConnectTimeoutMs`, buf)
+            FfiConverterUInt.write(value.`storageGetIdleMs`, buf)
+            FfiConverterUInt.write(value.`discoveryTimeoutMs`, buf)
+            FfiConverterUInt.write(value.`apiCallTimeoutMs`, buf)
+            FfiConverterUInt.write(value.`backgroundPutResourceTimeoutMs`, buf)
     }
 }
 
@@ -10745,6 +11266,159 @@ public object FfiConverterTypeCryptoError : FfiConverterRustBuffer<CryptoExcepti
 
 
 /**
+ * Which way the bytes go.
+ */
+
+enum class DirectDirectionDto {
+    
+    DOWNLOAD,
+    UPLOAD;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDirectDirectionDto: FfiConverterRustBuffer<DirectDirectionDto> {
+    override fun read(buf: ByteBuffer) = try {
+        DirectDirectionDto.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: DirectDirectionDto) = 4UL
+
+    override fun write(value: DirectDirectionDto, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * What the client learned from discovery when it asked just now.
+ */
+sealed class DirectDiscoveryStateDto {
+    
+    /**
+     * The server answered; `upload`: it lists the direct upload transport.
+     */
+    data class Offers(
+        val `upload`: kotlin.Boolean) : DirectDiscoveryStateDto()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * A JSON 404: the server has no direct transfer at all.
+     */
+    object NotSupported : DirectDiscoveryStateDto()
+    
+    
+    /**
+     * No usable answer (a 5xx, a timeout, a bare 404, a body that did not decode).
+     */
+    object Unknown : DirectDiscoveryStateDto()
+    
+    
+    /**
+     * 401 or 403: the login is not valid.
+     */
+    object Unauthorized : DirectDiscoveryStateDto()
+    
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDirectDiscoveryStateDto : FfiConverterRustBuffer<DirectDiscoveryStateDto>{
+    override fun read(buf: ByteBuffer): DirectDiscoveryStateDto {
+        return when(buf.getInt()) {
+            1 -> DirectDiscoveryStateDto.Offers(
+                FfiConverterBoolean.read(buf),
+                )
+            2 -> DirectDiscoveryStateDto.NotSupported
+            3 -> DirectDiscoveryStateDto.Unknown
+            4 -> DirectDiscoveryStateDto.Unauthorized
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: DirectDiscoveryStateDto) = when(value) {
+        is DirectDiscoveryStateDto.Offers -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterBoolean.allocationSize(value.`upload`)
+            )
+        }
+        is DirectDiscoveryStateDto.NotSupported -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is DirectDiscoveryStateDto.Unknown -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is DirectDiscoveryStateDto.Unauthorized -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+    }
+
+    override fun write(value: DirectDiscoveryStateDto, buf: ByteBuffer) {
+        when(value) {
+            is DirectDiscoveryStateDto.Offers -> {
+                buf.putInt(1)
+                FfiConverterBoolean.write(value.`upload`, buf)
+                Unit
+            }
+            is DirectDiscoveryStateDto.NotSupported -> {
+                buf.putInt(2)
+                Unit
+            }
+            is DirectDiscoveryStateDto.Unknown -> {
+                buf.putInt(3)
+                Unit
+            }
+            is DirectDiscoveryStateDto.Unauthorized -> {
+                buf.putInt(4)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+/**
  * What to do about discovery right now.
  */
 sealed class DirectLookupDto {
@@ -11334,6 +12008,92 @@ public object FfiConverterTypeDirectPollDto : FfiConverterRustBuffer<DirectPollD
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+/**
+ * The transport a resume record names.
+ */
+
+enum class DirectRecordedTransportDto {
+    
+    API,
+    DIRECT;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDirectRecordedTransportDto: FfiConverterRustBuffer<DirectRecordedTransportDto> {
+    override fun read(buf: ByteBuffer) = try {
+        DirectRecordedTransportDto.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: DirectRecordedTransportDto) = 4UL
+
+    override fun write(value: DirectRecordedTransportDto, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * What to do with the unfinished upload.
+ */
+
+enum class DirectResumeActionDto {
+    
+    CONTINUE_API,
+    CONTINUE_DIRECT,
+    /**
+     * Abandon the session, clear the record, start again on the API.
+     */
+    ABANDON_TO_API,
+    /**
+     * Keep the record and fail the file for this run.
+     */
+    KEEP_RECORD_AND_FAIL,
+    /**
+     * Keep the record and ask the user to sign in again.
+     */
+    KEEP_RECORD_AND_REAUTHENTICATE;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDirectResumeActionDto: FfiConverterRustBuffer<DirectResumeActionDto> {
+    override fun read(buf: ByteBuffer) = try {
+        DirectResumeActionDto.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: DirectResumeActionDto) = 4UL
+
+    override fun write(value: DirectResumeActionDto, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
     }
 }
 
@@ -14132,6 +14892,21 @@ public object FfiConverterSequenceTypeCeremonyStepDto: FfiConverterRustBuffer<Li
     
 
         /**
+         * A background URL session's resource timeout for a storage PUT, in milliseconds. No app timer runs in
+         * the background, so this is the only bound; it stays under the server's late-write fence from any
+         * start up to the link's expiry.
+         */ fun `directBackgroundPutResourceTimeoutMs`(): kotlin.ULong {
+            return FfiConverterULong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_direct_background_put_resource_timeout_ms(
+    
+        _status)
+}
+    )
+    }
+    
+
+        /**
          * May the app follow this storage link? `api_base` is the API origin in use.
          * Throws `LinkRefused` with the refusal code; the message never contains the URL.
          */
@@ -14201,6 +14976,21 @@ public object FfiConverterSequenceTypeCeremonyStepDto: FfiConverterRustBuffer<Li
     
 
         /**
+         * What to do with an unfinished upload found on disk. A recorded direct session is given up only on a
+         * definite no: the user forced the API (`forced_api`), or the server says it offers no direct uploads. It is
+         * never given up because discovery could not be read this time. One rule, so no client writes it by hand.
+         */ fun `directResumeTransport`(`recorded`: DirectRecordedTransportDto, `discovery`: DirectDiscoveryStateDto, `forcedApi`: kotlin.Boolean): DirectResumeActionDto {
+            return FfiConverterTypeDirectResumeActionDto.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_direct_resume_transport(
+    
+        FfiConverterTypeDirectRecordedTransportDto.lower(`recorded`),FfiConverterTypeDirectDiscoveryStateDto.lower(`discovery`),FfiConverterBoolean.lower(`forcedApi`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Text that may contain URLs, made safe to print.
          */ fun `directScrubText`(`text`: kotlin.String): kotlin.String {
             return FfiConverterString.lift(
@@ -14208,6 +14998,33 @@ public object FfiConverterSequenceTypeCeremonyStepDto: FfiConverterRustBuffer<Li
     UniffiLib.uniffi_beebeeb_uniffi_fn_func_direct_scrub_text(
     
         FfiConverterString.lower(`text`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The most a storage GET of `len` ciphertext bytes may take, in milliseconds (the same formula as a PUT).
+         */ fun `directStorageGetTotalMs`(`len`: kotlin.ULong): kotlin.ULong {
+            return FfiConverterULong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_direct_storage_get_total_ms(
+    
+        FfiConverterULong.lower(`len`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The most a storage PUT of `len` ciphertext bytes may take, in milliseconds: a minute plus the
+         * chunk at 1 Mbit/s (`60 s + ceil(len / 131072) s`). Any length is safe: a huge one is a long timeout.
+         */ fun `directStoragePutTotalMs`(`len`: kotlin.ULong): kotlin.ULong {
+            return FfiConverterULong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_direct_storage_put_total_ms(
+    
+        FfiConverterULong.lower(`len`),_status)
 }
     )
     }

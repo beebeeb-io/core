@@ -1,7 +1,16 @@
 // Compiled, never run: run.sh type-checks this against the generated .d.ts of both targets. It pins what a
 // TypeScript consumer sees of `WasmDownloadPlanner.poll()`; each `@ts-expect-error` fails the check if the line
 // beneath it stops being an error (for instance if the link of a fetch step became a plain string again).
-import { WasmDownloadPlanner, WasmSignedUrl, type DirectPoll, type DirectVerdict } from "./PKG/beebeeb_wasm"
+import {
+  WasmDirectHealth,
+  WasmDownloadPlanner,
+  WasmSignedUrl,
+  resumeTransport,
+  storageGetTotalMs,
+  storagePutTotalMs,
+  type DirectPoll,
+  type DirectVerdict,
+} from "./PKG/beebeeb_wasm"
 
 declare const planner: WasmDownloadPlanner
 
@@ -71,3 +80,20 @@ function verdict(v: DirectVerdict): string {
       return `terminal ${v.status} ${v.error ?? ""}`
   }
 }
+
+// The download-side additions (clients plan A1, A2): what a TypeScript consumer sees.
+declare const health: WasmDirectHealth
+const may: boolean = health.mayStart("download", 0)
+const mayFile: boolean = health.mayStartFile("upload", 0, false)
+// An absent timestamp is `undefined` (wasm-bindgen's `Option<f64>`), a present one a number.
+const lastGaveUp: number | undefined = health.lastGaveUpMs("download")
+// @ts-expect-error a missing timestamp is not a number
+const lastIsANumber: number = health.lastGaveUpMs("download")
+health.gaveUp("upload", Date.now())
+health.restore("download", 1)
+const action: string = resumeTransport("direct", { kind: "unknown" }, false)
+const putMs: number = storagePutTotalMs(4194332)
+const getMs: number = storageGetTotalMs(0)
+planner.setMaxInFlightBytes(64 * 1024 * 1024)
+const gaveUpStorage: boolean = planner.storageGivenUp()
+void [may, mayFile, lastGaveUp, lastIsANumber, action, putMs, getMs, gaveUpStorage]

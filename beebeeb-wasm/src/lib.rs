@@ -2144,11 +2144,18 @@ struct DirectConstantsJs {
     max_window: u32,
     default_window: u32,
     chunk_overhead: u32,
+    storage_connect_timeout_ms: u32,
+    storage_get_idle_ms: u32,
+    discovery_timeout_ms: u32,
+    api_call_timeout_ms: u32,
+    background_put_resource_timeout_ms: u32,
 }
 
 /// `{ cap_object_download_v1, cap_object_upload_v1, capabilities_header,
-/// discovery_path, max_window, default_window, chunk_overhead }`: the contract's
-/// names and numbers, so no client re-types them.
+/// discovery_path, max_window, default_window, chunk_overhead,
+/// storage_connect_timeout_ms, storage_get_idle_ms, discovery_timeout_ms,
+/// api_call_timeout_ms, background_put_resource_timeout_ms }`: the contract's
+/// names and numbers, and the time bounds every client applies, so no client re-types them.
 #[wasm_bindgen(js_name = directTransferConstants)]
 pub fn direct_transfer_constants() -> Result<JsValue, JsError> {
     direct_to_js(&direct_constants())
@@ -2163,7 +2170,47 @@ fn direct_constants() -> DirectConstantsJs {
         max_window: dt::wire::MAX_WINDOW,
         default_window: dt::wire::DEFAULT_WINDOW,
         chunk_overhead: dt::wire::CHUNK_OVERHEAD as u32,
+        storage_connect_timeout_ms: direct_timeout_ms(dt::timeouts::STORAGE_CONNECT_TIMEOUT),
+        storage_get_idle_ms: direct_timeout_ms(dt::timeouts::STORAGE_GET_IDLE),
+        discovery_timeout_ms: direct_timeout_ms(dt::timeouts::DISCOVERY_TIMEOUT),
+        api_call_timeout_ms: direct_timeout_ms(dt::timeouts::API_CALL_TIMEOUT),
+        background_put_resource_timeout_ms: direct_timeout_ms(dt::timeouts::BACKGROUND_PUT_RESOURCE_TIMEOUT),
     }
+}
+
+/// A fixed bound in milliseconds (every one is a few minutes at most).
+fn direct_timeout_ms(d: std::time::Duration) -> u32 {
+    u32::try_from(d.as_millis()).unwrap_or(u32::MAX)
+}
+
+/// A count of bytes that crossed as a JS number: finite, whole, and a number JS holds exactly (below 2^53).
+/// `code` is the stable failure code the caller branches on.
+fn direct_bytes(value: f64, code: &'static str) -> Result<u64, DirectFailure> {
+    if value.is_finite() && value >= 0.0 && value.fract() == 0.0 && value < 9_007_199_254_740_992.0 {
+        Ok(value as u64)
+    } else {
+        Err(DirectFailure::new("not a whole number of bytes", code))
+    }
+}
+
+/// A length that crossed as a JS number (see [`direct_bytes`]).
+fn direct_length(len: f64) -> Result<u64, DirectFailure> {
+    direct_bytes(len, "length_invalid")
+}
+
+/// The most a storage PUT of `len` ciphertext bytes may take, in milliseconds: a minute plus the
+/// chunk at 1 Mbit/s (`60 s + ceil(len / 131072) s`). Throws an `Error` with `code` `length_invalid`
+/// for a `len` that is not a whole, non-negative number.
+#[wasm_bindgen(js_name = storagePutTotalMs)]
+pub fn storage_put_total_ms(len: f64) -> Result<f64, DirectFailure> {
+    Ok(dt::timeouts::storage_put_total(direct_length(len)?).as_millis() as f64)
+}
+
+/// The most a storage GET of `len` ciphertext bytes may take, in milliseconds (the same formula as a PUT).
+/// Throws like `storagePutTotalMs`.
+#[wasm_bindgen(js_name = storageGetTotalMs)]
+pub fn storage_get_total_ms(len: f64) -> Result<f64, DirectFailure> {
+    Ok(dt::timeouts::storage_get_total(direct_length(len)?).as_millis() as f64)
 }
 
 /// `/api/v1/files/{id}/download-grants` for `file_id`.
@@ -2609,6 +2656,25 @@ impl WasmDownloadPlanner {
     pub fn in_flight(&self) -> u32 {
         self.inner.in_flight() as u32
     }
+
+    /// Cap the ciphertext bytes held at once (fetching, or fetched and waiting to be decrypted in order):
+    /// the planner then holds `clamp(floor(bytes / (chunk_size + 28)), 1, 4)` chunks, so 64 MiB holds four
+    /// chunks of 4 MiB but one of 256 MiB. Call it before the first `poll`. Throws `bytes_invalid` for a
+    /// number that is not a whole, non-negative byte count.
+    #[wasm_bindgen(js_name = setMaxInFlightBytes)]
+    pub fn set_max_in_flight_bytes(&mut self, bytes: f64) -> Result<(), DirectFailure> {
+        self.inner
+            .set_max_in_flight_bytes(Some(direct_bytes(bytes, "bytes_invalid")?));
+        Ok(())
+    }
+
+    /// Did the storage breaker trip? It does when a chunk used up its renewals and no chunk of this
+    /// transfer has come whole from storage: from then on every remaining chunk is a `fetch_via_api` poll.
+    /// When the file ends with this `true`, tell `WasmDirectHealth.gaveUp("download", nowMs)`.
+    #[wasm_bindgen(js_name = storageGivenUp)]
+    pub fn storage_given_up(&self) -> bool {
+        self.inner.storage_given_up()
+    }
 }
 
 impl WasmDownloadPlanner {
@@ -2697,6 +2763,120 @@ impl WasmDirectDiscoveryCache {
         let discovery = body.and_then(|b| dt::Discovery::from_json(b).ok());
         self.inner.record(&outcome.to_core(), discovery, now_ms);
     }
+}
+
+/// A time that crossed as a JS number: finite. A NaN or infinity would become 0 or a saturated number and make the
+/// ten-minute hold silently ineffective, so the health methods refuse it with a stable code.
+fn direct_time(ms: f64) -> Result<i64, DirectFailure> {
+    if ms.is_finite() {
+        Ok(direct_ms(ms))
+    } else {
+        Err(DirectFailure::new("not a time in milliseconds", "time_invalid"))
+    }
+}
+
+/// The direction a JS string names: `"download"` or `"upload"`.
+fn direct_direction(direction: &str) -> Result<dt::Direction, DirectFailure> {
+    dt::Direction::from_code(direction)
+        .ok_or_else(|| DirectFailure::new("direction must be \"download\" or \"upload\"", "direction_invalid"))
+}
+
+/// Whether this client may start a direct transfer now, per direction: after a transfer gave up direct,
+/// no new one of that direction starts for ten minutes. One per API base and account; feed it
+/// `Date.now()` (or a monotonic clock, consistently). `lastGaveUpMs` / `restore` let a client persist the
+/// two timestamps. A recorded time later than "now" counts as expired.
+#[wasm_bindgen]
+pub struct WasmDirectHealth {
+    inner: dt::DirectHealth,
+}
+
+impl Default for WasmDirectHealth {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[wasm_bindgen]
+impl WasmDirectHealth {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> WasmDirectHealth {
+        Self {
+            inner: dt::DirectHealth::new(),
+        }
+    }
+
+    /// A transfer of `direction` gave up direct. Throws `direction_invalid` for anything but
+    /// `"download"` or `"upload"` (as every method here does).
+    #[wasm_bindgen(js_name = gaveUp)]
+    pub fn gave_up(&mut self, direction: &str, now_ms: f64) -> Result<(), DirectFailure> {
+        self.inner.gave_up(direct_direction(direction)?, direct_time(now_ms)?);
+        Ok(())
+    }
+
+    /// May a new direct transfer of `direction` start now?
+    #[wasm_bindgen(js_name = mayStart)]
+    pub fn may_start(&self, direction: &str, now_ms: f64) -> Result<bool, DirectFailure> {
+        Ok(self.inner.may_start(direct_direction(direction)?, direct_time(now_ms)?))
+    }
+
+    /// As `mayStart`, for a file that may already have given up direct: it never may again (`fileGaveUp`).
+    #[wasm_bindgen(js_name = mayStartFile)]
+    pub fn may_start_file(&self, direction: &str, now_ms: f64, file_gave_up: bool) -> Result<bool, DirectFailure> {
+        Ok(self
+            .inner
+            .may_start_file(direct_direction(direction)?, direct_time(now_ms)?, file_gave_up))
+    }
+
+    /// When the last give-up of `direction` was recorded, or `null`.
+    #[wasm_bindgen(js_name = lastGaveUpMs)]
+    pub fn last_gave_up_ms(&self, direction: &str) -> Result<Option<f64>, DirectFailure> {
+        Ok(self
+            .inner
+            .last_gave_up_ms(direct_direction(direction)?)
+            .map(|ms| ms as f64))
+    }
+
+    /// Put back a timestamp `lastGaveUpMs` returned earlier.
+    pub fn restore(&mut self, direction: &str, last_gave_up_ms: f64) -> Result<(), DirectFailure> {
+        self.inner
+            .restore(direct_direction(direction)?, direct_time(last_gave_up_ms)?);
+        Ok(())
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct DirectDiscoveryStateJs {
+    kind: String,
+    #[serde(default)]
+    upload: Option<bool>,
+}
+
+/// What to do with an unfinished upload found on disk. `recorded` is `"api"` or `"direct"` (what the resume
+/// record names); `discovery` is `{ kind, upload? }` with `kind` `"offers"` (and `upload: true | false`),
+/// `"not_supported"` (a JSON 404), `"unknown"` (a 5xx, a timeout, a bare 404: no usable answer) or
+/// `"unauthorized"` (401 or 403); `forcedApi` is the user's own switch. Returns `"continue_api"`,
+/// `"continue_direct"`, `"abandon_to_api"`, `"keep_record_and_fail"` or `"keep_record_and_reauthenticate"`.
+/// A recorded direct session is given up only on a definite no. Throws `recorded_invalid` or
+/// `discovery_state_invalid`.
+#[wasm_bindgen(js_name = resumeTransport)]
+pub fn resume_transport_js(recorded: &str, discovery: JsValue, forced_api: bool) -> Result<String, DirectFailure> {
+    let state: DirectDiscoveryStateJs = serde_wasm_bindgen::from_value(discovery)
+        .map_err(|e| DirectFailure::new(e.to_string(), "discovery_state_invalid"))?;
+    direct_resume_transport(recorded, &state.kind, state.upload, forced_api)
+}
+
+/// The seam `resumeTransport` calls, in plain Rust.
+fn direct_resume_transport(
+    recorded: &str,
+    kind: &str,
+    upload: Option<bool>,
+    forced_api: bool,
+) -> Result<String, DirectFailure> {
+    let recorded = dt::RecordedTransport::from_code(recorded)
+        .ok_or_else(|| DirectFailure::new("recorded must be \"api\" or \"direct\"", "recorded_invalid"))?;
+    let state = dt::DiscoveryState::from_parts(kind, upload)
+        .ok_or_else(|| DirectFailure::new("not a discovery state", "discovery_state_invalid"))?;
+    Ok(dt::resume_transport(recorded, state, forced_api).code().to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -3107,7 +3287,7 @@ mod direct_vector_tests {
     //! `JsValue` wrapper calls. The same file `beebeeb-core` runs through core directly: a
     //! wrapper that drifts from core fails here.
 
-    use beebeeb_core::direct_transfer::vectors::{self, CacheSurface, PlannerSurface, Surface};
+    use beebeeb_core::direct_transfer::vectors::{self, CacheSurface, HealthSurface, PlannerSurface, Surface};
     use serde_json::{Value, json};
 
     use super::*;
@@ -3117,6 +3297,26 @@ mod direct_vector_tests {
     struct WasmPlannerSurface(WasmDownloadPlanner);
 
     struct WasmCacheSurface(WasmDirectDiscoveryCache);
+
+    struct WasmHealthSurface(WasmDirectHealth);
+
+    impl HealthSurface for WasmHealthSurface {
+        fn gave_up(&mut self, direction: &str, now_ms: i64) {
+            self.0.gave_up(direction, now_ms as f64).unwrap();
+        }
+        fn may_start(&self, direction: &str, now_ms: i64) -> bool {
+            self.0.may_start(direction, now_ms as f64).unwrap()
+        }
+        fn may_start_file(&self, direction: &str, now_ms: i64, file_gave_up: bool) -> bool {
+            self.0.may_start_file(direction, now_ms as f64, file_gave_up).unwrap()
+        }
+        fn last_gave_up_ms(&self, direction: &str) -> Option<i64> {
+            self.0.last_gave_up_ms(direction).unwrap().map(|ms| ms as i64)
+        }
+        fn restore(&mut self, direction: &str, last_gave_up_ms: i64) {
+            self.0.restore(direction, last_gave_up_ms as f64).unwrap();
+        }
+    }
 
     impl CacheSurface for WasmCacheSurface {
         fn lookup(&self, now_ms: i64) -> String {
@@ -3147,9 +3347,24 @@ mod direct_vector_tests {
     impl Surface for WasmSurface {
         type Planner = WasmPlannerSurface;
         type Cache = WasmCacheSurface;
+        type Health = WasmHealthSurface;
 
         fn cache(&self) -> WasmCacheSurface {
             WasmCacheSurface(WasmDirectDiscoveryCache::new())
+        }
+
+        fn health(&self) -> WasmHealthSurface {
+            WasmHealthSurface(WasmDirectHealth::new())
+        }
+
+        fn resume_transport(&self, recorded: &str, discovery: &Value, forced_api: bool) -> String {
+            direct_resume_transport(
+                recorded,
+                discovery["kind"].as_str().unwrap(),
+                discovery["upload"].as_bool(),
+                forced_api,
+            )
+            .unwrap()
         }
 
         fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String> {
@@ -3251,6 +3466,14 @@ mod direct_vector_tests {
                 "in_flight": self.0.in_flight(),
             }))
         }
+
+        fn set_max_in_flight_bytes(&mut self, bytes: u64) {
+            self.0.set_max_in_flight_bytes(bytes as f64).unwrap();
+        }
+
+        fn storage_given_up(&self) -> bool {
+            self.0.storage_given_up()
+        }
     }
 
     #[test]
@@ -3260,6 +3483,126 @@ mod direct_vector_tests {
             report,
             vectors::expected_report(),
             "a section that did not run is a failure"
+        );
+    }
+
+    /// A length crosses as a JS number: only a finite, whole, non-negative number below 2^53 is a length.
+    #[test]
+    fn storage_totals_follow_core_and_refuse_a_length_that_is_not_one() {
+        // A 4 MiB chunk (plus the AEAD overhead): 60 s + 33 s, in milliseconds.
+        let len = (4 * 1024 * 1024 + 28) as f64;
+        assert_eq!(storage_put_total_ms(len).unwrap(), 93_000.0);
+        assert_eq!(storage_get_total_ms(len).unwrap(), 93_000.0);
+        assert_eq!(storage_put_total_ms(0.0).unwrap(), 60_000.0);
+        for bad in [-1.0, f64::NAN, f64::INFINITY, 1.5, 9_007_199_254_740_992.0] {
+            assert_eq!(storage_put_total_ms(bad).unwrap_err().code, "length_invalid", "{bad}");
+            assert_eq!(storage_get_total_ms(bad).unwrap_err().code, "length_invalid", "{bad}");
+        }
+    }
+
+    #[test]
+    fn health_refuses_a_direction_that_is_not_one() {
+        let mut h = WasmDirectHealth::new();
+        for bad in ["", "Download", "up", "both"] {
+            assert_eq!(h.gave_up(bad, 0.0).unwrap_err().code, "direction_invalid", "{bad:?}");
+            assert_eq!(h.may_start(bad, 0.0).unwrap_err().code, "direction_invalid");
+            assert_eq!(h.may_start_file(bad, 0.0, false).unwrap_err().code, "direction_invalid");
+            assert_eq!(h.last_gave_up_ms(bad).unwrap_err().code, "direction_invalid");
+            assert_eq!(h.restore(bad, 0.0).unwrap_err().code, "direction_invalid");
+        }
+        // Nothing was recorded by the refused calls.
+        assert_eq!(h.last_gave_up_ms("download").unwrap(), None);
+        assert_eq!(h.last_gave_up_ms("upload").unwrap(), None);
+    }
+
+    #[test]
+    fn health_refuses_a_time_that_is_not_a_number() {
+        // A NaN or infinite time would be turned into 0 or a saturated number, which makes the ten-minute hold silently
+        // ineffective (a give-up recorded at the epoch is 56 years old).
+        let mut h = WasmDirectHealth::new();
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(h.gave_up("download", bad).unwrap_err().code, "time_invalid", "{bad}");
+            assert_eq!(h.may_start("download", bad).unwrap_err().code, "time_invalid");
+            assert_eq!(
+                h.may_start_file("download", bad, false).unwrap_err().code,
+                "time_invalid"
+            );
+            assert_eq!(h.restore("download", bad).unwrap_err().code, "time_invalid");
+        }
+        assert_eq!(h.last_gave_up_ms("download").unwrap(), None, "nothing was recorded");
+    }
+
+    #[test]
+    fn resume_transport_refuses_names_it_does_not_know() {
+        let ok = |r: &str, k: &str, u: Option<bool>, f: bool| direct_resume_transport(r, k, u, f);
+        assert_eq!(ok("direct", "offers", Some(true), false).unwrap(), "continue_direct");
+        assert_eq!(ok("direct", "unknown", None, false).unwrap(), "keep_record_and_fail");
+        assert_eq!(
+            ok("sideways", "offers", Some(true), false).unwrap_err().code,
+            "recorded_invalid"
+        );
+        assert_eq!(
+            ok("direct", "offers", None, false).unwrap_err().code,
+            "discovery_state_invalid"
+        );
+        assert_eq!(
+            ok("direct", "maybe", None, false).unwrap_err().code,
+            "discovery_state_invalid"
+        );
+    }
+
+    #[test]
+    fn the_byte_cap_refuses_a_number_that_is_not_a_byte_count() {
+        let discovery = dt::Discovery {
+            download: vec![dt::CAP_OBJECT_DOWNLOAD_V1.into()],
+            ..Default::default()
+        };
+        let mut p = WasmDownloadPlanner::from_parts(discovery, "https://api.beebeeb.test", "f", 1);
+        for bad in [-1.0, f64::NAN, f64::INFINITY, 1.5, 9_007_199_254_740_992.0] {
+            assert_eq!(
+                p.set_max_in_flight_bytes(bad).unwrap_err().code,
+                "bytes_invalid",
+                "{bad}"
+            );
+        }
+        p.set_max_in_flight_bytes(0.0).unwrap();
+        p.set_max_in_flight_bytes(67_108_864.0).unwrap();
+        assert!(!p.storage_given_up(), "a new planner has not given up storage");
+    }
+
+    #[test]
+    fn the_constants_carry_core_s_time_bounds() {
+        let c = direct_constants();
+        assert_eq!(
+            u64::from(c.storage_connect_timeout_ms),
+            dt::timeouts::STORAGE_CONNECT_TIMEOUT.as_millis() as u64
+        );
+        assert_eq!(
+            u64::from(c.storage_get_idle_ms),
+            dt::timeouts::STORAGE_GET_IDLE.as_millis() as u64
+        );
+        assert_eq!(
+            u64::from(c.discovery_timeout_ms),
+            dt::timeouts::DISCOVERY_TIMEOUT.as_millis() as u64
+        );
+        assert_eq!(
+            u64::from(c.api_call_timeout_ms),
+            dt::timeouts::API_CALL_TIMEOUT.as_millis() as u64
+        );
+        assert_eq!(
+            u64::from(c.background_put_resource_timeout_ms),
+            dt::timeouts::BACKGROUND_PUT_RESOURCE_TIMEOUT.as_millis() as u64
+        );
+        assert_eq!(
+            (
+                c.storage_connect_timeout_ms,
+                c.storage_get_idle_ms,
+                c.discovery_timeout_ms,
+                c.api_call_timeout_ms,
+                c.background_put_resource_timeout_ms
+            ),
+            (15_000, 30_000, 15_000, 60_000, 240_000),
+            "the numbers of the clients design, 6.2"
         );
     }
 
@@ -3396,6 +3739,11 @@ mod direct_vector_tests {
                 "max_window": 32,
                 "default_window": 8,
                 "chunk_overhead": 28,
+                "storage_connect_timeout_ms": 15_000,
+                "storage_get_idle_ms": 30_000,
+                "discovery_timeout_ms": 15_000,
+                "api_call_timeout_ms": 60_000,
+                "background_put_resource_timeout_ms": 240_000,
             })
         );
         assert_eq!(

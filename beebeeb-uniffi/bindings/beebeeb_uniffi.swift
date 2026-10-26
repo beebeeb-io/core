@@ -1821,6 +1821,19 @@ public protocol DirectDownloadPlannerHandleProtocol: AnyObject, Sendable {
     func poll(nowMs: Int64)  -> DirectPollDto
     
     /**
+     * Cap the ciphertext bytes held at once (fetching, or fetched and waiting to be decrypted in order):
+     * the planner then holds `clamp(floor(bytes / (chunk_size + 28)), 1, 4)` chunks. Call it before the first `poll`.
+     */
+    func setMaxInFlightBytes(bytes: UInt64) 
+    
+    /**
+     * Did the storage breaker trip? It does when a chunk used up its renewals and no chunk of this transfer has
+     * come whole from storage: from then on every remaining chunk is a `FetchViaApi` poll. When the file ends
+     * with this `true`, record `DirectHealthHandle.gave_up(Download, now_ms)`.
+     */
+    func storageGivenUp()  -> Bool
+    
+    /**
      * The window answer for the outstanding request, as the raw response body.
      */
     func windowAnswered(body: Data, nowMs: Int64)  -> DirectWindowAnswerDto
@@ -2027,6 +2040,31 @@ open func poll(nowMs: Int64) -> DirectPollDto  {
 }
     
     /**
+     * Cap the ciphertext bytes held at once (fetching, or fetched and waiting to be decrypted in order):
+     * the planner then holds `clamp(floor(bytes / (chunk_size + 28)), 1, 4)` chunks. Call it before the first `poll`.
+     */
+open func setMaxInFlightBytes(bytes: UInt64)  {try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_set_max_in_flight_bytes(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(bytes),$0
+    )
+}
+}
+    
+    /**
+     * Did the storage breaker trip? It does when a chunk used up its renewals and no chunk of this transfer has
+     * come whole from storage: from then on every remaining chunk is a `FetchViaApi` poll. When the file ends
+     * with this `true`, record `DirectHealthHandle.gave_up(Download, now_ms)`.
+     */
+open func storageGivenUp() -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_storage_given_up(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
      * The window answer for the outstanding request, as the raw response body.
      */
 open func windowAnswered(body: Data, nowMs: Int64) -> DirectWindowAnswerDto  {
@@ -2105,6 +2143,219 @@ public func FfiConverterTypeDirectDownloadPlannerHandle_lift(_ handle: UInt64) t
 #endif
 public func FfiConverterTypeDirectDownloadPlannerHandle_lower(_ value: DirectDownloadPlannerHandle) -> UInt64 {
     return FfiConverterTypeDirectDownloadPlannerHandle.lower(value)
+}
+
+
+
+
+
+
+/**
+ * Whether this client may start a direct transfer now, per direction: after a transfer gave up direct, no
+ * new one of that direction starts for ten minutes. One per API base and account. `now_ms` is Unix
+ * milliseconds (or a monotonic clock, used consistently). `last_gave_up_ms` / `restore` let a client that
+ * relaunches often persist the two timestamps. A recorded time later than "now" counts as expired.
+ */
+public protocol DirectHealthHandleProtocol: AnyObject, Sendable {
+    
+    /**
+     * A transfer of `direction` gave up direct.
+     */
+    func gaveUp(direction: DirectDirectionDto, nowMs: Int64) 
+    
+    /**
+     * When the last give-up of `direction` was recorded.
+     */
+    func lastGaveUpMs(direction: DirectDirectionDto)  -> Int64?
+    
+    /**
+     * May a new direct transfer of `direction` start now?
+     */
+    func mayStart(direction: DirectDirectionDto, nowMs: Int64)  -> Bool
+    
+    /**
+     * As `may_start`, for a file that may already have given up direct: it never may again (`file_gave_up`).
+     */
+    func mayStartFile(direction: DirectDirectionDto, nowMs: Int64, fileGaveUp: Bool)  -> Bool
+    
+    /**
+     * Put back a timestamp `last_gave_up_ms` returned earlier.
+     */
+    func restore(direction: DirectDirectionDto, lastGaveUpMs: Int64) 
+    
+}
+/**
+ * Whether this client may start a direct transfer now, per direction: after a transfer gave up direct, no
+ * new one of that direction starts for ten minutes. One per API base and account. `now_ms` is Unix
+ * milliseconds (or a monotonic clock, used consistently). `last_gave_up_ms` / `restore` let a client that
+ * relaunches often persist the two timestamps. A recorded time later than "now" counts as expired.
+ */
+open class DirectHealthHandle: DirectHealthHandleProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_directhealthhandle(self.handle, $0) }
+    }
+public convenience init() {
+    let handle =
+        try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_constructor_directhealthhandle_new($0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_directhealthhandle(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * A transfer of `direction` gave up direct.
+     */
+open func gaveUp(direction: DirectDirectionDto, nowMs: Int64)  {try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directhealthhandle_gave_up(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeDirectDirectionDto_lower(direction),
+        FfiConverterInt64.lower(nowMs),$0
+    )
+}
+}
+    
+    /**
+     * When the last give-up of `direction` was recorded.
+     */
+open func lastGaveUpMs(direction: DirectDirectionDto) -> Int64?  {
+    return try!  FfiConverterOptionInt64.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directhealthhandle_last_gave_up_ms(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeDirectDirectionDto_lower(direction),$0
+    )
+})
+}
+    
+    /**
+     * May a new direct transfer of `direction` start now?
+     */
+open func mayStart(direction: DirectDirectionDto, nowMs: Int64) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directhealthhandle_may_start(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeDirectDirectionDto_lower(direction),
+        FfiConverterInt64.lower(nowMs),$0
+    )
+})
+}
+    
+    /**
+     * As `may_start`, for a file that may already have given up direct: it never may again (`file_gave_up`).
+     */
+open func mayStartFile(direction: DirectDirectionDto, nowMs: Int64, fileGaveUp: Bool) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directhealthhandle_may_start_file(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeDirectDirectionDto_lower(direction),
+        FfiConverterInt64.lower(nowMs),
+        FfiConverterBool.lower(fileGaveUp),$0
+    )
+})
+}
+    
+    /**
+     * Put back a timestamp `last_gave_up_ms` returned earlier.
+     */
+open func restore(direction: DirectDirectionDto, lastGaveUpMs: Int64)  {try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directhealthhandle_restore(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeDirectDirectionDto_lower(direction),
+        FfiConverterInt64.lower(lastGaveUpMs),$0
+    )
+}
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDirectHealthHandle: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = DirectHealthHandle
+
+    public static func lift(_ handle: UInt64) throws -> DirectHealthHandle {
+        return DirectHealthHandle(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: DirectHealthHandle) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DirectHealthHandle {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: DirectHealthHandle, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectHealthHandle_lift(_ handle: UInt64) throws -> DirectHealthHandle {
+    return try FfiConverterTypeDirectHealthHandle.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectHealthHandle_lower(_ value: DirectHealthHandle) -> UInt64 {
+    return FfiConverterTypeDirectHealthHandle.lower(value)
 }
 
 
@@ -5172,10 +5423,21 @@ public struct DirectConstantsDto: Equatable, Hashable {
     public var maxWindow: UInt32
     public var defaultWindow: UInt32
     public var chunkOverhead: UInt32
+    /**
+     * The time bounds every client applies (clients design 6.2), in milliseconds.
+     */
+    public var storageConnectTimeoutMs: UInt32
+    public var storageGetIdleMs: UInt32
+    public var discoveryTimeoutMs: UInt32
+    public var apiCallTimeoutMs: UInt32
+    public var backgroundPutResourceTimeoutMs: UInt32
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(capObjectDownloadV1: String, capObjectUploadV1: String, capabilitiesHeader: String, discoveryPath: String, maxWindow: UInt32, defaultWindow: UInt32, chunkOverhead: UInt32) {
+    public init(capObjectDownloadV1: String, capObjectUploadV1: String, capabilitiesHeader: String, discoveryPath: String, maxWindow: UInt32, defaultWindow: UInt32, chunkOverhead: UInt32, 
+        /**
+         * The time bounds every client applies (clients design 6.2), in milliseconds.
+         */storageConnectTimeoutMs: UInt32, storageGetIdleMs: UInt32, discoveryTimeoutMs: UInt32, apiCallTimeoutMs: UInt32, backgroundPutResourceTimeoutMs: UInt32) {
         self.capObjectDownloadV1 = capObjectDownloadV1
         self.capObjectUploadV1 = capObjectUploadV1
         self.capabilitiesHeader = capabilitiesHeader
@@ -5183,6 +5445,11 @@ public struct DirectConstantsDto: Equatable, Hashable {
         self.maxWindow = maxWindow
         self.defaultWindow = defaultWindow
         self.chunkOverhead = chunkOverhead
+        self.storageConnectTimeoutMs = storageConnectTimeoutMs
+        self.storageGetIdleMs = storageGetIdleMs
+        self.discoveryTimeoutMs = discoveryTimeoutMs
+        self.apiCallTimeoutMs = apiCallTimeoutMs
+        self.backgroundPutResourceTimeoutMs = backgroundPutResourceTimeoutMs
     }
 
     
@@ -5207,7 +5474,12 @@ public struct FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer {
                 discoveryPath: FfiConverterString.read(from: &buf), 
                 maxWindow: FfiConverterUInt32.read(from: &buf), 
                 defaultWindow: FfiConverterUInt32.read(from: &buf), 
-                chunkOverhead: FfiConverterUInt32.read(from: &buf)
+                chunkOverhead: FfiConverterUInt32.read(from: &buf), 
+                storageConnectTimeoutMs: FfiConverterUInt32.read(from: &buf), 
+                storageGetIdleMs: FfiConverterUInt32.read(from: &buf), 
+                discoveryTimeoutMs: FfiConverterUInt32.read(from: &buf), 
+                apiCallTimeoutMs: FfiConverterUInt32.read(from: &buf), 
+                backgroundPutResourceTimeoutMs: FfiConverterUInt32.read(from: &buf)
         )
     }
 
@@ -5219,6 +5491,11 @@ public struct FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value.maxWindow, into: &buf)
         FfiConverterUInt32.write(value.defaultWindow, into: &buf)
         FfiConverterUInt32.write(value.chunkOverhead, into: &buf)
+        FfiConverterUInt32.write(value.storageConnectTimeoutMs, into: &buf)
+        FfiConverterUInt32.write(value.storageGetIdleMs, into: &buf)
+        FfiConverterUInt32.write(value.discoveryTimeoutMs, into: &buf)
+        FfiConverterUInt32.write(value.apiCallTimeoutMs, into: &buf)
+        FfiConverterUInt32.write(value.backgroundPutResourceTimeoutMs, into: &buf)
     }
 }
 
@@ -7296,6 +7573,175 @@ public func FfiConverterTypeCryptoError_lower(_ value: CryptoError) -> RustBuffe
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
+ * Which way the bytes go.
+ */
+
+public enum DirectDirectionDto: Equatable, Hashable {
+    
+    case download
+    case upload
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension DirectDirectionDto: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDirectDirectionDto: FfiConverterRustBuffer {
+    typealias SwiftType = DirectDirectionDto
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DirectDirectionDto {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .download
+        
+        case 2: return .upload
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DirectDirectionDto, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .download:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .upload:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectDirectionDto_lift(_ buf: RustBuffer) throws -> DirectDirectionDto {
+    return try FfiConverterTypeDirectDirectionDto.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectDirectionDto_lower(_ value: DirectDirectionDto) -> RustBuffer {
+    return FfiConverterTypeDirectDirectionDto.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * What the client learned from discovery when it asked just now.
+ */
+
+public enum DirectDiscoveryStateDto: Equatable, Hashable {
+    
+    /**
+     * The server answered; `upload`: it lists the direct upload transport.
+     */
+    case offers(upload: Bool
+    )
+    /**
+     * A JSON 404: the server has no direct transfer at all.
+     */
+    case notSupported
+    /**
+     * No usable answer (a 5xx, a timeout, a bare 404, a body that did not decode).
+     */
+    case unknown
+    /**
+     * 401 or 403: the login is not valid.
+     */
+    case unauthorized
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension DirectDiscoveryStateDto: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDirectDiscoveryStateDto: FfiConverterRustBuffer {
+    typealias SwiftType = DirectDiscoveryStateDto
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DirectDiscoveryStateDto {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .offers(upload: try FfiConverterBool.read(from: &buf)
+        )
+        
+        case 2: return .notSupported
+        
+        case 3: return .unknown
+        
+        case 4: return .unauthorized
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DirectDiscoveryStateDto, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .offers(upload):
+            writeInt(&buf, Int32(1))
+            FfiConverterBool.write(upload, into: &buf)
+            
+        
+        case .notSupported:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .unknown:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .unauthorized:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectDiscoveryStateDto_lift(_ buf: RustBuffer) throws -> DirectDiscoveryStateDto {
+    return try FfiConverterTypeDirectDiscoveryStateDto.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectDiscoveryStateDto_lower(_ value: DirectDiscoveryStateDto) -> RustBuffer {
+    return FfiConverterTypeDirectDiscoveryStateDto.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
  * What to do about discovery right now.
  */
 
@@ -7691,6 +8137,176 @@ public func FfiConverterTypeDirectPollDto_lift(_ buf: RustBuffer) throws -> Dire
 #endif
 public func FfiConverterTypeDirectPollDto_lower(_ value: DirectPollDto) -> RustBuffer {
     return FfiConverterTypeDirectPollDto.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * The transport a resume record names.
+ */
+
+public enum DirectRecordedTransportDto: Equatable, Hashable {
+    
+    case api
+    case direct
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension DirectRecordedTransportDto: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDirectRecordedTransportDto: FfiConverterRustBuffer {
+    typealias SwiftType = DirectRecordedTransportDto
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DirectRecordedTransportDto {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .api
+        
+        case 2: return .direct
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DirectRecordedTransportDto, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .api:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .direct:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectRecordedTransportDto_lift(_ buf: RustBuffer) throws -> DirectRecordedTransportDto {
+    return try FfiConverterTypeDirectRecordedTransportDto.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectRecordedTransportDto_lower(_ value: DirectRecordedTransportDto) -> RustBuffer {
+    return FfiConverterTypeDirectRecordedTransportDto.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * What to do with the unfinished upload.
+ */
+
+public enum DirectResumeActionDto: Equatable, Hashable {
+    
+    case continueApi
+    case continueDirect
+    /**
+     * Abandon the session, clear the record, start again on the API.
+     */
+    case abandonToApi
+    /**
+     * Keep the record and fail the file for this run.
+     */
+    case keepRecordAndFail
+    /**
+     * Keep the record and ask the user to sign in again.
+     */
+    case keepRecordAndReauthenticate
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension DirectResumeActionDto: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDirectResumeActionDto: FfiConverterRustBuffer {
+    typealias SwiftType = DirectResumeActionDto
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DirectResumeActionDto {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .continueApi
+        
+        case 2: return .continueDirect
+        
+        case 3: return .abandonToApi
+        
+        case 4: return .keepRecordAndFail
+        
+        case 5: return .keepRecordAndReauthenticate
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DirectResumeActionDto, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .continueApi:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .continueDirect:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .abandonToApi:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .keepRecordAndFail:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .keepRecordAndReauthenticate:
+            writeInt(&buf, Int32(5))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectResumeActionDto_lift(_ buf: RustBuffer) throws -> DirectResumeActionDto {
+    return try FfiConverterTypeDirectResumeActionDto.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectResumeActionDto_lower(_ value: DirectResumeActionDto) -> RustBuffer {
+    return FfiConverterTypeDirectResumeActionDto.lower(value)
 }
 
 
@@ -10386,6 +11002,17 @@ public func deriveX25519Public(privateKey: Data)throws  -> Data  {
 })
 }
 /**
+ * A background URL session's resource timeout for a storage PUT, in milliseconds. No app timer runs in
+ * the background, so this is the only bound; it stays under the server's late-write fence from any
+ * start up to the link's expiry.
+ */
+public func directBackgroundPutResourceTimeoutMs() -> UInt64  {
+    return try!  FfiConverterUInt64.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_direct_background_put_resource_timeout_ms($0
+    )
+})
+}
+/**
  * May the app follow this storage link? `api_base` is the API origin in use.
  * Throws `LinkRefused` with the refusal code; the message never contains the URL.
  */
@@ -10443,12 +11070,47 @@ public func directRedactUrl(url: String) -> String  {
 })
 }
 /**
+ * What to do with an unfinished upload found on disk. A recorded direct session is given up only on a
+ * definite no: the user forced the API (`forced_api`), or the server says it offers no direct uploads. It is
+ * never given up because discovery could not be read this time. One rule, so no client writes it by hand.
+ */
+public func directResumeTransport(recorded: DirectRecordedTransportDto, discovery: DirectDiscoveryStateDto, forcedApi: Bool) -> DirectResumeActionDto  {
+    return try!  FfiConverterTypeDirectResumeActionDto_lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_direct_resume_transport(
+        FfiConverterTypeDirectRecordedTransportDto_lower(recorded),
+        FfiConverterTypeDirectDiscoveryStateDto_lower(discovery),
+        FfiConverterBool.lower(forcedApi),$0
+    )
+})
+}
+/**
  * Text that may contain URLs, made safe to print.
  */
 public func directScrubText(text: String) -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_beebeeb_uniffi_fn_func_direct_scrub_text(
         FfiConverterString.lower(text),$0
+    )
+})
+}
+/**
+ * The most a storage GET of `len` ciphertext bytes may take, in milliseconds (the same formula as a PUT).
+ */
+public func directStorageGetTotalMs(len: UInt64) -> UInt64  {
+    return try!  FfiConverterUInt64.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_direct_storage_get_total_ms(
+        FfiConverterUInt64.lower(len),$0
+    )
+})
+}
+/**
+ * The most a storage PUT of `len` ciphertext bytes may take, in milliseconds: a minute plus the
+ * chunk at 1 Mbit/s (`60 s + ceil(len / 131072) s`). Any length is safe: a huge one is a long timeout.
+ */
+public func directStoragePutTotalMs(len: UInt64) -> UInt64  {
+    return try!  FfiConverterUInt64.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_direct_storage_put_total_ms(
+        FfiConverterUInt64.lower(len),$0
     )
 })
 }
@@ -11086,6 +11748,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_derive_x25519_public() != 3860) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_background_put_resource_timeout_ms() != 64703) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_url() != 37576) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -11101,7 +11766,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_direct_redact_url() != 8126) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_resume_transport() != 37116) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_scrub_text() != 49435) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_storage_get_total_ms() != 62965) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_storage_put_total_ms() != 48397) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_transfer_constants() != 20976) {
@@ -11335,6 +12009,12 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_poll() != 20104) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_set_max_in_flight_bytes() != 8572) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_storage_given_up() != 43725) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_window_answered() != 10453) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -11342,6 +12022,21 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_window_malformed() != 62818) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_directhealthhandle_gave_up() != 51195) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_directhealthhandle_last_gave_up_ms() != 18887) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_directhealthhandle_may_start() != 51037) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_directhealthhandle_may_start_file() != 45343) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_directhealthhandle_restore() != 16132) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_directsignedurl_raw() != 23451) {
@@ -11546,6 +12241,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_directdownloadplannerhandle_new() != 18802) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_directhealthhandle_new() != 34232) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_directsignedurl_new() != 57713) {

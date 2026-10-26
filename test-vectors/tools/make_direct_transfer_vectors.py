@@ -656,6 +656,209 @@ for what, outcome, verdict in [
                  poll(T0, {"kind": "stop", "verdict": verdict})]
         scenarios.append({"name": f"a late {late_what} window answer does not replace a {what} verdict", "discovery": "std", "seed": 7, "steps": steps})
 
+# ───────────── A1 (clients plan, decisions D19, D23, D25): the storage breaker, the byte cap, the clock ─────────────
+RENEWED = lambda n, i=0: {"kind": "fetch", "index": i, "url": f"{S3}/bb-01/t/v/{i}.bin?X-Amz-Signature=R{n}SIG{i}", "length": G[i]}
+
+
+def renewal_answer(n, i=0):
+    return {**window(i, 1, i + 1 if i < 2 else None), "grants": [grant(i, G[i], f"R{n}SIG")]}
+
+
+# 15. storage that never answers: the first chunk to use up its renewals trips the breaker; the rest goes to the pinned route
+steps = [poll(T0, req(None, 0, 8, False)), {"op": "window_answered", "now": T0, "response": window(0, 3, None), "expect": "ok"},
+         poll(T0, fetch(0)), poll(T0, fetch(1)), poll(T0, fetch(2)), {"op": "storage_given_up", "expect": False}]
+now = T0
+for n in range(1, 4):
+    steps += [{"op": "fetch_failed", "index": 0, "now": now, "expect": "ok"}, {"op": "storage_given_up", "expect": False}]
+    now += 10_000  # past any backoff (cap 8 s)
+    steps += [poll(now, req(VER, 0, 1, True)),
+              {"op": "window_answered", "now": now, "response": renewal_answer(n), "expect": "ok"},
+              poll(now, RENEWED(n))]
+steps += [{"op": "fetch_failed", "index": 0, "now": now, "expect": "ok"}, {"op": "storage_given_up", "expect": True},
+          poll(now, api(0)),
+          # chunks 1 and 2 were still waiting on storage: their failures go straight to the pinned route, no renewals
+          {"op": "fetch_failed", "index": 1, "now": now, "expect": "ok"}, {"op": "fetch_failed", "index": 2, "now": now, "expect": "ok"},
+          poll(now, api(1)), poll(now, api(2)), poll(now, WAIT_NONE)]
+for i in range(3):
+    steps += [{"op": "fetch_ok", "index": i, "expect": "ok"}, {"op": "consumed", "index": i, "expect": "ok"}]
+steps += [poll(now, DONE), {"op": "storage_given_up", "expect": True}]
+scenarios.append({"name": "storage that never answers trips the breaker after the first exhausted chunk", "discovery": "std", "seed": 7, "steps": steps})
+
+# 16. one success from storage first: the per-chunk rules alone apply, as before the breaker existed
+steps = [poll(T0, req(None, 0, 8, False)), {"op": "window_answered", "now": T0, "response": window(0, 3, None), "expect": "ok"},
+         poll(T0, fetch(0)), poll(T0, fetch(1)), poll(T0, fetch(2)),
+         {"op": "fetch_ok", "index": 0, "expect": "ok"}, {"op": "consumed", "index": 0, "expect": "ok"}]
+now = T0
+for n in range(1, 4):
+    steps += [{"op": "fetch_failed", "index": 1, "now": now, "expect": "ok"}]
+    now += 10_000
+    steps += [poll(now, req(VER, 1, 1, True)),
+              {"op": "window_answered", "now": now, "response": renewal_answer(n, 1), "expect": "ok"},
+              poll(now, RENEWED(n, 1))]
+steps += [{"op": "fetch_failed", "index": 1, "now": now, "expect": "ok"}, poll(now, api(1)), {"op": "storage_given_up", "expect": False},
+          {"op": "fetch_ok", "index": 2, "expect": "ok"}, {"op": "fetch_ok", "index": 1, "expect": "ok"},
+          {"op": "consumed", "index": 1, "expect": "ok"}, {"op": "consumed", "index": 2, "expect": "ok"}, poll(now, DONE),
+          {"op": "storage_given_up", "expect": False}]
+scenarios.append({"name": "after one chunk from storage, the failures of another chunk do not trip the breaker", "discovery": "std", "seed": 7, "steps": steps})
+
+# 16b. a chunk already in flight when the breaker trips arrives from storage: the report is cleared (no hold for the next file)
+steps = [poll(T0, req(None, 0, 8, False)), {"op": "window_answered", "now": T0, "response": window(0, 3, None), "expect": "ok"},
+         poll(T0, fetch(0)), poll(T0, fetch(1)), poll(T0, fetch(2))]
+now = T0
+for n in range(1, 4):
+    steps += [{"op": "fetch_failed", "index": 0, "now": now, "expect": "ok"}]
+    now += 10_000
+    steps += [poll(now, req(VER, 0, 1, True)),
+              {"op": "window_answered", "now": now, "response": renewal_answer(n), "expect": "ok"},
+              poll(now, RENEWED(n))]
+steps += [{"op": "fetch_failed", "index": 0, "now": now, "expect": "ok"}, {"op": "storage_given_up", "expect": True},
+          {"op": "fetch_ok", "index": 1, "expect": "ok"}, {"op": "storage_given_up", "expect": False},
+          poll(now, api(0)), {"op": "fetch_failed", "index": 2, "now": now, "expect": "ok"}, poll(now, api(2))]
+for i in range(3):
+    steps += [{"op": "fetch_ok", "index": i, "expect": "ok"} for _ in [0] if i != 1]
+    steps += [{"op": "consumed", "index": i, "expect": "ok"}]
+steps += [poll(now, DONE), {"op": "storage_given_up", "expect": False}]
+scenarios.append({"name": "a chunk already in flight when the breaker trips arrives from storage: the report is cleared", "discovery": "std", "seed": 7, "steps": steps})
+
+# 17. the byte cap (decision D23): the reorder window is the cap divided by the CIPHERTEXT chunk length (stride + 28), clamped to 1..4
+MIB = 1024 * 1024
+
+
+def geo(chunk_count, stride):
+    original = stride * (chunk_count - 1) + stride // 2
+    return {"chunk_count": chunk_count, "chunk_size": stride, "encrypted_size": original + 28 * chunk_count, "original_size": original}
+
+
+def glen(g, i):
+    full = g["chunk_size"] + 28
+    return full if i + 1 < g["chunk_count"] else g["encrypted_size"] - full * (g["chunk_count"] - 1)
+
+
+def gwindow(g, start, count, sig="SIG"):
+    n = g["chunk_count"]
+    end = min(start + count, n)
+    return {"transport": "object-download-v1", "file_id": FILE, "object_version_id": VER, "chunk_count": n, "chunk_size": g["chunk_size"],
+            "encrypted_size": g["encrypted_size"], "original_size": g["original_size"],
+            "grants": [{"index": i, "method": "GET", "url": f"{S3}/bb-01/t/v/{i}.bin?X-Amz-Signature={sig}{i}", "length": glen(g, i), "expires_at": EXP300}
+                       for i in range(start, end)],
+            "next_index": end if end < n else None}
+
+
+def gfetch(g, i, sig="SIG"):
+    return {"kind": "fetch", "index": i, "url": f"{S3}/bb-01/t/v/{i}.bin?X-Amz-Signature={sig}{i}", "length": glen(g, i)}
+
+
+def cap_scenario(name, stride, cap, starts):
+    g = geo(10, stride)
+    steps = [poll(T0, req(None, 0, 8, False)), {"op": "window_answered", "now": T0, "response": gwindow(g, 0, 8), "expect": "ok"}]
+    steps += [poll(T0, gfetch(g, i)) for i in range(starts)] + [poll(T0, WAIT_NONE)]
+    sc = {"name": name, "discovery": "std", "seed": 7, "steps": steps}
+    if cap is not None:
+        sc["max_in_flight_bytes"] = cap
+    scenarios.append(sc)
+
+
+cap_scenario("a 64 MiB cap holds four chunks of 4 MiB", 4 * MIB, 64 * MIB, 4)
+cap_scenario("a 64 MiB cap holds three chunks of 16 MiB: the 28 bytes of overhead count", 16 * MIB, 64 * MIB, 3)
+cap_scenario("a 64 MiB cap holds one chunk of 64 MiB", 64 * MIB, 64 * MIB, 1)
+cap_scenario("a 64 MiB cap still holds one chunk of 256 MiB", 256 * MIB, 64 * MIB, 1)
+cap_scenario("no cap keeps the window of four", 4 * MIB, None, 4)
+cap_scenario("a cap of exactly two ciphertext chunks holds two", 1000, 2 * 1028, 2)
+cap_scenario("a cap one byte short of two ciphertext chunks holds one", 1000, 2 * 1028 - 1, 1)
+cap_scenario("a cap of zero still holds one", 1000, 0, 1)
+
+# 18. with a cap of one, a failing chunk blocks the next fetch until it is consumed
+g256 = geo(10, 256 * MIB)
+steps = [poll(T0, req(None, 0, 8, False)), {"op": "window_answered", "now": T0, "response": gwindow(g256, 0, 8), "expect": "ok"},
+         poll(T0, gfetch(g256, 0)), poll(T0, WAIT_NONE),
+         {"op": "fetch_failed", "index": 0, "now": T0 + 1000, "expect": "ok"},
+         poll(T0 + 1000, {"kind": "wait", "until_ms_between": [T0 + 1125, T0 + 1250]}),
+         poll(T0 + 1250, req(VER, 0, 1, True)),
+         {"op": "window_answered", "now": T0 + 1250, "response": gwindow(g256, 0, 1, "NEWSIG"), "expect": "ok"},
+         poll(T0 + 1250, gfetch(g256, 0, "NEWSIG")),
+         poll(T0 + 1250, WAIT_NONE),  # chunk 1 holds a grant but is not started: it would be held, 256 MiB, behind a stalled chunk
+         {"op": "fetch_ok", "index": 0, "expect": "ok"}, poll(T0 + 1250, WAIT_NONE),
+         {"op": "consumed", "index": 0, "expect": "ok"}, poll(T0 + 1250, gfetch(g256, 1))]
+scenarios.append({"name": "with a cap of one, a failing chunk blocks the next fetch", "discovery": "std", "seed": 7, "max_in_flight_bytes": 64 * MIB, "steps": steps})
+
+# 19. a client clock ten minutes off (decision D28: no skew correction in v1) costs what it costs today
+for what, offset in (("ahead", 600_000), ("behind", -600_000)):
+    t = T0 + offset
+    steps = [poll(t, req(None, 0, 8, False)), {"op": "window_answered", "now": t, "response": window(0, 3, None), "expect": "ok"},
+             poll(t, fetch(0)), poll(t, fetch(1)), poll(t, fetch(2))]
+    for i in range(3):
+        steps += [{"op": "fetch_ok", "index": i, "expect": "ok"}, {"op": "consumed", "index": i, "expect": "ok"}]
+    steps += [poll(t, DONE)]
+    scenarios.append({"name": f"a client clock ten minutes {what} still completes a file with one window request", "discovery": "std", "seed": 7, "steps": steps})
+    # and its links last 270 s from arrival by the client's own clock, whatever the server wrote in expires_at
+    steps = [poll(t, req(None, 0, 8, False)), {"op": "window_answered", "now": t, "response": window(0, 3, None), "expect": "ok"},
+             poll(t + 269_999, fetch(0)), poll(t + 270_000, req(VER, 1, 2, True))]
+    scenarios.append({"name": f"a client clock ten minutes {what}: grants last 270 s from arrival by that clock", "discovery": "std", "seed": 7, "steps": steps})
+
+# ───────────── DirectHealth (decision D19) ─────────────
+HTTL = 600_000
+health = []
+
+
+def hs(op, direction, now=None, expect=None, **kw):
+    step = {"op": op, "direction": direction}
+    if now is not None:
+        step["now"] = now
+    if expect is not None or op == "last_gave_up":
+        step["expect"] = expect  # an explicit null means "nothing recorded"
+    step.update(kw)
+    return step
+
+
+health.append({"name": "a give-up holds new transfers of that direction off for ten minutes, then they may start", "steps": [
+    hs("may_start", "upload", T0, True), hs("gave_up", "upload", T0),
+    hs("may_start", "upload", T0, False), hs("may_start", "upload", T0 + HTTL - 1, False), hs("may_start", "upload", T0 + HTTL, True),
+    hs("may_start", "download", T0 + 1, True)]})
+health.append({"name": "downloads and uploads are held independently", "steps": [
+    hs("gave_up", "download", T0), hs("may_start", "download", T0 + 1, False), hs("may_start", "upload", T0 + 1, True),
+    hs("last_gave_up", "download", expect=T0), hs("last_gave_up", "upload", expect=None),
+    hs("gave_up", "upload", T0 + 5), hs("last_gave_up", "download", expect=T0), hs("last_gave_up", "upload", expect=T0 + 5)]})
+health.append({"name": "a later give-up renews the hold", "steps": [
+    hs("gave_up", "upload", T0), hs("gave_up", "upload", T0 + HTTL - 1),
+    hs("may_start", "upload", T0 + HTTL + 5, False), hs("may_start", "upload", T0 + 2 * HTTL - 1, True)]})
+health.append({"name": "a file that gave up direct stays off it, with no hold recorded at all", "steps": [
+    hs("may_start_file", "upload", T0, True, file_gave_up=False), hs("may_start_file", "upload", T0, False, file_gave_up=True),
+    hs("may_start_file", "download", T0 + 10 * HTTL, False, file_gave_up=True)]})
+health.append({"name": "the file's bit and the hold both apply", "steps": [
+    hs("gave_up", "download", T0), hs("may_start_file", "download", T0 + 1, False, file_gave_up=False),
+    hs("may_start_file", "download", T0 + HTTL, True, file_gave_up=False), hs("may_start_file", "download", T0 + HTTL, False, file_gave_up=True)]})
+health.append({"name": "a restored timestamp behaves like a live one", "steps": [
+    hs("restore", "download", ms=T0), hs("last_gave_up", "download", expect=T0),
+    hs("may_start", "download", T0 + HTTL - 1, False), hs("may_start", "download", T0 + HTTL, True), hs("last_gave_up", "upload", expect=None)]})
+health.append({"name": "a recorded time in the future counts as expired", "steps": [
+    hs("restore", "upload", ms=T0 + 5000), hs("may_start", "upload", T0, True),
+    hs("gave_up", "download", 9_000_000_000_000_000), hs("may_start", "download", T0, True)]})
+health.append({"name": "a clock that stepped back does not extend a hold", "steps": [
+    hs("gave_up", "upload", T0), hs("may_start", "upload", T0 + 1, False), hs("may_start", "upload", T0 - 1, True)]})
+
+# ───────────── resume_transport (decision D25) ─────────────
+resume_transport = []
+
+
+def rt(name, recorded, discovery, forced, expect):
+    resume_transport.append({"name": name, "recorded": recorded, "discovery": discovery, "forced_api": forced, "expect": expect})
+
+
+OFFERS = {"kind": "offers", "upload": True}
+for d, nm in ((OFFERS, "offers upload"), ({"kind": "offers", "upload": False}, "lists no upload"), ({"kind": "not_supported"}, "says not supported"),
+              ({"kind": "unknown"}, "could not be read"), ({"kind": "unauthorized"}, "refused the login")):
+    for forced in (False, True):
+        rt(f"an API session continues on the API: discovery {nm}, forced={forced}", "api", d, forced, "continue_api")
+rt("a direct session continues direct when discovery offers upload", "direct", OFFERS, False, "continue_direct")
+rt("a direct session is given up when discovery lists no upload", "direct", {"kind": "offers", "upload": False}, False, "abandon_to_api")
+rt("a direct session is given up when the server says it has no direct transfer (a JSON 404)", "direct", {"kind": "not_supported"}, False, "abandon_to_api")
+rt("a direct session is kept and the file fails when discovery cannot be read (a 5xx, a timeout, a bare 404)", "direct", {"kind": "unknown"}, False, "keep_record_and_fail")
+rt("a direct session is kept and the user signs in again on a 401 or 403 from discovery", "direct", {"kind": "unauthorized"}, False, "keep_record_and_reauthenticate")
+for d, nm in ((OFFERS, "offers upload"), ({"kind": "offers", "upload": False}, "lists no upload"), ({"kind": "not_supported"}, "says not supported"),
+              ({"kind": "unknown"}, "could not be read"), ({"kind": "unauthorized"}, "refused the login")):
+    rt(f"forcing the API gives a direct session up whatever discovery says: {nm}", "direct", d, True, "abandon_to_api")
+
+
 out = {
     "_provenance": "Task 2173 contract vectors for beebeeb_core::direct_transfer. Hand-authored from the spec "
                    "(R1.6, R1.12, R1.13, R2.6) and the core #33 review, not generated from the code. "
@@ -673,6 +876,8 @@ out = {
     "pinned_retry": pinned_retry,
     "discovery_cache": cache,
     "planner": scenarios,
+    "health": health,
+    "resume_transport": resume_transport,
 }
 json.dump(out, open(sys.argv[1], "w", encoding="utf-8"), indent=2, ensure_ascii=False)
-print("rows: authority", len(authority), "classify", len(classify), "pinned_retry", len(pinned_retry), "cache scenarios", len(cache), "planner scenarios", len(scenarios))
+print("rows: authority", len(authority), "classify", len(classify), "pinned_retry", len(pinned_retry), "cache scenarios", len(cache), "planner scenarios", len(scenarios), "health", len(health), "resume_transport", len(resume_transport))

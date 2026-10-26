@@ -91,6 +91,12 @@ pub struct PlannerConfig {
     pub refill_at: usize,
     /// Clamped to `1..=`[`MAX_IN_FLIGHT`] when the planner is built.
     pub max_in_flight: usize,
+    /// A ceiling, in bytes of **ciphertext**, on the chunks held at once (fetching or fetched and not yet
+    /// consumed): once the version's geometry is known the reorder window is
+    /// `clamp(floor(bytes / (chunk_size + 28)), 1, max_in_flight)` chunks, so a chunk is always held
+    /// (a chunk larger than the cap is fetched alone). `None` (what [`PlannerConfig::from_discovery`]
+    /// sets) keeps the window at `max_in_flight`. A web client sets it, because chunks reach 256 MiB.
+    pub max_in_flight_bytes: Option<u64>,
     pub renew_skew_ms: i64,
     /// Link lifetime assumed for plausibility checks, in milliseconds.
     pub url_ttl_ms: i64,
@@ -108,6 +114,7 @@ impl PlannerConfig {
             window: discovery.window(),
             refill_at: REFILL_AT,
             max_in_flight: MAX_IN_FLIGHT,
+            max_in_flight_bytes: None,
             renew_skew_ms: RENEW_SKEW_MS,
             url_ttl_ms: i64::try_from(discovery.url_ttl_secs().saturating_mul(1000)).unwrap_or(300_000),
             max_renewals: MAX_RENEWALS_PER_CHUNK,
@@ -435,6 +442,10 @@ pub struct DownloadPlanner {
     /// more grants are asked for and every chunk still to fetch goes through
     /// the pinned per-chunk API route.
     api_only: bool,
+    /// A chunk has arrived whole from STORAGE (a fetch through the pinned API route does not count).
+    storage_ok: bool,
+    /// The storage breaker tripped: see [`DownloadPlanner::storage_given_up`].
+    storage_given_up: bool,
     verdict: Option<Verdict>,
     rng: u64,
 }
@@ -460,9 +471,33 @@ impl DownloadPlanner {
             window_not_before_ms: i64::MIN,
             rate_limits: 0,
             api_only: false,
+            storage_ok: false,
+            storage_given_up: false,
             verdict: None,
             rng,
         }
+    }
+
+    /// Did the storage breaker trip? It does when a chunk used up its renewals and **no** chunk of this
+    /// transfer has come whole from storage yet: storage is not working for this client at all (the
+    /// bucket refuses the origin, a proxy blocks the host), so the planner stops asking for links and
+    /// sends the rest of the file through the pinned API route (the same `api_only` mode a refused window
+    /// causes). The caller records it with `DirectHealth::gave_up(Download, ..)` when the file ends, so no
+    /// new direct download starts for one trust period. After one chunk has arrived from storage the
+    /// per-chunk rules alone apply and this stays `false`.
+    ///
+    /// The report is cleared if a chunk that was already in flight when the breaker tripped then arrives from
+    /// storage: storage delivered bytes in this very transfer, so the caller must not hold the next file off
+    /// direct (the rest of this file still goes through the pinned route).
+    pub fn storage_given_up(&self) -> bool {
+        self.storage_given_up && !self.storage_ok
+    }
+
+    /// Set (or clear) the byte ceiling on held chunks ([`PlannerConfig::max_in_flight_bytes`]). Call it
+    /// before the first [`DownloadPlanner::poll`]; a later call takes effect at the next poll and never
+    /// cancels a chunk already held.
+    pub fn set_max_in_flight_bytes(&mut self, bytes: Option<u64>) {
+        self.cfg.max_in_flight_bytes = bytes;
     }
 
     /// The version's geometry, once the first window has been accepted.
@@ -576,11 +611,23 @@ impl DownloadPlanner {
         }
     }
 
-    /// The reorder window: chunks `consumed .. consumed + max_in_flight`.
+    /// The reorder window: chunks `consumed .. consumed + window_size`. It bounds what is HELD (fetching
+    /// plus fetched and waiting to be decrypted in order), not only what is outstanding.
     fn limit(&self, geometry: Geometry) -> u32 {
         self.consumed
-            .saturating_add(self.cfg.max_in_flight as u32)
+            .saturating_add(self.window_size(geometry))
             .min(geometry.chunk_count)
+    }
+
+    /// How many chunks may be held at once: `max_in_flight`, or fewer when the byte ceiling is lower
+    /// (ciphertext length is the stride plus the 28 bytes of AEAD overhead; never fewer than one).
+    fn window_size(&self, geometry: Geometry) -> u32 {
+        let most = self.cfg.max_in_flight as u32;
+        let Some(bytes) = self.cfg.max_in_flight_bytes else {
+            return most;
+        };
+        let held = geometry.chunk_size.saturating_add(CHUNK_OVERHEAD).max(1);
+        u32::try_from(bytes / held).unwrap_or(u32::MAX).clamp(1, most)
     }
 
     /// A grant that has aged past its usable window is dropped and counts as a
@@ -891,14 +938,17 @@ impl DownloadPlanner {
                 // Already being fetched, fetched or API-bound: keep it.
                 Some(_) => continue,
             };
-            self.slots.insert(
-                index,
+            // A window answered after the storage breaker tripped is not used: storage is given up.
+            let slot = if self.storage_given_up {
+                Slot::ApiPending { attempts }
+            } else {
                 Slot::Granted {
                     attempts,
                     grant,
                     usable_until_ms,
-                },
-            );
+                }
+            };
+            self.slots.insert(index, slot);
         }
         self.frontier = self.frontier.max(end);
         Ok(())
@@ -951,10 +1001,13 @@ impl DownloadPlanner {
     /// Chunk `index` arrived whole (status and length checked). It now waits
     /// to be decrypted in order.
     pub fn fetch_ok(&mut self, index: u32) -> Result<(), PlanError> {
-        let Some(Slot::Fetching { attempts, .. }) = self.slots.get(&index) else {
+        let Some(Slot::Fetching { attempts, via_api }) = self.slots.get(&index) else {
             return Err(PlanError::NotInFlight(index));
         };
-        let attempts = *attempts;
+        let (attempts, via_api) = (*attempts, *via_api);
+        if !via_api {
+            self.storage_ok = true;
+        }
         self.slots.insert(index, Slot::Fetched { attempts });
         Ok(())
     }
@@ -976,8 +1029,14 @@ impl DownloadPlanner {
             return Err(PlanError::ApiRouteFailure(index));
         }
         attempts.renewals = attempts.renewals.saturating_add(1);
-        if attempts.renewals > self.cfg.max_renewals || self.api_only {
+        let exhausted = attempts.renewals > self.cfg.max_renewals;
+        if exhausted || self.api_only {
             self.slots.insert(index, Slot::ApiPending { attempts });
+            // The first chunk to use up its renewals with no byte ever received from storage: storage is
+            // down for this client, not this chunk.
+            if exhausted && !self.api_only && !self.storage_ok {
+                self.give_up_storage();
+            }
         } else {
             let delay = self.backoff_ms(attempts.renewals);
             self.slots.insert(
@@ -989,6 +1048,20 @@ impl DownloadPlanner {
             );
         }
         Ok(())
+    }
+
+    /// The storage breaker: no more links are asked for, and every chunk still waiting for a link, or
+    /// holding one it has not used, goes to the pinned API route. Chunks already being fetched from
+    /// storage finish (or fail) as they would.
+    fn give_up_storage(&mut self) {
+        self.storage_given_up = true;
+        self.api_only = true;
+        for slot in self.slots.values_mut() {
+            if let Slot::NeedsGrant { attempts, .. } | Slot::Granted { attempts, .. } = slot {
+                let attempts = *attempts;
+                *slot = Slot::ApiPending { attempts };
+            }
+        }
     }
 
     /// The fetch of chunk `index` through the pinned API route failed (network,
@@ -2803,6 +2876,378 @@ mod tests {
             let got = Violation::from(rejected);
             assert_eq!(got, want, "{rejected:?}");
             assert_eq!(got.code(), code, "{rejected:?}");
+        }
+    }
+
+    // ── the storage breaker and the byte cap (task 2173, clients plan A1, decisions D19 and D23) ──
+
+    /// A chunk whose storage fetch is in flight, `renewals` renewals already spent.
+    fn spend_renewals(p: &mut DownloadPlanner, index: u32, renewals: u8) {
+        match p.slots.get_mut(&index) {
+            Some(Slot::Fetching { attempts, .. }) => attempts.renewals = renewals,
+            other => panic!("chunk {index} is not being fetched: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn storage_that_never_answers_trips_the_breaker_after_the_first_exhausted_chunk() {
+        let mut p = planner();
+        let mut now = T0;
+        let mut storage_fetches = std::collections::BTreeMap::<u32, u32>::new();
+        let mut api_fetches = 0u32;
+        let mut tripped_by = vec![];
+        for _ in 0..STEPS {
+            let given_up = p.storage_given_up();
+            match p.poll(now) {
+                Poll::RequestWindow(r) => p.window_answered(answer(&r, now), now).unwrap(),
+                Poll::Fetch { index, .. } => {
+                    assert!(!given_up, "a storage fetch (chunk {index}) after the breaker tripped");
+                    *storage_fetches.entry(index).or_default() += 1;
+                    p.fetch_failed(index, now).unwrap();
+                    if p.storage_given_up() && !given_up {
+                        tripped_by.push(index);
+                    }
+                }
+                Poll::FetchViaApi { index, .. } => {
+                    api_fetches += 1;
+                    finish(&mut p, index);
+                }
+                Poll::Wait { until_ms: Some(t) } => now = t,
+                Poll::Wait { until_ms: None } => panic!("stuck waiting for nothing"),
+                Poll::Done => break,
+                Poll::Stop(v) => panic!("stopped: {v:?}"),
+            }
+        }
+        assert_eq!(p.poll(now), Poll::Done);
+        assert_eq!(p.consumed_count(), CHUNKS);
+        // It trips once, on the failure that exhausts the FIRST chunk to use up its renewals (which chunk that is
+        // depends on the jittered backoffs): that chunk was tried four times, the first try and three renewals.
+        assert_eq!(tripped_by.len(), 1, "{tripped_by:?}");
+        assert_eq!(storage_fetches[&tripped_by[0]], 4, "{storage_fetches:?}");
+        assert!(storage_fetches.values().all(|n| *n <= 4), "{storage_fetches:?}");
+        assert!(p.storage_given_up());
+        let total: u32 = storage_fetches.values().sum();
+        assert!(total <= 16, "{storage_fetches:?}");
+        assert_eq!(
+            api_fetches, CHUNKS,
+            "every chunk reaches the client through the pinned route"
+        );
+    }
+
+    #[test]
+    fn one_storage_success_keeps_the_per_chunk_rules() {
+        let mut p = started();
+        for _ in 0..4 {
+            expect_fetch(&mut p, T0);
+        }
+        finish(&mut p, 0);
+        // Chunk 1 has used its whole renewal budget; its next failure exhausts it.
+        spend_renewals(&mut p, 1, 3);
+        p.fetch_failed(1, T0).unwrap();
+        assert!(
+            !p.storage_given_up(),
+            "storage worked once: this chunk alone goes to the API"
+        );
+        assert!(matches!(p.poll(T0), Poll::FetchViaApi { index: 1, .. }));
+        match p.poll(T0) {
+            Poll::Fetch { index, .. } => assert_eq!(index, 4, "the others still use storage"),
+            other => panic!("expected a storage fetch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_api_route_success_is_not_a_storage_success() {
+        let mut p = started();
+        // Chunk 0 reached the client through the pinned route (its grant aged out, say).
+        p.slots.insert(
+            0,
+            Slot::Fetching {
+                attempts: Attempts::default(),
+                via_api: true,
+            },
+        );
+        p.fetch_ok(0).unwrap();
+        p.consumed(0).unwrap();
+        for _ in 0..4 {
+            expect_fetch(&mut p, T0);
+        }
+        spend_renewals(&mut p, 1, 3);
+        p.fetch_failed(1, T0).unwrap();
+        assert!(
+            p.storage_given_up(),
+            "no byte has ever come from storage, so the first exhausted chunk trips it"
+        );
+    }
+
+    #[test]
+    fn a_breaker_during_a_renewal_sends_the_renewed_chunk_to_the_api_too() {
+        let mut p = started();
+        for _ in 0..4 {
+            expect_fetch(&mut p, T0);
+        }
+        p.fetch_failed(1, T0).unwrap();
+        let later = T0 + 10_000; // past any backoff
+        let renewal = expect_window(&mut p, later);
+        assert_eq!((renewal.start_index, renewal.count, renewal.renewal), (1, 1, true));
+        // While that request is out, chunk 0 uses up its budget.
+        spend_renewals(&mut p, 0, 3);
+        p.fetch_failed(0, later).unwrap();
+        assert!(p.storage_given_up());
+        // The renewal answers after the breaker tripped: chunk 1 holds a fresh grant that must not be used.
+        p.window_answered(answer(&renewal, later), later).unwrap();
+        let mut routes = vec![];
+        for _ in 0..10 {
+            match p.poll(later) {
+                Poll::FetchViaApi { index, .. } => routes.push(index),
+                Poll::Wait { .. } => break,
+                other => panic!("expected only API fetches, got {other:?}"),
+            }
+        }
+        assert_eq!(
+            routes,
+            [0, 1],
+            "the chunks that were waiting for storage now go to the API"
+        );
+    }
+
+    /// A geometry of ten chunks with the given plaintext stride.
+    fn big_geometry(stride: u64) -> Geometry {
+        let n = 10u32;
+        let original = stride * u64::from(n - 1) + stride / 2;
+        Geometry {
+            chunk_count: n,
+            chunk_size: stride,
+            encrypted_size: original + CHUNK_OVERHEAD * u64::from(n),
+            original_size: original,
+        }
+    }
+
+    fn answer_for(g: Geometry, request: &DownloadGrantRequest, now_ms: i64) -> DownloadGrantResponse {
+        let end = (request.start_index + request.count).min(g.chunk_count);
+        DownloadGrantResponse {
+            transport: CAP_OBJECT_DOWNLOAD_V1.into(),
+            file_id: FILE.into(),
+            object_version_id: VERSION.into(),
+            chunk_count: g.chunk_count,
+            chunk_size: g.chunk_size,
+            encrypted_size: g.encrypted_size,
+            original_size: g.original_size,
+            grants: (request.start_index..end)
+                .map(|i| ChunkGrant {
+                    index: i,
+                    method: "GET".into(),
+                    url: format!("https://s3.storage.test/bb-01/t/v/{i}.bin?X-Amz-Signature=SIG{i}"),
+                    length: g.chunk_length(i).unwrap(),
+                    expires_at: rfc3339(now_ms + 300_000),
+                })
+                .collect(),
+            next_index: (end < g.chunk_count).then_some(end),
+        }
+    }
+
+    fn started_for(g: Geometry, cap: Option<u64>) -> DownloadPlanner {
+        let mut cfg = PlannerConfig::from_discovery(&discovery(), 7);
+        cfg.max_in_flight_bytes = cap;
+        let mut p = DownloadPlanner::new(cfg, discovery(), API, FILE);
+        let first = expect_window(&mut p, T0);
+        p.window_answered(answer_for(g, &first, T0), T0).unwrap();
+        p
+    }
+
+    /// The chunks the planner starts before it has to wait.
+    fn fetches_until_wait(p: &mut DownloadPlanner) -> Vec<u32> {
+        let mut started = vec![];
+        for _ in 0..50 {
+            match p.poll(T0) {
+                Poll::Fetch { index, .. } => started.push(index),
+                Poll::Wait { .. } => return started,
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        panic!("never waited");
+    }
+
+    #[test]
+    fn the_byte_cap_bounds_the_reorder_window_by_ciphertext_length() {
+        const MIB: u64 = 1024 * 1024;
+        // (plaintext stride, cap, chunks the planner starts). The divisor is stride + 28, the ciphertext length.
+        for (stride, cap, want) in [
+            (4 * MIB, Some(64 * MIB), 4),   // floor(64 MiB / (4 MiB + 28)) = 15, clamped to 4
+            (16 * MIB, Some(64 * MIB), 3),  // floor(64 MiB / (16 MiB + 28)) = 3: the 28 bytes matter
+            (64 * MIB, Some(64 * MIB), 1),  // floor = 0, clamped up to 1: a chunk can always be held
+            (256 * MIB, Some(64 * MIB), 1), // a chunk larger than the cap is still fetched, alone
+            (4 * MIB, None, 4),             // no cap: today's window
+            (1000, Some(2 * 1028), 2),      // exactly two ciphertext chunks
+            (1000, Some(2 * 1028 - 1), 1),  // one byte short of two
+            (1000, Some(4 * 1028), 4),
+            (1000, Some(3 * 1028), 3),
+            (1000, Some(0), 1),
+            (1000, Some(u64::MAX), 4),
+        ] {
+            let mut p = started_for(big_geometry(stride), cap);
+            let got = fetches_until_wait(&mut p);
+            assert_eq!(got.len(), want, "stride {stride}, cap {cap:?}: started {got:?}");
+            assert_eq!(got, (0..want as u32).collect::<Vec<_>>(), "in order, from the front");
+        }
+    }
+
+    #[test]
+    fn with_a_cap_of_one_a_failing_chunk_blocks_the_next_fetch() {
+        const MIB: u64 = 1024 * 1024;
+        let g = big_geometry(256 * MIB);
+        let mut p = started_for(g, Some(64 * MIB));
+        assert_eq!(fetches_until_wait(&mut p), [0]);
+        p.fetch_failed(0, T0).unwrap();
+        // Chunk 0 waits for its renewal; however long that takes, chunk 1 is not started (it would be held, 256 MiB, behind a stalled chunk).
+        let mut now = T0;
+        let mut renewed = false;
+        for _ in 0..200 {
+            now += 1_000;
+            match p.poll(now) {
+                Poll::RequestWindow(r) => {
+                    assert!(r.renewal && r.start_index == 0, "{r:?}");
+                    p.window_answered(answer_for(g, &r, now), now).unwrap();
+                    renewed = true;
+                }
+                Poll::Fetch { index, .. } => {
+                    assert!(renewed, "chunk {index} was fetched before the renewal");
+                    assert_eq!(index, 0, "chunk 1 must wait for chunk 0 to be consumed");
+                    break;
+                }
+                Poll::Wait { .. } => {}
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        assert!(renewed);
+        finish(&mut p, 0);
+        assert_eq!(
+            expect_fetch(&mut p, now),
+            1,
+            "once chunk 0 is consumed the window moves"
+        );
+    }
+
+    #[test]
+    fn a_clock_ten_minutes_off_costs_what_it_costs_today() {
+        // No skew correction in v1 (D28): a client clock minutes off still completes the file within today's
+        // bounded request count. This pins the count so that a change to the expiry rules shows.
+        // Returns (window requests, storage fetches, API fetches) for a whole 20-chunk file.
+        fn run(offset_ms: i64) -> (u32, u32, u32) {
+            let mut p = planner();
+            let (mut windows, mut storage, mut api) = (0, 0, 0);
+            for _ in 0..STEPS {
+                let now = T0 + offset_ms; // the client's clock; the server issues links by T0
+                match p.poll(now) {
+                    Poll::RequestWindow(r) => {
+                        windows += 1;
+                        p.window_answered(answer(&r, T0), now).unwrap();
+                    }
+                    Poll::Fetch { index, .. } => {
+                        storage += 1;
+                        finish(&mut p, index);
+                    }
+                    Poll::FetchViaApi { index, .. } => {
+                        api += 1;
+                        finish(&mut p, index);
+                    }
+                    Poll::Done => return (windows, storage, api),
+                    other => panic!("offset {offset_ms}: unexpected {other:?}"),
+                }
+            }
+            panic!("offset {offset_ms}: never finished");
+        }
+        assert_eq!(run(0), (3, CHUNKS, 0), "the reference: windows of 8, 8 and 4");
+        assert_eq!(run(600_000), run(0), "a clock ten minutes ahead");
+        assert_eq!(run(-600_000), run(0), "a clock ten minutes behind");
+    }
+
+    #[test]
+    fn a_window_answered_after_the_breaker_tripped_is_not_used() {
+        let mut p = started();
+        p.give_up_storage();
+        assert_eq!(p.unused_grants(), 0, "the grants it held are dropped");
+        // A fresh window that was already on its way when the breaker tripped.
+        p.window = Some(DownloadGrantRequest {
+            object_version_id: Some(VERSION.into()),
+            start_index: 8,
+            count: 8,
+            renewal: false,
+        });
+        let late = DownloadGrantRequest {
+            object_version_id: Some(VERSION.into()),
+            start_index: 8,
+            count: 8,
+            renewal: false,
+        };
+        p.window_answered(answer(&late, T0), T0).unwrap();
+        assert_eq!(p.unused_grants(), 0, "none of its links is kept: storage is given up");
+        assert!(
+            p.slots
+                .range(8..16)
+                .all(|(_, slot)| matches!(slot, Slot::ApiPending { .. })),
+            "those chunks go to the pinned route"
+        );
+    }
+
+    #[test]
+    fn a_refused_window_is_not_a_storage_breaker() {
+        // A window the server could not serve moves the rest of the file to the pinned route (R1.6). That is
+        // the grant route failing, not storage: `storage_given_up` is for the caller to record storage trouble.
+        let mut p = started();
+        for _ in 0..4 {
+            expect_fetch(&mut p, T0);
+        }
+        p.window = Some(DownloadGrantRequest {
+            object_version_id: Some(VERSION.into()),
+            start_index: 8,
+            count: 8,
+            renewal: false,
+        });
+        p.window_failed(Outcome::ApiForThisFile, T0);
+        assert!(p.api_only && !p.storage_given_up());
+        spend_renewals(&mut p, 0, 3);
+        p.fetch_failed(0, T0).unwrap();
+        assert!(
+            !p.storage_given_up(),
+            "the file was already on the API route for another reason"
+        );
+    }
+
+    #[test]
+    fn a_storage_fetch_that_arrives_after_the_trip_clears_the_report() {
+        // Chunks 0-3 are in flight; chunk 0 exhausts its renewals and the breaker trips. Chunk 1 was already on its way
+        // and arrives: storage delivered bytes in this very transfer, so the caller must not hold the next file off direct.
+        let mut p = started();
+        for _ in 0..4 {
+            expect_fetch(&mut p, T0);
+        }
+        spend_renewals(&mut p, 0, 3);
+        p.fetch_failed(0, T0).unwrap();
+        assert!(p.storage_given_up(), "tripped: nothing has arrived from storage yet");
+        p.fetch_ok(1).unwrap();
+        assert!(
+            !p.storage_given_up(),
+            "a chunk arrived from storage: the report is cleared, no ten-minute hold"
+        );
+        assert!(
+            matches!(p.poll(T0), Poll::FetchViaApi { index: 0, .. }),
+            "the rest of this file still goes through the pinned route"
+        );
+    }
+
+    #[test]
+    fn a_huge_cap_does_not_widen_the_reorder_window_beyond_four() {
+        // The cap can only narrow the window. Chunks 1-3 finish while chunk 0 is stuck: with the window at
+        // four, nothing past chunk 3 may start, however large the cap is.
+        let mut p = started_for(big_geometry(1000), Some(u64::MAX));
+        assert_eq!(fetches_until_wait(&mut p), [0, 1, 2, 3]);
+        for i in 1..4 {
+            p.fetch_ok(i).unwrap();
+        }
+        for step in 1..50 {
+            if let Poll::Fetch { index, .. } = p.poll(T0 + step) {
+                panic!("started chunk {index} beyond the reorder window of four");
+            }
         }
     }
 }
