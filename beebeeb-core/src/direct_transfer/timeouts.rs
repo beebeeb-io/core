@@ -52,6 +52,26 @@ pub fn storage_get_total(len: u64) -> Duration {
     storage_put_total(len)
 }
 
+/// The server's late-write fence: the largest chunk at the minimum supported uplink, plus
+/// a minute, with a five-minute floor. The server numbers are pinned by `direct_upload.json`.
+pub fn put_allowance(len: u64) -> Duration {
+    // ceil((256 MiB + 28) * 8 / 3600), from the server's largest chunk and lease.
+    const MIN_UPLINK_BITS_PER_SECOND: u128 = 596_524;
+    let seconds = (u128::from(len) * 8).div_ceil(MIN_UPLINK_BITS_PER_SECOND) + 60;
+    Duration::from_secs(seconds.max(300) as u64)
+}
+
+/// N storage PUTs share the uplink. Always stop at least thirty seconds before the server's fence.
+/// A zero in-flight count is treated as one; hostile lengths and counts cannot overflow.
+pub fn storage_put_total_shared(len: u64, in_flight: u32) -> Duration {
+    let seconds = len
+        .div_ceil(STORAGE_TOTAL_BYTES_PER_SECOND)
+        .saturating_mul(u64::from(in_flight.max(1)));
+    STORAGE_TOTAL_BASE
+        .saturating_add(Duration::from_secs(seconds))
+        .min(put_allowance(len) - Duration::from_secs(30))
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -98,12 +118,7 @@ mod tests {
     /// The server's late-write fence for a PUT of `len` bytes: `max(floor, ceil(len * 8 / min_uplink) + 60)`,
     /// computed from the recorded server numbers the way the server does (`put_allowance_secs`).
     fn fence_secs(len: u64) -> u128 {
-        let c = constants();
-        let floor = u128::from(c["put_allowance_floor_seconds"].as_u64().unwrap());
-        let max = u128::from(c["max_ciphertext_chunk_bytes"].as_u64().unwrap());
-        let lease = u128::from(c["upload_lease_seconds"].as_u64().unwrap());
-        let min_uplink = (max * 8).div_ceil(lease);
-        (u128::from(len) * 8).div_ceil(min_uplink).saturating_add(60).max(floor)
+        u128::from(put_allowance(len).as_secs())
     }
 
     #[test]
@@ -136,6 +151,11 @@ mod tests {
 
     #[test]
     fn the_fence_this_test_computes_is_the_servers_number() {
+        let c = constants();
+        let max = u128::from(c["max_ciphertext_chunk_bytes"].as_u64().unwrap());
+        let lease = u128::from(c["upload_lease_seconds"].as_u64().unwrap());
+        assert_eq!((max * 8).div_ceil(lease), 596_524);
+        assert_eq!(c["put_allowance_floor_seconds"].as_u64(), Some(300));
         // Pins the test's own instrument: the server's tests assert these (server 30c8ed62, direct_transfer.rs
         // `the_put_fence_covers_a_large_chunk_at_the_minimum_uplink`: the floor for a 44-byte chunk, more than the
         // floor for the largest).

@@ -1,0 +1,14 @@
+{
+  "source": "task 2173 direct upload pipelining design sections 3.3 and 4",
+  "constants": {
+    "UPLOAD_COMMIT_SLOTS_SMALL": 2,
+    "UPLOAD_COMMIT_SLOTS_LARGE": 1,
+    "UPLOAD_COMMIT_SLOTS_SMALL_BELOW": 16777216,
+    "UPLOAD_PUT_LANES": 1,
+    "UPLOAD_FILE_CONCURRENCY_DEFAULT": 4,
+    "UPLOAD_FILE_CONCURRENCY_MAX": 8,
+    "UPLOAD_TAIL_FILES_MAX": 4,
+    "UPLOAD_API_REQUESTS_PER_SECOND_MAX": 60,
+    "UPLOAD_API_BURST": 20
+  }
+}
