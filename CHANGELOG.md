@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Discovery authorization answers (401/403) no longer consume or extend the routing-failure
+  budget. Reauthentication leaves cached discovery and real transport failures unchanged;
+  repeated authorization refusals no longer disable direct discovery for ten minutes.
+
 ### Security
 - Chunk format v2 (task 1908): file-content frames authenticate their position as AES-GCM
   associated data — `"beebeeb/chunk/v2" || len(file_id) || file_id || version_id(12) ||

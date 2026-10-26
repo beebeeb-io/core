@@ -2622,7 +2622,7 @@
       ]
     },
     {
-      "name": "an authorization answer counts as a failed attempt only",
+      "name": "repeated authorization answers are not routing failures",
       "steps": [
         {
           "op": "record",
@@ -2637,6 +2637,130 @@
         {
           "op": "lookup",
           "now": 1800000000001,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000000001,
+          "outcome": {
+            "kind": "terminal",
+            "status": 401,
+            "error": "unauthorized"
+          },
+          "body": null
+        },
+        {
+          "op": "record",
+          "now": 1800000000002,
+          "outcome": {
+            "kind": "terminal",
+            "status": 403,
+            "error": "forbidden"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000003,
+          "expect": "fetch"
+        }
+      ]
+    },
+    {
+      "name": "authorization preserves the real failure budget and its expiry",
+      "steps": [
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "record",
+          "now": 1800000000001,
+          "outcome": {
+            "kind": "terminal",
+            "status": 403,
+            "error": "forbidden"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000002,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000000003,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000004,
+          "expect": "use_api"
+        },
+        {
+          "op": "record",
+          "now": 1800000000005,
+          "outcome": {
+            "kind": "terminal",
+            "status": 403,
+            "error": "forbidden"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600003,
+          "expect": "fetch"
+        }
+      ]
+    },
+    {
+      "name": "authorization does not prolong expired discovery",
+      "steps": [
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "proceed"
+          },
+          "body": "@std"
+        },
+        {
+          "op": "record",
+          "now": 1800000599998,
+          "outcome": {
+            "kind": "terminal",
+            "status": 401,
+            "error": "unauthorized"
+          },
+          "body": null
+        },
+        {
+          "op": "record",
+          "now": 1800000599999,
+          "outcome": {
+            "kind": "terminal",
+            "status": 401,
+            "error": "unauthorized"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000599999,
+          "expect": "cached"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600000,
           "expect": "fetch"
         }
       ]

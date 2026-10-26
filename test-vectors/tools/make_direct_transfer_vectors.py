@@ -388,8 +388,18 @@ cache.append({"name": "a discovery body sent as text", "steps": [
     record(T0, {"kind": "proceed"}, json.dumps(discoveries["std"])), lookup(T0 + 1, "cached")]})
 cache.append({"name": "a success whose body does not decode is a failed attempt", "steps": [
     record(T0, {"kind": "proceed"}, "not json"), record(T0 + 1, {"kind": "proceed"}), lookup(T0 + 2, "use_api")]})
-cache.append({"name": "an authorization answer counts as a failed attempt only", "steps": [
-    record(T0, {"kind": "terminal", "status": 401, "error": "unauthorized"}), lookup(T0 + 1, "fetch")]})
+AUTH_401 = {"kind": "terminal", "status": 401, "error": "unauthorized"}
+AUTH_403 = {"kind": "terminal", "status": 403, "error": "forbidden"}
+cache.append({"name": "repeated authorization answers are not routing failures", "steps": [
+    record(T0, AUTH_401), lookup(T0 + 1, "fetch"),
+    record(T0 + 1, AUTH_401), record(T0 + 2, AUTH_403), lookup(T0 + 3, "fetch")]})
+cache.append({"name": "authorization preserves the real failure budget and its expiry", "steps": [
+    record(T0, USE_API_NOW), record(T0 + 1, AUTH_403), lookup(T0 + 2, "fetch"),
+    record(T0 + 3, USE_API_NOW), lookup(T0 + 4, "use_api"), record(T0 + 5, AUTH_403),
+    lookup(T0 + 3 + TTL, "fetch")]})
+cache.append({"name": "authorization does not prolong expired discovery", "steps": [
+    record(T0, {"kind": "proceed"}, "@std"), record(T0 + TTL - 2, AUTH_401),
+    record(T0 + TTL - 1, AUTH_401), lookup(T0 + TTL - 1, "cached"), lookup(T0 + TTL, "fetch")]})
 
 redact = [
     {"input": f"{S3}/bb-01/tenant-0000/versions/v-1111/0.bin?X-Amz-Signature=abc&x=1", "expect": "https://s3.storage.test/<redacted>"},
