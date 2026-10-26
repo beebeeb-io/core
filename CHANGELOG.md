@@ -153,6 +153,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   adds its own assert.
   Not yet exported through WASM or UniFFI as functions: the CLI uses the Rust module directly;
   desktop, iOS and web adopt it in their own tasks.
+- Direct transfer, the download side for web, desktop and iOS (task 2173, clients plan A1, A2 and the
+  download half of A3; no upload behaviour changes):
+  - `direct_transfer::timeouts`: the time bounds every client applies (`STORAGE_CONNECT_TIMEOUT` 15 s,
+    `STORAGE_GET_IDLE` 30 s, `DISCOVERY_TIMEOUT` 15 s, `API_CALL_TIMEOUT` 60 s,
+    `BACKGROUND_PUT_RESOURCE_TIMEOUT` 240 s) and `storage_put_total` / `storage_get_total`
+    (`60 s + ceil(len / 131072) s` over the ciphertext length). A test keeps the PUT total under the
+    server's late-write fence `max(300, ceil(len * 8 / min_uplink) + 60)` for every chunk length up to
+    the largest chunk; the server numbers are recorded with their source lines in
+    `test-vectors/direct_upload.json` `constants`.
+  - `direct_transfer::health`: `DirectHealth` and `Direction`. After a transfer gave up direct, no new
+    one of that direction starts for one trust period (ten minutes); `may_start_file` also keeps a file
+    that gave up off direct for the rest of its life; `last_gave_up_ms` / `restore` persist the two
+    timestamps; a recorded time in the future counts as expired.
+  - `direct_transfer::resume`: `resume_transport(recorded, discovery, forced_api)`. A recorded direct
+    upload session is given up only on a definite no (the user forced the API, discovery lists no
+    upload, a JSON 404), never because discovery could not be read this time; a 401/403 keeps the
+    record and asks for a new login.
+  - `DownloadPlanner`: a storage breaker (`storage_given_up()`): when a chunk uses up its renewals and
+    no chunk of the transfer has come whole from storage, the rest of the file goes through the pinned
+    API route (the existing `api_only` mode) and the caller records `gave_up(Download)`. A fetch through
+    the pinned route is not a storage success. And a byte ceiling on held chunks
+    (`PlannerConfig::max_in_flight_bytes`, `set_max_in_flight_bytes`): the reorder window becomes
+    `clamp(floor(bytes / (chunk_size + 28)), 1, 4)`; `None` keeps today's four.
+  - Exports. WASM: `WasmDirectHealth`, `resumeTransport`, `storagePutTotalMs`, `storageGetTotalMs`,
+    `WasmDownloadPlanner.setMaxInFlightBytes` / `storageGivenUp`, and five `*_ms` time bounds in
+    `directTransferConstants()`. UniFFI: `DirectHealthHandle`, `direct_resume_transport`,
+    `direct_storage_put_total_ms`, `direct_storage_get_total_ms`,
+    `direct_background_put_resource_timeout_ms`, `DirectDownloadPlannerHandle.set_max_in_flight_bytes` /
+    `storage_given_up`, and the same five bounds in `DirectConstantsDto` (the Swift and Kotlin bindings
+    are regenerated).
+  - Vectors: `direct_transfer.json` gains `health` (8 scenarios, 37 steps) and `resume_transport` (20
+    rows) sections and 15 planner scenarios (the breaker, the byte cap, a client clock ten minutes off);
+    `direct_upload.json` gains the time-bound constants and two policy rows showing a refused PUT (403)
+    and a PUT with no answer (status 0) are decided alike. Each surface (core, WASM, UniFFI) runs them
+    all through the one interpreter.
 - CI `Claims guard` job: runs the shared claims-guard engine plus
   `scripts/claims-guard/canon-sweep.sh`, the canon CLAIM_SWEEP over the whole tree
   (including any `design/` folder), so a false audit or compliance claim fails the build.
