@@ -158,6 +158,28 @@ pub fn derive_search_index_key(master_key: &MasterKey, bucket: u32) -> FileKey {
     FileKey { bytes: *okm }
 }
 
+/// Domain-separation label for a shared folder's encrypted search index
+/// (task 2237). Deliberately distinct from `beebeeb-search-index-shard-v1`:
+/// a shared folder's index is keyed from the folder key, so a collision with
+/// the account index key would let one keyspace decrypt the other.
+pub const SHARED_FOLDER_INDEX_KEY_INFO: &[u8] = b"beebeeb-shared-folder-index-v1";
+
+/// Derive the per-bucket key of a shared folder's encrypted search index
+/// (task 2237): `HKDF-SHA256(salt = none, ikm = folder_key, info = label ||
+/// bucket as u32 little-endian)`, 32 bytes. Mirrors `derive_search_index_key`
+/// with a different IKM and label, so the same folder key yields an
+/// independent key per bucket.
+pub fn derive_shared_folder_index_key(folder_key: &FileKey, bucket: u32) -> FileKey {
+    let hk = Hkdf::<Sha256>::new(None, folder_key.as_bytes());
+    let mut info = Vec::with_capacity(SHARED_FOLDER_INDEX_KEY_INFO.len() + 4);
+    info.extend_from_slice(SHARED_FOLDER_INDEX_KEY_INFO);
+    info.extend_from_slice(&bucket.to_le_bytes());
+    let mut okm = Zeroizing::new([0u8; 32]);
+    hk.expand(&info, &mut *okm)
+        .expect("HKDF-SHA256 expand for 32 bytes cannot fail");
+    FileKey { bytes: *okm }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,6 +321,67 @@ mod tests {
     // Master key: 32 bytes all 0x01. Vectors cover bucket 0, an interior
     // bucket (7), and the last bucket of the default 64-shard layout (63).
     const KAT_MASTER_KEY: [u8; 32] = [0x01u8; 32];
+
+    // ---------------------------------------------------------------------
+    // Cross-client KAT for the shared-folder index key (task 2237).
+    //
+    // A shared folder's search index uses its own key hierarchy: the folder
+    // key (not an account master key) is the IKM, and the domain-separation
+    // label is `beebeeb-shared-folder-index-v1`. One key per bucket, exactly
+    // like the account index. Same warning as above: a changed vector means
+    // every stored shared-folder index becomes undecryptable.
+    //
+    // Folder key: 32 bytes 0x80..=0x9f. Vectors cover bucket 0, an interior
+    // bucket (7), and the last bucket of the default 64-bucket layout (63).
+    const KAT_FOLDER_KEY: [u8; 32] = {
+        let mut k = [0u8; 32];
+        let mut i = 0;
+        while i < 32 {
+            k[i] = 0x80 + i as u8;
+            i += 1;
+        }
+        k
+    };
+
+    #[test]
+    fn shared_folder_index_key_known_answer_vectors() {
+        let folder_key = FileKey::from_bytes(KAT_FOLDER_KEY);
+
+        let vectors: [(u32, &str); 3] = [
+            (0, "a4a09ac7b7e2d845a05c1b67930024a043c6bda3ed280f5fcf627ddb15d1208c"),
+            (7, "d137ca8982ca27f94260e6cf43ef1479b6fe5e658ac65741fcaca848522df0fd"),
+            (63, "c88fd54b38b22e112085870cf8d1cf7b6ce124ab232b8d817e11c1bec16aa0a2"),
+        ];
+
+        for (bucket, expected_hex) in vectors {
+            let key = derive_shared_folder_index_key(&folder_key, bucket);
+            assert_eq!(
+                hex::encode(key.as_bytes()),
+                expected_hex,
+                "shared-folder index KAT diverged for bucket {bucket} — this breaks \
+                 every stored shared-folder search index; see comment above this test"
+            );
+        }
+    }
+
+    #[test]
+    fn shared_folder_index_key_is_domain_separated_from_search_index_key() {
+        // Same 32 key bytes fed to both derivations must not collide: the two
+        // index keyspaces are cryptographically separate even for bucket 0.
+        let folder_key = FileKey::from_bytes(KAT_FOLDER_KEY);
+        let mk = MasterKey::from_bytes(KAT_FOLDER_KEY);
+        let shared = derive_shared_folder_index_key(&folder_key, 0);
+        let account = derive_search_index_key(&mk, 0);
+        assert_ne!(shared.as_bytes(), account.as_bytes());
+    }
+
+    #[test]
+    fn shared_folder_index_keys_differ_per_bucket() {
+        let folder_key = FileKey::from_bytes(KAT_FOLDER_KEY);
+        let k1 = derive_shared_folder_index_key(&folder_key, 0);
+        let k2 = derive_shared_folder_index_key(&folder_key, 1);
+        assert_ne!(k1.as_bytes(), k2.as_bytes());
+    }
 
     #[test]
     fn search_index_key_known_answer_vectors() {

@@ -202,7 +202,28 @@
       "name": "folder_key_id",
       "note": "folder_key_id = HKDF-SHA256(ikm = folder key, salt = none, info = \"beebeeb/folder-key-id/v1\"), 32 bytes. A one-way id of a folder key, meant for a server to compare folder keys without learning them. Not secret, and never a key.",
       "salt": "none"
+    },
+    {
+      "buckets": [
+        {
+          "bucket": 0,
+          "expected_hex": "a4a09ac7b7e2d845a05c1b67930024a043c6bda3ed280f5fcf627ddb15d1208c"
+        },
+        {
+          "bucket": 7,
+          "expected_hex": "d137ca8982ca27f94260e6cf43ef1479b6fe5e658ac65741fcaca848522df0fd"
+        },
+        {
+          "bucket": 63,
+          "expected_hex": "c88fd54b38b22e112085870cf8d1cf7b6ce124ab232b8d817e11c1bec16aa0a2"
+        }
+      ],
+      "folder_key_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "info": "beebeeb-shared-folder-index-v1",
+      "name": "shared_folder_index_key",
+      "note": "shared-folder search index key = HKDF-SHA256(ikm = folder key, salt = none, info = \"beebeeb-shared-folder-index-v1\" || bucket as u32 LE), 32 bytes, one key per bucket.",
+      "salt": "none"
     }
   ],
-  "version": 7
+  "version": 8
 }

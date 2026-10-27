@@ -10,7 +10,7 @@
 
 use beebeeb_core::encrypt::{decrypt_chunk, decrypt_metadata, encrypt_metadata};
 use beebeeb_core::file_request::{derive_request_wrap_key, open_request_upload, unwrap_request_private};
-use beebeeb_core::kdf::{FileKey, MasterKey, derive_file_key, derive_master_key};
+use beebeeb_core::kdf::{FileKey, MasterKey, derive_file_key, derive_master_key, derive_shared_folder_index_key};
 use beebeeb_core::opaque::{
     OpaqueEnvelope, compute_recovery_check, derive_share_key, derive_x25519_private, derive_x25519_public,
     x25519_shared_secret,
@@ -672,6 +672,28 @@ fn vector_thumbnail_encrypt_roundtrip() {
 }
 
 // ---------------------------------------------------------------------------
+// 19b. Shared-folder search-index key (version 8, task 2237) — the reader
+//      path every client implements must reproduce the published buckets.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn shared_folder_index_key_vector_is_reproducible() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "shared_folder_index_key");
+
+    let folder_key = FileKey::from_bytes(bytes32(&v, "folder_key_hex"));
+    let buckets = v["buckets"].as_array().expect("buckets array");
+    assert_eq!(buckets.len(), 3, "vector must pin buckets 0, 7 and 63");
+
+    for entry in buckets {
+        let bucket = entry["bucket"].as_u64().expect("bucket") as u32;
+        let expected = entry["expected_hex"].as_str().expect("expected_hex");
+        let got = hex::encode(derive_shared_folder_index_key(&folder_key, bucket).as_bytes());
+        assert_eq!(got, expected, "shared_folder_index_key diverged for bucket {bucket}");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 20. Version guard — fail loudly if vectors.json format changes unexpectedly
 // ---------------------------------------------------------------------------
 
@@ -685,8 +707,8 @@ fn vector_file_version_check() {
         .as_u64()
         .expect("vectors.json must have a 'version' field");
     assert_eq!(
-        version, 7,
-        "vectors.json version mismatch — expected 7, got {version}. \
+        version, 8,
+        "vectors.json version mismatch — expected 8, got {version}. \
          Update this test if you intentionally bumped the version."
     );
 
@@ -716,6 +738,8 @@ fn vector_file_version_check() {
         "metadata_v1_name_filekey",
         // Version 7 (task 2133): a shared folder's key id.
         "folder_key_id",
+        // Version 8 (task 2237): a shared folder's search-index bucket key.
+        "shared_folder_index_key",
     ];
     for name in &required {
         assert!(names.contains(name), "vectors.json is missing required vector '{name}'");
