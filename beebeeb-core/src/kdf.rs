@@ -47,6 +47,16 @@ pub struct FileKey {
 }
 
 impl FileKey {
+    /// Generate an independent 256-bit key from the OS CSPRNG.
+    pub fn generate() -> Result<Self, CoreError> {
+        use rand::RngCore;
+        let mut bytes = Zeroizing::new([0u8; 32]);
+        rand::rngs::OsRng
+            .try_fill_bytes(&mut *bytes)
+            .map_err(|e| CoreError::Encryption(format!("OS randomness unavailable: {e}")))?;
+        Ok(Self::from_bytes(*bytes))
+    }
+
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.bytes
     }
@@ -183,6 +193,22 @@ pub fn derive_shared_folder_index_key(folder_key: &FileKey, bucket: u32) -> File
 /// Domain-separation label for the folder link key combiner (task 2237b).
 pub const FOLDER_LINK_KEY_INFO: &[u8] = b"beebeeb-folder-link-key-v1";
 
+/// Token-bound salt domain for a folder link's Argon2id passphrase stretch.
+pub const FOLDER_LINK_PASSPHRASE_SALT_LABEL: &[u8] = b"beebeeb-folder-link-passphrase-v1";
+
+/// Stretch a folder-link passphrase with the canonical strong Argon2id cost.
+/// Salt = SHA-256(UTF-8 token || label)[0..16]. A KDF failure is an error;
+/// callers must never downgrade a protected link to a plain link.
+pub fn derive_folder_link_passphrase_stretch(passphrase: &str, token: &str) -> Result<Zeroizing<[u8; 32]>, CoreError> {
+    use sha2::Digest;
+    let mut digest = Sha256::new();
+    digest.update(token.as_bytes());
+    digest.update(FOLDER_LINK_PASSPHRASE_SALT_LABEL);
+    let salt = digest.finalize();
+    let key = derive_master_key(passphrase, &salt[..16])?;
+    Ok(Zeroizing::new(*key.as_bytes()))
+}
+
 /// Combine a folder link's fragment key `K_c` with an optional passphrase
 /// stretch into the 32-byte key that unwraps the link's sealed folder key.
 ///
@@ -216,6 +242,17 @@ pub fn combine_folder_link_key(k_c: &[u8; 32], passphrase_stretch: Option<&[u8; 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_link_passphrase_stretch_matches_the_web_vector() {
+        let doc: serde_json::Value = serde_json::from_str(include_str!("../../test-vectors/vectors.json")).unwrap();
+        let v = doc["vectors"].as_array().unwrap().iter()
+            .find(|v| v["name"] == "folder_link_passphrase").unwrap();
+        let stretch = derive_folder_link_passphrase_stretch(
+            v["passphrase"].as_str().unwrap(), v["token"].as_str().unwrap(),
+        ).unwrap();
+        assert_eq!(hex::encode(*stretch), v["stretch_hex"].as_str().unwrap());
+    }
 
     const TEST_SALT: &[u8] = b"test-salt-16bytes";
     const TEST_FILE_ID: &[u8] = b"file-0001";

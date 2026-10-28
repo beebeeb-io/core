@@ -233,7 +233,25 @@
       "note": "folder link key = HKDF-SHA256(ikm = K_c [|| 32-byte Argon2id passphrase stretch], salt = none, info = \"beebeeb-folder-link-key-v1\" || presence byte (0x00 without passphrase, 0x01 with)), 32 bytes.",
       "passphrase_stretch_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
       "salt": "none"
+    },
+    {
+      "inner_key_hex": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+      "name": "key_wrap_v1",
+      "nonce_hex": "000102030405060708090a0b",
+      "note": "AES-256-GCM, no AAD; fixed nonce for this public test only.",
+      "wrapped_hex": "000102030405060708090a0b5a640e1b13e922c7aa7beaa9d480a2d4f3b55f7a1839db24965992ed3dcc1721c6ae72e8cf00e92571c68887fe3a9258",
+      "wrapper_key_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f"
+    },
+    {
+      "k_c_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "link_key_hex": "28033d9bbe8781dbbba4508cb6f38972e2fdccb894689c0e41b72d6cad6a4ac4",
+      "name": "folder_link_passphrase",
+      "note": "Argon2id v19, 256 MiB, 4 iterations, 2 lanes, 32 bytes; token-bound SHA-256 salt then folder-link HKDF.",
+      "passphrase": "folder café 2237",
+      "salt_hex": "ca6bed5537508ec3bc602d7ae7034040",
+      "stretch_hex": "1b08b5a91605001c53cacc58aa794aea129e4d450cf8fbdf4e65ae30718037b0",
+      "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
     }
   ],
-  "version": 9
+  "version": 10
 }
