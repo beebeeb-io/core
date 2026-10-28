@@ -41,7 +41,10 @@ fn exported_errors_never_have_message_fields() {
             let closing = format!("{indent}}}");
             // Source guard for rustfmt's enum layout. Require the closing line
             // so a changed layout cannot silently turn the check into a no-op.
-            assert!(declaration.trim_end().ends_with('{'), "unrecognized error enum layout: {declaration}");
+            assert!(
+                declaration.trim_end().ends_with('{'),
+                "unrecognized error enum layout: {declaration}"
+            );
             let mut body = String::new();
             let mut closed = false;
             for line in lines {
@@ -67,7 +70,10 @@ fn exported_errors_never_have_message_fields() {
         }
     }
 
-    assert!(checked >= 5, "expected at least five exported errors, checked {checked}");
+    assert!(
+        checked >= 5,
+        "expected at least five exported errors, checked {checked}"
+    );
     assert!(
         offending.is_empty(),
         "UniFFI error fields collide with Kotlin Exception.message; use detail instead:\n{}",
