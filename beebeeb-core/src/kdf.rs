@@ -211,19 +211,146 @@ pub const FOLDER_LINK_PASSPHRASE_SALT_LABEL: &[u8] = b"beebeeb-folder-link-passp
 /// callers must never downgrade a protected link to a plain link.
 pub fn derive_folder_link_passphrase_stretch(passphrase: &str, token: &str) -> Result<Zeroizing<[u8; 32]>, CoreError> {
     use sha2::Digest;
-    use unicode_normalization::UnicodeNormalization;
     if passphrase.is_empty() {
         return Err(CoreError::InvalidInput(
             "folder-link passphrase must not be empty".into(),
         ));
     }
-    let normalized = Zeroizing::new(passphrase.nfc().collect::<String>());
+    let normalized = normalize_passphrase(passphrase)?;
     let mut digest = Sha256::new();
     digest.update(token.as_bytes());
     digest.update(FOLDER_LINK_PASSPHRASE_SALT_LABEL);
     let salt = digest.finalize();
     let key = derive_master_key(&normalized, &salt[..16])?;
     Ok(Zeroizing::new(*key.as_bytes()))
+}
+
+// Canonical normalization with owned, fallibly allocated, wiped scratch. The
+// standard NFC iterator can spill nonstarters to an unwiped heap allocation.
+fn normalize_passphrase(input: &str) -> Result<Zeroizing<String>, CoreError> {
+    use unicode_normalization::char::{canonical_combining_class as ccc, compose, decompose_canonical};
+    let allocation_error = || CoreError::Kdf("insufficient normalization memory".into());
+    let mut count = Some(0usize);
+    for ch in input.chars() {
+        decompose_canonical(ch, |_| {
+            count = count.and_then(|n| n.checked_add(1));
+        });
+    }
+    let mut scratch = Zeroizing::new(Vec::<char>::new());
+    scratch
+        .try_reserve_exact(count.ok_or_else(allocation_error)?)
+        .map_err(|_| allocation_error())?;
+    for ch in input.chars() {
+        decompose_canonical(ch, |c| scratch.push(c));
+    }
+    // Stable in-place ordering avoids the allocating sort scratch. Equal
+    // classes retain their order; starters delimit combining sequences.
+    for i in 1..scratch.len() {
+        let class = ccc(scratch[i]);
+        if class == 0 {
+            continue;
+        }
+        let mut j = i;
+        while j > 0 && ccc(scratch[j - 1]) > class {
+            scratch.swap(j - 1, j);
+            j -= 1;
+        }
+    }
+    let mut written = 0usize;
+    let mut starter: Option<usize> = None;
+    let mut last_class = 0;
+    for i in 0..scratch.len() {
+        let ch = scratch[i];
+        let class = ccc(ch);
+        if let Some(at) = starter {
+            if last_class == 0 || last_class < class {
+                if let Some(composed) = compose(scratch[at], ch) {
+                    scratch[at] = composed;
+                    continue;
+                }
+            }
+        }
+        scratch[written] = ch;
+        if class == 0 {
+            starter = Some(written);
+        }
+        last_class = class;
+        written += 1;
+    }
+    let bytes = scratch[..written]
+        .iter()
+        .try_fold(0usize, |n, c| n.checked_add(c.len_utf8()))
+        .ok_or_else(allocation_error)?;
+    let mut output = Zeroizing::new(String::new());
+    output.try_reserve_exact(bytes).map_err(|_| allocation_error())?;
+    for &ch in &scratch[..written] {
+        output.push(ch);
+    }
+    // Keep the entire scratch length alive so its duplicate tail is wiped too.
+    Ok(output)
+}
+
+/// L7: root UUID bytes, item UUID bytes, and kind (1=file, 2=folder).
+pub const FOLDER_CHILD_LABEL: &[u8] = b"beebeeb-folder-child-v1";
+fn folder_child_context(root: &[u8], item: &[u8], kind: u8) -> Result<Vec<u8>, CoreError> {
+    if root.len() != 16 || item.len() != 16 || !matches!(kind, 1 | 2) {
+        return Err(CoreError::InvalidInput(
+            "folder child requires 16-byte root/item UUIDs and kind 1 or 2".into(),
+        ));
+    }
+    Ok([FOLDER_CHILD_LABEL, root, item, &[kind]].concat())
+}
+pub(crate) fn wrap_folder_child_with_nonce(
+    folder: &FileKey,
+    root: &[u8],
+    item: &[u8],
+    kind: u8,
+    child: &FileKey,
+    nonce: &[u8; 12],
+) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
+    let context = folder_child_context(root, item, kind)?;
+    let raw = crate::encrypt::seal_raw_with_nonce(folder, nonce, child.as_bytes(), &context)?;
+    Ok(beebeeb_types::EncryptedBlob {
+        cipher_suite: beebeeb_types::CipherSuite::V1Aes256Gcm,
+        nonce: raw[..12].to_vec(),
+        ciphertext: raw[12..].to_vec(),
+    })
+}
+pub fn wrap_folder_child(
+    folder: &FileKey,
+    root: &[u8],
+    item: &[u8],
+    kind: u8,
+    child: &FileKey,
+) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
+    use rand::RngCore;
+    let mut nonce = [0; 12];
+    rand::rngs::OsRng
+        .try_fill_bytes(&mut nonce)
+        .map_err(|e| CoreError::Encryption(format!("OS randomness unavailable: {e}")))?;
+    wrap_folder_child_with_nonce(folder, root, item, kind, child, &nonce)
+}
+pub fn unwrap_folder_child(
+    folder: &FileKey,
+    root: &[u8],
+    item: &[u8],
+    kind: u8,
+    blob: &beebeeb_types::EncryptedBlob,
+) -> Result<FileKey, CoreError> {
+    let context = folder_child_context(root, item, kind)?;
+    if blob.cipher_suite != beebeeb_types::CipherSuite::V1Aes256Gcm
+        || blob.nonce.len() != 12
+        || blob.ciphertext.len() != 48
+    {
+        return Err(CoreError::Decryption);
+    }
+    let bytes = Zeroizing::new(crate::encrypt::open_raw_with_aad(
+        folder,
+        &[blob.nonce.as_slice(), blob.ciphertext.as_slice()].concat(),
+        &context,
+    )?);
+    let key: &[u8; 32] = bytes.as_slice().try_into().map_err(|_| CoreError::Decryption)?;
+    Ok(FileKey::from_bytes(*key))
 }
 
 /// L6: purpose and record id are bound twice: as HKDF info and AEAD AAD.
@@ -387,6 +514,58 @@ pub fn combine_folder_link_key(k_c: &[u8; 32], passphrase_stretch: Option<&[u8; 
 mod tests {
     use super::*;
 
+    #[test]
+    fn rv44_normalization_matches_unicode_reference() {
+        use unicode_normalization::UnicodeNormalization;
+        for c in (0..=0x10ffff).filter_map(char::from_u32) {
+            let input = c.to_string();
+            assert_eq!(
+                &*normalize_passphrase(&input).unwrap(),
+                &input.nfc().collect::<String>()
+            );
+        }
+        for input in [
+            "a\u{35c}\u{323}\u{301}",
+            "\u{301}\u{323}a",
+            "\u{1100}\u{1161}\u{11a8}",
+            "a\u{301}\u{300}",
+            "\u{344}",
+        ] {
+            assert_eq!(&*normalize_passphrase(input).unwrap(), &input.nfc().collect::<String>());
+        }
+    }
+    #[test]
+    fn l7_child_round_trip_both_kinds() {
+        let folder = FileKey::from_bytes([0x40; 32]);
+        let child = FileKey::from_bytes([0x60; 32]);
+        for kind in [1, 2] {
+            let b = wrap_folder_child(&folder, &[1; 16], &[2; 16], kind, &child).unwrap();
+            assert_eq!(
+                unwrap_folder_child(&folder, &[1; 16], &[2; 16], kind, &b)
+                    .unwrap()
+                    .as_bytes(),
+                child.as_bytes()
+            );
+        }
+    }
+    #[test]
+    fn l7_swap_rejected() {
+        let k = FileKey::from_bytes([3; 32]);
+        let b = wrap_folder_child(&k, &[1; 16], &[2; 16], 1, &k).unwrap();
+        assert!(unwrap_folder_child(&k, &[1; 16], &[4; 16], 1, &b).is_err());
+    }
+    #[test]
+    fn l7_cross_folder_same_key_rejected() {
+        let k = FileKey::from_bytes([3; 32]);
+        let b = wrap_folder_child(&k, &[1; 16], &[2; 16], 1, &k).unwrap();
+        assert!(unwrap_folder_child(&k, &[4; 16], &[2; 16], 1, &b).is_err());
+    }
+    #[test]
+    fn l7_kind_confusion_rejected() {
+        let k = FileKey::from_bytes([3; 32]);
+        let b = wrap_folder_child(&k, &[1; 16], &[2; 16], 1, &k).unwrap();
+        assert!(unwrap_folder_child(&k, &[1; 16], &[2; 16], 2, &b).is_err());
+    }
     #[test]
     fn l6_passphrase_nfd_equals_nfc() {
         let nfc = derive_folder_link_passphrase_stretch("folder café 2237", "token").unwrap();

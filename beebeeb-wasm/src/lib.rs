@@ -3913,3 +3913,59 @@ mod direct_vector_tests {
         );
     }
 }
+
+/// L7 wire = nonce(12) || ciphertext+tag(48); UUID strings bind raw UUID bytes.
+#[wasm_bindgen(js_name = wrapFolderChild)]
+pub fn wrap_folder_child(
+    folder_key: &[u8],
+    shared_folder_id: &str,
+    item_id: &str,
+    kind: u8,
+    child_key: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    let folder = kdf::FileKey::from_bytes(
+        folder_key
+            .try_into()
+            .map_err(|_| JsError::new("folder key must be 32 bytes"))?,
+    );
+    let child = kdf::FileKey::from_bytes(
+        child_key
+            .try_into()
+            .map_err(|_| JsError::new("child key must be 32 bytes"))?,
+    );
+    let root = uuid::Uuid::parse_str(shared_folder_id).map_err(|_| JsError::new("invalid root UUID"))?;
+    let item = uuid::Uuid::parse_str(item_id).map_err(|_| JsError::new("invalid item UUID"))?;
+    let b = kdf::wrap_folder_child(&folder, root.as_bytes(), item.as_bytes(), kind, &child)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    Ok([b.nonce, b.ciphertext].concat())
+}
+#[wasm_bindgen(js_name = unwrapFolderChild)]
+pub fn unwrap_folder_child(
+    folder_key: &[u8],
+    shared_folder_id: &str,
+    item_id: &str,
+    kind: u8,
+    wrapped: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    if wrapped.len() != 60 {
+        return Err(JsError::new("child wrap must be 60 bytes"));
+    }
+    let folder = kdf::FileKey::from_bytes(
+        folder_key
+            .try_into()
+            .map_err(|_| JsError::new("folder key must be 32 bytes"))?,
+    );
+    let root = uuid::Uuid::parse_str(shared_folder_id).map_err(|_| JsError::new("invalid root UUID"))?;
+    let item = uuid::Uuid::parse_str(item_id).map_err(|_| JsError::new("invalid item UUID"))?;
+    let b = beebeeb_types::EncryptedBlob {
+        cipher_suite: beebeeb_types::CipherSuite::V1Aes256Gcm,
+        nonce: wrapped[..12].to_vec(),
+        ciphertext: wrapped[12..].to_vec(),
+    };
+    Ok(
+        kdf::unwrap_folder_child(&folder, root.as_bytes(), item.as_bytes(), kind, &b)
+            .map_err(|e| JsError::new(&e.to_string()))?
+            .as_bytes()
+            .to_vec(),
+    )
+}

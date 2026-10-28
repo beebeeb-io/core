@@ -1430,6 +1430,49 @@ impl FileKeyHandle {
         Ok(Self::new(file_key_from_slice(&key)?))
     }
 
+    /// L7 authenticated child wrap. IDs are UUID strings; AAD uses their 16 raw bytes.
+    pub fn wrap_folder_child(
+        &self,
+        shared_folder_id: String,
+        item_id: String,
+        kind: u8,
+        inner: &FileKeyHandle,
+    ) -> Result<EncryptedData, CryptoError> {
+        let root = uuid::Uuid::parse_str(&shared_folder_id).map_err(|_| CryptoError::InvalidInput {
+            detail: "invalid shared folder UUID".into(),
+        })?;
+        let item = uuid::Uuid::parse_str(&item_id).map_err(|_| CryptoError::InvalidInput {
+            detail: "invalid item UUID".into(),
+        })?;
+        let inner = inner.with_key(|k| kdf::FileKey::from_bytes(*k.as_bytes()))?;
+        self.with_key(|k| kdf::wrap_folder_child(k, root.as_bytes(), item.as_bytes(), kind, &inner))?
+            .map(|b| encrypted_blob_to_data(&b))
+            .map_err(Into::into)
+    }
+    pub fn unwrap_folder_child(
+        &self,
+        shared_folder_id: String,
+        item_id: String,
+        kind: u8,
+        nonce: Vec<u8>,
+        ciphertext: Vec<u8>,
+    ) -> Result<Arc<FileKeyHandle>, CryptoError> {
+        let root = uuid::Uuid::parse_str(&shared_folder_id).map_err(|_| CryptoError::InvalidInput {
+            detail: "invalid shared folder UUID".into(),
+        })?;
+        let item = uuid::Uuid::parse_str(&item_id).map_err(|_| CryptoError::InvalidInput {
+            detail: "invalid item UUID".into(),
+        })?;
+        let blob = EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce,
+            ciphertext,
+        };
+        self.with_key(|k| kdf::unwrap_folder_child(k, root.as_bytes(), item.as_bytes(), kind, &blob))?
+            .map(Self::new)
+            .map_err(Into::into)
+    }
+
     /// One-way public key identifier; never exports the key itself.
     pub fn key_id(&self) -> Result<Vec<u8>, CryptoError> {
         self.with_key(|fk| beebeeb_core::folder_key::folder_key_id(fk.as_bytes()).to_vec())
