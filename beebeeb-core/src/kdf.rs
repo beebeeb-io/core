@@ -1121,6 +1121,9 @@ mod invite_owner_copy_tests {
         assert!(unwrap_invite_owner_copy(&master, b"folder", &legacy).is_err());
         let custody = wrap_folder_custody(&master, b"folder", &key).unwrap();
         assert!(unwrap_invite_owner_copy(&master, b"folder", &custody).is_err());
+        let owner_file = wrap_owner_file_key(&master, b"folder", &key).unwrap();
+        assert!(unwrap_invite_owner_copy(&master, b"folder", &owner_file).is_err());
+        assert!(unwrap_owner_file_key(&master, b"folder", &copy).is_err());
         assert!(wrap_invite_owner_copy(&master, b"", &key).is_err());
     }
     #[test]
