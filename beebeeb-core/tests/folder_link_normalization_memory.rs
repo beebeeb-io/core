@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use zeroize::Zeroizing;
 
 struct Witness;
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 static CAPTURE: AtomicBool = AtomicBool::new(false);
 static UNWIPED_REALLOCS: AtomicUsize = AtomicUsize::new(0);
 const MARKER: &[u8] = b"rv44-public-";
@@ -64,6 +65,7 @@ static ALLOCATOR: Witness = Witness;
 
 #[test]
 fn preallocated_zeroizing_string_control() {
+    let _serial = SERIAL.lock().unwrap();
     let fixture = "rv44-public-".repeat(128);
     let mut s = Zeroizing::new(String::with_capacity(fixture.len()));
     UNWIPED_REALLOCS.store(0, Ordering::SeqCst);
@@ -76,6 +78,7 @@ fn preallocated_zeroizing_string_control() {
 
 #[test]
 fn nfc_collection_never_releases_unwiped_passphrase_fragments() {
+    let _serial = SERIAL.lock().unwrap();
     let fixture = "rv44-public-".repeat(128);
     UNWIPED_REALLOCS.store(0, Ordering::SeqCst);
     CAPTURE.store(true, Ordering::SeqCst);
@@ -91,6 +94,7 @@ fn nfc_collection_never_releases_unwiped_passphrase_fragments() {
 
 #[test]
 fn normalizer_scratch_is_wiped() {
+    let _serial = SERIAL.lock().unwrap();
     let fixture = format!("rv44-public-{}{}", "\u{35c}".repeat(128), "\u{323}".repeat(128));
     UNWIPED_REALLOCS.store(0, Ordering::SeqCst);
     CAPTURE.store(true, Ordering::SeqCst);
