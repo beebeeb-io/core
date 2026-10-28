@@ -3489,6 +3489,11 @@ public protocol MasterKeyHandleProtocol: AnyObject, Sendable {
     func unwrapLinkOwnerToken(shareId: String, nonce: Data, ciphertext: Data) throws  -> Data
     
     /**
+     * Open only L8 and return an opaque handle, never raw file-key bytes.
+     */
+    func unwrapOwnerFileKey(itemId: String, nonce: Data, ciphertext: Data) throws  -> FileKeyHandle
+    
+    /**
      * Verify a legacy candidate without exporting the master key.
      */
     func verifyLegacyFolderKey(folderId: String, candidate: FileKeyHandle, ownerChildId: String, childWrap: Data) throws  -> Bool
@@ -3511,6 +3516,11 @@ public protocol MasterKeyHandleProtocol: AnyObject, Sendable {
     func wrapLinkOwnerKey(shareId: String, inner: FileKeyHandle) throws  -> EncryptedData
     
     func wrapLinkOwnerToken(shareId: String, token: Data) throws  -> EncryptedData
+    
+    /**
+     * L8 owner adoption. Key material stays in native handles.
+     */
+    func wrapOwnerFileKey(itemId: String, inner: FileKeyHandle) throws  -> EncryptedData
     
 }
 /**
@@ -3840,6 +3850,20 @@ open func unwrapLinkOwnerToken(shareId: String, nonce: Data, ciphertext: Data)th
 }
     
     /**
+     * Open only L8 and return an opaque handle, never raw file-key bytes.
+     */
+open func unwrapOwnerFileKey(itemId: String, nonce: Data, ciphertext: Data)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_owner_file_key(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(itemId),
+        FfiConverterData.lower(nonce),
+        FfiConverterData.lower(ciphertext),$0
+    )
+})
+}
+    
+    /**
      * Verify a legacy candidate without exporting the master key.
      */
 open func verifyLegacyFolderKey(folderId: String, candidate: FileKeyHandle, ownerChildId: String, childWrap: Data)throws  -> Bool  {
@@ -3915,6 +3939,19 @@ open func wrapLinkOwnerToken(shareId: String, token: Data)throws  -> EncryptedDa
             self.uniffiCloneHandle(),
         FfiConverterString.lower(shareId),
         FfiConverterData.lower(token),$0
+    )
+})
+}
+    
+    /**
+     * L8 owner adoption. Key material stays in native handles.
+     */
+open func wrapOwnerFileKey(itemId: String, inner: FileKeyHandle)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_owner_file_key(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(itemId),
+        FfiConverterTypeFileKeyHandle_lower(inner),$0
     )
 })
 }
@@ -12457,6 +12494,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_link_owner_token() != 21189) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_owner_file_key() != 55056) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_verify_legacy_folder_key() != 33121) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -12476,6 +12516,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_link_owner_token() != 17239) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_owner_file_key() != 19400) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_encrypt_buckets() != 883) {
