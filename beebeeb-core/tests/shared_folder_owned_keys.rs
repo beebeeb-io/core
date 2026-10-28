@@ -35,12 +35,16 @@ fn owner_kat() {
     let second = wrap_key_to_owner(&master, FILE_ID, &child()).unwrap();
     assert_eq!(first.len(), 60);
     assert_ne!(&first[..12], &second[..12]);
-    assert_eq!(unwrap_owner_key(&master, FILE_ID, &first).unwrap().as_bytes(), &expected_child_key);
+    assert_eq!(
+        unwrap_owner_key(&master, FILE_ID, &first).unwrap().as_bytes(),
+        &expected_child_key
+    );
     // Canonical textual UUID bytes, not the binary 16-byte UUID.
     let binary_wrap = encrypt_chunk_raw(
         &derive_file_key(&master, uuid::Uuid::parse_str(FILE_ID).unwrap().as_bytes()),
         &expected_child_key,
-    ).unwrap();
+    )
+    .unwrap();
     assert!(unwrap_owner_key(&master, FILE_ID, &binary_wrap).is_err());
 }
 
@@ -54,7 +58,10 @@ fn folder_kat() {
     let second = wrap_child_key(&folder, &child()).unwrap();
     assert_eq!(first.len(), 60);
     assert_ne!(&first[..12], &second[..12]);
-    assert_eq!(unwrap_child_key(&folder, &first).unwrap().as_bytes(), &expected_child_key);
+    assert_eq!(
+        unwrap_child_key(&folder, &first).unwrap().as_bytes(),
+        &expected_child_key
+    );
     assert!(unwrap_child_key(&child(), &first).is_err());
 }
 
@@ -65,9 +72,19 @@ fn resolution_order() {
     let owner_wrap = hex::decode(OWNER_CHILD).unwrap();
     let different_child = FileKey::from_bytes([0x33; 32]);
     let folder_wrap = wrap_child_key(&folder, &different_child).unwrap();
-    let resolve = |owner, frame, foreign| resolve_owned_key(
-        &master, FILE_ID, owner, Some(FolderWrap { folder_key: &folder, wrapped_key: frame }), foreign,
-    ).unwrap();
+    let resolve = |owner, frame, foreign| {
+        resolve_owned_key(
+            &master,
+            FILE_ID,
+            owner,
+            Some(FolderWrap {
+                folder_key: &folder,
+                wrapped_key: frame,
+            }),
+            foreign,
+        )
+        .unwrap()
+    };
     let winner = resolve(Some(owner_wrap.as_slice()), folder_wrap.as_slice(), true);
     assert_eq!(winner.origin, KeyOrigin::OwnerWrap);
     assert_eq!(winner.key.as_bytes(), child().as_bytes());
@@ -91,9 +108,19 @@ fn foreign_never_derived() {
     let invalid = [0; 60];
     for owner in [None, Some(invalid.as_slice())] {
         assert!(resolve_owned_key(&master, FILE_ID, owner, None, true).is_err());
-        assert!(resolve_owned_key(&master, FILE_ID, owner, Some(FolderWrap {
-            folder_key: &folder, wrapped_key: &invalid,
-        }), true).is_err());
+        assert!(
+            resolve_owned_key(
+                &master,
+                FILE_ID,
+                owner,
+                Some(FolderWrap {
+                    folder_key: &folder,
+                    wrapped_key: &invalid,
+                }),
+                true
+            )
+            .is_err()
+        );
     }
     // Envelope presence blocks derivation even if provenance is absent (moved out).
     for owner in [invalid.as_slice(), &[]] {
@@ -139,12 +166,23 @@ fn legacy_derived_unchanged() {
     let master = master();
     let resolved = resolve_owned_key(&master, FILE_ID, None, None, false).unwrap();
     assert_eq!(resolved.origin, KeyOrigin::Derived);
-    assert_eq!(resolved.key.as_bytes(), derive_file_key(&master, FILE_ID.as_bytes()).as_bytes());
+    assert_eq!(
+        resolved.key.as_bytes(),
+        derive_file_key(&master, FILE_ID.as_bytes()).as_bytes()
+    );
     // An unrelated unusable folder inventory does not change ordinary owner files.
     let folder = folder();
-    let resolved = resolve_owned_key(&master, FILE_ID, None, Some(FolderWrap {
-        folder_key: &folder, wrapped_key: &[],
-    }), false).unwrap();
+    let resolved = resolve_owned_key(
+        &master,
+        FILE_ID,
+        None,
+        Some(FolderWrap {
+            folder_key: &folder,
+            wrapped_key: &[],
+        }),
+        false,
+    )
+    .unwrap();
     assert_eq!(resolved.origin, KeyOrigin::Derived);
 }
 
@@ -153,17 +191,37 @@ fn folder_name_key_adoption() {
     let master = master();
     let folder = folder();
     let random_key = child();
-    assert_ne!(random_key.as_bytes(), derive_file_key(&master, FOLDER_ID.as_bytes()).as_bytes());
-    let name = encrypt_name_for(&random_key, "Guest holiday folder", None, ExpectedChunkFormat::Unrecorded).unwrap();
+    assert_ne!(
+        random_key.as_bytes(),
+        derive_file_key(&master, FOLDER_ID.as_bytes()).as_bytes()
+    );
+    let name = encrypt_name_for(
+        &random_key,
+        "Guest holiday folder",
+        None,
+        ExpectedChunkFormat::Unrecorded,
+    )
+    .unwrap();
     let frame = wrap_child_key(&folder, &random_key).unwrap();
-    let resolved = resolve_owned_key(&master, FOLDER_ID, None, Some(FolderWrap {
-        folder_key: &folder, wrapped_key: &frame,
-    }), true).unwrap();
+    let resolved = resolve_owned_key(
+        &master,
+        FOLDER_ID,
+        None,
+        Some(FolderWrap {
+            folder_key: &folder,
+            wrapped_key: &frame,
+        }),
+        true,
+    )
+    .unwrap();
     let metadata = decrypt_file_metadata_with_key(&resolved.key, &name).unwrap();
     assert_eq!(metadata.name, "Guest holiday folder");
     let adoption = wrap_key_to_owner(&master, FOLDER_ID, &resolved.key).unwrap();
     let after_move = resolve_owned_key(&master, FOLDER_ID, Some(&adoption), None, true).unwrap();
     assert_eq!(after_move.origin, KeyOrigin::OwnerWrap);
     assert_eq!(after_move.key.as_bytes(), random_key.as_bytes());
-    assert_eq!(decrypt_file_metadata_with_key(&after_move.key, &name).unwrap().name, metadata.name);
+    assert_eq!(
+        decrypt_file_metadata_with_key(&after_move.key, &name).unwrap().name,
+        metadata.name
+    );
 }

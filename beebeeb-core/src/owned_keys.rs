@@ -7,8 +7,8 @@
 //! UUID bytes. No new key is minted during resolution.
 
 use crate::CoreError;
-use crate::kdf::{FileKey, MasterKey, derive_file_key};
 use crate::encrypt::{decrypt_chunk_raw, encrypt_chunk_raw};
+use crate::kdf::{FileKey, MasterKey, derive_file_key};
 use zeroize::Zeroizing;
 
 /// The source of a resolved key; safe to inspect without exposing key material.
@@ -74,12 +74,18 @@ pub fn resolve_owned_key(
 ) -> Result<ResolvedOwnedKey, CoreError> {
     if let Some(frame) = owner_wrap {
         if let Ok(key) = unwrap_owner_key(master, item_id, frame) {
-            return Ok(ResolvedOwnedKey { key, origin: KeyOrigin::OwnerWrap });
+            return Ok(ResolvedOwnedKey {
+                key,
+                origin: KeyOrigin::OwnerWrap,
+            });
         }
     }
     if let Some(wrap) = folder_wrap {
         if let Ok(key) = unwrap_child_key(wrap.folder_key, wrap.wrapped_key) {
-            return Ok(ResolvedOwnedKey { key, origin: KeyOrigin::FolderWrap });
+            return Ok(ResolvedOwnedKey {
+                key,
+                origin: KeyOrigin::FolderWrap,
+            });
         }
     }
     if owner_wrap.is_some() || foreign_added {
