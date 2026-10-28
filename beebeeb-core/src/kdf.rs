@@ -425,6 +425,7 @@ mod tests {
     fn combine_folder_link_key_modes_are_domain_separated() {
         let k_c = KAT_FOLDER_KEY;
         let none = combine_folder_link_key(&k_c, None);
+        assert_ne!(none, k_c, "a passphrase-free link still uses the combiner domain");
         let zero_stretch = combine_folder_link_key(&k_c, Some(&[0u8; 32]));
         assert_ne!(none, zero_stretch, "presence byte distinguishes the modes");
 

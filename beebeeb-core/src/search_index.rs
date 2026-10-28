@@ -753,14 +753,16 @@ mod tests {
         let shards = idx.encrypt_shards_with(ShardKeySource::Folder(&folder_key)).unwrap();
         assert_eq!(shards.len(), idx.encrypt_shards(&master).unwrap().len());
 
-        // Same plaintext index, different key bytes: no page blob may collide.
-        let master_shards = idx.encrypt_shards(&master).unwrap();
-        let folder_blob = &shards[0].blob;
-        let master_blob = master_shards
-            .iter()
-            .find(|s| s.bucket == shards[0].bucket && s.page == shards[0].page)
-            .unwrap();
-        assert_ne!(folder_blob, &master_blob.blob);
+        // Pin the actual per-bucket key domain. Comparing ciphertexts would
+        // pass even with identical keys because every page has a random nonce.
+        for shard in &shards {
+            let index_key = derive_shared_folder_index_key(&folder_key, shard.bucket);
+            decrypt_chunk_raw(&index_key, &shard.blob).expect("folder index key must open its shard");
+            assert!(
+                matches!(decrypt_chunk_raw(&folder_key, &shard.blob), Err(CoreError::Decryption)),
+                "the raw folder key must not open an index shard"
+            );
+        }
 
         let restored =
             SearchIndex::from_encrypted_shards_with(ShardKeySource::Folder(&folder_key), &shards, idx.num_shards())

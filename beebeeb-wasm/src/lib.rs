@@ -346,18 +346,17 @@ pub fn derive_shared_folder_index_key(folder_key: &[u8], bucket: u32) -> Result<
 /// link's sealed folder key. Never send the result or `K_c` to the server.
 #[wasm_bindgen(js_name = combineFolderLinkKey)]
 pub fn combine_folder_link_key(k_c: &[u8], passphrase_stretch: Option<Vec<u8>>) -> Result<Vec<u8>, JsError> {
-    let k_c: [u8; 32] = k_c.try_into().map_err(|_| JsError::new("k_c must be 32 bytes"))?;
+    // Own the incoming Vec before validating either secret so every error
+    // path wipes it too. Borrowed wasm-bindgen inputs remain host-owned.
+    let passphrase_stretch = passphrase_stretch.map(zeroize::Zeroizing::new);
+    let k_c = zeroize::Zeroizing::new(<[u8; 32]>::try_from(k_c).map_err(|_| JsError::new("k_c must be 32 bytes"))?);
     let stretch = match passphrase_stretch {
-        Some(bytes) => {
-            let arr: [u8; 32] = bytes
-                .as_slice()
-                .try_into()
-                .map_err(|_| JsError::new("passphrase stretch must be 32 bytes"))?;
-            Some(arr)
-        }
+        Some(bytes) => Some(zeroize::Zeroizing::new(
+            <[u8; 32]>::try_from(bytes.as_slice()).map_err(|_| JsError::new("passphrase stretch must be 32 bytes"))?,
+        )),
         None => None,
     };
-    Ok(kdf::combine_folder_link_key(&k_c, stretch.as_ref()).to_vec())
+    Ok(kdf::combine_folder_link_key(&k_c, stretch.as_deref()).to_vec())
 }
 
 // ---------------------------------------------------------------------------
@@ -1811,18 +1810,28 @@ pub struct WasmSearchIndex {
     inner: search_index::SearchIndex,
 }
 
+// Match deriveSharedFolderIndexKey and the server's 64-bucket layout.
+fn validate_search_index_shard_count(num_shards: u32) -> Result<(), JsError> {
+    if num_shards > search_index::DEFAULT_NUM_SHARDS {
+        return Err(JsError::new("num_shards must be at most 64"));
+    }
+    Ok(())
+}
+
 #[wasm_bindgen]
 impl WasmSearchIndex {
-    /// Empty index with the given shard count (clamped to ≥ 1).
+    /// Empty index with 1–64 shards (zero is clamped to 1).
     #[wasm_bindgen(constructor)]
-    pub fn new(num_shards: u32) -> WasmSearchIndex {
-        Self {
+    pub fn new(num_shards: u32) -> Result<WasmSearchIndex, JsError> {
+        validate_search_index_shard_count(num_shards)?;
+        Ok(Self {
             inner: search_index::SearchIndex::new(num_shards),
-        }
+        })
     }
 
     /// Build from `files` — a JS array of `{ fileId, name }` objects.
     pub fn build(files: JsValue, num_shards: u32) -> Result<WasmSearchIndex, JsError> {
+        validate_search_index_shard_count(num_shards)?;
         let arr = js_sys::Array::from(&files);
         let mut pairs: Vec<(String, String)> = Vec::with_capacity(arr.length() as usize);
         for item in arr.iter() {
@@ -1841,6 +1850,7 @@ impl WasmSearchIndex {
         shards: JsValue,
         num_shards: u32,
     ) -> Result<WasmSearchIndex, JsError> {
+        validate_search_index_shard_count(num_shards)?;
         let mk = master_key_from_slice(master_key)?;
         let core_shards = js_to_shards(&shards)?;
         let inner = search_index::SearchIndex::from_encrypted_shards(&mk, &core_shards, num_shards)
@@ -1906,6 +1916,7 @@ impl WasmSearchIndex {
         shards: JsValue,
         num_shards: u32,
     ) -> Result<WasmSearchIndex, JsError> {
+        validate_search_index_shard_count(num_shards)?;
         let fk = file_key_from_slice(folder_key)?;
         let core_shards = js_to_shards(&shards)?;
         let inner = search_index::SearchIndex::from_encrypted_shards_with(
