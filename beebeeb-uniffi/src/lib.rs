@@ -3289,12 +3289,14 @@ impl From<beebeeb_upload::UploadError> for UploadError {
     fn from(e: beebeeb_upload::UploadError) -> Self {
         match e {
             beebeeb_upload::UploadError::Network(s) => UploadError::Network { detail: s },
-            beebeeb_upload::UploadError::ServerError { status, message } => {
-                UploadError::ServerError { status, detail: message }
-            }
-            beebeeb_upload::UploadError::ClientError { status, message } => {
-                UploadError::ClientError { status, detail: message }
-            }
+            beebeeb_upload::UploadError::ServerError { status, message } => UploadError::ServerError {
+                status,
+                detail: message,
+            },
+            beebeeb_upload::UploadError::ClientError { status, message } => UploadError::ClientError {
+                status,
+                detail: message,
+            },
             beebeeb_upload::UploadError::RateLimited { retry_after_secs } => {
                 UploadError::RateLimited { retry_after_secs }
             }
