@@ -4022,6 +4022,69 @@ pub fn unwrap_owner_file_key(master_key: &[u8], item_id: &str, wrapped: &[u8]) -
         .to_vec())
 }
 
+/// L9 (task 2255): open a LEGACY invite owner copy and return its key only when
+/// core proves it over the folder's rows, in ONE call. `rows` are the server's
+/// `GET /shares/invites/{id}/folder-keys` rows verbatim:
+/// `[{ file_id: string, encrypted_file_key: string }]`, the key in standard base64.
+/// They are read lazily, and core examines at most 64 distinct ids. Returns
+/// `undefined` when the copy does not open, holds text, or is not proven; the
+/// unproven candidate never reaches JS. Attack B (task 2255) is a named residual.
+#[wasm_bindgen(js_name = openLegacyInviteOwnerCopy)]
+pub fn open_legacy_invite_owner_copy(
+    master_key: &[u8],
+    folder_id: &str,
+    legacy_copy: &[u8],
+    rows: JsValue,
+) -> Result<Option<Vec<u8>>, JsError> {
+    use base64::Engine as _;
+    let master = master_key_from_slice(master_key)?;
+    if !js_sys::Array::is_array(&rows) {
+        return Err(JsError::new("rows must be an array"));
+    }
+    let rows = js_sys::Array::from(&rows);
+    // A malformed row reads as an empty id or wrap, which core skips.
+    let rows = rows.iter().map(|row| {
+        let field = |name: &str| {
+            js_sys::Reflect::get(&row, &name.into())
+                .ok()
+                .and_then(|v| v.as_string())
+                .unwrap_or_default()
+        };
+        let wrap = base64::engine::general_purpose::STANDARD
+            .decode(field("encrypted_file_key"))
+            .unwrap_or_default();
+        (field("file_id").into_bytes(), wrap)
+    });
+    Ok(
+        kdf::open_legacy_invite_owner_copy(&master, folder_id.as_bytes(), legacy_copy, rows)
+            .map(|key| key.as_bytes().to_vec()),
+    )
+}
+
+/// Seal a purpose-bound invite owner copy (L9).
+#[wasm_bindgen(js_name = wrapInviteOwnerCopy)]
+pub fn wrap_invite_owner_copy(master_key: &[u8], folder_id: &str, folder_key: &[u8]) -> Result<Vec<u8>, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let key = owned_key(folder_key)?;
+    let blob =
+        kdf::wrap_invite_owner_copy(&master, folder_id.as_bytes(), &key).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok([blob.nonce, blob.ciphertext].concat())
+}
+
+/// Open a purpose-bound invite owner copy; never performs a legacy fallback.
+#[wasm_bindgen(js_name = unwrapInviteOwnerCopy)]
+pub fn unwrap_invite_owner_copy(master_key: &[u8], folder_id: &str, wrapped: &[u8]) -> Result<Vec<u8>, JsError> {
+    if wrapped.len() != 60 {
+        return Err(JsError::new("decryption failed: invite owner copy must be 60 bytes"));
+    }
+    let master = master_key_from_slice(master_key)?;
+    let blob = l6_blob(wrapped, "invite owner copy")?;
+    Ok(kdf::unwrap_invite_owner_copy(&master, folder_id.as_bytes(), &blob)
+        .map_err(|e| JsError::new(&e.to_string()))?
+        .as_bytes()
+        .to_vec())
+}
+
 /// Seal a shared folder's key to the owner's master key (L6 custody record).
 #[wasm_bindgen(js_name = wrapFolderCustody)]
 pub fn wrap_folder_custody(master_key: &[u8], folder_id: &str, folder_key: &[u8]) -> Result<Vec<u8>, JsError> {

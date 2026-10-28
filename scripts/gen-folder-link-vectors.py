@@ -64,6 +64,7 @@ def vectors():
     assert unicodedata.normalize("NFC", nfd["passphrase"]) == passphrase
     generated.append(nfd)
     for name, label, record_id, plaintext in [
+        ("invite_owner_copy_v1", b"beebeeb-invite-owner-copy-v1", "folder-2255", inner),
         ("folder_custody_v1", b"beebeeb-folder-custody-v1", "folder-2237c", inner),
         ("link_owner_key_v1", b"beebeeb-link-owner-key-v1", "share-2237c", kc),
         ("link_owner_token_v1", b"beebeeb-link-owner-token-v1", "share-2237c", token.encode("utf-8")),
@@ -96,9 +97,10 @@ def main():
     if args.write:
         path = Path(__file__).resolve().parent.parent / "test-vectors/vectors.json"
         doc = json.loads(path.read_text())
-        names = {v["name"] for v in generated}
-        doc["vectors"] = [v for v in doc["vectors"] if v["name"] not in names] + generated
-        doc["version"] = 10
+        by_name = {v["name"]: v for v in generated}
+        existing = {v["name"] for v in doc["vectors"]}
+        doc["vectors"] = [by_name.get(v["name"], v) for v in doc["vectors"]] + [v for v in generated if v["name"] not in existing]
+        doc["version"] = 12
         path.write_text(json.dumps(doc, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     print(json.dumps(generated, ensure_ascii=False, indent=2, sort_keys=True))
 

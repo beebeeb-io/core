@@ -356,7 +356,19 @@
       "nonce_hex": "000102030405060708090a0b",
       "note": "L7 child wrap: AAD domain || root UUID bytes || item UUID bytes || kind; independent cryptography KAT.",
       "shared_folder_id": "22222222-2222-4222-8222-222222222222"
+    },
+    {
+      "context_hex": "626565626565622d696e766974652d6f776e65722d636f70792d7631666f6c6465722d32323535",
+      "label": "beebeeb-invite-owner-copy-v1",
+      "master_key_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+      "name": "invite_owner_copy_v1",
+      "nonce_hex": "000102030405060708090a0b",
+      "note": "L6: HKDF info and AES-GCM AAD both equal label || UTF-8 record id; fixed nonce for this public test only.",
+      "plaintext_hex": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+      "purpose_key_hex": "df59dc74d106d59f30987fbc9a2cd3f6519389c9632d23946979ffd7e129069e",
+      "record_id": "folder-2255",
+      "wrapped_hex": "000102030405060708090a0b87a67fd4a3963817b3d53fbb7e057b4556aef4bc590fd256e1beed627958d6329c77f56c216cd23fe3f772333934978a"
     }
   ],
-  "version": 11
+  "version": 12
 }
