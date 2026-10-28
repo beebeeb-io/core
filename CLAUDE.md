@@ -87,6 +87,40 @@ AAD = "beebeeb/chunk/v2"         16 bytes: domain tag + version
 
 `ChunkEncryptorHandle` / `ChunkDecryptorHandle` wrap the primitive for Swift/Kotlin. Key derived IN CORE from a borrowed `&MasterKeyHandle` — raw key bytes never cross FFI. **Single-consumer contract:** a handle is an ordered cursor driven from ONE sequence; the `Mutex` is only UniFFI's Send+Sync backstop. `finish()` consumes the handle. Regenerating bindings: `build-ios.sh` / `build-android.sh`; grep the regenerated header for every new symbol before shipping (the 0426 12-symbol drift lesson).
 
+### Folder-link handles (task 2237c)
+
+Folder keys are random (`FileKeyHandle.generate`, OS CSPRNG), never derived from
+the master key. Clients fetch permanent owner custody before minting a key.
+`wrap_key` / `unwrap_key` keep keys in native handles: AES-256-GCM, no AAD,
+`nonce(12) || ciphertext(48)`; unwrap rejects every plaintext length except 32.
+`key_id` is core's one-way folder-key id, never the key itself.
+
+`from_folder_link` combines the 32-byte URL fragment `K_c` and an optional
+32-byte stretch with `combine_folder_link_key`. `from_folder_link_passphrase`
+stretches with Argon2id v19 (256 MiB, 4 iterations, 2 lanes, 32 bytes), salt =
+`SHA-256(UTF-8 token || "beebeeb-folder-link-passphrase-v1")[0..16]`, then combines.
+Passphrases are NFC-normalized in core and empty strings are rejected. KDF
+errors propagate; clients must never downgrade to an unprotected link. Argon2
+uses a try-reserved explicit block buffer, zeroized on drop with argon2's
+`zeroize` feature. Allocation failure returns a KDF error (OS process termination
+cannot be caught).
+
+L6 supersedes the original custody/owner-wrap rule. `wrap_folder_custody` /
+`unwrap_folder_custody` derive a purpose key using HKDF-SHA256 (no salt, master
+IKM), info = `beebeeb-folder-custody-v1` || folder-id bytes, and bind the same
+bytes as AES-GCM AAD. Link owner recovery uses `beebeeb-link-owner-key-v1` ||
+share-id bytes for K_c and `beebeeb-link-owner-token-v1` || share-id bytes for
+token UTF-8. UniFFI takes canonical id strings as UTF-8. Never fall back to the
+legacy file-key custody opener after authentication fails; an existing invite
+may be opened separately for seeding only. MasterKeyHandle exposes these wraps
+plus legacy `wrap_key` / `wrap_bytes` without exporting the master key.
+
+Unreleased vectors v10 include the original two families, an NFD-equality row,
+and three purpose-wrap families. Python argon2-cffi/cryptography independently
+produces all six; WebCrypto verifies the new purpose keys, AAD and ciphertext.
+The core drift guard regenerates them. Owned secrets and scratch memory are
+zeroized on success and error paths.
+
 ## Encrypted search index (`search_index.rs`)
 
 Client-built, E2E-encrypted file-name search; the server is zero-knowledge, everything runs on-device, identically for every client. `tokenize(name)`: NFKD + accent-fold + separators + camelCase, dedup preserving order; keeps the full normalized name for substring fallback.
@@ -160,3 +194,5 @@ This repo has a knowledge graph at graphify-out/. Read `graphify-out/GRAPH_REPOR
 ## Task history
 
 Pre-distillation CLAUDE.md verbatim (chunk-format v2 review rounds 1–5 + public API change list, onboarding review rounds, count-history baselines): docs/runbook/core-task-history.md
+
+L7 (2237c): folder child key wraps authenticate `beebeeb-folder-child-v1 || shared root UUID bytes (16) || item UUID bytes (16) || kind (1=file, 2=folder)` under the random folder key, without HKDF or an unbound fallback. UniFFI accepts UUID strings and handles; WASM follows its existing byte-key API. Passphrase NFC uses fallibly preallocated zeroizing scalar scratch and UTF-8 output; normalization never grows an unwiped secret buffer.

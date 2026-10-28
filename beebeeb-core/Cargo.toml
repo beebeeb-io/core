@@ -9,7 +9,7 @@ license.workspace = true
 beebeeb-types = { path = "../beebeeb-types" }
 aes-gcm = "0.10"
 base64 = "0.22"
-argon2 = "0.5"
+argon2 = { version = "0.5", features = ["zeroize"] }
 rand = "0.8"
 hkdf = "0.12"
 sha2 = "0.10"

@@ -707,8 +707,8 @@ fn vector_file_version_check() {
         .as_u64()
         .expect("vectors.json must have a 'version' field");
     assert_eq!(
-        version, 9,
-        "vectors.json version mismatch — expected 9, got {version}. \
+        version, 10,
+        "vectors.json version mismatch — expected 10, got {version}. \
          Update this test if you intentionally bumped the version."
     );
 
@@ -742,6 +742,14 @@ fn vector_file_version_check() {
         "shared_folder_index_key",
         // Version 9 (task 2237b): the public folder-link key combiner.
         "combine_folder_link_key",
+        "key_wrap_v1",
+        "folder_link_passphrase",
+        "folder_link_passphrase_nfd",
+        "folder_custody_v1",
+        "link_owner_key_v1",
+        "link_owner_token_v1",
+        "folder_child_file_v1",
+        "folder_child_folder_v1",
     ];
     for name in &required {
         assert!(names.contains(name), "vectors.json is missing required vector '{name}'");
