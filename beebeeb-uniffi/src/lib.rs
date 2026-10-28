@@ -40,23 +40,44 @@ mod folder_link_2237c {
                 .unwrap_invite_owner_copy("other".into(), wire[..12].to_vec(), wire[12..].to_vec())
                 .is_err()
         );
+        // L9 legacy opener: one core call over the folder's rows; the unproven
+        // candidate never leaves core.
+        let folder = FileKeyHandle::from_key_bytes(vec![0xF8; 32]).unwrap();
+        let name_key = master.derive_file_key(folder_id.as_bytes().to_vec()).unwrap();
+        let wire = |d: EncryptedData| [d.nonce, d.ciphertext].concat();
+        let legacy = wire(name_key.wrap_key(&folder).unwrap());
         let child = master.derive_file_key(b"child".to_vec()).unwrap();
-        let wrapped = key.wrap_key(&child).unwrap();
-        let proof = [wrapped.nonce, wrapped.ciphertext].concat();
+        let row = |file_id: &str, wrap: Vec<u8>| LegacyFolderKeyRow {
+            file_id: file_id.into(),
+            wrap,
+        };
+        let proof = wire(folder.wrap_key(&child).unwrap());
+        let opened = master
+            .open_legacy_invite_owner_copy(folder_id.clone(), legacy.clone(), vec![row("child", proof.clone())])
+            .unwrap()
+            .unwrap();
+        assert_eq!(opened.key_id().unwrap(), folder.key_id().unwrap());
         assert!(
             master
-                .verify_legacy_folder_key(folder_id.clone(), &key, "child".into(), proof.clone())
+                .open_legacy_invite_owner_copy(folder_id.clone(), legacy.clone(), vec![row("other", proof)])
                 .unwrap()
+                .is_none()
         );
         assert!(
-            !master
-                .verify_legacy_folder_key(folder_id.clone(), &key, "other".into(), proof)
+            master
+                .open_legacy_invite_owner_copy(folder_id.clone(), legacy, vec![])
                 .unwrap()
+                .is_none()
         );
+        // The folder's 32-byte name JSON is never a key, whatever rows come with it.
+        let name = FileKeyHandle::from_key_bytes(br#"{"name":"Docs","mime_type":null}"#.to_vec()).unwrap();
+        let name_blob = wire(name_key.wrap_key(&name).unwrap());
+        let known = wire(name.wrap_key(&child).unwrap());
         assert!(
-            !master
-                .verify_legacy_folder_key(folder_id, &key, "child".into(), vec![])
+            master
+                .open_legacy_invite_owner_copy(folder_id, name_blob, vec![row("child", known)])
                 .unwrap()
+                .is_none()
         );
     }
 
@@ -472,6 +493,14 @@ impl From<beebeeb_core::CoreError> for CryptoError {
 // ---------------------------------------------------------------------------
 // Return types — UniFFI records
 // ---------------------------------------------------------------------------
+
+/// One row of a shared folder's legacy key table, for the L9 proof (task 2255):
+/// `file_id` as the server lists it, `wrap` = nonce(12) || ciphertext || tag.
+#[derive(uniffi::Record)]
+pub struct LegacyFolderKeyRow {
+    pub file_id: String,
+    pub wrap: Vec<u8>,
+}
 
 /// Result of encrypting a chunk or metadata. Contains the cipher suite
 /// identifier, a random nonce, and the ciphertext (including the GCM tag).
@@ -1203,24 +1232,24 @@ impl MasterKeyHandle {
         Ok(FileKeyHandle::new(key))
     }
 
-    /// Verify a legacy candidate without exporting the master key.
-    pub fn verify_legacy_folder_key(
+    /// L9 (task 2255): open a LEGACY invite owner copy; `Some` only when core
+    /// proves it over the folder's `rows` (at most 64 distinct ids, one call).
+    /// The unproven candidate never leaves core. Attack B is a named residual.
+    pub fn open_legacy_invite_owner_copy(
         &self,
         folder_id: String,
-        candidate: &FileKeyHandle,
-        owner_child_id: String,
-        child_wrap: Vec<u8>,
-    ) -> Result<bool, CryptoError> {
-        let key = candidate.with_key(|key| Zeroizing::new(*key.as_bytes()))?;
-        self.with_key(|master| {
-            kdf::verify_legacy_folder_key(
+        legacy_copy: Vec<u8>,
+        rows: Vec<LegacyFolderKeyRow>,
+    ) -> Result<Option<Arc<FileKeyHandle>>, CryptoError> {
+        let key = self.with_key(|master| {
+            kdf::open_legacy_invite_owner_copy(
                 master,
                 folder_id.as_bytes(),
-                &*key,
-                owner_child_id.as_bytes(),
-                &child_wrap,
+                &legacy_copy,
+                rows.iter().map(|row| (row.file_id.as_bytes(), row.wrap.as_slice())),
             )
-        })
+        })?;
+        Ok(key.map(FileKeyHandle::new))
     }
 
     pub fn wrap_invite_owner_copy(

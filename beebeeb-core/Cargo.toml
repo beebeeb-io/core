@@ -17,6 +17,8 @@ sha2 = "0.10"
 # keyed by SHA-1 prefix. Never used for integrity or authentication.
 sha1 = "0.10"
 zeroize = { version = "1", features = ["derive"] }
+# Constant-time key comparison (task 2255, L9 legacy folder-key proof).
+subtle = "2.6"
 bip39 = { version = "2", features = ["rand"] }
 thiserror = { workspace = true }
 opaque-ke = { version = "4.0.1", features = ["ristretto255", "argon2"] }

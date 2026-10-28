@@ -18,6 +18,8 @@ js-sys = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
 uuid = { version = "1", features = ["v4", "serde", "js"] }
 zeroize = "1"
+# Decodes the server's base64 folder-key rows for the L9 legacy proof (task 2255).
+base64 = "0.22"
 
 # wasm-pack's bundled wasm-opt rejects the bulk-memory / sign-ext ops that
 # Rust 1.95 emits by default, so a bare `wasm-pack --release` fails the opt step.

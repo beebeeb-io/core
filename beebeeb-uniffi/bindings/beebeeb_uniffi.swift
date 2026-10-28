@@ -3476,6 +3476,13 @@ public protocol MasterKeyHandleProtocol: AnyObject, Sendable {
      */
     func exportForKeychain() throws  -> Data
     
+    /**
+     * L9 (task 2255): open a LEGACY invite owner copy; `Some` only when core
+     * proves it over the folder's `rows` (at most 64 distinct ids, one call).
+     * The unproven candidate never leaves core. Attack B is a named residual.
+     */
+    func openLegacyInviteOwnerCopy(folderId: String, legacyCopy: Data, rows: [LegacyFolderKeyRow]) throws  -> FileKeyHandle?
+    
     func unwrapFolderCustody(folderId: String, nonce: Data, ciphertext: Data) throws  -> FileKeyHandle
     
     func unwrapInviteOwnerCopy(folderId: String, nonce: Data, ciphertext: Data) throws  -> FileKeyHandle
@@ -3492,11 +3499,6 @@ public protocol MasterKeyHandleProtocol: AnyObject, Sendable {
      * Open only L8 and return an opaque handle, never raw file-key bytes.
      */
     func unwrapOwnerFileKey(itemId: String, nonce: Data, ciphertext: Data) throws  -> FileKeyHandle
-    
-    /**
-     * Verify a legacy candidate without exporting the master key.
-     */
-    func verifyLegacyFolderKey(folderId: String, candidate: FileKeyHandle, ownerChildId: String, childWrap: Data) throws  -> Bool
     
     /**
      * Wrap bytes without exporting the master key across the FFI boundary.
@@ -3801,6 +3803,22 @@ open func exportForKeychain()throws  -> Data  {
 })
 }
     
+    /**
+     * L9 (task 2255): open a LEGACY invite owner copy; `Some` only when core
+     * proves it over the folder's `rows` (at most 64 distinct ids, one call).
+     * The unproven candidate never leaves core. Attack B is a named residual.
+     */
+open func openLegacyInviteOwnerCopy(folderId: String, legacyCopy: Data, rows: [LegacyFolderKeyRow])throws  -> FileKeyHandle?  {
+    return try  FfiConverterOptionTypeFileKeyHandle.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_open_legacy_invite_owner_copy(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(folderId),
+        FfiConverterData.lower(legacyCopy),
+        FfiConverterSequenceTypeLegacyFolderKeyRow.lower(rows),$0
+    )
+})
+}
+    
 open func unwrapFolderCustody(folderId: String, nonce: Data, ciphertext: Data)throws  -> FileKeyHandle  {
     return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_folder_custody(
@@ -3859,21 +3877,6 @@ open func unwrapOwnerFileKey(itemId: String, nonce: Data, ciphertext: Data)throw
         FfiConverterString.lower(itemId),
         FfiConverterData.lower(nonce),
         FfiConverterData.lower(ciphertext),$0
-    )
-})
-}
-    
-    /**
-     * Verify a legacy candidate without exporting the master key.
-     */
-open func verifyLegacyFolderKey(folderId: String, candidate: FileKeyHandle, ownerChildId: String, childWrap: Data)throws  -> Bool  {
-    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
-    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_verify_legacy_folder_key(
-            self.uniffiCloneHandle(),
-        FfiConverterString.lower(folderId),
-        FfiConverterTypeFileKeyHandle_lower(candidate),
-        FfiConverterString.lower(ownerChildId),
-        FfiConverterData.lower(childWrap),$0
     )
 })
 }
@@ -6583,6 +6586,64 @@ public func FfiConverterTypeEncryptedShardDto_lift(_ buf: RustBuffer) throws -> 
 #endif
 public func FfiConverterTypeEncryptedShardDto_lower(_ value: EncryptedShardDto) -> RustBuffer {
     return FfiConverterTypeEncryptedShardDto.lower(value)
+}
+
+
+/**
+ * One row of a shared folder's legacy key table, for the L9 proof (task 2255):
+ * `file_id` as the server lists it, `wrap` = nonce(12) || ciphertext || tag.
+ */
+public struct LegacyFolderKeyRow: Equatable, Hashable {
+    public var fileId: String
+    public var wrap: Data
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(fileId: String, wrap: Data) {
+        self.fileId = fileId
+        self.wrap = wrap
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension LegacyFolderKeyRow: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLegacyFolderKeyRow: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LegacyFolderKeyRow {
+        return
+            try LegacyFolderKeyRow(
+                fileId: FfiConverterString.read(from: &buf), 
+                wrap: FfiConverterData.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LegacyFolderKeyRow, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.fileId, into: &buf)
+        FfiConverterData.write(value.wrap, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLegacyFolderKeyRow_lift(_ buf: RustBuffer) throws -> LegacyFolderKeyRow {
+    return try FfiConverterTypeLegacyFolderKeyRow.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLegacyFolderKeyRow_lower(_ value: LegacyFolderKeyRow) -> RustBuffer {
+    return FfiConverterTypeLegacyFolderKeyRow.lower(value)
 }
 
 
@@ -10384,6 +10445,30 @@ fileprivate struct FfiConverterOptionTypeBreachCheckHandle: FfiConverterRustBuff
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeFileKeyHandle: FfiConverterRustBuffer {
+    typealias SwiftType = FileKeyHandle?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeFileKeyHandle.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeFileKeyHandle.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeCachedFileEntryData: FfiConverterRustBuffer {
     typealias SwiftType = CachedFileEntryData?
 
@@ -10868,6 +10953,31 @@ fileprivate struct FfiConverterSequenceTypeEncryptedShardDto: FfiConverterRustBu
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeEncryptedShardDto.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeLegacyFolderKeyRow: FfiConverterRustBuffer {
+    typealias SwiftType = [LegacyFolderKeyRow]
+
+    public static func write(_ value: [LegacyFolderKeyRow], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeLegacyFolderKeyRow.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [LegacyFolderKeyRow] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [LegacyFolderKeyRow]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeLegacyFolderKeyRow.read(from: &buf))
         }
         return seq
     }
@@ -12482,6 +12592,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_export_for_keychain() != 50366) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_open_legacy_invite_owner_copy() != 59849) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_folder_custody() != 29894) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -12495,9 +12608,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_owner_file_key() != 55056) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_verify_legacy_folder_key() != 33121) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_bytes() != 63264) {

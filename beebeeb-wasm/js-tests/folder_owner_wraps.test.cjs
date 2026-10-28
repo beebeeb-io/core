@@ -138,7 +138,7 @@ test('L8 rejects invalid key/frame lengths and empty record IDs', () => {
   assert.throws(() => wasm.unwrapOwnerFileKey(key, '', new Uint8Array(60)), /record id must not be empty/);
 });
 
-test('L9 invite owner copy vector, purpose binding and legacy proof', () => {
+test('L9 invite owner copy vector and purpose binding', () => {
   const v = vector('invite_owner_copy_v1');
   const master = bytes(v.master_key_hex);
   const key = bytes(v.plaintext_hex);
@@ -147,10 +147,43 @@ test('L9 invite owner copy vector, purpose binding and legacy proof', () => {
   assert.equal(hex(wasm.unwrapInviteOwnerCopy(master, v.record_id, copy)), v.plaintext_hex);
   assert.throws(() => wasm.unwrapInviteOwnerCopy(master, 'other', copy));
   assert.throws(() => wasm.unwrapFolderCustody(master, v.record_id, copy));
-  const child = wasm.derive_file_key(master, new TextEncoder().encode('child'));
-  const sealed = wasm.encrypt_chunk(key, child);
-  const wire = new Uint8Array([...sealed.nonce, ...sealed.ciphertext]);
-  assert.equal(wasm.verifyLegacyFolderKey(master, v.record_id, key, 'child', wire), true);
-  assert.equal(wasm.verifyLegacyFolderKey(master, v.record_id, key, 'other', wire), false);
-  assert.equal(wasm.verifyLegacyFolderKey(master, v.record_id, key, 'child', new Uint8Array()), false);
+  // A purpose-bound copy never opens as a legacy one.
+  assert.equal(wasm.openLegacyInviteOwnerCopy(master, v.record_id, copy, []), undefined);
+});
+
+test('L9 legacy owner copy opens only when proven over the server rows, in one call', () => {
+  const enc = new TextEncoder();
+  const master = new Uint8Array(32).fill(7);
+  const folderId = '11111111-1111-4111-8111-111111111111';
+  const folderKey = new Uint8Array(32).fill(0xf8); // 0xF8 never occurs in UTF-8
+  const seal = (key, plaintext) => {
+    const r = wasm.encrypt_chunk(key, plaintext);
+    return new Uint8Array([...r.nonce, ...r.ciphertext]);
+  };
+  const b64 = (b) => Buffer.from(b).toString('base64');
+  const nameKey = wasm.derive_file_key(master, enc.encode(folderId));
+  const ownerRow = (id, key = folderKey) => ({ file_id: id, encrypted_file_key: b64(seal(key, wasm.derive_file_key(master, enc.encode(id)))) });
+  const legacy = seal(nameKey, folderKey);
+  const proof = ownerRow('22222222-2222-4222-8222-222222222222');
+  const foreign = { file_id: '33333333-3333-4333-8333-333333333333', encrypted_file_key: b64(seal(folderKey, new Uint8Array(32).fill(0x5a))) };
+
+  assert.equal(hex(wasm.openLegacyInviteOwnerCopy(master, folderId, legacy, [foreign, proof])), hex(folderKey));
+  assert.equal(wasm.openLegacyInviteOwnerCopy(master, folderId, legacy, [foreign]), undefined);
+  assert.equal(wasm.openLegacyInviteOwnerCopy(master, folderId, legacy, []), undefined);
+  // Malformed rows are skipped, not fatal.
+  assert.equal(hex(wasm.openLegacyInviteOwnerCopy(master, folderId, legacy, [{}, { file_id: 'x', encrypted_file_key: '%%' }, proof])), hex(folderKey));
+  // The cap: 64 distinct non-proving ids first, then the proof, is not proven.
+  const junk = Array.from({ length: 64 }, (_, i) => ({ ...foreign, file_id: `junk-${i}` }));
+  assert.equal(wasm.openLegacyInviteOwnerCopy(master, folderId, legacy, [...junk, proof]), undefined);
+  assert.equal(hex(wasm.openLegacyInviteOwnerCopy(master, folderId, legacy, [...junk.slice(1), proof])), hex(folderKey));
+
+  // The folder's own name blob ({"name":"Docs","mime_type":null} is 32 bytes)
+  // is never a key, even with a row the server could build from a leaked child key.
+  const name = enc.encode('{"name":"Docs","mime_type":null}');
+  assert.equal(name.length, 32);
+  const nameBlob = seal(nameKey, name);
+  assert.equal(wasm.openLegacyInviteOwnerCopy(master, folderId, nameBlob, [ownerRow(proof.file_id, name)]), undefined);
+
+  assert.throws(() => wasm.openLegacyInviteOwnerCopy(master, folderId, legacy, 'rows'), /rows must be an array/);
+  assert.throws(() => wasm.openLegacyInviteOwnerCopy(new Uint8Array(31), folderId, legacy, []), /master_key must be exactly 32 bytes/);
 });

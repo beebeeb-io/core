@@ -1046,6 +1046,8 @@ external fun uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_encrypt_name_
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_export_for_keychain(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_open_legacy_invite_owner_copy(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_folder_custody(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_invite_owner_copy(
@@ -1055,8 +1057,6 @@ external fun uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_link_o
 external fun uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_link_owner_token(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_owner_file_key(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_verify_legacy_folder_key(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_bytes(
 ): Short
@@ -1451,6 +1451,8 @@ external fun uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_encrypt_name_with_c
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_export_for_keychain(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_open_legacy_invite_owner_copy(`ptr`: Long,`folderId`: RustBuffer.ByValue,`legacyCopy`: RustBuffer.ByValue,`rows`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_folder_custody(`ptr`: Long,`folderId`: RustBuffer.ByValue,`nonce`: RustBuffer.ByValue,`ciphertext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_invite_owner_copy(`ptr`: Long,`folderId`: RustBuffer.ByValue,`nonce`: RustBuffer.ByValue,`ciphertext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1461,8 +1463,6 @@ external fun uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_link_owner_t
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_owner_file_key(`ptr`: Long,`itemId`: RustBuffer.ByValue,`nonce`: RustBuffer.ByValue,`ciphertext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
-external fun uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_verify_legacy_folder_key(`ptr`: Long,`folderId`: RustBuffer.ByValue,`candidate`: Long,`ownerChildId`: RustBuffer.ByValue,`childWrap`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Byte
 external fun uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_bytes(`ptr`: Long,`bytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_folder_custody(`ptr`: Long,`folderId`: RustBuffer.ByValue,`inner`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -2298,6 +2298,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_export_for_keychain() != 50366.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_open_legacy_invite_owner_copy() != 59849.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_folder_custody() != 29894.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2311,9 +2314,6 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_owner_file_key() != 55056.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_verify_legacy_folder_key() != 33121.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_bytes() != 63264.toShort()) {
@@ -7509,6 +7509,13 @@ public interface MasterKeyHandleInterface {
      */
     fun `exportForKeychain`(): kotlin.ByteArray
     
+    /**
+     * L9 (task 2255): open a LEGACY invite owner copy; `Some` only when core
+     * proves it over the folder's `rows` (at most 64 distinct ids, one call).
+     * The unproven candidate never leaves core. Attack B is a named residual.
+     */
+    fun `openLegacyInviteOwnerCopy`(`folderId`: kotlin.String, `legacyCopy`: kotlin.ByteArray, `rows`: List<LegacyFolderKeyRow>): FileKeyHandle?
+    
     fun `unwrapFolderCustody`(`folderId`: kotlin.String, `nonce`: kotlin.ByteArray, `ciphertext`: kotlin.ByteArray): FileKeyHandle
     
     fun `unwrapInviteOwnerCopy`(`folderId`: kotlin.String, `nonce`: kotlin.ByteArray, `ciphertext`: kotlin.ByteArray): FileKeyHandle
@@ -7525,11 +7532,6 @@ public interface MasterKeyHandleInterface {
      * Open only L8 and return an opaque handle, never raw file-key bytes.
      */
     fun `unwrapOwnerFileKey`(`itemId`: kotlin.String, `nonce`: kotlin.ByteArray, `ciphertext`: kotlin.ByteArray): FileKeyHandle
-    
-    /**
-     * Verify a legacy candidate without exporting the master key.
-     */
-    fun `verifyLegacyFolderKey`(`folderId`: kotlin.String, `candidate`: FileKeyHandle, `ownerChildId`: kotlin.String, `childWrap`: kotlin.ByteArray): kotlin.Boolean
     
     /**
      * Wrap bytes without exporting the master key across the FFI boundary.
@@ -7909,6 +7911,25 @@ open class MasterKeyHandle: Disposable, AutoCloseable, MasterKeyHandleInterface
     
 
     
+    /**
+     * L9 (task 2255): open a LEGACY invite owner copy; `Some` only when core
+     * proves it over the folder's `rows` (at most 64 distinct ids, one call).
+     * The unproven candidate never leaves core. Attack B is a named residual.
+     */
+    @Throws(CryptoException::class)override fun `openLegacyInviteOwnerCopy`(`folderId`: kotlin.String, `legacyCopy`: kotlin.ByteArray, `rows`: List<LegacyFolderKeyRow>): FileKeyHandle? {
+            return FfiConverterOptionalTypeFileKeyHandle.lift(
+    callWithHandle {
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_open_legacy_invite_owner_copy(
+        it,
+        FfiConverterString.lower(`folderId`),FfiConverterByteArray.lower(`legacyCopy`),FfiConverterSequenceTypeLegacyFolderKeyRow.lower(`rows`),_status)
+}
+    }
+    )
+    }
+    
+
+    
     @Throws(CryptoException::class)override fun `unwrapFolderCustody`(`folderId`: kotlin.String, `nonce`: kotlin.ByteArray, `ciphertext`: kotlin.ByteArray): FileKeyHandle {
             return FfiConverterTypeFileKeyHandle.lift(
     callWithHandle {
@@ -7979,23 +8000,6 @@ open class MasterKeyHandle: Disposable, AutoCloseable, MasterKeyHandleInterface
     UniffiLib.uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_owner_file_key(
         it,
         FfiConverterString.lower(`itemId`),FfiConverterByteArray.lower(`nonce`),FfiConverterByteArray.lower(`ciphertext`),_status)
-}
-    }
-    )
-    }
-    
-
-    
-    /**
-     * Verify a legacy candidate without exporting the master key.
-     */
-    @Throws(CryptoException::class)override fun `verifyLegacyFolderKey`(`folderId`: kotlin.String, `candidate`: FileKeyHandle, `ownerChildId`: kotlin.String, `childWrap`: kotlin.ByteArray): kotlin.Boolean {
-            return FfiConverterBoolean.lift(
-    callWithHandle {
-    uniffiRustCallWithError(CryptoException) { _status ->
-    UniffiLib.uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_verify_legacy_folder_key(
-        it,
-        FfiConverterString.lower(`folderId`),FfiConverterTypeFileKeyHandle.lower(`candidate`),FfiConverterString.lower(`ownerChildId`),FfiConverterByteArray.lower(`childWrap`),_status)
 }
     }
     )
@@ -10715,6 +10719,48 @@ public object FfiConverterTypeEncryptedShardDto: FfiConverterRustBuffer<Encrypte
             FfiConverterUInt.write(value.`bucket`, buf)
             FfiConverterUInt.write(value.`page`, buf)
             FfiConverterByteArray.write(value.`blob`, buf)
+    }
+}
+
+
+
+/**
+ * One row of a shared folder's legacy key table, for the L9 proof (task 2255):
+ * `file_id` as the server lists it, `wrap` = nonce(12) || ciphertext || tag.
+ */
+data class LegacyFolderKeyRow (
+    var `fileId`: kotlin.String
+    , 
+    var `wrap`: kotlin.ByteArray
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLegacyFolderKeyRow: FfiConverterRustBuffer<LegacyFolderKeyRow> {
+    override fun read(buf: ByteBuffer): LegacyFolderKeyRow {
+        return LegacyFolderKeyRow(
+            FfiConverterString.read(buf),
+            FfiConverterByteArray.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: LegacyFolderKeyRow) = (
+            FfiConverterString.allocationSize(value.`fileId`) +
+            FfiConverterByteArray.allocationSize(value.`wrap`)
+    )
+
+    override fun write(value: LegacyFolderKeyRow, buf: ByteBuffer) {
+            FfiConverterString.write(value.`fileId`, buf)
+            FfiConverterByteArray.write(value.`wrap`, buf)
     }
 }
 
@@ -14328,6 +14374,38 @@ public object FfiConverterOptionalTypeBreachCheckHandle: FfiConverterRustBuffer<
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeFileKeyHandle: FfiConverterRustBuffer<FileKeyHandle?> {
+    override fun read(buf: ByteBuffer): FileKeyHandle? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeFileKeyHandle.read(buf)
+    }
+
+    override fun allocationSize(value: FileKeyHandle?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeFileKeyHandle.allocationSize(value)
+        }
+    }
+
+    override fun write(value: FileKeyHandle?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeFileKeyHandle.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeCachedFileEntryData: FfiConverterRustBuffer<CachedFileEntryData?> {
     override fun read(buf: ByteBuffer): CachedFileEntryData? {
         if (buf.get().toInt() == 0) {
@@ -14910,6 +14988,34 @@ public object FfiConverterSequenceTypeEncryptedShardDto: FfiConverterRustBuffer<
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeEncryptedShardDto.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeLegacyFolderKeyRow: FfiConverterRustBuffer<List<LegacyFolderKeyRow>> {
+    override fun read(buf: ByteBuffer): List<LegacyFolderKeyRow> {
+        val len = buf.getInt()
+        return List<LegacyFolderKeyRow>(len) {
+            FfiConverterTypeLegacyFolderKeyRow.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<LegacyFolderKeyRow>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeLegacyFolderKeyRow.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<LegacyFolderKeyRow>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeLegacyFolderKeyRow.write(it, buf)
         }
     }
 }
