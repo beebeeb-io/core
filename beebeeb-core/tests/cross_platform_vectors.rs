@@ -796,10 +796,16 @@ fn check_owner_key_vector(v: &serde_json::Value, id_field: &str, key_field: &str
     let expected = bytes32(v, key_field);
     let frame = decode_hex(v, "expected_frame_hex");
     assert_eq!(&frame[..12], decode_hex(v, "nonce_hex"));
-    assert_eq!(unwrap_owner_file_key(&master, id, &frame).unwrap().as_bytes(), &expected);
+    assert_eq!(
+        unwrap_owner_file_key(&master, id, &frame).unwrap().as_bytes(),
+        &expected
+    );
     let shipped = wrap_owner_file_key(&master, id, &FileKey::from_bytes(expected)).unwrap();
     assert_eq!(shipped.len(), frame.len());
-    assert_eq!(unwrap_owner_file_key(&master, id, &shipped).unwrap().as_bytes(), &expected);
+    assert_eq!(
+        unwrap_owner_file_key(&master, id, &shipped).unwrap().as_bytes(),
+        &expected
+    );
 }
 
 #[test]

@@ -35,7 +35,11 @@ pub struct FolderWrap<'a> {
 /// Seal an owner file-key adoption envelope with the L8 purpose key and AAD.
 /// Item IDs use the same canonical UUID string bytes as L6 custody records.
 pub fn wrap_owner_file_key(master: &MasterKey, item_id: &str, key: &FileKey) -> Result<Vec<u8>, CoreError> {
-    Ok(key_frame(crate::kdf::wrap_owner_file_key(master, item_id.as_bytes(), key)?))
+    Ok(key_frame(crate::kdf::wrap_owner_file_key(
+        master,
+        item_id.as_bytes(),
+        key,
+    )?))
 }
 
 /// Open only L8 owner adoption. No legacy name, content or owner-wrap fallback.

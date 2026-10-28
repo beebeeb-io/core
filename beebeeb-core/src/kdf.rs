@@ -615,17 +615,29 @@ mod tests {
         let wrapping_key = purpose_key(&master, &context);
         let key = FileKey::from_bytes([0x60; 32]);
         let no_aad = crate::encrypt::encrypt_chunk(&wrapping_key, key.as_bytes()).unwrap();
-        assert!(unwrap_owner_file_key(&master, item, &no_aad).is_err(), "empty AAD accepted");
+        assert!(
+            unwrap_owner_file_key(&master, item, &no_aad).is_err(),
+            "empty AAD accepted"
+        );
         let bound = wrap_owner_file_key(&master, item, &key).unwrap();
-        assert!(crate::encrypt::decrypt_chunk(&wrapping_key, &bound).is_err(), "writer omitted AAD");
+        assert!(
+            crate::encrypt::decrypt_chunk(&wrapping_key, &bound).is_err(),
+            "writer omitted AAD"
+        );
     }
 
     #[test]
     fn l8_owner_file_key_requires_exactly_32_authenticated_bytes() {
         let master = MasterKey::from_bytes([0x40; 32]);
         for length in [0, 31, 32, 33, 64] {
-            let blob = purpose_wrap_with_nonce(&master, OWNER_FILE_KEY_LABEL, b"item", &vec![0x60; length], &[0x37; 12]).unwrap();
-            assert_eq!(unwrap_owner_file_key(&master, b"item", &blob).is_ok(), length == 32, "length {length}");
+            let blob =
+                purpose_wrap_with_nonce(&master, OWNER_FILE_KEY_LABEL, b"item", &vec![0x60; length], &[0x37; 12])
+                    .unwrap();
+            assert_eq!(
+                unwrap_owner_file_key(&master, b"item", &blob).is_ok(),
+                length == 32,
+                "length {length}"
+            );
         }
     }
 

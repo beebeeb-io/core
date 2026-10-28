@@ -264,8 +264,13 @@ fn owned_key_vector(name: &str) -> Value {
     let raw = |blob: beebeeb_types::EncryptedBlob| [blob.nonce, blob.ciphertext].concat();
     let frame = match name {
         "owner_wrapped_file_key" => raw(crate::kdf::purpose_wrap_with_nonce(
-            &master, crate::kdf::OWNER_FILE_KEY_LABEL, file_id.as_bytes(), &child_bytes, &nonce,
-        ).expect("seal L8 owner file vector")),
+            &master,
+            crate::kdf::OWNER_FILE_KEY_LABEL,
+            file_id.as_bytes(),
+            &child_bytes,
+            &nonce,
+        )
+        .expect("seal L8 owner file vector")),
         "owner_wrapped_folder_key" => raw(crate::kdf::purpose_wrap_with_nonce(
             &master,
             crate::kdf::FOLDER_CUSTODY_LABEL,

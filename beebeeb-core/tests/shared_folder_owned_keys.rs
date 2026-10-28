@@ -50,9 +50,9 @@ fn owner_kat() {
         &expected_child_key
     );
     // Canonical textual UUID bytes, not the binary 16-byte UUID.
-    let binary_blob = beebeeb_core::kdf::wrap_owner_file_key(
-        &master, uuid::Uuid::parse_str(FILE_ID).unwrap().as_bytes(), &child(),
-    ).unwrap();
+    let binary_blob =
+        beebeeb_core::kdf::wrap_owner_file_key(&master, uuid::Uuid::parse_str(FILE_ID).unwrap().as_bytes(), &child())
+            .unwrap();
     let binary_wrap = [binary_blob.nonce, binary_blob.ciphertext].concat();
     assert!(unwrap_owner_file_key(&master, FILE_ID, &binary_wrap).is_err());
 }
@@ -422,8 +422,14 @@ fn l8_owner_rejects_own_v1_content_frame() {
     let known_content = [0x55; 32];
     let frame = encrypt_chunk_raw(&content_key, &known_content).unwrap();
     assert_eq!(frame.len(), 60);
-    assert_eq!(beebeeb_core::encrypt::decrypt_chunk_raw(&content_key, &frame).unwrap(), known_content);
-    assert!(unwrap_owner_file_key(&master, FILE_ID, &frame).is_err(), "v1 content accepted as owner wrap");
+    assert_eq!(
+        beebeeb_core::encrypt::decrypt_chunk_raw(&content_key, &frame).unwrap(),
+        known_content
+    );
+    assert!(
+        unwrap_owner_file_key(&master, FILE_ID, &frame).is_err(),
+        "v1 content accepted as owner wrap"
+    );
 }
 
 #[test]
@@ -435,7 +441,10 @@ fn l8_owner_rejects_own_legacy_name_envelope() {
     assert_eq!(plaintext, br#"{"mime_type":null,"name":"test"}"#);
     let frame = [blob.nonce, blob.ciphertext].concat();
     assert_eq!(frame.len(), 60, "fixture must pass the old length gate");
-    assert!(unwrap_owner_file_key(&master, FILE_ID, &frame).is_err(), "legacy name accepted as owner wrap");
+    assert!(
+        unwrap_owner_file_key(&master, FILE_ID, &frame).is_err(),
+        "legacy name accepted as owner wrap"
+    );
 }
 
 #[test]
@@ -443,7 +452,10 @@ fn l8_resolver_never_reads_legacy_owner_format() {
     let master = master();
     let old = encrypt_chunk_raw(&derive_file_key(&master, FILE_ID.as_bytes()), child().as_bytes()).unwrap();
     for foreign in [false, true] {
-        assert!(resolve_owned_key(&master, FILE_ID, Some(&old), None, foreign).is_err(), "resolver accepted legacy owner wrap");
+        assert!(
+            resolve_owned_key(&master, FILE_ID, Some(&old), None, foreign).is_err(),
+            "resolver accepted legacy owner wrap"
+        );
     }
 }
 
@@ -451,7 +463,10 @@ fn l8_resolver_never_reads_legacy_owner_format() {
 fn l8_owner_wrap_binds_item_and_purpose() {
     let master = master();
     let wrap = wrap_owner_file_key(&master, FILE_ID, &child()).unwrap();
-    assert_eq!(unwrap_owner_file_key(&master, FILE_ID, &wrap).unwrap().as_bytes(), child().as_bytes());
+    assert_eq!(
+        unwrap_owner_file_key(&master, FILE_ID, &wrap).unwrap().as_bytes(),
+        child().as_bytes()
+    );
     assert!(unwrap_owner_file_key(&master, FOLDER_ID, &wrap).is_err());
     assert!(unwrap_folder_custody(&master, FILE_ID, &wrap).is_err());
     let custody = wrap_folder_custody(&master, FILE_ID, &child()).unwrap();
