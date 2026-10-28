@@ -1159,6 +1159,52 @@ impl MasterKeyHandle {
         Ok(FileKeyHandle::new(key))
     }
 
+    /// Verify a legacy candidate without exporting the master key.
+    pub fn verify_legacy_folder_key(
+        &self,
+        folder_id: String,
+        candidate: &FileKeyHandle,
+        owner_child_id: String,
+        child_wrap: Vec<u8>,
+    ) -> Result<bool, CryptoError> {
+        let key = candidate.with_key(|key| Zeroizing::new(*key.as_bytes()))?;
+        self.with_key(|master| {
+            kdf::verify_legacy_folder_key(
+                master,
+                folder_id.as_bytes(),
+                &*key,
+                owner_child_id.as_bytes(),
+                &child_wrap,
+            )
+        })
+    }
+
+    pub fn wrap_invite_owner_copy(
+        &self,
+        folder_id: String,
+        inner: &FileKeyHandle,
+    ) -> Result<EncryptedData, CryptoError> {
+        let key = inner.with_key(|key| kdf::FileKey::from_bytes(*key.as_bytes()))?;
+        self.with_key(|master| kdf::wrap_invite_owner_copy(master, folder_id.as_bytes(), &key))?
+            .map(|blob| encrypted_blob_to_data(&blob))
+            .map_err(Into::into)
+    }
+
+    pub fn unwrap_invite_owner_copy(
+        &self,
+        folder_id: String,
+        nonce: Vec<u8>,
+        ciphertext: Vec<u8>,
+    ) -> Result<Arc<FileKeyHandle>, CryptoError> {
+        let blob = EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce,
+            ciphertext,
+        };
+        let key = self.with_key(|master| kdf::unwrap_invite_owner_copy(master, folder_id.as_bytes(), &blob))??;
+        Ok(FileKeyHandle::new(key))
+    }
+
     pub fn wrap_folder_custody(&self, folder_id: String, inner: &FileKeyHandle) -> Result<EncryptedData, CryptoError> {
         let key = inner.with_key(|key| kdf::FileKey::from_bytes(*key.as_bytes()))?;
         self.with_key(|mk| kdf::wrap_folder_custody(mk, folder_id.as_bytes(), &key))?

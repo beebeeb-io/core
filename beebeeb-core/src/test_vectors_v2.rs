@@ -35,10 +35,10 @@ use crate::encrypt::{derive_name_key, encrypt_name_for_with_nonce, encrypt_name_
 use crate::kdf::{MasterKey, derive_file_key};
 
 /// The `version` of `test-vectors/vectors.json` that carries these vectors.
-pub const VECTORS_FILE_VERSION: u64 = 11;
+pub const VECTORS_FILE_VERSION: u64 = 12;
 
 /// Names of the v2 vectors, in the order they are published.
-pub const V2_VECTOR_NAMES: [&str; 19] = [
+pub const V2_VECTOR_NAMES: [&str; 20] = [
     "chunk_v2_stream",
     "chunk_v2_single_frame",
     "metadata_v2_name",
@@ -52,6 +52,7 @@ pub const V2_VECTOR_NAMES: [&str; 19] = [
     "key_wrap_v1",
     "folder_link_passphrase",
     "folder_link_passphrase_nfd",
+    "invite_owner_copy_v1",
     "folder_custody_v1",
     "link_owner_key_v1",
     "link_owner_token_v1",
@@ -121,6 +122,12 @@ pub fn v2_vectors() -> Vec<Value> {
         key_wrap_v1_vector(),
         folder_link_passphrase_vector(),
         folder_link_passphrase_nfd_vector(),
+        purpose_wrap_vector(
+            "invite_owner_copy_v1",
+            crate::kdf::INVITE_OWNER_COPY_LABEL,
+            "folder-2255",
+            &GIVEN_FILE_KEY,
+        ),
         purpose_wrap_vector(
             "folder_custody_v1",
             crate::kdf::FOLDER_CUSTODY_LABEL,

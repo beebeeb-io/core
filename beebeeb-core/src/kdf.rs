@@ -455,6 +455,51 @@ pub fn unwrap_owner_file_key(
     purpose_unwrap_key(master, OWNER_FILE_KEY_LABEL, item_id, blob)
 }
 
+/// Prove possession of a legacy folder key using an owner-derived child (L9).
+/// The caller must supply a child of this folder, excluding request uploads.
+/// Legacy wraps carry no AAD; only equality with the secret derived child key
+/// proves possession. Successful decryption or a 32-byte plaintext is insufficient.
+pub fn verify_legacy_folder_key(
+    master: &MasterKey,
+    folder_id: &[u8],
+    candidate_key: &[u8],
+    owner_child_id: &[u8],
+    child_wrap: &[u8],
+) -> bool {
+    if folder_id.is_empty() || owner_child_id.is_empty() || folder_id == owner_child_id || child_wrap.len() != 60 {
+        return false;
+    }
+    let Ok(candidate): Result<&[u8; 32], _> = candidate_key.try_into() else {
+        return false;
+    };
+    let Ok(opened) = crate::encrypt::open_raw_with_aad(&FileKey::from_bytes(*candidate), child_wrap, &[]) else {
+        return false;
+    };
+    let opened = Zeroizing::new(opened);
+    opened.as_slice() == derive_file_key(master, owner_child_id).as_bytes()
+}
+
+/// Purpose domain for invite owner copies, distinct from custody and metadata.
+pub const INVITE_OWNER_COPY_LABEL: &[u8] = b"beebeeb-invite-owner-copy-v1";
+
+/// Seal an invite's owner copy, binding its purpose and folder id (L9).
+pub fn wrap_invite_owner_copy(
+    master: &MasterKey,
+    folder_id: &[u8],
+    key: &FileKey,
+) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
+    purpose_wrap(master, INVITE_OWNER_COPY_LABEL, folder_id, key.as_bytes())
+}
+
+/// Open only the purpose-bound invite format; legacy proof is a separate path.
+pub fn unwrap_invite_owner_copy(
+    master: &MasterKey,
+    folder_id: &[u8],
+    blob: &beebeeb_types::EncryptedBlob,
+) -> Result<FileKey, CoreError> {
+    purpose_unwrap_key(master, INVITE_OWNER_COPY_LABEL, folder_id, blob)
+}
+
 /// Permanent folder custody. Never accepts legacy name/file-key ciphertext.
 pub fn wrap_folder_custody(
     master: &MasterKey,
@@ -957,5 +1002,160 @@ mod tests {
                  client's stored search index; see comment above this test"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod invite_owner_copy_tests {
+    use super::*;
+    use crate::encrypt::{encrypt_chunk, seal_raw_with_nonce};
+
+    fn wire(blob: beebeeb_types::EncryptedBlob) -> Vec<u8> {
+        [blob.nonce, blob.ciphertext].concat()
+    }
+    fn proof(master: &MasterKey, folder: &FileKey) -> Vec<u8> {
+        wire(encrypt_chunk(folder, derive_file_key(master, b"child").as_bytes()).unwrap())
+    }
+    #[test]
+    fn invite_legacy_name_candidate_is_rejected() {
+        let master = MasterKey::from_bytes([7; 32]);
+        let name = br#"{"name":"Docs","mime_type":null}"#;
+        assert_eq!(name.len(), 32);
+        let name_blob = encrypt_chunk(&derive_file_key(&master, b"folder"), name).unwrap();
+        let candidate = crate::encrypt::decrypt_chunk(&derive_file_key(&master, b"folder"), &name_blob).unwrap();
+        assert!(!verify_legacy_folder_key(
+            &master,
+            b"folder",
+            &candidate,
+            b"child",
+            &proof(&master, &FileKey::from_bytes([8; 32]))
+        ));
+    }
+    #[test]
+    fn invite_legacy_true_key_is_accepted() {
+        let master = MasterKey::from_bytes([7; 32]);
+        let folder = FileKey::from_bytes([8; 32]);
+        assert!(verify_legacy_folder_key(
+            &master,
+            b"folder",
+            folder.as_bytes(),
+            b"child",
+            &proof(&master, &folder)
+        ));
+    }
+    #[test]
+    fn invite_legacy_fabricated_child_is_rejected() {
+        let master = MasterKey::from_bytes([7; 32]);
+        let candidate = FileKey::from_bytes(*br#"{"name":"Docs","mime_type":null}"#);
+        let fabricated = wire(encrypt_chunk(&candidate, &[9; 32]).unwrap());
+        assert!(!verify_legacy_folder_key(
+            &master,
+            b"folder",
+            candidate.as_bytes(),
+            b"child",
+            &fabricated
+        ));
+    }
+    #[test]
+    fn invite_legacy_requires_owner_derived_child() {
+        let master = MasterKey::from_bytes([7; 32]);
+        let folder = FileKey::from_bytes([8; 32]);
+        let wrap = proof(&master, &folder);
+        for (id, bytes) in [
+            (b"".as_slice(), wrap.as_slice()),
+            (b"other".as_slice(), wrap.as_slice()),
+            (b"child".as_slice(), b"".as_slice()),
+        ] {
+            assert!(!verify_legacy_folder_key(
+                &master,
+                b"folder",
+                folder.as_bytes(),
+                id,
+                bytes
+            ));
+        }
+        assert!(!verify_legacy_folder_key(
+            &MasterKey::from_bytes([6; 32]),
+            b"folder",
+            folder.as_bytes(),
+            b"child",
+            &wrap
+        ));
+    }
+    #[test]
+    fn invite_legacy_rejects_invalid_lengths() {
+        let master = MasterKey::from_bytes([7; 32]);
+        let folder = FileKey::from_bytes([8; 32]);
+        let wrap = proof(&master, &folder);
+        for len in [0, 31, 33] {
+            assert!(!verify_legacy_folder_key(
+                &master,
+                b"folder",
+                &vec![8; len],
+                b"child",
+                &wrap
+            ));
+        }
+        for len in [0, 27, 59, 61] {
+            assert!(!verify_legacy_folder_key(
+                &master,
+                b"folder",
+                folder.as_bytes(),
+                b"child",
+                &vec![0; len]
+            ));
+        }
+    }
+    #[test]
+    fn invite_owner_copy_roundtrip_and_separation() {
+        let master = MasterKey::from_bytes([7; 32]);
+        let key = FileKey::from_bytes([8; 32]);
+        let copy = wrap_invite_owner_copy(&master, b"folder", &key).unwrap();
+        assert_eq!(
+            unwrap_invite_owner_copy(&master, b"folder", &copy).unwrap().as_bytes(),
+            key.as_bytes()
+        );
+        assert!(unwrap_invite_owner_copy(&master, b"other", &copy).is_err());
+        assert!(unwrap_folder_custody(&master, b"folder", &copy).is_err());
+        let legacy = encrypt_chunk(&derive_file_key(&master, b"folder"), key.as_bytes()).unwrap();
+        assert!(unwrap_invite_owner_copy(&master, b"folder", &legacy).is_err());
+        let custody = wrap_folder_custody(&master, b"folder", &key).unwrap();
+        assert!(unwrap_invite_owner_copy(&master, b"folder", &custody).is_err());
+        assert!(wrap_invite_owner_copy(&master, b"", &key).is_err());
+    }
+    #[test]
+    fn invite_owner_copy_python_vector() {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!("../../test-vectors/vectors.json")).unwrap();
+        let v = vectors["vectors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["name"] == "invite_owner_copy_v1")
+            .unwrap();
+        let unhex = |s: &str| -> Vec<u8> {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                .collect()
+        };
+        let master = MasterKey::from_bytes(unhex(v["master_key_hex"].as_str().unwrap()).try_into().unwrap());
+        let raw = unhex(v["wrapped_hex"].as_str().unwrap());
+        let blob = beebeeb_types::EncryptedBlob {
+            cipher_suite: beebeeb_types::CipherSuite::V1Aes256Gcm,
+            nonce: raw[..12].to_vec(),
+            ciphertext: raw[12..].to_vec(),
+        };
+        assert_eq!(
+            unwrap_invite_owner_copy(&master, v["record_id"].as_str().unwrap().as_bytes(), &blob)
+                .unwrap()
+                .as_bytes()
+                .as_slice(),
+            unhex(v["plaintext_hex"].as_str().unwrap())
+        );
+        let context = unhex(v["context_hex"].as_str().unwrap());
+        let plaintext = unhex(v["plaintext_hex"].as_str().unwrap());
+        let key = purpose_key(&master, &context);
+        let nonce: [u8; 12] = raw[..12].try_into().unwrap();
+        assert_eq!(seal_raw_with_nonce(&key, &nonce, &plaintext, &context).unwrap(), raw);
     }
 }

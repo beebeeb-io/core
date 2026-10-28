@@ -4022,6 +4022,49 @@ pub fn unwrap_owner_file_key(master_key: &[u8], item_id: &str, wrapped: &[u8]) -
         .to_vec())
 }
 
+/// Verify a legacy child wrap against the owner's master-derived child key.
+#[wasm_bindgen(js_name = verifyLegacyFolderKey)]
+pub fn verify_legacy_folder_key(
+    master_key: &[u8],
+    folder_id: &str,
+    candidate_key: &[u8],
+    owner_child_id: &str,
+    child_wrap: &[u8],
+) -> Result<bool, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    Ok(kdf::verify_legacy_folder_key(
+        &master,
+        folder_id.as_bytes(),
+        candidate_key,
+        owner_child_id.as_bytes(),
+        child_wrap,
+    ))
+}
+
+/// Seal a purpose-bound invite owner copy (L9).
+#[wasm_bindgen(js_name = wrapInviteOwnerCopy)]
+pub fn wrap_invite_owner_copy(master_key: &[u8], folder_id: &str, folder_key: &[u8]) -> Result<Vec<u8>, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let key = owned_key(folder_key)?;
+    let blob =
+        kdf::wrap_invite_owner_copy(&master, folder_id.as_bytes(), &key).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok([blob.nonce, blob.ciphertext].concat())
+}
+
+/// Open a purpose-bound invite owner copy; never performs a legacy fallback.
+#[wasm_bindgen(js_name = unwrapInviteOwnerCopy)]
+pub fn unwrap_invite_owner_copy(master_key: &[u8], folder_id: &str, wrapped: &[u8]) -> Result<Vec<u8>, JsError> {
+    if wrapped.len() != 60 {
+        return Err(JsError::new("decryption failed: invite owner copy must be 60 bytes"));
+    }
+    let master = master_key_from_slice(master_key)?;
+    let blob = l6_blob(wrapped, "invite owner copy")?;
+    Ok(kdf::unwrap_invite_owner_copy(&master, folder_id.as_bytes(), &blob)
+        .map_err(|e| JsError::new(&e.to_string()))?
+        .as_bytes()
+        .to_vec())
+}
+
 /// Seal a shared folder's key to the owner's master key (L6 custody record).
 #[wasm_bindgen(js_name = wrapFolderCustody)]
 pub fn wrap_folder_custody(master_key: &[u8], folder_id: &str, folder_key: &[u8]) -> Result<Vec<u8>, JsError> {
