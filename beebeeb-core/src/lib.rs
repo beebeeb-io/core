@@ -19,6 +19,7 @@ pub mod metadata_wire;
 pub mod onboarding;
 pub mod opaque;
 pub mod opaque_protocol;
+pub mod owned_keys;
 pub mod pdf;
 pub mod recovery;
 pub mod search_index;

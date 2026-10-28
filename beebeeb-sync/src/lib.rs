@@ -2,6 +2,7 @@ pub mod config;
 pub mod conflict;
 pub mod engine;
 pub mod error;
+pub mod key_resolution;
 pub mod selective;
 pub mod state;
 pub mod watcher;

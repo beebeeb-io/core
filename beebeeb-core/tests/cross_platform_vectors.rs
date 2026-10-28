@@ -707,8 +707,8 @@ fn vector_file_version_check() {
         .as_u64()
         .expect("vectors.json must have a 'version' field");
     assert_eq!(
-        version, 10,
-        "vectors.json version mismatch — expected 10, got {version}. \
+        version, 11,
+        "vectors.json version mismatch — expected 11, got {version}. \
          Update this test if you intentionally bumped the version."
     );
 
@@ -750,10 +750,56 @@ fn vector_file_version_check() {
         "link_owner_token_v1",
         "folder_child_file_v1",
         "folder_child_folder_v1",
+        "owner_wrapped_file_key",
+        "owner_wrapped_folder_key",
+        "folder_wrapped_file_key",
     ];
     for name in &required {
         assert!(names.contains(name), "vectors.json is missing required vector '{name}'");
     }
+}
+
+// Owner/shared-folder custody: consume independent known answers, then check
+// shipped fresh-nonce writers against those same published keys.
+#[test]
+fn vector_owner_wrapped_file_key() {
+    let v = get_vector(&load_vectors(), "owner_wrapped_file_key");
+    check_owner_key_vector(&v, "file_id", "child_key_hex");
+}
+
+#[test]
+fn vector_owner_wrapped_folder_key() {
+    let v = get_vector(&load_vectors(), "owner_wrapped_folder_key");
+    check_owner_key_vector(&v, "folder_id", "folder_key_hex");
+}
+
+fn check_owner_key_vector(v: &serde_json::Value, id_field: &str, key_field: &str) {
+    use beebeeb_core::owned_keys::{unwrap_owner_key, wrap_key_to_owner};
+
+    let master = MasterKey::from_bytes(bytes32(v, "master_key_hex"));
+    let id = v[id_field].as_str().unwrap();
+    let expected = bytes32(v, key_field);
+    let frame = decode_hex(v, "expected_frame_hex");
+    assert_eq!(&frame[..12], decode_hex(v, "nonce_hex"));
+    assert_eq!(unwrap_owner_key(&master, id, &frame).unwrap().as_bytes(), &expected);
+    let shipped = wrap_key_to_owner(&master, id, &FileKey::from_bytes(expected)).unwrap();
+    assert_eq!(shipped.len(), frame.len());
+    assert_eq!(unwrap_owner_key(&master, id, &shipped).unwrap().as_bytes(), &expected);
+}
+
+#[test]
+fn vector_folder_wrapped_file_key() {
+    use beebeeb_core::owned_keys::{unwrap_child_key, wrap_child_key};
+
+    let v = get_vector(&load_vectors(), "folder_wrapped_file_key");
+    let folder = FileKey::from_bytes(bytes32(&v, "folder_key_hex"));
+    let expected = bytes32(&v, "child_key_hex");
+    let frame = decode_hex(&v, "expected_frame_hex");
+    assert_eq!(&frame[..12], decode_hex(&v, "nonce_hex"));
+    assert_eq!(unwrap_child_key(&folder, &frame).unwrap().as_bytes(), &expected);
+    let shipped = wrap_child_key(&folder, &FileKey::from_bytes(expected)).unwrap();
+    assert_eq!(shipped.len(), frame.len());
+    assert_eq!(unwrap_child_key(&folder, &shipped).unwrap().as_bytes(), &expected);
 }
 
 // ---------------------------------------------------------------------------
