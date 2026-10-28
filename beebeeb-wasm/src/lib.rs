@@ -4025,7 +4025,7 @@ pub fn unwrap_owner_file_key(master_key: &[u8], item_id: &str, wrapped: &[u8]) -
 /// L9 (task 2255): open a LEGACY invite owner copy and return its key only when
 /// core proves it over the folder's rows, in ONE call. `rows` are the server's
 /// `GET /shares/invites/{id}/folder-keys` rows verbatim:
-/// `[{ file_id: string, encrypted_file_key: string /* standard base64 */ }]`.
+/// `[{ file_id: string, encrypted_file_key: string }]`, the key in standard base64.
 /// They are read lazily, and core examines at most 64 distinct ids. Returns
 /// `undefined` when the copy does not open, holds text, or is not proven; the
 /// unproven candidate never reaches JS. Attack B (task 2255) is a named residual.
