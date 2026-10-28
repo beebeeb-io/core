@@ -473,7 +473,9 @@ const LEGACY_KEY_WRAP_LEN: usize = 12 + 32 + 16;
 ///    UTF-8 with probability about 2^-30.
 /// 2. Possession: some row `(file_id, wrap)` of the folder must open under the
 ///    candidate (legacy format, empty AAD) to exactly
-///    `derive_file_key(master, file_id)`. Any of the folder's rows counts. Each
+///    `derive_file_key(master, file_id)`. Any of the folder's rows counts,
+///    except the folder's own row (`file_id == folder_id`): the honest invite
+///    flow never writes it, and it carries the folder's name key. Each
 ///    `file_id` is examined once, and at most [`LEGACY_FOLDER_KEY_PROOF_CAP`]
 ///    distinct ids are examined.
 /// 3. That comparison is constant-time.
@@ -482,11 +484,17 @@ const LEGACY_KEY_WRAP_LEN: usize = 12 + 32 + 16;
 /// (file links, share recipients, folder members), so the proof only shows
 /// that someone holds one of them. Named residuals:
 /// - Attack B: a server that knows the folder's own name key (from a pre-2238
-///   folder link, or a colluding member of an enclosing shared folder) can seal
-///   a non-text key of its choice as a legacy owner copy, plus a matching row,
-///   and this check passes. See `invite_legacy_residual_attack_b_name_key_holder_can_forge`.
+///   folder link; once any folder link exists, from ANY link guest or invite
+///   member it colludes with, because the link path writes the folder's own
+///   row; or a colluding member of an enclosing shared folder) and one child's
+///   key can seal a non-text key of its choice as a legacy owner copy, plus a
+///   matching row, and this check passes.
+///   See `invite_legacy_residual_attack_b_name_key_holder_can_forge`.
+/// - Rule 1 trusts the server's `is_folder`: a FILE id passed off as a folder
+///   could have non-text content sealed under that key. Contrived; the chunk
+///   AAD of task 1908 closes it.
 /// - P3-3: no key version is bound, so an older genuine owner copy passes too.
-pub fn verify_legacy_folder_key<I, F, W>(master: &MasterKey, candidate: &[u8], rows: I) -> bool
+pub fn verify_legacy_folder_key<I, F, W>(master: &MasterKey, folder_id: &[u8], candidate: &[u8], rows: I) -> bool
 where
     I: IntoIterator<Item = (F, W)>,
     F: AsRef<[u8]>,
@@ -509,7 +517,11 @@ where
             break;
         }
         let (file_id, wrap) = (file_id.as_ref(), wrap.as_ref());
-        if !seen.insert(file_id.to_vec()) || file_id.is_empty() || wrap.len() != LEGACY_KEY_WRAP_LEN {
+        if !seen.insert(file_id.to_vec())
+            || file_id.is_empty()
+            || file_id == folder_id
+            || wrap.len() != LEGACY_KEY_WRAP_LEN
+        {
             continue;
         }
         let Ok(opened) = crate::encrypt::open_raw_with_aad(&key, wrap, &[]) else {
@@ -546,7 +558,7 @@ where
     let opened =
         Zeroizing::new(crate::encrypt::open_raw_with_aad(&derive_file_key(master, folder_id), legacy_copy, &[]).ok()?);
     let candidate: Zeroizing<[u8; 32]> = Zeroizing::new(opened.as_slice().try_into().ok()?);
-    verify_legacy_folder_key(master, &*candidate, rows).then(|| FileKey::from_bytes(*candidate))
+    verify_legacy_folder_key(master, folder_id, &*candidate, rows).then(|| FileKey::from_bytes(*candidate))
 }
 
 /// Purpose domain for invite owner copies, distinct from custody and metadata.
@@ -1124,7 +1136,7 @@ mod invite_owner_copy_tests {
         let known = derive_file_key(&master, b"shared-by-link");
         let forged = (b"shared-by-link".to_vec(), legacy_wrap(&name_key, known.as_bytes()));
         assert!(std::str::from_utf8(NAME).is_ok());
-        assert!(!verify_legacy_folder_key(&master, NAME, [forged.clone()]));
+        assert!(!verify_legacy_folder_key(&master, FOLDER, NAME, [forged.clone()]));
         // End to end: the folder's own name blob as the "owner copy" opens nothing.
         assert!(open_legacy_invite_owner_copy(&master, FOLDER, &legacy_copy(&master, NAME), [forged]).is_none());
     }
@@ -1139,12 +1151,13 @@ mod invite_owner_copy_tests {
             foreign_row(&key, "request-upload"),
             owner_row(&master, &key, "nested/grandchild"),
         ];
-        assert!(verify_legacy_folder_key(&master, key.as_bytes(), rows.clone()));
+        assert!(verify_legacy_folder_key(&master, FOLDER, key.as_bytes(), rows.clone()));
         let opened = open_legacy_invite_owner_copy(&master, FOLDER, &legacy_copy(&master, key.as_bytes()), rows);
         assert_eq!(opened.unwrap().as_bytes(), key.as_bytes());
-        // The folder's own row counts too ("any row"; attack B covers its risk).
+        // Except the folder's own row (file_id == folder_id): the honest invite
+        // flow never writes it, and it holds the folder's name key.
         let own = owner_row(&master, &key, std::str::from_utf8(FOLDER).unwrap());
-        assert!(verify_legacy_folder_key(&master, key.as_bytes(), [own]));
+        assert!(!verify_legacy_folder_key(&master, FOLDER, key.as_bytes(), [own]));
     }
 
     #[test]
@@ -1152,11 +1165,12 @@ mod invite_owner_copy_tests {
         // A wrap under the candidate that holds a server-chosen key is no proof.
         let (master, key) = (master(), folder_key());
         let fabricated = (b"child".to_vec(), legacy_wrap(&key, &[9; 32]));
-        assert!(!verify_legacy_folder_key(&master, key.as_bytes(), [fabricated]));
+        assert!(!verify_legacy_folder_key(&master, FOLDER, key.as_bytes(), [fabricated]));
         // The right row under another owner's master proves nothing either.
         let row = owner_row(&master, &key, "child");
         assert!(!verify_legacy_folder_key(
             &MasterKey::from_bytes([6; 32]),
+            FOLDER,
             key.as_bytes(),
             [row]
         ));
@@ -1166,7 +1180,7 @@ mod invite_owner_copy_tests {
     fn invite_legacy_without_rows_is_not_proven() {
         let (master, key) = (master(), folder_key());
         let none: [(Vec<u8>, Vec<u8>); 0] = [];
-        assert!(!verify_legacy_folder_key(&master, key.as_bytes(), none.clone()));
+        assert!(!verify_legacy_folder_key(&master, FOLDER, key.as_bytes(), none.clone()));
         assert!(open_legacy_invite_owner_copy(&master, FOLDER, &legacy_copy(&master, key.as_bytes()), none).is_none());
     }
 
@@ -1177,8 +1191,13 @@ mod invite_owner_copy_tests {
         let (master, key) = (master(), folder_key());
         let good = owner_row(&master, &key, "child");
         let bad = (good.0.clone(), vec![0; LEGACY_KEY_WRAP_LEN]);
-        assert!(verify_legacy_folder_key(&master, key.as_bytes(), [good.clone()]));
-        assert!(!verify_legacy_folder_key(&master, key.as_bytes(), [bad, good]));
+        assert!(verify_legacy_folder_key(
+            &master,
+            FOLDER,
+            key.as_bytes(),
+            [good.clone()]
+        ));
+        assert!(!verify_legacy_folder_key(&master, FOLDER, key.as_bytes(), [bad, good]));
     }
 
     #[test]
@@ -1192,13 +1211,13 @@ mod invite_owner_copy_tests {
         let good = owner_row(&master, &key, "child");
         // The proof as the 64th distinct id is examined; as the 65th it is not.
         let at_cap = [junk(LEGACY_FOLDER_KEY_PROOF_CAP - 1), vec![good.clone()]].concat();
-        assert!(verify_legacy_folder_key(&master, key.as_bytes(), at_cap));
+        assert!(verify_legacy_folder_key(&master, FOLDER, key.as_bytes(), at_cap));
         let past_cap = [junk(LEGACY_FOLDER_KEY_PROOF_CAP), vec![good.clone()]].concat();
-        assert!(!verify_legacy_folder_key(&master, key.as_bytes(), past_cap));
+        assert!(!verify_legacy_folder_key(&master, FOLDER, key.as_bytes(), past_cap));
         // Duplicates are skipped without using up the cap.
         let dupes = vec![foreign_row(&key, "junk-0"); 500];
         let with_dupes = [junk(LEGACY_FOLDER_KEY_PROOF_CAP - 1), dupes, vec![good]].concat();
-        assert!(verify_legacy_folder_key(&master, key.as_bytes(), with_dupes));
+        assert!(verify_legacy_folder_key(&master, FOLDER, key.as_bytes(), with_dupes));
     }
 
     #[test]
@@ -1206,17 +1225,24 @@ mod invite_owner_copy_tests {
         let (master, key) = (master(), folder_key());
         let row = owner_row(&master, &key, "child");
         for len in [0, 31, 33] {
-            assert!(!verify_legacy_folder_key(&master, &vec![0xF8; len], [row.clone()]));
+            assert!(!verify_legacy_folder_key(
+                &master,
+                FOLDER,
+                &vec![0xF8; len],
+                [row.clone()]
+            ));
         }
         for len in [0, 27, 59, 61] {
             assert!(!verify_legacy_folder_key(
                 &master,
+                FOLDER,
                 key.as_bytes(),
                 [(row.0.clone(), vec![0; len])]
             ));
         }
         assert!(!verify_legacy_folder_key(
             &master,
+            FOLDER,
             key.as_bytes(),
             [(Vec::new(), row.1.clone())]
         ));
@@ -1225,6 +1251,7 @@ mod invite_owner_copy_tests {
         let bound = wire(wrap_folder_child(&key, &root, &item, 1, &derive_file_key(&master, &item)).unwrap());
         assert!(!verify_legacy_folder_key(
             &master,
+            FOLDER,
             key.as_bytes(),
             [(item.to_vec(), bound)]
         ));
@@ -1244,15 +1271,17 @@ mod invite_owner_copy_tests {
     #[test]
     fn invite_legacy_residual_attack_b_name_key_holder_can_forge() {
         // RESIDUAL, named in task 2255 (attack B), NOT fixed here. A server that
-        // knows the folder's own name key (a pre-2238 folder link, or a colluding
-        // member of an enclosing shared folder) seals a key of its choice as the
-        // legacy owner copy, plus a row proving it. This test pins the gap: when
-        // the follow-up closes it, this assertion must flip.
+        // knows the folder's own name key (a pre-2238 folder link; once any folder
+        // link exists, ANY link guest or invite member colluding with it) and one
+        // child's key seals a key of its choice as the legacy owner copy, plus a
+        // row proving it. This test pins the gap: when the follow-up closes it,
+        // this assertion must flip.
         let master = master();
         let name_key = derive_file_key(&master, FOLDER);
+        let child_key = derive_file_key(&master, b"child");
         let chosen = FileKey::from_bytes([0xF9; 32]);
         let copy = legacy_wrap(&name_key, chosen.as_bytes());
-        let row = (FOLDER.to_vec(), legacy_wrap(&chosen, name_key.as_bytes()));
+        let row = (b"child".to_vec(), legacy_wrap(&chosen, child_key.as_bytes()));
         let opened = open_legacy_invite_owner_copy(&master, FOLDER, &copy, [row]);
         assert_eq!(opened.unwrap().as_bytes(), chosen.as_bytes());
     }
