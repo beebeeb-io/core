@@ -114,6 +114,14 @@ token UTF-8. UniFFI takes canonical id strings as UTF-8. Never fall back to the
 legacy file-key custody opener after authentication fails; an existing invite
 may be opened separately for seeding only. MasterKeyHandle exposes these wraps
 plus legacy `wrap_key` / `wrap_bytes` without exporting the master key.
+WASM (2237b) exports the same wraps in the L7 byte style, wire = nonce(12) ||
+ciphertext+tag, record id = the canonical id string as UTF-8:
+`wrapFolderCustody` / `unwrapFolderCustody` (60-byte wire),
+`wrapLinkOwnerKey` / `unwrapLinkOwnerKey`, `wrapLinkOwnerToken` /
+`unwrapLinkOwnerToken`, and `deriveFolderLinkPassphraseStretch` (NFC + empty
+refusal in core). They take the master key as 32 bytes like the other byte-key
+exports; task 2254 moves them to handles. Pinned by
+`beebeeb-wasm/js-tests/folder_owner_wraps.test.cjs` against vectors v10.
 
 Unreleased vectors v10 include the original two families, an NFD-equality row,
 and three purpose-wrap families. Python argon2-cffi/cryptography independently
