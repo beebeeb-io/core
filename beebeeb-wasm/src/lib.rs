@@ -3998,6 +3998,30 @@ fn owned_key(key: &[u8]) -> Result<kdf::FileKey, JsError> {
     Ok(kdf::FileKey::from_bytes(*bytes))
 }
 
+/// Seal an owner file-key adoption record with its own purpose key and AAD (L8).
+/// Item IDs use the exact UTF-8 string bytes used by the L6 exports.
+#[wasm_bindgen(js_name = wrapOwnerFileKey)]
+pub fn wrap_owner_file_key(master_key: &[u8], item_id: &str, file_key: &[u8]) -> Result<Vec<u8>, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let key = owned_key(file_key)?;
+    let blob = kdf::wrap_owner_file_key(&master, item_id.as_bytes(), &key).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok([blob.nonce, blob.ciphertext].concat())
+}
+
+/// Open only an L8 owner file-key record, requiring exactly 32 plaintext bytes.
+#[wasm_bindgen(js_name = unwrapOwnerFileKey)]
+pub fn unwrap_owner_file_key(master_key: &[u8], item_id: &str, wrapped: &[u8]) -> Result<Vec<u8>, JsError> {
+    if wrapped.len() != 60 {
+        return Err(JsError::new("owner file-key wrap must be 60 bytes"));
+    }
+    let master = master_key_from_slice(master_key)?;
+    let blob = l6_blob(wrapped, "owner file-key")?;
+    Ok(kdf::unwrap_owner_file_key(&master, item_id.as_bytes(), &blob)
+        .map_err(|e| JsError::new(&e.to_string()))?
+        .as_bytes()
+        .to_vec())
+}
+
 /// Seal a shared folder's key to the owner's master key (L6 custody record).
 #[wasm_bindgen(js_name = wrapFolderCustody)]
 pub fn wrap_folder_custody(master_key: &[u8], folder_id: &str, folder_key: &[u8]) -> Result<Vec<u8>, JsError> {

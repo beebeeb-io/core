@@ -156,6 +156,83 @@ mod folder_link_2237c {
         );
     }
 
+    #[test]
+    fn l8_owner_file_vector_and_round_trip_through_handles() {
+        let v = vector("owner_wrapped_file_key");
+        let master = MasterKeyHandle::from_keychain_bytes(bytes(&v, "master_key_hex")).unwrap();
+        let item = v["file_id"].as_str().unwrap().to_string();
+        let frame = bytes(&v, "expected_frame_hex");
+        let inner = master
+            .unwrap_owner_file_key(item.clone(), frame[..12].to_vec(), frame[12..].to_vec())
+            .unwrap();
+        assert_eq!(inner.key_id().unwrap(), id(bytes(&v, "child_key_hex")));
+        let blob = master.wrap_owner_file_key(item.clone(), &inner).unwrap();
+        assert_eq!(blob.nonce.len() + blob.ciphertext.len(), 60);
+        assert_eq!(
+            master
+                .unwrap_owner_file_key(item, blob.nonce, blob.ciphertext)
+                .unwrap()
+                .key_id()
+                .unwrap(),
+            inner.key_id().unwrap()
+        );
+        assert!(
+            master
+                .unwrap_owner_file_key("other".into(), frame[..12].to_vec(), frame[12..].to_vec())
+                .is_err()
+        );
+        let custody = master
+            .wrap_folder_custody(v["file_id"].as_str().unwrap().into(), &inner)
+            .unwrap();
+        assert!(
+            master
+                .unwrap_owner_file_key(v["file_id"].as_str().unwrap().into(), custody.nonce, custody.ciphertext)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn l8_owner_handle_rejects_content_names_legacy_and_bad_lengths() {
+        let master = MasterKeyHandle::from_keychain_bytes(vec![0x40; 32]).unwrap();
+        let item = "11111111-1111-4111-8111-111111111111";
+        let legacy_key = master.derive_file_key(item.as_bytes().to_vec()).unwrap();
+        let content = legacy_key.encrypt_chunk(vec![0x55; 32]).unwrap();
+        assert_eq!(content.ciphertext.len(), 48);
+        assert!(
+            master
+                .unwrap_owner_file_key(item.into(), content.nonce, content.ciphertext)
+                .is_err()
+        );
+        let name = master.encrypt_name(item.into(), "test".into(), None).unwrap();
+        let blob: EncryptedBlob = serde_json::from_str(&name).unwrap();
+        assert_eq!(blob.ciphertext.len(), 48);
+        assert!(
+            master
+                .unwrap_owner_file_key(item.into(), blob.nonce, blob.ciphertext)
+                .is_err()
+        );
+        let inner = FileKeyHandle::from_key_bytes(vec![0x60; 32]).unwrap();
+        let legacy = legacy_key.wrap_key(&inner).unwrap();
+        assert!(
+            master
+                .unwrap_owner_file_key(item.into(), legacy.nonce, legacy.ciphertext)
+                .is_err()
+        );
+        for (nonce, ciphertext) in [
+            (vec![0; 11], vec![0; 48]),
+            (vec![0; 12], vec![0; 47]),
+            (vec![0; 12], vec![0; 49]),
+        ] {
+            assert!(master.unwrap_owner_file_key(item.into(), nonce, ciphertext).is_err());
+        }
+        assert!(master.wrap_owner_file_key(String::new(), &inner).is_err());
+        assert!(
+            master
+                .unwrap_owner_file_key(String::new(), vec![0; 12], vec![0; 48])
+                .is_err()
+        );
+    }
+
     fn vector(name: &str) -> serde_json::Value {
         let doc: serde_json::Value = serde_json::from_str(include_str!("../../test-vectors/vectors.json")).unwrap();
         doc["vectors"]
@@ -1056,6 +1133,30 @@ impl MasterKeyHandle {
         })?
         .map(|blob| encrypted_blob_to_data(&blob))
         .map_err(Into::into)
+    }
+
+    /// L8 owner adoption. Key material stays in native handles.
+    pub fn wrap_owner_file_key(&self, item_id: String, inner: &FileKeyHandle) -> Result<EncryptedData, CryptoError> {
+        let key = inner.with_key(|key| kdf::FileKey::from_bytes(*key.as_bytes()))?;
+        self.with_key(|mk| kdf::wrap_owner_file_key(mk, item_id.as_bytes(), &key))?
+            .map(|blob| encrypted_blob_to_data(&blob))
+            .map_err(Into::into)
+    }
+
+    /// Open only L8 and return an opaque handle, never raw file-key bytes.
+    pub fn unwrap_owner_file_key(
+        &self,
+        item_id: String,
+        nonce: Vec<u8>,
+        ciphertext: Vec<u8>,
+    ) -> Result<Arc<FileKeyHandle>, CryptoError> {
+        let blob = EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce,
+            ciphertext,
+        };
+        let key = self.with_key(|mk| kdf::unwrap_owner_file_key(mk, item_id.as_bytes(), &blob))??;
+        Ok(FileKeyHandle::new(key))
     }
 
     pub fn wrap_folder_custody(&self, folder_id: String, inner: &FileKeyHandle) -> Result<EncryptedData, CryptoError> {

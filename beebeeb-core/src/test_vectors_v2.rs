@@ -252,7 +252,6 @@ fn folder_link_passphrase_vector() -> Value {
 /// supplied independently in Plan D / the L6-L7 fixture generator, and are
 /// opened by the public consumers.
 fn owned_key_vector(name: &str) -> Value {
-    use crate::encrypt::seal_raw_with_nonce;
     use crate::kdf::FileKey;
 
     let master_bytes = std::array::from_fn(|i| i as u8);
@@ -264,10 +263,14 @@ fn owned_key_vector(name: &str) -> Value {
     let nonce = std::array::from_fn(|i| i as u8);
     let raw = |blob: beebeeb_types::EncryptedBlob| [blob.nonce, blob.ciphertext].concat();
     let frame = match name {
-        "owner_wrapped_file_key" => {
-            seal_raw_with_nonce(&derive_file_key(&master, file_id.as_bytes()), &nonce, &child_bytes, &[])
-                .expect("seal owner file vector")
-        }
+        "owner_wrapped_file_key" => raw(crate::kdf::purpose_wrap_with_nonce(
+            &master,
+            crate::kdf::OWNER_FILE_KEY_LABEL,
+            file_id.as_bytes(),
+            &child_bytes,
+            &nonce,
+        )
+        .expect("seal L8 owner file vector")),
         "owner_wrapped_folder_key" => raw(crate::kdf::purpose_wrap_with_nonce(
             &master,
             crate::kdf::FOLDER_CUSTODY_LABEL,
@@ -298,7 +301,11 @@ fn owned_key_vector(name: &str) -> Value {
         "nonce_hex": hex(&nonce),
         "expected_frame_hex": hex(&frame),
     });
-    if name == "owner_wrapped_folder_key" {
+    if name == "owner_wrapped_file_key" {
+        vector["note"] = json!(
+            "L8 owner file key: HKDF-SHA256(master, domain || canonical item ID string), same context as AAD; independent Python cryptography KAT."
+        );
+    } else if name == "owner_wrapped_folder_key" {
         vector["note"] = json!(
             "L6 permanent root custody: HKDF-SHA256(master, domain || canonical root ID string), same context as AAD; independent cryptography KAT."
         );

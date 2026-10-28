@@ -789,17 +789,23 @@ fn vector_owner_wrapped_folder_key() {
 }
 
 fn check_owner_key_vector(v: &serde_json::Value, id_field: &str, key_field: &str) {
-    use beebeeb_core::owned_keys::{unwrap_owner_key, wrap_key_to_owner};
+    use beebeeb_core::owned_keys::{unwrap_owner_file_key, wrap_owner_file_key};
 
     let master = MasterKey::from_bytes(bytes32(v, "master_key_hex"));
     let id = v[id_field].as_str().unwrap();
     let expected = bytes32(v, key_field);
     let frame = decode_hex(v, "expected_frame_hex");
     assert_eq!(&frame[..12], decode_hex(v, "nonce_hex"));
-    assert_eq!(unwrap_owner_key(&master, id, &frame).unwrap().as_bytes(), &expected);
-    let shipped = wrap_key_to_owner(&master, id, &FileKey::from_bytes(expected)).unwrap();
+    assert_eq!(
+        unwrap_owner_file_key(&master, id, &frame).unwrap().as_bytes(),
+        &expected
+    );
+    let shipped = wrap_owner_file_key(&master, id, &FileKey::from_bytes(expected)).unwrap();
     assert_eq!(shipped.len(), frame.len());
-    assert_eq!(unwrap_owner_key(&master, id, &shipped).unwrap().as_bytes(), &expected);
+    assert_eq!(
+        unwrap_owner_file_key(&master, id, &shipped).unwrap().as_bytes(),
+        &expected
+    );
 }
 
 #[test]

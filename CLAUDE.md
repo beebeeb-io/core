@@ -129,6 +129,18 @@ produces all six; WebCrypto verifies the new purpose keys, AAD and ciphertext.
 The core drift guard regenerates them. Owned secrets and scratch memory are
 zeroized on success and error paths.
 
+## Owner file-key adoption (L8)
+
+`owned_keys::wrap_owner_file_key` / `unwrap_owner_file_key` use the KDF purpose helpers:
+HKDF-SHA256(master, no salt, info = `beebeeb-owner-file-key-v1` || item ID UTF-8 bytes), with that exact context as AES-GCM AAD.
+IDs use the same textual encoding as L6 custody, never the binary UUID encoding of L7.
+Wire: nonce(12) || ciphertext+tag(48); the opener requires exactly 32 authenticated bytes.
+The old owner-adoption entry points and generic opener are removed; `resolve_owned_key` reads only L8 owner wraps.
+There is no legacy owner-wrap fallback (plan C L8: this flag-on format was never enabled in production).
+UniFFI `MasterKeyHandle::wrap_owner_file_key` takes a `FileKeyHandle`; its opener returns a handle.
+WASM `wrapOwnerFileKey` / `unwrapOwnerFileKey` follow the L6 byte-array API; client binding regeneration and core pin bumps follow in client PRs.
+The independent Python generator is `test-vectors/tools/make_owner_file_key_vector.py`.
+
 ## Encrypted search index (`search_index.rs`)
 
 Client-built, E2E-encrypted file-name search; the server is zero-knowledge, everything runs on-device, identically for every client. `tokenize(name)`: NFKD + accent-fold + separators + camelCase, dedup preserving order; keeps the full normalized name for substring fallback.

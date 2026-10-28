@@ -81,3 +81,59 @@ test('the passphrase stretch matches the vectors, NFC and NFD alike, and refuses
   }
   assert.throws(() => wasm.deriveFolderLinkPassphraseStretch('', 'tok'), /must not be empty/);
 });
+
+// L8 uses the same envelope encoding as L6 with its own purpose label.
+test('L8 owner file-key exports open the independent Python KAT and round-trip', () => {
+  const v = vector('owner_wrapped_file_key');
+  const master = bytes(v.master_key_hex);
+  assert.equal(hex(wasm.unwrapOwnerFileKey(master, v.file_id, bytes(v.expected_frame_hex))), v.child_key_hex);
+  const wrap = wasm.wrapOwnerFileKey(master, v.file_id, bytes(v.child_key_hex));
+  assert.equal(wrap.length, 60);
+  assert.equal(hex(wasm.unwrapOwnerFileKey(master, v.file_id, wrap)), v.child_key_hex);
+  assert.throws(() => wasm.unwrapOwnerFileKey(master, v.folder_id, wrap), /decryption failed/);
+  assert.throws(() => wasm.unwrapOwnerFileKey(new Uint8Array(32).fill(0xff), v.file_id, wrap), /decryption failed/);
+  assert.throws(() => wasm.unwrapFolderCustody(master, v.file_id, wrap), /decryption failed/);
+  const custody = wasm.wrapFolderCustody(master, v.file_id, bytes(v.child_key_hex));
+  assert.throws(() => wasm.unwrapOwnerFileKey(master, v.file_id, custody), /decryption failed/);
+});
+
+const { createCipheriv, hkdfSync } = require('node:crypto');
+const sealFrame = (key, plaintext, aad = Buffer.alloc(0)) => {
+  const nonce = Buffer.alloc(12, 0x37);
+  const cipher = createCipheriv('aes-256-gcm', key, nonce);
+  cipher.setAAD(aad);
+  return Buffer.concat([nonce, cipher.update(plaintext), cipher.final(), cipher.getAuthTag()]);
+};
+
+test('L8 refuses the item own v1 content, legacy name and old owner format', () => {
+  const v = vector('owner_wrapped_file_key');
+  const master = bytes(v.master_key_hex);
+  const legacy = wasm.derive_file_key(master, new TextEncoder().encode(v.file_id));
+  for (const known of [Buffer.alloc(32, 0x55), Buffer.from('{"mime_type":null,"name":"test"}'), bytes(v.child_key_hex)]) {
+    const frame = sealFrame(legacy, known);
+    assert.equal(frame.length, 60);
+    assert.throws(() => wasm.unwrapOwnerFileKey(master, v.file_id, frame), /decryption failed/);
+  }
+});
+
+test('L8 authenticates AAD in both directions', () => {
+  const v = vector('owner_wrapped_file_key');
+  const master = bytes(v.master_key_hex);
+  const context = Buffer.from('beebeeb-owner-file-key-v1' + v.file_id);
+  const purpose = Buffer.from(hkdfSync('sha256', master, Buffer.alloc(0), context, 32));
+  const noAad = sealFrame(purpose, bytes(v.child_key_hex));
+  assert.throws(() => wasm.unwrapOwnerFileKey(master, v.file_id, noAad), /decryption failed/);
+  const frame = wasm.wrapOwnerFileKey(master, v.file_id, bytes(v.child_key_hex));
+  assert.throws(() => wasm.decrypt_chunk(purpose, frame.slice(0, 12), frame.slice(12)), /decryption failed/);
+});
+
+test('L8 rejects invalid key/frame lengths and empty record IDs', () => {
+  const key = new Uint8Array(32);
+  assert.throws(() => wasm.wrapOwnerFileKey(new Uint8Array(31), 'f', key), /master_key must be exactly 32 bytes/);
+  assert.throws(() => wasm.wrapOwnerFileKey(key, 'f', new Uint8Array(33)), /key must be exactly 32 bytes/);
+  for (const length of [0, 12, 28, 59, 61, 92]) {
+    assert.throws(() => wasm.unwrapOwnerFileKey(key, 'f', new Uint8Array(length)), /must be 60 bytes/);
+  }
+  assert.throws(() => wasm.wrapOwnerFileKey(key, '', key), /record id must not be empty/);
+  assert.throws(() => wasm.unwrapOwnerFileKey(key, '', new Uint8Array(60)), /record id must not be empty/);
+});
