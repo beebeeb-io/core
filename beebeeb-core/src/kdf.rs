@@ -114,7 +114,8 @@ pub fn derive_master_key(password: &str, salt: &[u8]) -> Result<MasterKey, CoreE
 
 fn allocate_argon_memory(block_count: usize) -> Result<Zeroizing<Vec<argon2::Block>>, CoreError> {
     let mut memory = Vec::new();
-    memory.try_reserve_exact(block_count)
+    memory
+        .try_reserve_exact(block_count)
         .map_err(|_| CoreError::Kdf("insufficient memory for Argon2id".into()))?;
     memory.resize(block_count, argon2::Block::new());
     Ok(Zeroizing::new(memory))
@@ -212,7 +213,9 @@ pub fn derive_folder_link_passphrase_stretch(passphrase: &str, token: &str) -> R
     use sha2::Digest;
     use unicode_normalization::UnicodeNormalization;
     if passphrase.is_empty() {
-        return Err(CoreError::InvalidInput("folder-link passphrase must not be empty".into()));
+        return Err(CoreError::InvalidInput(
+            "folder-link passphrase must not be empty".into(),
+        ));
     }
     let normalized = Zeroizing::new(passphrase.nfc().collect::<String>());
     let mut digest = Sha256::new();
@@ -229,65 +232,124 @@ pub const LINK_OWNER_KEY_LABEL: &[u8] = b"beebeeb-link-owner-key-v1";
 pub const LINK_OWNER_TOKEN_LABEL: &[u8] = b"beebeeb-link-owner-token-v1";
 
 fn purpose_context(label: &[u8], id: &[u8]) -> Result<Vec<u8>, CoreError> {
-    if id.is_empty() { return Err(CoreError::InvalidInput("wrap record id must not be empty".into())); }
+    if id.is_empty() {
+        return Err(CoreError::InvalidInput("wrap record id must not be empty".into()));
+    }
     Ok([label, id].concat())
 }
 
 fn purpose_key(master: &MasterKey, context: &[u8]) -> FileKey {
     let mut bytes = Zeroizing::new([0u8; 32]);
-    Hkdf::<Sha256>::new(None, master.as_bytes()).expand(context, &mut *bytes)
+    Hkdf::<Sha256>::new(None, master.as_bytes())
+        .expand(context, &mut *bytes)
         .expect("HKDF-SHA256 expand for 32 bytes cannot fail");
     FileKey::from_bytes(*bytes)
 }
 
-pub(crate) fn purpose_wrap_with_nonce(master: &MasterKey, label: &[u8], id: &[u8], plaintext: &[u8], nonce: &[u8; 12]) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
+pub(crate) fn purpose_wrap_with_nonce(
+    master: &MasterKey,
+    label: &[u8],
+    id: &[u8],
+    plaintext: &[u8],
+    nonce: &[u8; 12],
+) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
     let context = purpose_context(label, id)?;
     let raw = crate::encrypt::seal_raw_with_nonce(&purpose_key(master, &context), nonce, plaintext, &context)?;
     Ok(beebeeb_types::EncryptedBlob {
         cipher_suite: beebeeb_types::CipherSuite::V1Aes256Gcm,
-        nonce: raw[..12].to_vec(), ciphertext: raw[12..].to_vec(),
+        nonce: raw[..12].to_vec(),
+        ciphertext: raw[12..].to_vec(),
     })
 }
 
-fn purpose_wrap(master: &MasterKey, label: &[u8], id: &[u8], plaintext: &[u8]) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
+fn purpose_wrap(
+    master: &MasterKey,
+    label: &[u8],
+    id: &[u8],
+    plaintext: &[u8],
+) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
     use rand::RngCore;
     let mut nonce = [0u8; 12];
-    rand::rngs::OsRng.try_fill_bytes(&mut nonce)
+    rand::rngs::OsRng
+        .try_fill_bytes(&mut nonce)
         .map_err(|e| CoreError::Encryption(format!("OS randomness unavailable: {e}")))?;
     purpose_wrap_with_nonce(master, label, id, plaintext, &nonce)
 }
 
-fn purpose_unwrap(master: &MasterKey, label: &[u8], id: &[u8], blob: &beebeeb_types::EncryptedBlob) -> Result<Zeroizing<Vec<u8>>, CoreError> {
-    if blob.cipher_suite != beebeeb_types::CipherSuite::V1Aes256Gcm || blob.nonce.len() != 12 { return Err(CoreError::Decryption); }
+fn purpose_unwrap(
+    master: &MasterKey,
+    label: &[u8],
+    id: &[u8],
+    blob: &beebeeb_types::EncryptedBlob,
+) -> Result<Zeroizing<Vec<u8>>, CoreError> {
+    if blob.cipher_suite != beebeeb_types::CipherSuite::V1Aes256Gcm || blob.nonce.len() != 12 {
+        return Err(CoreError::Decryption);
+    }
     let context = purpose_context(label, id)?;
-    crate::encrypt::open_raw_with_aad(&purpose_key(master, &context), &[blob.nonce.as_slice(), blob.ciphertext.as_slice()].concat(), &context)
-        .map(Zeroizing::new)
+    crate::encrypt::open_raw_with_aad(
+        &purpose_key(master, &context),
+        &[blob.nonce.as_slice(), blob.ciphertext.as_slice()].concat(),
+        &context,
+    )
+    .map(Zeroizing::new)
 }
 
-fn purpose_unwrap_key(master: &MasterKey, label: &[u8], id: &[u8], blob: &beebeeb_types::EncryptedBlob) -> Result<FileKey, CoreError> {
+fn purpose_unwrap_key(
+    master: &MasterKey,
+    label: &[u8],
+    id: &[u8],
+    blob: &beebeeb_types::EncryptedBlob,
+) -> Result<FileKey, CoreError> {
     let bytes = purpose_unwrap(master, label, id, blob)?;
-    let key: &[u8; 32] = bytes.as_slice().try_into().map_err(|_| CoreError::InvalidInput("wrapped key must be exactly 32 bytes".into()))?;
+    let key: &[u8; 32] = bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| CoreError::InvalidInput("wrapped key must be exactly 32 bytes".into()))?;
     Ok(FileKey::from_bytes(*key))
 }
 
 /// Permanent folder custody. Never accepts legacy name/file-key ciphertext.
-pub fn wrap_folder_custody(master: &MasterKey, folder_id: &[u8], key: &FileKey) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
+pub fn wrap_folder_custody(
+    master: &MasterKey,
+    folder_id: &[u8],
+    key: &FileKey,
+) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
     purpose_wrap(master, FOLDER_CUSTODY_LABEL, folder_id, key.as_bytes())
 }
-pub fn unwrap_folder_custody(master: &MasterKey, folder_id: &[u8], blob: &beebeeb_types::EncryptedBlob) -> Result<FileKey, CoreError> {
+pub fn unwrap_folder_custody(
+    master: &MasterKey,
+    folder_id: &[u8],
+    blob: &beebeeb_types::EncryptedBlob,
+) -> Result<FileKey, CoreError> {
     purpose_unwrap_key(master, FOLDER_CUSTODY_LABEL, folder_id, blob)
 }
 /// Link fragment recovery is bound to the share's id, never the folder's id.
-pub fn wrap_link_owner_key(master: &MasterKey, share_id: &[u8], key: &FileKey) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
+pub fn wrap_link_owner_key(
+    master: &MasterKey,
+    share_id: &[u8],
+    key: &FileKey,
+) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
     purpose_wrap(master, LINK_OWNER_KEY_LABEL, share_id, key.as_bytes())
 }
-pub fn unwrap_link_owner_key(master: &MasterKey, share_id: &[u8], blob: &beebeeb_types::EncryptedBlob) -> Result<FileKey, CoreError> {
+pub fn unwrap_link_owner_key(
+    master: &MasterKey,
+    share_id: &[u8],
+    blob: &beebeeb_types::EncryptedBlob,
+) -> Result<FileKey, CoreError> {
     purpose_unwrap_key(master, LINK_OWNER_KEY_LABEL, share_id, blob)
 }
-pub fn wrap_link_owner_token(master: &MasterKey, share_id: &[u8], token: &[u8]) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
+pub fn wrap_link_owner_token(
+    master: &MasterKey,
+    share_id: &[u8],
+    token: &[u8],
+) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
     purpose_wrap(master, LINK_OWNER_TOKEN_LABEL, share_id, token)
 }
-pub fn unwrap_link_owner_token(master: &MasterKey, share_id: &[u8], blob: &beebeeb_types::EncryptedBlob) -> Result<Zeroizing<Vec<u8>>, CoreError> {
+pub fn unwrap_link_owner_token(
+    master: &MasterKey,
+    share_id: &[u8],
+    blob: &beebeeb_types::EncryptedBlob,
+) -> Result<Zeroizing<Vec<u8>>, CoreError> {
     purpose_unwrap(master, LINK_OWNER_TOKEN_LABEL, share_id, blob)
 }
 
@@ -334,7 +396,10 @@ mod tests {
 
     #[test]
     fn l6_empty_passphrase_is_rejected() {
-        assert!(derive_folder_link_passphrase_stretch("", "token").is_err(), "empty passphrase accepted");
+        assert!(
+            derive_folder_link_passphrase_stretch("", "token").is_err(),
+            "empty passphrase accepted"
+        );
     }
 
     #[test]
@@ -358,11 +423,17 @@ mod tests {
         let master = MasterKey::from_bytes([0x40; 32]);
         let key = FileKey::from_bytes([0x60; 32]);
         let custody = wrap_folder_custody(&master, b"folder", &key).unwrap();
-        assert_eq!(unwrap_folder_custody(&master, b"folder", &custody).unwrap().as_bytes(), key.as_bytes());
+        assert_eq!(
+            unwrap_folder_custody(&master, b"folder", &custody).unwrap().as_bytes(),
+            key.as_bytes()
+        );
         assert!(unwrap_folder_custody(&master, b"other", &custody).is_err());
         assert!(unwrap_link_owner_key(&master, b"folder", &custody).is_err());
         let owner = wrap_link_owner_key(&master, b"share", &key).unwrap();
-        assert_eq!(unwrap_link_owner_key(&master, b"share", &owner).unwrap().as_bytes(), key.as_bytes());
+        assert_eq!(
+            unwrap_link_owner_key(&master, b"share", &owner).unwrap().as_bytes(),
+            key.as_bytes()
+        );
         assert!(unwrap_link_owner_key(&master, b"other", &owner).is_err());
         assert!(unwrap_link_owner_token(&master, b"share", &owner).is_err());
         let token = wrap_link_owner_token(&master, b"share", b"token").unwrap();

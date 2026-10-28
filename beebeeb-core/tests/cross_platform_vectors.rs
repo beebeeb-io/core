@@ -744,6 +744,10 @@ fn vector_file_version_check() {
         "combine_folder_link_key",
         "key_wrap_v1",
         "folder_link_passphrase",
+        "folder_link_passphrase_nfd",
+        "folder_custody_v1",
+        "link_owner_key_v1",
+        "link_owner_token_v1",
     ];
     for name in &required {
         assert!(names.contains(name), "vectors.json is missing required vector '{name}'");

@@ -99,16 +99,27 @@ the master key. Clients fetch permanent owner custody before minting a key.
 32-byte stretch with `combine_folder_link_key`. `from_folder_link_passphrase`
 stretches with Argon2id v19 (256 MiB, 4 iterations, 2 lanes, 32 bytes), salt =
 `SHA-256(UTF-8 token || "beebeeb-folder-link-passphrase-v1")[0..16]`, then combines.
-KDF errors propagate; clients must show an error instead of silently opening or
-creating a link without its passphrase. Owned secret inputs and temporary key
-buffers are zeroized on every return path. Custody wraps use a master-derived
-folder-id key; the link's `owner_wrapped_key` holds `K_c` under the master key.
+Passphrases are NFC-normalized in core and empty strings are rejected. KDF
+errors propagate; clients must never downgrade to an unprotected link. Argon2
+uses a try-reserved explicit block buffer, zeroized on drop with argon2's
+`zeroize` feature. Allocation failure returns a KDF error (OS process termination
+cannot be caught).
 
-Vectors v10 add `key_wrap_v1` and `folder_link_passphrase`.
-`python3 scripts/gen-folder-link-vectors.py` independently computes their bytes
-with argon2-cffi and cryptography; `--write` replaces only those two families
-and the version. Recheck against the web passphrase function and WASM combiner
-before changing these vectors. The core drift guard regenerates both families.
+L6 supersedes the original custody/owner-wrap rule. `wrap_folder_custody` /
+`unwrap_folder_custody` derive a purpose key using HKDF-SHA256 (no salt, master
+IKM), info = `beebeeb-folder-custody-v1` || folder-id bytes, and bind the same
+bytes as AES-GCM AAD. Link owner recovery uses `beebeeb-link-owner-key-v1` ||
+share-id bytes for K_c and `beebeeb-link-owner-token-v1` || share-id bytes for
+token UTF-8. UniFFI takes canonical id strings as UTF-8. Never fall back to the
+legacy file-key custody opener after authentication fails; an existing invite
+may be opened separately for seeding only. MasterKeyHandle exposes these wraps
+plus legacy `wrap_key` / `wrap_bytes` without exporting the master key.
+
+Unreleased vectors v10 include the original two families, an NFD-equality row,
+and three purpose-wrap families. Python argon2-cffi/cryptography independently
+produces all six; WebCrypto verifies the new purpose keys, AAD and ciphertext.
+The core drift guard regenerates them. Owned secrets and scratch memory are
+zeroized on success and error paths.
 
 ## Encrypted search index (`search_index.rs`)
 

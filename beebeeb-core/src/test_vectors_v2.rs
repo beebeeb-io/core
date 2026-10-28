@@ -38,7 +38,7 @@ use crate::kdf::{MasterKey, derive_file_key};
 pub const VECTORS_FILE_VERSION: u64 = 10;
 
 /// Names of the v2 vectors, in the order they are published.
-pub const V2_VECTOR_NAMES: [&str; 10] = [
+pub const V2_VECTOR_NAMES: [&str; 14] = [
     "chunk_v2_stream",
     "chunk_v2_single_frame",
     "metadata_v2_name",
@@ -51,6 +51,10 @@ pub const V2_VECTOR_NAMES: [&str; 10] = [
     "combine_folder_link_key",
     "key_wrap_v1",
     "folder_link_passphrase",
+    "folder_link_passphrase_nfd",
+    "folder_custody_v1",
+    "link_owner_key_v1",
+    "link_owner_token_v1",
 ];
 
 /// A shared folder's key (bytes 0x80..=0x9f) for the `folder_key_id` vector.
@@ -111,7 +115,65 @@ pub fn v2_vectors() -> Vec<Value> {
         combine_folder_link_key_vector(),
         key_wrap_v1_vector(),
         folder_link_passphrase_vector(),
+        folder_link_passphrase_nfd_vector(),
+        purpose_wrap_vector(
+            "folder_custody_v1",
+            crate::kdf::FOLDER_CUSTODY_LABEL,
+            "folder-2237c",
+            &GIVEN_FILE_KEY,
+        ),
+        purpose_wrap_vector(
+            "link_owner_key_v1",
+            crate::kdf::LINK_OWNER_KEY_LABEL,
+            "share-2237c",
+            &FOLDER_KEY,
+        ),
+        purpose_wrap_vector(
+            "link_owner_token_v1",
+            crate::kdf::LINK_OWNER_TOKEN_LABEL,
+            "share-2237c",
+            b"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        ),
     ]
+}
+
+fn folder_link_passphrase_nfd_vector() -> Value {
+    use unicode_normalization::UnicodeNormalization;
+    let mut vector = folder_link_passphrase_vector();
+    let passphrase = "folder café 2237".nfd().collect::<String>();
+    let token = vector["token"].as_str().unwrap();
+    let stretch = crate::kdf::derive_folder_link_passphrase_stretch(&passphrase, token).unwrap();
+    vector["name"] = json!("folder_link_passphrase_nfd");
+    vector["note"] = json!("NFC-normalize before Argon2id; this NFD spelling equals folder_link_passphrase.");
+    vector["passphrase"] = json!(passphrase);
+    vector["stretch_hex"] = json!(hex(&*stretch));
+    vector["link_key_hex"] = json!(hex(&crate::kdf::combine_folder_link_key(&FOLDER_KEY, Some(&stretch))));
+    vector
+}
+
+fn purpose_wrap_vector(name: &str, label: &[u8], record_id: &str, plaintext: &[u8]) -> Value {
+    let context = [label, record_id.as_bytes()].concat();
+    let mut key = zeroize::Zeroizing::new([0u8; 32]);
+    hkdf::Hkdf::<sha2::Sha256>::new(None, &MASTER_KEY)
+        .expand(&context, &mut *key)
+        .unwrap();
+    let nonce: [u8; 12] = std::array::from_fn(|i| i as u8);
+    let blob = crate::kdf::purpose_wrap_with_nonce(
+        &MasterKey::from_bytes(MASTER_KEY),
+        label,
+        record_id.as_bytes(),
+        plaintext,
+        &nonce,
+    )
+    .unwrap();
+    json!({
+        "name": name,
+        "note": "L6: HKDF info and AES-GCM AAD both equal label || UTF-8 record id; fixed nonce for this public test only.",
+        "master_key_hex": hex(&MASTER_KEY), "record_id": record_id,
+        "label": std::str::from_utf8(label).unwrap(), "context_hex": hex(&context),
+        "purpose_key_hex": hex(&*key), "plaintext_hex": hex(plaintext),
+        "nonce_hex": hex(&nonce), "wrapped_hex": hex(&[blob.nonce, blob.ciphertext].concat()),
+    })
 }
 
 fn key_wrap_v1_vector() -> Value {
