@@ -249,7 +249,8 @@ fn folder_link_passphrase_vector() -> Value {
 }
 
 /// Regenerate only the fixed-nonce fixture frames. The published values were
-/// supplied independently in Plan D and are opened by the public consumers.
+/// supplied independently in Plan D / the L6-L7 fixture generator, and are
+/// opened by the public consumers.
 fn owned_key_vector(name: &str) -> Value {
     use crate::encrypt::seal_raw_with_nonce;
     use crate::kdf::FileKey;
@@ -261,13 +262,32 @@ fn owned_key_vector(name: &str) -> Value {
     let file_id = "11111111-1111-4111-8111-111111111111";
     let folder_id = "22222222-2222-4222-8222-222222222222";
     let nonce = std::array::from_fn(|i| i as u8);
-    let (wrapping_key, key) = match name {
-        "owner_wrapped_file_key" => (derive_file_key(&master, file_id.as_bytes()), child_bytes),
-        "owner_wrapped_folder_key" => (derive_file_key(&master, folder_id.as_bytes()), FOLDER_KEY),
-        "folder_wrapped_file_key" => (folder, child_bytes),
+    let raw = |blob: beebeeb_types::EncryptedBlob| [blob.nonce, blob.ciphertext].concat();
+    let frame = match name {
+        "owner_wrapped_file_key" => {
+            seal_raw_with_nonce(&derive_file_key(&master, file_id.as_bytes()), &nonce, &child_bytes, &[])
+                .expect("seal owner file vector")
+        }
+        "owner_wrapped_folder_key" => raw(crate::kdf::purpose_wrap_with_nonce(
+            &master,
+            crate::kdf::FOLDER_CUSTODY_LABEL,
+            folder_id.as_bytes(),
+            &FOLDER_KEY,
+            &nonce,
+        )
+        .expect("seal L6 custody vector")),
+        "folder_wrapped_file_key" => raw(crate::kdf::wrap_folder_child_with_nonce(
+            &folder,
+            uuid::Uuid::parse_str(folder_id).unwrap().as_bytes(),
+            uuid::Uuid::parse_str(file_id).unwrap().as_bytes(),
+            1,
+            &FileKey::from_bytes(child_bytes),
+            &nonce,
+        )
+        .expect("seal L7 child vector")),
         _ => unreachable!("owned key vector name"),
     };
-    json!({
+    let mut vector = json!({
         "name": name,
         "note": "Independent Plan D AES-GCM/HKDF known answer; fixed nonce for this fixture only. Owner wrapping uses canonical UUID string bytes; the folder key is random, never derived.",
         "master_key_hex": hex(&master_bytes),
@@ -276,8 +296,20 @@ fn owned_key_vector(name: &str) -> Value {
         "file_id": file_id,
         "folder_id": folder_id,
         "nonce_hex": hex(&nonce),
-        "expected_frame_hex": hex(&seal_raw_with_nonce(&wrapping_key, &nonce, &key, &[]).expect("seal key vector")),
-    })
+        "expected_frame_hex": hex(&frame),
+    });
+    if name == "owner_wrapped_folder_key" {
+        vector["note"] = json!(
+            "L6 permanent root custody: HKDF-SHA256(master, domain || canonical root ID string), same context as AAD; independent cryptography KAT."
+        );
+    } else if name == "folder_wrapped_file_key" {
+        vector["note"] = json!(
+            "L7 child wrap: AAD domain || root UUID bytes || item UUID bytes || kind; independent cryptography KAT."
+        );
+        vector["shared_folder_id"] = json!(folder_id);
+        vector["kind"] = json!(1);
+    }
+    vector
 }
 
 /// A shared folder's per-bucket search-index key (task 2237):

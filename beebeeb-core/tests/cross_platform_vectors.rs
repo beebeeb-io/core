@@ -769,8 +769,23 @@ fn vector_owner_wrapped_file_key() {
 
 #[test]
 fn vector_owner_wrapped_folder_key() {
+    use beebeeb_core::owned_keys::{unwrap_folder_custody, wrap_folder_custody};
     let v = get_vector(&load_vectors(), "owner_wrapped_folder_key");
-    check_owner_key_vector(&v, "folder_id", "folder_key_hex");
+    let master = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let id = v["folder_id"].as_str().unwrap();
+    let expected = bytes32(&v, "folder_key_hex");
+    let frame = decode_hex(&v, "expected_frame_hex");
+    assert_eq!(&frame[..12], decode_hex(&v, "nonce_hex"));
+    assert_eq!(
+        unwrap_folder_custody(&master, id, &frame).unwrap().as_bytes(),
+        &expected
+    );
+    let shipped = wrap_folder_custody(&master, id, &FileKey::from_bytes(expected)).unwrap();
+    assert_eq!(shipped.len(), frame.len());
+    assert_eq!(
+        unwrap_folder_custody(&master, id, &shipped).unwrap().as_bytes(),
+        &expected
+    );
 }
 
 fn check_owner_key_vector(v: &serde_json::Value, id_field: &str, key_field: &str) {
@@ -794,12 +809,23 @@ fn vector_folder_wrapped_file_key() {
     let v = get_vector(&load_vectors(), "folder_wrapped_file_key");
     let folder = FileKey::from_bytes(bytes32(&v, "folder_key_hex"));
     let expected = bytes32(&v, "child_key_hex");
+    let root = v["shared_folder_id"].as_str().unwrap();
+    let item = v["file_id"].as_str().unwrap();
+    let kind = u8::try_from(v["kind"].as_u64().unwrap()).unwrap();
     let frame = decode_hex(&v, "expected_frame_hex");
     assert_eq!(&frame[..12], decode_hex(&v, "nonce_hex"));
-    assert_eq!(unwrap_child_key(&folder, &frame).unwrap().as_bytes(), &expected);
-    let shipped = wrap_child_key(&folder, &FileKey::from_bytes(expected)).unwrap();
+    assert_eq!(
+        unwrap_child_key(&folder, root, item, kind, &frame).unwrap().as_bytes(),
+        &expected
+    );
+    let shipped = wrap_child_key(&folder, root, item, kind, &FileKey::from_bytes(expected)).unwrap();
     assert_eq!(shipped.len(), frame.len());
-    assert_eq!(unwrap_child_key(&folder, &shipped).unwrap().as_bytes(), &expected);
+    assert_eq!(
+        unwrap_child_key(&folder, root, item, kind, &shipped)
+            .unwrap()
+            .as_bytes(),
+        &expected
+    );
 }
 
 // ---------------------------------------------------------------------------

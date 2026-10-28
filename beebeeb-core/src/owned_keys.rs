@@ -26,8 +26,8 @@ pub struct ResolvedOwnedKey {
     pub origin: KeyOrigin,
 }
 
-/// Context from the row's authenticated shared-folder inventory: root ID and
-/// item kind. The child ID is always resolve_owned_key's own item_id argument.
+/// The expected shared ROOT ID and item kind for the row. The child ID is
+/// always resolve_owned_key's own item_id argument.
 pub struct FolderWrap<'a> {
     pub shared_folder_id: &'a str,
     pub kind: u8,
@@ -53,7 +53,11 @@ pub fn unwrap_owner_key(master: &MasterKey, item_id: &str, frame: &[u8]) -> Resu
 /// Seal permanent shared-root custody through the L6 purpose key and AAD.
 /// The record ID uses canonical UUID string bytes, matching C1's custody API.
 pub fn wrap_folder_custody(master: &MasterKey, root_id: &str, key: &FileKey) -> Result<Vec<u8>, CoreError> {
-    Ok(key_frame(crate::kdf::wrap_folder_custody(master, root_id.as_bytes(), key)?))
+    Ok(key_frame(crate::kdf::wrap_folder_custody(
+        master,
+        root_id.as_bytes(),
+        key,
+    )?))
 }
 
 /// Open only L6 custody. Legacy invite seeds must be read explicitly elsewhere;
@@ -73,7 +77,13 @@ pub fn wrap_child_key(
 ) -> Result<Vec<u8>, CoreError> {
     let root = child_uuid(shared_folder_id)?;
     let item = child_uuid(item_id)?;
-    Ok(key_frame(crate::kdf::wrap_folder_child(folder_key, root.as_bytes(), item.as_bytes(), kind, key)?))
+    Ok(key_frame(crate::kdf::wrap_folder_child(
+        folder_key,
+        root.as_bytes(),
+        item.as_bytes(),
+        kind,
+        key,
+    )?))
 }
 
 /// Open only the row's L7 root/item/kind-bound child envelope.
@@ -142,7 +152,13 @@ pub fn resolve_owned_key(
         }
     }
     if let Some(wrap) = folder_wrap {
-        if let Ok(key) = unwrap_child_key(wrap.folder_key, wrap.shared_folder_id, item_id, wrap.kind, wrap.wrapped_key) {
+        if let Ok(key) = unwrap_child_key(
+            wrap.folder_key,
+            wrap.shared_folder_id,
+            item_id,
+            wrap.kind,
+            wrap.wrapped_key,
+        ) {
             return Ok(ResolvedOwnedKey {
                 key,
                 origin: KeyOrigin::FolderWrap,

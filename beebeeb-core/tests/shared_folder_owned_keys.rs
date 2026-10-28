@@ -2,14 +2,16 @@ use beebeeb_core::chunk_stream::ExpectedChunkFormat;
 use beebeeb_core::encrypt::{decrypt_file_metadata_with_key, encrypt_chunk_raw, encrypt_name_for};
 use beebeeb_core::kdf::{FileKey, MasterKey, derive_file_key};
 use beebeeb_core::owned_keys::{
-    FolderWrap, KeyOrigin, resolve_owned_key, unwrap_child_key, unwrap_owner_key, wrap_child_key, wrap_key_to_owner, wrap_folder_custody, unwrap_folder_custody,
+    FolderWrap, KeyOrigin, resolve_owned_key, unwrap_child_key, unwrap_folder_custody, unwrap_owner_key,
+    wrap_child_key, wrap_folder_custody, wrap_key_to_owner,
 };
 
 const FILE_ID: &str = "11111111-1111-4111-8111-111111111111";
 const FOLDER_ID: &str = "22222222-2222-4222-8222-222222222222";
 const OWNER_CHILD: &str = "000102030405060708090a0b35514b6b6c4b17aff62f216ac0b1450fbc111e4df6425098a0dfa8538a074ab1072608ec9c094a9f2b065b252ac77b90";
-const FOLDER_CHILD: &str = "000102030405060708090a0b53e1dd8ab183dc0c6eddf3c784fb530e4436147ac012610979e5790104c1ca8d4c00604e3ec4c4332ef142f4cb8734a9";
-const OWNER_ROOT: &str = "000102030405060708090a0b0f6fecaa527867903e235f8f8be9ad483a15628b210fdae52e58146b296828b233d626b9da219760113ad528e8f067d3";
+const FOLDER_CHILD: &str = "000102030405060708090a0b53e1dd8ab183dc0c6eddf3c784fb530e4436147ac012610979e5790104c1ca8d7fa70b87b7f6eac00ff8b615519b7275";
+const FOLDER_CHILD_FOLDER: &str = "000102030405060708090a0b53e1dd8ab183dc0c6eddf3c784fb530e4436147ac012610979e5790104c1ca8d794c5a8b70b04861d35d6c0dae1978c7";
+const OWNER_ROOT: &str = "000102030405060708090a0be76dd2b5f6581ea20f0e3ef1730df58cb833f1c91ca6fbe931adc3cf50c1117b5e683d28ba2e1e04614014c4fbcd8572";
 
 fn master() -> MasterKey {
     MasterKey::from_bytes(std::array::from_fn(|i| i as u8))
@@ -29,8 +31,16 @@ fn owner_kat() {
     let expected_child_key = *child().as_bytes();
     let unwrapped = unwrap_owner_key(&master, FILE_ID, &hex::decode(OWNER_CHILD).unwrap()).unwrap();
     assert_eq!(unwrapped.as_bytes(), &expected_child_key);
-    let root = unwrap_owner_key(&master, FOLDER_ID, &hex::decode(OWNER_ROOT).unwrap()).unwrap();
+    let root = unwrap_folder_custody(&master, FOLDER_ID, &hex::decode(OWNER_ROOT).unwrap()).unwrap();
     assert_eq!(root.as_bytes(), folder().as_bytes());
+    let custody = wrap_folder_custody(&master, FOLDER_ID, &root).unwrap();
+    let second_custody = wrap_folder_custody(&master, FOLDER_ID, &root).unwrap();
+    assert_ne!(&custody[..12], &second_custody[..12]);
+    assert_eq!(
+        unwrap_folder_custody(&master, FOLDER_ID, &custody).unwrap().as_bytes(),
+        root.as_bytes()
+    );
+
     let first = wrap_key_to_owner(&master, FILE_ID, &child()).unwrap();
     let second = wrap_key_to_owner(&master, FILE_ID, &child()).unwrap();
     assert_eq!(first.len(), 60);
@@ -59,10 +69,20 @@ fn folder_kat() {
     assert_eq!(first.len(), 60);
     assert_ne!(&first[..12], &second[..12]);
     assert_eq!(
-        unwrap_child_key(&folder, FOLDER_ID, FILE_ID, 1, &first).unwrap().as_bytes(),
+        unwrap_child_key(&folder, FOLDER_ID, FILE_ID, 1, &first)
+            .unwrap()
+            .as_bytes(),
         &expected_child_key
     );
     assert!(unwrap_child_key(&child(), FOLDER_ID, FILE_ID, 1, &first).is_err());
+    let folder_frame = hex::decode(FOLDER_CHILD_FOLDER).unwrap();
+    assert_eq!(
+        unwrap_child_key(&folder, FOLDER_ID, FILE_ID, 2, &folder_frame)
+            .unwrap()
+            .as_bytes(),
+        &expected_child_key
+    );
+    assert!(unwrap_child_key(&folder, FOLDER_ID, FILE_ID, 1, &folder_frame).is_err());
 }
 
 #[test]
@@ -117,8 +137,8 @@ fn foreign_never_derived() {
                 owner,
                 Some(FolderWrap {
                     folder_key: &folder,
-                shared_folder_id: FOLDER_ID,
-                kind: 1,
+                    shared_folder_id: FOLDER_ID,
+                    kind: 1,
                     wrapped_key: &invalid,
                 }),
                 true
@@ -138,6 +158,7 @@ fn invalid_frames() {
     let folder = folder();
     for length in [0, 12, 28, 59, 61] {
         assert!(unwrap_owner_key(&master, FILE_ID, &vec![0; length]).is_err());
+        assert!(unwrap_folder_custody(&master, FOLDER_ID, &vec![0; length]).is_err());
         assert!(unwrap_child_key(&folder, FOLDER_ID, FILE_ID, 1, &vec![0; length]).is_err());
     }
     // Authenticated frames with plaintext of the wrong size must also fail.
@@ -182,8 +203,8 @@ fn legacy_derived_unchanged() {
         None,
         Some(FolderWrap {
             folder_key: &folder,
-                shared_folder_id: FOLDER_ID,
-                kind: 1,
+            shared_folder_id: FOLDER_ID,
+            kind: 1,
             wrapped_key: &[],
         }),
         false,
@@ -194,12 +215,13 @@ fn legacy_derived_unchanged() {
 
 #[test]
 fn folder_name_key_adoption() {
+    const NESTED_ID: &str = "55555555-5555-4555-8555-555555555555";
     let master = master();
     let folder = folder();
     let random_key = child();
     assert_ne!(
         random_key.as_bytes(),
-        derive_file_key(&master, FOLDER_ID.as_bytes()).as_bytes()
+        derive_file_key(&master, NESTED_ID.as_bytes()).as_bytes()
     );
     let name = encrypt_name_for(
         &random_key,
@@ -208,15 +230,15 @@ fn folder_name_key_adoption() {
         ExpectedChunkFormat::Unrecorded,
     )
     .unwrap();
-    let frame = wrap_child_key(&folder, FOLDER_ID, FILE_ID, 1, &random_key).unwrap();
+    let frame = wrap_child_key(&folder, FOLDER_ID, NESTED_ID, 2, &random_key).unwrap();
     let resolved = resolve_owned_key(
         &master,
-        FOLDER_ID,
+        NESTED_ID,
         None,
         Some(FolderWrap {
             folder_key: &folder,
-                shared_folder_id: FOLDER_ID,
-                kind: 1,
+            shared_folder_id: FOLDER_ID,
+            kind: 2,
             wrapped_key: &frame,
         }),
         true,
@@ -224,8 +246,8 @@ fn folder_name_key_adoption() {
     .unwrap();
     let metadata = decrypt_file_metadata_with_key(&resolved.key, &name).unwrap();
     assert_eq!(metadata.name, "Guest holiday folder");
-    let adoption = wrap_key_to_owner(&master, FOLDER_ID, &resolved.key).unwrap();
-    let after_move = resolve_owned_key(&master, FOLDER_ID, Some(&adoption), None, true).unwrap();
+    let adoption = wrap_key_to_owner(&master, NESTED_ID, &resolved.key).unwrap();
+    let after_move = resolve_owned_key(&master, NESTED_ID, Some(&adoption), None, true).unwrap();
     assert_eq!(after_move.origin, KeyOrigin::OwnerWrap);
     assert_eq!(after_move.key.as_bytes(), random_key.as_bytes());
     assert_eq!(
@@ -238,7 +260,10 @@ fn folder_name_key_adoption() {
 // cases stay separate from the original eight happy-path/selection cases.
 mod review_l6_l7 {
     use super::*;
-    use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::{Aead, Payload}};
+    use aes_gcm::{
+        Aes256Gcm, KeyInit, Nonce,
+        aead::{Aead, Payload},
+    };
     use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor};
     use beebeeb_core::encrypt::encrypt_name;
     use beebeeb_types::EncryptedBlob;
@@ -256,21 +281,32 @@ mod review_l6_l7 {
         context.extend_from_slice(FOLDER_ID.as_bytes());
         let raw_master = Zeroizing::new(master.to_bytes());
         let mut key = Zeroizing::new([0u8; 32]);
-        Hkdf::<Sha256>::new(None, raw_master.as_ref()).expand(&context, key.as_mut()).unwrap();
+        Hkdf::<Sha256>::new(None, raw_master.as_ref())
+            .expand(&context, key.as_mut())
+            .unwrap();
         let nonce = [0x37; 12];
         let folder = folder();
         // Independent AES-GCM/HKDF reference, not the adapter under test.
         let cipher = Aes256Gcm::new_from_slice(key.as_ref()).unwrap();
-        let encrypted = cipher.encrypt(Nonce::from_slice(&nonce), Payload {
-            msg: folder.as_bytes(), aad: &context,
-        }).unwrap();
+        let encrypted = cipher
+            .encrypt(
+                Nonce::from_slice(&nonce),
+                Payload {
+                    msg: folder.as_bytes(),
+                    aad: &context,
+                },
+            )
+            .unwrap();
         let mut frame = nonce.to_vec();
         frame.extend_from_slice(&encrypted);
         let candidate = unwrap_folder_custody(&master, FOLDER_ID, &frame).unwrap();
         assert_eq!(candidate.as_bytes(), folder.as_bytes());
         let shipped = wrap_folder_custody(&master, FOLDER_ID, &folder).unwrap();
         assert_eq!(shipped.len(), 60);
-        assert_eq!(unwrap_folder_custody(&master, FOLDER_ID, &shipped).unwrap().as_bytes(), folder.as_bytes());
+        assert_eq!(
+            unwrap_folder_custody(&master, FOLDER_ID, &shipped).unwrap().as_bytes(),
+            folder.as_bytes()
+        );
         assert!(unwrap_folder_custody(&master, OTHER_ROOT, &shipped).is_err());
         assert!(unwrap_folder_custody(&MasterKey::from_bytes([0xff; 32]), FOLDER_ID, &shipped).is_err());
     }
@@ -287,7 +323,9 @@ mod review_l6_l7 {
         assert!(unwrap_folder_custody(&master, FOLDER_ID, &frame).is_err());
         let custody = wrap_folder_custody(&master, FOLDER_ID, &folder()).unwrap();
         let mut content = ChunkDecryptor::for_push_with_file_key(
-            derive_file_key(&master, FOLDER_ID.as_bytes()), FOLDER_ID, ExpectedChunkFormat::Unrecorded,
+            derive_file_key(&master, FOLDER_ID.as_bytes()),
+            FOLDER_ID,
+            ExpectedChunkFormat::Unrecorded,
         );
         assert!(content.push_frame(&custody).is_err());
         // Never upgrade an old unbound custody frame by silently reading it.
@@ -304,9 +342,19 @@ mod review_l6_l7 {
         let name_a = encrypt_name_for(&child_a, "invoice.txt", None, ExpectedChunkFormat::Unrecorded).unwrap();
         let wrap_a = wrap_child_key(&folder, FOLDER_ID, FILE_ID, 1, &child_a).unwrap();
         let wrap_b = wrap_child_key(&folder, FOLDER_ID, B, 1, &child_b).unwrap();
-        let legit = resolve_owned_key(&master, B, None, Some(FolderWrap {
-            folder_key: &folder, shared_folder_id: FOLDER_ID, kind: 1, wrapped_key: &wrap_b,
-        }), true).unwrap();
+        let legit = resolve_owned_key(
+            &master,
+            B,
+            None,
+            Some(FolderWrap {
+                folder_key: &folder,
+                shared_folder_id: FOLDER_ID,
+                kind: 1,
+                wrapped_key: &wrap_b,
+            }),
+            true,
+        )
+        .unwrap();
         assert_eq!(legit.key.as_bytes(), child_b.as_bytes());
         let data_a = b"different logical item";
         let mut enc = ChunkEncryptor::for_push_with_file_key(child_a, FILE_ID, data_a.len() as u64, 32).unwrap();
@@ -314,9 +362,18 @@ mod review_l6_l7 {
         enc.finish().unwrap();
         // A server replays A's wrap, authenticated name and v1 bytes on B's row.
         let attack = (|| -> Result<Vec<u8>, beebeeb_core::CoreError> {
-            let resolved = resolve_owned_key(&master, B, None, Some(FolderWrap {
-                folder_key: &folder, shared_folder_id: FOLDER_ID, kind: 1, wrapped_key: &wrap_a,
-            }), true)?;
+            let resolved = resolve_owned_key(
+                &master,
+                B,
+                None,
+                Some(FolderWrap {
+                    folder_key: &folder,
+                    shared_folder_id: FOLDER_ID,
+                    kind: 1,
+                    wrapped_key: &wrap_a,
+                }),
+                true,
+            )?;
             let metadata = decrypt_file_metadata_with_key(&resolved.key, &name_a)?;
             let mut dec = ChunkDecryptor::for_push_with_file_key(resolved.key, B, metadata.chunk_format);
             let plaintext = dec.push_frame(&content_a.data)?.data;
@@ -331,10 +388,24 @@ mod review_l6_l7 {
         let master = master();
         let folder = folder();
         let frame = wrap_child_key(&folder, FOLDER_ID, FILE_ID, 1, &child()).unwrap();
-        let resolve = |root, kind, frame| resolve_owned_key(&master, FILE_ID, None, Some(FolderWrap {
-            folder_key: &folder, shared_folder_id: root, kind, wrapped_key: frame,
-        }), true);
-        assert_eq!(resolve(FOLDER_ID, 1, &frame).unwrap().key.as_bytes(), child().as_bytes());
+        let resolve = |root, kind, frame| {
+            resolve_owned_key(
+                &master,
+                FILE_ID,
+                None,
+                Some(FolderWrap {
+                    folder_key: &folder,
+                    shared_folder_id: root,
+                    kind,
+                    wrapped_key: frame,
+                }),
+                true,
+            )
+        };
+        assert_eq!(
+            resolve(FOLDER_ID, 1, &frame).unwrap().key.as_bytes(),
+            child().as_bytes()
+        );
         assert!(resolve(OTHER_ROOT, 1, &frame).is_err());
         assert!(resolve(FOLDER_ID, 2, &frame).is_err());
         assert!(resolve(FOLDER_ID, 0, &frame).is_err());
