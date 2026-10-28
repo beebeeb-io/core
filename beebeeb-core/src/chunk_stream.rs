@@ -22,8 +22,9 @@
 //!
 //! ## Key handling
 //!
-//! The per-file key is derived **once** in the constructor via
-//! [`derive_file_key`] and held as a [`FileKey`], which is `ZeroizeOnDrop`, so
+//! The per-file key is derived **once** in the master-key constructors via
+//! [`derive_file_key`], or supplied for an existing random-key file. It is held
+//! as a [`FileKey`], which is `ZeroizeOnDrop`, so
 //! it is wiped when the encryptor/decryptor drops. The reused plaintext read
 //! buffer is wrapped in [`Zeroizing`] so residual plaintext is wiped too.
 //!
@@ -600,7 +601,7 @@ enum Source {
 
 /// Streaming chunk encryptor — see the [module docs](self).
 pub struct ChunkEncryptor {
-    /// Derived once; `ZeroizeOnDrop` wipes it when this struct drops.
+    /// Derived once or supplied by the caller; `ZeroizeOnDrop` wipes it on drop.
     file_key: FileKey,
     /// The plan this encryptor follows (chunk size + count).
     plan: ChunkPlan,
@@ -623,7 +624,7 @@ pub struct ChunkEncryptor {
     /// Format of every frame this encryptor writes ([`WRITE_FORMAT`] unless a
     /// test overrides it before the first chunk).
     format: ChunkFormat,
-    /// The exact bytes the file key was derived from (bound into the v2 AAD).
+    /// The item identity, also for random keys (bound into the v2 AAD).
     file_id: Vec<u8>,
     /// v2 chunk subkey (`HKDF(file_key, "beebeeb/chunk/v2/key")`); zeroized on drop.
     chunk_key: FileKey,
@@ -636,6 +637,30 @@ pub struct ChunkEncryptor {
 }
 
 impl ChunkEncryptor {
+    /// **Push** writer for an existing random file key, including shared-folder
+    /// additions. New files still write `WRITE_FORMAT`; a replacement must call
+    /// `with_recorded_pin` with the existing file's authenticated metadata pin.
+    pub fn for_push_with_file_key(
+        file_key: FileKey,
+        file_id: &str,
+        file_size: u64,
+        chunk_size: u64,
+    ) -> Result<Self, CoreError> {
+        Self::with_explicit_chunk_size(file_key, file_id, file_size, chunk_size, Source::Push)
+    }
+
+    /// **Pull** counterpart of `for_push_with_file_key`, owning both the key and
+    /// the source. Uses the same plan bounds, frame loop and finish checks.
+    pub fn from_reader_with_file_key<R: Read + Send + 'static>(
+        file_key: FileKey,
+        file_id: &str,
+        file_size: u64,
+        chunk_size: u64,
+        reader: R,
+    ) -> Result<Self, CoreError> {
+        Self::with_explicit_chunk_size(file_key, file_id, file_size, chunk_size, Source::Pull(Box::new(reader)))
+    }
+
     /// **Pull** constructor: the encryptor owns `reader` and pulls one chunk at
     /// a time. The plan is derived from `file_size` + `profile`.
     ///
@@ -674,22 +699,7 @@ impl ChunkEncryptor {
         file_size: u64,
         chunk_size_bytes: u64,
     ) -> Result<Self, CoreError> {
-        check_explicit_chunk_size(chunk_size_bytes)?;
-        let chunk_count = if file_size == 0 {
-            1
-        } else {
-            file_size.div_ceil(chunk_size_bytes)
-        };
-        let plan = ChunkPlan {
-            file_size_bytes: file_size,
-            chunk_size_bytes,
-            chunk_count,
-            strategy: ChunkStrategy::Capped {
-                max_chunk_size_bytes: chunk_size_bytes,
-            },
-            storage_format_version: STORAGE_FORMAT_VERSION_V2,
-        };
-        Self::new(mk, file_id, plan, Source::Push)
+        Self::for_push_with_file_key(derive_file_key(mk, file_id.as_bytes()), file_id, file_size, chunk_size_bytes)
     }
 
     /// **Pull** constructor with an explicit chunk size — the reader-form analog
@@ -706,27 +716,38 @@ impl ChunkEncryptor {
         chunk_size_bytes: u64,
         reader: R,
     ) -> Result<Self, CoreError> {
+        Self::from_reader_with_file_key(
+            derive_file_key(mk, file_id.as_bytes()), file_id, file_size, chunk_size_bytes, reader,
+        )
+    }
+
+    fn with_explicit_chunk_size(
+        file_key: FileKey,
+        file_id: &str,
+        file_size: u64,
+        chunk_size_bytes: u64,
+        source: Source,
+    ) -> Result<Self, CoreError> {
         check_explicit_chunk_size(chunk_size_bytes)?;
-        let chunk_count = if file_size == 0 {
-            1
-        } else {
-            file_size.div_ceil(chunk_size_bytes)
-        };
+        let chunk_count = if file_size == 0 { 1 } else { file_size.div_ceil(chunk_size_bytes) };
         let plan = ChunkPlan {
             file_size_bytes: file_size,
             chunk_size_bytes,
             chunk_count,
-            strategy: ChunkStrategy::Capped {
-                max_chunk_size_bytes: chunk_size_bytes,
-            },
+            strategy: ChunkStrategy::Capped { max_chunk_size_bytes: chunk_size_bytes },
             storage_format_version: STORAGE_FORMAT_VERSION_V2,
         };
-        Self::new(mk, file_id, plan, Source::Pull(Box::new(reader)))
+        Self::new_with_file_key(file_key, file_id, plan, source)
     }
 
     /// Shared constructor body: validates the plan, derives the key once, sizes
     /// the read buffer (pull only).
     fn new(mk: &MasterKey, file_id: &str, plan: ChunkPlan, source: Source) -> Result<Self, CoreError> {
+        Self::new_with_file_key(derive_file_key(mk, file_id.as_bytes()), file_id, plan, source)
+    }
+
+    /// All constructors share plan validation, key ownership and source setup.
+    fn new_with_file_key(file_key: FileKey, file_id: &str, plan: ChunkPlan, source: Source) -> Result<Self, CoreError> {
         let chunk_count: u32 = plan.chunk_count.try_into().map_err(|_| {
             CoreError::InvalidInput(format!(
                 "chunk_count {} exceeds u32::MAX; file too large for this chunk size",
@@ -740,7 +761,6 @@ impl ChunkEncryptor {
             ))
         })?;
 
-        let file_key = derive_file_key(mk, file_id.as_bytes());
         let chunk_key = derive_chunk_key_v2(&file_key);
 
         // Only the pull path reads into a buffer; push callers own their bytes.
