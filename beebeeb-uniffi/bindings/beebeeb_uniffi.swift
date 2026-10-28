@@ -2681,6 +2681,28 @@ public protocol FileKeyHandleProtocol: AnyObject, Sendable {
      */
     func encryptThumbnailFor(plaintext: Data, recordedPin: UInt8) throws  -> Data
     
+    /**
+     * One-way public key identifier; never exports the key itself.
+     */
+    func keyId() throws  -> Data
+    
+    func unwrapFolderChild(sharedFolderId: String, itemId: String, kind: UInt8, nonce: Data, ciphertext: Data) throws  -> FileKeyHandle
+    
+    /**
+     * Authenticate a wrap and keep its exactly 32-byte plaintext in a handle.
+     */
+    func unwrapKey(nonce: Data, ciphertext: Data) throws  -> FileKeyHandle
+    
+    /**
+     * L7 authenticated child wrap. IDs are UUID strings; AAD uses their 16 raw bytes.
+     */
+    func wrapFolderChild(sharedFolderId: String, itemId: String, kind: UInt8, inner: FileKeyHandle) throws  -> EncryptedData
+    
+    /**
+     * AES-256-GCM key wrap, no AAD: 12-byte nonce and 48-byte ciphertext.
+     */
+    func wrapKey(inner: FileKeyHandle) throws  -> EncryptedData
+    
 }
 /**
  * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`
@@ -2739,6 +2761,32 @@ open class FileKeyHandle: FileKeyHandleProtocol, @unchecked Sendable {
 
     
     /**
+     * Combine a link fragment and optional 32-byte Argon2id stretch in core.
+     * Owned secret inputs are wiped on success and every error path.
+     */
+public static func fromFolderLink(kC: Data, passphraseStretch: Data?)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_from_folder_link(
+        FfiConverterData.lower(kC),
+        FfiConverterOptionData.lower(passphraseStretch),$0
+    )
+})
+}
+    
+    /**
+     * Stretch then combine; memory/KDF errors propagate without a plain-link fallback.
+     */
+public static func fromFolderLinkPassphrase(kC: Data, passphrase: String, token: String)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_from_folder_link_passphrase(
+        FfiConverterData.lower(kC),
+        FfiConverterString.lower(passphrase),
+        FfiConverterString.lower(token),$0
+    )
+})
+}
+    
+    /**
      * A handle for a per-file key the app holds as raw bytes and that is NOT
      * derived from the account's master key: a file-request upload's content
      * key (`open_request_upload`), a shared file's key. Task 1958 round 4: the
@@ -2754,6 +2802,16 @@ public static func fromKeyBytes(key: Data)throws  -> FileKeyHandle  {
     return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_from_key_bytes(
         FfiConverterData.lower(key),$0
+    )
+})
+}
+    
+    /**
+     * A fresh random key, independent of the account master key.
+     */
+public static func generate()throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_generate($0
     )
 })
 }
@@ -2972,6 +3030,70 @@ open func encryptThumbnailFor(plaintext: Data, recordedPin: UInt8)throws  -> Dat
             self.uniffiCloneHandle(),
         FfiConverterData.lower(plaintext),
         FfiConverterUInt8.lower(recordedPin),$0
+    )
+})
+}
+    
+    /**
+     * One-way public key identifier; never exports the key itself.
+     */
+open func keyId()throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_key_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+open func unwrapFolderChild(sharedFolderId: String, itemId: String, kind: UInt8, nonce: Data, ciphertext: Data)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_unwrap_folder_child(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(sharedFolderId),
+        FfiConverterString.lower(itemId),
+        FfiConverterUInt8.lower(kind),
+        FfiConverterData.lower(nonce),
+        FfiConverterData.lower(ciphertext),$0
+    )
+})
+}
+    
+    /**
+     * Authenticate a wrap and keep its exactly 32-byte plaintext in a handle.
+     */
+open func unwrapKey(nonce: Data, ciphertext: Data)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_unwrap_key(
+            self.uniffiCloneHandle(),
+        FfiConverterData.lower(nonce),
+        FfiConverterData.lower(ciphertext),$0
+    )
+})
+}
+    
+    /**
+     * L7 authenticated child wrap. IDs are UUID strings; AAD uses their 16 raw bytes.
+     */
+open func wrapFolderChild(sharedFolderId: String, itemId: String, kind: UInt8, inner: FileKeyHandle)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_wrap_folder_child(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(sharedFolderId),
+        FfiConverterString.lower(itemId),
+        FfiConverterUInt8.lower(kind),
+        FfiConverterTypeFileKeyHandle_lower(inner),$0
+    )
+})
+}
+    
+    /**
+     * AES-256-GCM key wrap, no AAD: 12-byte nonce and 48-byte ciphertext.
+     */
+open func wrapKey(inner: FileKeyHandle)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_wrap_key(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeFileKeyHandle_lower(inner),$0
     )
 })
 }
@@ -3354,6 +3476,42 @@ public protocol MasterKeyHandleProtocol: AnyObject, Sendable {
      */
     func exportForKeychain() throws  -> Data
     
+    func unwrapFolderCustody(folderId: String, nonce: Data, ciphertext: Data) throws  -> FileKeyHandle
+    
+    func unwrapInviteOwnerCopy(folderId: String, nonce: Data, ciphertext: Data) throws  -> FileKeyHandle
+    
+    /**
+     * The link fragment is the deliberate export exception: JS puts K_c in
+     * the URL. The account master key never crosses this boundary.
+     */
+    func unwrapLinkOwnerKey(shareId: String, nonce: Data, ciphertext: Data) throws  -> Data
+    
+    func unwrapLinkOwnerToken(shareId: String, nonce: Data, ciphertext: Data) throws  -> Data
+    
+    /**
+     * Verify a legacy candidate without exporting the master key.
+     */
+    func verifyLegacyFolderKey(folderId: String, candidate: FileKeyHandle, ownerChildId: String, childWrap: Data) throws  -> Bool
+    
+    /**
+     * Wrap bytes without exporting the master key across the FFI boundary.
+     */
+    func wrapBytes(bytes: Data) throws  -> EncryptedData
+    
+    func wrapFolderCustody(folderId: String, inner: FileKeyHandle) throws  -> EncryptedData
+    
+    func wrapInviteOwnerCopy(folderId: String, inner: FileKeyHandle) throws  -> EncryptedData
+    
+    /**
+     * Legacy direct-master wrap for existing protocols. Folder custody and
+     * link recovery MUST use the purpose-bound methods below instead.
+     */
+    func wrapKey(inner: FileKeyHandle) throws  -> EncryptedData
+    
+    func wrapLinkOwnerKey(shareId: String, inner: FileKeyHandle) throws  -> EncryptedData
+    
+    func wrapLinkOwnerToken(shareId: String, token: Data) throws  -> EncryptedData
+    
 }
 /**
  * Opaque handle to a MasterKey. The key bytes never leave Rust except via
@@ -3629,6 +3787,134 @@ open func exportForKeychain()throws  -> Data  {
     return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_export_for_keychain(
             self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+open func unwrapFolderCustody(folderId: String, nonce: Data, ciphertext: Data)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_folder_custody(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(folderId),
+        FfiConverterData.lower(nonce),
+        FfiConverterData.lower(ciphertext),$0
+    )
+})
+}
+    
+open func unwrapInviteOwnerCopy(folderId: String, nonce: Data, ciphertext: Data)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_invite_owner_copy(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(folderId),
+        FfiConverterData.lower(nonce),
+        FfiConverterData.lower(ciphertext),$0
+    )
+})
+}
+    
+    /**
+     * The link fragment is the deliberate export exception: JS puts K_c in
+     * the URL. The account master key never crosses this boundary.
+     */
+open func unwrapLinkOwnerKey(shareId: String, nonce: Data, ciphertext: Data)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_link_owner_key(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(shareId),
+        FfiConverterData.lower(nonce),
+        FfiConverterData.lower(ciphertext),$0
+    )
+})
+}
+    
+open func unwrapLinkOwnerToken(shareId: String, nonce: Data, ciphertext: Data)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_link_owner_token(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(shareId),
+        FfiConverterData.lower(nonce),
+        FfiConverterData.lower(ciphertext),$0
+    )
+})
+}
+    
+    /**
+     * Verify a legacy candidate without exporting the master key.
+     */
+open func verifyLegacyFolderKey(folderId: String, candidate: FileKeyHandle, ownerChildId: String, childWrap: Data)throws  -> Bool  {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_verify_legacy_folder_key(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(folderId),
+        FfiConverterTypeFileKeyHandle_lower(candidate),
+        FfiConverterString.lower(ownerChildId),
+        FfiConverterData.lower(childWrap),$0
+    )
+})
+}
+    
+    /**
+     * Wrap bytes without exporting the master key across the FFI boundary.
+     */
+open func wrapBytes(bytes: Data)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_bytes(
+            self.uniffiCloneHandle(),
+        FfiConverterData.lower(bytes),$0
+    )
+})
+}
+    
+open func wrapFolderCustody(folderId: String, inner: FileKeyHandle)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_folder_custody(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(folderId),
+        FfiConverterTypeFileKeyHandle_lower(inner),$0
+    )
+})
+}
+    
+open func wrapInviteOwnerCopy(folderId: String, inner: FileKeyHandle)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_invite_owner_copy(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(folderId),
+        FfiConverterTypeFileKeyHandle_lower(inner),$0
+    )
+})
+}
+    
+    /**
+     * Legacy direct-master wrap for existing protocols. Folder custody and
+     * link recovery MUST use the purpose-bound methods below instead.
+     */
+open func wrapKey(inner: FileKeyHandle)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_key(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeFileKeyHandle_lower(inner),$0
+    )
+})
+}
+    
+open func wrapLinkOwnerKey(shareId: String, inner: FileKeyHandle)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_link_owner_key(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(shareId),
+        FfiConverterTypeFileKeyHandle_lower(inner),$0
+    )
+})
+}
+    
+open func wrapLinkOwnerToken(shareId: String, token: Data)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_link_owner_token(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(shareId),
+        FfiConverterData.lower(token),$0
     )
 })
 }
@@ -9238,9 +9524,9 @@ public enum UploadError: Swift.Error, Equatable, Hashable, Foundation.LocalizedE
     
     case Network(detail: String
     )
-    case ServerError(status: UInt16, message: String
+    case ServerError(status: UInt16, detail: String
     )
-    case ClientError(status: UInt16, message: String
+    case ClientError(status: UInt16, detail: String
     )
     case RateLimited(retryAfterSecs: UInt64
     )
@@ -9286,11 +9572,11 @@ public struct FfiConverterTypeUploadError: FfiConverterRustBuffer {
             )
         case 2: return .ServerError(
             status: try FfiConverterUInt16.read(from: &buf), 
-            message: try FfiConverterString.read(from: &buf)
+            detail: try FfiConverterString.read(from: &buf)
             )
         case 3: return .ClientError(
             status: try FfiConverterUInt16.read(from: &buf), 
-            message: try FfiConverterString.read(from: &buf)
+            detail: try FfiConverterString.read(from: &buf)
             )
         case 4: return .RateLimited(
             retryAfterSecs: try FfiConverterUInt64.read(from: &buf)
@@ -9325,16 +9611,16 @@ public struct FfiConverterTypeUploadError: FfiConverterRustBuffer {
             FfiConverterString.write(detail, into: &buf)
             
         
-        case let .ServerError(status,message):
+        case let .ServerError(status,detail):
             writeInt(&buf, Int32(2))
             FfiConverterUInt16.write(status, into: &buf)
-            FfiConverterString.write(message, into: &buf)
+            FfiConverterString.write(detail, into: &buf)
             
         
-        case let .ClientError(status,message):
+        case let .ClientError(status,detail):
             writeInt(&buf, Int32(3))
             FfiConverterUInt16.write(status, into: &buf)
-            FfiConverterString.write(message, into: &buf)
+            FfiConverterString.write(detail, into: &buf)
             
         
         case let .RateLimited(retryAfterSecs):
@@ -12087,6 +12373,21 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_thumbnail_for() != 63311) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_key_id() != 12051) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_unwrap_folder_child() != 38035) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_unwrap_key() != 46173) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_wrap_folder_child() != 38562) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_wrap_key() != 2716) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_fileprovidercachehandle_clear() != 34269) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -12142,6 +12443,39 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_export_for_keychain() != 50366) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_folder_custody() != 29894) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_invite_owner_copy() != 13280) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_link_owner_key() != 33903) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_link_owner_token() != 21189) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_verify_legacy_folder_key() != 33121) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_bytes() != 63264) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_folder_custody() != 30373) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_invite_owner_copy() != 63555) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_key() != 6508) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_link_owner_key() != 31672) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_link_owner_token() != 17239) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_encrypt_buckets() != 883) {
@@ -12249,7 +12583,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_constructor_directsignedurl_new() != 57713) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_folder_link() != 22577) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_folder_link_passphrase() != 65362) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_key_bytes() != 50246) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_generate() != 28342) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_fileprovidercachehandle_open() != 22658) {
