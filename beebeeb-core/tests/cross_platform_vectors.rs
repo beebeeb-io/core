@@ -748,6 +748,8 @@ fn vector_file_version_check() {
         "folder_custody_v1",
         "link_owner_key_v1",
         "link_owner_token_v1",
+        "folder_child_file_v1",
+        "folder_child_folder_v1",
     ];
     for name in &required {
         assert!(names.contains(name), "vectors.json is missing required vector '{name}'");

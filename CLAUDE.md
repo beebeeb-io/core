@@ -194,3 +194,5 @@ This repo has a knowledge graph at graphify-out/. Read `graphify-out/GRAPH_REPOR
 ## Task history
 
 Pre-distillation CLAUDE.md verbatim (chunk-format v2 review rounds 1–5 + public API change list, onboarding review rounds, count-history baselines): docs/runbook/core-task-history.md
+
+L7 (2237c): folder child key wraps authenticate `beebeeb-folder-child-v1 || shared root UUID bytes (16) || item UUID bytes (16) || kind (1=file, 2=folder)` under the random folder key, without HKDF or an unbound fallback. UniFFI accepts UUID strings and handles; WASM follows its existing byte-key API. Passphrase NFC uses fallibly preallocated zeroizing scalar scratch and UTF-8 output; normalization never grows an unwiped secret buffer.

@@ -78,6 +78,12 @@ def vectors():
             "nonce_hex": nonce.hex(),
             "wrapped_hex": (nonce + AESGCM(key).encrypt(nonce, plaintext, context)).hex(),
         })
+    import uuid
+    root = "2237c000-0000-4000-8000-000000000001"
+    item = "2237c000-0000-4000-8000-000000000002"
+    for kind, name in [(1, "folder_child_file_v1"), (2, "folder_child_folder_v1")]:
+        aad = b"beebeeb-folder-child-v1" + uuid.UUID(root).bytes + uuid.UUID(item).bytes + bytes([kind])
+        generated.append({"name": name, "note": "L7: root UUID bytes || item UUID bytes || kind, after domain label; fixed nonce for public KAT only.", "folder_key_hex": wrapper.hex(), "child_key_hex": inner.hex(), "shared_folder_id": root, "item_id": item, "kind": kind, "aad_hex": aad.hex(), "nonce_hex": nonce.hex(), "wrapped_hex": (nonce + AESGCM(wrapper).encrypt(nonce, inner, aad)).hex()})
     return generated
 
 

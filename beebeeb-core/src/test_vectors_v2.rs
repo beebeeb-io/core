@@ -38,7 +38,7 @@ use crate::kdf::{MasterKey, derive_file_key};
 pub const VECTORS_FILE_VERSION: u64 = 10;
 
 /// Names of the v2 vectors, in the order they are published.
-pub const V2_VECTOR_NAMES: [&str; 14] = [
+pub const V2_VECTOR_NAMES: [&str; 16] = [
     "chunk_v2_stream",
     "chunk_v2_single_frame",
     "metadata_v2_name",
@@ -55,6 +55,8 @@ pub const V2_VECTOR_NAMES: [&str; 14] = [
     "folder_custody_v1",
     "link_owner_key_v1",
     "link_owner_token_v1",
+    "folder_child_file_v1",
+    "folder_child_folder_v1",
 ];
 
 /// A shared folder's key (bytes 0x80..=0x9f) for the `folder_key_id` vector.
@@ -134,7 +136,32 @@ pub fn v2_vectors() -> Vec<Value> {
             "share-2237c",
             b"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
         ),
+        folder_child_vector(1),
+        folder_child_vector(2),
     ]
+}
+
+fn folder_child_vector(kind: u8) -> Value {
+    let root = uuid::Uuid::parse_str("2237c000-0000-4000-8000-000000000001").unwrap();
+    let item = uuid::Uuid::parse_str("2237c000-0000-4000-8000-000000000002").unwrap();
+    let nonce = std::array::from_fn(|i| i as u8);
+    let blob = crate::kdf::wrap_folder_child_with_nonce(
+        &crate::kdf::FileKey::from_bytes(MASTER_KEY),
+        root.as_bytes(),
+        item.as_bytes(),
+        kind,
+        &crate::kdf::FileKey::from_bytes(GIVEN_FILE_KEY),
+        &nonce,
+    )
+    .unwrap();
+    let aad = [
+        crate::kdf::FOLDER_CHILD_LABEL,
+        root.as_bytes(),
+        item.as_bytes(),
+        &[kind],
+    ]
+    .concat();
+    json!({"name": if kind==1 {"folder_child_file_v1"} else {"folder_child_folder_v1"}, "note":"L7: root UUID bytes || item UUID bytes || kind, after domain label; fixed nonce for public KAT only.", "folder_key_hex":hex(&MASTER_KEY),"child_key_hex":hex(&GIVEN_FILE_KEY),"shared_folder_id":root.to_string(),"item_id":item.to_string(),"kind":kind,"aad_hex":hex(&aad),"nonce_hex":hex(&nonce),"wrapped_hex":hex(&[blob.nonce,blob.ciphertext].concat())})
 }
 
 fn folder_link_passphrase_nfd_vector() -> Value {

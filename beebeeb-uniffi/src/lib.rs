@@ -17,6 +17,51 @@ mod folder_link_2237c {
     use super::*;
 
     #[test]
+    fn l7_vectors_and_context_failures_through_handles() {
+        for family in ["folder_child_file_v1", "folder_child_folder_v1"] {
+            let v = vector(family);
+            let folder = FileKeyHandle::from_key_bytes(bytes(&v, "folder_key_hex")).unwrap();
+            let wire = bytes(&v, "wrapped_hex");
+            let root = v["shared_folder_id"].as_str().unwrap().to_string();
+            let item = v["item_id"].as_str().unwrap().to_string();
+            let kind = v["kind"].as_u64().unwrap() as u8;
+            let child = folder
+                .unwrap_folder_child(
+                    root.clone(),
+                    item.clone(),
+                    kind,
+                    wire[..12].to_vec(),
+                    wire[12..].to_vec(),
+                )
+                .unwrap();
+            assert_eq!(child.key_id().unwrap(), id(bytes(&v, "child_key_hex")));
+            let b = folder
+                .wrap_folder_child(root.clone(), item.clone(), kind, &child)
+                .unwrap();
+            assert_eq!(
+                folder
+                    .unwrap_folder_child(root.clone(), item.clone(), kind, b.nonce, b.ciphertext)
+                    .unwrap()
+                    .key_id()
+                    .unwrap(),
+                child.key_id().unwrap()
+            );
+            for (r, i, k) in [
+                ("00000000-0000-4000-8000-000000000099".into(), item.clone(), kind),
+                (root.clone(), "00000000-0000-4000-8000-000000000099".into(), kind),
+                (root.clone(), item.clone(), 3 - kind),
+                (root.clone(), item.clone(), 0),
+                ("bad".into(), item.clone(), kind),
+            ] {
+                assert!(
+                    folder
+                        .unwrap_folder_child(r, i, k, wire[..12].to_vec(), wire[12..].to_vec())
+                        .is_err()
+                );
+            }
+        }
+    }
+    #[test]
     fn l6_published_vectors_open_through_handles() {
         for family in ["folder_custody_v1", "link_owner_key_v1", "link_owner_token_v1"] {
             let v = vector(family);
