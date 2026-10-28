@@ -246,11 +246,15 @@ mod tests {
     #[test]
     fn folder_link_passphrase_stretch_matches_the_web_vector() {
         let doc: serde_json::Value = serde_json::from_str(include_str!("../../test-vectors/vectors.json")).unwrap();
-        let v = doc["vectors"].as_array().unwrap().iter()
-            .find(|v| v["name"] == "folder_link_passphrase").unwrap();
-        let stretch = derive_folder_link_passphrase_stretch(
-            v["passphrase"].as_str().unwrap(), v["token"].as_str().unwrap(),
-        ).unwrap();
+        let v = doc["vectors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["name"] == "folder_link_passphrase")
+            .unwrap();
+        let stretch =
+            derive_folder_link_passphrase_stretch(v["passphrase"].as_str().unwrap(), v["token"].as_str().unwrap())
+                .unwrap();
         assert_eq!(hex::encode(*stretch), v["stretch_hex"].as_str().unwrap());
     }
 

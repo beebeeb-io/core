@@ -130,11 +130,16 @@ fn key_wrap_v1_vector() -> Value {
 }
 
 fn folder_link_passphrase_vector() -> Value {
-    use crate::kdf::{FOLDER_LINK_PASSPHRASE_SALT_LABEL, combine_folder_link_key, derive_folder_link_passphrase_stretch};
+    use crate::kdf::{
+        FOLDER_LINK_PASSPHRASE_SALT_LABEL, combine_folder_link_key, derive_folder_link_passphrase_stretch,
+    };
     use sha2::{Digest, Sha256};
     let token = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
     let passphrase = "folder café 2237";
-    let salt = Sha256::new().chain_update(token.as_bytes()).chain_update(FOLDER_LINK_PASSPHRASE_SALT_LABEL).finalize();
+    let salt = Sha256::new()
+        .chain_update(token.as_bytes())
+        .chain_update(FOLDER_LINK_PASSPHRASE_SALT_LABEL)
+        .finalize();
     let stretch = derive_folder_link_passphrase_stretch(passphrase, token).unwrap();
     json!({
         "name": "folder_link_passphrase",

@@ -18,12 +18,23 @@ mod folder_link_2237c {
 
     fn vector(name: &str) -> serde_json::Value {
         let doc: serde_json::Value = serde_json::from_str(include_str!("../../test-vectors/vectors.json")).unwrap();
-        doc["vectors"].as_array().unwrap().iter().find(|v| v["name"] == name).unwrap().clone()
+        doc["vectors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["name"] == name)
+            .unwrap()
+            .clone()
     }
 
     fn bytes(v: &serde_json::Value, field: &str) -> Vec<u8> {
-        v[field].as_str().unwrap().as_bytes().chunks_exact(2)
-            .map(|b| u8::from_str_radix(std::str::from_utf8(b).unwrap(), 16).unwrap()).collect()
+        v[field]
+            .as_str()
+            .unwrap()
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|b| u8::from_str_radix(std::str::from_utf8(b).unwrap(), 16).unwrap())
+            .collect()
     }
 
     fn id(bytes: Vec<u8>) -> Vec<u8> {
@@ -39,10 +50,22 @@ mod folder_link_2237c {
         assert_eq!(opened.key_id().unwrap(), a.key_id().unwrap());
         // Same-handle wrapping must not take the same non-reentrant lock twice.
         let self_wrap = a.wrap_key(&a).unwrap();
-        assert_eq!(a.unwrap_key(self_wrap.nonce, self_wrap.ciphertext).unwrap().key_id().unwrap(), a.key_id().unwrap());
+        assert_eq!(
+            a.unwrap_key(self_wrap.nonce, self_wrap.ciphertext)
+                .unwrap()
+                .key_id()
+                .unwrap(),
+            a.key_id().unwrap()
+        );
         for len in [0, 31, 33, 64] {
             let wrap = b.encrypt_chunk(vec![0x42; len]).unwrap();
-            assert!(matches!(b.unwrap_key(wrap.nonce, wrap.ciphertext), Err(CryptoError::InvalidInput { .. })), "accepted plaintext length {len}");
+            assert!(
+                matches!(
+                    b.unwrap_key(wrap.nonce, wrap.ciphertext),
+                    Err(CryptoError::InvalidInput { .. })
+                ),
+                "accepted plaintext length {len}"
+            );
         }
         let mut corrupt = wrap.ciphertext;
         corrupt[0] ^= 1;
@@ -78,19 +101,37 @@ mod folder_link_2237c {
     fn from_folder_link_matches_the_combine_vector() {
         let v = vector("combine_folder_link_key");
         let plain = FileKeyHandle::from_folder_link(bytes(&v, "k_c_hex"), None).unwrap();
-        assert_eq!(plain.key_id().unwrap(), id(bytes(&v, "expected_without_passphrase_hex")));
-        let protected = FileKeyHandle::from_folder_link(bytes(&v, "k_c_hex"), Some(bytes(&v, "passphrase_stretch_hex"))).unwrap();
-        assert_eq!(protected.key_id().unwrap(), id(bytes(&v, "expected_with_passphrase_hex")));
+        assert_eq!(
+            plain.key_id().unwrap(),
+            id(bytes(&v, "expected_without_passphrase_hex"))
+        );
+        let protected =
+            FileKeyHandle::from_folder_link(bytes(&v, "k_c_hex"), Some(bytes(&v, "passphrase_stretch_hex"))).unwrap();
+        assert_eq!(
+            protected.key_id().unwrap(),
+            id(bytes(&v, "expected_with_passphrase_hex"))
+        );
         for len in [0, 31, 33] {
-            assert!(matches!(FileKeyHandle::from_folder_link(vec![0; len], None), Err(CryptoError::InvalidInput { .. })));
-            assert!(matches!(FileKeyHandle::from_folder_link(vec![0; 32], Some(vec![0; len])), Err(CryptoError::InvalidInput { .. })));
+            assert!(matches!(
+                FileKeyHandle::from_folder_link(vec![0; len], None),
+                Err(CryptoError::InvalidInput { .. })
+            ));
+            assert!(matches!(
+                FileKeyHandle::from_folder_link(vec![0; 32], Some(vec![0; len])),
+                Err(CryptoError::InvalidInput { .. })
+            ));
         }
     }
 
     #[test]
     fn from_folder_link_passphrase_matches_the_web_derivation() {
         let v = vector("folder_link_passphrase");
-        let h = FileKeyHandle::from_folder_link_passphrase(bytes(&v, "k_c_hex"), v["passphrase"].as_str().unwrap().into(), v["token"].as_str().unwrap().into()).unwrap();
+        let h = FileKeyHandle::from_folder_link_passphrase(
+            bytes(&v, "k_c_hex"),
+            v["passphrase"].as_str().unwrap().into(),
+            v["token"].as_str().unwrap().into(),
+        )
+        .unwrap();
         assert_eq!(h.key_id().unwrap(), id(bytes(&v, "link_key_hex")));
     }
 
@@ -101,8 +142,10 @@ mod folder_link_2237c {
         let pass = v["passphrase"].as_str().unwrap();
         let token = v["token"].as_str().unwrap();
         let expected = id(bytes(&v, "link_key_hex"));
-        let wrong_pass = FileKeyHandle::from_folder_link_passphrase(kc.clone(), format!("{pass}!"), token.into()).unwrap();
-        let wrong_token = FileKeyHandle::from_folder_link_passphrase(kc.clone(), pass.into(), format!("{token}!" )).unwrap();
+        let wrong_pass =
+            FileKeyHandle::from_folder_link_passphrase(kc.clone(), format!("{pass}!"), token.into()).unwrap();
+        let wrong_token =
+            FileKeyHandle::from_folder_link_passphrase(kc.clone(), pass.into(), format!("{token}!")).unwrap();
         let mut other_kc = kc;
         other_kc[0] ^= 1;
         let wrong_kc = FileKeyHandle::from_folder_link_passphrase(other_kc, pass.into(), token.into()).unwrap();
@@ -1161,15 +1204,25 @@ impl FileKeyHandle {
         let k_c: &[u8; 32] = k_c.as_slice().try_into().map_err(|_| CryptoError::InvalidInput {
             detail: "link fragment key must be exactly 32 bytes".into(),
         })?;
-        let stretch: Option<&[u8; 32]> = stretch.as_ref().map(|s| s.as_slice().try_into()).transpose()
-            .map_err(|_| CryptoError::InvalidInput { detail: "passphrase stretch must be exactly 32 bytes".into() })?;
+        let stretch: Option<&[u8; 32]> =
+            stretch
+                .as_ref()
+                .map(|s| s.as_slice().try_into())
+                .transpose()
+                .map_err(|_| CryptoError::InvalidInput {
+                    detail: "passphrase stretch must be exactly 32 bytes".into(),
+                })?;
         let key = Zeroizing::new(kdf::combine_folder_link_key(k_c, stretch));
         Ok(Self::new(kdf::FileKey::from_bytes(*key)))
     }
 
     /// Stretch then combine; memory/KDF errors propagate without a plain-link fallback.
     #[uniffi::constructor]
-    pub fn from_folder_link_passphrase(k_c: Vec<u8>, passphrase: String, token: String) -> Result<Arc<Self>, CryptoError> {
+    pub fn from_folder_link_passphrase(
+        k_c: Vec<u8>,
+        passphrase: String,
+        token: String,
+    ) -> Result<Arc<Self>, CryptoError> {
         let k_c = Zeroizing::new(k_c);
         let passphrase = Zeroizing::new(passphrase);
         let token = Zeroizing::new(token);

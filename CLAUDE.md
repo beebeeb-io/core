@@ -87,6 +87,29 @@ AAD = "beebeeb/chunk/v2"         16 bytes: domain tag + version
 
 `ChunkEncryptorHandle` / `ChunkDecryptorHandle` wrap the primitive for Swift/Kotlin. Key derived IN CORE from a borrowed `&MasterKeyHandle` — raw key bytes never cross FFI. **Single-consumer contract:** a handle is an ordered cursor driven from ONE sequence; the `Mutex` is only UniFFI's Send+Sync backstop. `finish()` consumes the handle. Regenerating bindings: `build-ios.sh` / `build-android.sh`; grep the regenerated header for every new symbol before shipping (the 0426 12-symbol drift lesson).
 
+### Folder-link handles (task 2237c)
+
+Folder keys are random (`FileKeyHandle.generate`, OS CSPRNG), never derived from
+the master key. Clients fetch permanent owner custody before minting a key.
+`wrap_key` / `unwrap_key` keep keys in native handles: AES-256-GCM, no AAD,
+`nonce(12) || ciphertext(48)`; unwrap rejects every plaintext length except 32.
+`key_id` is core's one-way folder-key id, never the key itself.
+
+`from_folder_link` combines the 32-byte URL fragment `K_c` and an optional
+32-byte stretch with `combine_folder_link_key`. `from_folder_link_passphrase`
+stretches with Argon2id v19 (256 MiB, 4 iterations, 2 lanes, 32 bytes), salt =
+`SHA-256(UTF-8 token || "beebeeb-folder-link-passphrase-v1")[0..16]`, then combines.
+KDF errors propagate; clients must show an error instead of silently opening or
+creating a link without its passphrase. Owned secret inputs and temporary key
+buffers are zeroized on every return path. Custody wraps use a master-derived
+folder-id key; the link's `owner_wrapped_key` holds `K_c` under the master key.
+
+Vectors v10 add `key_wrap_v1` and `folder_link_passphrase`.
+`python3 scripts/gen-folder-link-vectors.py` independently computes their bytes
+with argon2-cffi and cryptography; `--write` replaces only those two families
+and the version. Recheck against the web passphrase function and WASM combiner
+before changing these vectors. The core drift guard regenerates both families.
+
 ## Encrypted search index (`search_index.rs`)
 
 Client-built, E2E-encrypted file-name search; the server is zero-knowledge, everything runs on-device, identically for every client. `tokenize(name)`: NFKD + accent-fold + separators + camelCase, dedup preserving order; keeps the full normalized name for substring fallback.
