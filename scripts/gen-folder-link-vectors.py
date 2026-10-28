@@ -97,8 +97,9 @@ def main():
     if args.write:
         path = Path(__file__).resolve().parent.parent / "test-vectors/vectors.json"
         doc = json.loads(path.read_text())
-        names = {v["name"] for v in generated}
-        doc["vectors"] = [v for v in doc["vectors"] if v["name"] not in names] + generated
+        by_name = {v["name"]: v for v in generated}
+        existing = {v["name"] for v in doc["vectors"]}
+        doc["vectors"] = [by_name.get(v["name"], v) for v in doc["vectors"]] + [v for v in generated if v["name"] not in existing]
         doc["version"] = 12
         path.write_text(json.dumps(doc, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     print(json.dumps(generated, ensure_ascii=False, indent=2, sort_keys=True))

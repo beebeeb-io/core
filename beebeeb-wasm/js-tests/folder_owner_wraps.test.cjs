@@ -137,3 +137,20 @@ test('L8 rejects invalid key/frame lengths and empty record IDs', () => {
   assert.throws(() => wasm.wrapOwnerFileKey(key, '', key), /record id must not be empty/);
   assert.throws(() => wasm.unwrapOwnerFileKey(key, '', new Uint8Array(60)), /record id must not be empty/);
 });
+
+test('L9 invite owner copy vector, purpose binding and legacy proof', () => {
+  const v = vector('invite_owner_copy_v1');
+  const master = bytes(v.master_key_hex);
+  const key = bytes(v.plaintext_hex);
+  assert.equal(hex(wasm.unwrapInviteOwnerCopy(master, v.record_id, bytes(v.wrapped_hex))), v.plaintext_hex);
+  const copy = wasm.wrapInviteOwnerCopy(master, v.record_id, key);
+  assert.equal(hex(wasm.unwrapInviteOwnerCopy(master, v.record_id, copy)), v.plaintext_hex);
+  assert.throws(() => wasm.unwrapInviteOwnerCopy(master, 'other', copy));
+  assert.throws(() => wasm.unwrapFolderCustody(master, v.record_id, copy));
+  const child = wasm.derive_file_key(master, new TextEncoder().encode('child'));
+  const sealed = wasm.encrypt_chunk(key, child);
+  const wire = new Uint8Array([...sealed.nonce, ...sealed.ciphertext]);
+  assert.equal(wasm.verifyLegacyFolderKey(master, v.record_id, key, 'child', wire), true);
+  assert.equal(wasm.verifyLegacyFolderKey(master, v.record_id, key, 'other', wire), false);
+  assert.equal(wasm.verifyLegacyFolderKey(master, v.record_id, key, 'child', new Uint8Array()), false);
+});

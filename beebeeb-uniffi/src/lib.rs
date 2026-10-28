@@ -17,6 +17,50 @@ mod folder_link_2237c {
     use super::*;
 
     #[test]
+    fn invite_2255_proof_and_owner_copy_through_handles() {
+        let v = vector("invite_owner_copy_v1");
+        let master = MasterKeyHandle::from_keychain_bytes(bytes(&v, "master_key_hex")).unwrap();
+        let wire = bytes(&v, "wrapped_hex");
+        let folder_id = v["record_id"].as_str().unwrap().to_string();
+        let key = master
+            .unwrap_invite_owner_copy(folder_id.clone(), wire[..12].to_vec(), wire[12..].to_vec())
+            .unwrap();
+        assert_eq!(key.key_id().unwrap(), id(bytes(&v, "plaintext_hex")));
+        let copy = master.wrap_invite_owner_copy(folder_id.clone(), &key).unwrap();
+        assert_eq!(
+            master
+                .unwrap_invite_owner_copy(folder_id.clone(), copy.nonce, copy.ciphertext)
+                .unwrap()
+                .key_id()
+                .unwrap(),
+            key.key_id().unwrap()
+        );
+        assert!(
+            master
+                .unwrap_invite_owner_copy("other".into(), wire[..12].to_vec(), wire[12..].to_vec())
+                .is_err()
+        );
+        let child = master.derive_file_key(b"child".to_vec()).unwrap();
+        let wrapped = key.wrap_key(&child).unwrap();
+        let proof = [wrapped.nonce, wrapped.ciphertext].concat();
+        assert!(
+            master
+                .verify_legacy_folder_key(folder_id.clone(), &key, "child".into(), proof.clone())
+                .unwrap()
+        );
+        assert!(
+            !master
+                .verify_legacy_folder_key(folder_id.clone(), &key, "other".into(), proof)
+                .unwrap()
+        );
+        assert!(
+            !master
+                .verify_legacy_folder_key(folder_id, &key, "child".into(), vec![])
+                .unwrap()
+        );
+    }
+
+    #[test]
     fn l7_vectors_and_context_failures_through_handles() {
         for family in ["folder_child_file_v1", "folder_child_folder_v1"] {
             let v = vector(family);
