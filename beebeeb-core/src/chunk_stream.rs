@@ -699,7 +699,12 @@ impl ChunkEncryptor {
         file_size: u64,
         chunk_size_bytes: u64,
     ) -> Result<Self, CoreError> {
-        Self::for_push_with_file_key(derive_file_key(mk, file_id.as_bytes()), file_id, file_size, chunk_size_bytes)
+        Self::for_push_with_file_key(
+            derive_file_key(mk, file_id.as_bytes()),
+            file_id,
+            file_size,
+            chunk_size_bytes,
+        )
     }
 
     /// **Pull** constructor with an explicit chunk size — the reader-form analog
@@ -717,7 +722,11 @@ impl ChunkEncryptor {
         reader: R,
     ) -> Result<Self, CoreError> {
         Self::from_reader_with_file_key(
-            derive_file_key(mk, file_id.as_bytes()), file_id, file_size, chunk_size_bytes, reader,
+            derive_file_key(mk, file_id.as_bytes()),
+            file_id,
+            file_size,
+            chunk_size_bytes,
+            reader,
         )
     }
 
@@ -729,12 +738,18 @@ impl ChunkEncryptor {
         source: Source,
     ) -> Result<Self, CoreError> {
         check_explicit_chunk_size(chunk_size_bytes)?;
-        let chunk_count = if file_size == 0 { 1 } else { file_size.div_ceil(chunk_size_bytes) };
+        let chunk_count = if file_size == 0 {
+            1
+        } else {
+            file_size.div_ceil(chunk_size_bytes)
+        };
         let plan = ChunkPlan {
             file_size_bytes: file_size,
             chunk_size_bytes,
             chunk_count,
-            strategy: ChunkStrategy::Capped { max_chunk_size_bytes: chunk_size_bytes },
+            strategy: ChunkStrategy::Capped {
+                max_chunk_size_bytes: chunk_size_bytes,
+            },
             storage_format_version: STORAGE_FORMAT_VERSION_V2,
         };
         Self::new_with_file_key(file_key, file_id, plan, source)
