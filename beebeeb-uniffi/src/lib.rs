@@ -3263,11 +3263,11 @@ pub enum UploadError {
     #[error("network error: {detail}")]
     Network { detail: String },
 
-    #[error("server error (HTTP {status}): {message}")]
-    ServerError { status: u16, message: String },
+    #[error("server error (HTTP {status}): {detail}")]
+    ServerError { status: u16, detail: String },
 
-    #[error("client error (HTTP {status}): {message}")]
-    ClientError { status: u16, message: String },
+    #[error("client error (HTTP {status}): {detail}")]
+    ClientError { status: u16, detail: String },
 
     #[error("rate limited — retry after {retry_after_secs}s")]
     RateLimited { retry_after_secs: u64 },
@@ -3290,10 +3290,10 @@ impl From<beebeeb_upload::UploadError> for UploadError {
         match e {
             beebeeb_upload::UploadError::Network(s) => UploadError::Network { detail: s },
             beebeeb_upload::UploadError::ServerError { status, message } => {
-                UploadError::ServerError { status, message }
+                UploadError::ServerError { status, detail: message }
             }
             beebeeb_upload::UploadError::ClientError { status, message } => {
-                UploadError::ClientError { status, message }
+                UploadError::ClientError { status, detail: message }
             }
             beebeeb_upload::UploadError::RateLimited { retry_after_secs } => {
                 UploadError::RateLimited { retry_after_secs }
