@@ -14,10 +14,7 @@ const MARKER: &[u8] = b"rv44-public-";
 unsafe fn inspect(p: *mut u8, layout: Layout) {
     if CAPTURE.load(Ordering::SeqCst) && layout.align() <= 4 && layout.size() >= 16 {
         let b = unsafe { std::slice::from_raw_parts(p, layout.size()) };
-        if b.windows(MARKER.len()).any(|x| x == MARKER)
-            || b.windows(16)
-                .any(|x| x == [0x5c, 3, 0, 0, 0x5c, 3, 0, 0, 0x5c, 3, 0, 0, 0x5c, 3, 0, 0])
-        {
+        if b.windows(MARKER.len()).any(|x| x == MARKER) || b.windows(4).any(|x| x == [0x5c, 3, 0, 0]) {
             UNWIPED_REALLOCS.fetch_add(1, Ordering::SeqCst);
         }
     }
@@ -46,11 +43,7 @@ unsafe impl GlobalAlloc for Witness {
         }
         if CAPTURE.load(Ordering::SeqCst) && layout.align() <= 4 && layout.size() >= MARKER.len() {
             let bytes = unsafe { std::slice::from_raw_parts(p, layout.size()) };
-            if bytes.windows(MARKER.len()).any(|b| b == MARKER)
-                || bytes
-                    .windows(16)
-                    .any(|b| b == [0x5c, 3, 0, 0, 0x5c, 3, 0, 0, 0x5c, 3, 0, 0, 0x5c, 3, 0, 0])
-            {
+            if bytes.windows(MARKER.len()).any(|b| b == MARKER) || bytes.windows(4).any(|b| b == [0x5c, 3, 0, 0]) {
                 UNWIPED_REALLOCS.fetch_add(1, Ordering::SeqCst);
             }
         }
