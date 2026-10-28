@@ -9,6 +9,7 @@ import argparse
 import base64
 import hashlib
 import json
+import unicodedata
 from pathlib import Path
 
 from argon2.low_level import Type, hash_secret_raw
@@ -35,7 +36,7 @@ def vectors():
         algorithm=hashes.SHA256(), length=32, salt=None,
         info=b"beebeeb-folder-link-key-v1\x01",
     ).derive(kc + stretch)
-    return [
+    generated = [
         {
             "name": "key_wrap_v1",
             "note": "AES-256-GCM, no AAD; fixed nonce for this public test only.",
@@ -55,6 +56,30 @@ def vectors():
             "link_key_hex": link_key.hex(),
         },
     ]
+
+    nfd = dict(generated[1])
+    nfd["name"] = "folder_link_passphrase_nfd"
+    nfd["passphrase"] = unicodedata.normalize("NFD", passphrase)
+    nfd["note"] = "NFC-normalize before Argon2id; this NFD spelling equals folder_link_passphrase."
+    assert unicodedata.normalize("NFC", nfd["passphrase"]) == passphrase
+    generated.append(nfd)
+    for name, label, record_id, plaintext in [
+        ("folder_custody_v1", b"beebeeb-folder-custody-v1", "folder-2237c", inner),
+        ("link_owner_key_v1", b"beebeeb-link-owner-key-v1", "share-2237c", kc),
+        ("link_owner_token_v1", b"beebeeb-link-owner-token-v1", "share-2237c", token.encode("utf-8")),
+    ]:
+        context = label + record_id.encode("utf-8")
+        key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=context).derive(wrapper)
+        generated.append({
+            "name": name, "note": "L6: HKDF info and AES-GCM AAD both equal label || UTF-8 record id; fixed nonce for this public test only.",
+            "master_key_hex": wrapper.hex(), "record_id": record_id,
+            "label": label.decode("ascii"), "context_hex": context.hex(),
+            "purpose_key_hex": key.hex(), "plaintext_hex": plaintext.hex(),
+            "nonce_hex": nonce.hex(),
+            "wrapped_hex": (nonce + AESGCM(key).encrypt(nonce, plaintext, context)).hex(),
+        })
+    return generated
+
 
 
 def main():
