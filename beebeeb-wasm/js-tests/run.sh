@@ -37,4 +37,4 @@ done
 (cd "$out" && "${tsc[@]}" --noEmit --strict --target es2022 --lib es2022,dom,esnext.disposable types.nodejs.check.ts types.web.check.ts)
 
 echo "== node --test: the real module"
-BB_WASM_PKG="$out/nodejs" node --test "$here/direct_signed_url.test.cjs" "$here/direct_poll_shape.test.cjs" "$here/direct_health_shape.test.cjs" "$here/folder_link.test.cjs"
+BB_WASM_PKG="$out/nodejs" node --test "$here/direct_signed_url.test.cjs" "$here/direct_poll_shape.test.cjs" "$here/direct_health_shape.test.cjs" "$here/folder_link.test.cjs" "$here/folder_owner_wraps.test.cjs"

@@ -3969,3 +3969,109 @@ pub fn unwrap_folder_child(
             .to_vec(),
     )
 }
+
+// ---------------------------------------------------------------------------
+// L6 owner copies under the master key (task 2237b, decision L6)
+// ---------------------------------------------------------------------------
+//
+// Folder custody and a link's owner copies of K_c and of its token are sealed
+// with a purpose-bound key AND AAD (`label || UTF-8 record id`, see
+// `kdf::wrap_folder_custody`). Same wire as the L7 exports: nonce(12) ||
+// ciphertext+tag. The record id is the folder UUID / share UUID string the
+// client stores the record under. Incoming secrets are owned in `Zeroizing`
+// so every path wipes them; returned buffers belong to JS.
+
+fn l6_blob(wrapped: &[u8], what: &str) -> Result<EncryptedBlob, JsError> {
+    if wrapped.len() < 12 + 16 {
+        return Err(JsError::new(&format!("{what} wrap is too short")));
+    }
+    Ok(EncryptedBlob {
+        cipher_suite: CipherSuite::V1Aes256Gcm,
+        nonce: wrapped[..12].to_vec(),
+        ciphertext: wrapped[12..].to_vec(),
+    })
+}
+
+fn owned_key(key: &[u8]) -> Result<kdf::FileKey, JsError> {
+    let bytes =
+        zeroize::Zeroizing::new(<[u8; 32]>::try_from(key).map_err(|_| JsError::new("key must be exactly 32 bytes"))?);
+    Ok(kdf::FileKey::from_bytes(*bytes))
+}
+
+/// Seal a shared folder's key to the owner's master key (L6 custody record).
+#[wasm_bindgen(js_name = wrapFolderCustody)]
+pub fn wrap_folder_custody(master_key: &[u8], folder_id: &str, folder_key: &[u8]) -> Result<Vec<u8>, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let key = owned_key(folder_key)?;
+    let blob =
+        kdf::wrap_folder_custody(&master, folder_id.as_bytes(), &key).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok([blob.nonce, blob.ciphertext].concat())
+}
+
+/// Open an L6 custody record. Never accepts a legacy (unbound) owner copy.
+#[wasm_bindgen(js_name = unwrapFolderCustody)]
+pub fn unwrap_folder_custody(master_key: &[u8], folder_id: &str, wrapped: &[u8]) -> Result<Vec<u8>, JsError> {
+    if wrapped.len() != 60 {
+        return Err(JsError::new("custody wrap must be 60 bytes"));
+    }
+    let master = master_key_from_slice(master_key)?;
+    let blob = l6_blob(wrapped, "custody")?;
+    Ok(kdf::unwrap_folder_custody(&master, folder_id.as_bytes(), &blob)
+        .map_err(|e| JsError::new(&e.to_string()))?
+        .as_bytes()
+        .to_vec())
+}
+
+/// Seal a folder link's fragment key K_c to the owner's master key, bound to
+/// the link's share id (so the owner can copy the link again later).
+#[wasm_bindgen(js_name = wrapLinkOwnerKey)]
+pub fn wrap_link_owner_key(master_key: &[u8], share_id: &str, link_key: &[u8]) -> Result<Vec<u8>, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let key = owned_key(link_key)?;
+    let blob =
+        kdf::wrap_link_owner_key(&master, share_id.as_bytes(), &key).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok([blob.nonce, blob.ciphertext].concat())
+}
+
+/// Open a link's owner copy of K_c. K_c is the deliberate export: JS puts it
+/// in the link fragment. The master key never leaves the caller.
+#[wasm_bindgen(js_name = unwrapLinkOwnerKey)]
+pub fn unwrap_link_owner_key(master_key: &[u8], share_id: &str, wrapped: &[u8]) -> Result<Vec<u8>, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let blob = l6_blob(wrapped, "link owner key")?;
+    Ok(kdf::unwrap_link_owner_key(&master, share_id.as_bytes(), &blob)
+        .map_err(|e| JsError::new(&e.to_string()))?
+        .as_bytes()
+        .to_vec())
+}
+
+/// Seal a folder link's raw token to the owner's master key, bound to the
+/// link's share id.
+#[wasm_bindgen(js_name = wrapLinkOwnerToken)]
+pub fn wrap_link_owner_token(master_key: &[u8], share_id: &str, token: &[u8]) -> Result<Vec<u8>, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let token = zeroize::Zeroizing::new(token.to_vec());
+    let blob =
+        kdf::wrap_link_owner_token(&master, share_id.as_bytes(), &token).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok([blob.nonce, blob.ciphertext].concat())
+}
+
+/// Open a link's owner copy of its token.
+#[wasm_bindgen(js_name = unwrapLinkOwnerToken)]
+pub fn unwrap_link_owner_token(master_key: &[u8], share_id: &str, wrapped: &[u8]) -> Result<Vec<u8>, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let blob = l6_blob(wrapped, "link owner token")?;
+    Ok(kdf::unwrap_link_owner_token(&master, share_id.as_bytes(), &blob)
+        .map_err(|e| JsError::new(&e.to_string()))?
+        .to_vec())
+}
+
+/// Stretch a folder-link passphrase (Argon2id over the canonical NFC form,
+/// token-bound salt). Refuses an empty passphrase. Pass the result to
+/// `combineFolderLinkKey`; never send it to the server.
+#[wasm_bindgen(js_name = deriveFolderLinkPassphraseStretch)]
+pub fn derive_folder_link_passphrase_stretch(passphrase: &str, token: &str) -> Result<Vec<u8>, JsError> {
+    let stretch =
+        kdf::derive_folder_link_passphrase_stretch(passphrase, token).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(stretch.to_vec())
+}
