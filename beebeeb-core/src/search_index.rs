@@ -45,7 +45,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::CoreError;
 use crate::encrypt::{decrypt_chunk_raw, encrypt_chunk_raw};
-use crate::kdf::{MasterKey, derive_search_index_key};
+use crate::kdf::{FileKey, MasterKey, derive_search_index_key, derive_shared_folder_index_key};
 
 /// Default shard count. A power-of-two-ish spread that keeps per-shard size small
 /// for typical vaults while bounding the number of blobs to sync.
@@ -319,8 +319,15 @@ impl SearchIndex {
 
     /// Encrypt every non-empty shard page of the whole index.
     pub fn encrypt_shards(&self, master_key: &MasterKey) -> Result<Vec<EncryptedShard>, CoreError> {
+        self.encrypt_shards_with(ShardKeySource::Master(master_key))
+    }
+
+    /// Encrypt every non-empty shard page under a caller-chosen key domain:
+    /// the account master key, or a shared folder's key (its per-bucket keys
+    /// come from [`derive_shared_folder_index_key`]).
+    pub fn encrypt_shards_with(&self, source: ShardKeySource<'_>) -> Result<Vec<EncryptedShard>, CoreError> {
         let buckets: Vec<u32> = self.collect_buckets().keys().copied().collect();
-        self.encrypt_selected(master_key, &buckets)
+        self.encrypt_selected_with(source, &buckets)
     }
 
     /// Encrypt only the given buckets' shard pages (incremental sync). Buckets
@@ -331,18 +338,31 @@ impl SearchIndex {
         master_key: &MasterKey,
         buckets: &BTreeSet<u32>,
     ) -> Result<Vec<EncryptedShard>, CoreError> {
-        let buckets: Vec<u32> = buckets.iter().copied().collect();
-        self.encrypt_selected(master_key, &buckets)
+        self.encrypt_buckets_with(ShardKeySource::Master(master_key), buckets)
     }
 
-    fn encrypt_selected(&self, master_key: &MasterKey, buckets: &[u32]) -> Result<Vec<EncryptedShard>, CoreError> {
+    /// [`Self::encrypt_buckets`] under a caller-chosen key domain.
+    pub fn encrypt_buckets_with(
+        &self,
+        source: ShardKeySource<'_>,
+        buckets: &BTreeSet<u32>,
+    ) -> Result<Vec<EncryptedShard>, CoreError> {
+        let buckets: Vec<u32> = buckets.iter().copied().collect();
+        self.encrypt_selected_with(source, &buckets)
+    }
+
+    fn encrypt_selected_with(
+        &self,
+        source: ShardKeySource<'_>,
+        buckets: &[u32],
+    ) -> Result<Vec<EncryptedShard>, CoreError> {
         let mut data = self.collect_buckets();
         let mut out = Vec::new();
         for &b in buckets {
             let Some(bucket) = data.remove(&b) else {
                 continue; // no data for this bucket (empty / not present)
             };
-            let key = derive_search_index_key(master_key, b);
+            let key = source.bucket_key(b);
             for (page_idx, page) in paginate(b, bucket, PAGE_PLAINTEXT_BUDGET).into_iter().enumerate() {
                 let plaintext = serde_json::to_vec(&page).map_err(|e| CoreError::Encryption(e.to_string()))?;
                 let blob = encrypt_chunk_raw(&key, &plaintext)?;
@@ -364,9 +384,19 @@ impl SearchIndex {
         shards: &[EncryptedShard],
         num_shards: u32,
     ) -> Result<Self, CoreError> {
+        Self::from_encrypted_shards_with(ShardKeySource::Master(master_key), shards, num_shards)
+    }
+
+    /// [`Self::from_encrypted_shards`] under a caller-chosen key domain. Pages
+    /// sealed under another domain fail with [`CoreError::Decryption`].
+    pub fn from_encrypted_shards_with(
+        source: ShardKeySource<'_>,
+        shards: &[EncryptedShard],
+        num_shards: u32,
+    ) -> Result<Self, CoreError> {
         let mut idx = Self::new(num_shards);
         for sh in shards {
-            let key = derive_search_index_key(master_key, sh.bucket);
+            let key = source.bucket_key(sh.bucket);
             let plaintext = decrypt_chunk_raw(&key, &sh.blob)?;
             let page: ShardPage = serde_json::from_slice(&plaintext).map_err(|_| CoreError::Decryption)?;
             if page.v != FORMAT_VERSION {
@@ -384,6 +414,29 @@ impl SearchIndex {
             }
         }
         Ok(idx)
+    }
+}
+
+/// Which key domain a search index is sealed under.
+///
+/// The account index uses per-bucket keys derived from the user's master key;
+/// a shared folder's index uses per-bucket keys derived from the folder key, so
+/// a folder's index can be read by anyone holding the folder key and never by
+/// the account master key alone.
+#[derive(Clone, Copy)]
+pub enum ShardKeySource<'a> {
+    /// The user's account master key (the default, unchanged derivation).
+    Master(&'a MasterKey),
+    /// A shared folder's key.
+    Folder(&'a FileKey),
+}
+
+impl ShardKeySource<'_> {
+    fn bucket_key(&self, bucket: u32) -> FileKey {
+        match self {
+            Self::Master(master_key) => derive_search_index_key(master_key, bucket),
+            Self::Folder(folder_key) => derive_shared_folder_index_key(folder_key, bucket),
+        }
     }
 }
 
@@ -687,6 +740,40 @@ mod tests {
                 "query '{term}' must match after round-trip"
             );
         }
+    }
+
+    #[test]
+    fn folder_keyed_shards_round_trip_and_do_not_open_with_master_key() {
+        use crate::kdf::FileKey;
+
+        let folder_key = FileKey::from_bytes([0x5a; 32]);
+        let master = mk();
+        let idx = sample_index();
+
+        let shards = idx.encrypt_shards_with(ShardKeySource::Folder(&folder_key)).unwrap();
+        assert_eq!(shards.len(), idx.encrypt_shards(&master).unwrap().len());
+
+        // Same plaintext index, different key bytes: no page blob may collide.
+        let master_shards = idx.encrypt_shards(&master).unwrap();
+        let folder_blob = &shards[0].blob;
+        let master_blob = master_shards
+            .iter()
+            .find(|s| s.bucket == shards[0].bucket && s.page == shards[0].page)
+            .unwrap();
+        assert_ne!(folder_blob, &master_blob.blob);
+
+        let restored =
+            SearchIndex::from_encrypted_shards_with(ShardKeySource::Folder(&folder_key), &shards, idx.num_shards())
+                .unwrap();
+        for term in ["nf", "vac", "ong", "cafe", "report", "png"] {
+            assert_eq!(idx.query(term), restored.query(term), "{term}");
+        }
+
+        assert!(
+            SearchIndex::from_encrypted_shards_with(ShardKeySource::Master(&master), &shards, idx.num_shards())
+                .is_err(),
+            "folder-keyed shards must not open under the account master key"
+        );
     }
 
     #[test]

@@ -180,6 +180,39 @@ pub fn derive_shared_folder_index_key(folder_key: &FileKey, bucket: u32) -> File
     FileKey { bytes: *okm }
 }
 
+/// Domain-separation label for the folder link key combiner (task 2237b).
+pub const FOLDER_LINK_KEY_INFO: &[u8] = b"beebeeb-folder-link-key-v1";
+
+/// Combine a folder link's fragment key `K_c` with an optional passphrase
+/// stretch into the 32-byte key that unwraps the link's sealed folder key.
+///
+/// - `None` (no passphrase): `HKDF-SHA256(salt = none, ikm = K_c,
+///   info = label || 0x00)`.
+/// - `Some(stretch)`: `HKDF-SHA256(salt = none, ikm = K_c || stretch,
+///   info = label || 0x01)`, where `stretch` is the client's Argon2id output
+///   over the passphrase and the link salt.
+///
+/// The presence byte and the distinct IKM keep the two modes (and both modes
+/// from any other derivation in this module) cryptographically separate, so a
+/// link can never be opened with the wrong mode's key. This derivation is
+/// public by design: `K_c` is in the link fragment and never reaches the
+/// server; it is not an account key.
+pub fn combine_folder_link_key(k_c: &[u8; 32], passphrase_stretch: Option<&[u8; 32]>) -> [u8; 32] {
+    let mut ikm = Zeroizing::new(Vec::with_capacity(64));
+    ikm.extend_from_slice(k_c);
+    if let Some(stretch) = passphrase_stretch {
+        ikm.extend_from_slice(stretch);
+    }
+    let hk = Hkdf::<Sha256>::new(None, &ikm);
+    let mut info = Vec::with_capacity(FOLDER_LINK_KEY_INFO.len() + 1);
+    info.extend_from_slice(FOLDER_LINK_KEY_INFO);
+    info.push(u8::from(passphrase_stretch.is_some()));
+    let mut okm = Zeroizing::new([0u8; 32]);
+    hk.expand(&info, &mut *okm)
+        .expect("HKDF-SHA256 expand for 32 bytes cannot fail");
+    *okm
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,6 +395,53 @@ mod tests {
                  every stored shared-folder search index; see comment above this test"
             );
         }
+    }
+
+    #[test]
+    fn combine_folder_link_key_known_answer_vectors() {
+        // K_c = 0x80..=0x9f, passphrase stretch = 0xa0..=0xbf. These pin the
+        // public combiner every client uses to open a folder link; a change
+        // breaks every link already handed out.
+        let k_c: [u8; 32] = KAT_FOLDER_KEY;
+        let stretch: [u8; 32] = {
+            let mut s = [0u8; 32];
+            for (i, b) in s.iter_mut().enumerate() {
+                *b = 0xa0 + i as u8;
+            }
+            s
+        };
+
+        assert_eq!(
+            hex::encode(combine_folder_link_key(&k_c, None)),
+            "5fb510b7068bfa1e9290e8a8ed296da4f610e5451a567699dc48e9bc3bd1badc"
+        );
+        assert_eq!(
+            hex::encode(combine_folder_link_key(&k_c, Some(&stretch))),
+            "1b87f03afb4b81c4b17c1a6f74648a4e725d1d5c1e0750b5767df89ee653b13b"
+        );
+    }
+
+    #[test]
+    fn combine_folder_link_key_modes_are_domain_separated() {
+        let k_c = KAT_FOLDER_KEY;
+        let none = combine_folder_link_key(&k_c, None);
+        let zero_stretch = combine_folder_link_key(&k_c, Some(&[0u8; 32]));
+        assert_ne!(none, zero_stretch, "presence byte distinguishes the modes");
+
+        // Distinct from every other derivation in this module even with the
+        // same 32 input bytes.
+        let folder_key = FileKey::from_bytes(KAT_FOLDER_KEY);
+        assert_ne!(none, *derive_shared_folder_index_key(&folder_key, 0).as_bytes());
+        let mk = MasterKey::from_bytes(KAT_FOLDER_KEY);
+        assert_ne!(none, *derive_search_index_key(&mk, 0).as_bytes());
+
+        // A different K_c or stretch never collides.
+        let mut other = KAT_FOLDER_KEY;
+        other[31] ^= 1;
+        assert_ne!(none, combine_folder_link_key(&other, None));
+        let mut other_stretch = [0xa0u8; 32];
+        other_stretch[0] ^= 1;
+        assert_ne!(zero_stretch, combine_folder_link_key(&k_c, Some(&other_stretch)));
     }
 
     #[test]

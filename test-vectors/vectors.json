@@ -223,7 +223,17 @@
       "name": "shared_folder_index_key",
       "note": "shared-folder search index key = HKDF-SHA256(ikm = folder key, salt = none, info = \"beebeeb-shared-folder-index-v1\" || bucket as u32 LE), 32 bytes, one key per bucket.",
       "salt": "none"
+    },
+    {
+      "expected_with_passphrase_hex": "1b87f03afb4b81c4b17c1a6f74648a4e725d1d5c1e0750b5767df89ee653b13b",
+      "expected_without_passphrase_hex": "5fb510b7068bfa1e9290e8a8ed296da4f610e5451a567699dc48e9bc3bd1badc",
+      "info": "beebeeb-folder-link-key-v1",
+      "k_c_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "name": "combine_folder_link_key",
+      "note": "folder link key = HKDF-SHA256(ikm = K_c [|| 32-byte Argon2id passphrase stretch], salt = none, info = \"beebeeb-folder-link-key-v1\" || presence byte (0x00 without passphrase, 0x01 with)), 32 bytes.",
+      "passphrase_stretch_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "salt": "none"
     }
   ],
-  "version": 8
+  "version": 9
 }

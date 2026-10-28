@@ -321,6 +321,45 @@ pub fn folder_key_id(folder_key: &[u8]) -> Result<Vec<u8>, JsError> {
     Ok(beebeeb_core::folder_key::folder_key_id(&key).to_vec())
 }
 
+/// Derive one bucket key of a shared folder's encrypted search index (task
+/// 2237b): `HKDF-SHA256(ikm = folder key, salt = none, info =
+/// "beebeeb-shared-folder-index-v1" || bucket as u32 LE)`. Returns a 32-byte
+/// `Uint8Array`. `bucket` must be below the index's shard count (64 in the
+/// standard layout); values of 64 or more are rejected here.
+#[wasm_bindgen(js_name = deriveSharedFolderIndexKey)]
+pub fn derive_shared_folder_index_key(folder_key: &[u8], bucket: u32) -> Result<Vec<u8>, JsError> {
+    if bucket >= beebeeb_core::search_index::DEFAULT_NUM_SHARDS {
+        return Err(JsError::new("bucket must be less than 64"));
+    }
+    let key = zeroize::Zeroizing::new(
+        <[u8; 32]>::try_from(folder_key).map_err(|_| JsError::new("folder_key must be 32 bytes"))?,
+    );
+    let file_key = kdf::FileKey::from_bytes(*key);
+    Ok(kdf::derive_shared_folder_index_key(&file_key, bucket)
+        .as_bytes()
+        .to_vec())
+}
+
+/// Combine a folder link's fragment key `K_c` with an optional 32-byte
+/// passphrase stretch (task 2237b). Pass `undefined`/`null` for a link without
+/// a passphrase. Returns a 32-byte `Uint8Array`: the key that unwraps the
+/// link's sealed folder key. Never send the result or `K_c` to the server.
+#[wasm_bindgen(js_name = combineFolderLinkKey)]
+pub fn combine_folder_link_key(k_c: &[u8], passphrase_stretch: Option<Vec<u8>>) -> Result<Vec<u8>, JsError> {
+    let k_c: [u8; 32] = k_c.try_into().map_err(|_| JsError::new("k_c must be 32 bytes"))?;
+    let stretch = match passphrase_stretch {
+        Some(bytes) => {
+            let arr: [u8; 32] = bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| JsError::new("passphrase stretch must be 32 bytes"))?;
+            Some(arr)
+        }
+        None => None,
+    };
+    Ok(kdf::combine_folder_link_key(&k_c, stretch.as_ref()).to_vec())
+}
+
 // ---------------------------------------------------------------------------
 // Constellation transfer (ephemeral device-to-device E2E channel)
 // ---------------------------------------------------------------------------
@@ -1855,6 +1894,48 @@ impl WasmSearchIndex {
         let shards = self
             .inner
             .encrypt_buckets(&mk, &set)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(shards_to_js(&shards))
+    }
+
+    /// Reconstruct a shared folder's index from shards sealed under the folder
+    /// key (`encryptShardsWithFolderKey` output).
+    #[wasm_bindgen(js_name = fromEncryptedShardsWithFolderKey)]
+    pub fn from_encrypted_shards_with_folder_key(
+        folder_key: &[u8],
+        shards: JsValue,
+        num_shards: u32,
+    ) -> Result<WasmSearchIndex, JsError> {
+        let fk = file_key_from_slice(folder_key)?;
+        let core_shards = js_to_shards(&shards)?;
+        let inner = search_index::SearchIndex::from_encrypted_shards_with(
+            search_index::ShardKeySource::Folder(&fk),
+            &core_shards,
+            num_shards,
+        )
+        .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    /// Encrypt every non-empty shard page under the folder key.
+    #[wasm_bindgen(js_name = encryptShardsWithFolderKey)]
+    pub fn encrypt_shards_with_folder_key(&self, folder_key: &[u8]) -> Result<JsValue, JsError> {
+        let fk = file_key_from_slice(folder_key)?;
+        let shards = self
+            .inner
+            .encrypt_shards_with(search_index::ShardKeySource::Folder(&fk))
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(shards_to_js(&shards))
+    }
+
+    /// Encrypt only the given buckets under the folder key (incremental sync).
+    #[wasm_bindgen(js_name = encryptBucketsWithFolderKey)]
+    pub fn encrypt_buckets_with_folder_key(&self, folder_key: &[u8], buckets: Vec<u32>) -> Result<JsValue, JsError> {
+        let fk = file_key_from_slice(folder_key)?;
+        let set: std::collections::BTreeSet<u32> = buckets.into_iter().collect();
+        let shards = self
+            .inner
+            .encrypt_buckets_with(search_index::ShardKeySource::Folder(&fk), &set)
             .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(shards_to_js(&shards))
     }
@@ -3788,5 +3869,36 @@ mod direct_vector_tests {
         let shown = format!("{failure:?} {}", failure.message);
         assert_eq!(failure.code, "userinfo");
         assert!(!shown.contains("SECRETSIG") && !shown.contains("evil.test"), "{shown}");
+    }
+
+    #[test]
+    fn folder_keyed_index_from_wasm() {
+        // wasm-bindgen imports cannot be called on the host, so this covers the
+        // core path the wrapper delegates to; the JS surface (both exports and
+        // the shard methods) is covered by beebeeb-wasm/js-tests/folder_link.test.cjs.
+        let folder_key = kdf::FileKey::from_bytes([0x5a; 32]);
+        let mut idx = search_index::SearchIndex::new(search_index::DEFAULT_NUM_SHARDS);
+        idx.upsert("f1", "NF_song.mp3");
+        let shards = idx
+            .encrypt_shards_with(search_index::ShardKeySource::Folder(&folder_key))
+            .unwrap();
+        let restored = search_index::SearchIndex::from_encrypted_shards_with(
+            search_index::ShardKeySource::Folder(&folder_key),
+            &shards,
+            idx.num_shards(),
+        )
+        .unwrap();
+        assert_eq!(
+            restored.query("nf"),
+            std::collections::BTreeSet::from(["f1".to_string()])
+        );
+        assert!(
+            search_index::SearchIndex::from_encrypted_shards_with(
+                search_index::ShardKeySource::Master(&kdf::MasterKey::from_bytes([0x11; 32])),
+                &shards,
+                idx.num_shards(),
+            )
+            .is_err()
+        );
     }
 }
