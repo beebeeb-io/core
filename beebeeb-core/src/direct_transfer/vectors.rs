@@ -17,8 +17,8 @@ use serde_json::{Value, json};
 use super::{
     ApiAnswer, Call, DirectHealth, Direction, Discovery, DiscoveryCache, DiscoveryState, DownloadPlanner, Geometry,
     Lookup, Outcome, PinnedRetry, PlannerConfig, Poll, RecordedTransport, RetryDecision, StorageBucket, StorageGet,
-    Terminal, WindowAnswer, check_storage_get, check_storage_url, classify, paced_until_ms, pairs_allowed, redact,
-    resume_transport, scrub,
+    Terminal, WindowAnswer, check_storage_body, check_storage_get, check_storage_url, classify, paced_until_ms,
+    pairs_allowed, redact, resume_transport, scrub,
 };
 
 const API_PROD: &str = "https://api.beebeeb.test";
@@ -60,6 +60,9 @@ pub trait Surface {
     fn chunk_length(&self, chunk_count: u32, chunk_size: u64, encrypted_size: u64, index: u32) -> Option<u64>;
     /// [`check_storage_get`] as `{kind: "stored"}` or `{kind: "failed", status}`.
     fn check_storage_get(&self, status: u16, content_length: Option<u64>, expected: u64) -> Value;
+    /// [`check_storage_body`] as `{kind: "stored"}` or `{kind: "failed", status}`: the head passed,
+    /// so only the counted bytes decide.
+    fn check_storage_body(&self, received: u64, expected: u64) -> Value;
     /// [`paced_until_ms`] (`i64::MIN` means no ceiling).
     fn paced_until_ms(&self, start_ms: i64, wire_bytes: u64, kbps: u64) -> i64;
     /// [`super::max_in_flight_bytes`] for the class named by its code.
@@ -274,12 +277,25 @@ pub fn run_all<S: Surface>(surface: &S) -> Report {
     }
 
     for row in v["storage_get"].as_array().expect("storage_get") {
-        let got = surface.check_storage_get(
-            row["status"].as_u64().unwrap() as u16,
-            row["content_length"].as_u64(),
-            as_u64(&row["expected"]),
-        );
-        assert_eq!(got, row["expect"], "storage_get row {:?}", row["name"]);
+        let name = row["name"].as_str().unwrap();
+        let expected = as_u64(&row["expected"]);
+        let got = match row.get("check") {
+            // The body rows test the counted bytes, after a head that said 200 and the grant's length.
+            Some(c) if c == "body" => surface.check_storage_body(as_u64(&row["received"]), expected),
+            Some(other) => panic!("storage_get row {name:?}: unknown check {other:?}"),
+            None => surface.check_storage_get(
+                // A status is a u16: anything else is a broken row, not a wrap.
+                u16::try_from(as_u64(&row["status"])).expect("a status fits u16"),
+                // A missing key is a broken row; an explicit null means "no Content-Length".
+                match row.get("content_length") {
+                    Some(Value::Null) => None,
+                    Some(v) => Some(as_u64(v)),
+                    None => panic!("storage_get row {name:?}: no content_length (use null for none)"),
+                },
+                expected,
+            ),
+        };
+        assert_eq!(got, row["expect"], "storage_get row {name:?}");
         report.storage_get += 1;
     }
 
@@ -665,6 +681,14 @@ fn direction_of(code: &str) -> Direction {
     Direction::from_code(code).unwrap_or_else(|| panic!("unknown direction {code:?}"))
 }
 
+/// One storage answer as the contract's JSON, from its own stable kind.
+fn storage_get_json(got: StorageGet) -> Value {
+    match got {
+        StorageGet::Stored => json!({"kind": got.kind()}),
+        StorageGet::Failed { status } => json!({"kind": got.kind(), "status": status}),
+    }
+}
+
 impl HealthSurface for DirectHealth {
     fn gave_up(&mut self, direction: &str, now_ms: i64) {
         DirectHealth::gave_up(self, direction_of(direction), now_ms);
@@ -747,10 +771,10 @@ impl Surface for CoreSurface {
         .chunk_length(index)
     }
     fn check_storage_get(&self, status: u16, content_length: Option<u64>, expected: u64) -> Value {
-        match check_storage_get(status, content_length, expected) {
-            StorageGet::Stored => json!({"kind": "stored"}),
-            StorageGet::Failed { status } => json!({"kind": "failed", "status": status}),
-        }
+        storage_get_json(check_storage_get(status, content_length, expected))
+    }
+    fn check_storage_body(&self, received: u64, expected: u64) -> Value {
+        storage_get_json(check_storage_body(received, expected))
     }
     fn paced_until_ms(&self, start_ms: i64, wire_bytes: u64, kbps: u64) -> i64 {
         paced_until_ms(start_ms, wire_bytes, kbps)
@@ -906,6 +930,17 @@ mod tests {
             }
             CoreSurface.check_storage_get(status, len, expected)
         }
+        fn check_storage_body(&self, received: u64, expected: u64) -> Value {
+            if self.0 == "storage" {
+                // a binding that accepts a short body
+                return if received >= expected {
+                    json!({"kind": "stored"})
+                } else {
+                    json!({"kind": "failed", "status": 200})
+                };
+            }
+            CoreSurface.check_storage_body(received, expected)
+        }
         fn paced_until_ms(&self, start_ms: i64, bytes: u64, kbps: u64) -> i64 {
             if self.0 == "pacing" {
                 return start_ms;
@@ -913,9 +948,18 @@ mod tests {
             CoreSurface.paced_until_ms(start_ms, bytes, kbps)
         }
         fn max_in_flight_bytes(&self, class: &str) -> u64 {
+            if self.0 == "memory_class" {
+                // a binding that reports the wrong ceiling for every class
+                return crate::direct_transfer::max_in_flight_bytes(crate::direct_transfer::MemoryClass::Native);
+            }
             CoreSurface.max_in_flight_bytes(class)
         }
         fn pairs_allowed(&self, d: &Value, direction: &str, allowlist: &Value) -> bool {
+            if self.0 == "pairs_allowed" {
+                // a binding that reads an empty bucket list as vacuously allowed
+                let empty = allowlist.as_array().is_some_and(Vec::is_empty);
+                return empty || CoreSurface.pairs_allowed(d, direction, allowlist);
+            }
             CoreSurface.pairs_allowed(d, direction, allowlist)
         }
         fn planner(&self, d: &Value, api: &str, file: &str, seed: u64) -> DownloadPlanner {
@@ -1012,6 +1056,9 @@ mod tests {
         fn check_storage_get(&self, status: u16, len: Option<u64>, expected: u64) -> Value {
             CoreSurface.check_storage_get(status, len, expected)
         }
+        fn check_storage_body(&self, received: u64, expected: u64) -> Value {
+            CoreSurface.check_storage_body(received, expected)
+        }
         fn paced_until_ms(&self, start_ms: i64, bytes: u64, kbps: u64) -> i64 {
             CoreSurface.paced_until_ms(start_ms, bytes, kbps)
         }
@@ -1035,6 +1082,10 @@ mod tests {
             report.authority >= 59
                 && report.classify >= 121
                 && report.chunk_length >= 8
+                && report.storage_get >= 8
+                && report.pacing >= 6
+                && report.pairs_allowed >= 8
+                && report.memory_class == 4
                 && report.pinned_retry >= 20
                 && report.cache_scenarios >= 11
                 && report.cache_steps >= 60,
@@ -1089,6 +1140,10 @@ mod tests {
             "authority",
             "classify",
             "chunk_length",
+            "storage_get",
+            "pacing",
+            "pairs_allowed",
+            "memory_class",
             "pinned_retry",
             "discovery_cache",
             "planner",
@@ -1118,6 +1173,10 @@ mod tests {
             "cache",
             "redact",
             "geometry",
+            "storage",
+            "pacing",
+            "pairs_allowed",
+            "memory_class",
             "direction",
             "file_bit",
             "future",

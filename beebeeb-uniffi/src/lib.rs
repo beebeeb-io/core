@@ -5040,18 +5040,18 @@ pub struct DirectConstantsDto {
     pub max_window: u32,
     pub default_window: u32,
     pub chunk_overhead: u32,
-    /// The largest discovery body a client should read.
-    pub max_discovery_body_bytes: u32,
-    /// The largest grant-window body a client should read.
-    pub max_grant_body_bytes: u32,
-    /// The largest ciphertext chunk the client will ever see (256 MiB plus the AEAD overhead).
-    pub max_chunk_body_bytes: u64,
     /// The time bounds every client applies (clients design 6.2), in milliseconds.
     pub storage_connect_timeout_ms: u32,
     pub storage_get_idle_ms: u32,
     pub discovery_timeout_ms: u32,
     pub api_call_timeout_ms: u32,
     pub background_put_resource_timeout_ms: u32,
+    /// The largest discovery body a client should read.
+    pub max_discovery_body_bytes: u32,
+    /// The largest grant-window body a client should read.
+    pub max_grant_body_bytes: u32,
+    /// The largest ciphertext chunk the client will ever see (256 MiB plus the AEAD overhead).
+    pub max_chunk_body_bytes: u64,
 }
 
 #[uniffi::export]
@@ -5064,14 +5064,16 @@ pub fn direct_transfer_constants() -> DirectConstantsDto {
         max_window: dt::wire::MAX_WINDOW,
         default_window: dt::wire::DEFAULT_WINDOW,
         chunk_overhead: dt::wire::CHUNK_OVERHEAD as u32,
-        max_discovery_body_bytes: dt::wire::MAX_DISCOVERY_BYTES as u32,
-        max_grant_body_bytes: dt::wire::MAX_GRANT_BODY_BYTES as u32,
-        max_chunk_body_bytes: beebeeb_core::chunk_stream::MAX_CHUNK_SIZE + dt::wire::CHUNK_OVERHEAD,
         storage_connect_timeout_ms: timeout_ms(dt::timeouts::STORAGE_CONNECT_TIMEOUT),
         storage_get_idle_ms: timeout_ms(dt::timeouts::STORAGE_GET_IDLE),
         discovery_timeout_ms: timeout_ms(dt::timeouts::DISCOVERY_TIMEOUT),
         api_call_timeout_ms: timeout_ms(dt::timeouts::API_CALL_TIMEOUT),
         background_put_resource_timeout_ms: timeout_ms(dt::timeouts::BACKGROUND_PUT_RESOURCE_TIMEOUT),
+        // The three response caps are appended last, so a client that copies fields positionally
+        // (older generated bindings) keeps every earlier field where it was.
+        max_discovery_body_bytes: dt::wire::MAX_DISCOVERY_BYTES as u32,
+        max_grant_body_bytes: dt::wire::MAX_GRANT_BODY_BYTES as u32,
+        max_chunk_body_bytes: beebeeb_core::chunk_stream::MAX_CHUNK_SIZE + dt::wire::CHUNK_OVERHEAD,
     }
 }
 
@@ -5235,7 +5237,18 @@ pub enum DirectStorageGetDto {
 /// Check a storage GET answer: `Stored` only for `200` with `Some(expected)`.
 #[uniffi::export]
 pub fn direct_check_storage_get(status: u16, content_length: Option<u64>, expected: u64) -> DirectStorageGetDto {
-    match dt::check_storage_get(status, content_length, expected) {
+    storage_get_dto(dt::check_storage_get(status, content_length, expected))
+}
+
+/// Check the body a storage GET actually delivered: `Stored` only when the counted bytes are
+/// exactly the grant. `Content-Length` is only the head; a truncated stream ends short.
+#[uniffi::export]
+pub fn direct_check_storage_body(received: u64, expected: u64) -> DirectStorageGetDto {
+    storage_get_dto(dt::check_storage_body(received, expected))
+}
+
+fn storage_get_dto(got: dt::StorageGet) -> DirectStorageGetDto {
+    match got {
         dt::StorageGet::Stored => DirectStorageGetDto::Stored,
         dt::StorageGet::Failed { status } => DirectStorageGetDto::Failed { status },
     }
@@ -6220,6 +6233,18 @@ mod direct_transfer_binding_tests {
         }
     }
 
+    /// A storage answer as the contract's JSON. The kind is core's, not a copy in the test.
+    fn storage_answer_json(dto: DirectStorageGetDto) -> Value {
+        let got = match dto {
+            DirectStorageGetDto::Stored => dt::StorageGet::Stored,
+            DirectStorageGetDto::Failed { status } => dt::StorageGet::Failed { status },
+        };
+        match got {
+            dt::StorageGet::Stored => json!({"kind": got.kind()}),
+            dt::StorageGet::Failed { status } => json!({"kind": got.kind(), "status": status}),
+        }
+    }
+
     impl HealthSurface for UniffiHealth {
         fn gave_up(&mut self, direction: &str, now_ms: i64) {
             self.0.gave_up(direction_dto(direction), now_ms);
@@ -6453,10 +6478,11 @@ mod direct_transfer_binding_tests {
         }
 
         fn check_storage_get(&self, status: u16, content_length: Option<u64>, expected: u64) -> Value {
-            match direct_check_storage_get(status, content_length, expected) {
-                DirectStorageGetDto::Stored => json!({"kind": "stored"}),
-                DirectStorageGetDto::Failed { status } => json!({"kind": "failed", "status": status}),
-            }
+            storage_answer_json(direct_check_storage_get(status, content_length, expected))
+        }
+
+        fn check_storage_body(&self, received: u64, expected: u64) -> Value {
+            storage_answer_json(direct_check_storage_body(received, expected))
         }
 
         fn paced_until_ms(&self, start_ms: i64, wire_bytes: u64, kbps: u64) -> i64 {
@@ -6475,11 +6501,6 @@ mod direct_transfer_binding_tests {
         }
 
         fn pairs_allowed(&self, discovery: &Value, direction: &str, allowlist: &Value) -> bool {
-            let direction = match direction {
-                "download" => DirectDirectionDto::Download,
-                "upload" => DirectDirectionDto::Upload,
-                other => panic!("unknown direction {other:?}"),
-            };
             let pairs: Vec<DirectStorageBucketDto> = allowlist
                 .as_array()
                 .expect("allowlist")
@@ -6489,7 +6510,7 @@ mod direct_transfer_binding_tests {
                     bucket: p["bucket"].as_str().expect("bucket").to_owned(),
                 })
                 .collect();
-            direct_pairs_allowed(discovery_dto(discovery), direction, pairs)
+            direct_pairs_allowed(discovery_dto(discovery), direction_dto(direction), pairs)
         }
 
         fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> UniffiPlanner {
@@ -6667,6 +6688,32 @@ mod direct_transfer_binding_tests {
         let waits: Vec<i64> = (1..=6).map(wait_after_a_failure).collect();
         assert!(waits.iter().any(|w| *w != waits[0]), "{waits:?}");
         assert_eq!(wait_after_a_failure(3), wait_after_a_failure(3));
+    }
+
+    #[test]
+    fn a_chunk_length_is_the_stride_and_the_last_chunk_is_short() {
+        // The binding must not flatten every index to the stride: the last chunk is whatever the
+        // grant's encrypted size leaves, and an index past the window has no length at all.
+        let vectors = vectors::vectors();
+        let t0 = vectors["t0_ms"].as_i64().unwrap();
+        let p = DirectDownloadPlannerHandle::new(
+            discovery_dto(&vectors["discoveries"]["std"]),
+            "https://api.beebeeb.test".to_owned(),
+            vectors["file_id"].as_str().unwrap().to_owned(),
+            7,
+        );
+        assert_eq!(p.chunk_length(0), None, "no geometry before a window is accepted");
+        p.poll(t0);
+        let window = vectors["planner"][0]["steps"][2]["response"].clone();
+        assert_eq!(
+            p.window_answered(serde_json::to_vec(&window).unwrap(), t0),
+            DirectWindowAnswerDto::Accepted
+        );
+        // One window, three chunks: stride 1028 (1000 + 28), encrypted size 2584.
+        assert_eq!(p.chunk_length(0), Some(1028), "the first chunk is a full stride");
+        assert_eq!(p.chunk_length(1), Some(1028), "a middle chunk is a full stride");
+        assert_eq!(p.chunk_length(2), Some(528), "the last chunk is short");
+        assert_eq!(p.chunk_length(3), None, "past the end there is no chunk");
     }
 
     #[test]

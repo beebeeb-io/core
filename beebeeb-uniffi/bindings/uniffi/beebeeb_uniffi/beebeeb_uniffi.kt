@@ -774,6 +774,8 @@ external fun uniffi_beebeeb_uniffi_checksum_func_derive_x25519_public(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_background_put_resource_timeout_ms(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_body(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_get(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_url(
@@ -1605,6 +1607,8 @@ external fun uniffi_beebeeb_uniffi_fn_func_derive_x25519_public(`privateKey`: Ru
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_direct_background_put_resource_timeout_ms(uniffi_out_err: UniffiRustCallStatus, 
 ): Long
+external fun uniffi_beebeeb_uniffi_fn_func_direct_check_storage_body(`received`: Long,`expected`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_direct_check_storage_get(`status`: Short,`contentLength`: RustBuffer.ByValue,`expected`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_direct_check_storage_url(`url`: RustBuffer.ByValue,`discovery`: RustBuffer.ByValue,`apiBase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1908,6 +1912,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_background_put_resource_timeout_ms() != 64703.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_body() != 26492.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_get() != 41265.toShort()) {
@@ -10135,6 +10142,19 @@ data class DirectConstantsDto (
     var `chunkOverhead`: kotlin.UInt
     , 
     /**
+     * The time bounds every client applies (clients design 6.2), in milliseconds.
+     */
+    var `storageConnectTimeoutMs`: kotlin.UInt
+    , 
+    var `storageGetIdleMs`: kotlin.UInt
+    , 
+    var `discoveryTimeoutMs`: kotlin.UInt
+    , 
+    var `apiCallTimeoutMs`: kotlin.UInt
+    , 
+    var `backgroundPutResourceTimeoutMs`: kotlin.UInt
+    , 
+    /**
      * The largest discovery body a client should read.
      */
     var `maxDiscoveryBodyBytes`: kotlin.UInt
@@ -10148,19 +10168,6 @@ data class DirectConstantsDto (
      * The largest ciphertext chunk the client will ever see (256 MiB plus the AEAD overhead).
      */
     var `maxChunkBodyBytes`: kotlin.ULong
-    , 
-    /**
-     * The time bounds every client applies (clients design 6.2), in milliseconds.
-     */
-    var `storageConnectTimeoutMs`: kotlin.UInt
-    , 
-    var `storageGetIdleMs`: kotlin.UInt
-    , 
-    var `discoveryTimeoutMs`: kotlin.UInt
-    , 
-    var `apiCallTimeoutMs`: kotlin.UInt
-    , 
-    var `backgroundPutResourceTimeoutMs`: kotlin.UInt
     
 ){
     
@@ -10186,12 +10193,12 @@ public object FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer<DirectC
             FfiConverterUInt.read(buf),
             FfiConverterUInt.read(buf),
             FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
             FfiConverterULong.read(buf),
-            FfiConverterUInt.read(buf),
-            FfiConverterUInt.read(buf),
-            FfiConverterUInt.read(buf),
-            FfiConverterUInt.read(buf),
-            FfiConverterUInt.read(buf),
         )
     }
 
@@ -10203,14 +10210,14 @@ public object FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer<DirectC
             FfiConverterUInt.allocationSize(value.`maxWindow`) +
             FfiConverterUInt.allocationSize(value.`defaultWindow`) +
             FfiConverterUInt.allocationSize(value.`chunkOverhead`) +
-            FfiConverterUInt.allocationSize(value.`maxDiscoveryBodyBytes`) +
-            FfiConverterUInt.allocationSize(value.`maxGrantBodyBytes`) +
-            FfiConverterULong.allocationSize(value.`maxChunkBodyBytes`) +
             FfiConverterUInt.allocationSize(value.`storageConnectTimeoutMs`) +
             FfiConverterUInt.allocationSize(value.`storageGetIdleMs`) +
             FfiConverterUInt.allocationSize(value.`discoveryTimeoutMs`) +
             FfiConverterUInt.allocationSize(value.`apiCallTimeoutMs`) +
-            FfiConverterUInt.allocationSize(value.`backgroundPutResourceTimeoutMs`)
+            FfiConverterUInt.allocationSize(value.`backgroundPutResourceTimeoutMs`) +
+            FfiConverterUInt.allocationSize(value.`maxDiscoveryBodyBytes`) +
+            FfiConverterUInt.allocationSize(value.`maxGrantBodyBytes`) +
+            FfiConverterULong.allocationSize(value.`maxChunkBodyBytes`)
     )
 
     override fun write(value: DirectConstantsDto, buf: ByteBuffer) {
@@ -10221,14 +10228,14 @@ public object FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer<DirectC
             FfiConverterUInt.write(value.`maxWindow`, buf)
             FfiConverterUInt.write(value.`defaultWindow`, buf)
             FfiConverterUInt.write(value.`chunkOverhead`, buf)
-            FfiConverterUInt.write(value.`maxDiscoveryBodyBytes`, buf)
-            FfiConverterUInt.write(value.`maxGrantBodyBytes`, buf)
-            FfiConverterULong.write(value.`maxChunkBodyBytes`, buf)
             FfiConverterUInt.write(value.`storageConnectTimeoutMs`, buf)
             FfiConverterUInt.write(value.`storageGetIdleMs`, buf)
             FfiConverterUInt.write(value.`discoveryTimeoutMs`, buf)
             FfiConverterUInt.write(value.`apiCallTimeoutMs`, buf)
             FfiConverterUInt.write(value.`backgroundPutResourceTimeoutMs`, buf)
+            FfiConverterUInt.write(value.`maxDiscoveryBodyBytes`, buf)
+            FfiConverterUInt.write(value.`maxGrantBodyBytes`, buf)
+            FfiConverterULong.write(value.`maxChunkBodyBytes`, buf)
     }
 }
 
@@ -15750,6 +15757,20 @@ public object FfiConverterSequenceTypeCeremonyStepDto: FfiConverterRustBuffer<Li
     UniffiLib.uniffi_beebeeb_uniffi_fn_func_direct_background_put_resource_timeout_ms(
     
         _status)
+}
+    )
+    }
+    
+
+        /**
+         * Check the body a storage GET actually delivered: `Stored` only when the counted bytes are
+         * exactly the grant. `Content-Length` is only the head; a truncated stream ends short.
+         */ fun `directCheckStorageBody`(`received`: kotlin.ULong, `expected`: kotlin.ULong): DirectStorageGetDto {
+            return FfiConverterTypeDirectStorageGetDto.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_direct_check_storage_body(
+    
+        FfiConverterULong.lower(`received`),FfiConverterULong.lower(`expected`),_status)
 }
     )
     }

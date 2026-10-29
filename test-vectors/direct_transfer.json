@@ -2178,6 +2178,38 @@
         "kind": "stored"
       },
       "source": "spec R1.7: the rule is exactness, and an empty chunk is exact at zero"
+    },
+    {
+      "name": "a counted body one byte short is not the chunk",
+      "check": "body",
+      "received": 4194331,
+      "expected": 4194332,
+      "expect": {
+        "kind": "failed",
+        "status": 200
+      },
+      "source": "spec R1.7: a truncated stream ends short even after a 200 head with the grant's length"
+    },
+    {
+      "name": "a counted body one byte long is not the chunk",
+      "check": "body",
+      "received": 4194333,
+      "expected": 4194332,
+      "expect": {
+        "kind": "failed",
+        "status": 200
+      },
+      "source": "spec R1.7: a proxy that sends more than it declared is still not the chunk"
+    },
+    {
+      "name": "a counted body of exactly the grant is the chunk",
+      "check": "body",
+      "received": 4194332,
+      "expected": 4194332,
+      "expect": {
+        "kind": "stored"
+      },
+      "source": "spec R1.7: the caller counts what it read; equal is the chunk"
     }
   ],
   "pacing": [
@@ -2187,7 +2219,7 @@
       "wire_bytes": 10000,
       "kbps": 0,
       "expect": "-9223372036854775808",
-      "source": "desktop src-tauri/src/direct_download.rs:1539 (the ceiling is off: i64::MIN)"
+      "source": "desktop src-tauri/src/direct_download.rs:1540 (the ceiling is off: i64::MIN; the formula is :193-199)"
     },
     {
       "name": "no bytes received yet is no wait",
@@ -2195,7 +2227,7 @@
       "wire_bytes": 0,
       "kbps": 8,
       "expect": 1000,
-      "source": "desktop src-tauri/src/direct_download.rs:1540"
+      "source": "desktop src-tauri/src/direct_download.rs:1541"
     },
     {
       "name": "8 KiB at 8 KiB/s is one second",
@@ -2203,7 +2235,7 @@
       "wire_bytes": 8192,
       "kbps": 8,
       "expect": 2000,
-      "source": "desktop src-tauri/src/direct_download.rs:1541"
+      "source": "desktop src-tauri/src/direct_download.rs:1542"
     },
     {
       "name": "the largest count saturates instead of wrapping",
@@ -2211,7 +2243,7 @@
       "wire_bytes": "18446744073709551615",
       "kbps": 1,
       "expect": "9223372036854775807",
-      "source": "desktop src-tauri/src/direct_download.rs:1542 (u64::MAX at 1 KiB/s)"
+      "source": "desktop src-tauri/src/direct_download.rs:1543 (u64::MAX at 1 KiB/s)"
     },
     {
       "name": "a 4 MiB chunk at 1000 KiB/s takes four seconds",
@@ -2370,12 +2402,12 @@
       "source": "spec R1.12: nothing listed, nothing allowed"
     },
     {
-      "name": "a discovery with no pairs is allowed vacuously",
+      "name": "an empty allowlist is not allowed vacuously",
       "discovery": "hosts_only",
       "direction": "download",
       "allowlist": [],
-      "expect": true,
-      "source": "spec R1.12: every pair (of none) is allowlisted, and download is offered"
+      "expect": false,
+      "source": "spec R1.12: every pair (of none) is allowlisted, but direct needs a listed bucket and check_storage_url refuses every unlisted bucket; the web rule is the same (!!discovery.storage_buckets?.length && every(...))"
     },
     {
       "name": "both dev pairs allowlisted",

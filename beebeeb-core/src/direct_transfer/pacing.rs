@@ -2,8 +2,9 @@
 //!
 //! Desktop already holds requests back instead of sleeping after each chunk, so that up to four
 //! requests in flight average out to the same rate as the API path's post-chunk sleep. The formula
-//! is desktop's (`src-tauri/src/direct_download.rs:194-199`), unchanged in value: `kbps` is KiB/s,
-//! and `kbps == 0` means no ceiling at all ([`i64::MIN`], which every caller reads as "no wait").
+//! is desktop's (`src-tauri/src/direct_download.rs:193-199`, checked against desktop `origin/main`
+//! `cb9fe41`), unchanged in value: `kbps` is KiB/s, and `kbps == 0` means no ceiling at all
+//! ([`i64::MIN`], which every caller reads as "no wait").
 //!
 //! Pure arithmetic: no clock, no I/O.
 
@@ -21,8 +22,8 @@ pub fn paced_until_ms(start_ms: i64, wire_bytes: u64, kbps: u64) -> i64 {
 mod tests {
     use super::*;
 
-    /// The rows desktop's own pacing test uses, copied with their source line
-    /// (`desktop/src-tauri/src/direct_download.rs:1538-1544`), plus two extra rows.
+    /// The rows desktop's own pacing test uses, copied with their source lines
+    /// (`desktop/src-tauri/src/direct_download.rs:1540-1543`), plus two extra rows.
     #[test]
     fn pacing_matches_the_formula_it_replaces() {
         assert_eq!(paced_until_ms(1_000, 0, 8), 1_000, "no bytes received yet: no wait");

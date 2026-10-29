@@ -2271,7 +2271,7 @@ fn direct_constants() -> DirectConstantsJs {
         chunk_overhead: dt::wire::CHUNK_OVERHEAD as u32,
         max_discovery_body_bytes: dt::wire::MAX_DISCOVERY_BYTES as u32,
         max_grant_body_bytes: dt::wire::MAX_GRANT_BODY_BYTES as u32,
-        max_chunk_body_bytes: (beebeeb_core::chunk_stream::MAX_CHUNK_SIZE + dt::wire::CHUNK_OVERHEAD) as u32,
+        max_chunk_body_bytes: MAX_CHUNK_BODY_BYTES,
         storage_connect_timeout_ms: direct_timeout_ms(dt::timeouts::STORAGE_CONNECT_TIMEOUT),
         storage_get_idle_ms: direct_timeout_ms(dt::timeouts::STORAGE_GET_IDLE),
         discovery_timeout_ms: direct_timeout_ms(dt::timeouts::DISCOVERY_TIMEOUT),
@@ -2279,6 +2279,17 @@ fn direct_constants() -> DirectConstantsJs {
         background_put_resource_timeout_ms: direct_timeout_ms(dt::timeouts::BACKGROUND_PUT_RESOURCE_TIMEOUT),
     }
 }
+
+/// The biggest chunk body the contract allows (a full chunk plus its overhead). The `u32` is
+/// checked at compile time: a future chunk size above 4 GiB must fail the build, not truncate.
+const MAX_CHUNK_BODY_BYTES: u32 = {
+    let bytes = beebeeb_core::chunk_stream::MAX_CHUNK_SIZE + dt::wire::CHUNK_OVERHEAD;
+    assert!(
+        bytes <= u32::MAX as u64,
+        "the chunk body must fit the u32 the bindings export"
+    );
+    bytes as u32
+};
 
 /// A fixed bound in milliseconds (every one is a few minutes at most).
 fn direct_timeout_ms(d: std::time::Duration) -> u32 {
@@ -2356,25 +2367,62 @@ pub fn check_storage_get_js(status: u16, content_length: Option<f64>, expected: 
     direct_to_js(&value).map_err(|e| DirectFailure::new(format!("{e:?}"), "internal"))
 }
 
+/// Was the body a storage GET actually delivered the chunk? Same answer shape as
+/// `checkStorageGet`, but decided by the counted bytes: `stored` only when `received` is
+/// exactly `expected`. `Content-Length` is only the head; a truncated stream ends short.
+#[wasm_bindgen(js_name = checkStorageBody, unchecked_return_type = "DirectStorageGet")]
+pub fn check_storage_body_js(received: f64, expected: f64) -> Result<JsValue, DirectFailure> {
+    let value = storage_body_json(direct_length(received)?, direct_length(expected)?);
+    direct_to_js(&value).map_err(|e| DirectFailure::new(format!("{e:?}"), "internal"))
+}
+
 fn storage_get_json(status: u16, content_length: Option<u64>, expected: u64) -> serde_json::Value {
-    match dt::check_storage_get(status, content_length, expected) {
-        dt::StorageGet::Stored => serde_json::json!({"kind": "stored"}),
-        dt::StorageGet::Failed { status } => serde_json::json!({"kind": "failed", "status": status}),
+    storage_answer_json(dt::check_storage_get(status, content_length, expected))
+}
+
+fn storage_body_json(received: u64, expected: u64) -> serde_json::Value {
+    storage_answer_json(dt::check_storage_body(received, expected))
+}
+
+/// One storage answer as the contract's JSON, from its own stable kind (no hand-typed copies).
+fn storage_answer_json(got: dt::StorageGet) -> serde_json::Value {
+    match got {
+        dt::StorageGet::Stored => serde_json::json!({"kind": got.kind()}),
+        dt::StorageGet::Failed { status } => serde_json::json!({"kind": got.kind(), "status": status}),
     }
 }
 
 /// When `wire_bytes` received since `start_ms` at `kbps` KiB/s lets the next storage
-/// request start. The three counts cross as BigInt; `-9223372036854775808n` (`i64::MIN`)
-/// means there is no ceiling. Desktop's formula, unchanged in value.
+/// request start. The three counts cross as JS numbers (`f64`), like every other count.
+/// `-Infinity` (`i64::MIN` in core) means there is no ceiling: a real deadline is a
+/// finite number, so a caller only has to test `Number.isFinite`. Desktop's formula,
+/// unchanged in value.
 #[wasm_bindgen(js_name = pacedUntilMs)]
-pub fn paced_until_ms(start_ms: i64, wire_bytes: u64, kbps: u64) -> i64 {
-    dt::paced_until_ms(start_ms, wire_bytes, kbps)
+pub fn paced_until_ms_js(start_ms: f64, wire_bytes: f64, kbps: f64) -> Result<f64, DirectFailure> {
+    let start_ms = direct_time(start_ms)?;
+    let wire_bytes = direct_bytes(wire_bytes, "bytes_invalid")?;
+    let kbps = direct_bytes(kbps, "kbps_invalid")?;
+    Ok(paced_until_ms_value(start_ms, wire_bytes, kbps))
+}
+
+/// [`paced_until_ms_js`]'s answer from core's exact counts, so the Rust test surface can run
+/// the same seam with the rows whose counts are above 2^53.
+fn paced_until_ms_value(start_ms: i64, wire_bytes: u64, kbps: u64) -> f64 {
+    match dt::paced_until_ms(start_ms, wire_bytes, kbps) {
+        i64::MIN => f64::NEG_INFINITY,
+        ms => ms as f64,
+    }
 }
 
 /// The ciphertext bytes a process of `class` (`"native"`, `"browser"`, `"mobile_app"`,
 /// `"mobile_extension"`) may hold at once. Throws `class_invalid` for any other string.
 #[wasm_bindgen(js_name = maxInFlightBytes)]
 pub fn max_in_flight_bytes(class: &str) -> Result<f64, DirectFailure> {
+    max_in_flight_bytes_value(class)
+}
+
+/// [`max_in_flight_bytes`]'s seam: the export and the Rust test surface both call this.
+fn max_in_flight_bytes_value(class: &str) -> Result<f64, DirectFailure> {
     Ok(dt::max_in_flight_bytes(memory_class_of(class)?) as f64)
 }
 
@@ -2384,16 +2432,25 @@ fn memory_class_of(code: &str) -> Result<dt::MemoryClass, DirectFailure> {
 }
 
 /// May this client use the direct transport for `direction`? True only when discovery
-/// offers it AND every pair in `discovery.storage_buckets` is in `pairs` (an array of
-/// `{host, bucket}`). Hosts compare ASCII case-insensitively, buckets exactly.
+/// offers it AND has at least one storage pair AND every pair in `discovery.storage_buckets`
+/// is in `pairs` (an array of `{host, bucket}`). Hosts compare ASCII case-insensitively,
+/// buckets exactly.
 #[wasm_bindgen(js_name = pairsAllowed)]
 pub fn pairs_allowed_js(discovery: JsValue, direction: &str, pairs: JsValue) -> Result<bool, DirectFailure> {
     let discovery = direct_discovery_from_js(discovery)?;
-    let direction = dt::Direction::from_code(direction)
-        .ok_or_else(|| DirectFailure::new(format!("unknown direction {direction:?}"), "direction_invalid"))?;
     let pairs: Vec<dt::StorageBucket> =
         serde_wasm_bindgen::from_value(pairs).map_err(|e| DirectFailure::new(e.to_string(), "pairs_invalid"))?;
-    Ok(dt::pairs_allowed(&discovery, direction, &pairs))
+    pairs_allowed_value(&discovery, direction, &pairs)
+}
+
+/// [`pairs_allowed_js`]'s seam: the export and the Rust test surface both call this.
+fn pairs_allowed_value(
+    discovery: &dt::Discovery,
+    direction: &str,
+    pairs: &[dt::StorageBucket],
+) -> Result<bool, DirectFailure> {
+    let direction = direct_direction(direction)?;
+    Ok(dt::pairs_allowed(discovery, direction, pairs))
 }
 
 /// A URL for a log line: scheme and host only.
@@ -3578,19 +3635,27 @@ mod direct_vector_tests {
             storage_get_json(status, content_length, expected)
         }
 
+        fn check_storage_body(&self, received: u64, expected: u64) -> Value {
+            storage_body_json(received, expected)
+        }
+
         fn paced_until_ms(&self, start_ms: i64, wire_bytes: u64, kbps: u64) -> i64 {
-            paced_until_ms(start_ms, wire_bytes, kbps)
+            // The export crosses the answer as a JS number (`-Infinity` for no ceiling); the
+            // vectors file writes that sentinel as core's `i64::MIN`.
+            match paced_until_ms_value(start_ms, wire_bytes, kbps) {
+                ms if ms == f64::NEG_INFINITY => i64::MIN,
+                ms => ms as i64,
+            }
         }
 
         fn max_in_flight_bytes(&self, class: &str) -> u64 {
-            dt::max_in_flight_bytes(memory_class_of(class).unwrap())
+            max_in_flight_bytes_value(class).unwrap() as u64
         }
 
         fn pairs_allowed(&self, discovery: &Value, direction: &str, allowlist: &Value) -> bool {
             let d: dt::Discovery = serde_json::from_value(discovery.clone()).unwrap();
-            let direction = dt::Direction::from_code(direction).unwrap();
             let allowlist: Vec<dt::StorageBucket> = serde_json::from_value(allowlist.clone()).unwrap();
-            dt::pairs_allowed(&d, direction, &allowlist)
+            pairs_allowed_value(&d, direction, &allowlist).unwrap()
         }
 
         fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> WasmPlannerSurface {

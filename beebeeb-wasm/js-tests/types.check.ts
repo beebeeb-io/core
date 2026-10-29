@@ -5,6 +5,7 @@ import {
   WasmDirectHealth,
   WasmDownloadPlanner,
   WasmSignedUrl,
+  checkStorageBody,
   checkStorageGet,
   maxInFlightBytes,
   pacedUntilMs,
@@ -108,9 +109,11 @@ if (stored.kind === "failed") {
 }
 // @ts-expect-error a stored answer carries no status
 void stored.status
-const until = pacedUntilMs(1000n, 8192n, 8n)
+const until = pacedUntilMs(1000, 8192, 8)
+const untilIsANumber: number = until
+const counted = checkStorageBody(4194332, 4194332)
 const cap: number = maxInFlightBytes("browser")
 maxInFlightBytes("desktop") // any string is typed; the export refuses an unknown one with class_invalid
 const allowed: boolean = pairsAllowed({ download: [], upload: [] }, "download", [])
 const chunkLen: number | null = planner.chunkLength(0)
-void [may, mayFile, lastGaveUp, lastIsANumber, action, putMs, getMs, gaveUpStorage, stored, until, cap, allowed, chunkLen]
+void [may, mayFile, lastGaveUp, lastIsANumber, action, putMs, getMs, gaveUpStorage, stored, counted, until, untilIsANumber, cap, allowed, chunkLen]

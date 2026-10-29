@@ -1318,6 +1318,11 @@ uint64_t uniffi_beebeeb_uniffi_fn_func_direct_background_put_resource_timeout_ms
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DIRECT_CHECK_STORAGE_BODY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DIRECT_CHECK_STORAGE_BODY
+RustBuffer uniffi_beebeeb_uniffi_fn_func_direct_check_storage_body(uint64_t received, uint64_t expected, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DIRECT_CHECK_STORAGE_GET
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DIRECT_CHECK_STORAGE_GET
 RustBuffer uniffi_beebeeb_uniffi_fn_func_direct_check_storage_get(uint16_t status, RustBuffer content_length, uint64_t expected, RustCallStatus *_Nonnull out_status
@@ -2007,6 +2012,12 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_derive_x25519_public(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DIRECT_BACKGROUND_PUT_RESOURCE_TIMEOUT_MS
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DIRECT_BACKGROUND_PUT_RESOURCE_TIMEOUT_MS
 uint16_t uniffi_beebeeb_uniffi_checksum_func_direct_background_put_resource_timeout_ms(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DIRECT_CHECK_STORAGE_BODY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DIRECT_CHECK_STORAGE_BODY
+uint16_t uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_body(void
     
 );
 #endif

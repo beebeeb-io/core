@@ -35,10 +35,22 @@ test('checkStorageGet: only 200 with the exact length is stored', () => {
 })
 
 test('pacedUntilMs carries desktop formula and the no-ceiling sentinel', () => {
-  assert.equal(wasm.pacedUntilMs(1000n, 10000n, 0n), -9223372036854775808n, 'no ceiling')
-  assert.equal(wasm.pacedUntilMs(1000n, 0n, 8n), 1000n)
-  assert.equal(wasm.pacedUntilMs(1000n, 8192n, 8n), 2000n, '8 KiB at 8 KiB/s')
-  assert.equal(wasm.pacedUntilMs(1000n, 18446744073709551615n, 1n), 9223372036854775807n, 'saturates')
+  assert.equal(wasm.pacedUntilMs(1000, 10000, 0), -Infinity, 'no ceiling is -Infinity')
+  assert.equal(wasm.pacedUntilMs(1000, 0, 8), 1000)
+  assert.equal(wasm.pacedUntilMs(1000, 8192, 8), 2000, '8 KiB at 8 KiB/s')
+  assert.ok(Number.isFinite(wasm.pacedUntilMs(0, Number.MAX_SAFE_INTEGER, 1)), 'a big finite wait stays finite')
+  for (const bad of [-1, NaN, Infinity, 1.5]) {
+    assert.equal(codeOf(() => wasm.pacedUntilMs(1000, bad, 8)), 'bytes_invalid', `bytes ${bad}`)
+    assert.equal(codeOf(() => wasm.pacedUntilMs(1000, 0, bad)), 'kbps_invalid', `kbps ${bad}`)
+  }
+})
+
+test('checkStorageBody: only the counted bytes decide, after a 200 head', () => {
+  assert.deepEqual(wasm.checkStorageBody(CHUNK, CHUNK), { kind: 'stored' })
+  assert.deepEqual(wasm.checkStorageBody(CHUNK - 1, CHUNK), { kind: 'failed', status: 200 }, 'short')
+  assert.deepEqual(wasm.checkStorageBody(CHUNK + 1, CHUNK), { kind: 'failed', status: 200 }, 'long')
+  assert.deepEqual(wasm.checkStorageBody(0, 0), { kind: 'stored' })
+  assert.equal(codeOf(() => wasm.checkStorageBody(NaN, CHUNK)), 'length_invalid')
 })
 
 test('maxInFlightBytes names the four classes', () => {
@@ -75,6 +87,11 @@ test('pairsAllowed refuses a missing pair, a missing token and a bucket-case cha
     wasm.pairsAllowed(discovery, 'download', [{ host: 's3.storage.test', bucket: 'BB-01' }, all[1]]),
     false,
     'buckets are exact',
+  )
+  assert.equal(
+    wasm.pairsAllowed({ download: ['object-download-v1'], upload: [], storage_buckets: [] }, 'download', []),
+    false,
+    'no listed bucket is not vacuously allowed',
   )
 })
 

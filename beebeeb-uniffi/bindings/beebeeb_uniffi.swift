@@ -5769,6 +5769,14 @@ public struct DirectConstantsDto: Equatable, Hashable {
     public var defaultWindow: UInt32
     public var chunkOverhead: UInt32
     /**
+     * The time bounds every client applies (clients design 6.2), in milliseconds.
+     */
+    public var storageConnectTimeoutMs: UInt32
+    public var storageGetIdleMs: UInt32
+    public var discoveryTimeoutMs: UInt32
+    public var apiCallTimeoutMs: UInt32
+    public var backgroundPutResourceTimeoutMs: UInt32
+    /**
      * The largest discovery body a client should read.
      */
     public var maxDiscoveryBodyBytes: UInt32
@@ -5780,18 +5788,13 @@ public struct DirectConstantsDto: Equatable, Hashable {
      * The largest ciphertext chunk the client will ever see (256 MiB plus the AEAD overhead).
      */
     public var maxChunkBodyBytes: UInt64
-    /**
-     * The time bounds every client applies (clients design 6.2), in milliseconds.
-     */
-    public var storageConnectTimeoutMs: UInt32
-    public var storageGetIdleMs: UInt32
-    public var discoveryTimeoutMs: UInt32
-    public var apiCallTimeoutMs: UInt32
-    public var backgroundPutResourceTimeoutMs: UInt32
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
     public init(capObjectDownloadV1: String, capObjectUploadV1: String, capabilitiesHeader: String, discoveryPath: String, maxWindow: UInt32, defaultWindow: UInt32, chunkOverhead: UInt32, 
+        /**
+         * The time bounds every client applies (clients design 6.2), in milliseconds.
+         */storageConnectTimeoutMs: UInt32, storageGetIdleMs: UInt32, discoveryTimeoutMs: UInt32, apiCallTimeoutMs: UInt32, backgroundPutResourceTimeoutMs: UInt32, 
         /**
          * The largest discovery body a client should read.
          */maxDiscoveryBodyBytes: UInt32, 
@@ -5800,10 +5803,7 @@ public struct DirectConstantsDto: Equatable, Hashable {
          */maxGrantBodyBytes: UInt32, 
         /**
          * The largest ciphertext chunk the client will ever see (256 MiB plus the AEAD overhead).
-         */maxChunkBodyBytes: UInt64, 
-        /**
-         * The time bounds every client applies (clients design 6.2), in milliseconds.
-         */storageConnectTimeoutMs: UInt32, storageGetIdleMs: UInt32, discoveryTimeoutMs: UInt32, apiCallTimeoutMs: UInt32, backgroundPutResourceTimeoutMs: UInt32) {
+         */maxChunkBodyBytes: UInt64) {
         self.capObjectDownloadV1 = capObjectDownloadV1
         self.capObjectUploadV1 = capObjectUploadV1
         self.capabilitiesHeader = capabilitiesHeader
@@ -5811,14 +5811,14 @@ public struct DirectConstantsDto: Equatable, Hashable {
         self.maxWindow = maxWindow
         self.defaultWindow = defaultWindow
         self.chunkOverhead = chunkOverhead
-        self.maxDiscoveryBodyBytes = maxDiscoveryBodyBytes
-        self.maxGrantBodyBytes = maxGrantBodyBytes
-        self.maxChunkBodyBytes = maxChunkBodyBytes
         self.storageConnectTimeoutMs = storageConnectTimeoutMs
         self.storageGetIdleMs = storageGetIdleMs
         self.discoveryTimeoutMs = discoveryTimeoutMs
         self.apiCallTimeoutMs = apiCallTimeoutMs
         self.backgroundPutResourceTimeoutMs = backgroundPutResourceTimeoutMs
+        self.maxDiscoveryBodyBytes = maxDiscoveryBodyBytes
+        self.maxGrantBodyBytes = maxGrantBodyBytes
+        self.maxChunkBodyBytes = maxChunkBodyBytes
     }
 
     
@@ -5844,14 +5844,14 @@ public struct FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer {
                 maxWindow: FfiConverterUInt32.read(from: &buf), 
                 defaultWindow: FfiConverterUInt32.read(from: &buf), 
                 chunkOverhead: FfiConverterUInt32.read(from: &buf), 
-                maxDiscoveryBodyBytes: FfiConverterUInt32.read(from: &buf), 
-                maxGrantBodyBytes: FfiConverterUInt32.read(from: &buf), 
-                maxChunkBodyBytes: FfiConverterUInt64.read(from: &buf), 
                 storageConnectTimeoutMs: FfiConverterUInt32.read(from: &buf), 
                 storageGetIdleMs: FfiConverterUInt32.read(from: &buf), 
                 discoveryTimeoutMs: FfiConverterUInt32.read(from: &buf), 
                 apiCallTimeoutMs: FfiConverterUInt32.read(from: &buf), 
-                backgroundPutResourceTimeoutMs: FfiConverterUInt32.read(from: &buf)
+                backgroundPutResourceTimeoutMs: FfiConverterUInt32.read(from: &buf), 
+                maxDiscoveryBodyBytes: FfiConverterUInt32.read(from: &buf), 
+                maxGrantBodyBytes: FfiConverterUInt32.read(from: &buf), 
+                maxChunkBodyBytes: FfiConverterUInt64.read(from: &buf)
         )
     }
 
@@ -5863,14 +5863,14 @@ public struct FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value.maxWindow, into: &buf)
         FfiConverterUInt32.write(value.defaultWindow, into: &buf)
         FfiConverterUInt32.write(value.chunkOverhead, into: &buf)
-        FfiConverterUInt32.write(value.maxDiscoveryBodyBytes, into: &buf)
-        FfiConverterUInt32.write(value.maxGrantBodyBytes, into: &buf)
-        FfiConverterUInt64.write(value.maxChunkBodyBytes, into: &buf)
         FfiConverterUInt32.write(value.storageConnectTimeoutMs, into: &buf)
         FfiConverterUInt32.write(value.storageGetIdleMs, into: &buf)
         FfiConverterUInt32.write(value.discoveryTimeoutMs, into: &buf)
         FfiConverterUInt32.write(value.apiCallTimeoutMs, into: &buf)
         FfiConverterUInt32.write(value.backgroundPutResourceTimeoutMs, into: &buf)
+        FfiConverterUInt32.write(value.maxDiscoveryBodyBytes, into: &buf)
+        FfiConverterUInt32.write(value.maxGrantBodyBytes, into: &buf)
+        FfiConverterUInt64.write(value.maxChunkBodyBytes, into: &buf)
     }
 }
 
@@ -11653,6 +11653,18 @@ public func directBackgroundPutResourceTimeoutMs() -> UInt64  {
 })
 }
 /**
+ * Check the body a storage GET actually delivered: `Stored` only when the counted bytes are
+ * exactly the grant. `Content-Length` is only the head; a truncated stream ends short.
+ */
+public func directCheckStorageBody(received: UInt64, expected: UInt64) -> DirectStorageGetDto  {
+    return try!  FfiConverterTypeDirectStorageGetDto_lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_direct_check_storage_body(
+        FfiConverterUInt64.lower(received),
+        FfiConverterUInt64.lower(expected),$0
+    )
+})
+}
+/**
  * Check a storage GET answer: `Stored` only for `200` with `Some(expected)`.
  */
 public func directCheckStorageGet(status: UInt16, contentLength: UInt64?, expected: UInt64) -> DirectStorageGetDto  {
@@ -12439,6 +12451,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_background_put_resource_timeout_ms() != 64703) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_body() != 26492) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_get() != 41265) {
