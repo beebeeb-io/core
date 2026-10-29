@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use zeroize::{Zeroize, Zeroizing};
 
 use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor, ChunkFormat, ExpectedChunkFormat, SessionResume};
+use beebeeb_core::client_meta;
 use beebeeb_core::constellation;
 use beebeeb_core::encrypt;
 use beebeeb_core::kdf;
@@ -515,6 +516,39 @@ pub struct EncryptedData {
 #[derive(uniffi::Record)]
 pub struct MasterKeyResult {
     pub key: Vec<u8>,
+}
+
+/// One encrypted client-metadata row (task 1922): `record_key` is the record's
+/// client key, `device_key` the parent device's (absent for the device
+/// hostname), `field` is 1-4 and `envelope` is a `bbcm1.` string.
+#[derive(uniffi::Record)]
+pub struct ClientMetaItem {
+    pub record_key: String,
+    pub device_key: Option<String>,
+    pub field: u8,
+    pub envelope: String,
+}
+
+/// One opened client-metadata row: `ok` false means this row failed and
+/// `value` is absent. One bad row never fails the batch.
+#[derive(uniffi::Record)]
+pub struct ClientMetaOpened {
+    pub ok: bool,
+    pub value: Option<String>,
+}
+
+fn client_meta_uuid(s: &str) -> Result<uuid::Uuid, CryptoError> {
+    uuid::Uuid::parse_str(s).map_err(|_| CryptoError::InvalidInput {
+        detail: "record_key/device_key must be a UUID".into(),
+    })
+}
+
+fn client_meta_optional_uuid(s: Option<&str>) -> Result<Option<uuid::Uuid>, CryptoError> {
+    s.map(client_meta_uuid).transpose()
+}
+
+fn client_meta_field(field: u8) -> Result<client_meta::ClientMetaField, CryptoError> {
+    client_meta::ClientMetaField::try_from(field).map_err(CryptoError::from)
 }
 
 /// Result of starting an OPAQUE registration or login.
@@ -1483,6 +1517,61 @@ impl MasterKeyHandle {
             })
             .collect();
         Ok(out)
+    }
+
+    /// Seal one encrypted client-metadata field (task 1922). `device_key` must
+    /// be `None` for field 1 (a device hostname) and `Some` for fields 2-4; the
+    /// derived key and the master key never cross FFI.
+    pub fn seal_client_meta(
+        &self,
+        record_key: String,
+        device_key: Option<String>,
+        field: u8,
+        plaintext: String,
+    ) -> Result<String, CryptoError> {
+        let record = client_meta_uuid(&record_key)?;
+        let device = client_meta_optional_uuid(device_key.as_deref())?;
+        let field = client_meta_field(field)?;
+        self.with_key(|mk| client_meta::seal_client_meta(mk, &record, device.as_ref(), field, &plaintext))?
+            .map_err(CryptoError::from)
+    }
+
+    /// Open one `bbcm1.` client-metadata envelope (task 1922).
+    pub fn open_client_meta(
+        &self,
+        record_key: String,
+        device_key: Option<String>,
+        field: u8,
+        envelope: String,
+    ) -> Result<String, CryptoError> {
+        let record = client_meta_uuid(&record_key)?;
+        let device = client_meta_optional_uuid(device_key.as_deref())?;
+        let field = client_meta_field(field)?;
+        self.with_key(|mk| client_meta::open_client_meta(mk, &record, device.as_ref(), field, &envelope))?
+            .map_err(CryptoError::from)
+    }
+
+    /// Open many client-metadata rows under ONE derived key (task 1922). Order
+    /// and length match `items`; a bad row yields `ok: false` for that row only.
+    pub fn open_client_meta_many(&self, items: Vec<ClientMetaItem>) -> Vec<ClientMetaOpened> {
+        items.into_iter().map(|item| self.open_client_meta_row(item)).collect()
+    }
+
+    fn open_client_meta_row(&self, item: ClientMetaItem) -> ClientMetaOpened {
+        let opened = (|| {
+            let record = client_meta_uuid(&item.record_key)?;
+            let device = client_meta_optional_uuid(item.device_key.as_deref())?;
+            let field = client_meta_field(item.field)?;
+            self.with_key(|mk| client_meta::open_client_meta(mk, &record, device.as_ref(), field, &item.envelope))?
+                .map_err(CryptoError::from)
+        })();
+        match opened {
+            Ok(value) => ClientMetaOpened {
+                ok: true,
+                value: Some(value),
+            },
+            Err(_) => ClientMetaOpened { ok: false, value: None },
+        }
     }
 
     /// Encrypt a file from disk, writing each chunk as a `.enc` file.
@@ -6846,5 +6935,66 @@ mod direct_transfer_binding_tests {
             !err.to_string().contains("SECRETSIG") && !err.to_string().contains("evil.test"),
             "{err}"
         );
+    }
+}
+
+#[cfg(test)]
+mod client_meta_binding_tests {
+    //! Task 1922: the UniFFI `MasterKeyHandle` methods, keys staying in Rust.
+    use super::*;
+
+    fn master() -> Arc<MasterKeyHandle> {
+        MasterKeyHandle::from_keychain_bytes(vec![0x40u8; 32]).unwrap()
+    }
+
+    const RECORD: &str = "19220000-0000-4000-8000-000000000001";
+    const DEVICE: &str = "19220000-0000-4000-8000-0000000000aa";
+
+    #[test]
+    fn client_meta_round_trip_and_many() {
+        let m = master();
+        let host = m
+            .seal_client_meta(RECORD.into(), None, 1, "MacBook-Air".into())
+            .unwrap();
+        assert!(host.starts_with("bbcm1."));
+        assert_eq!(
+            m.open_client_meta(RECORD.into(), None, 1, host.clone()).unwrap(),
+            "MacBook-Air"
+        );
+        // Field 1 must not carry a device key.
+        assert!(
+            m.seal_client_meta(RECORD.into(), Some(DEVICE.into()), 1, "x".into())
+                .is_err()
+        );
+        let path = m
+            .seal_client_meta(RECORD.into(), Some(DEVICE.into()), 3, "/Users/guus/Taxes".into())
+            .unwrap();
+        let rows = m.open_client_meta_many(vec![
+            ClientMetaItem {
+                record_key: RECORD.into(),
+                device_key: None,
+                field: 1,
+                envelope: host,
+            },
+            ClientMetaItem {
+                record_key: RECORD.into(),
+                device_key: Some(DEVICE.into()),
+                field: 3,
+                envelope: path,
+            },
+            ClientMetaItem {
+                record_key: RECORD.into(),
+                device_key: Some(DEVICE.into()),
+                field: 4,
+                envelope: "not-an-envelope".into(),
+            },
+        ]);
+        assert_eq!(rows.len(), 3);
+        assert!(rows[0].ok);
+        assert_eq!(rows[0].value.as_deref(), Some("MacBook-Air"));
+        assert!(rows[1].ok);
+        assert_eq!(rows[1].value.as_deref(), Some("/Users/guus/Taxes"));
+        assert!(!rows[2].ok);
+        assert!(rows[2].value.is_none());
     }
 }
