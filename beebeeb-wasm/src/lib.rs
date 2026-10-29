@@ -2156,6 +2156,8 @@ export type DirectVerdict =
     | { kind: "terminal"; status: number; error: string | null }
     | { kind: "corrupt" };
 
+export type DirectStorageGet = { kind: "stored" } | { kind: "failed"; status: number };
+
 export type DirectPoll =
     | { kind: "request_window"; request: { object_version_id: string | null; start_index: number; count: number; renewal: boolean } }
     | { kind: "fetch"; index: number; method: string; url: WasmSignedUrl; length: number; expires_at: string }
@@ -2236,6 +2238,9 @@ struct DirectConstantsJs {
     max_window: u32,
     default_window: u32,
     chunk_overhead: u32,
+    max_discovery_body_bytes: u32,
+    max_grant_body_bytes: u32,
+    max_chunk_body_bytes: u32,
     storage_connect_timeout_ms: u32,
     storage_get_idle_ms: u32,
     discovery_timeout_ms: u32,
@@ -2245,9 +2250,11 @@ struct DirectConstantsJs {
 
 /// `{ cap_object_download_v1, cap_object_upload_v1, capabilities_header,
 /// discovery_path, max_window, default_window, chunk_overhead,
+/// max_discovery_body_bytes, max_grant_body_bytes, max_chunk_body_bytes,
 /// storage_connect_timeout_ms, storage_get_idle_ms, discovery_timeout_ms,
 /// api_call_timeout_ms, background_put_resource_timeout_ms }`: the contract's
-/// names and numbers, and the time bounds every client applies, so no client re-types them.
+/// names and numbers, the response caps and the time bounds every client applies,
+/// so no client re-types them.
 #[wasm_bindgen(js_name = directTransferConstants)]
 pub fn direct_transfer_constants() -> Result<JsValue, JsError> {
     direct_to_js(&direct_constants())
@@ -2262,6 +2269,9 @@ fn direct_constants() -> DirectConstantsJs {
         max_window: dt::wire::MAX_WINDOW,
         default_window: dt::wire::DEFAULT_WINDOW,
         chunk_overhead: dt::wire::CHUNK_OVERHEAD as u32,
+        max_discovery_body_bytes: dt::wire::MAX_DISCOVERY_BYTES as u32,
+        max_grant_body_bytes: dt::wire::MAX_GRANT_BODY_BYTES as u32,
+        max_chunk_body_bytes: (beebeeb_core::chunk_stream::MAX_CHUNK_SIZE + dt::wire::CHUNK_OVERHEAD) as u32,
         storage_connect_timeout_ms: direct_timeout_ms(dt::timeouts::STORAGE_CONNECT_TIMEOUT),
         storage_get_idle_ms: direct_timeout_ms(dt::timeouts::STORAGE_GET_IDLE),
         discovery_timeout_ms: direct_timeout_ms(dt::timeouts::DISCOVERY_TIMEOUT),
@@ -2331,6 +2341,59 @@ pub fn parse_direct_discovery(body: &[u8]) -> Result<JsValue, JsValue> {
 pub fn check_storage_url_js(url: &str, discovery: JsValue, api_base: &str) -> Result<(), JsValue> {
     let discovery = direct_discovery_from_js(discovery)?;
     direct_check_url(url, &discovery, api_base).map_err(JsValue::from)
+}
+
+/// Was a storage GET answer the chunk we asked for? `{ kind: "stored" }` or
+/// `{ kind: "failed", status }`; status `0` means there was no HTTP answer at all.
+/// Only a `200` whose `Content-Length` is exactly `expected` is `stored`.
+#[wasm_bindgen(js_name = checkStorageGet, unchecked_return_type = "DirectStorageGet")]
+pub fn check_storage_get_js(status: u16, content_length: Option<f64>, expected: f64) -> Result<JsValue, DirectFailure> {
+    let content_length = match content_length {
+        Some(len) => Some(direct_length(len)?),
+        None => None,
+    };
+    let value = storage_get_json(status, content_length, direct_length(expected)?);
+    direct_to_js(&value).map_err(|e| DirectFailure::new(format!("{e:?}"), "internal"))
+}
+
+fn storage_get_json(status: u16, content_length: Option<u64>, expected: u64) -> serde_json::Value {
+    match dt::check_storage_get(status, content_length, expected) {
+        dt::StorageGet::Stored => serde_json::json!({"kind": "stored"}),
+        dt::StorageGet::Failed { status } => serde_json::json!({"kind": "failed", "status": status}),
+    }
+}
+
+/// When `wire_bytes` received since `start_ms` at `kbps` KiB/s lets the next storage
+/// request start. The three counts cross as BigInt; `-9223372036854775808n` (`i64::MIN`)
+/// means there is no ceiling. Desktop's formula, unchanged in value.
+#[wasm_bindgen(js_name = pacedUntilMs)]
+pub fn paced_until_ms(start_ms: i64, wire_bytes: u64, kbps: u64) -> i64 {
+    dt::paced_until_ms(start_ms, wire_bytes, kbps)
+}
+
+/// The ciphertext bytes a process of `class` (`"native"`, `"browser"`, `"mobile_app"`,
+/// `"mobile_extension"`) may hold at once. Throws `class_invalid` for any other string.
+#[wasm_bindgen(js_name = maxInFlightBytes)]
+pub fn max_in_flight_bytes(class: &str) -> Result<f64, DirectFailure> {
+    Ok(dt::max_in_flight_bytes(memory_class_of(class)?) as f64)
+}
+
+fn memory_class_of(code: &str) -> Result<dt::MemoryClass, DirectFailure> {
+    dt::MemoryClass::from_code(code)
+        .ok_or_else(|| DirectFailure::new(format!("unknown memory class {code:?}"), "class_invalid"))
+}
+
+/// May this client use the direct transport for `direction`? True only when discovery
+/// offers it AND every pair in `discovery.storage_buckets` is in `pairs` (an array of
+/// `{host, bucket}`). Hosts compare ASCII case-insensitively, buckets exactly.
+#[wasm_bindgen(js_name = pairsAllowed)]
+pub fn pairs_allowed_js(discovery: JsValue, direction: &str, pairs: JsValue) -> Result<bool, DirectFailure> {
+    let discovery = direct_discovery_from_js(discovery)?;
+    let direction = dt::Direction::from_code(direction)
+        .ok_or_else(|| DirectFailure::new(format!("unknown direction {direction:?}"), "direction_invalid"))?;
+    let pairs: Vec<dt::StorageBucket> =
+        serde_wasm_bindgen::from_value(pairs).map_err(|e| DirectFailure::new(e.to_string(), "pairs_invalid"))?;
+    Ok(dt::pairs_allowed(&discovery, direction, &pairs))
 }
 
 /// A URL for a log line: scheme and host only.
@@ -2723,6 +2786,16 @@ impl WasmDownloadPlanner {
     /// Chunk `index` has been decrypted and written. Strictly in order.
     pub fn consumed(&mut self, index: u32) -> Result<(), DirectFailure> {
         self.inner.consumed(index).map_err(DirectFailure::from)
+    }
+
+    /// The ciphertext length of chunk `index` once the first window was accepted, else `null`.
+    /// The link's `length` is this number; the caller checks a storage answer against it.
+    #[wasm_bindgen(js_name = chunkLength, unchecked_return_type = "number | null")]
+    pub fn chunk_length(&self, index: u32) -> JsValue {
+        match self.inner.geometry().and_then(|g| g.chunk_length(index)) {
+            Some(len) => JsValue::from_f64(len as f64),
+            None => JsValue::NULL,
+        }
     }
 
     /// `{ chunk_count, chunk_size, encrypted_size, original_size }` once the
@@ -3501,6 +3574,25 @@ mod direct_vector_tests {
             .chunk_length(index)
         }
 
+        fn check_storage_get(&self, status: u16, content_length: Option<u64>, expected: u64) -> Value {
+            storage_get_json(status, content_length, expected)
+        }
+
+        fn paced_until_ms(&self, start_ms: i64, wire_bytes: u64, kbps: u64) -> i64 {
+            paced_until_ms(start_ms, wire_bytes, kbps)
+        }
+
+        fn max_in_flight_bytes(&self, class: &str) -> u64 {
+            dt::max_in_flight_bytes(memory_class_of(class).unwrap())
+        }
+
+        fn pairs_allowed(&self, discovery: &Value, direction: &str, allowlist: &Value) -> bool {
+            let d: dt::Discovery = serde_json::from_value(discovery.clone()).unwrap();
+            let direction = dt::Direction::from_code(direction).unwrap();
+            let allowlist: Vec<dt::StorageBucket> = serde_json::from_value(allowlist.clone()).unwrap();
+            dt::pairs_allowed(&d, direction, &allowlist)
+        }
+
         fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> WasmPlannerSurface {
             let d: dt::Discovery = serde_json::from_value(discovery.clone()).unwrap();
             WasmPlannerSurface(WasmDownloadPlanner::from_parts(d, api_base, file_id, seed))
@@ -3831,6 +3923,9 @@ mod direct_vector_tests {
                 "max_window": 32,
                 "default_window": 8,
                 "chunk_overhead": 28,
+                "max_discovery_body_bytes": 256 * 1024,
+                "max_grant_body_bytes": 1024 * 1024,
+                "max_chunk_body_bytes": 256 * 1024 * 1024 + 28,
                 "storage_connect_timeout_ms": 15_000,
                 "storage_get_idle_ms": 30_000,
                 "discovery_timeout_ms": 15_000,

@@ -1775,6 +1775,12 @@ public protocol DirectDownloadPlannerHandleProtocol: AnyObject, Sendable {
     func apiFetchFailed(index: UInt32) throws 
     
     /**
+     * The ciphertext length of chunk `index` once the first window was accepted, else `None`.
+     * The grant's `length` is this number; check a storage answer against it.
+     */
+    func chunkLength(index: UInt32)  -> UInt64?
+    
+    /**
      * Chunk `index` arrived but did not authenticate when decrypted.
      */
     func chunkUnauthentic(index: UInt32) throws 
@@ -1935,6 +1941,19 @@ open func apiFetchFailed(index: UInt32)throws   {try rustCallWithError(FfiConver
         FfiConverterUInt32.lower(index),$0
     )
 }
+}
+    
+    /**
+     * The ciphertext length of chunk `index` once the first window was accepted, else `None`.
+     * The grant's `length` is this number; check a storage answer against it.
+     */
+open func chunkLength(index: UInt32) -> UInt64?  {
+    return try!  FfiConverterOptionUInt64.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_chunk_length(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt32.lower(index),$0
+    )
+})
 }
     
     /**
@@ -5750,6 +5769,18 @@ public struct DirectConstantsDto: Equatable, Hashable {
     public var defaultWindow: UInt32
     public var chunkOverhead: UInt32
     /**
+     * The largest discovery body a client should read.
+     */
+    public var maxDiscoveryBodyBytes: UInt32
+    /**
+     * The largest grant-window body a client should read.
+     */
+    public var maxGrantBodyBytes: UInt32
+    /**
+     * The largest ciphertext chunk the client will ever see (256 MiB plus the AEAD overhead).
+     */
+    public var maxChunkBodyBytes: UInt64
+    /**
      * The time bounds every client applies (clients design 6.2), in milliseconds.
      */
     public var storageConnectTimeoutMs: UInt32
@@ -5762,6 +5793,15 @@ public struct DirectConstantsDto: Equatable, Hashable {
     // declare one manually.
     public init(capObjectDownloadV1: String, capObjectUploadV1: String, capabilitiesHeader: String, discoveryPath: String, maxWindow: UInt32, defaultWindow: UInt32, chunkOverhead: UInt32, 
         /**
+         * The largest discovery body a client should read.
+         */maxDiscoveryBodyBytes: UInt32, 
+        /**
+         * The largest grant-window body a client should read.
+         */maxGrantBodyBytes: UInt32, 
+        /**
+         * The largest ciphertext chunk the client will ever see (256 MiB plus the AEAD overhead).
+         */maxChunkBodyBytes: UInt64, 
+        /**
          * The time bounds every client applies (clients design 6.2), in milliseconds.
          */storageConnectTimeoutMs: UInt32, storageGetIdleMs: UInt32, discoveryTimeoutMs: UInt32, apiCallTimeoutMs: UInt32, backgroundPutResourceTimeoutMs: UInt32) {
         self.capObjectDownloadV1 = capObjectDownloadV1
@@ -5771,6 +5811,9 @@ public struct DirectConstantsDto: Equatable, Hashable {
         self.maxWindow = maxWindow
         self.defaultWindow = defaultWindow
         self.chunkOverhead = chunkOverhead
+        self.maxDiscoveryBodyBytes = maxDiscoveryBodyBytes
+        self.maxGrantBodyBytes = maxGrantBodyBytes
+        self.maxChunkBodyBytes = maxChunkBodyBytes
         self.storageConnectTimeoutMs = storageConnectTimeoutMs
         self.storageGetIdleMs = storageGetIdleMs
         self.discoveryTimeoutMs = discoveryTimeoutMs
@@ -5801,6 +5844,9 @@ public struct FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer {
                 maxWindow: FfiConverterUInt32.read(from: &buf), 
                 defaultWindow: FfiConverterUInt32.read(from: &buf), 
                 chunkOverhead: FfiConverterUInt32.read(from: &buf), 
+                maxDiscoveryBodyBytes: FfiConverterUInt32.read(from: &buf), 
+                maxGrantBodyBytes: FfiConverterUInt32.read(from: &buf), 
+                maxChunkBodyBytes: FfiConverterUInt64.read(from: &buf), 
                 storageConnectTimeoutMs: FfiConverterUInt32.read(from: &buf), 
                 storageGetIdleMs: FfiConverterUInt32.read(from: &buf), 
                 discoveryTimeoutMs: FfiConverterUInt32.read(from: &buf), 
@@ -5817,6 +5863,9 @@ public struct FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value.maxWindow, into: &buf)
         FfiConverterUInt32.write(value.defaultWindow, into: &buf)
         FfiConverterUInt32.write(value.chunkOverhead, into: &buf)
+        FfiConverterUInt32.write(value.maxDiscoveryBodyBytes, into: &buf)
+        FfiConverterUInt32.write(value.maxGrantBodyBytes, into: &buf)
+        FfiConverterUInt64.write(value.maxChunkBodyBytes, into: &buf)
         FfiConverterUInt32.write(value.storageConnectTimeoutMs, into: &buf)
         FfiConverterUInt32.write(value.storageGetIdleMs, into: &buf)
         FfiConverterUInt32.write(value.discoveryTimeoutMs, into: &buf)
@@ -8215,6 +8264,90 @@ public func FfiConverterTypeDirectLookupDto_lower(_ value: DirectLookupDto) -> R
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
+ * The process class, which sets the ciphertext-in-flight cap.
+ */
+
+public enum DirectMemoryClassDto: Equatable, Hashable {
+    
+    case native
+    case browser
+    case mobileApp
+    case mobileExtension
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension DirectMemoryClassDto: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDirectMemoryClassDto: FfiConverterRustBuffer {
+    typealias SwiftType = DirectMemoryClassDto
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DirectMemoryClassDto {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .native
+        
+        case 2: return .browser
+        
+        case 3: return .mobileApp
+        
+        case 4: return .mobileExtension
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DirectMemoryClassDto, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .native:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .browser:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .mobileApp:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .mobileExtension:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectMemoryClassDto_lift(_ buf: RustBuffer) throws -> DirectMemoryClassDto {
+    return try FfiConverterTypeDirectMemoryClassDto.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectMemoryClassDto_lower(_ value: DirectMemoryClassDto) -> RustBuffer {
+    return FfiConverterTypeDirectMemoryClassDto.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
  * What an API answer means.
  */
 
@@ -8770,6 +8903,80 @@ public func FfiConverterTypeDirectRetryDecisionDto_lift(_ buf: RustBuffer) throw
 #endif
 public func FfiConverterTypeDirectRetryDecisionDto_lower(_ value: DirectRetryDecisionDto) -> RustBuffer {
     return FfiConverterTypeDirectRetryDecisionDto.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * What a storage GET answer means. `Stored` only for a `200` whose `Content-Length` is exactly
+ * the grant's length; `Failed` carries the status (`0` means there was no HTTP answer).
+ */
+
+public enum DirectStorageGetDto: Equatable, Hashable {
+    
+    case stored
+    case failed(status: UInt16
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension DirectStorageGetDto: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDirectStorageGetDto: FfiConverterRustBuffer {
+    typealias SwiftType = DirectStorageGetDto
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DirectStorageGetDto {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .stored
+        
+        case 2: return .failed(status: try FfiConverterUInt16.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DirectStorageGetDto, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .stored:
+            writeInt(&buf, Int32(1))
+        
+        
+        case let .failed(status):
+            writeInt(&buf, Int32(2))
+            FfiConverterUInt16.write(status, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectStorageGetDto_lift(_ buf: RustBuffer) throws -> DirectStorageGetDto {
+    return try FfiConverterTypeDirectStorageGetDto.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectStorageGetDto_lower(_ value: DirectStorageGetDto) -> RustBuffer {
+    return FfiConverterTypeDirectStorageGetDto.lower(value)
 }
 
 
@@ -11446,6 +11653,18 @@ public func directBackgroundPutResourceTimeoutMs() -> UInt64  {
 })
 }
 /**
+ * Check a storage GET answer: `Stored` only for `200` with `Some(expected)`.
+ */
+public func directCheckStorageGet(status: UInt16, contentLength: UInt64?, expected: UInt64) -> DirectStorageGetDto  {
+    return try!  FfiConverterTypeDirectStorageGetDto_lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_direct_check_storage_get(
+        FfiConverterUInt16.lower(status),
+        FfiConverterOptionUInt64.lower(contentLength),
+        FfiConverterUInt64.lower(expected),$0
+    )
+})
+}
+/**
  * May the app follow this storage link? `api_base` is the API origin in use.
  * Throws `LinkRefused` with the refusal code; the message never contains the URL.
  */
@@ -11474,6 +11693,44 @@ public func directDownloadGrantsPath(fileId: String) -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_beebeeb_uniffi_fn_func_direct_download_grants_path(
         FfiConverterString.lower(fileId),$0
+    )
+})
+}
+/**
+ * The ciphertext bytes a process of `class` may hold at once (256, 64, 64, 16 MiB). The planner
+ * clamps the chunk count to at least one, so this is a ceiling, never a reason to fail.
+ */
+public func directMaxInFlightBytes(`class`: DirectMemoryClassDto) -> UInt64  {
+    return try!  FfiConverterUInt64.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_direct_max_in_flight_bytes(
+        FfiConverterTypeDirectMemoryClassDto_lower(`class`),$0
+    )
+})
+}
+/**
+ * When `wire_bytes` received since `start_ms` at `kbps` KiB/s lets the next storage request
+ * start. `kbps == 0` returns `i64::MIN`: there is no ceiling.
+ */
+public func directPacedUntilMs(startMs: Int64, wireBytes: UInt64, kbps: UInt64) -> Int64  {
+    return try!  FfiConverterInt64.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_direct_paced_until_ms(
+        FfiConverterInt64.lower(startMs),
+        FfiConverterUInt64.lower(wireBytes),
+        FfiConverterUInt64.lower(kbps),$0
+    )
+})
+}
+/**
+ * May this client use the direct transport for `direction`? True only when discovery offers it
+ * AND every pair in `discovery.storage_buckets` is in `pairs`. Hosts compare ASCII
+ * case-insensitively, buckets exactly.
+ */
+public func directPairsAllowed(discovery: DirectDiscoveryDto, direction: DirectDirectionDto, pairs: [DirectStorageBucketDto]) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_direct_pairs_allowed(
+        FfiConverterTypeDirectDiscoveryDto_lower(discovery),
+        FfiConverterTypeDirectDirectionDto_lower(direction),
+        FfiConverterSequenceTypeDirectStorageBucketDto.lower(pairs),$0
     )
 })
 }
@@ -12184,6 +12441,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_direct_background_put_resource_timeout_ms() != 64703) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_get() != 41265) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_url() != 37576) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -12191,6 +12451,15 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_download_grants_path() != 38361) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_max_in_flight_bytes() != 41345) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_paced_until_ms() != 40002) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_pairs_allowed() != 44854) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_pinned_retry_decision() != 23908) {
@@ -12413,6 +12682,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_api_fetch_failed() != 34853) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_chunk_length() != 15665) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_chunk_unauthentic() != 20797) {
