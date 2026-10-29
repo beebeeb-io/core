@@ -21,7 +21,7 @@
 //! | [`resume`] | [`resume_transport()`]: what to do with an unfinished upload (a recorded direct session is given up only on a definite no) |
 //! | [`timeouts`] | the time bounds every client applies: connect, idle, API calls, and the storage totals (`60 s + len / 1 Mbit/s`) kept under the server's late-write fence |
 //! | [`upload`] | the direct upload: [`UploadGrant`] / [`UploadCommitted`] validation, [`UploadChunkState`] (grants, waits, fallback per chunk) |
-//! | [`storage`] | [`check_storage_get()`] / [`check_storage_body()`]: does a storage GET's head declare the grant's length, and does the body it delivered count to exactly that |
+//! | [`storage`] | [`check_storage_get()`] / [`StorageBody`] / [`check_storage_body()`]: does a storage GET's head declare the grant's length, and do the bytes it delivered count to exactly that |
 //! | [`pacing`] | [`paced_until_ms()`]: when the download ceiling lets the next storage request start |
 //! | [`context`] | [`MemoryClass`] / [`max_in_flight_bytes()`] and [`pairs_allowed()`]: the process's byte cap and the storage allowlist |
 //! | this file | [`DiscoveryCache`]: how long discovery's answer is trusted |
@@ -35,7 +35,8 @@
 //!   in development), and strip the URL from its own errors (reqwest
 //!   `.without_url()`); run any error text through [`scrub`] before printing it.
 //! * Check `200` and `Content-Length == grant.length` on every storage GET, count
-//!   the bytes the body actually delivered ([`check_storage_body()`]), and
+//!   the bytes the body actually delivered ([`StorageBody`], or its one-shot form
+//!   [`check_storage_body()`]), and
 //!   decrypt with [`crate::chunk_stream`] (frame and AAD position checks), never
 //!   by trusting the manifest.
 //! * Publish plaintext only after every chunk has authenticated.
@@ -70,7 +71,7 @@ pub use context::{MemoryClass, max_in_flight_bytes, pairs_allowed};
 pub use health::{DirectHealth, Direction, HEALTH_TRUST_MS};
 pub use pacing::paced_until_ms;
 pub use resume::{DiscoveryState, RecordedTransport, ResumeAction, resume_transport};
-pub use storage::{StorageGet, check_storage_body, check_storage_get};
+pub use storage::{StorageBody, StorageGet, check_storage_body, check_storage_get};
 pub use timeouts::{
     API_CALL_TIMEOUT, BACKGROUND_PUT_RESOURCE_TIMEOUT, DISCOVERY_TIMEOUT, STORAGE_CONNECT_TIMEOUT, STORAGE_GET_IDLE,
     storage_get_total, storage_put_total,
