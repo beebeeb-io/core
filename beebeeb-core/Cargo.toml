@@ -10,7 +10,7 @@ beebeeb-types = { path = "../beebeeb-types" }
 aes-gcm = "0.10"
 base64 = "0.22"
 argon2 = { version = "0.5", features = ["zeroize"] }
-rand = "0.8"
+rand = "0.9"
 hkdf = "0.12"
 sha2 = "0.10"
 # SHA-1 ONLY to address the k-anonymity breach corpus (onboarding::breach): the corpus is
