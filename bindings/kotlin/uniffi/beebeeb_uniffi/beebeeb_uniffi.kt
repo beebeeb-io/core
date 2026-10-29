@@ -774,11 +774,21 @@ external fun uniffi_beebeeb_uniffi_checksum_func_derive_x25519_public(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_background_put_resource_timeout_ms(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_body(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_get(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_url(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_discovery_offers_download(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_download_grants_path(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_direct_max_in_flight_bytes(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_direct_paced_until_ms(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_direct_pairs_allowed(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_pinned_retry_decision(
 ): Short
@@ -927,6 +937,8 @@ external fun uniffi_beebeeb_uniffi_checksum_method_directdiscoverycachehandle_lo
 external fun uniffi_beebeeb_uniffi_checksum_method_directdiscoverycachehandle_record(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_api_fetch_failed(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_chunk_length(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_chunk_unauthentic(
 ): Short
@@ -1291,6 +1303,8 @@ external fun uniffi_beebeeb_uniffi_fn_constructor_directdownloadplannerhandle_ne
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_api_fetch_failed(`ptr`: Long,`index`: Int,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_chunk_length(`ptr`: Long,`index`: Int,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_chunk_unauthentic(`ptr`: Long,`index`: Int,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_consumed(`ptr`: Long,`index`: Int,uniffi_out_err: UniffiRustCallStatus, 
@@ -1593,12 +1607,22 @@ external fun uniffi_beebeeb_uniffi_fn_func_derive_x25519_public(`privateKey`: Ru
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_direct_background_put_resource_timeout_ms(uniffi_out_err: UniffiRustCallStatus, 
 ): Long
+external fun uniffi_beebeeb_uniffi_fn_func_direct_check_storage_body(`received`: Long,`expected`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_direct_check_storage_get(`status`: Short,`contentLength`: RustBuffer.ByValue,`expected`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_direct_check_storage_url(`url`: RustBuffer.ByValue,`discovery`: RustBuffer.ByValue,`apiBase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_func_direct_discovery_offers_download(`discovery`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 external fun uniffi_beebeeb_uniffi_fn_func_direct_download_grants_path(`fileId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_direct_max_in_flight_bytes(`class`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_func_direct_paced_until_ms(`startMs`: Long,`wireBytes`: Long,`kbps`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_func_direct_pairs_allowed(`discovery`: RustBuffer.ByValue,`direction`: RustBuffer.ByValue,`pairs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
 external fun uniffi_beebeeb_uniffi_fn_func_direct_pinned_retry_decision(`outcome`: RustBuffer.ByValue,`attempt`: Int,`waitedMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_direct_redact_url(`url`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1890,6 +1914,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_background_put_resource_timeout_ms() != 64703.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_body() != 26492.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_get() != 41265.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_url() != 37576.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1897,6 +1927,15 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_download_grants_path() != 38361.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_max_in_flight_bytes() != 41345.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_paced_until_ms() != 40002.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_pairs_allowed() != 44854.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_pinned_retry_decision() != 23908.toShort()) {
@@ -2119,6 +2158,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_api_fetch_failed() != 34853.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_chunk_length() != 15665.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_chunk_unauthentic() != 20797.toShort()) {
@@ -4957,6 +4999,12 @@ public interface DirectDownloadPlannerHandleInterface {
     fun `apiFetchFailed`(`index`: kotlin.UInt)
     
     /**
+     * The ciphertext length of chunk `index` once the first window was accepted, else `None`.
+     * The grant's `length` is this number; check a storage answer against it.
+     */
+    fun `chunkLength`(`index`: kotlin.UInt): kotlin.ULong?
+    
+    /**
      * Chunk `index` arrived but did not authenticate when decrypted.
      */
     fun `chunkUnauthentic`(`index`: kotlin.UInt)
@@ -5164,6 +5212,23 @@ open class DirectDownloadPlannerHandle: Disposable, AutoCloseable, DirectDownloa
 }
     }
     
+    
+
+    
+    /**
+     * The ciphertext length of chunk `index` once the first window was accepted, else `None`.
+     * The grant's `length` is this number; check a storage answer against it.
+     */override fun `chunkLength`(`index`: kotlin.UInt): kotlin.ULong? {
+            return FfiConverterOptionalULong.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_chunk_length(
+        it,
+        FfiConverterUInt.lower(`index`),_status)
+}
+    }
+    )
+    }
     
 
     
@@ -10088,6 +10153,21 @@ data class DirectConstantsDto (
     var `apiCallTimeoutMs`: kotlin.UInt
     , 
     var `backgroundPutResourceTimeoutMs`: kotlin.UInt
+    , 
+    /**
+     * The largest discovery body a client should read.
+     */
+    var `maxDiscoveryBodyBytes`: kotlin.UInt
+    , 
+    /**
+     * The largest grant-window body a client should read.
+     */
+    var `maxGrantBodyBytes`: kotlin.UInt
+    , 
+    /**
+     * The largest ciphertext chunk the client will ever see (256 MiB plus the AEAD overhead).
+     */
+    var `maxChunkBodyBytes`: kotlin.ULong
     
 ){
     
@@ -10116,6 +10196,9 @@ public object FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer<DirectC
             FfiConverterUInt.read(buf),
             FfiConverterUInt.read(buf),
             FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterULong.read(buf),
         )
     }
 
@@ -10131,7 +10214,10 @@ public object FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer<DirectC
             FfiConverterUInt.allocationSize(value.`storageGetIdleMs`) +
             FfiConverterUInt.allocationSize(value.`discoveryTimeoutMs`) +
             FfiConverterUInt.allocationSize(value.`apiCallTimeoutMs`) +
-            FfiConverterUInt.allocationSize(value.`backgroundPutResourceTimeoutMs`)
+            FfiConverterUInt.allocationSize(value.`backgroundPutResourceTimeoutMs`) +
+            FfiConverterUInt.allocationSize(value.`maxDiscoveryBodyBytes`) +
+            FfiConverterUInt.allocationSize(value.`maxGrantBodyBytes`) +
+            FfiConverterULong.allocationSize(value.`maxChunkBodyBytes`)
     )
 
     override fun write(value: DirectConstantsDto, buf: ByteBuffer) {
@@ -10147,6 +10233,9 @@ public object FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer<DirectC
             FfiConverterUInt.write(value.`discoveryTimeoutMs`, buf)
             FfiConverterUInt.write(value.`apiCallTimeoutMs`, buf)
             FfiConverterUInt.write(value.`backgroundPutResourceTimeoutMs`, buf)
+            FfiConverterUInt.write(value.`maxDiscoveryBodyBytes`, buf)
+            FfiConverterUInt.write(value.`maxGrantBodyBytes`, buf)
+            FfiConverterULong.write(value.`maxChunkBodyBytes`, buf)
     }
 }
 
@@ -12109,6 +12198,45 @@ public object FfiConverterTypeDirectLookupDto : FfiConverterRustBuffer<DirectLoo
 
 
 /**
+ * The process class, which sets the ciphertext-in-flight cap.
+ */
+
+enum class DirectMemoryClassDto {
+    
+    NATIVE,
+    BROWSER,
+    MOBILE_APP,
+    MOBILE_EXTENSION;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDirectMemoryClassDto: FfiConverterRustBuffer<DirectMemoryClassDto> {
+    override fun read(buf: ByteBuffer) = try {
+        DirectMemoryClassDto.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: DirectMemoryClassDto) = 4UL
+
+    override fun write(value: DirectMemoryClassDto, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
  * What an API answer means.
  */
 sealed class DirectOutcomeDto {
@@ -12764,6 +12892,83 @@ public object FfiConverterTypeDirectRetryDecisionDto : FfiConverterRustBuffer<Di
             }
             is DirectRetryDecisionDto.GiveUp -> {
                 buf.putInt(2)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+/**
+ * What a storage GET answer means. `Stored` only for a `200` whose `Content-Length` is exactly
+ * the grant's length; `Failed` carries the status (`0` means there was no HTTP answer).
+ */
+sealed class DirectStorageGetDto {
+    
+    object Stored : DirectStorageGetDto()
+    
+    
+    data class Failed(
+        val `status`: kotlin.UShort) : DirectStorageGetDto()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDirectStorageGetDto : FfiConverterRustBuffer<DirectStorageGetDto>{
+    override fun read(buf: ByteBuffer): DirectStorageGetDto {
+        return when(buf.getInt()) {
+            1 -> DirectStorageGetDto.Stored
+            2 -> DirectStorageGetDto.Failed(
+                FfiConverterUShort.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: DirectStorageGetDto) = when(value) {
+        is DirectStorageGetDto.Stored -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is DirectStorageGetDto.Failed -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterUShort.allocationSize(value.`status`)
+            )
+        }
+    }
+
+    override fun write(value: DirectStorageGetDto, buf: ByteBuffer) {
+        when(value) {
+            is DirectStorageGetDto.Stored -> {
+                buf.putInt(1)
+                Unit
+            }
+            is DirectStorageGetDto.Failed -> {
+                buf.putInt(2)
+                FfiConverterUShort.write(value.`status`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -15558,6 +15763,33 @@ public object FfiConverterSequenceTypeCeremonyStepDto: FfiConverterRustBuffer<Li
     
 
         /**
+         * Check the body a storage GET actually delivered: `Stored` only when the counted bytes are
+         * exactly the grant. `Content-Length` is only the head; a truncated stream ends short.
+         */ fun `directCheckStorageBody`(`received`: kotlin.ULong, `expected`: kotlin.ULong): DirectStorageGetDto {
+            return FfiConverterTypeDirectStorageGetDto.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_direct_check_storage_body(
+    
+        FfiConverterULong.lower(`received`),FfiConverterULong.lower(`expected`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Check a storage GET answer: `Stored` only for `200` with `Some(expected)`.
+         */ fun `directCheckStorageGet`(`status`: kotlin.UShort, `contentLength`: kotlin.ULong?, `expected`: kotlin.ULong): DirectStorageGetDto {
+            return FfiConverterTypeDirectStorageGetDto.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_direct_check_storage_get(
+    
+        FfiConverterUShort.lower(`status`),FfiConverterOptionalULong.lower(`contentLength`),FfiConverterULong.lower(`expected`),_status)
+}
+    )
+    }
+    
+
+        /**
          * May the app follow this storage link? `api_base` is the API origin in use.
          * Throws `LinkRefused` with the refusal code; the message never contains the URL.
          */
@@ -15592,6 +15824,49 @@ public object FfiConverterSequenceTypeCeremonyStepDto: FfiConverterRustBuffer<Li
     UniffiLib.uniffi_beebeeb_uniffi_fn_func_direct_download_grants_path(
     
         FfiConverterString.lower(`fileId`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The ciphertext bytes a process of `class` may hold at once (256, 64, 64, 16 MiB). The planner
+         * clamps the chunk count to at least one, so this is a ceiling, never a reason to fail.
+         */ fun `directMaxInFlightBytes`(`class`: DirectMemoryClassDto): kotlin.ULong {
+            return FfiConverterULong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_direct_max_in_flight_bytes(
+    
+        FfiConverterTypeDirectMemoryClassDto.lower(`class`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * When `wire_bytes` received since `start_ms` at `kbps` KiB/s lets the next storage request
+         * start. `kbps == 0` returns `i64::MIN`: there is no ceiling.
+         */ fun `directPacedUntilMs`(`startMs`: kotlin.Long, `wireBytes`: kotlin.ULong, `kbps`: kotlin.ULong): kotlin.Long {
+            return FfiConverterLong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_direct_paced_until_ms(
+    
+        FfiConverterLong.lower(`startMs`),FfiConverterULong.lower(`wireBytes`),FfiConverterULong.lower(`kbps`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * May this client use the direct transport for `direction`? True only when discovery offers it
+         * AND every pair in `discovery.storage_buckets` is in `pairs`. Hosts compare ASCII
+         * case-insensitively, buckets exactly.
+         */ fun `directPairsAllowed`(`discovery`: DirectDiscoveryDto, `direction`: DirectDirectionDto, `pairs`: List<DirectStorageBucketDto>): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_direct_pairs_allowed(
+    
+        FfiConverterTypeDirectDiscoveryDto.lower(`discovery`),FfiConverterTypeDirectDirectionDto.lower(`direction`),FfiConverterSequenceTypeDirectStorageBucketDto.lower(`pairs`),_status)
 }
     )
     }

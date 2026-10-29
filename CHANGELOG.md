@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `direct_transfer::storage::check_storage_get`: a storage GET delivered the chunk only for a
+  `200` whose `Content-Length` is exactly the grant's length; anything else is `Failed { status }`
+  (status `0`: no HTTP answer). `check_storage_body` applies the same rule to the bytes actually
+  counted (a truncated stream after a good head is still failed). `StorageGet::kind()` is the stable
+  `"stored"`/`"failed"` name bindings and vectors print. WASM `checkStorageGet` / `checkStorageBody`,
+  UniFFI `direct_check_storage_get` / `direct_check_storage_body`.
+- `direct_transfer::pacing::paced_until_ms`: desktop's download-ceiling formula (`kbps` is KiB/s,
+  `kbps == 0` is `i64::MIN`, saturating), so the direct path can hold requests back instead of
+  sleeping after each chunk. WASM `pacedUntilMs` crosses numbers as `f64` and reports the no-ceiling
+  case as `-Infinity` (test with `Number.isFinite`); UniFFI keeps `i64`/`u64`.
+- `direct_transfer::context`: `MemoryClass` with `max_in_flight_bytes` (256 MiB native, 64 MiB
+  browser, 64 MiB mobile app, 16 MiB mobile extension) and `pairs_allowed` (the direction must be
+  offered and every discovery storage pair allowlisted; hosts ASCII case-insensitive, buckets
+  exact, and a discovery that lists no pairs is refused rather than allowed vacuously). WASM
+  `maxInFlightBytes` / `pairsAllowed`, UniFFI `DirectMemoryClassDto` / `direct_max_in_flight_bytes`
+  / `direct_pairs_allowed`.
+- `WasmDownloadPlanner.chunkLength(index)` and `DirectDownloadPlannerHandle::chunk_length(index)`:
+  the ciphertext length of a chunk from the accepted window's geometry (`null`/`None` before it).
+- `directTransferConstants()` / `DirectConstantsDto` gain the response caps
+  `max_discovery_body_bytes` (256 KiB), `max_grant_body_bytes` (1 MiB) and `max_chunk_body_bytes`
+  (256 MiB + 28), so no client re-types them.
+- Contract vectors `test-vectors/direct_transfer.json`: `storage_get` (13 rows: 10 heads and 3 counted bodies), `pacing` (7),
+  `pairs_allowed` (12) and `memory_class` (4), each row naming its `source`; `vectors::run_all`
+  checks them on native, WASM and UniFFI.
+
 ### Fixed
 - Discovery authorization answers (401/403) no longer consume or extend the routing-failure
   budget. Reauthentication leaves cached discovery and real transport failures unchanged;

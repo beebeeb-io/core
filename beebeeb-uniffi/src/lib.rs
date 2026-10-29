@@ -5046,6 +5046,12 @@ pub struct DirectConstantsDto {
     pub discovery_timeout_ms: u32,
     pub api_call_timeout_ms: u32,
     pub background_put_resource_timeout_ms: u32,
+    /// The largest discovery body a client should read.
+    pub max_discovery_body_bytes: u32,
+    /// The largest grant-window body a client should read.
+    pub max_grant_body_bytes: u32,
+    /// The largest ciphertext chunk the client will ever see (256 MiB plus the AEAD overhead).
+    pub max_chunk_body_bytes: u64,
 }
 
 #[uniffi::export]
@@ -5063,6 +5069,11 @@ pub fn direct_transfer_constants() -> DirectConstantsDto {
         discovery_timeout_ms: timeout_ms(dt::timeouts::DISCOVERY_TIMEOUT),
         api_call_timeout_ms: timeout_ms(dt::timeouts::API_CALL_TIMEOUT),
         background_put_resource_timeout_ms: timeout_ms(dt::timeouts::BACKGROUND_PUT_RESOURCE_TIMEOUT),
+        // The three response caps are appended last, so a client that copies fields positionally
+        // (older generated bindings) keeps every earlier field where it was.
+        max_discovery_body_bytes: dt::wire::MAX_DISCOVERY_BYTES as u32,
+        max_grant_body_bytes: dt::wire::MAX_GRANT_BODY_BYTES as u32,
+        max_chunk_body_bytes: beebeeb_core::chunk_stream::MAX_CHUNK_SIZE + dt::wire::CHUNK_OVERHEAD,
     }
 }
 
@@ -5213,6 +5224,87 @@ pub fn direct_check_storage_url(
             code: r.code().to_owned(),
         }
     })
+}
+
+/// What a storage GET answer means. `Stored` only for a `200` whose `Content-Length` is exactly
+/// the grant's length; `Failed` carries the status (`0` means there was no HTTP answer).
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirectStorageGetDto {
+    Stored,
+    Failed { status: u16 },
+}
+
+/// Check a storage GET answer: `Stored` only for `200` with `Some(expected)`.
+#[uniffi::export]
+pub fn direct_check_storage_get(status: u16, content_length: Option<u64>, expected: u64) -> DirectStorageGetDto {
+    storage_get_dto(dt::check_storage_get(status, content_length, expected))
+}
+
+/// Check the body a storage GET actually delivered: `Stored` only when the counted bytes are
+/// exactly the grant. `Content-Length` is only the head; a truncated stream ends short.
+#[uniffi::export]
+pub fn direct_check_storage_body(received: u64, expected: u64) -> DirectStorageGetDto {
+    storage_get_dto(dt::check_storage_body(received, expected))
+}
+
+fn storage_get_dto(got: dt::StorageGet) -> DirectStorageGetDto {
+    match got {
+        dt::StorageGet::Stored => DirectStorageGetDto::Stored,
+        dt::StorageGet::Failed { status } => DirectStorageGetDto::Failed { status },
+    }
+}
+
+/// When `wire_bytes` received since `start_ms` at `kbps` KiB/s lets the next storage request
+/// start. `kbps == 0` returns `i64::MIN`: there is no ceiling.
+#[uniffi::export]
+pub fn direct_paced_until_ms(start_ms: i64, wire_bytes: u64, kbps: u64) -> i64 {
+    dt::paced_until_ms(start_ms, wire_bytes, kbps)
+}
+
+/// The process class, which sets the ciphertext-in-flight cap.
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirectMemoryClassDto {
+    Native,
+    Browser,
+    MobileApp,
+    MobileExtension,
+}
+
+impl From<DirectMemoryClassDto> for dt::MemoryClass {
+    fn from(c: DirectMemoryClassDto) -> Self {
+        match c {
+            DirectMemoryClassDto::Native => dt::MemoryClass::Native,
+            DirectMemoryClassDto::Browser => dt::MemoryClass::Browser,
+            DirectMemoryClassDto::MobileApp => dt::MemoryClass::MobileApp,
+            DirectMemoryClassDto::MobileExtension => dt::MemoryClass::MobileExtension,
+        }
+    }
+}
+
+/// The ciphertext bytes a process of `class` may hold at once (256, 64, 64, 16 MiB). The planner
+/// clamps the chunk count to at least one, so this is a ceiling, never a reason to fail.
+#[uniffi::export]
+pub fn direct_max_in_flight_bytes(class: DirectMemoryClassDto) -> u64 {
+    dt::max_in_flight_bytes(class.into())
+}
+
+/// May this client use the direct transport for `direction`? True only when discovery offers it
+/// AND every pair in `discovery.storage_buckets` is in `pairs`. Hosts compare ASCII
+/// case-insensitively, buckets exactly.
+#[uniffi::export]
+pub fn direct_pairs_allowed(
+    discovery: DirectDiscoveryDto,
+    direction: DirectDirectionDto,
+    pairs: Vec<DirectStorageBucketDto>,
+) -> bool {
+    let pairs: Vec<dt::StorageBucket> = pairs
+        .into_iter()
+        .map(|p| dt::StorageBucket {
+            host: p.host,
+            bucket: p.bucket,
+        })
+        .collect();
+    dt::pairs_allowed(&dt::Discovery::from(discovery), direction.into(), &pairs)
 }
 
 /// A URL for a log line: scheme and host only.
@@ -5603,6 +5695,14 @@ impl DirectDownloadPlannerHandle {
     /// Chunk `index` has been decrypted and written. Strictly in order.
     pub fn consumed(&self, index: u32) -> Result<(), DirectTransferError> {
         lock_tolerant(&self.inner).consumed(index).map_err(plan_error)
+    }
+
+    /// The ciphertext length of chunk `index` once the first window was accepted, else `None`.
+    /// The grant's `length` is this number; check a storage answer against it.
+    pub fn chunk_length(&self, index: u32) -> Option<u64> {
+        lock_tolerant(&self.inner)
+            .geometry()
+            .and_then(|g| g.chunk_length(index))
     }
 
     /// The version's geometry, once the first window was accepted.
@@ -6133,6 +6233,18 @@ mod direct_transfer_binding_tests {
         }
     }
 
+    /// A storage answer as the contract's JSON. The kind is core's, not a copy in the test.
+    fn storage_answer_json(dto: DirectStorageGetDto) -> Value {
+        let got = match dto {
+            DirectStorageGetDto::Stored => dt::StorageGet::Stored,
+            DirectStorageGetDto::Failed { status } => dt::StorageGet::Failed { status },
+        };
+        match got {
+            dt::StorageGet::Stored => json!({"kind": got.kind()}),
+            dt::StorageGet::Failed { status } => json!({"kind": got.kind(), "status": status}),
+        }
+    }
+
     impl HealthSurface for UniffiHealth {
         fn gave_up(&mut self, direction: &str, now_ms: i64) {
             self.0.gave_up(direction_dto(direction), now_ms);
@@ -6365,6 +6477,42 @@ mod direct_transfer_binding_tests {
             .chunk_length(index)
         }
 
+        fn check_storage_get(&self, status: u16, content_length: Option<u64>, expected: u64) -> Value {
+            storage_answer_json(direct_check_storage_get(status, content_length, expected))
+        }
+
+        fn check_storage_body(&self, received: u64, expected: u64) -> Value {
+            storage_answer_json(direct_check_storage_body(received, expected))
+        }
+
+        fn paced_until_ms(&self, start_ms: i64, wire_bytes: u64, kbps: u64) -> i64 {
+            direct_paced_until_ms(start_ms, wire_bytes, kbps)
+        }
+
+        fn max_in_flight_bytes(&self, class: &str) -> u64 {
+            let class = match class {
+                "native" => DirectMemoryClassDto::Native,
+                "browser" => DirectMemoryClassDto::Browser,
+                "mobile_app" => DirectMemoryClassDto::MobileApp,
+                "mobile_extension" => DirectMemoryClassDto::MobileExtension,
+                other => panic!("unknown memory class {other:?}"),
+            };
+            direct_max_in_flight_bytes(class)
+        }
+
+        fn pairs_allowed(&self, discovery: &Value, direction: &str, allowlist: &Value) -> bool {
+            let pairs: Vec<DirectStorageBucketDto> = allowlist
+                .as_array()
+                .expect("allowlist")
+                .iter()
+                .map(|p| DirectStorageBucketDto {
+                    host: p["host"].as_str().expect("host").to_owned(),
+                    bucket: p["bucket"].as_str().expect("bucket").to_owned(),
+                })
+                .collect();
+            direct_pairs_allowed(discovery_dto(discovery), direction_dto(direction), pairs)
+        }
+
         fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> UniffiPlanner {
             UniffiPlanner(DirectDownloadPlannerHandle::new(
                 discovery_dto(discovery),
@@ -6540,6 +6688,32 @@ mod direct_transfer_binding_tests {
         let waits: Vec<i64> = (1..=6).map(wait_after_a_failure).collect();
         assert!(waits.iter().any(|w| *w != waits[0]), "{waits:?}");
         assert_eq!(wait_after_a_failure(3), wait_after_a_failure(3));
+    }
+
+    #[test]
+    fn a_chunk_length_is_the_stride_and_the_last_chunk_is_short() {
+        // The binding must not flatten every index to the stride: the last chunk is whatever the
+        // grant's encrypted size leaves, and an index past the window has no length at all.
+        let vectors = vectors::vectors();
+        let t0 = vectors["t0_ms"].as_i64().unwrap();
+        let p = DirectDownloadPlannerHandle::new(
+            discovery_dto(&vectors["discoveries"]["std"]),
+            "https://api.beebeeb.test".to_owned(),
+            vectors["file_id"].as_str().unwrap().to_owned(),
+            7,
+        );
+        assert_eq!(p.chunk_length(0), None, "no geometry before a window is accepted");
+        p.poll(t0);
+        let window = vectors["planner"][0]["steps"][2]["response"].clone();
+        assert_eq!(
+            p.window_answered(serde_json::to_vec(&window).unwrap(), t0),
+            DirectWindowAnswerDto::Accepted
+        );
+        // One window, three chunks: stride 1028 (1000 + 28), encrypted size 2584.
+        assert_eq!(p.chunk_length(0), Some(1028), "the first chunk is a full stride");
+        assert_eq!(p.chunk_length(1), Some(1028), "a middle chunk is a full stride");
+        assert_eq!(p.chunk_length(2), Some(528), "the last chunk is short");
+        assert_eq!(p.chunk_length(3), None, "past the end there is no chunk");
     }
 
     #[test]
