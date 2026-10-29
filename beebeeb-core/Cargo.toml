@@ -9,11 +9,16 @@ license.workspace = true
 beebeeb-types = { path = "../beebeeb-types" }
 aes-gcm = "0.10"
 base64 = "0.22"
-argon2 = "0.5"
+argon2 = { version = "0.5", features = ["zeroize"] }
 rand = "0.8"
 hkdf = "0.12"
 sha2 = "0.10"
+# SHA-1 ONLY to address the k-anonymity breach corpus (onboarding::breach): the corpus is
+# keyed by SHA-1 prefix. Never used for integrity or authentication.
+sha1 = "0.10"
 zeroize = { version = "1", features = ["derive"] }
+# Constant-time key comparison (task 2255, L9 legacy folder-key proof).
+subtle = "2.6"
 bip39 = { version = "2", features = ["rand"] }
 thiserror = { workspace = true }
 opaque-ke = { version = "4.0.1", features = ["ristretto255", "argon2"] }
@@ -45,6 +50,17 @@ rayon = "1"
 [features]
 default = ["webp-encode"]
 webp-encode = ["webp"]
+# Test-only seams, never in a shipped client build:
+# - `ChunkEncryptor::with_format`: the binding crates' TESTS write v2 frames
+#   while `WRITE_FORMAT` is still v1 (task 1908 read-only rollout);
+# - `ChunkEncryptor::with_vector_nonces`,
+#   `encrypt::encrypt_name_with_chunk_format_and_nonce` (task 1943) and
+#   `encrypt::encrypt_name_for_with_nonce` (task 1958): fixed nonces for the
+#   published known-answer vectors.
+# Enable it only from `[dev-dependencies]`.
+test-support = []
 
 [dev-dependencies]
 hex = "0.4"
+# Differential test only: the authority check must agree with the WHATWG parser reqwest connects with.
+url = "2"

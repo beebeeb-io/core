@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
-use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor};
+use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor, ChunkFormat, ExpectedChunkFormat, SessionResume};
 use beebeeb_core::constellation;
 use beebeeb_core::encrypt;
 use beebeeb_core::kdf;
@@ -11,6 +11,438 @@ use beebeeb_core::recovery;
 use beebeeb_types::{CipherSuite, EncryptedBlob};
 
 uniffi::setup_scaffolding!();
+
+#[cfg(test)]
+mod folder_link_2237c {
+    use super::*;
+
+    #[test]
+    fn invite_2255_proof_and_owner_copy_through_handles() {
+        let v = vector("invite_owner_copy_v1");
+        let master = MasterKeyHandle::from_keychain_bytes(bytes(&v, "master_key_hex")).unwrap();
+        let wire = bytes(&v, "wrapped_hex");
+        let folder_id = v["record_id"].as_str().unwrap().to_string();
+        let key = master
+            .unwrap_invite_owner_copy(folder_id.clone(), wire[..12].to_vec(), wire[12..].to_vec())
+            .unwrap();
+        assert_eq!(key.key_id().unwrap(), id(bytes(&v, "plaintext_hex")));
+        let copy = master.wrap_invite_owner_copy(folder_id.clone(), &key).unwrap();
+        assert_eq!(
+            master
+                .unwrap_invite_owner_copy(folder_id.clone(), copy.nonce, copy.ciphertext)
+                .unwrap()
+                .key_id()
+                .unwrap(),
+            key.key_id().unwrap()
+        );
+        assert!(
+            master
+                .unwrap_invite_owner_copy("other".into(), wire[..12].to_vec(), wire[12..].to_vec())
+                .is_err()
+        );
+        // L9 legacy opener: one core call over the folder's rows; the unproven
+        // candidate never leaves core.
+        let folder = FileKeyHandle::from_key_bytes(vec![0xF8; 32]).unwrap();
+        let name_key = master.derive_file_key(folder_id.as_bytes().to_vec()).unwrap();
+        let wire = |d: EncryptedData| [d.nonce, d.ciphertext].concat();
+        let legacy = wire(name_key.wrap_key(&folder).unwrap());
+        let child = master.derive_file_key(b"child".to_vec()).unwrap();
+        let row = |file_id: &str, wrap: Vec<u8>| LegacyFolderKeyRow {
+            file_id: file_id.into(),
+            wrap,
+        };
+        let proof = wire(folder.wrap_key(&child).unwrap());
+        let opened = master
+            .open_legacy_invite_owner_copy(folder_id.clone(), legacy.clone(), vec![row("child", proof.clone())])
+            .unwrap()
+            .unwrap();
+        assert_eq!(opened.key_id().unwrap(), folder.key_id().unwrap());
+        assert!(
+            master
+                .open_legacy_invite_owner_copy(folder_id.clone(), legacy.clone(), vec![row("other", proof)])
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            master
+                .open_legacy_invite_owner_copy(folder_id.clone(), legacy, vec![])
+                .unwrap()
+                .is_none()
+        );
+        // The folder's 32-byte name JSON is never a key, whatever rows come with it.
+        let name = FileKeyHandle::from_key_bytes(br#"{"name":"Docs","mime_type":null}"#.to_vec()).unwrap();
+        let name_blob = wire(name_key.wrap_key(&name).unwrap());
+        let known = wire(name.wrap_key(&child).unwrap());
+        assert!(
+            master
+                .open_legacy_invite_owner_copy(folder_id, name_blob, vec![row("child", known)])
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn l7_vectors_and_context_failures_through_handles() {
+        for family in ["folder_child_file_v1", "folder_child_folder_v1"] {
+            let v = vector(family);
+            let folder = FileKeyHandle::from_key_bytes(bytes(&v, "folder_key_hex")).unwrap();
+            let wire = bytes(&v, "wrapped_hex");
+            let root = v["shared_folder_id"].as_str().unwrap().to_string();
+            let item = v["item_id"].as_str().unwrap().to_string();
+            let kind = v["kind"].as_u64().unwrap() as u8;
+            let child = folder
+                .unwrap_folder_child(
+                    root.clone(),
+                    item.clone(),
+                    kind,
+                    wire[..12].to_vec(),
+                    wire[12..].to_vec(),
+                )
+                .unwrap();
+            assert_eq!(child.key_id().unwrap(), id(bytes(&v, "child_key_hex")));
+            let b = folder
+                .wrap_folder_child(root.clone(), item.clone(), kind, &child)
+                .unwrap();
+            assert_eq!(
+                folder
+                    .unwrap_folder_child(root.clone(), item.clone(), kind, b.nonce, b.ciphertext)
+                    .unwrap()
+                    .key_id()
+                    .unwrap(),
+                child.key_id().unwrap()
+            );
+            for (r, i, k) in [
+                ("00000000-0000-4000-8000-000000000099".into(), item.clone(), kind),
+                (root.clone(), "00000000-0000-4000-8000-000000000099".into(), kind),
+                (root.clone(), item.clone(), 3 - kind),
+                (root.clone(), item.clone(), 0),
+                ("bad".into(), item.clone(), kind),
+            ] {
+                assert!(
+                    folder
+                        .unwrap_folder_child(r, i, k, wire[..12].to_vec(), wire[12..].to_vec())
+                        .is_err()
+                );
+            }
+        }
+    }
+    #[test]
+    fn l6_published_vectors_open_through_handles() {
+        for family in ["folder_custody_v1", "link_owner_key_v1", "link_owner_token_v1"] {
+            let v = vector(family);
+            let master = MasterKeyHandle::from_keychain_bytes(bytes(&v, "master_key_hex")).unwrap();
+            let wire = bytes(&v, "wrapped_hex");
+            let record = v["record_id"].as_str().unwrap().to_string();
+            match family {
+                "folder_custody_v1" => {
+                    let key = master
+                        .unwrap_folder_custody(record, wire[..12].to_vec(), wire[12..].to_vec())
+                        .unwrap();
+                    assert_eq!(key.key_id().unwrap(), id(bytes(&v, "plaintext_hex")));
+                }
+                "link_owner_key_v1" => assert_eq!(
+                    master
+                        .unwrap_link_owner_key(record, wire[..12].to_vec(), wire[12..].to_vec())
+                        .unwrap(),
+                    bytes(&v, "plaintext_hex")
+                ),
+                _ => assert_eq!(
+                    master
+                        .unwrap_link_owner_token(record, wire[..12].to_vec(), wire[12..].to_vec())
+                        .unwrap(),
+                    bytes(&v, "plaintext_hex")
+                ),
+            }
+        }
+        let v = vector("folder_link_passphrase_nfd");
+        let handle = FileKeyHandle::from_folder_link_passphrase(
+            bytes(&v, "k_c_hex"),
+            v["passphrase"].as_str().unwrap().into(),
+            v["token"].as_str().unwrap().into(),
+        )
+        .unwrap();
+        assert_eq!(handle.key_id().unwrap(), id(bytes(&v, "link_key_hex")));
+    }
+
+    #[test]
+    fn l6_master_handle_wraps_without_exporting_master_bytes() {
+        let master = MasterKeyHandle::from_keychain_bytes(vec![0x40; 32]).unwrap();
+        let inner = FileKeyHandle::from_key_bytes(vec![0x60; 32]).unwrap();
+        let wrapped = master.wrap_key(&inner).unwrap();
+        let wrapper = FileKeyHandle::from_key_bytes(vec![0x40; 32]).unwrap();
+        assert_eq!(
+            wrapper
+                .unwrap_key(wrapped.nonce, wrapped.ciphertext)
+                .unwrap()
+                .key_id()
+                .unwrap(),
+            inner.key_id().unwrap()
+        );
+        let token = master.wrap_bytes(b"token".to_vec()).unwrap();
+        assert_eq!(wrapper.decrypt_chunk(token.nonce, token.ciphertext).unwrap(), b"token");
+    }
+
+    #[test]
+    fn l6_master_handle_purpose_wraps_round_trip() {
+        let master = MasterKeyHandle::from_keychain_bytes(vec![0x40; 32]).unwrap();
+        let inner = FileKeyHandle::from_key_bytes(vec![0x60; 32]).unwrap();
+        let custody = master.wrap_folder_custody("folder".into(), &inner).unwrap();
+        assert_eq!(
+            master
+                .unwrap_folder_custody("folder".into(), custody.nonce.clone(), custody.ciphertext.clone())
+                .unwrap()
+                .key_id()
+                .unwrap(),
+            inner.key_id().unwrap()
+        );
+        assert!(
+            master
+                .unwrap_folder_custody("other".into(), custody.nonce, custody.ciphertext)
+                .is_err()
+        );
+        let owner = master.wrap_link_owner_key("share".into(), &inner).unwrap();
+        assert_eq!(
+            master
+                .unwrap_link_owner_key("share".into(), owner.nonce.clone(), owner.ciphertext.clone())
+                .unwrap(),
+            vec![0x60; 32]
+        );
+        assert!(
+            master
+                .unwrap_link_owner_token("share".into(), owner.nonce, owner.ciphertext)
+                .is_err()
+        );
+        let token = master.wrap_link_owner_token("share".into(), b"token".to_vec()).unwrap();
+        assert_eq!(
+            master
+                .unwrap_link_owner_token("share".into(), token.nonce, token.ciphertext)
+                .unwrap(),
+            b"token"
+        );
+    }
+
+    #[test]
+    fn l8_owner_file_vector_and_round_trip_through_handles() {
+        let v = vector("owner_wrapped_file_key");
+        let master = MasterKeyHandle::from_keychain_bytes(bytes(&v, "master_key_hex")).unwrap();
+        let item = v["file_id"].as_str().unwrap().to_string();
+        let frame = bytes(&v, "expected_frame_hex");
+        let inner = master
+            .unwrap_owner_file_key(item.clone(), frame[..12].to_vec(), frame[12..].to_vec())
+            .unwrap();
+        assert_eq!(inner.key_id().unwrap(), id(bytes(&v, "child_key_hex")));
+        let blob = master.wrap_owner_file_key(item.clone(), &inner).unwrap();
+        assert_eq!(blob.nonce.len() + blob.ciphertext.len(), 60);
+        assert_eq!(
+            master
+                .unwrap_owner_file_key(item, blob.nonce, blob.ciphertext)
+                .unwrap()
+                .key_id()
+                .unwrap(),
+            inner.key_id().unwrap()
+        );
+        assert!(
+            master
+                .unwrap_owner_file_key("other".into(), frame[..12].to_vec(), frame[12..].to_vec())
+                .is_err()
+        );
+        let custody = master
+            .wrap_folder_custody(v["file_id"].as_str().unwrap().into(), &inner)
+            .unwrap();
+        assert!(
+            master
+                .unwrap_owner_file_key(v["file_id"].as_str().unwrap().into(), custody.nonce, custody.ciphertext)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn l8_owner_handle_rejects_content_names_legacy_and_bad_lengths() {
+        let master = MasterKeyHandle::from_keychain_bytes(vec![0x40; 32]).unwrap();
+        let item = "11111111-1111-4111-8111-111111111111";
+        let legacy_key = master.derive_file_key(item.as_bytes().to_vec()).unwrap();
+        let content = legacy_key.encrypt_chunk(vec![0x55; 32]).unwrap();
+        assert_eq!(content.ciphertext.len(), 48);
+        assert!(
+            master
+                .unwrap_owner_file_key(item.into(), content.nonce, content.ciphertext)
+                .is_err()
+        );
+        let name = master.encrypt_name(item.into(), "test".into(), None).unwrap();
+        let blob: EncryptedBlob = serde_json::from_str(&name).unwrap();
+        assert_eq!(blob.ciphertext.len(), 48);
+        assert!(
+            master
+                .unwrap_owner_file_key(item.into(), blob.nonce, blob.ciphertext)
+                .is_err()
+        );
+        let inner = FileKeyHandle::from_key_bytes(vec![0x60; 32]).unwrap();
+        let legacy = legacy_key.wrap_key(&inner).unwrap();
+        assert!(
+            master
+                .unwrap_owner_file_key(item.into(), legacy.nonce, legacy.ciphertext)
+                .is_err()
+        );
+        for (nonce, ciphertext) in [
+            (vec![0; 11], vec![0; 48]),
+            (vec![0; 12], vec![0; 47]),
+            (vec![0; 12], vec![0; 49]),
+        ] {
+            assert!(master.unwrap_owner_file_key(item.into(), nonce, ciphertext).is_err());
+        }
+        assert!(master.wrap_owner_file_key(String::new(), &inner).is_err());
+        assert!(
+            master
+                .unwrap_owner_file_key(String::new(), vec![0; 12], vec![0; 48])
+                .is_err()
+        );
+    }
+
+    fn vector(name: &str) -> serde_json::Value {
+        let doc: serde_json::Value = serde_json::from_str(include_str!("../../test-vectors/vectors.json")).unwrap();
+        doc["vectors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["name"] == name)
+            .unwrap()
+            .clone()
+    }
+
+    fn bytes(v: &serde_json::Value, field: &str) -> Vec<u8> {
+        v[field]
+            .as_str()
+            .unwrap()
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|b| u8::from_str_radix(std::str::from_utf8(b).unwrap(), 16).unwrap())
+            .collect()
+    }
+
+    fn id(bytes: Vec<u8>) -> Vec<u8> {
+        beebeeb_core::folder_key::folder_key_id(&bytes.try_into().unwrap()).to_vec()
+    }
+
+    #[test]
+    fn unwrap_key_round_trips_and_refuses_any_other_length() {
+        let a = FileKeyHandle::from_key_bytes(vec![0xa1; 32]).unwrap();
+        let b = FileKeyHandle::from_key_bytes(vec![0xb2; 32]).unwrap();
+        let wrap = b.wrap_key(&a).unwrap();
+        let opened = b.unwrap_key(wrap.nonce.clone(), wrap.ciphertext.clone()).unwrap();
+        assert_eq!(opened.key_id().unwrap(), a.key_id().unwrap());
+        // Same-handle wrapping must not take the same non-reentrant lock twice.
+        let self_wrap = a.wrap_key(&a).unwrap();
+        assert_eq!(
+            a.unwrap_key(self_wrap.nonce, self_wrap.ciphertext)
+                .unwrap()
+                .key_id()
+                .unwrap(),
+            a.key_id().unwrap()
+        );
+        for len in [0, 31, 33, 64] {
+            let wrap = b.encrypt_chunk(vec![0x42; len]).unwrap();
+            assert!(
+                matches!(
+                    b.unwrap_key(wrap.nonce, wrap.ciphertext),
+                    Err(CryptoError::InvalidInput { .. })
+                ),
+                "accepted plaintext length {len}"
+            );
+        }
+        let mut corrupt = wrap.ciphertext;
+        corrupt[0] ^= 1;
+        assert!(b.unwrap_key(wrap.nonce, corrupt).is_err());
+        for len in [0, 11, 13] {
+            assert!(b.unwrap_key(vec![0; len], vec![0; 48]).is_err());
+        }
+        *b.inner.lock().unwrap() = None;
+        assert!(b.wrap_key(&a).is_err());
+        assert!(b.key_id().is_err());
+    }
+
+    #[test]
+    fn wrap_key_is_60_bytes_on_the_wire() {
+        let a = FileKeyHandle::from_key_bytes(vec![0xa1; 32]).unwrap();
+        let b = FileKeyHandle::from_key_bytes(vec![0xb2; 32]).unwrap();
+        let wrap = b.wrap_key(&a).unwrap();
+        assert_eq!(wrap.nonce.len(), 12);
+        assert_eq!(wrap.ciphertext.len(), 48);
+        assert_eq!(wrap.nonce.len() + wrap.ciphertext.len(), 60);
+    }
+
+    #[test]
+    fn unwrap_key_opens_the_web_made_wrap() {
+        let v = vector("key_wrap_v1");
+        let wrapper = FileKeyHandle::from_key_bytes(bytes(&v, "wrapper_key_hex")).unwrap();
+        let wrap = bytes(&v, "wrapped_hex");
+        let inner = wrapper.unwrap_key(wrap[..12].to_vec(), wrap[12..].to_vec()).unwrap();
+        assert_eq!(inner.key_id().unwrap(), id(bytes(&v, "inner_key_hex")));
+    }
+
+    #[test]
+    fn from_folder_link_matches_the_combine_vector() {
+        let v = vector("combine_folder_link_key");
+        let plain = FileKeyHandle::from_folder_link(bytes(&v, "k_c_hex"), None).unwrap();
+        assert_eq!(
+            plain.key_id().unwrap(),
+            id(bytes(&v, "expected_without_passphrase_hex"))
+        );
+        let protected =
+            FileKeyHandle::from_folder_link(bytes(&v, "k_c_hex"), Some(bytes(&v, "passphrase_stretch_hex"))).unwrap();
+        assert_eq!(
+            protected.key_id().unwrap(),
+            id(bytes(&v, "expected_with_passphrase_hex"))
+        );
+        for len in [0, 31, 33] {
+            assert!(matches!(
+                FileKeyHandle::from_folder_link(vec![0; len], None),
+                Err(CryptoError::InvalidInput { .. })
+            ));
+            assert!(matches!(
+                FileKeyHandle::from_folder_link(vec![0; 32], Some(vec![0; len])),
+                Err(CryptoError::InvalidInput { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn from_folder_link_passphrase_matches_the_web_derivation() {
+        let v = vector("folder_link_passphrase");
+        let h = FileKeyHandle::from_folder_link_passphrase(
+            bytes(&v, "k_c_hex"),
+            v["passphrase"].as_str().unwrap().into(),
+            v["token"].as_str().unwrap().into(),
+        )
+        .unwrap();
+        assert_eq!(h.key_id().unwrap(), id(bytes(&v, "link_key_hex")));
+    }
+
+    #[test]
+    fn passphrase_token_and_kc_are_all_required() {
+        let v = vector("folder_link_passphrase");
+        let kc = bytes(&v, "k_c_hex");
+        let pass = v["passphrase"].as_str().unwrap();
+        let token = v["token"].as_str().unwrap();
+        let expected = id(bytes(&v, "link_key_hex"));
+        let wrong_pass =
+            FileKeyHandle::from_folder_link_passphrase(kc.clone(), format!("{pass}!"), token.into()).unwrap();
+        let wrong_token =
+            FileKeyHandle::from_folder_link_passphrase(kc.clone(), pass.into(), format!("{token}!")).unwrap();
+        let mut other_kc = kc;
+        other_kc[0] ^= 1;
+        let wrong_kc = FileKeyHandle::from_folder_link_passphrase(other_kc, pass.into(), token.into()).unwrap();
+        for h in [wrong_pass, wrong_token, wrong_kc] {
+            assert_ne!(h.key_id().unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn generate_makes_distinct_keys() {
+        let a = FileKeyHandle::generate().unwrap();
+        let b = FileKeyHandle::generate().unwrap();
+        assert_ne!(a.key_id().unwrap(), b.key_id().unwrap());
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Error type — UniFFI-compatible enum
@@ -61,6 +493,14 @@ impl From<beebeeb_core::CoreError> for CryptoError {
 // ---------------------------------------------------------------------------
 // Return types — UniFFI records
 // ---------------------------------------------------------------------------
+
+/// One row of a shared folder's legacy key table, for the L9 proof (task 2255):
+/// `file_id` as the server lists it, `wrap` = nonce(12) || ciphertext || tag.
+#[derive(uniffi::Record)]
+pub struct LegacyFolderKeyRow {
+    pub file_id: String,
+    pub wrap: Vec<u8>,
+}
 
 /// Result of encrypting a chunk or metadata. Contains the cipher suite
 /// identifier, a random nonce, and the ciphertext (including the GCM tag).
@@ -303,15 +743,27 @@ pub fn decrypt_chunk(key: Vec<u8>, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Resul
 /// cache layer does not treat the partial file as complete.
 ///
 /// Returns the total number of plaintext bytes written.
+///
+/// **Task 1908:** `file_id` (the id the file was uploaded under) and
+/// `expected_chunk_format` (from the file's encrypted metadata,
+/// `decrypt_file_metadata`: 0 = unrecorded, 2 = v2) are required: the chunks
+/// are opened as one file's ordered stream — v2 frames are bound to (file id,
+/// upload, index, last), v1 files still open when the metadata records no
+/// format. Reordered, spliced, duplicated, dropped or truncated v2 chunks fail.
+/// The output is atomic (core `.tmp` + rename).
 #[uniffi::export]
 pub fn decrypt_chunks_to_file(
     key: Vec<u8>,
+    file_id: String,
+    expected_chunk_format: u8,
     chunks: Vec<EncryptedChunkData>,
     output_path: String,
 ) -> Result<u64, CryptoError> {
+    let key = Zeroizing::new(key);
     let fk = file_key_from_slice(&key)?;
+    let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
     let chunk_pairs: Vec<(Vec<u8>, Vec<u8>)> = chunks.into_iter().map(|c| (c.nonce, c.ciphertext)).collect();
-    encrypt::decrypt_chunks_to_file(&fk, chunk_pairs, &output_path).map_err(CryptoError::from)
+    encrypt::decrypt_chunks_to_file(&fk, &file_id, expected, chunk_pairs, &output_path).map_err(CryptoError::from)
 }
 
 /// Decrypt a contiguous encrypted body into a file.
@@ -336,15 +788,27 @@ pub fn decrypt_chunks_to_file(
 /// `output_path` is never created/overwritten. Callers no longer need to clean
 /// up a partial file on `Err`, and an existence-based cache cannot serve a
 /// truncated decrypt.
+///
+/// **Task 1908:** `file_id` (the id the file was uploaded under) is required —
+/// it is bound into every v2 frame together with the upload's version id, the
+/// chunk index and the last-chunk flag — and so is `expected_chunk_format`
+/// from the file's encrypted metadata (0 = unrecorded, 2 = v2). v1 files still
+/// open when the metadata records no format. A reordered/spliced/truncated v2
+/// body fails.
 #[uniffi::export]
 pub fn decrypt_contiguous_to_file(
     file_key: Vec<u8>,
+    file_id: String,
+    expected_chunk_format: u8,
     body: Vec<u8>,
     chunk_size: u64,
     output_path: String,
 ) -> Result<u64, CryptoError> {
+    let file_key = Zeroizing::new(file_key);
     let fk = file_key_from_slice(&file_key)?;
-    encrypt::decrypt_contiguous_to_file(&fk, &body, chunk_size, &output_path).map_err(CryptoError::from)
+    let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
+    encrypt::decrypt_contiguous_to_file(&fk, &file_id, expected, &body, chunk_size, &output_path)
+        .map_err(CryptoError::from)
 }
 
 // ---------------------------------------------------------------------------
@@ -580,6 +1044,21 @@ pub fn compute_recovery_check(master_key: Vec<u8>) -> Result<Vec<u8>, CryptoErro
     Ok(beebeeb_core::opaque::compute_recovery_check(&mk).to_vec())
 }
 
+/// A shared folder's key id (task 2133): a one-way id of the folder's 32-byte
+/// key, for a server to compare folder keys without learning them (HKDF-SHA256,
+/// info `beebeeb/folder-key-id/v1`). Returns 32 bytes; not secret, and never a
+/// key. Wipes the copy of the key this function owns.
+#[uniffi::export]
+pub fn folder_key_id(folder_key: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
+    let mut folder_key = folder_key;
+    let key = <[u8; 32]>::try_from(folder_key.as_slice()).map(Zeroizing::new);
+    folder_key.zeroize();
+    let key = key.map_err(|_| CryptoError::InvalidInput {
+        detail: "folder_key must be exactly 32 bytes".into(),
+    })?;
+    Ok(beebeeb_core::folder_key::folder_key_id(&key).to_vec())
+}
+
 // ---------------------------------------------------------------------------
 // File requests (sealed-box / ECIES per request)
 // ---------------------------------------------------------------------------
@@ -711,6 +1190,162 @@ impl MasterKeyHandle {
         })
     }
 
+    /// Legacy direct-master wrap for existing protocols. Folder custody and
+    /// link recovery MUST use the purpose-bound methods below instead.
+    pub fn wrap_key(&self, inner: &FileKeyHandle) -> Result<EncryptedData, CryptoError> {
+        let key = inner.with_key(|key| Zeroizing::new(*key.as_bytes()))?;
+        self.wrap_bytes(key.to_vec())
+    }
+
+    /// Wrap bytes without exporting the master key across the FFI boundary.
+    pub fn wrap_bytes(&self, bytes: Vec<u8>) -> Result<EncryptedData, CryptoError> {
+        let bytes = Zeroizing::new(bytes);
+        self.with_key(|mk| {
+            let raw = Zeroizing::new(mk.to_bytes());
+            encrypt::encrypt_chunk(&kdf::FileKey::from_bytes(*raw), &bytes)
+        })?
+        .map(|blob| encrypted_blob_to_data(&blob))
+        .map_err(Into::into)
+    }
+
+    /// L8 owner adoption. Key material stays in native handles.
+    pub fn wrap_owner_file_key(&self, item_id: String, inner: &FileKeyHandle) -> Result<EncryptedData, CryptoError> {
+        let key = inner.with_key(|key| kdf::FileKey::from_bytes(*key.as_bytes()))?;
+        self.with_key(|mk| kdf::wrap_owner_file_key(mk, item_id.as_bytes(), &key))?
+            .map(|blob| encrypted_blob_to_data(&blob))
+            .map_err(Into::into)
+    }
+
+    /// Open only L8 and return an opaque handle, never raw file-key bytes.
+    pub fn unwrap_owner_file_key(
+        &self,
+        item_id: String,
+        nonce: Vec<u8>,
+        ciphertext: Vec<u8>,
+    ) -> Result<Arc<FileKeyHandle>, CryptoError> {
+        let blob = EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce,
+            ciphertext,
+        };
+        let key = self.with_key(|mk| kdf::unwrap_owner_file_key(mk, item_id.as_bytes(), &blob))??;
+        Ok(FileKeyHandle::new(key))
+    }
+
+    /// L9 (task 2255): open a LEGACY invite owner copy; `Some` only when core
+    /// proves it over the folder's `rows` (at most 64 distinct ids, one call).
+    /// The unproven candidate never leaves core. Attack B is a named residual.
+    pub fn open_legacy_invite_owner_copy(
+        &self,
+        folder_id: String,
+        legacy_copy: Vec<u8>,
+        rows: Vec<LegacyFolderKeyRow>,
+    ) -> Result<Option<Arc<FileKeyHandle>>, CryptoError> {
+        let key = self.with_key(|master| {
+            kdf::open_legacy_invite_owner_copy(
+                master,
+                folder_id.as_bytes(),
+                &legacy_copy,
+                rows.iter().map(|row| (row.file_id.as_bytes(), row.wrap.as_slice())),
+            )
+        })?;
+        Ok(key.map(FileKeyHandle::new))
+    }
+
+    pub fn wrap_invite_owner_copy(
+        &self,
+        folder_id: String,
+        inner: &FileKeyHandle,
+    ) -> Result<EncryptedData, CryptoError> {
+        let key = inner.with_key(|key| kdf::FileKey::from_bytes(*key.as_bytes()))?;
+        self.with_key(|master| kdf::wrap_invite_owner_copy(master, folder_id.as_bytes(), &key))?
+            .map(|blob| encrypted_blob_to_data(&blob))
+            .map_err(Into::into)
+    }
+
+    pub fn unwrap_invite_owner_copy(
+        &self,
+        folder_id: String,
+        nonce: Vec<u8>,
+        ciphertext: Vec<u8>,
+    ) -> Result<Arc<FileKeyHandle>, CryptoError> {
+        let blob = EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce,
+            ciphertext,
+        };
+        let key = self.with_key(|master| kdf::unwrap_invite_owner_copy(master, folder_id.as_bytes(), &blob))??;
+        Ok(FileKeyHandle::new(key))
+    }
+
+    pub fn wrap_folder_custody(&self, folder_id: String, inner: &FileKeyHandle) -> Result<EncryptedData, CryptoError> {
+        let key = inner.with_key(|key| kdf::FileKey::from_bytes(*key.as_bytes()))?;
+        self.with_key(|mk| kdf::wrap_folder_custody(mk, folder_id.as_bytes(), &key))?
+            .map(|blob| encrypted_blob_to_data(&blob))
+            .map_err(Into::into)
+    }
+
+    pub fn unwrap_folder_custody(
+        &self,
+        folder_id: String,
+        nonce: Vec<u8>,
+        ciphertext: Vec<u8>,
+    ) -> Result<Arc<FileKeyHandle>, CryptoError> {
+        let blob = EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce,
+            ciphertext,
+        };
+        let key = self.with_key(|mk| kdf::unwrap_folder_custody(mk, folder_id.as_bytes(), &blob))??;
+        Ok(FileKeyHandle::new(key))
+    }
+
+    pub fn wrap_link_owner_key(&self, share_id: String, inner: &FileKeyHandle) -> Result<EncryptedData, CryptoError> {
+        let key = inner.with_key(|key| kdf::FileKey::from_bytes(*key.as_bytes()))?;
+        self.with_key(|mk| kdf::wrap_link_owner_key(mk, share_id.as_bytes(), &key))?
+            .map(|blob| encrypted_blob_to_data(&blob))
+            .map_err(Into::into)
+    }
+
+    /// The link fragment is the deliberate export exception: JS puts K_c in
+    /// the URL. The account master key never crosses this boundary.
+    pub fn unwrap_link_owner_key(
+        &self,
+        share_id: String,
+        nonce: Vec<u8>,
+        ciphertext: Vec<u8>,
+    ) -> Result<Vec<u8>, CryptoError> {
+        let blob = EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce,
+            ciphertext,
+        };
+        let key = self.with_key(|mk| kdf::unwrap_link_owner_key(mk, share_id.as_bytes(), &blob))??;
+        Ok(key.as_bytes().to_vec())
+    }
+
+    pub fn wrap_link_owner_token(&self, share_id: String, token: Vec<u8>) -> Result<EncryptedData, CryptoError> {
+        let token = Zeroizing::new(token);
+        self.with_key(|mk| kdf::wrap_link_owner_token(mk, share_id.as_bytes(), &token))?
+            .map(|blob| encrypted_blob_to_data(&blob))
+            .map_err(Into::into)
+    }
+
+    pub fn unwrap_link_owner_token(
+        &self,
+        share_id: String,
+        nonce: Vec<u8>,
+        ciphertext: Vec<u8>,
+    ) -> Result<Vec<u8>, CryptoError> {
+        let blob = EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce,
+            ciphertext,
+        };
+        let token = self.with_key(|mk| kdf::unwrap_link_owner_token(mk, share_id.as_bytes(), &blob))??;
+        Ok(token.to_vec())
+    }
+
     /// Derive the X25519 secret scalar from the master key. Returns 32 bytes.
     pub fn derive_x25519_private(&self) -> Result<Vec<u8>, CryptoError> {
         self.with_key(|mk| beebeeb_core::opaque::derive_x25519_private(mk).to_vec())
@@ -736,6 +1371,57 @@ impl MasterKeyHandle {
     ) -> Result<String, CryptoError> {
         self.with_key(|mk| encrypt::encrypt_name(mk, &file_id, &filename, mime_type.as_deref()))?
             .map_err(CryptoError::from)
+    }
+
+    /// [`encrypt_name`](Self::encrypt_name) that also records the file's chunk
+    /// format in the encrypted metadata (task 1908): `chunk_format` 2 = every
+    /// upload of this file id is v2, 0 = record nothing (identical to
+    /// `encrypt_name`). New file: the encryptor's format (2 only if it wrote
+    /// v2). Rename / replace: the value `decrypt_file_metadata` returned for the
+    /// file — never upgrade a file with v1 history, never drop a recorded 2.
+    pub fn encrypt_name_with_chunk_format(
+        &self,
+        file_id: String,
+        filename: String,
+        mime_type: Option<String>,
+        chunk_format: u8,
+    ) -> Result<String, CryptoError> {
+        let chunk_format = ExpectedChunkFormat::from_u8(chunk_format)?;
+        self.with_key(|mk| {
+            encrypt::encrypt_name_with_chunk_format(mk, &file_id, &filename, mime_type.as_deref(), chunk_format)
+        })?
+        .map_err(CryptoError::from)
+    }
+
+    /// Decrypt a `name_encrypted` envelope into name, MIME type and the
+    /// `chunk_format` every content reader of this file must be given
+    /// (0 = unrecorded, 2 = v2) — task 1908.
+    pub fn decrypt_name_metadata(
+        &self,
+        file_id: String,
+        name_encrypted: String,
+    ) -> Result<NameMetadataDto, CryptoError> {
+        let meta = self
+            .with_key(|mk| encrypt::decrypt_name_metadata(mk, &file_id, &name_encrypted))?
+            .map_err(CryptoError::from)?;
+        Ok(NameMetadataDto::from(meta))
+    }
+
+    /// The metadata reader for FILES (task 1908 round 3): exactly
+    /// `decrypt_name_metadata`, except that a plaintext (non-JSON)
+    /// `name_encrypted` is refused. A plaintext name carries no chunk-format
+    /// pin, so accepting it for a file lets a server re-enable frame-0
+    /// detection. Take the content reader's `chunk_format` from THIS for every
+    /// file; `decrypt_name_metadata` stays for folders / display.
+    pub fn decrypt_file_metadata(
+        &self,
+        file_id: String,
+        name_encrypted: String,
+    ) -> Result<NameMetadataDto, CryptoError> {
+        let meta = self
+            .with_key(|mk| encrypt::decrypt_file_metadata(mk, &file_id, &name_encrypted))?
+            .map_err(CryptoError::from)?;
+        Ok(NameMetadataDto::from(meta))
     }
 
     /// Decrypt a `name_encrypted` envelope using the handle's master key.
@@ -867,9 +1553,13 @@ impl MasterKeyHandle {
     ///
     /// Reads each chunk file (containing `nonce || ciphertext`), decrypts,
     /// and writes plaintext to output. Atomic rename at end.
+    ///
+    /// `expected_chunk_format` (task 1908) comes from the file's encrypted
+    /// metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
     pub fn decrypt_file(
         &self,
         file_id: String,
+        expected_chunk_format: u8,
         chunk_paths: Vec<String>,
         output_path: String,
         callback: Option<Box<dyn FileProgressCallback>>,
@@ -884,10 +1574,12 @@ impl MasterKeyHandle {
             .as_ref()
             .map(|a| a as &dyn beebeeb_core::file_encrypt::FileProgressCallback);
 
+        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
         let result = self.with_key(|mk| {
             beebeeb_core::file_encrypt::decrypt_chunks_to_file(
                 mk,
                 &file_id,
+                expected,
                 &path_refs,
                 Path::new(&output_path),
                 core_cb,
@@ -902,7 +1594,9 @@ impl MasterKeyHandle {
     }
 }
 
-/// Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`.
+/// Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`
+/// for a key derived from the account's master key, or via
+/// [`FileKeyHandle::from_key_bytes`] for one the app holds as 32 bytes.
 #[derive(uniffi::Object)]
 pub struct FileKeyHandle {
     inner: Mutex<Option<kdf::FileKey>>,
@@ -925,6 +1619,130 @@ impl FileKeyHandle {
 
 #[uniffi::export]
 impl FileKeyHandle {
+    /// A handle for a per-file key the app holds as raw bytes and that is NOT
+    /// derived from the account's master key: a file-request upload's content
+    /// key (`open_request_upload`), a shared file's key. Task 1958 round 4: the
+    /// with-key name, note and thumbnail functions of this handle
+    /// (`encrypt_name_for`, `decrypt_file_metadata`, `encrypt_note_for`, ...)
+    /// were reachable only through `MasterKeyHandle::derive_file_key`, so not
+    /// for these keys. The WASM side takes the same bytes (`fileKey`).
+    ///
+    /// Exactly 32 bytes, anything else is an `InvalidInput` error. The input is
+    /// zeroized once copied into the key.
+    #[uniffi::constructor]
+    pub fn from_key_bytes(key: Vec<u8>) -> Result<Arc<Self>, CryptoError> {
+        let key = Zeroizing::new(key);
+        Ok(Self::new(file_key_from_slice(&key)?))
+    }
+
+    /// A fresh random key, independent of the account master key.
+    #[uniffi::constructor]
+    pub fn generate() -> Result<Arc<Self>, CryptoError> {
+        Ok(Self::new(kdf::FileKey::generate()?))
+    }
+
+    /// Combine a link fragment and optional 32-byte Argon2id stretch in core.
+    /// Owned secret inputs are wiped on success and every error path.
+    #[uniffi::constructor]
+    pub fn from_folder_link(k_c: Vec<u8>, passphrase_stretch: Option<Vec<u8>>) -> Result<Arc<Self>, CryptoError> {
+        let k_c = Zeroizing::new(k_c);
+        let stretch = passphrase_stretch.map(Zeroizing::new);
+        let k_c: &[u8; 32] = k_c.as_slice().try_into().map_err(|_| CryptoError::InvalidInput {
+            detail: "link fragment key must be exactly 32 bytes".into(),
+        })?;
+        let stretch: Option<&[u8; 32]> =
+            stretch
+                .as_ref()
+                .map(|s| s.as_slice().try_into())
+                .transpose()
+                .map_err(|_| CryptoError::InvalidInput {
+                    detail: "passphrase stretch must be exactly 32 bytes".into(),
+                })?;
+        let key = Zeroizing::new(kdf::combine_folder_link_key(k_c, stretch));
+        Ok(Self::new(kdf::FileKey::from_bytes(*key)))
+    }
+
+    /// Stretch then combine; memory/KDF errors propagate without a plain-link fallback.
+    #[uniffi::constructor]
+    pub fn from_folder_link_passphrase(
+        k_c: Vec<u8>,
+        passphrase: String,
+        token: String,
+    ) -> Result<Arc<Self>, CryptoError> {
+        let k_c = Zeroizing::new(k_c);
+        let passphrase = Zeroizing::new(passphrase);
+        let token = Zeroizing::new(token);
+        let k_c: &[u8; 32] = k_c.as_slice().try_into().map_err(|_| CryptoError::InvalidInput {
+            detail: "link fragment key must be exactly 32 bytes".into(),
+        })?;
+        let stretch = kdf::derive_folder_link_passphrase_stretch(&passphrase, &token)?;
+        let key = Zeroizing::new(kdf::combine_folder_link_key(k_c, Some(&stretch)));
+        Ok(Self::new(kdf::FileKey::from_bytes(*key)))
+    }
+
+    /// AES-256-GCM key wrap, no AAD: 12-byte nonce and 48-byte ciphertext.
+    pub fn wrap_key(&self, inner: &FileKeyHandle) -> Result<EncryptedData, CryptoError> {
+        // Drop the inner lock before borrowing the wrapper (self-wrap is valid).
+        let key = inner.with_key(|fk| Zeroizing::new(*fk.as_bytes()))?;
+        self.with_key(|fk| encrypt::encrypt_chunk(fk, &*key))?
+            .map(|blob| encrypted_blob_to_data(&blob))
+            .map_err(Into::into)
+    }
+
+    /// Authenticate a wrap and keep its exactly 32-byte plaintext in a handle.
+    pub fn unwrap_key(&self, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Result<Arc<FileKeyHandle>, CryptoError> {
+        let key = Zeroizing::new(self.decrypt_chunk(nonce, ciphertext)?);
+        Ok(Self::new(file_key_from_slice(&key)?))
+    }
+
+    /// L7 authenticated child wrap. IDs are UUID strings; AAD uses their 16 raw bytes.
+    pub fn wrap_folder_child(
+        &self,
+        shared_folder_id: String,
+        item_id: String,
+        kind: u8,
+        inner: &FileKeyHandle,
+    ) -> Result<EncryptedData, CryptoError> {
+        let root = uuid::Uuid::parse_str(&shared_folder_id).map_err(|_| CryptoError::InvalidInput {
+            detail: "invalid shared folder UUID".into(),
+        })?;
+        let item = uuid::Uuid::parse_str(&item_id).map_err(|_| CryptoError::InvalidInput {
+            detail: "invalid item UUID".into(),
+        })?;
+        let inner = inner.with_key(|k| kdf::FileKey::from_bytes(*k.as_bytes()))?;
+        self.with_key(|k| kdf::wrap_folder_child(k, root.as_bytes(), item.as_bytes(), kind, &inner))?
+            .map(|b| encrypted_blob_to_data(&b))
+            .map_err(Into::into)
+    }
+    pub fn unwrap_folder_child(
+        &self,
+        shared_folder_id: String,
+        item_id: String,
+        kind: u8,
+        nonce: Vec<u8>,
+        ciphertext: Vec<u8>,
+    ) -> Result<Arc<FileKeyHandle>, CryptoError> {
+        let root = uuid::Uuid::parse_str(&shared_folder_id).map_err(|_| CryptoError::InvalidInput {
+            detail: "invalid shared folder UUID".into(),
+        })?;
+        let item = uuid::Uuid::parse_str(&item_id).map_err(|_| CryptoError::InvalidInput {
+            detail: "invalid item UUID".into(),
+        })?;
+        let blob = EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce,
+            ciphertext,
+        };
+        self.with_key(|k| kdf::unwrap_folder_child(k, root.as_bytes(), item.as_bytes(), kind, &blob))?
+            .map(Self::new)
+            .map_err(Into::into)
+    }
+
+    /// One-way public key identifier; never exports the key itself.
+    pub fn key_id(&self) -> Result<Vec<u8>, CryptoError> {
+        self.with_key(|fk| beebeeb_core::folder_key::folder_key_id(fk.as_bytes()).to_vec())
+    }
+
     pub fn encrypt_chunk(&self, plaintext: Vec<u8>) -> Result<EncryptedData, CryptoError> {
         self.with_key(|fk| encrypt::encrypt_chunk(fk, &plaintext))?
             .map(|blob| encrypted_blob_to_data(&blob))
@@ -939,6 +1757,143 @@ impl FileKeyHandle {
         };
         self.with_key(|fk| encrypt::decrypt_chunk(fk, &blob))?
             .map_err(Into::into)
+    }
+
+    /// [`MasterKeyHandle::decrypt_name_metadata`] with this file key (share
+    /// recipients, file-request content keys) — task 1908.
+    pub fn decrypt_name_metadata(&self, name_encrypted: String) -> Result<NameMetadataDto, CryptoError> {
+        let meta = self
+            .with_key(|fk| encrypt::decrypt_name_metadata_with_key(fk, &name_encrypted))?
+            .map_err(CryptoError::from)?;
+        Ok(NameMetadataDto::from(meta))
+    }
+
+    /// [`MasterKeyHandle::decrypt_file_metadata`] with this file key: refuses a
+    /// plaintext `name_encrypted` (task 1908 round 3). Use it for files.
+    pub fn decrypt_file_metadata(&self, name_encrypted: String) -> Result<NameMetadataDto, CryptoError> {
+        let meta = self
+            .with_key(|fk| encrypt::decrypt_file_metadata_with_key(fk, &name_encrypted))?
+            .map_err(CryptoError::from)?;
+        Ok(NameMetadataDto::from(meta))
+    }
+
+    /// Seal a thumbnail (already-encoded image bytes) for upload: `nonce(12) ||
+    /// ciphertext || tag(16)`, the wire format thumbnails already use. The ONLY
+    /// way to seal a thumbnail (task 1908 round 3) — not `encrypt_chunk`: after
+    /// the gated seal switch it uses the thumbnail subkey, so a thumbnail can
+    /// never be served as file content.
+    pub fn encrypt_thumbnail(&self, plaintext: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
+        let plaintext = Zeroizing::new(plaintext);
+        self.with_key(|fk| encrypt::encrypt_thumbnail(fk, &plaintext))?
+            .map_err(Into::into)
+    }
+
+    /// Seal a thumbnail of an EXISTING file (replace / new version /
+    /// regenerated thumbnail) under the rule of its recorded pin (task 1908
+    /// round 4): `recorded_pin` = the `chunk_format` that
+    /// `decrypt_file_metadata` returned (0 = unrecorded, 2 = v2). A v2 pin is
+    /// always sealed under the thumbnail subkey; 0 behaves like
+    /// `encrypt_thumbnail`. Any other code is an error.
+    pub fn encrypt_thumbnail_for(&self, plaintext: Vec<u8>, recorded_pin: u8) -> Result<Vec<u8>, CryptoError> {
+        let pin = ExpectedChunkFormat::from_u8(recorded_pin)?;
+        let plaintext = Zeroizing::new(plaintext);
+        self.with_key(|fk| encrypt::encrypt_thumbnail_for(fk, &plaintext, pin))?
+            .map_err(Into::into)
+    }
+
+    /// Open a thumbnail frame (`nonce || ct || tag`): the thumbnail subkey
+    /// first, then the legacy raw file key (every thumbnail stored before the
+    /// switch). The ONLY way to open a thumbnail — not `decrypt_chunk`.
+    pub fn decrypt_thumbnail(&self, frame: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
+        self.with_key(|fk| encrypt::decrypt_thumbnail(fk, &frame))?
+            .map_err(Into::into)
+    }
+
+    /// Seal a file note for a file with no recorded pin yet (task 1908 round
+    /// 5): returns the canonical `EncryptedBlob` JSON to store in
+    /// `note_encrypted`. Follows the gated seal switch, like
+    /// `encrypt_thumbnail`. For a note on an EXISTING file use
+    /// `encrypt_note_for` with the file's recorded pin. The ONLY way to seal a
+    /// note — not `encrypt_chunk` / an `encrypt_metadata`-style call under the
+    /// file key (a raw-key note can stand in for a v2 file's name and content).
+    pub fn encrypt_note(&self, note: String) -> Result<String, CryptoError> {
+        let note = Zeroizing::new(note);
+        self.with_key(|fk| encrypt::encrypt_note(fk, &note))?
+            .map_err(Into::into)
+    }
+
+    /// Seal a note of an EXISTING file under the rule of its recorded pin
+    /// (task 1908 round 5): `recorded_pin` = the `chunk_format` that
+    /// `decrypt_file_metadata` returned for this file (0 = unrecorded, 2 = v2),
+    /// never a server field. A v2 pin is always sealed under the note subkey;
+    /// 0 behaves like `encrypt_note`. Any other code is an error.
+    pub fn encrypt_note_for(&self, note: String, recorded_pin: u8) -> Result<String, CryptoError> {
+        let pin = ExpectedChunkFormat::from_u8(recorded_pin)?;
+        let note = Zeroizing::new(note);
+        self.with_key(|fk| encrypt::encrypt_note_for(fk, &note, pin))?
+            .map_err(Into::into)
+    }
+
+    /// Seal the name/MIME envelope under THIS file key, by the rule of a
+    /// recorded pin (task 1958). The only name writer that takes a key, so it
+    /// serves keys not derived from the master key (file-request uploads,
+    /// shared-folder files). A v2 pin records `chunk_format: 2` and is always
+    /// sealed under the name subkey; 0 follows the current write rule. Any
+    /// other code is an error. `recorded_pin`:
+    /// - an EXISTING file (rename): the `chunk_format` that
+    ///   `decrypt_file_metadata` returned for this file (0 = unrecorded,
+    ///   2 = v2), never a server field;
+    /// - a NEW file (e.g. a file-request upload): the pin of the format its
+    ///   content was written in, `recorded_for(encryptor.format())` (2 for a v2
+    ///   upload, 0 for v1), as at any upload. Nothing else is allowed for a new
+    ///   file.
+    pub fn encrypt_name_for(
+        &self,
+        filename: String,
+        mime_type: Option<String>,
+        recorded_pin: u8,
+    ) -> Result<String, CryptoError> {
+        let pin = ExpectedChunkFormat::from_u8(recorded_pin)?;
+        let filename = Zeroizing::new(filename);
+        self.with_key(|fk| encrypt::encrypt_name_for(fk, &filename, mime_type.as_deref(), pin))?
+            .map_err(Into::into)
+    }
+
+    /// Open a `note_encrypted` envelope: the note subkey first, then the
+    /// legacy raw file key (notes stored before the switch). A plaintext value
+    /// is an error. The ONLY way to open a note — not `decrypt_chunk` or the
+    /// name readers.
+    pub fn decrypt_note(&self, note_encrypted: String) -> Result<String, CryptoError> {
+        self.with_key(|fk| encrypt::decrypt_note(fk, &note_encrypted))?
+            .map_err(Into::into)
+    }
+
+    /// Random-access open of ONE file-content frame (`nonce || ct || tag`) at a
+    /// known position — for seeking readers (video streaming) that cannot use
+    /// the sequential [`ChunkDecryptorHandle`]. `index` is the chunk the caller
+    /// asked for and `is_last` is `index == chunk_count - 1`; a server that
+    /// serves another chunk or lies about the count fails the tag.
+    ///
+    /// `format` (1 = v1 legacy, 2 = v2) must come from authenticated data — 2
+    /// when the encrypted metadata records v2, else the `chunk_format()` of a
+    /// decryptor that opened chunk 0 — never from a server field.
+    /// `version_id` (12 bytes, v2 only; ignored for v1) is the `version_id()` of
+    /// a decryptor that opened chunk 0, or chunk 0's first 12 bytes: frames of
+    /// another upload of the same file id fail.
+    pub fn decrypt_chunk_frame(
+        &self,
+        file_id: String,
+        version_id: Vec<u8>,
+        index: u32,
+        is_last: bool,
+        format: u8,
+        frame: Vec<u8>,
+    ) -> Result<Vec<u8>, CryptoError> {
+        let format = ChunkFormat::from_u8(format)?;
+        self.with_key(|fk| {
+            beebeeb_core::chunk_stream::open_chunk(fk, &file_id, &version_id, index, is_last, format, &frame)
+        })?
+        .map_err(Into::into)
     }
 
     pub fn encrypt_metadata(&self, metadata: String) -> Result<EncryptedData, CryptoError> {
@@ -991,6 +1946,53 @@ pub struct EncryptedChunkDto {
 pub struct DecryptedChunkDto {
     pub index: u32,
     pub data: Vec<u8>,
+}
+
+/// What to do with an interrupted upload session — see
+/// [`ChunkEncryptorHandle::resume_policy`] (task 1908 round 3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum SessionResumeAction {
+    /// Keep the session; re-PUT from chunk 0 (the server skips stored frames).
+    ContinueSession,
+    /// Never PUT to the old session again; upload from chunk 0 into a new one.
+    RestartWithFreshSession,
+}
+
+impl From<SessionResume> for SessionResumeAction {
+    fn from(r: SessionResume) -> Self {
+        match r {
+            SessionResume::ContinueSession => SessionResumeAction::ContinueSession,
+            SessionResume::RestartWithFreshSession => SessionResumeAction::RestartWithFreshSession,
+        }
+    }
+}
+
+/// Decrypted name metadata (task 1908): `chunk_format` is what every content
+/// reader of the file must be given (0 = unrecorded, 2 = v2).
+#[derive(uniffi::Record)]
+pub struct NameMetadataDto {
+    pub name: String,
+    pub mime_type: Option<String>,
+    pub chunk_format: u8,
+}
+
+impl From<encrypt::NameMetadata> for NameMetadataDto {
+    fn from(m: encrypt::NameMetadata) -> Self {
+        Self {
+            name: m.name,
+            mime_type: m.mime_type,
+            chunk_format: m.chunk_format.as_u8(),
+        }
+    }
+}
+
+/// Summary returned by [`ChunkDecryptorHandle::finish`] after the end-of-stream
+/// check (task 1908).
+#[derive(uniffi::Record)]
+pub struct ChunkDecryptorSummaryDto {
+    pub chunk_count: u32,
+    /// 1 = v1 legacy, 2 = v2 (position-bound).
+    pub format: u8,
 }
 
 /// Summary returned by [`ChunkEncryptorHandle::finish`] after the integrity guard.
@@ -1124,6 +2126,63 @@ impl ChunkEncryptorHandle {
         self.with_inner(|e| e.chunks_emitted())
     }
 
+    /// The chunk format this encryptor writes: 1 = v1, 2 = v2 (task 1908).
+    /// Still 1 during the read-only rollout phase. Record it at upload via
+    /// `encrypt_name_with_chunk_format` (2 if this is 2, else 0) so readers
+    /// can pin it.
+    pub fn chunk_format(&self) -> Result<u8, CryptoError> {
+        self.with_inner(|e| e.format().as_u8())
+    }
+
+    /// Replace / new version of an EXISTING file (task 1908 round 4, I-1):
+    /// write in the format the file's recorded pin requires. `recorded_pin` =
+    /// the `chunk_format` that `decrypt_file_metadata` returned for the file
+    /// (0 = unrecorded, 2 = v2) — never a server field. A v2 pin forces v2
+    /// frames even during the read-only phase (the server keeps the v2
+    /// metadata on replace, so v1 frames would never open); 0 keeps the default
+    /// write format. Call it right after the constructor, before the first
+    /// chunk (afterwards it errors and the handle stays usable as it was). Any
+    /// other code is an error.
+    ///
+    /// **New-file rule (lead ruling 2026-10-17):** pass 2 ONLY when it was
+    /// read from an EXISTING file's authenticated metadata. A brand-new file
+    /// makes NO call (the default write format applies) and records
+    /// `chunk_format()` in its name; passing 2 for a new file would create a
+    /// v2 file before the switch. Core cannot enforce this; each client keeps
+    /// a test that its new-file path never calls this with 2.
+    pub fn apply_recorded_pin(&self, recorded_pin: u8) -> Result<(), CryptoError> {
+        let pin = ExpectedChunkFormat::from_u8(recorded_pin)?;
+        let mut guard = self.inner.lock().unwrap();
+        let enc = guard.as_ref().ok_or(CryptoError::InvalidInput {
+            detail: "chunk encryptor handle has been finished or cleared".into(),
+        })?;
+        if enc.chunks_emitted() != 0 {
+            return Err(CryptoError::InvalidInput {
+                detail: "apply_recorded_pin must be called before the first chunk".into(),
+            });
+        }
+        // Checked above, so `with_recorded_pin` cannot fail and the handle is
+        // never left empty.
+        let enc = guard.take().expect("checked Some above");
+        *guard = Some(enc.with_recorded_pin(pin)?);
+        Ok(())
+    }
+
+    /// Resuming an interrupted upload (task 1908 round 3): may THIS (new)
+    /// encryptor continue the old server upload session? `stored_format` is the
+    /// `chunk_format()` the client persisted next to the session id when it
+    /// opened the session (1 = v1, 2 = v2), or `None` when the resume record
+    /// does not say. Only a v1 session resumed by a v1 encryptor may continue;
+    /// everything else (always for v2) must abandon the session and upload
+    /// from chunk 0 into a FRESH session — a v2 upload's frames all bind one
+    /// version id, and a new encryptor has a new one. Restart = `POST
+    /// /api/v1/files/{id}/upload/abandon` (or wait for the lease to expire),
+    /// then init again; on a 409 retry that, never fall back to the old session.
+    pub fn resume_policy(&self, stored_format: Option<u8>) -> Result<SessionResumeAction, CryptoError> {
+        let stored = stored_format.map(ChunkFormat::from_u8).transpose()?;
+        self.with_inner(|e| SessionResumeAction::from(e.resume_policy(stored)))
+    }
+
     /// Consume the encryptor (by value) and return the summary after the integrity
     /// guard (detects a source that shrank). The handle is unusable afterwards.
     pub fn finish(&self) -> Result<ChunkEncryptorSummaryDto, CryptoError> {
@@ -1162,13 +2221,18 @@ impl ChunkDecryptorHandle {
     /// PULL constructor: stream-decrypt an encrypted file from disk.
     /// `chunk_size_bytes` is the PLAINTEXT chunk size used at encryption (the wire
     /// frame is `nonce(12) + chunk_size + tag(16)`). Errors if it is 0.
+    ///
+    /// `expected_chunk_format` (task 1908) comes from the file's encrypted
+    /// metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
     #[uniffi::constructor]
     pub fn from_file(
         master_key: &MasterKeyHandle,
         file_id: String,
+        expected_chunk_format: u8,
         chunk_size_bytes: u64,
         input_path: String,
     ) -> Result<Arc<Self>, CryptoError> {
+        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
         let file = std::fs::File::open(std::path::Path::new(&input_path)).map_err(|e| CryptoError::Io {
             detail: format!("open input: {e}"),
         })?;
@@ -1176,7 +2240,8 @@ impl ChunkDecryptorHandle {
             .saturating_add(28)
             .clamp(8 * 1024, 8 * 1024 * 1024);
         let reader = std::io::BufReader::with_capacity(buf_cap, file);
-        let dec = master_key.with_key(|mk| ChunkDecryptor::from_reader(mk, &file_id, chunk_size_bytes, reader))??;
+        let dec = master_key
+            .with_key(|mk| ChunkDecryptor::from_reader(mk, &file_id, expected, chunk_size_bytes, reader))??;
         Ok(Arc::new(Self {
             inner: Mutex::new(Some(dec)),
         }))
@@ -1185,12 +2250,89 @@ impl ChunkDecryptorHandle {
     /// PUSH constructor: the caller feeds wire frames via
     /// [`push_frame`](Self::push_frame). Each frame is self-describing, so no chunk
     /// size is needed.
+    ///
+    /// `expected_chunk_format` (task 1908) comes from the file's encrypted
+    /// metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
     #[uniffi::constructor]
-    pub fn for_push(master_key: &MasterKeyHandle, file_id: String) -> Result<Arc<Self>, CryptoError> {
-        let dec = master_key.with_key(|mk| ChunkDecryptor::for_push(mk, &file_id))?;
+    pub fn for_push(
+        master_key: &MasterKeyHandle,
+        file_id: String,
+        expected_chunk_format: u8,
+    ) -> Result<Arc<Self>, CryptoError> {
+        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
+        let dec = master_key.with_key(|mk| ChunkDecryptor::for_push(mk, &file_id, expected))?;
         Ok(Arc::new(Self {
             inner: Mutex::new(Some(dec)),
         }))
+    }
+
+    /// PUSH constructor from a [`FileKeyHandle`] — for callers that hold the
+    /// file key but not the owner's master key (share / shared-link recipients).
+    /// Preferred over [`for_push_with_file_key`](Self::for_push_with_file_key):
+    /// the raw key never reaches Swift/Kotlin. `file_id` must be the id the file
+    /// was uploaded under (bound into every v2 frame).
+    #[uniffi::constructor]
+    pub fn for_push_with_file_key_handle(
+        file_key: &FileKeyHandle,
+        file_id: String,
+        expected_chunk_format: u8,
+    ) -> Result<Arc<Self>, CryptoError> {
+        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
+        // Copy into a fresh zeroize-on-drop key owned by the decryptor
+        // (`FileKey::from_bytes` wipes its by-value input).
+        let fk = file_key.with_key(|fk| kdf::FileKey::from_bytes(*fk.as_bytes()))?;
+        let dec = ChunkDecryptor::for_push_with_file_key(fk, &file_id, expected);
+        Ok(Arc::new(Self {
+            inner: Mutex::new(Some(dec)),
+        }))
+    }
+
+    /// PUSH constructor from a raw 32-byte file key, for hosts that only have
+    /// the bytes. Prefer [`for_push_with_file_key_handle`](Self::for_push_with_file_key_handle).
+    /// The owned copy that crosses the FFI is zeroized here; the host's own
+    /// copy is the host's to wipe.
+    #[uniffi::constructor]
+    pub fn for_push_with_file_key(
+        file_key: Vec<u8>,
+        file_id: String,
+        expected_chunk_format: u8,
+    ) -> Result<Arc<Self>, CryptoError> {
+        let file_key = Zeroizing::new(file_key);
+        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
+        let fk = file_key_from_slice(&file_key)?;
+        let dec = ChunkDecryptor::for_push_with_file_key(fk, &file_id, expected);
+        Ok(Arc::new(Self {
+            inner: Mutex::new(Some(dec)),
+        }))
+    }
+
+    /// The file's chunk format (1 = v1 legacy, 2 = v2) once chunk 0 has been
+    /// opened; `None` before.
+    pub fn chunk_format(&self) -> Result<Option<u8>, CryptoError> {
+        self.with_inner(|d| d.format().map(ChunkFormat::as_u8))
+    }
+
+    /// v2: the upload's version id (chunk 0's 12-byte nonce) once chunk 0 has
+    /// authenticated — what a seeking reader passes to
+    /// `FileKeyHandle.decrypt_chunk_frame`. `None` before chunk 0 and for v1.
+    pub fn version_id(&self) -> Result<Option<Vec<u8>>, CryptoError> {
+        self.with_inner(|d| d.version_id().map(|v| v.to_vec()))
+    }
+
+    /// End-of-stream check, consuming the decryptor. MUST be called after the
+    /// last pushed frame: it fails if no frame was pushed or if a v2 file ended
+    /// before its last chunk (truncation). Treat an `Err` as a failed download
+    /// and discard the plaintext. The pull form runs the same check at EOF.
+    pub fn finish(&self) -> Result<ChunkDecryptorSummaryDto, CryptoError> {
+        let mut guard = self.inner.lock().unwrap();
+        let dec = guard.take().ok_or(CryptoError::InvalidInput {
+            detail: "chunk decryptor handle has been finished or cleared".into(),
+        })?;
+        let summary = dec.finish().map_err(CryptoError::from)?;
+        Ok(ChunkDecryptorSummaryDto {
+            chunk_count: summary.chunk_count,
+            format: summary.format.as_u8(),
+        })
     }
 
     /// PULL: emit the next decrypted chunk, or `None` at clean EOF.
@@ -1226,6 +2368,11 @@ mod chunk_stream_handle_tests {
         MasterKeyHandle::from_keychain_bytes(vec![7u8; 32]).unwrap()
     }
 
+    /// What the metadata records for a file written by the default encryptor.
+    fn default_expected() -> u8 {
+        ExpectedChunkFormat::recorded_for(beebeeb_core::chunk_stream::WRITE_FORMAT).as_u8()
+    }
+
     #[test]
     fn push_roundtrip_via_handles() {
         let mk = mk_handle();
@@ -1234,6 +2381,12 @@ mod chunk_stream_handle_tests {
 
         let enc = ChunkEncryptorHandle::for_push(&mk, file_id.clone(), data.len() as u64, "mobile".into()).unwrap();
         assert_eq!(enc.chunk_plan().unwrap().chunk_count, 1);
+        // Read-only rollout phase: the FFI encryptor still writes v1.
+        assert_eq!(
+            enc.chunk_format().unwrap(),
+            1,
+            "WRITE_FORMAT is v1 until the gated switch"
+        );
         let frame = enc.push_chunk(data.clone()).unwrap();
         assert_eq!(frame.index, 0);
         assert_ne!(frame.data, data); // ciphertext != plaintext
@@ -1241,10 +2394,400 @@ mod chunk_stream_handle_tests {
         assert_eq!(summary.chunk_count, 1);
         assert_eq!(summary.total_plaintext, data.len() as u64);
 
-        let dec = ChunkDecryptorHandle::for_push(&mk, file_id).unwrap();
+        let dec = ChunkDecryptorHandle::for_push(&mk, file_id, default_expected()).unwrap();
         let out = dec.push_frame(frame.data).unwrap();
         assert_eq!(out.index, 0);
         assert_eq!(out.data, data);
+        assert_eq!(dec.chunk_format().unwrap(), Some(1));
+        let s = dec.finish().unwrap();
+        assert_eq!((s.chunk_count, s.format), (1, 1));
+    }
+
+    /// Task 1908: two equal-size v2 chunks (as a client writes them after the
+    /// gated v2 switch). Core-written via the dev-only `test-support` feature.
+    fn two_v2_frames(mk: &MasterKeyHandle, file_id: &str) -> (Vec<u8>, Vec<Vec<u8>>) {
+        // 5 MiB on the "mobile" ladder (4 MiB chunks) => 2 chunks.
+        let data: Vec<u8> = (0..5 * 1024 * 1024).map(|i| (i % 253) as u8).collect();
+        let frames = mk
+            .with_key(|m| {
+                let mut enc =
+                    ChunkEncryptor::for_push(m, file_id, data.len() as u64, beebeeb_types::ChunkProfile::Mobile)
+                        .unwrap()
+                        .with_format(ChunkFormat::V2)
+                        .unwrap();
+                let cs = enc.chunk_plan().chunk_size_bytes as usize;
+                let frames: Vec<Vec<u8>> = data.chunks(cs).map(|c| enc.push_chunk(c).unwrap().data).collect();
+                enc.finish().unwrap();
+                frames
+            })
+            .unwrap();
+        assert_eq!(frames.len(), 2);
+        (data, frames)
+    }
+
+    #[test]
+    fn handle_rejects_reorder_and_truncation() {
+        let mk = mk_handle();
+        let (_, frames) = two_v2_frames(&mk, "ffi-v2");
+
+        for expected in [0u8, 2] {
+            // Out of order: chunk 1 pushed first.
+            let dec = ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into(), expected).unwrap();
+            assert!(dec.push_frame(frames[1].clone()).is_err());
+
+            // Truncated: only chunk 0, then finish.
+            let dec = ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into(), expected).unwrap();
+            dec.push_frame(frames[0].clone()).unwrap();
+            assert!(
+                dec.finish().is_err(),
+                "finish must reject a v2 stream without its last chunk"
+            );
+        }
+        // Unknown expected-format codes are refused, not treated as "detect".
+        for bad in [1u8, 3] {
+            assert!(ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into(), bad).is_err());
+        }
+    }
+
+    #[test]
+    fn handle_v2_pin_refuses_name_blob_as_frame0() {
+        // Review round 2 P1-1 through the FFI: metadata records v2, the server
+        // serves the file's own name blob as its only frame.
+        let mk = mk_handle();
+        let id = "ffi-downgrade";
+        let ne = mk
+            .encrypt_name_with_chunk_format(id.into(), "a.pdf".into(), Some("application/pdf".into()), 2)
+            .unwrap();
+        let meta = mk.decrypt_name_metadata(id.into(), ne.clone()).unwrap();
+        assert_eq!((meta.name.as_str(), meta.chunk_format), ("a.pdf", 2));
+        let blob = parse_name_blob(&ne);
+        let forged = [blob.nonce, blob.ciphertext].concat();
+        let dec = ChunkDecryptorHandle::for_push(&mk, id.into(), meta.chunk_format).unwrap();
+        assert!(dec.push_frame(forged).is_err());
+        // A name written without a format reads back as 0 (unrecorded).
+        let legacy = mk.encrypt_name(id.into(), "a.pdf".into(), None).unwrap();
+        assert_eq!(mk.decrypt_name_metadata(id.into(), legacy).unwrap().chunk_format, 0);
+        assert!(
+            mk.encrypt_name_with_chunk_format(id.into(), "a".into(), None, 1)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn handle_file_metadata_refuses_plaintext_folder_reader_keeps_it() {
+        // Round 3 P1-B through the FFI: files refuse a plaintext name.
+        let mk = mk_handle();
+        let id = "ffi-plaintext";
+        assert!(mk.decrypt_file_metadata(id.into(), "innocent.txt".into()).is_err());
+        assert_eq!(
+            mk.decrypt_name_metadata(id.into(), "Photos".into()).unwrap().name,
+            "Photos"
+        );
+        let fk = mk.derive_file_key(id.as_bytes().to_vec()).unwrap();
+        assert!(fk.decrypt_file_metadata("innocent.txt".into()).is_err());
+        // A real envelope reads through both file readers.
+        let ne = mk.encrypt_name(id.into(), "a.pdf".into(), None).unwrap();
+        assert_eq!(mk.decrypt_file_metadata(id.into(), ne.clone()).unwrap().name, "a.pdf");
+        assert_eq!(fk.decrypt_file_metadata(ne).unwrap().chunk_format, 0);
+    }
+
+    #[test]
+    fn handle_thumbnail_roundtrip_and_resume_policy() {
+        let mk = mk_handle();
+        let fk = mk.derive_file_key(b"ffi-thumb".to_vec()).unwrap();
+        let sealed = fk.encrypt_thumbnail(b"webp bytes".to_vec()).unwrap();
+        assert_eq!(fk.decrypt_thumbnail(sealed).unwrap(), b"webp bytes");
+
+        // Round 3 P1-A through the FFI: the default (v1) encryptor may continue
+        // a v1 session; an unrecorded record restarts; unknown codes are errors.
+        let enc = ChunkEncryptorHandle::for_push(&mk, "ffi-resume".into(), 10, "mobile".into()).unwrap();
+        assert_eq!(
+            enc.resume_policy(Some(1)).unwrap(),
+            SessionResumeAction::ContinueSession
+        );
+        for stored in [None, Some(2)] {
+            assert_eq!(
+                enc.resume_policy(stored).unwrap(),
+                SessionResumeAction::RestartWithFreshSession,
+                "stored {stored:?}"
+            );
+        }
+        assert!(enc.resume_policy(Some(3)).is_err());
+    }
+
+    #[test]
+    fn handle_replace_of_a_v2_pinned_file_uses_the_recorded_pin() {
+        // Task 1908 round 4, I-1 through the FFI: pin from the file's metadata
+        // -> apply_recorded_pin -> the new version reads back under that pin.
+        let mk = mk_handle();
+        let id = "ffi-replace-v2";
+        let name = mk
+            .encrypt_name_with_chunk_format(id.into(), "a.pdf".into(), None, 2)
+            .unwrap();
+        let pin = mk.decrypt_file_metadata(id.into(), name).unwrap().chunk_format;
+        assert_eq!(pin, 2);
+        let data = b"replaced content of a v2-pinned file".to_vec();
+        let enc = ChunkEncryptorHandle::for_push(&mk, id.into(), data.len() as u64, "mobile".into()).unwrap();
+        enc.apply_recorded_pin(pin).unwrap();
+        assert_eq!(enc.chunk_format().unwrap(), 2, "a v2-pinned file must be written as v2");
+        let frame = enc.push_chunk(data.clone()).unwrap();
+        enc.finish().unwrap();
+        let dec = ChunkDecryptorHandle::for_push(&mk, id.into(), pin).unwrap();
+        assert_eq!(dec.push_frame(frame.data).unwrap().data, data);
+        dec.finish().unwrap();
+
+        // Unrecorded keeps the write format; unknown codes are errors.
+        let enc0 = ChunkEncryptorHandle::for_push(&mk, "ffi-replace-v1".into(), 4, "mobile".into()).unwrap();
+        enc0.apply_recorded_pin(0).unwrap();
+        assert_eq!(enc0.chunk_format().unwrap(), default_write_format());
+        for bad in [1u8, 3] {
+            let e = ChunkEncryptorHandle::for_push(&mk, "ffi-bad-pin".into(), 4, "mobile".into()).unwrap();
+            assert!(e.apply_recorded_pin(bad).is_err(), "pin code {bad}");
+        }
+    }
+
+    #[test]
+    fn handle_thumbnail_for_a_v2_pin_is_not_raw_key_sealed() {
+        let mk = mk_handle();
+        let fk = mk.derive_file_key(b"ffi-thumb-pin".to_vec()).unwrap();
+        let sealed = fk.encrypt_thumbnail_for(b"webp".to_vec(), 2).unwrap();
+        assert_eq!(fk.decrypt_thumbnail(sealed.clone()).unwrap(), b"webp");
+        assert!(
+            fk.decrypt_chunk(sealed[..12].to_vec(), sealed[12..].to_vec()).is_err(),
+            "a v2-pinned thumbnail must not open under the raw file key"
+        );
+        assert!(fk.encrypt_thumbnail_for(b"webp".to_vec(), 7).is_err());
+    }
+
+    #[test]
+    fn handle_note_for_a_v2_pin_is_subkey_sealed_and_not_a_name() {
+        // Task 1908 round 5 through the FFI: a note written for a v2-pinned
+        // file never sits under the raw file key and never opens as the
+        // file's metadata (the downgrade a raw-key note allowed).
+        let mk = mk_handle();
+        let id = "ffi-note-v2";
+        let name = mk
+            .encrypt_name_with_chunk_format(id.into(), "a.pdf".into(), None, 2)
+            .unwrap();
+        let pin = mk.decrypt_file_metadata(id.into(), name).unwrap().chunk_format;
+        assert_eq!(pin, 2);
+        let fk = mk.derive_file_key(id.as_bytes().to_vec()).unwrap();
+        let note = fk.encrypt_note_for("ffi note".into(), pin).unwrap();
+        assert_eq!(fk.decrypt_note(note.clone()).unwrap(), "ffi note");
+        let blob = parse_name_blob(&note);
+        assert!(
+            fk.decrypt_chunk(blob.nonce.clone(), blob.ciphertext.clone()).is_err(),
+            "a v2-pinned note must not open under the raw file key"
+        );
+        assert!(
+            fk.decrypt_file_metadata(note.clone()).is_err(),
+            "a v2 note must not open as the file's metadata"
+        );
+        assert!(mk.decrypt_file_metadata(id.into(), note).is_err());
+
+        // Unrecorded follows the write switch; unknown codes are errors.
+        let n0 = fk.encrypt_note_for("n0".into(), 0).unwrap();
+        assert_eq!(fk.decrypt_note(n0).unwrap(), "n0");
+        assert_eq!(fk.decrypt_note(fk.encrypt_note("n".into()).unwrap()).unwrap(), "n");
+        for bad in [1u8, 7] {
+            assert!(fk.encrypt_note_for("x".into(), bad).is_err(), "pin code {bad}");
+        }
+        assert!(fk.decrypt_note("a plaintext note".into()).is_err());
+    }
+
+    #[test]
+    fn handle_name_for_keeps_the_pin_under_a_file_key_handle_1958() {
+        // Task 1958 through the FFI: the rename writer of a FileKeyHandle keeps
+        // a v2 pin, seals under the name subkey, and for a derived key reads back
+        // through the master-key reader too.
+        let mk = mk_handle();
+        let id = "ffi-name-for";
+        let fk = mk.derive_file_key(id.as_bytes().to_vec()).unwrap();
+        let renamed = fk
+            .encrypt_name_for("renamed.pdf".into(), Some("application/pdf".into()), 2)
+            .unwrap();
+        let meta = fk.decrypt_file_metadata(renamed.clone()).unwrap();
+        assert_eq!((meta.name.as_str(), meta.chunk_format), ("renamed.pdf", 2));
+        assert_eq!(
+            mk.decrypt_file_metadata(id.into(), renamed.clone())
+                .unwrap()
+                .chunk_format,
+            2
+        );
+        let blob = parse_name_blob(&renamed);
+        assert!(
+            fk.decrypt_chunk(blob.nonce.clone(), blob.ciphertext.clone()).is_err(),
+            "a v2-pinned name must not open under the raw file key"
+        );
+        let r0 = fk.encrypt_name_for("r0.txt".into(), None, 0).unwrap();
+        assert_eq!(fk.decrypt_file_metadata(r0).unwrap().chunk_format, 0);
+        for bad in [1u8, 7] {
+            assert!(fk.encrypt_name_for("x".into(), None, bad).is_err(), "pin code {bad}");
+        }
+    }
+
+    /// The key of the published given-key name vectors (task 1958): 32 bytes
+    /// NOT derived from any master key.
+    const GIVEN_FILE_KEY: [u8; 32] = [
+        0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0x71,
+        0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f,
+    ];
+
+    #[test]
+    fn a_non_derived_key_reaches_the_name_writer_and_reader_1958_r4() {
+        // Task 1958 round 4 (Codex P1): a key the app holds as bytes (a
+        // file-request upload's content key, a shared file's key) becomes a
+        // FileKeyHandle, and its name round-trips with the pin: what Swift and
+        // Kotlin could not do while `derive_file_key` was the only way in.
+        let fk = FileKeyHandle::from_key_bytes(GIVEN_FILE_KEY.to_vec()).unwrap();
+        for pin in [0u8, 2] {
+            let sealed = fk
+                .encrypt_name_for("request-upload.pdf".into(), Some("application/pdf".into()), pin)
+                .unwrap();
+            let meta = fk.decrypt_file_metadata(sealed.clone()).unwrap();
+            assert_eq!(meta.name, "request-upload.pdf", "pin {pin}");
+            assert_eq!(meta.mime_type.as_deref(), Some("application/pdf"), "pin {pin}");
+            assert_eq!(meta.chunk_format, pin, "pin {pin}");
+            // The same key as core's, byte for byte: core's with-key reader opens it.
+            let core_meta =
+                encrypt::decrypt_file_metadata_with_key(&kdf::FileKey::from_bytes(GIVEN_FILE_KEY), &sealed).unwrap();
+            assert_eq!(core_meta.chunk_format.as_u8(), pin, "pin {pin}");
+        }
+        // The rest of the handle is reachable for such a key too (notes).
+        let note = fk.encrypt_note_for("a note".into(), 2).unwrap();
+        assert_eq!(fk.decrypt_note(note).unwrap(), "a note");
+    }
+
+    #[test]
+    fn file_key_handle_from_key_bytes_refuses_other_lengths_1958_r4() {
+        for len in [0usize, 16, 31, 33, 64] {
+            match FileKeyHandle::from_key_bytes(vec![0x42; len]) {
+                Err(CryptoError::InvalidInput { .. }) => {}
+                Err(other) => panic!("{len} bytes: wrong error {other:?}"),
+                Ok(_) => panic!("{len} bytes must be refused"),
+            }
+        }
+    }
+
+    /// The default write format's code (1 during the read-only phase).
+    fn default_write_format() -> u8 {
+        beebeeb_core::chunk_stream::WRITE_FORMAT.as_u8()
+    }
+
+    /// Parse a native `name_encrypted` envelope (numeric-array JSON).
+    fn parse_name_blob(json: &str) -> beebeeb_types::EncryptedBlob {
+        let (nonce, ciphertext) = beebeeb_core::metadata_wire::parse_encrypted_metadata(json).unwrap();
+        beebeeb_types::EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce,
+            ciphertext,
+        }
+    }
+
+    #[test]
+    fn handle_with_file_key_and_random_access_frame_open() {
+        let mk = mk_handle();
+        let (data, frames) = two_v2_frames(&mk, "ffi-fk");
+        let fk = mk.derive_file_key(b"ffi-fk".to_vec()).unwrap();
+        let fk_bytes = mk
+            .with_key(|m| kdf::derive_file_key(m, b"ffi-fk").as_bytes().to_vec())
+            .unwrap();
+
+        // File-key decryptors (share recipient path): raw bytes and handle.
+        for dec in [
+            ChunkDecryptorHandle::for_push_with_file_key(fk_bytes.clone(), "ffi-fk".into(), 2).unwrap(),
+            ChunkDecryptorHandle::for_push_with_file_key_handle(&fk, "ffi-fk".into(), 2).unwrap(),
+        ] {
+            let mut out = Vec::new();
+            for f in &frames {
+                out.extend(dec.push_frame(f.clone()).unwrap().data);
+            }
+            assert_eq!(dec.version_id().unwrap().unwrap(), frames[0][..12].to_vec());
+            dec.finish().unwrap();
+            assert_eq!(out, data);
+        }
+
+        // Wrong file id with the right key fails.
+        let dec = ChunkDecryptorHandle::for_push_with_file_key_handle(&fk, "other".into(), 2).unwrap();
+        assert!(dec.push_frame(frames[0].clone()).is_err());
+
+        // Random access: right position + version opens; wrong position, last
+        // flag, version or format fails.
+        let vid = frames[0][..12].to_vec();
+        assert_eq!(
+            fk.decrypt_chunk_frame("ffi-fk".into(), vid.clone(), 1, true, 2, frames[1].clone())
+                .unwrap(),
+            data[4 * 1024 * 1024..]
+        );
+        let (_, other_upload) = two_v2_frames(&mk, "ffi-fk");
+        for (v, i, last, fmt, frame) in [
+            (vid.clone(), 0, false, 2, frames[1].clone()),
+            (vid.clone(), 1, false, 2, frames[1].clone()),
+            (vid.clone(), 1, true, 1, frames[1].clone()),
+            (vid.clone(), 1, true, 9, frames[1].clone()),
+            (vid.clone(), 1, true, 2, other_upload[1].clone()),
+            (other_upload[0][..12].to_vec(), 1, true, 2, frames[1].clone()),
+            (vid[..11].to_vec(), 1, true, 2, frames[1].clone()),
+        ] {
+            assert!(fk.decrypt_chunk_frame("ffi-fk".into(), v, i, last, fmt, frame).is_err());
+        }
+    }
+
+    #[test]
+    fn contiguous_to_file_binds_file_id_and_rejects_swap() {
+        let mk = mk_handle();
+        let (data, frames) = two_v2_frames(&mk, "ffi-contig");
+        let fk_bytes = mk
+            .with_key(|m| kdf::derive_file_key(m, b"ffi-contig").as_bytes().to_vec())
+            .unwrap();
+        let dir = std::env::temp_dir().join("bb_uniffi_contig_1908");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("out.bin").to_string_lossy().into_owned();
+        let cs = 4 * 1024 * 1024u64;
+
+        let n = decrypt_contiguous_to_file(
+            fk_bytes.clone(),
+            "ffi-contig".into(),
+            2,
+            frames.concat(),
+            cs,
+            out.clone(),
+        )
+        .unwrap();
+        assert_eq!(n, data.len() as u64);
+        std::fs::remove_file(&out).unwrap();
+
+        // Truncated to chunk 0: rejected, nothing written.
+        assert!(
+            decrypt_contiguous_to_file(
+                fk_bytes.clone(),
+                "ffi-contig".into(),
+                2,
+                frames[0].clone(),
+                cs,
+                out.clone()
+            )
+            .is_err()
+        );
+        assert!(!std::path::Path::new(&out).exists());
+
+        // Pre-sliced variant: wrong file id rejected; right id opens.
+        let pairs = || -> Vec<EncryptedChunkData> {
+            frames
+                .iter()
+                .map(|f| EncryptedChunkData {
+                    nonce: f[..12].to_vec(),
+                    ciphertext: f[12..].to_vec(),
+                })
+                .collect()
+        };
+        assert!(decrypt_chunks_to_file(fk_bytes.clone(), "not-the-id".into(), 2, pairs(), out.clone()).is_err());
+        assert_eq!(
+            decrypt_chunks_to_file(fk_bytes, "ffi-contig".into(), 2, pairs(), out.clone()).unwrap(),
+            data.len() as u64
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1264,7 +2807,7 @@ mod chunk_stream_handle_tests {
         let enc = ChunkEncryptorHandle::for_push(&mk, "secret".into(), 5, "mobile".into()).unwrap();
         let frame = enc.push_chunk(b"hello".to_vec()).unwrap();
         let wrong = MasterKeyHandle::from_keychain_bytes(vec![9u8; 32]).unwrap();
-        let dec = ChunkDecryptorHandle::for_push(&wrong, "secret".into()).unwrap();
+        let dec = ChunkDecryptorHandle::for_push(&wrong, "secret".into(), default_expected()).unwrap();
         assert!(dec.push_frame(frame.data).is_err());
     }
 
@@ -1306,6 +2849,7 @@ mod chunk_stream_handle_tests {
         let dec = ChunkDecryptorHandle::from_file(
             &mk,
             "pullfile".into(),
+            default_expected(),
             chunk_size,
             enc_path.to_string_lossy().into_owned(),
         )
@@ -1327,6 +2871,29 @@ mod chunk_stream_handle_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Doc comments are copied into the generated glue (JSDoc in the `.js` and `.d.ts`, Kotlin and Swift doc
+    /// comments in the UniFFI bindings). A block-comment closer inside one ends the comment early, which
+    /// is a SyntaxError in the glue; an opener starts a nested comment that Kotlin and Swift then wait to
+    /// see closed. Neither can be seen by `cargo test` of the generated code, so the source is checked.
+    #[test]
+    fn no_doc_comment_contains_a_block_comment_token() {
+        let offending: Vec<String> = include_str!("lib.rs")
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| {
+                let line = line.trim_start();
+                line.starts_with("///") || line.starts_with("//!")
+            })
+            .filter(|(_, line)| line.contains("/*") || line.contains("*/"))
+            .map(|(i, line)| format!("lib.rs:{}: {}", i + 1, line.trim()))
+            .collect();
+        assert!(
+            offending.is_empty(),
+            "use line comments (or words) inside doc comments, never a block-comment token:\n{}",
+            offending.join("\n")
+        );
+    }
 
     const TEST_SALT: &[u8] = b"test-salt-16bytes";
     const TEST_FILE_ID: &[u8] = b"file-0001";
@@ -1916,11 +3483,11 @@ pub enum UploadError {
     #[error("network error: {detail}")]
     Network { detail: String },
 
-    #[error("server error (HTTP {status}): {message}")]
-    ServerError { status: u16, message: String },
+    #[error("server error (HTTP {status}): {detail}")]
+    ServerError { status: u16, detail: String },
 
-    #[error("client error (HTTP {status}): {message}")]
-    ClientError { status: u16, message: String },
+    #[error("client error (HTTP {status}): {detail}")]
+    ClientError { status: u16, detail: String },
 
     #[error("rate limited — retry after {retry_after_secs}s")]
     RateLimited { retry_after_secs: u64 },
@@ -1942,12 +3509,14 @@ impl From<beebeeb_upload::UploadError> for UploadError {
     fn from(e: beebeeb_upload::UploadError) -> Self {
         match e {
             beebeeb_upload::UploadError::Network(s) => UploadError::Network { detail: s },
-            beebeeb_upload::UploadError::ServerError { status, message } => {
-                UploadError::ServerError { status, message }
-            }
-            beebeeb_upload::UploadError::ClientError { status, message } => {
-                UploadError::ClientError { status, message }
-            }
+            beebeeb_upload::UploadError::ServerError { status, message } => UploadError::ServerError {
+                status,
+                detail: message,
+            },
+            beebeeb_upload::UploadError::ClientError { status, message } => UploadError::ClientError {
+                status,
+                detail: message,
+            },
             beebeeb_upload::UploadError::RateLimited { retry_after_secs } => {
                 UploadError::RateLimited { retry_after_secs }
             }
@@ -2635,15 +4204,21 @@ impl beebeeb_upload::DownloadProgressCallback for DownloadCallbackBridge<'_> {
 /// Uses the MasterKeyHandle to derive the per-file key via HKDF, then
 /// fetches `GET /api/v1/files/{file_id}/download`, splits into chunks,
 /// decrypts each with AES-256-GCM, and writes to `output_path`.
+///
+/// `expected_chunk_format` (task 1908) comes from the file's encrypted
+/// metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
 #[uniffi::export]
 pub fn download_and_decrypt_file(
     api_url: String,
     token: String,
     master_key_handle: &MasterKeyHandle,
     file_id: String,
+    expected_chunk_format: u8,
     output_path: String,
     callback: Option<Box<dyn DownloadProgressCallback>>,
 ) -> Result<DownloadResultData, UploadError> {
+    let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)
+        .map_err(|e| UploadError::UploadInvalidInput { detail: e.to_string() })?;
     // Extract the raw master key bytes while the lock is held, then release.
     let mk_bytes = master_key_handle
         .with_key(|mk| mk.to_bytes())
@@ -2656,7 +4231,8 @@ pub fn download_and_decrypt_file(
     let core_cb: Option<Box<dyn beebeeb_upload::DownloadProgressCallback + '_>> =
         bridge.map(|b| Box::new(b) as Box<dyn beebeeb_upload::DownloadProgressCallback>);
 
-    let result = beebeeb_upload::download_and_decrypt_file(&api_url, &token, &mk, &file_id, &output_path, core_cb)?;
+    let result =
+        beebeeb_upload::download_and_decrypt_file(&api_url, &token, &mk, &file_id, expected, &output_path, core_cb)?;
 
     Ok(DownloadResultData {
         output_path: result.output_path,
@@ -2946,6 +4522,1293 @@ pub fn search_index_sync_plan(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Onboarding (task 1744): password policy, breach check, signup ceremony
+// ---------------------------------------------------------------------------
+//
+// Thin wrappers over `beebeeb_core::onboarding`. All logic lives in core; this
+// section only converts types. The ceremony and the breach check are handles
+// (`#[uniffi::Object]`) so the password, phrase and master key stay in Rust
+// memory in zeroizing buffers; the master key leaves the ceremony as a
+// `MasterKeyHandle`, never as bytes.
+
+use beebeeb_core::onboarding as onb;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum PasswordStrengthDto {
+    TooShort,
+    Fair,
+    Good,
+    Strong,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum PasswordHintDto {
+    None,
+    NeedMoreCharacters,
+    MixCaseAndAddNumberOrSymbol,
+    MixCase,
+    AddNumberOrSymbol,
+}
+
+/// Result of evaluating a password against the server's policy. Contains no
+/// part of the password.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct PasswordEvaluationDto {
+    pub length: u32,
+    pub min_length: u32,
+    pub missing_characters: u32,
+    pub meets_minimum: bool,
+    pub has_mixed_case: bool,
+    pub has_number_or_symbol: bool,
+    pub strength: PasswordStrengthDto,
+    /// Meter level 1 (too short) to 4 (strong).
+    pub level: u8,
+    pub hint: PasswordHintDto,
+}
+
+impl From<onb::PasswordEvaluation> for PasswordEvaluationDto {
+    fn from(e: onb::PasswordEvaluation) -> Self {
+        Self {
+            length: e.length,
+            min_length: e.min_length,
+            missing_characters: e.missing_characters,
+            meets_minimum: e.meets_minimum,
+            has_mixed_case: e.has_mixed_case,
+            has_number_or_symbol: e.has_number_or_symbol,
+            strength: match e.strength {
+                onb::PasswordStrength::TooShort => PasswordStrengthDto::TooShort,
+                onb::PasswordStrength::Fair => PasswordStrengthDto::Fair,
+                onb::PasswordStrength::Good => PasswordStrengthDto::Good,
+                onb::PasswordStrength::Strong => PasswordStrengthDto::Strong,
+            },
+            level: e.strength.level(),
+            hint: match e.hint {
+                onb::PasswordHint::None => PasswordHintDto::None,
+                onb::PasswordHint::NeedMoreCharacters => PasswordHintDto::NeedMoreCharacters,
+                onb::PasswordHint::MixCaseAndAddNumberOrSymbol => PasswordHintDto::MixCaseAndAddNumberOrSymbol,
+                onb::PasswordHint::MixCase => PasswordHintDto::MixCase,
+                onb::PasswordHint::AddNumberOrSymbol => PasswordHintDto::AddNumberOrSymbol,
+            },
+        }
+    }
+}
+
+/// Evaluate a password against the server's `policy.password.min_length`
+/// (clamped up to the core floor of 12).
+#[uniffi::export]
+pub fn evaluate_password(password: String, min_length: u32) -> PasswordEvaluationDto {
+    // UniFFI hands over an owned String; wipe that allocation when we are done.
+    let password = Zeroizing::new(password);
+    let policy = onb::PasswordPolicy::from_server(min_length);
+    onb::evaluate_password(&password, &policy).into()
+}
+
+/// Verdict of a breach check. `NotRequired` is constructed by the app when the
+/// onboarding document declares no breach check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum BreachVerdictDto {
+    Clean,
+    Breached { count: u64 },
+    CheckFailedAllowed,
+    CheckFailedBlocked,
+    NotRequired,
+}
+
+impl From<onb::BreachVerdict> for BreachVerdictDto {
+    fn from(v: onb::BreachVerdict) -> Self {
+        match v {
+            onb::BreachVerdict::Clean => Self::Clean,
+            onb::BreachVerdict::Breached { count } => Self::Breached { count },
+            onb::BreachVerdict::CheckFailedAllowed => Self::CheckFailedAllowed,
+            onb::BreachVerdict::CheckFailedBlocked => Self::CheckFailedBlocked,
+            onb::BreachVerdict::NotRequired => Self::NotRequired,
+        }
+    }
+}
+
+impl From<BreachVerdictDto> for onb::BreachVerdict {
+    fn from(v: BreachVerdictDto) -> Self {
+        match v {
+            BreachVerdictDto::Clean => Self::Clean,
+            BreachVerdictDto::Breached { count } => Self::Breached { count },
+            BreachVerdictDto::CheckFailedAllowed => Self::CheckFailedAllowed,
+            BreachVerdictDto::CheckFailedBlocked => Self::CheckFailedBlocked,
+            BreachVerdictDto::NotRequired => Self::NotRequired,
+        }
+    }
+}
+
+/// Whether the app may let the user continue with this password. `Breached`
+/// and `CheckFailedBlocked` stop it. Kept in core so apps do not re-derive it.
+#[uniffi::export]
+pub fn breach_verdict_allows_proceeding(verdict: BreachVerdictDto) -> bool {
+    onb::BreachVerdict::from(verdict).allows_proceeding()
+}
+
+/// True when the corpus was not actually consulted (outage, either policy).
+#[uniffi::export]
+pub fn breach_verdict_check_failed(verdict: BreachVerdictDto) -> bool {
+    onb::BreachVerdict::from(verdict).check_failed()
+}
+
+/// k-anonymity breach check for one password. Core hashes and matches; **the app
+/// makes the HTTP call**, to the endpoint the onboarding document declares in
+/// `policy.password.breach_check.endpoint` (Beebeeb's own API, never a third
+/// party). Only `prefix()` (5 hex chars) may be sent. The rest of the digest
+/// stays in this handle and is zeroized when it is released.
+///
+/// The handle is bound to the password it was made from and remembers the
+/// answer: pass it to `SignupCeremonyHandle.set_password`, which refuses a
+/// check made for a different password. A response body over 262144 bytes is
+/// treated as an outage, so stop reading the response at that size.
+#[derive(uniffi::Object)]
+pub struct BreachCheckHandle {
+    check: Mutex<onb::BreachCheck>,
+}
+
+#[uniffi::export]
+impl BreachCheckHandle {
+    #[uniffi::constructor]
+    pub fn new(password: String) -> Arc<Self> {
+        let password = Zeroizing::new(password);
+        Arc::new(Self {
+            check: Mutex::new(onb::BreachCheck::new(&password)),
+        })
+    }
+
+    /// The 5 upper-case hex characters to send to the server.
+    pub fn prefix(&self) -> String {
+        lock_tolerant(&self.check).prefix().to_owned()
+    }
+
+    /// Record the answer and return the verdict for display. `body` is the
+    /// response text of a 2xx answer, or `None` when the request failed
+    /// (network error, timeout, non-2xx). An empty body counts as a failed
+    /// request. `fail_open` is `policy.password.breach_check.fail_open` and
+    /// only shapes this display value: the ceremony applies the value it was
+    /// constructed with.
+    ///
+    /// `requested_prefix` is the prefix the request URL (or the cache entry)
+    /// actually used. If it is not this password's prefix this throws
+    /// `BreachPrefixMismatch` and records nothing: a body for another prefix
+    /// would otherwise evaluate as clean.
+    pub fn evaluate(
+        &self,
+        requested_prefix: String,
+        body: Option<String>,
+        fail_open: bool,
+    ) -> Result<BreachVerdictDto, OnboardingError> {
+        let response = match body.as_deref() {
+            Some(b) => onb::BreachResponse::Body(b),
+            None => onb::BreachResponse::Unavailable,
+        };
+        lock_tolerant(&self.check)
+            .record_and_evaluate(&requested_prefix, response, fail_open)
+            .map(Into::into)
+            .map_err(Into::into)
+    }
+}
+
+/// Lock a mutex, recovering the data if a panic in another call poisoned it:
+/// one panicking call must not turn every later call on the handle into a
+/// panic across the FFI boundary.
+fn lock_tolerant<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum CeremonyStepDto {
+    VerifyEmail,
+    SetPassword,
+    SavePhrase,
+    ConfirmPhrase,
+    CreateAccount,
+    Done,
+}
+
+impl From<onb::CeremonyStep> for CeremonyStepDto {
+    fn from(s: onb::CeremonyStep) -> Self {
+        match s {
+            onb::CeremonyStep::VerifyEmail => Self::VerifyEmail,
+            onb::CeremonyStep::SetPassword => Self::SetPassword,
+            onb::CeremonyStep::SavePhrase => Self::SavePhrase,
+            onb::CeremonyStep::ConfirmPhrase => Self::ConfirmPhrase,
+            onb::CeremonyStep::CreateAccount => Self::CreateAccount,
+            onb::CeremonyStep::Done => Self::Done,
+        }
+    }
+}
+
+/// The server step id a ceremony step belongs to (`save_recovery_phrase` for
+/// both phrase parts).
+#[uniffi::export]
+pub fn ceremony_step_spec_id(step: CeremonyStepDto) -> String {
+    let core = match step {
+        CeremonyStepDto::VerifyEmail => onb::CeremonyStep::VerifyEmail,
+        CeremonyStepDto::SetPassword => onb::CeremonyStep::SetPassword,
+        CeremonyStepDto::SavePhrase => onb::CeremonyStep::SavePhrase,
+        CeremonyStepDto::ConfirmPhrase => onb::CeremonyStep::ConfirmPhrase,
+        CeremonyStepDto::CreateAccount => onb::CeremonyStep::CreateAccount,
+        CeremonyStepDto::Done => onb::CeremonyStep::Done,
+    };
+    core.spec_step_id().to_owned()
+}
+
+/// Errors from the signup ceremony. Distinct from [`CryptoError`] so the UI can
+/// branch on the cause (too short, breached, wrong word) without parsing text.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum OnboardingError {
+    #[error("cannot {action} yet: step {blocking:?} is not done")]
+    StepNotDone { action: String, blocking: CeremonyStepDto },
+
+    #[error("cannot {action}: {reason}")]
+    InvalidState { action: String, reason: String },
+
+    #[error("passwords do not match")]
+    PasswordMismatch,
+
+    #[error("password is too short: {length} characters, minimum {min_length}")]
+    PasswordTooShort { length: u32, min_length: u32 },
+
+    #[error("password appears in {count} known breaches")]
+    PasswordBreached { count: u64 },
+
+    #[error("the breach check could not run and the server requires it")]
+    BreachCheckBlocked,
+
+    #[error("the breach check is required and has not been answered")]
+    BreachCheckMissing,
+
+    #[error("the breach check was run for a different password")]
+    BreachCheckStale,
+
+    #[error("the breach lookup was made for a different prefix than this password's")]
+    BreachPrefixMismatch,
+
+    #[error("the recovery phrase is not available")]
+    PhraseUnavailable,
+
+    #[error("expected {expected} words, got {got}")]
+    PhraseAnswerCount { expected: u32, got: u32 },
+
+    #[error("one or more words are incorrect")]
+    PhraseWordMismatch,
+
+    #[error("crypto error: {detail}")]
+    Crypto { detail: String },
+}
+
+impl From<onb::BreachError> for OnboardingError {
+    fn from(e: onb::BreachError) -> Self {
+        match e {
+            onb::BreachError::PrefixMismatch => Self::BreachPrefixMismatch,
+        }
+    }
+}
+
+impl From<onb::CeremonyError> for OnboardingError {
+    fn from(e: onb::CeremonyError) -> Self {
+        match e {
+            onb::CeremonyError::StepNotDone { action, blocking } => Self::StepNotDone {
+                action: action.to_owned(),
+                blocking: blocking.into(),
+            },
+            onb::CeremonyError::InvalidState { action, reason } => Self::InvalidState {
+                action: action.to_owned(),
+                reason: reason.to_owned(),
+            },
+            onb::CeremonyError::PasswordMismatch => Self::PasswordMismatch,
+            onb::CeremonyError::PasswordTooShort { length, min_length } => {
+                Self::PasswordTooShort { length, min_length }
+            }
+            onb::CeremonyError::PasswordBreached { count } => Self::PasswordBreached { count },
+            onb::CeremonyError::BreachCheckBlocked => Self::BreachCheckBlocked,
+            onb::CeremonyError::BreachCheckMissing => Self::BreachCheckMissing,
+            onb::CeremonyError::BreachCheckStale => Self::BreachCheckStale,
+            onb::CeremonyError::PhraseUnavailable => Self::PhraseUnavailable,
+            onb::CeremonyError::PhraseAnswerCount { expected, got } => Self::PhraseAnswerCount {
+                expected: expected as u32,
+                got: got as u32,
+            },
+            onb::CeremonyError::PhraseWordMismatch => Self::PhraseWordMismatch,
+            onb::CeremonyError::Crypto(c) => Self::Crypto { detail: c.to_string() },
+        }
+    }
+}
+
+/// What `opaque/register-finish` takes from the client. No `Debug`: the
+/// recovery binding must not end up in a log line by accident.
+#[derive(Clone, uniffi::Record)]
+pub struct RegistrationFinishDto {
+    pub upload: Vec<u8>,
+    pub x25519_public: Vec<u8>,
+    pub recovery_check: Vec<u8>,
+}
+
+/// The signup ceremony state machine, one per signup attempt. Single-consumer:
+/// drive it from one sequence (the `Mutex` is only the `Send + Sync` backstop
+/// UniFFI requires). Call `abandon()` when the flow is left (back, cancel,
+/// error): releasing the handle also wipes the password, phrase and master key
+/// it holds, but only when ARC or the GC gets round to it.
+#[derive(uniffi::Object)]
+pub struct SignupCeremonyHandle {
+    inner: Mutex<onb::SignupCeremony>,
+}
+
+impl SignupCeremonyHandle {
+    fn with<T>(&self, f: impl FnOnce(&mut onb::SignupCeremony) -> T) -> T {
+        let mut guard = lock_tolerant(&self.inner);
+        f(&mut guard)
+    }
+}
+
+#[uniffi::export]
+impl SignupCeremonyHandle {
+    /// `min_length` = `policy.password.min_length`; `email_verification_required`
+    /// = the document lists a required `verify_email_code`; `verify_word_count`
+    /// = `policy.recovery_phrase.verify_word_count`; `breach_check_required` =
+    /// the document declares a breach check, with `breach_fail_open` =
+    /// `policy.password.breach_check.fail_open` (applied by the ceremony, not
+    /// by the caller).
+    #[uniffi::constructor]
+    pub fn new(
+        min_length: u32,
+        email_verification_required: bool,
+        verify_word_count: u32,
+        breach_check_required: bool,
+        breach_fail_open: bool,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            inner: Mutex::new(onb::SignupCeremony::new(onb::CeremonyConfig {
+                password_policy: onb::PasswordPolicy::from_server(min_length),
+                email_verification_required,
+                verify_word_count,
+                breach: if breach_check_required {
+                    onb::BreachPolicy::Required {
+                        fail_open: breach_fail_open,
+                    }
+                } else {
+                    onb::BreachPolicy::NotRequired
+                },
+            })),
+        })
+    }
+
+    /// Abandon the signup: wipe the password, phrase and master key and return
+    /// to a fresh ceremony. Call on back, cancel and error exits.
+    pub fn abandon(&self) {
+        self.with(|c| c.wipe());
+    }
+
+    /// First pending step, or `Done`.
+    pub fn step(&self) -> CeremonyStepDto {
+        self.with(|c| c.step()).into()
+    }
+
+    /// Every pending step in canonical order.
+    pub fn pending_steps(&self) -> Vec<CeremonyStepDto> {
+        self.with(|c| c.pending_steps()).into_iter().map(Into::into).collect()
+    }
+
+    /// The server accepted the email code.
+    pub fn email_verified(&self) {
+        self.with(|c| c.email_verified());
+    }
+
+    /// The server reported the signup ticket expired: back to the code step,
+    /// password and confirmed phrase kept.
+    pub fn email_ticket_invalidated(&self) {
+        self.with(|c| c.email_ticket_invalidated());
+    }
+
+    /// The user changed the email address after it was verified: back to the
+    /// code step, password and confirmed phrase kept.
+    pub fn email_changed(&self) {
+        self.with(|c| c.email_changed());
+    }
+
+    /// Validate and store the password. `breach` is the `BreachCheckHandle`
+    /// made for **this** password, after `evaluate` recorded the endpoint's
+    /// answer; pass `None` when the document declares no breach check. Throws
+    /// `PasswordMismatch`, `PasswordTooShort`, `BreachCheckMissing`,
+    /// `BreachCheckStale`, `PasswordBreached` or `BreachCheckBlocked`.
+    pub fn set_password(
+        &self,
+        password: String,
+        confirmation: String,
+        breach: Option<Arc<BreachCheckHandle>>,
+    ) -> Result<PasswordEvaluationDto, OnboardingError> {
+        let password = Zeroizing::new(password);
+        let confirmation = Zeroizing::new(confirmation);
+        Ok(self
+            .with(|c| match &breach {
+                Some(handle) => {
+                    let guard = lock_tolerant(&handle.check);
+                    c.set_password(&password, &confirmation, Some(&guard))
+                }
+                None => c.set_password(&password, &confirmation, None),
+            })?
+            .into())
+    }
+
+    /// Generate the recovery phrase and master key (Argon2id, about a second).
+    /// Idempotent.
+    pub fn begin_phrase(&self) -> Result<(), OnboardingError> {
+        Ok(self.with(|c| c.begin_phrase())?)
+    }
+
+    /// The phrase to show. Throws `PhraseUnavailable` before `begin_phrase` or
+    /// after the phrase was confirmed (it is wiped then). The returned string
+    /// is a plain copy owned by the host runtime and cannot be wiped: call this
+    /// only while rendering the phrase and drop the reference afterwards.
+    pub fn phrase(&self) -> Result<String, OnboardingError> {
+        Ok(self.with(|c| c.phrase().map(|p| p.as_str().to_owned()))?)
+    }
+
+    /// The user confirms they saved the phrase.
+    pub fn acknowledge_phrase(&self) -> Result<(), OnboardingError> {
+        Ok(self.with(|c| c.acknowledge_phrase())?)
+    }
+
+    /// 1-based word positions to ask for, ascending, stable for this phrase.
+    pub fn challenge_positions(&self) -> Result<Vec<u32>, OnboardingError> {
+        Ok(self.with(|c| c.challenge_positions())?)
+    }
+
+    /// `answers` in `challenge_positions` order. Throws `PhraseWordMismatch` /
+    /// `PhraseAnswerCount`; retryable.
+    pub fn confirm_phrase(&self, answers: Vec<String>) -> Result<(), OnboardingError> {
+        // Each answer is a word of the recovery phrase: wipe our copies on return.
+        let answers: Vec<Zeroizing<String>> = answers.into_iter().map(Zeroizing::new).collect();
+        Ok(self.with(|c| c.confirm_phrase(&answers))?)
+    }
+
+    /// OPAQUE step 1: the `RegistrationRequest` for `opaque/register-start`.
+    /// Throws `StepNotDone` until every other required step is done.
+    pub fn start_registration(&self) -> Result<Vec<u8>, OnboardingError> {
+        Ok(self.with(|c| c.start_registration().map(|r| r.message))?)
+    }
+
+    /// OPAQUE step 2, from the server's `register-start` response.
+    pub fn finish_registration(&self, server_message: Vec<u8>) -> Result<RegistrationFinishDto, OnboardingError> {
+        let r = self.with(|c| c.finish_registration(&server_message))?;
+        Ok(RegistrationFinishDto {
+            upload: r.upload,
+            x25519_public: r.x25519_public.to_vec(),
+            recovery_check: r.recovery_check.to_vec(),
+        })
+    }
+
+    /// The server rejected `register-finish` in a retryable way.
+    pub fn registration_failed(&self) {
+        self.with(|c| c.registration_failed());
+    }
+
+    /// The server accepted `register-finish`. Returns the master key as a
+    /// handle (the bytes never cross FFI); the ceremony wipes everything else.
+    pub fn account_created(&self) -> Result<Arc<MasterKeyHandle>, OnboardingError> {
+        let key = self.with(|c| c.account_created())?;
+        Ok(MasterKeyHandle::new(key))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Direct S3 transfers (task 2173): the client rules of `beebeeb_core::direct_transfer`
+// ---------------------------------------------------------------------------
+//
+// Thin wrappers. ALL logic lives in core; this section converts types. The app
+// keeps its own HTTP stack (URLSession / OkHttp) and asks these rules whether a
+// storage link may be followed, what an API answer means, and what to do next
+// (windows, renewals, fallbacks), exactly as the CLI, desktop and web do.
+//
+// A planner is one sequence's cursor (the `Mutex` is only UniFFI's Send+Sync
+// backstop): drive it from ONE place, and feed it `now_ms` (Unix milliseconds)
+// on every call. Errors carry stable string codes; no error text ever contains
+// a URL. A presigned URL is a bearer capability until it expires: do not log
+// `DirectChunkGrantDto.url`, use `direct_redact_url` / `direct_scrub_text`.
+
+use beebeeb_core::direct_transfer as dt;
+
+/// The contract's names and numbers, so no client re-types them.
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct DirectConstantsDto {
+    pub cap_object_download_v1: String,
+    pub cap_object_upload_v1: String,
+    pub capabilities_header: String,
+    pub discovery_path: String,
+    pub max_window: u32,
+    pub default_window: u32,
+    pub chunk_overhead: u32,
+    /// The time bounds every client applies (clients design 6.2), in milliseconds.
+    pub storage_connect_timeout_ms: u32,
+    pub storage_get_idle_ms: u32,
+    pub discovery_timeout_ms: u32,
+    pub api_call_timeout_ms: u32,
+    pub background_put_resource_timeout_ms: u32,
+}
+
+#[uniffi::export]
+pub fn direct_transfer_constants() -> DirectConstantsDto {
+    DirectConstantsDto {
+        cap_object_download_v1: dt::CAP_OBJECT_DOWNLOAD_V1.to_owned(),
+        cap_object_upload_v1: dt::CAP_OBJECT_UPLOAD_V1.to_owned(),
+        capabilities_header: dt::CAPABILITIES_HEADER.to_owned(),
+        discovery_path: dt::DISCOVERY_PATH.to_owned(),
+        max_window: dt::wire::MAX_WINDOW,
+        default_window: dt::wire::DEFAULT_WINDOW,
+        chunk_overhead: dt::wire::CHUNK_OVERHEAD as u32,
+        storage_connect_timeout_ms: timeout_ms(dt::timeouts::STORAGE_CONNECT_TIMEOUT),
+        storage_get_idle_ms: timeout_ms(dt::timeouts::STORAGE_GET_IDLE),
+        discovery_timeout_ms: timeout_ms(dt::timeouts::DISCOVERY_TIMEOUT),
+        api_call_timeout_ms: timeout_ms(dt::timeouts::API_CALL_TIMEOUT),
+        background_put_resource_timeout_ms: timeout_ms(dt::timeouts::BACKGROUND_PUT_RESOURCE_TIMEOUT),
+    }
+}
+
+/// A fixed bound in milliseconds (every one is a few minutes at most).
+fn timeout_ms(d: std::time::Duration) -> u32 {
+    u32::try_from(d.as_millis()).unwrap_or(u32::MAX)
+}
+
+/// The most a storage PUT of `len` ciphertext bytes may take, in milliseconds: a minute plus the
+/// chunk at 1 Mbit/s (`60 s + ceil(len / 131072) s`). Any length is safe: a huge one is a long timeout.
+#[uniffi::export]
+pub fn direct_storage_put_total_ms(len: u64) -> u64 {
+    u64::try_from(dt::timeouts::storage_put_total(len).as_millis()).unwrap_or(u64::MAX)
+}
+
+/// The most a storage GET of `len` ciphertext bytes may take, in milliseconds (the same formula as a PUT).
+#[uniffi::export]
+pub fn direct_storage_get_total_ms(len: u64) -> u64 {
+    u64::try_from(dt::timeouts::storage_get_total(len).as_millis()).unwrap_or(u64::MAX)
+}
+
+/// A background URL session's resource timeout for a storage PUT, in milliseconds. No app timer runs in
+/// the background, so this is the only bound; it stays under the server's late-write fence from any
+/// start up to the link's expiry.
+#[uniffi::export]
+pub fn direct_background_put_resource_timeout_ms() -> u64 {
+    u64::try_from(dt::timeouts::BACKGROUND_PUT_RESOURCE_TIMEOUT.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// `/api/v1/files/{id}/download-grants` for `file_id`.
+#[uniffi::export]
+pub fn direct_download_grants_path(file_id: String) -> String {
+    dt::download_grants_path(&file_id)
+}
+
+/// Why a call into the direct-transfer rules failed. Every variant carries a
+/// stable `code`; none carries a URL.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum DirectTransferError {
+    /// A storage link was refused: `malformed`, `not_https`, `userinfo`,
+    /// `ip_literal`, `loopback`, `bad_host`, `port`, `host_not_listed`,
+    /// `bucket_not_listed`, `bad_path`.
+    #[error("the storage link was refused: {code}")]
+    LinkRefused { code: String },
+
+    /// The discovery body could not be decoded: `discovery_too_large`,
+    /// `discovery_malformed`.
+    #[error("the discovery answer could not be used: {code}")]
+    Discovery { code: String },
+
+    /// A call that does not fit the planner's state (a bug in the caller):
+    /// `not_in_flight`, `not_fetched`, `out_of_order`, `api_route_failure`.
+    #[error("the planner was driven out of order: {code}")]
+    Plan { code: String },
+
+    /// `call` was none of `discovery`, `download_grant`, `pinned_chunk`.
+    #[error("unknown call")]
+    UnknownCall,
+}
+
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct DirectStorageBucketDto {
+    pub host: String,
+    pub bucket: String,
+}
+
+/// The answer of `GET /api/v1/transfer/capabilities`.
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct DirectDiscoveryDto {
+    pub download: Vec<String>,
+    pub upload: Vec<String>,
+    pub storage_hosts: Vec<String>,
+    pub storage_buckets: Vec<DirectStorageBucketDto>,
+    pub max_window: Option<u32>,
+    pub url_ttl_seconds: Option<u64>,
+}
+
+impl From<dt::Discovery> for DirectDiscoveryDto {
+    fn from(d: dt::Discovery) -> Self {
+        Self {
+            download: d.download,
+            upload: d.upload,
+            storage_hosts: d.storage_hosts,
+            storage_buckets: d
+                .storage_buckets
+                .into_iter()
+                .map(|b| DirectStorageBucketDto {
+                    host: b.host,
+                    bucket: b.bucket,
+                })
+                .collect(),
+            max_window: d.max_window,
+            url_ttl_seconds: d.url_ttl_seconds,
+        }
+    }
+}
+
+impl From<DirectDiscoveryDto> for dt::Discovery {
+    fn from(d: DirectDiscoveryDto) -> Self {
+        Self {
+            download: d.download,
+            upload: d.upload,
+            storage_hosts: d.storage_hosts,
+            storage_buckets: d
+                .storage_buckets
+                .into_iter()
+                .map(|b| dt::StorageBucket {
+                    host: b.host,
+                    bucket: b.bucket,
+                })
+                .collect(),
+            max_window: d.max_window,
+            url_ttl_seconds: d.url_ttl_seconds,
+        }
+    }
+}
+
+/// Decode a discovery body. Unknown fields are ignored, missing lists are empty.
+#[uniffi::export]
+pub fn parse_direct_discovery(body: Vec<u8>) -> Result<DirectDiscoveryDto, DirectTransferError> {
+    dt::Discovery::from_json(&body)
+        .map(DirectDiscoveryDto::from)
+        .map_err(|e| DirectTransferError::Discovery {
+            code: match e {
+                dt::WireError::TooLarge(_) => "discovery_too_large",
+                dt::WireError::Malformed => "discovery_malformed",
+            }
+            .to_owned(),
+        })
+}
+
+/// Does the server offer direct downloads, and how many grants to ask per window.
+#[uniffi::export]
+pub fn direct_discovery_offers_download(discovery: DirectDiscoveryDto) -> bool {
+    dt::Discovery::from(discovery).offers_download()
+}
+
+/// May the app follow this storage link? `api_base` is the API origin in use.
+/// Throws `LinkRefused` with the refusal code; the message never contains the URL.
+#[uniffi::export]
+pub fn direct_check_storage_url(
+    url: String,
+    discovery: DirectDiscoveryDto,
+    api_base: String,
+) -> Result<(), DirectTransferError> {
+    dt::check_storage_url(&url, &dt::Discovery::from(discovery), &api_base).map_err(|r| {
+        DirectTransferError::LinkRefused {
+            code: r.code().to_owned(),
+        }
+    })
+}
+
+/// A URL for a log line: scheme and host only.
+#[uniffi::export]
+pub fn direct_redact_url(url: String) -> String {
+    dt::redact(&url)
+}
+
+/// Text that may contain URLs, made safe to print.
+#[uniffi::export]
+pub fn direct_scrub_text(text: String) -> String {
+    dt::scrub(&text)
+}
+
+/// What an API answer means.
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+pub enum DirectOutcomeDto {
+    /// 2xx: decode the body and go on.
+    Proceed,
+    /// Discovery only: this server has no direct transport; cache that.
+    NotSupported,
+    /// No direct transport right now: use the API for this file now.
+    UseApiNow,
+    /// This file is served over the API. For an UPLOAD call it means this session cannot go direct:
+    /// abandon the session and init again WITHOUT the capability token.
+    ApiForThisFile,
+    /// `version_unavailable`: discard and restart from fresh metadata.
+    Restart,
+    /// 429 / `replace_in_progress` / `commit_in_progress`: wait, then ask again.
+    Backoff { millis: u64 },
+    /// 401, 403 or a JSON 404: do not fall back.
+    Terminal { status: u16, error: Option<String> },
+    /// The pinned chunk route and the upload calls: a failure that may pass (5xx, no answer). For the
+    /// pinned route the bounded backoff is `direct_pinned_retry_decision`; the retry rules of an upload
+    /// chunk (the grant cap, the attempts, the waits) are core's `UploadChunkState`, which is not
+    /// exported yet, so do NOT pass an upload outcome to `direct_pinned_retry_decision` (it knows no
+    /// grant cap and answers give-up for `Regrant`).
+    Retry,
+    /// `upload_commit` only: the staged chunk is not there; ask for a new link and send it again.
+    Regrant,
+    /// `upload_commit` only (409 `commit_in_progress`): the server holds the chunk's commit lock, up to
+    /// 420 s after a failed copy. Wait (`millis` is the server's stated wait, `None` when it sent none)
+    /// and commit again; it is not a failure. core's `UploadChunkState` bounds the wait (the lock TTL
+    /// plus 30 s = 450 s, polls no faster than once a second) but is not exported yet: a host that
+    /// handles this itself must bound it the same way, and not count a hold as one of its failures.
+    Held { millis: Option<u64> },
+}
+
+impl DirectOutcomeDto {
+    fn from_core(o: &dt::Outcome) -> Self {
+        match o {
+            dt::Outcome::Proceed => Self::Proceed,
+            dt::Outcome::NotSupported => Self::NotSupported,
+            dt::Outcome::UseApiNow => Self::UseApiNow,
+            dt::Outcome::ApiForThisFile => Self::ApiForThisFile,
+            dt::Outcome::Restart => Self::Restart,
+            dt::Outcome::Backoff(d) => Self::Backoff {
+                millis: d.as_millis() as u64,
+            },
+            dt::Outcome::Terminal(t) => Self::Terminal {
+                status: t.status,
+                error: t.error.clone(),
+            },
+            dt::Outcome::Retry => Self::Retry,
+            dt::Outcome::Regrant => Self::Regrant,
+            dt::Outcome::Held(d) => Self::Held {
+                millis: d.map(|d| d.as_millis() as u64),
+            },
+            // `Outcome` is non-exhaustive: a variant added later is the safe one.
+            _ => Self::UseApiNow,
+        }
+    }
+
+    fn to_core(&self) -> dt::Outcome {
+        match self {
+            Self::Proceed => dt::Outcome::Proceed,
+            Self::NotSupported => dt::Outcome::NotSupported,
+            Self::UseApiNow => dt::Outcome::UseApiNow,
+            Self::ApiForThisFile => dt::Outcome::ApiForThisFile,
+            Self::Restart => dt::Outcome::Restart,
+            Self::Backoff { millis } => dt::Outcome::Backoff(std::time::Duration::from_millis(*millis)),
+            Self::Terminal { status, error } => dt::Outcome::Terminal(dt::Terminal {
+                status: *status,
+                error: error.clone(),
+            }),
+            Self::Retry => dt::Outcome::Retry,
+            Self::Regrant => dt::Outcome::Regrant,
+            Self::Held { millis } => dt::Outcome::Held(millis.map(std::time::Duration::from_millis)),
+        }
+    }
+}
+
+/// What to do after a failed attempt on the pinned per-chunk route.
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+pub enum DirectRetryDecisionDto {
+    /// Wait this long, then try again.
+    Wait { millis: u64 },
+    /// Stop: act on the outcome (restart, terminal) or hand the file to the API stream.
+    GiveUp,
+}
+
+/// The shared retry policy of the pinned per-chunk route (4 attempts, 150 s of waiting in all, a
+/// stated `Retry-After` kept, otherwise 1 s doubling). `outcome` is `classify_direct_answer`'s
+/// answer for `"pinned_chunk"`; `attempt` is the 1-based number of the attempt that just failed;
+/// `waited_ms` is the total waited so far.
+#[uniffi::export]
+pub fn direct_pinned_retry_decision(outcome: DirectOutcomeDto, attempt: u32, waited_ms: u64) -> DirectRetryDecisionDto {
+    match dt::PinnedRetry::default().decide(attempt, std::time::Duration::from_millis(waited_ms), &outcome.to_core()) {
+        dt::RetryDecision::Wait(d) => DirectRetryDecisionDto::Wait {
+            millis: d.as_millis() as u64,
+        },
+        dt::RetryDecision::GiveUp => DirectRetryDecisionDto::GiveUp,
+    }
+}
+
+/// Classify an API answer. `call` is `"discovery"`, `"download_grant"`, `"pinned_chunk"`,
+/// `"upload_grant"` or `"upload_commit"`; pass `status` 0 when there was no HTTP answer. `body` is whatever was read of the
+/// body (at most 64 KiB is looked at); `retry_after` is the raw header value.
+#[uniffi::export]
+pub fn classify_direct_answer(
+    call: String,
+    status: u16,
+    content_type: Option<String>,
+    body: Vec<u8>,
+    retry_after: Option<String>,
+) -> Result<DirectOutcomeDto, DirectTransferError> {
+    let call = dt::Call::from_code(&call).ok_or(DirectTransferError::UnknownCall)?;
+    let answer = dt::ApiAnswer::from_parts(status, content_type.as_deref(), &body, retry_after.as_deref());
+    Ok(DirectOutcomeDto::from_core(&dt::classify(call, &answer)))
+}
+
+/// `POST /api/v1/files/{id}/download-grants` body.
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct DirectGrantRequestDto {
+    pub object_version_id: Option<String>,
+    pub start_index: u32,
+    pub count: u32,
+    pub renewal: bool,
+}
+
+/// A presigned storage link: a bearer capability until it expires (it carries the signature in its
+/// query). It is an OBJECT, not a string, so that no generated `toString()` (Kotlin), `description`
+/// (Swift) or `print` can show it: its `Debug` and `Display` are the redacted form (scheme and host),
+/// and so is the derived `Debug`/`toString()` of every record that holds one. The only way to the
+/// link is [`DirectSignedUrl::raw`], by name, so it shows up in a review: pass it to the HTTP client
+/// and nowhere else.
+///
+/// On Kotlin, `toString()` of the object, or of a record that holds one, throws
+/// `IllegalStateException` once the object has been `destroy()`ed or `close()`d, like any call on a
+/// released object: do not log a grant after releasing it.
+///
+/// It exports no `Eq` or `Hash` on purpose. UniFFI 0.31.1 generates Kotlin `equals` and `hashCode`
+/// that lower the object's handle with no check that it was destroyed, so comparing or hashing a
+/// released link (or a grant or poll that holds one) would be a use-after-free in native code.
+/// Compare the links' text (`raw()`) when a comparison is needed.
+#[derive(uniffi::Object, PartialEq, Eq)]
+#[uniffi::export(Debug, Display)]
+pub struct DirectSignedUrl {
+    url: String,
+}
+
+impl std::fmt::Display for DirectSignedUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&dt::redact(&self.url))
+    }
+}
+
+impl std::fmt::Debug for DirectSignedUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DirectSignedUrl({})", dt::redact(&self.url))
+    }
+}
+
+#[uniffi::export]
+impl DirectSignedUrl {
+    /// A link from its text. The engine builds its own; this is for an app's tests (a `Fetch` poll
+    /// made by hand). The text is not checked: `direct_check_storage_url` is the check.
+    #[uniffi::constructor]
+    pub fn new(url: String) -> Arc<Self> {
+        Arc::new(Self { url })
+    }
+
+    /// The full presigned link, to hand to the HTTP client. Never log it.
+    pub fn raw(&self) -> String {
+        self.url.clone()
+    }
+
+    /// Scheme and host only: safe for a log line.
+    pub fn redacted(&self) -> String {
+        dt::redact(&self.url)
+    }
+}
+
+/// One presigned link. `url` is a bearer capability, and cannot be printed by accident: see
+/// [`DirectSignedUrl`].
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct DirectChunkGrantDto {
+    pub index: u32,
+    pub method: String,
+    pub url: Arc<DirectSignedUrl>,
+    pub length: u64,
+    pub expires_at: String,
+}
+
+/// How a file ends when it cannot go on directly.
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+pub enum DirectVerdictDto {
+    /// Discard any partial output and download the file again on the API path.
+    ApiForFile,
+    /// The pinned version changed: discard and restart from fresh metadata.
+    Restart,
+    /// An authorization answer: do not fall back.
+    Terminal { status: u16, error: Option<String> },
+    /// A chunk failed authentication from storage and from the API: a hard error.
+    Corrupt,
+}
+
+/// What the app must do now.
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+pub enum DirectPollDto {
+    /// `POST` this body to `direct_download_grants_path(file_id)` with the
+    /// capability header, then report the answer.
+    RequestWindow { request: DirectGrantRequestDto },
+    /// `GET grant.url.raw()` (`grant.url` is a `DirectSignedUrl`, not a string) with a client that
+    /// sends nothing else (no cookies, no `Authorization`), redirects off; accept only `200` whose
+    /// `Content-Length` is `grant.length`.
+    Fetch { index: u32, grant: DirectChunkGrantDto },
+    /// `GET /api/v1/files/{id}/chunks/{index}?object_version_id=<pinned>`.
+    FetchViaApi { index: u32, object_version_id: String },
+    /// Nothing to start. `until_ms` is the next moment the planner can act by
+    /// itself; `None` means it waits for a request that is outstanding.
+    Wait { until_ms: Option<i64> },
+    /// Every chunk has been consumed.
+    Done,
+    /// Cannot go on directly.
+    Stop { verdict: DirectVerdictDto },
+}
+
+impl DirectPollDto {
+    fn from_core(p: &dt::Poll) -> Self {
+        match p {
+            dt::Poll::RequestWindow(r) => Self::RequestWindow {
+                request: DirectGrantRequestDto {
+                    object_version_id: r.object_version_id.clone(),
+                    start_index: r.start_index,
+                    count: r.count,
+                    renewal: r.renewal,
+                },
+            },
+            dt::Poll::Fetch { index, grant } => Self::Fetch {
+                index: *index,
+                grant: DirectChunkGrantDto {
+                    index: grant.index,
+                    method: grant.method.clone(),
+                    url: DirectSignedUrl::new(grant.url.clone()),
+                    length: grant.length,
+                    expires_at: grant.expires_at.clone(),
+                },
+            },
+            dt::Poll::FetchViaApi {
+                index,
+                object_version_id,
+            } => Self::FetchViaApi {
+                index: *index,
+                object_version_id: object_version_id.clone(),
+            },
+            dt::Poll::Wait { until_ms } => Self::Wait { until_ms: *until_ms },
+            dt::Poll::Done => Self::Done,
+            dt::Poll::Stop(v) => Self::Stop {
+                verdict: match v {
+                    dt::Verdict::ApiForFile => DirectVerdictDto::ApiForFile,
+                    dt::Verdict::Restart => DirectVerdictDto::Restart,
+                    dt::Verdict::Terminal(t) => DirectVerdictDto::Terminal {
+                        status: t.status,
+                        error: t.error.clone(),
+                    },
+                    dt::Verdict::Corrupt => DirectVerdictDto::Corrupt,
+                },
+            },
+        }
+    }
+}
+
+/// The version's geometry, once the first window was accepted.
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct DirectGeometryDto {
+    pub chunk_count: u32,
+    pub chunk_size: u64,
+    pub encrypted_size: u64,
+    pub original_size: u64,
+}
+
+/// The outcome of handing a window answer to the planner.
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+pub enum DirectWindowAnswerDto {
+    Accepted,
+    /// The body was not the contract's JSON; handled like any window the server
+    /// could not serve. Poll again.
+    Malformed,
+    /// The answer broke the contract (`transport`, `file_mismatch`,
+    /// `version_changed`, `geometry`, `grants`, `length`, `method`,
+    /// `authority_<refusal>`, `expiry`, `unexpected`). Poll again.
+    Refused {
+        code: String,
+    },
+}
+
+fn plan_error(e: dt::PlanError) -> DirectTransferError {
+    DirectTransferError::Plan {
+        code: e.code().to_owned(),
+    }
+}
+
+/// The download planner for ONE file: when to ask the API for a window of
+/// links, which chunk to fetch next (at most 4 in flight, in order), when to
+/// renew a link, and when a chunk goes to the pinned API route. It performs no
+/// I/O and holds no clock. See `DirectPollDto` for what each poll asks of you;
+/// decrypt chunks in order and report each with `consumed`, or `chunk_unauthentic`
+/// when one does not authenticate.
+#[derive(uniffi::Object)]
+pub struct DirectDownloadPlannerHandle {
+    inner: Mutex<dt::DownloadPlanner>,
+}
+
+#[uniffi::export]
+impl DirectDownloadPlannerHandle {
+    /// `discovery` is what `parse_direct_discovery` returned; `jitter_seed` any
+    /// integer (random in production).
+    #[uniffi::constructor]
+    pub fn new(discovery: DirectDiscoveryDto, api_base: String, file_id: String, jitter_seed: u64) -> Arc<Self> {
+        let discovery = dt::Discovery::from(discovery);
+        let config = dt::PlannerConfig::from_discovery(&discovery, jitter_seed);
+        Arc::new(Self {
+            inner: Mutex::new(dt::DownloadPlanner::new(config, discovery, &api_base, &file_id)),
+        })
+    }
+
+    /// What to do now. Call again after every report.
+    pub fn poll(&self, now_ms: i64) -> DirectPollDto {
+        DirectPollDto::from_core(&lock_tolerant(&self.inner).poll(now_ms))
+    }
+
+    /// The window answer for the outstanding request, as the raw response body.
+    pub fn window_answered(&self, body: Vec<u8>, now_ms: i64) -> DirectWindowAnswerDto {
+        match lock_tolerant(&self.inner).window_answered_bytes(&body, now_ms) {
+            dt::WindowAnswer::Accepted => DirectWindowAnswerDto::Accepted,
+            dt::WindowAnswer::Malformed => DirectWindowAnswerDto::Malformed,
+            dt::WindowAnswer::Refused(v) => DirectWindowAnswerDto::Refused {
+                code: v.code().to_owned(),
+            },
+        }
+    }
+
+    /// The window request failed; `outcome` is what `classify_direct_answer`
+    /// returned (or `UseApiNow` for a network error).
+    pub fn window_failed(&self, outcome: DirectOutcomeDto, now_ms: i64) {
+        lock_tolerant(&self.inner).window_failed(outcome.to_core(), now_ms);
+    }
+
+    /// A 2xx window response whose body could not be decoded at all.
+    pub fn window_malformed(&self) {
+        lock_tolerant(&self.inner).window_malformed();
+    }
+
+    /// Chunk `index` arrived whole (status 200 and the right length).
+    pub fn fetch_ok(&self, index: u32) -> Result<(), DirectTransferError> {
+        lock_tolerant(&self.inner).fetch_ok(index).map_err(plan_error)
+    }
+
+    /// The transfer of chunk `index` from storage failed (any non-200, a short
+    /// body, a wrong length, a network error, an expired link).
+    pub fn fetch_failed(&self, index: u32, now_ms: i64) -> Result<(), DirectTransferError> {
+        lock_tolerant(&self.inner)
+            .fetch_failed(index, now_ms)
+            .map_err(plan_error)
+    }
+
+    /// The pinned API route failed for chunk `index` after the caller's own retries.
+    pub fn api_fetch_failed(&self, index: u32) -> Result<(), DirectTransferError> {
+        lock_tolerant(&self.inner).api_fetch_failed(index).map_err(plan_error)
+    }
+
+    /// Chunk `index` arrived but did not authenticate when decrypted.
+    pub fn chunk_unauthentic(&self, index: u32) -> Result<(), DirectTransferError> {
+        lock_tolerant(&self.inner).chunk_unauthentic(index).map_err(plan_error)
+    }
+
+    /// Chunk `index` has been decrypted and written. Strictly in order.
+    pub fn consumed(&self, index: u32) -> Result<(), DirectTransferError> {
+        lock_tolerant(&self.inner).consumed(index).map_err(plan_error)
+    }
+
+    /// The version's geometry, once the first window was accepted.
+    pub fn geometry(&self) -> Option<DirectGeometryDto> {
+        lock_tolerant(&self.inner).geometry().map(|g| DirectGeometryDto {
+            chunk_count: g.chunk_count,
+            chunk_size: g.chunk_size,
+            encrypted_size: g.encrypted_size,
+            original_size: g.original_size,
+        })
+    }
+
+    /// The pinned `object_version_id`, once the first window was accepted.
+    pub fn pinned_version(&self) -> Option<String> {
+        lock_tolerant(&self.inner).pinned_version().map(str::to_owned)
+    }
+
+    /// Chunks decrypted and written so far.
+    pub fn consumed_count(&self) -> u32 {
+        lock_tolerant(&self.inner).consumed_count()
+    }
+
+    /// Chunk requests (storage or API) currently outstanding.
+    pub fn in_flight(&self) -> u32 {
+        lock_tolerant(&self.inner).in_flight() as u32
+    }
+
+    /// Cap the ciphertext bytes held at once (fetching, or fetched and waiting to be decrypted in order):
+    /// the planner then holds `clamp(floor(bytes / (chunk_size + 28)), 1, 4)` chunks. Call it before the first `poll`.
+    pub fn set_max_in_flight_bytes(&self, bytes: u64) {
+        lock_tolerant(&self.inner).set_max_in_flight_bytes(Some(bytes));
+    }
+
+    /// Did the storage breaker trip? It does when a chunk used up its renewals and no chunk of this transfer has
+    /// come whole from storage: from then on every remaining chunk is a `FetchViaApi` poll. When the file ends
+    /// with this `true`, record `DirectHealthHandle.gave_up(Download, now_ms)`.
+    pub fn storage_given_up(&self) -> bool {
+        lock_tolerant(&self.inner).storage_given_up()
+    }
+}
+
+/// What to do about discovery right now.
+#[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
+pub enum DirectLookupDto {
+    /// Ask the server.
+    Fetch,
+    /// Use this answer (it may still say the server offers nothing).
+    Cached { discovery: DirectDiscoveryDto },
+    /// Do not ask; use the API.
+    UseApi,
+}
+
+/// How long a discovery answer is trusted (10 minutes), and whether to ask
+/// again. A JSON 404 and two failed attempts are each remembered for the same ten minutes, then the
+/// client probes again; within a trust period a failed attempt is retried once.
+#[derive(uniffi::Object)]
+pub struct DirectDiscoveryCacheHandle {
+    inner: Mutex<dt::DiscoveryCache>,
+}
+
+#[uniffi::export]
+impl DirectDiscoveryCacheHandle {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            inner: Mutex::new(dt::DiscoveryCache::new()),
+        })
+    }
+
+    pub fn lookup(&self, now_ms: i64) -> DirectLookupDto {
+        match lock_tolerant(&self.inner).lookup(now_ms) {
+            dt::Lookup::Fetch => DirectLookupDto::Fetch,
+            dt::Lookup::Cached(d) => DirectLookupDto::Cached { discovery: d.into() },
+            dt::Lookup::UseApi => DirectLookupDto::UseApi,
+        }
+    }
+
+    /// Record the result of a discovery call: the `classify_direct_answer`
+    /// outcome and the response body (or `None`).
+    pub fn record(&self, outcome: DirectOutcomeDto, body: Option<Vec<u8>>, now_ms: i64) {
+        let discovery = body.and_then(|b| dt::Discovery::from_json(&b).ok());
+        lock_tolerant(&self.inner).record(&outcome.to_core(), discovery, now_ms);
+    }
+}
+
+/// Which way the bytes go.
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirectDirectionDto {
+    Download,
+    Upload,
+}
+
+impl From<DirectDirectionDto> for dt::Direction {
+    fn from(d: DirectDirectionDto) -> Self {
+        match d {
+            DirectDirectionDto::Download => dt::Direction::Download,
+            DirectDirectionDto::Upload => dt::Direction::Upload,
+        }
+    }
+}
+
+/// Whether this client may start a direct transfer now, per direction: after a transfer gave up direct, no
+/// new one of that direction starts for ten minutes. One per API base and account. `now_ms` is Unix
+/// milliseconds (or a monotonic clock, used consistently). `last_gave_up_ms` / `restore` let a client that
+/// relaunches often persist the two timestamps. A recorded time later than "now" counts as expired.
+#[derive(uniffi::Object)]
+pub struct DirectHealthHandle {
+    inner: Mutex<dt::DirectHealth>,
+}
+
+#[uniffi::export]
+impl DirectHealthHandle {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            inner: Mutex::new(dt::DirectHealth::new()),
+        })
+    }
+
+    /// A transfer of `direction` gave up direct.
+    pub fn gave_up(&self, direction: DirectDirectionDto, now_ms: i64) {
+        lock_tolerant(&self.inner).gave_up(direction.into(), now_ms);
+    }
+
+    /// May a new direct transfer of `direction` start now?
+    pub fn may_start(&self, direction: DirectDirectionDto, now_ms: i64) -> bool {
+        lock_tolerant(&self.inner).may_start(direction.into(), now_ms)
+    }
+
+    /// As `may_start`, for a file that may already have given up direct: it never may again (`file_gave_up`).
+    pub fn may_start_file(&self, direction: DirectDirectionDto, now_ms: i64, file_gave_up: bool) -> bool {
+        lock_tolerant(&self.inner).may_start_file(direction.into(), now_ms, file_gave_up)
+    }
+
+    /// When the last give-up of `direction` was recorded.
+    pub fn last_gave_up_ms(&self, direction: DirectDirectionDto) -> Option<i64> {
+        lock_tolerant(&self.inner).last_gave_up_ms(direction.into())
+    }
+
+    /// Put back a timestamp `last_gave_up_ms` returned earlier.
+    pub fn restore(&self, direction: DirectDirectionDto, last_gave_up_ms: i64) {
+        lock_tolerant(&self.inner).restore(direction.into(), last_gave_up_ms);
+    }
+}
+
+/// The transport a resume record names.
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirectRecordedTransportDto {
+    Api,
+    Direct,
+}
+
+/// What the client learned from discovery when it asked just now.
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirectDiscoveryStateDto {
+    /// The server answered; `upload`: it lists the direct upload transport.
+    Offers { upload: bool },
+    /// A JSON 404: the server has no direct transfer at all.
+    NotSupported,
+    /// No usable answer (a 5xx, a timeout, a bare 404, a body that did not decode).
+    Unknown,
+    /// 401 or 403: the login is not valid.
+    Unauthorized,
+}
+
+/// What to do with the unfinished upload.
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirectResumeActionDto {
+    ContinueApi,
+    ContinueDirect,
+    /// Abandon the session, clear the record, start again on the API.
+    AbandonToApi,
+    /// Keep the record and fail the file for this run.
+    KeepRecordAndFail,
+    /// Keep the record and ask the user to sign in again.
+    KeepRecordAndReauthenticate,
+}
+
+/// What to do with an unfinished upload found on disk. A recorded direct session is given up only on a
+/// definite no: the user forced the API (`forced_api`), or the server says it offers no direct uploads. It is
+/// never given up because discovery could not be read this time. One rule, so no client writes it by hand.
+#[uniffi::export]
+pub fn direct_resume_transport(
+    recorded: DirectRecordedTransportDto,
+    discovery: DirectDiscoveryStateDto,
+    forced_api: bool,
+) -> DirectResumeActionDto {
+    let recorded = match recorded {
+        DirectRecordedTransportDto::Api => dt::RecordedTransport::Api,
+        DirectRecordedTransportDto::Direct => dt::RecordedTransport::Direct,
+    };
+    let discovery = match discovery {
+        DirectDiscoveryStateDto::Offers { upload } => dt::DiscoveryState::Offers { upload },
+        DirectDiscoveryStateDto::NotSupported => dt::DiscoveryState::NotSupported,
+        DirectDiscoveryStateDto::Unknown => dt::DiscoveryState::Unknown,
+        DirectDiscoveryStateDto::Unauthorized => dt::DiscoveryState::Unauthorized,
+    };
+    match dt::resume_transport(recorded, discovery, forced_api) {
+        dt::ResumeAction::ContinueApi => DirectResumeActionDto::ContinueApi,
+        dt::ResumeAction::ContinueDirect => DirectResumeActionDto::ContinueDirect,
+        dt::ResumeAction::AbandonToApi => DirectResumeActionDto::AbandonToApi,
+        dt::ResumeAction::KeepRecordAndFail => DirectResumeActionDto::KeepRecordAndFail,
+        dt::ResumeAction::KeepRecordAndReauthenticate => DirectResumeActionDto::KeepRecordAndReauthenticate,
+    }
+}
+
 #[cfg(test)]
 mod search_index_binding_tests {
     use super::*;
@@ -3016,5 +5879,798 @@ mod search_index_binding_tests {
         assert_eq!(plan.to_delete.len(), 1);
         assert_eq!(plan.to_delete[0].bucket, 3);
         assert!(plan.to_get.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod onboarding_binding_tests {
+    use super::*;
+
+    const GOOD_PW: &str = "correct horse battery staple";
+
+    #[test]
+    fn evaluate_password_maps_policy_and_floor() {
+        let e = evaluate_password("aaaaaaa".into(), 1); // hostile min_length 1
+        assert_eq!(e.min_length, 12, "core floor of 12 applies through the binding");
+        assert!(!e.meets_minimum);
+        assert_eq!(e.strength, PasswordStrengthDto::TooShort);
+        assert_eq!(e.hint, PasswordHintDto::NeedMoreCharacters);
+        let strong = evaluate_password("aaaaaaaaaaA1".into(), 12);
+        assert_eq!(
+            (strong.strength, strong.level, strong.hint),
+            (PasswordStrengthDto::Strong, 4, PasswordHintDto::None)
+        );
+    }
+
+    #[test]
+    fn breach_handle_prefix_and_outage_policy() {
+        let h = BreachCheckHandle::new("password".into());
+        assert_eq!(h.prefix(), "5BAA6");
+        assert_eq!(
+            h.evaluate(h.prefix(), None, true).unwrap(),
+            BreachVerdictDto::CheckFailedAllowed
+        );
+        assert_eq!(
+            h.evaluate(h.prefix(), None, false).unwrap(),
+            BreachVerdictDto::CheckFailedBlocked
+        );
+        assert!(breach_verdict_allows_proceeding(BreachVerdictDto::CheckFailedAllowed));
+        assert!(!breach_verdict_allows_proceeding(BreachVerdictDto::CheckFailedBlocked));
+        assert!(breach_verdict_check_failed(BreachVerdictDto::CheckFailedAllowed));
+        let hit = h
+            .evaluate(
+                h.prefix(),
+                Some("1E4C9B93F3F0682250B6CF8331B7EE68FD8:9\r\n".into()),
+                true,
+            )
+            .unwrap();
+        assert_eq!(hit, BreachVerdictDto::Breached { count: 9 });
+        assert!(!breach_verdict_allows_proceeding(hit));
+        // An empty body is an outage (review M2), not clean.
+        assert_eq!(
+            h.evaluate(h.prefix(), Some(String::new()), false).unwrap(),
+            BreachVerdictDto::CheckFailedBlocked
+        );
+    }
+
+    #[test]
+    fn breach_handle_refuses_another_prefix() {
+        let h = BreachCheckHandle::new("password".into());
+        let err = h
+            .evaluate(
+                "ABCDE".into(),
+                Some("0018A45C4D1DEF81644B54AB7F969B88D65:1\r\n".into()),
+                true,
+            )
+            .expect_err("mismatched prefix must be refused");
+        assert!(matches!(err, OnboardingError::BreachPrefixMismatch), "{err}");
+    }
+
+    #[test]
+    fn ceremony_errors_map_to_distinct_variants() {
+        let c = SignupCeremonyHandle::new(12, true, 3, false, true);
+        assert_eq!(c.step(), CeremonyStepDto::VerifyEmail);
+        assert!(matches!(
+            c.start_registration(),
+            Err(OnboardingError::StepNotDone {
+                blocking: CeremonyStepDto::VerifyEmail,
+                ..
+            })
+        ));
+        c.email_verified();
+        assert!(matches!(
+            c.set_password("short".into(), "short".into(), None),
+            Err(OnboardingError::PasswordTooShort {
+                length: 5,
+                min_length: 12
+            })
+        ));
+        assert!(matches!(
+            c.set_password(GOOD_PW.into(), "other".into(), None),
+            Err(OnboardingError::PasswordMismatch)
+        ));
+        assert!(matches!(c.phrase(), Err(OnboardingError::PhraseUnavailable)));
+        assert_eq!(
+            ceremony_step_spec_id(CeremonyStepDto::ConfirmPhrase),
+            "save_recovery_phrase"
+        );
+    }
+
+    #[test]
+    fn breach_gate_is_bound_to_the_handle_and_the_ceremonys_own_policy() {
+        let clean = "0018A45C4D1DEF81644B54AB7F969B88D65:1\r\n".to_string();
+        let c = SignupCeremonyHandle::new(12, false, 3, true, false);
+
+        // Required and absent.
+        assert!(matches!(
+            c.set_password(GOOD_PW.into(), GOOD_PW.into(), None),
+            Err(OnboardingError::BreachCheckMissing)
+        ));
+        // A clean answer recorded for another password is stale.
+        let other = BreachCheckHandle::new("an older password!".into());
+        other.evaluate(other.prefix(), Some(clean.clone()), true).unwrap();
+        assert!(matches!(
+            c.set_password(GOOD_PW.into(), GOOD_PW.into(), Some(other)),
+            Err(OnboardingError::BreachCheckStale)
+        ));
+        // Outage: the ceremony's fail_open (false) wins over what the caller showed the user.
+        let down = BreachCheckHandle::new(GOOD_PW.into());
+        assert_eq!(
+            down.evaluate(down.prefix(), None, true).unwrap(),
+            BreachVerdictDto::CheckFailedAllowed
+        );
+        assert!(matches!(
+            c.set_password(GOOD_PW.into(), GOOD_PW.into(), Some(down)),
+            Err(OnboardingError::BreachCheckBlocked)
+        ));
+        // Breached.
+        let suffix = onb::BreachQuery::from_password(GOOD_PW).suffix().to_owned();
+        let hit = BreachCheckHandle::new(GOOD_PW.into());
+        hit.evaluate(hit.prefix(), Some(format!("{suffix}:4\r\n")), true)
+            .unwrap();
+        assert!(matches!(
+            c.set_password(GOOD_PW.into(), GOOD_PW.into(), Some(hit)),
+            Err(OnboardingError::PasswordBreached { count: 4 })
+        ));
+        assert_eq!(
+            c.step(),
+            CeremonyStepDto::SetPassword,
+            "no rejection stored the password"
+        );
+        // Clean passes.
+        let ok = BreachCheckHandle::new(GOOD_PW.into());
+        ok.evaluate(ok.prefix(), Some(clean), false).unwrap();
+        assert!(c.set_password(GOOD_PW.into(), GOOD_PW.into(), Some(ok)).is_ok());
+    }
+
+    #[test]
+    fn abandon_wipes_and_a_poisoned_lock_does_not_brick_the_handle() {
+        let c = SignupCeremonyHandle::new(12, false, 3, false, true);
+        c.set_password(GOOD_PW.into(), GOOD_PW.into(), None).unwrap();
+        assert_ne!(c.step(), CeremonyStepDto::SetPassword);
+        c.abandon();
+        assert_eq!(c.step(), CeremonyStepDto::SetPassword);
+        assert!(matches!(c.phrase(), Err(OnboardingError::PhraseUnavailable)));
+
+        // Poison the mutex with a panicking closure; later calls still work (review L10).
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.with(|_| panic!("boom"));
+        }));
+        assert!(poisoned.is_err());
+        assert_eq!(c.step(), CeremonyStepDto::SetPassword);
+        c.email_changed();
+    }
+
+    /// Whole ceremony through the binding against a real server-side OPAQUE,
+    /// ending in a `MasterKeyHandle` whose key equals what the phrase recovers.
+    #[test]
+    fn full_ceremony_through_the_binding_hands_back_a_key_handle() {
+        let server_setup = beebeeb_core::opaque_protocol::create_server_setup();
+        let username = b"binding@beebeeb.io";
+
+        let c = SignupCeremonyHandle::new(12, false, 3, false, true);
+        c.set_password(GOOD_PW.into(), GOOD_PW.into(), None).unwrap();
+        c.begin_phrase().unwrap();
+        let phrase = c.phrase().unwrap();
+        c.acknowledge_phrase().unwrap();
+        let words: Vec<&str> = phrase.split_whitespace().collect();
+        let answers: Vec<String> = c
+            .challenge_positions()
+            .unwrap()
+            .iter()
+            .map(|p| words[*p as usize - 1].to_owned())
+            .collect();
+        c.confirm_phrase(answers).unwrap();
+        assert_eq!(c.step(), CeremonyStepDto::CreateAccount);
+
+        let msg = c.start_registration().unwrap();
+        let server_msg =
+            beebeeb_core::opaque_protocol::server_registration_start(&server_setup, &msg, username).unwrap();
+        let fin = c.finish_registration(server_msg).unwrap();
+        assert_eq!(fin.x25519_public.len(), 32);
+        assert_eq!(fin.recovery_check.len(), 32);
+        assert!(!fin.upload.is_empty());
+
+        let handle = c.account_created().unwrap();
+        let from_handle = handle.with_key(|mk| mk.to_bytes()).unwrap();
+        let from_phrase = recovery::recover_from_phrase(&phrase).unwrap().to_bytes();
+        assert_eq!(from_handle, from_phrase);
+        assert_eq!(c.step(), CeremonyStepDto::Done);
+        assert!(
+            matches!(c.phrase(), Err(OnboardingError::PhraseUnavailable)),
+            "phrase wiped"
+        );
+    }
+}
+
+#[cfg(test)]
+mod folder_key_id_2133 {
+    use super::*;
+
+    #[test]
+    fn a_folder_key_that_is_not_32_bytes_is_invalid_input() {
+        for len in [31usize, 33] {
+            assert!(
+                matches!(folder_key_id(vec![0x80; len]), Err(CryptoError::InvalidInput { .. })),
+                "{len} bytes"
+            );
+        }
+    }
+
+    #[test]
+    fn the_32_byte_vector_matches() {
+        let key: Vec<u8> = (0x80u8..=0x9f).collect();
+        let id = folder_key_id(key).expect("a 32-byte key");
+        let hex: String = id.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, "e07f022dd6a140210b19530af0a6b316ec4f06b3a2b086fdf0c03c761baf3b07");
+    }
+}
+
+#[cfg(test)]
+mod direct_transfer_binding_tests {
+    //! The cross-client contract vectors, run through the EXPORTED functions and handle of this
+    //! crate. The same file `beebeeb-core` runs through core directly: a binding that drifts
+    //! from core fails here.
+
+    use beebeeb_core::direct_transfer::vectors::{self, CacheSurface, HealthSurface, PlannerSurface, Surface};
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    struct UniffiSurface;
+
+    struct UniffiPlanner(Arc<DirectDownloadPlannerHandle>);
+
+    struct UniffiCache(Arc<DirectDiscoveryCacheHandle>);
+
+    struct UniffiHealth(Arc<DirectHealthHandle>);
+
+    fn direction_dto(code: &str) -> DirectDirectionDto {
+        match code {
+            "download" => DirectDirectionDto::Download,
+            "upload" => DirectDirectionDto::Upload,
+            other => panic!("unknown direction {other:?}"),
+        }
+    }
+
+    impl HealthSurface for UniffiHealth {
+        fn gave_up(&mut self, direction: &str, now_ms: i64) {
+            self.0.gave_up(direction_dto(direction), now_ms);
+        }
+        fn may_start(&self, direction: &str, now_ms: i64) -> bool {
+            self.0.may_start(direction_dto(direction), now_ms)
+        }
+        fn may_start_file(&self, direction: &str, now_ms: i64, file_gave_up: bool) -> bool {
+            self.0.may_start_file(direction_dto(direction), now_ms, file_gave_up)
+        }
+        fn last_gave_up_ms(&self, direction: &str) -> Option<i64> {
+            self.0.last_gave_up_ms(direction_dto(direction))
+        }
+        fn restore(&mut self, direction: &str, last_gave_up_ms: i64) {
+            self.0.restore(direction_dto(direction), last_gave_up_ms);
+        }
+    }
+
+    impl CacheSurface for UniffiCache {
+        fn lookup(&self, now_ms: i64) -> String {
+            match self.0.lookup(now_ms) {
+                DirectLookupDto::Fetch => "fetch",
+                DirectLookupDto::Cached { .. } => "cached",
+                DirectLookupDto::UseApi => "use_api",
+            }
+            .to_string()
+        }
+
+        fn record(&mut self, outcome: &Value, body: Option<&[u8]>, now_ms: i64) {
+            self.0.record(outcome_dto(outcome), body.map(<[u8]>::to_vec), now_ms);
+        }
+    }
+
+    fn discovery_dto(v: &Value) -> DirectDiscoveryDto {
+        let d: dt::Discovery = serde_json::from_value(v.clone()).expect("discovery");
+        d.into()
+    }
+
+    /// The host hands outcomes back to core (a planner's `window_failed`, the pinned retry decision, the
+    /// discovery cache): every kind must come back as itself, `Regrant` and `Retry` included.
+    #[test]
+    fn every_outcome_survives_a_round_trip_through_core() {
+        for outcome in [
+            DirectOutcomeDto::Proceed,
+            DirectOutcomeDto::NotSupported,
+            DirectOutcomeDto::UseApiNow,
+            DirectOutcomeDto::ApiForThisFile,
+            DirectOutcomeDto::Restart,
+            DirectOutcomeDto::Backoff { millis: 1500 },
+            DirectOutcomeDto::Terminal {
+                status: 403,
+                error: None,
+            },
+            DirectOutcomeDto::Terminal {
+                status: 404,
+                error: Some("not found".to_string()),
+            },
+            DirectOutcomeDto::Retry,
+            DirectOutcomeDto::Regrant,
+            DirectOutcomeDto::Held { millis: None },
+            DirectOutcomeDto::Held { millis: Some(3000) },
+        ] {
+            assert_eq!(DirectOutcomeDto::from_core(&outcome.to_core()), outcome);
+        }
+    }
+
+    fn outcome_value(o: &DirectOutcomeDto) -> Value {
+        match o {
+            DirectOutcomeDto::Proceed => json!({"kind": "proceed"}),
+            DirectOutcomeDto::NotSupported => json!({"kind": "not_supported"}),
+            DirectOutcomeDto::UseApiNow => json!({"kind": "use_api_now"}),
+            DirectOutcomeDto::ApiForThisFile => json!({"kind": "api_for_this_file"}),
+            DirectOutcomeDto::Restart => json!({"kind": "restart"}),
+            DirectOutcomeDto::Backoff { millis } => json!({"kind": "backoff", "millis": millis}),
+            DirectOutcomeDto::Terminal { status, error } => {
+                json!({"kind": "terminal", "status": status, "error": error})
+            }
+            DirectOutcomeDto::Retry => json!({"kind": "retry"}),
+            DirectOutcomeDto::Regrant => json!({"kind": "regrant"}),
+            DirectOutcomeDto::Held { millis } => json!({"kind": "held", "millis": millis}),
+        }
+    }
+
+    fn outcome_dto(v: &Value) -> DirectOutcomeDto {
+        match v["kind"].as_str().unwrap() {
+            "proceed" => DirectOutcomeDto::Proceed,
+            "not_supported" => DirectOutcomeDto::NotSupported,
+            "use_api_now" => DirectOutcomeDto::UseApiNow,
+            "api_for_this_file" => DirectOutcomeDto::ApiForThisFile,
+            "restart" => DirectOutcomeDto::Restart,
+            "retry" => DirectOutcomeDto::Retry,
+            "regrant" => DirectOutcomeDto::Regrant,
+            "held" => DirectOutcomeDto::Held {
+                millis: v["millis"].as_u64(),
+            },
+            "backoff" => DirectOutcomeDto::Backoff {
+                millis: v["millis"].as_u64().unwrap(),
+            },
+            "terminal" => DirectOutcomeDto::Terminal {
+                status: v["status"].as_u64().unwrap() as u16,
+                error: v["error"].as_str().map(str::to_owned),
+            },
+            other => panic!("unknown outcome {other}"),
+        }
+    }
+
+    fn poll_value(p: DirectPollDto) -> Value {
+        match p {
+            DirectPollDto::RequestWindow { request } => json!({"kind": "request_window", "request": {
+                "object_version_id": request.object_version_id, "start_index": request.start_index,
+                "count": request.count, "renewal": request.renewal}}),
+            DirectPollDto::Fetch { index, grant } => {
+                json!({"kind": "fetch", "index": index, "url": grant.url.raw(), "length": grant.length})
+            }
+            DirectPollDto::FetchViaApi {
+                index,
+                object_version_id,
+            } => json!({"kind": "fetch_via_api", "index": index, "object_version_id": object_version_id}),
+            DirectPollDto::Wait { until_ms } => json!({"kind": "wait", "until_ms": until_ms}),
+            DirectPollDto::Done => json!({"kind": "done"}),
+            DirectPollDto::Stop { verdict } => {
+                let v = match verdict {
+                    DirectVerdictDto::ApiForFile => json!({"kind": "api_for_file"}),
+                    DirectVerdictDto::Restart => json!({"kind": "restart"}),
+                    DirectVerdictDto::Terminal { status, error } => {
+                        json!({"kind": "terminal", "status": status, "error": error})
+                    }
+                    DirectVerdictDto::Corrupt => json!({"kind": "corrupt"}),
+                };
+                json!({"kind": "stop", "verdict": v})
+            }
+        }
+    }
+
+    fn plan_code(e: DirectTransferError) -> String {
+        match e {
+            DirectTransferError::Plan { code } => code,
+            other => panic!("unexpected error {other:?}"),
+        }
+    }
+
+    impl Surface for UniffiSurface {
+        type Planner = UniffiPlanner;
+        type Cache = UniffiCache;
+        type Health = UniffiHealth;
+
+        fn cache(&self) -> UniffiCache {
+            UniffiCache(DirectDiscoveryCacheHandle::new())
+        }
+
+        fn health(&self) -> UniffiHealth {
+            UniffiHealth(DirectHealthHandle::new())
+        }
+
+        fn resume_transport(&self, recorded: &str, discovery: &Value, forced_api: bool) -> String {
+            let recorded = match recorded {
+                "api" => DirectRecordedTransportDto::Api,
+                "direct" => DirectRecordedTransportDto::Direct,
+                other => panic!("unknown recorded transport {other:?}"),
+            };
+            let state = match discovery["kind"].as_str().unwrap() {
+                "offers" => DirectDiscoveryStateDto::Offers {
+                    upload: discovery["upload"].as_bool().unwrap(),
+                },
+                "not_supported" => DirectDiscoveryStateDto::NotSupported,
+                "unknown" => DirectDiscoveryStateDto::Unknown,
+                "unauthorized" => DirectDiscoveryStateDto::Unauthorized,
+                other => panic!("unknown discovery state {other:?}"),
+            };
+            match direct_resume_transport(recorded, state, forced_api) {
+                DirectResumeActionDto::ContinueApi => "continue_api",
+                DirectResumeActionDto::ContinueDirect => "continue_direct",
+                DirectResumeActionDto::AbandonToApi => "abandon_to_api",
+                DirectResumeActionDto::KeepRecordAndFail => "keep_record_and_fail",
+                DirectResumeActionDto::KeepRecordAndReauthenticate => "keep_record_and_reauthenticate",
+            }
+            .to_string()
+        }
+
+        fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String> {
+            direct_check_storage_url(url.to_owned(), discovery_dto(discovery), api_base.to_owned()).map_err(|e| match e
+            {
+                DirectTransferError::LinkRefused { code } => code,
+                other => panic!("unexpected error {other:?}"),
+            })
+        }
+
+        fn classify(
+            &self,
+            call: &str,
+            status: u16,
+            content_type: Option<&str>,
+            body: &[u8],
+            retry_after: Option<&str>,
+        ) -> Value {
+            let outcome = classify_direct_answer(
+                call.to_owned(),
+                status,
+                content_type.map(str::to_owned),
+                body.to_vec(),
+                retry_after.map(str::to_owned),
+            )
+            .expect("known call");
+            outcome_value(&outcome)
+        }
+
+        fn redact(&self, input: &str) -> String {
+            direct_redact_url(input.to_owned())
+        }
+
+        fn pinned_retry(&self, outcome: &Value, attempt: u32, waited_ms: u64) -> Value {
+            match direct_pinned_retry_decision(outcome_dto(outcome), attempt, waited_ms) {
+                DirectRetryDecisionDto::Wait { millis } => json!({"kind": "wait", "millis": millis}),
+                DirectRetryDecisionDto::GiveUp => json!({"kind": "give_up"}),
+            }
+        }
+
+        fn scrub(&self, input: &str) -> String {
+            direct_scrub_text(input.to_owned())
+        }
+
+        fn chunk_length(&self, chunk_count: u32, chunk_size: u64, encrypted_size: u64, index: u32) -> Option<u64> {
+            // Not exported on its own: reached through the planner's length check. Core's value is the contract.
+            dt::Geometry {
+                chunk_count,
+                chunk_size,
+                encrypted_size,
+                original_size: 0,
+            }
+            .chunk_length(index)
+        }
+
+        fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> UniffiPlanner {
+            UniffiPlanner(DirectDownloadPlannerHandle::new(
+                discovery_dto(discovery),
+                api_base.to_owned(),
+                file_id.to_owned(),
+                seed,
+            ))
+        }
+    }
+
+    impl PlannerSurface for UniffiPlanner {
+        fn poll(&mut self, now_ms: i64) -> Value {
+            poll_value(self.0.poll(now_ms))
+        }
+
+        fn window_answered(&mut self, body: &[u8], now_ms: i64) -> Result<(), String> {
+            match self.0.window_answered(body.to_vec(), now_ms) {
+                DirectWindowAnswerDto::Accepted => Ok(()),
+                DirectWindowAnswerDto::Malformed => Err("malformed".to_owned()),
+                DirectWindowAnswerDto::Refused { code } => Err(code),
+            }
+        }
+
+        fn window_failed(&mut self, outcome: &Value, now_ms: i64) {
+            self.0.window_failed(outcome_dto(outcome), now_ms);
+        }
+
+        fn window_malformed(&mut self) {
+            self.0.window_malformed();
+        }
+
+        fn fetch_ok(&mut self, index: u32) -> Result<(), String> {
+            self.0.fetch_ok(index).map_err(plan_code)
+        }
+
+        fn fetch_failed(&mut self, index: u32, now_ms: i64) -> Result<(), String> {
+            self.0.fetch_failed(index, now_ms).map_err(plan_code)
+        }
+
+        fn api_fetch_failed(&mut self, index: u32) -> Result<(), String> {
+            self.0.api_fetch_failed(index).map_err(plan_code)
+        }
+
+        fn chunk_unauthentic(&mut self, index: u32) -> Result<(), String> {
+            self.0.chunk_unauthentic(index).map_err(plan_code)
+        }
+
+        fn consumed(&mut self, index: u32) -> Result<(), String> {
+            self.0.consumed(index).map_err(plan_code)
+        }
+
+        fn inspect(&self) -> Value {
+            json!({
+                "geometry": self.0.geometry().map(|g| json!({
+                    "chunk_count": g.chunk_count, "chunk_size": g.chunk_size,
+                    "encrypted_size": g.encrypted_size, "original_size": g.original_size})),
+                "pinned_version": self.0.pinned_version(),
+                "consumed": self.0.consumed_count(),
+                "in_flight": self.0.in_flight(),
+            })
+        }
+
+        fn set_max_in_flight_bytes(&mut self, bytes: u64) {
+            self.0.set_max_in_flight_bytes(bytes);
+        }
+
+        fn storage_given_up(&self) -> bool {
+            self.0.storage_given_up()
+        }
+    }
+
+    #[test]
+    fn the_exported_surface_passes_every_row_of_the_vectors() {
+        let report = vectors::run_all(&UniffiSurface);
+        assert_eq!(
+            report,
+            vectors::expected_report(),
+            "a section that did not run is a failure"
+        );
+    }
+
+    #[test]
+    fn the_time_bounds_and_the_storage_totals_follow_core() {
+        // A 4 MiB chunk (plus the AEAD overhead): 60 s + 33 s, in milliseconds.
+        let len = 4 * 1024 * 1024 + 28;
+        assert_eq!(direct_storage_put_total_ms(len), 93_000);
+        assert_eq!(direct_storage_get_total_ms(len), 93_000);
+        assert_eq!(direct_storage_put_total_ms(0), 60_000);
+        assert_eq!(direct_background_put_resource_timeout_ms(), 240_000);
+        // A hostile length is a long timeout, not a wrap to a short one.
+        assert!(direct_storage_put_total_ms(u64::MAX) > direct_storage_put_total_ms(256 * 1024 * 1024 + 28));
+        let c = direct_transfer_constants();
+        assert_eq!(
+            (
+                c.storage_connect_timeout_ms,
+                c.storage_get_idle_ms,
+                c.discovery_timeout_ms,
+                c.api_call_timeout_ms,
+                c.background_put_resource_timeout_ms
+            ),
+            (15_000, 30_000, 15_000, 60_000, 240_000),
+            "the numbers of the clients design, 6.2"
+        );
+    }
+
+    #[test]
+    fn constants_discovery_and_the_cache_follow_core() {
+        let c = direct_transfer_constants();
+        assert_eq!(c.cap_object_download_v1, "object-download-v1");
+        assert_eq!(c.capabilities_header, "X-Beebeeb-Capabilities");
+        assert_eq!((c.max_window, c.default_window, c.chunk_overhead), (32, 8, 28));
+        assert_eq!(
+            direct_download_grants_path("f".to_owned()),
+            "/api/v1/files/f/download-grants"
+        );
+
+        let body =
+            br#"{"download":["object-download-v1"],"upload":null,"storage_hosts":["s3.storage.test"],"future":1}"#;
+        let d = parse_direct_discovery(body.to_vec()).unwrap();
+        assert!(direct_discovery_offers_download(d.clone()) && d.upload.is_empty());
+        assert!(matches!(
+            parse_direct_discovery(b"[]".to_vec()),
+            Err(DirectTransferError::Discovery { code }) if code == "discovery_malformed"
+        ));
+        assert!(matches!(
+            parse_direct_discovery(vec![b' '; dt::wire::MAX_DISCOVERY_BYTES + 1]),
+            Err(DirectTransferError::Discovery { code }) if code == "discovery_too_large"
+        ));
+
+        let cache = DirectDiscoveryCacheHandle::new();
+        assert_eq!(cache.lookup(0), DirectLookupDto::Fetch);
+        cache.record(DirectOutcomeDto::Proceed, Some(body.to_vec()), 1_000);
+        assert!(matches!(cache.lookup(1_000), DirectLookupDto::Cached { .. }));
+        assert_eq!(
+            cache.lookup(1_000 + 10 * 60 * 1000),
+            DirectLookupDto::Fetch,
+            "trusted for 10 minutes"
+        );
+        let gone = DirectDiscoveryCacheHandle::new();
+        gone.record(DirectOutcomeDto::NotSupported, None, 0);
+        assert_eq!(gone.lookup(1), DirectLookupDto::UseApi, "NotSupported is remembered");
+    }
+
+    #[test]
+    fn the_jitter_seed_reaches_the_planner() {
+        // The same failure, on planners seeded differently, waits different times (equal jitter);
+        // the same seed repeats. A binding that drops the seed would give every client one schedule.
+        let vectors = vectors::vectors();
+        let t0 = vectors["t0_ms"].as_i64().unwrap();
+        let file_id = vectors["file_id"].as_str().unwrap().to_owned();
+        let wait_after_a_failure = |seed: u64| -> i64 {
+            let p = DirectDownloadPlannerHandle::new(
+                discovery_dto(&vectors["discoveries"]["std"]),
+                "https://api.beebeeb.test".to_owned(),
+                file_id.clone(),
+                seed,
+            );
+            p.poll(t0);
+            let window = vectors["planner"][0]["steps"][2]["response"].clone();
+            assert_eq!(
+                p.window_answered(serde_json::to_vec(&window).unwrap(), t0),
+                DirectWindowAnswerDto::Accepted
+            );
+            for _ in 0..3 {
+                p.poll(t0);
+            }
+            p.fetch_failed(0, t0).unwrap();
+            match p.poll(t0) {
+                DirectPollDto::Wait { until_ms: Some(t) } => t,
+                other => panic!("expected a wait for the renewal, got {other:?}"),
+            }
+        };
+        let waits: Vec<i64> = (1..=6).map(wait_after_a_failure).collect();
+        assert!(waits.iter().any(|w| *w != waits[0]), "{waits:?}");
+        assert_eq!(wait_after_a_failure(3), wait_after_a_failure(3));
+    }
+
+    #[test]
+    fn unknown_calls_and_driving_errors_are_typed() {
+        assert!(matches!(
+            classify_direct_answer("nope".to_owned(), 200, None, vec![], None),
+            Err(DirectTransferError::UnknownCall)
+        ));
+        let p = DirectDownloadPlannerHandle::new(
+            DirectDiscoveryDto::from(dt::Discovery::default()),
+            "https://api.beebeeb.test".to_owned(),
+            "f".to_owned(),
+            1,
+        );
+        assert!(matches!(p.fetch_ok(0), Err(DirectTransferError::Plan { code }) if code == "not_in_flight"));
+        assert!(
+            matches!(p.consumed(0), Err(DirectTransferError::Plan { code }) if code == "out_of_order" || code == "not_fetched")
+        );
+    }
+
+    #[test]
+    fn a_signed_url_is_built_from_text_and_prints_none_of_it() {
+        let text = "https://s3.storage.test/bb-01/k?X-Amz-Signature=SECRETSIG";
+        let a = DirectSignedUrl::new(text.to_owned());
+        let other = DirectSignedUrl::new(format!("{text}x"));
+        assert_eq!(a.raw(), text);
+        // Rust-side equality exists (the derives of the records need it); the bindings do not export it.
+        assert_eq!(*a, *DirectSignedUrl::new(text.to_owned()));
+        assert_ne!(*a, *other);
+        assert!(!format!("{a:?} {a}").contains("SECRETSIG"));
+    }
+
+    /// The committed Swift and Kotlin are what the apps compile. A change to the exported surface of the link
+    /// (its redacted `toString`, the constructor, the traits it must NOT export) must come with regenerated files.
+    #[test]
+    fn the_committed_bindings_carry_the_signed_url_surface() {
+        let swift = include_str!("../bindings/beebeeb_uniffi.swift");
+        assert!(
+            swift.contains(
+                "open class DirectSignedUrl: DirectSignedUrlProtocol, @unchecked Sendable, \
+                 CustomDebugStringConvertible, CustomStringConvertible {"
+            ),
+            "Swift: DirectSignedUrl is printed through its Rust Display/Debug, and is not Equatable or Hashable"
+        );
+        assert!(
+            swift.contains("public convenience init(url: String)"),
+            "Swift: the constructor"
+        );
+        let header = include_str!("../bindings/beebeeb_uniffiFFI.h");
+        let kotlin_sources = [
+            include_str!("../bindings/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
+            include_str!("../../bindings/kotlin/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
+        ];
+        // UniFFI 0.31.1's Kotlin `equals`/`hashCode` lower the object's handle with no destroyed check: comparing
+        // or hashing a released link, grant or poll would be a use-after-free in native code. None is exported.
+        for exported in [
+            "directsignedurl_uniffi_trait_eq",
+            "directsignedurl_uniffi_trait_hash",
+            "directchunkgrantdto_uniffi_trait",
+            "directpolldto_uniffi_trait",
+        ] {
+            assert!(!header.contains(exported), "C header exports {exported}");
+            assert!(!swift.contains(exported), "Swift calls {exported}");
+            for kotlin in kotlin_sources {
+                assert!(!kotlin.contains(exported), "Kotlin calls {exported}");
+            }
+        }
+        for held_in in [
+            "public struct DirectChunkGrantDto: Equatable",
+            "public struct DirectChunkGrantDto: Hashable",
+            "public enum DirectPollDto: Equatable",
+            "public enum DirectPollDto: Hashable",
+        ] {
+            assert!(!swift.contains(held_in), "Swift: {held_in}");
+        }
+        for kotlin in kotlin_sources {
+            let class = kotlin
+                .split("open class DirectSignedUrl")
+                .nth(1)
+                .expect("Kotlin: DirectSignedUrl is generated")
+                .split("object FfiConverterTypeDirectSignedUrl")
+                .next()
+                .unwrap();
+            for needed in ["override fun toString()", "constructor(`url`: kotlin.String)"] {
+                assert!(class.contains(needed), "Kotlin: DirectSignedUrl lacks {needed}");
+            }
+            for forbidden in ["override fun equals(", "override fun hashCode("] {
+                assert!(!class.contains(forbidden), "Kotlin: DirectSignedUrl has {forbidden}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_grant_never_prints_its_signature() {
+        let link = "https://s3.storage.test/bb-01/k?X-Amz-Signature=SECRETSIG";
+        let grant = DirectChunkGrantDto {
+            index: 0,
+            method: "GET".to_owned(),
+            url: DirectSignedUrl::new(link.to_owned()),
+            length: 1,
+            expires_at: "2027-01-15T08:05:00Z".to_owned(),
+        };
+        // Everything a generated binding can print: the record's Debug (what Kotlin's data-class
+        // `toString()` and Swift's reflection reach through the object), the object's own Debug and
+        // Display (what the exported `toString()` / `description` call), and the enum around it.
+        let shown = format!(
+            "{grant:?} {:?} {} {:?} {}",
+            DirectPollDto::Fetch {
+                index: 0,
+                grant: grant.clone()
+            },
+            grant.url,
+            grant.url,
+            grant.url.redacted(),
+        );
+        assert!(!shown.contains("SECRETSIG") && !shown.contains("X-Amz"), "{shown}");
+        assert!(
+            shown.contains("s3.storage.test"),
+            "the host is still visible for a log line: {shown}"
+        );
+        // The one way to the link is explicit, by name.
+        assert_eq!(grant.url.raw(), link);
+        let err = direct_check_storage_url(
+            "https://evil.test@s3.storage.test/bb-01/k?X-Amz-Signature=SECRETSIG".to_owned(),
+            DirectDiscoveryDto::from(dt::Discovery::default()),
+            "https://api.beebeeb.test".to_owned(),
+        )
+        .unwrap_err();
+        assert!(
+            !err.to_string().contains("SECRETSIG") && !err.to_string().contains("evil.test"),
+            "{err}"
+        );
     }
 }

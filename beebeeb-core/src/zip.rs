@@ -5,14 +5,18 @@ use zip::CompressionMethod;
 use zip::write::{SimpleFileOptions, ZipWriter};
 
 use crate::CoreError;
-use crate::encrypt::decrypt_chunk_raw;
-use crate::kdf::{MasterKey, derive_file_key};
+use crate::chunk_stream::{ChunkDecryptor, ExpectedChunkFormat};
+use crate::kdf::MasterKey;
 
 pub struct ZipEntry {
     pub path: String,
     pub file_id: String,
     pub chunk_count: u32,
     pub size_bytes: u64,
+    /// From the entry's encrypted metadata
+    /// ([`crate::encrypt::decrypt_file_metadata`]) — task 1908. `V2` accepts
+    /// only v2 frames; `Unrecorded` (legacy metadata) lets chunk 0 decide.
+    pub chunk_format: ExpectedChunkFormat,
 }
 
 pub struct ZipProgress {
@@ -47,7 +51,9 @@ pub fn stream_folder_zip<W: Write + Seek>(
             return Err(CoreError::Cancelled);
         }
 
-        let file_key = derive_file_key(master_key, entry.file_id.as_bytes());
+        // Task 1908: one ordered decrypt stream per entry, so a reordered,
+        // spliced or truncated chunk list fails instead of zipping garbage.
+        let mut decryptor = ChunkDecryptor::for_push(master_key, &entry.file_id, entry.chunk_format);
 
         zip.start_file(&entry.path, options)
             .map_err(|e| CoreError::Io(e.to_string()))?;
@@ -58,7 +64,7 @@ pub fn stream_folder_zip<W: Write + Seek>(
             }
 
             let encrypted = fetch_chunk(&entry.file_id, chunk_idx)?;
-            let plaintext = decrypt_chunk_raw(&file_key, &encrypted)?;
+            let plaintext = decryptor.push_frame(&encrypted)?.data;
 
             zip.write_all(&plaintext).map_err(|e| CoreError::Io(e.to_string()))?;
 
@@ -72,6 +78,9 @@ pub fn stream_folder_zip<W: Write + Seek>(
                 current_file: entry.path.clone(),
             });
         }
+        // `chunk_count` comes from the server; a v2 file whose count was
+        // understated ends before its last chunk and is rejected here.
+        decryptor.finish()?;
     }
 
     zip.finish().map_err(|e| CoreError::Io(e.to_string()))?;

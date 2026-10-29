@@ -59,6 +59,10 @@ pub fn encrypt_chunk(key: &[u8], plaintext: &[u8]) -> Result<JsValue, JsError> {
 
 /// Decrypt a ciphertext chunk that was produced by `encrypt_chunk`.
 /// `key`, `nonce`, and `ciphertext` are raw byte slices.
+///
+/// Generic no-AAD AEAD open (key unwrap, share keys, v1 blobs). It does NOT
+/// open v2 file-content frames — use `WasmChunkDecryptor` (sequential) or
+/// `decrypt_chunk_frame` (random access) for file content (task 1908).
 #[wasm_bindgen]
 pub fn decrypt_chunk(key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, JsError> {
     let fk = file_key_from_slice(key)?;
@@ -302,6 +306,57 @@ pub fn compute_recovery_check(master_key: &[u8]) -> Result<Vec<u8>, JsError> {
         .map_err(|_| JsError::new("master_key must be 32 bytes"))?;
     let mk = kdf::MasterKey::from_bytes(mk_bytes);
     Ok(beebeeb_core::opaque::compute_recovery_check(&mk).to_vec())
+}
+
+/// A shared folder's key id (task 2133): a one-way id of the folder's 32-byte
+/// key, for a server to compare folder keys without learning them (HKDF-SHA256,
+/// info `beebeeb/folder-key-id/v1`). Returns a 32-byte `Uint8Array`; not secret,
+/// and never a key. Wipes the copy of the key this function owns
+/// (wasm-bindgen's own copy is freed without a wipe).
+#[wasm_bindgen]
+pub fn folder_key_id(folder_key: &[u8]) -> Result<Vec<u8>, JsError> {
+    let key = zeroize::Zeroizing::new(
+        <[u8; 32]>::try_from(folder_key).map_err(|_| JsError::new("folder_key must be 32 bytes"))?,
+    );
+    Ok(beebeeb_core::folder_key::folder_key_id(&key).to_vec())
+}
+
+/// Derive one bucket key of a shared folder's encrypted search index (task
+/// 2237b): `HKDF-SHA256(ikm = folder key, salt = none, info =
+/// "beebeeb-shared-folder-index-v1" || bucket as u32 LE)`. Returns a 32-byte
+/// `Uint8Array`. `bucket` must be below the index's shard count (64 in the
+/// standard layout); values of 64 or more are rejected here.
+#[wasm_bindgen(js_name = deriveSharedFolderIndexKey)]
+pub fn derive_shared_folder_index_key(folder_key: &[u8], bucket: u32) -> Result<Vec<u8>, JsError> {
+    if bucket >= beebeeb_core::search_index::DEFAULT_NUM_SHARDS {
+        return Err(JsError::new("bucket must be less than 64"));
+    }
+    let key = zeroize::Zeroizing::new(
+        <[u8; 32]>::try_from(folder_key).map_err(|_| JsError::new("folder_key must be 32 bytes"))?,
+    );
+    let file_key = kdf::FileKey::from_bytes(*key);
+    Ok(kdf::derive_shared_folder_index_key(&file_key, bucket)
+        .as_bytes()
+        .to_vec())
+}
+
+/// Combine a folder link's fragment key `K_c` with an optional 32-byte
+/// passphrase stretch (task 2237b). Pass `undefined`/`null` for a link without
+/// a passphrase. Returns a 32-byte `Uint8Array`: the key that unwraps the
+/// link's sealed folder key. Never send the result or `K_c` to the server.
+#[wasm_bindgen(js_name = combineFolderLinkKey)]
+pub fn combine_folder_link_key(k_c: &[u8], passphrase_stretch: Option<Vec<u8>>) -> Result<Vec<u8>, JsError> {
+    // Own the incoming Vec before validating either secret so every error
+    // path wipes it too. Borrowed wasm-bindgen inputs remain host-owned.
+    let passphrase_stretch = passphrase_stretch.map(zeroize::Zeroizing::new);
+    let k_c = zeroize::Zeroizing::new(<[u8; 32]>::try_from(k_c).map_err(|_| JsError::new("k_c must be 32 bytes"))?);
+    let stretch = match passphrase_stretch {
+        Some(bytes) => Some(zeroize::Zeroizing::new(
+            <[u8; 32]>::try_from(bytes.as_slice()).map_err(|_| JsError::new("passphrase stretch must be 32 bytes"))?,
+        )),
+        None => None,
+    };
+    Ok(kdf::combine_folder_link_key(&k_c, stretch.as_deref()).to_vec())
 }
 
 // ---------------------------------------------------------------------------
@@ -658,6 +713,49 @@ impl WasmChunkEncryptor {
         self.inner.chunks_emitted()
     }
 
+    /// The chunk format this encryptor writes: 1 = v1, 2 = v2 (task 1908).
+    /// Still 1 during the read-only rollout phase. Record it at upload via
+    /// `encrypt_name_with_chunk_format` (2 if this is 2, else 0) so readers
+    /// can pin it.
+    #[wasm_bindgen(getter)]
+    pub fn format(&self) -> u8 {
+        self.inner.format().as_u8()
+    }
+
+    /// Replace / new version of an EXISTING file (task 1908 round 4, I-1):
+    /// returns this encryptor writing in the format the file's recorded pin
+    /// requires. `recordedPin` = the `chunk_format` from
+    /// `decrypt_file_metadata` (0 = unrecorded, 2 = v2), never a server field.
+    /// A v2 pin forces v2 frames even during the read-only phase; 0 keeps the
+    /// default. Before the first `pushChunk` only; other codes throw. Consumes
+    /// the old JS object — use the returned one.
+    ///
+    /// **New-file rule (lead ruling 2026-10-17):** pass 2 ONLY when it was
+    /// read from an EXISTING file's authenticated metadata. A brand-new file
+    /// makes NO call (the default write format applies) and records `format`
+    /// in its name; passing 2 for a new file would create a v2 file before the
+    /// switch. Core cannot enforce this; the web client keeps a test that its
+    /// new-file path never calls this with 2.
+    #[wasm_bindgen(js_name = withRecordedPin)]
+    pub fn with_recorded_pin(self, recorded_pin: u8) -> Result<WasmChunkEncryptor, JsError> {
+        let inner = recorded_pin_core(self.inner, recorded_pin).map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    /// Resuming an interrupted upload (task 1908 round 3): may this (new)
+    /// encryptor continue the old server upload session? `storedFormat` = the
+    /// `format` persisted next to the session id when the session was opened
+    /// (1 = v1, 2 = v2), or `undefined` if the resume record does not say.
+    /// Returns `"continue"` (keep the session, re-PUT from chunk 0) only for a
+    /// v1 session resumed by a v1 encryptor, else `"restart"`: never PUT to the
+    /// old session again, upload from chunk 0 into a fresh session. Restart =
+    /// `POST /api/v1/files/{id}/upload/abandon` (or wait for the lease to
+    /// expire), then init again; on a 409 retry that, never the old session.
+    #[wasm_bindgen(js_name = resumePolicy)]
+    pub fn resume_policy(&self, stored_format: Option<u8>) -> Result<String, JsError> {
+        resume_policy_str(&self.inner, stored_format).map_err(|e| JsError::new(&e.to_string()))
+    }
+
     /// Consume the encryptor, run the integrity guard (all planned chunks
     /// emitted and the ciphertext total matches), and return the summary
     /// `{ chunk_count, total_plaintext, total_ciphertext, chunk_size_bytes }`.
@@ -682,12 +780,780 @@ impl WasmChunkEncryptor {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Streaming chunk decryption (push form) — task 1908
+// ---------------------------------------------------------------------------
+
+/// Stateful, single-file streaming decryptor for the web client — the ONE way
+/// web should decrypt file content (downloads, previews, shared links).
+///
+/// Reads v2 (position-bound) and v1 (legacy) files. Both constructors take
+/// `expectedChunkFormat` from the file's encrypted metadata
+/// (`decrypt_file_metadata(...).chunk_format`; 0 = unrecorded, 2 = v2): with
+/// 2 only v2 frames open; with 0 (legacy metadata) chunk 0 decides. In v2 every
+/// frame must be the next chunk in order and from the same upload as chunk 0,
+/// and nothing may follow the last one; [`finish`] fails if the file ended
+/// before its last chunk (truncation). JS must treat any thrown error — from
+/// `pushFrame` or `finish` — as a failed download and discard the plaintext it
+/// has buffered.
+///
+/// Replaces the per-chunk `decrypt_chunk(fileKey, nonce, ciphertext)` loop for
+/// file content: that generic function has no position and can only open v1
+/// frames (it stays for key unwrapping).
+///
+/// [`finish`]: Self::finish
+#[wasm_bindgen]
+pub struct WasmChunkDecryptor {
+    inner: beebeeb_core::chunk_stream::ChunkDecryptor,
+}
+
+#[wasm_bindgen]
+impl WasmChunkDecryptor {
+    /// Decryptor for the owner: the file key is derived in core from the
+    /// 32-byte master key and `file_id`.
+    #[wasm_bindgen(constructor)]
+    pub fn new(master_key: &[u8], file_id: String, expected_chunk_format: u8) -> Result<WasmChunkDecryptor, JsError> {
+        let mk = master_key_from_slice(master_key)?;
+        let expected = expected_from_u8(expected_chunk_format)?;
+        Ok(Self {
+            inner: beebeeb_core::chunk_stream::ChunkDecryptor::for_push(&mk, &file_id, expected),
+        })
+    }
+
+    /// Decryptor from an already-unwrapped 32-byte file key (share / shared-link
+    /// recipients). `file_id` must be the id the file was uploaded under.
+    #[wasm_bindgen(js_name = fromFileKey)]
+    pub fn from_file_key(
+        file_key: &[u8],
+        file_id: String,
+        expected_chunk_format: u8,
+    ) -> Result<WasmChunkDecryptor, JsError> {
+        let fk = file_key_from_slice(file_key)?;
+        let expected = expected_from_u8(expected_chunk_format)?;
+        Ok(Self {
+            inner: beebeeb_core::chunk_stream::ChunkDecryptor::for_push_with_file_key(fk, &file_id, expected),
+        })
+    }
+
+    /// v2: the upload's version id (chunk 0's 12-byte nonce) once chunk 0 has
+    /// authenticated — what a seeking reader passes to `decrypt_chunk_frame`.
+    /// `undefined` before chunk 0 and for v1 files.
+    #[wasm_bindgen(getter, js_name = versionId)]
+    pub fn version_id(&self) -> Option<Vec<u8>> {
+        self.inner.version_id().map(|v| v.to_vec())
+    }
+
+    /// Decrypt the next wire frame (`nonce(12) || ciphertext || tag(16)`),
+    /// returning its plaintext. Frames must be pushed in order from chunk 0.
+    #[wasm_bindgen(js_name = pushFrame)]
+    pub fn push_frame(&mut self, frame: &[u8]) -> Result<Vec<u8>, JsError> {
+        self.inner
+            .push_frame(frame)
+            .map(|c| c.data)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// The file's chunk format once chunk 0 has been opened: 1 = v1, 2 = v2;
+    /// 0 before the first frame.
+    #[wasm_bindgen(getter)]
+    pub fn format(&self) -> u8 {
+        self.inner.format().map(|f| f.as_u8()).unwrap_or(0)
+    }
+
+    /// How many frames have been decrypted so far.
+    #[wasm_bindgen(getter, js_name = chunksDecrypted)]
+    pub fn chunks_decrypted(&self) -> u32 {
+        self.inner.chunks_decrypted()
+    }
+
+    /// Consume the decryptor and run the end-of-stream check. Throws if no frame
+    /// was pushed or a v2 file ended before its last chunk. Returns
+    /// `{ chunk_count, format }`.
+    pub fn finish(self) -> Result<JsValue, JsError> {
+        let summary = self.inner.finish().map_err(|e| JsError::new(&e.to_string()))?;
+        #[derive(serde::Serialize)]
+        struct DecryptSummaryJs {
+            chunk_count: u32,
+            format: u8,
+        }
+        Ok(serde_wasm_bindgen::to_value(&DecryptSummaryJs {
+            chunk_count: summary.chunk_count,
+            format: summary.format.as_u8(),
+        })?)
+    }
+}
+
+/// Random-access open of ONE file-content frame at a known position (seeking
+/// readers: video, range previews). `index` is the chunk requested and
+/// `is_last = index == chunk_count - 1`; a server that serves another chunk or
+/// lies about the count fails the tag. `format` (1 = v1, 2 = v2) must come from
+/// authenticated data (2 when the encrypted metadata records v2, else a
+/// `WasmChunkDecryptor.format` after chunk 0), never from a server field.
+/// `version_id` (12 bytes, v2 only; ignored for v1) is `WasmChunkDecryptor.versionId`
+/// after chunk 0 (or chunk 0's first 12 bytes): another upload's frames fail.
+#[wasm_bindgen]
+pub fn decrypt_chunk_frame(
+    file_key: &[u8],
+    file_id: &str,
+    version_id: &[u8],
+    index: u32,
+    is_last: bool,
+    format: u8,
+    frame: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    let f = beebeeb_core::chunk_stream::ChunkFormat::from_u8(format).map_err(|e| JsError::new(&e.to_string()))?;
+    beebeeb_core::chunk_stream::open_chunk(&fk, file_id, version_id, index, is_last, f, frame)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+fn expected_from_u8(code: u8) -> Result<beebeeb_core::chunk_stream::ExpectedChunkFormat, JsError> {
+    beebeeb_core::chunk_stream::ExpectedChunkFormat::from_u8(code).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Encrypt a filename (+ MIME) into a `name_encrypted` envelope that also
+/// records the file's chunk format (task 1908): `chunk_format` 2 = every upload
+/// of this file id is v2, 0 = record nothing (the pre-1908 shape). New file:
+/// 2 only if its content was written as v2. Rename / replace: pass the value
+/// `decrypt_file_metadata` returned — never upgrade a file with v1 history,
+/// never drop a recorded 2.
+#[wasm_bindgen]
+pub fn encrypt_name_with_chunk_format(
+    master_key: &[u8],
+    file_id: &str,
+    filename: &str,
+    mime_type: Option<String>,
+    chunk_format: u8,
+) -> Result<String, JsError> {
+    let mk = master_key_from_slice(master_key)?;
+    let cf = expected_from_u8(chunk_format)?;
+    encrypt::encrypt_name_with_chunk_format(&mk, file_id, filename, mime_type.as_deref(), cf)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+#[derive(serde::Serialize)]
+struct NameMetadataJs {
+    name: String,
+    mime_type: Option<String>,
+    /// 0 = unrecorded (detect), 2 = v2 — pass to `WasmChunkDecryptor`.
+    chunk_format: u8,
+}
+
+impl From<encrypt::NameMetadata> for NameMetadataJs {
+    fn from(m: encrypt::NameMetadata) -> Self {
+        Self {
+            name: m.name,
+            mime_type: m.mime_type,
+            chunk_format: m.chunk_format.as_u8(),
+        }
+    }
+}
+
+/// Decrypt a `name_encrypted` envelope (same format/key matrix as core
+/// `decrypt_name`) into `{ name, mime_type, chunk_format }`. `chunk_format`
+/// (0 = unrecorded, 2 = v2) is what every content reader of the file must be
+/// given — task 1908.
+#[wasm_bindgen]
+pub fn decrypt_name_metadata(master_key: &[u8], file_id: &str, name_encrypted: &str) -> Result<JsValue, JsError> {
+    let mk = master_key_from_slice(master_key)?;
+    let meta =
+        encrypt::decrypt_name_metadata(&mk, file_id, name_encrypted).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(serde_wasm_bindgen::to_value(&NameMetadataJs::from(meta))?)
+}
+
+/// The metadata reader for FILES (task 1908 round 3): exactly
+/// [`decrypt_name_metadata`], except that a plaintext (non-JSON)
+/// `name_encrypted` is refused — a plaintext name carries no chunk-format pin.
+/// Take every file-content reader's `chunk_format` from THIS;
+/// `decrypt_name_metadata` stays for folders / display.
+#[wasm_bindgen]
+pub fn decrypt_file_metadata(master_key: &[u8], file_id: &str, name_encrypted: &str) -> Result<JsValue, JsError> {
+    let mk = master_key_from_slice(master_key)?;
+    let meta =
+        encrypt::decrypt_file_metadata(&mk, file_id, name_encrypted).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(serde_wasm_bindgen::to_value(&NameMetadataJs::from(meta))?)
+}
+
+/// [`decrypt_file_metadata`] with an already-unwrapped 32-byte file key.
+#[wasm_bindgen]
+pub fn decrypt_file_metadata_with_key(file_key: &[u8], name_encrypted: &str) -> Result<JsValue, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    let meta =
+        encrypt::decrypt_file_metadata_with_key(&fk, name_encrypted).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(serde_wasm_bindgen::to_value(&NameMetadataJs::from(meta))?)
+}
+
+/// Seal a thumbnail (already-encoded image bytes) under a 32-byte file key:
+/// `nonce(12) || ciphertext || tag(16)` (the existing thumbnail wire format).
+/// The ONLY way to seal a thumbnail (task 1908 round 3) — after the gated seal
+/// switch it uses the thumbnail subkey, so a thumbnail can never be served as
+/// file content.
+#[wasm_bindgen]
+pub fn encrypt_thumbnail(file_key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    encrypt::encrypt_thumbnail(&fk, plaintext).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Seal a thumbnail of an EXISTING file under the rule of its recorded pin
+/// (task 1908 round 4): `recordedPin` = the `chunk_format` from
+/// `decrypt_file_metadata` (0 = unrecorded, 2 = v2). A v2 pin is always sealed
+/// under the thumbnail subkey; 0 behaves like `encrypt_thumbnail`.
+#[wasm_bindgen]
+pub fn encrypt_thumbnail_for(file_key: &[u8], plaintext: &[u8], recorded_pin: u8) -> Result<Vec<u8>, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    let pin = expected_from_u8(recorded_pin)?;
+    encrypt::encrypt_thumbnail_for(&fk, plaintext, pin).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Open a thumbnail frame: the thumbnail subkey first, then the legacy raw
+/// file key (thumbnails stored before the switch).
+#[wasm_bindgen]
+pub fn decrypt_thumbnail(file_key: &[u8], frame: &[u8]) -> Result<Vec<u8>, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    encrypt::decrypt_thumbnail(&fk, frame).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Seal a file note for a file with no recorded pin yet (task 1908 round 5):
+/// returns the canonical `EncryptedBlob` JSON to store in `note_encrypted` (the
+/// shape `serializeEncryptedBlob` writes). Follows the gated seal switch, like
+/// `encrypt_thumbnail`. For a note on an EXISTING file (the details panel) use
+/// `encrypt_note_for` with the file's recorded pin. The ONLY way to seal a
+/// note — not `encryptFilename` / `encrypt_metadata` under the file key (a
+/// raw-key note can stand in for a v2 file's name and content).
+#[wasm_bindgen]
+pub fn encrypt_note(file_key: &[u8], note: &str) -> Result<String, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    encrypt::encrypt_note(&fk, note).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Seal a note of an EXISTING file under the rule of its recorded pin (task
+/// 1908 round 5): `recordedPin` = the `chunk_format` from
+/// `decrypt_file_metadata` of THIS file (0 = unrecorded, 2 = v2), never a
+/// server field. A v2 pin is always sealed under the note subkey; 0 behaves
+/// like `encrypt_note`.
+#[wasm_bindgen]
+pub fn encrypt_note_for(file_key: &[u8], note: &str, recorded_pin: u8) -> Result<String, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    note_for_core(&fk, note, recorded_pin).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Native seam of [`encrypt_note_for`] (testable off-wasm, incl. the
+/// unknown-pin error path).
+fn note_for_core(fk: &kdf::FileKey, note: &str, recorded_pin: u8) -> Result<String, beebeeb_core::CoreError> {
+    let pin = beebeeb_core::chunk_stream::ExpectedChunkFormat::from_u8(recorded_pin)?;
+    encrypt::encrypt_note_for(fk, note, pin)
+}
+
+/// Seal the name/MIME envelope under a GIVEN per-file key, by the rule of a
+/// recorded pin (task 1958). The only name writer that takes a key, so it serves
+/// keys NOT derived from the master key (file-request uploads, shared-folder
+/// files); for a derived key it writes what `encrypt_name_with_chunk_format`
+/// writes. A v2 pin records `chunk_format: 2` and is always sealed under the
+/// name subkey; 0 follows the current write rule. Any other code is an error.
+/// `recordedPin`:
+/// - an EXISTING file (rename): the `chunk_format` from
+///   `decrypt_file_metadata` / `..._with_key` of THIS file (0 = unrecorded,
+///   2 = v2), never a server field;
+/// - a NEW file (e.g. a file-request upload): the pin of the format its content
+///   was written in, `recorded_for(encryptor.format())` (2 for a v2 upload, 0
+///   for v1), as at any upload. Nothing else is allowed for a new file.
+#[wasm_bindgen]
+pub fn encrypt_name_for(
+    file_key: &[u8],
+    filename: &str,
+    mime_type: Option<String>,
+    recorded_pin: u8,
+) -> Result<String, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    name_for_core(&fk, filename, mime_type.as_deref(), recorded_pin).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Native seam of [`encrypt_name_for`] (testable off-wasm, incl. the
+/// unknown-pin error path).
+fn name_for_core(
+    fk: &kdf::FileKey,
+    filename: &str,
+    mime_type: Option<&str>,
+    recorded_pin: u8,
+) -> Result<String, beebeeb_core::CoreError> {
+    let pin = beebeeb_core::chunk_stream::ExpectedChunkFormat::from_u8(recorded_pin)?;
+    encrypt::encrypt_name_for(fk, filename, mime_type, pin)
+}
+
+/// Open a `note_encrypted` envelope: the note subkey first, then the legacy
+/// raw file key (notes stored before the switch). A plaintext value is an
+/// error. The ONLY way to open a note — not `decryptFilename`.
+#[wasm_bindgen]
+pub fn decrypt_note(file_key: &[u8], note_encrypted: &str) -> Result<String, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    encrypt::decrypt_note(&fk, note_encrypted).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// [`decrypt_name_metadata`] with an already-unwrapped 32-byte file key (share
+/// / shared-link recipients, file-request content keys).
+#[wasm_bindgen]
+pub fn decrypt_name_metadata_with_key(file_key: &[u8], name_encrypted: &str) -> Result<JsValue, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    let meta =
+        encrypt::decrypt_name_metadata_with_key(&fk, name_encrypted).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(serde_wasm_bindgen::to_value(&NameMetadataJs::from(meta))?)
+}
+
+/// Native seam of [`WasmChunkEncryptor::with_recorded_pin`] (testable off-wasm).
+fn recorded_pin_core(
+    enc: beebeeb_core::chunk_stream::ChunkEncryptor,
+    recorded_pin: u8,
+) -> Result<beebeeb_core::chunk_stream::ChunkEncryptor, beebeeb_core::CoreError> {
+    let pin = beebeeb_core::chunk_stream::ExpectedChunkFormat::from_u8(recorded_pin)?;
+    enc.with_recorded_pin(pin)
+}
+
+/// Native seam of [`WasmChunkEncryptor::resume_policy`] (testable off-wasm).
+fn resume_policy_str(
+    enc: &beebeeb_core::chunk_stream::ChunkEncryptor,
+    stored_format: Option<u8>,
+) -> Result<String, beebeeb_core::CoreError> {
+    let stored = stored_format
+        .map(beebeeb_core::chunk_stream::ChunkFormat::from_u8)
+        .transpose()?;
+    Ok(enc.resume_policy(stored).as_str().to_string())
+}
+
 impl WasmChunkEncryptor {
     /// Testable seam for the consuming `finish`: runs the core integrity guard
     /// and returns the native summary without crossing the JS boundary, so unit
     /// tests can exercise the by-value `finish` path without a JS runtime.
     fn finish_summary(self) -> Result<beebeeb_core::chunk_stream::ChunkEncryptorSummary, beebeeb_core::CoreError> {
         self.inner.finish()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding (task 1744): password policy, breach check, signup ceremony
+// ---------------------------------------------------------------------------
+//
+// Thin wrappers over `beebeeb_core::onboarding`. All logic lives in core; this
+// section only converts types. Enum-like values cross as lowercase string
+// tokens (the `as_str()` of the core type) so JS needs no enum plumbing.
+// Objects are plain JS objects via typed `serde::Serialize` structs (0655), and
+// counts cross as `f64` (never `BigInt`). Ceremony errors are thrown as `Error`
+// objects with a stable `code` property (`CeremonyError::code`).
+
+use beebeeb_core::onboarding as onb;
+
+#[derive(serde::Serialize)]
+struct PasswordEvaluationJs {
+    length: u32,
+    min_length: u32,
+    missing_characters: u32,
+    meets_minimum: bool,
+    has_mixed_case: bool,
+    has_number_or_symbol: bool,
+    /// `"too_short" | "fair" | "good" | "strong"`.
+    strength: &'static str,
+    /// Meter level 1 to 4.
+    level: u8,
+    /// `"none" | "need_more_characters" | "mix_case_and_add_number_or_symbol" | "mix_case" | "add_number_or_symbol"`.
+    hint: &'static str,
+}
+
+fn password_evaluation_js(e: &onb::PasswordEvaluation) -> PasswordEvaluationJs {
+    PasswordEvaluationJs {
+        length: e.length,
+        min_length: e.min_length,
+        missing_characters: e.missing_characters,
+        meets_minimum: e.meets_minimum,
+        has_mixed_case: e.has_mixed_case,
+        has_number_or_symbol: e.has_number_or_symbol,
+        strength: e.strength.as_str(),
+        level: e.strength.level(),
+        hint: e.hint.as_str(),
+    }
+}
+
+/// Evaluate a password against the server's `policy.password.min_length`
+/// (clamped up to the core floor of 12). Returns
+/// `{ length, min_length, missing_characters, meets_minimum, has_mixed_case,
+/// has_number_or_symbol, strength, level, hint }`. Contains no part of the password.
+#[wasm_bindgen]
+pub fn evaluate_password(password: String, min_length: u32) -> Result<JsValue, JsError> {
+    // Owned `String` so this copy is wiped when we are done (wasm-bindgen's
+    // `&str` path would leave the decoded bytes in freed WASM memory).
+    let password = zeroize::Zeroizing::new(password);
+    let policy = onb::PasswordPolicy::from_server(min_length);
+    let e = onb::evaluate_password(&password, &policy);
+    Ok(serde_wasm_bindgen::to_value(&password_evaluation_js(&e))?)
+}
+
+/// Verdict of a breach check as a plain object, for the UI to render. It is
+/// **output only**: `WasmSignupCeremony.setPassword` takes the
+/// `WasmBreachCheck` object itself and recomputes the verdict from the password
+/// it stores, so nothing a caller builds by hand can satisfy the gate.
+#[derive(serde::Serialize)]
+struct BreachVerdictJs {
+    /// `"clean" | "breached" | "check_failed_allowed" | "check_failed_blocked" | "not_required"`.
+    kind: String,
+    count: f64,
+    allows_proceeding: bool,
+    check_failed: bool,
+}
+
+impl BreachVerdictJs {
+    fn from_core(v: onb::BreachVerdict) -> Self {
+        Self {
+            kind: v.kind_str().to_owned(),
+            count: match v {
+                onb::BreachVerdict::Breached { count } => count as f64,
+                _ => 0.0,
+            },
+            allows_proceeding: v.allows_proceeding(),
+            check_failed: v.check_failed(),
+        }
+    }
+}
+
+/// k-anonymity breach check for one password. Core hashes and matches; **JS
+/// makes the HTTP call**, to the endpoint the onboarding document declares in
+/// `policy.password.breach_check.endpoint` (Beebeeb's own API, never a third
+/// party). Only `prefix` (5 hex chars) may be sent; the rest stays here and is
+/// zeroized when the object is freed.
+///
+/// The object is bound to the password it was made from and remembers the
+/// answer: pass it to `WasmSignupCeremony.setPassword`, which refuses a check
+/// made for a different password. A response body over 262144 bytes is treated
+/// as an outage, so stop reading the response at that size.
+///
+/// ```js
+/// const q = new WasmBreachCheck(password)
+/// const prefix = q.prefix               // send exactly this, and pass exactly what you sent back
+/// let body = null
+/// try { const r = await fetch(endpoint.replace('{prefix}', prefix)); if (r.ok) body = await r.text() } catch {}
+/// const verdict = q.evaluate(prefix, body, failOpen)   // body === null means the call failed
+/// ceremony.setPassword(password, confirmation, q)   // borrows q; omit-the-check cannot bypass a required gate
+/// q.free()
+/// ```
+#[wasm_bindgen]
+pub struct WasmBreachCheck {
+    check: onb::BreachCheck,
+}
+
+#[wasm_bindgen]
+impl WasmBreachCheck {
+    #[wasm_bindgen(constructor)]
+    pub fn new(password: String) -> WasmBreachCheck {
+        let password = zeroize::Zeroizing::new(password);
+        Self {
+            check: onb::BreachCheck::new(&password),
+        }
+    }
+
+    /// The 5 upper-case hex characters to send to the server.
+    #[wasm_bindgen(getter)]
+    pub fn prefix(&self) -> String {
+        self.check.prefix().to_owned()
+    }
+
+    /// Record the answer and return the verdict for display. `requested_prefix`
+    /// is the prefix the request URL (or the cache entry read) actually used;
+    /// if it is not this password's prefix this throws an `Error` with code
+    /// `breach_prefix_mismatch` and records nothing (a body for another prefix
+    /// would otherwise read as clean). `body` is the
+    /// response text of a 2xx answer, or `null`/`undefined` when the request
+    /// failed (network error, timeout, non-2xx). An empty body counts as a
+    /// failed request. `fail_open` is `policy.password.breach_check.fail_open`
+    /// and only shapes this display value: the ceremony applies the value it
+    /// was constructed with. Returns `{ kind, count, allows_proceeding, check_failed }`.
+    pub fn evaluate(
+        &mut self,
+        requested_prefix: &str,
+        body: Option<String>,
+        fail_open: bool,
+    ) -> Result<JsValue, JsValue> {
+        let v = self
+            .record(requested_prefix, body.as_deref(), fail_open)
+            .map_err(breach_error)?;
+        serde_wasm_bindgen::to_value(&BreachVerdictJs::from_core(v))
+            .map_err(|e| JsValue::from(JsError::new(&e.to_string())))
+    }
+}
+
+impl WasmBreachCheck {
+    /// Testable seam: record and evaluate without crossing the JS boundary.
+    fn record(
+        &mut self,
+        requested_prefix: &str,
+        body: Option<&str>,
+        fail_open: bool,
+    ) -> Result<onb::BreachVerdict, onb::BreachError> {
+        let response = match body {
+            Some(b) => onb::BreachResponse::Body(b),
+            None => onb::BreachResponse::Unavailable,
+        };
+        self.check.record_and_evaluate(requested_prefix, response, fail_open)
+    }
+}
+
+#[derive(serde::Serialize)]
+struct CeremonyStepJs {
+    /// `"verify_email" | "set_password" | "save_phrase" | "confirm_phrase" | "create_account" | "done"`.
+    step: &'static str,
+    /// The server step id this belongs to (`save_phrase` and `confirm_phrase`
+    /// are both `save_recovery_phrase`).
+    spec_step_id: &'static str,
+}
+
+impl CeremonyStepJs {
+    fn from_core(s: onb::CeremonyStep) -> Self {
+        Self {
+            step: s.as_str(),
+            spec_step_id: s.spec_step_id(),
+        }
+    }
+}
+
+/// Thrown as an `Error` with a stable string `code` (see `BreachError::code`).
+fn breach_error(e: onb::BreachError) -> JsValue {
+    let err = js_sys::Error::new(&e.to_string());
+    let _ = js_sys::Reflect::set(&err, &"code".into(), &JsValue::from_str(e.code()));
+    err.into()
+}
+
+/// Thrown as an `Error` with a stable string `code` (see `CeremonyError::code`).
+fn ceremony_error(e: onb::CeremonyError) -> JsValue {
+    let err = js_sys::Error::new(&e.to_string());
+    let _ = js_sys::Reflect::set(&err, &"code".into(), &JsValue::from_str(e.code()));
+    err.into()
+}
+
+/// The signup ceremony state machine, one per signup attempt.
+///
+/// Holds the password, the recovery phrase and the master key inside WASM
+/// memory in zeroizing buffers. Call `abandon()` when the flow is left (back,
+/// cancel, error): freeing the object or waiting for garbage collection wipes
+/// it too, but on the finalizer's schedule, which can be much later. See `beebeeb_core::onboarding::ceremony` for the rules.
+/// Call order is enforced there: `startRegistration` fails until every other
+/// required step is done.
+#[wasm_bindgen]
+pub struct WasmSignupCeremony {
+    inner: onb::SignupCeremony,
+}
+
+#[wasm_bindgen]
+impl WasmSignupCeremony {
+    /// `min_length` = `policy.password.min_length`; `email_verification_required`
+    /// = the document lists a required `verify_email_code`; `verify_word_count`
+    /// = `policy.recovery_phrase.verify_word_count`; `breach_check_required` =
+    /// the document declares a breach check, with `breach_fail_open` =
+    /// `policy.password.breach_check.fail_open` (applied by the ceremony, not
+    /// by the caller).
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        min_length: u32,
+        email_verification_required: bool,
+        verify_word_count: u32,
+        breach_check_required: bool,
+        breach_fail_open: bool,
+    ) -> WasmSignupCeremony {
+        Self {
+            inner: onb::SignupCeremony::new(onb::CeremonyConfig {
+                password_policy: onb::PasswordPolicy::from_server(min_length),
+                email_verification_required,
+                verify_word_count,
+                breach: if breach_check_required {
+                    onb::BreachPolicy::Required {
+                        fail_open: breach_fail_open,
+                    }
+                } else {
+                    onb::BreachPolicy::NotRequired
+                },
+            }),
+        }
+    }
+
+    /// Abandon the signup: wipe the password, phrase and master key and return
+    /// to a fresh ceremony. Call on back, cancel and error exits.
+    pub fn abandon(&mut self) {
+        self.inner.wipe();
+    }
+
+    /// First pending step: `{ step, spec_step_id }`.
+    pub fn step(&self) -> Result<JsValue, JsError> {
+        Ok(serde_wasm_bindgen::to_value(&CeremonyStepJs::from_core(
+            self.inner.step(),
+        ))?)
+    }
+
+    /// Every pending step in canonical order, as `[{ step, spec_step_id }]`.
+    #[wasm_bindgen(js_name = pendingSteps)]
+    pub fn pending_steps(&self) -> Result<JsValue, JsError> {
+        let steps: Vec<CeremonyStepJs> = self
+            .inner
+            .pending_steps()
+            .into_iter()
+            .map(CeremonyStepJs::from_core)
+            .collect();
+        Ok(serde_wasm_bindgen::to_value(&steps)?)
+    }
+
+    /// The server accepted the email code.
+    #[wasm_bindgen(js_name = emailVerified)]
+    pub fn email_verified(&mut self) {
+        self.inner.email_verified();
+    }
+
+    /// The server reported the signup ticket expired: back to the code step,
+    /// password and confirmed phrase kept.
+    #[wasm_bindgen(js_name = emailTicketInvalidated)]
+    pub fn email_ticket_invalidated(&mut self) {
+        self.inner.email_ticket_invalidated();
+    }
+
+    /// The user changed the email address after it was verified: back to the
+    /// code step, password and confirmed phrase kept.
+    #[wasm_bindgen(js_name = emailChanged)]
+    pub fn email_changed(&mut self) {
+        self.inner.email_changed();
+    }
+
+    /// Validate and store the password. `breach_check` is the
+    /// `WasmBreachCheck` made for **this** password, after `evaluate` recorded
+    /// the endpoint's answer. It is only borrowed: after a rejection the same
+    /// check can be passed again. Throws an `Error` whose `code` is
+    /// `password_mismatch`, `password_too_short`, `breach_check_missing`,
+    /// `breach_check_stale`, `password_breached` or `breach_check_blocked`.
+    /// Returns the password evaluation (same shape as `evaluate_password`).
+    #[wasm_bindgen(js_name = setPassword)]
+    pub fn set_password(
+        &mut self,
+        password: String,
+        confirmation: String,
+        breach_check: &WasmBreachCheck,
+    ) -> Result<JsValue, JsValue> {
+        let (password, confirmation) = (zeroize::Zeroizing::new(password), zeroize::Zeroizing::new(confirmation));
+        self.set_password_js(&password, &confirmation, Some(&breach_check.check))
+    }
+
+    /// `setPassword` for a document that declares no breach check. If the
+    /// ceremony was constructed with `breachCheckRequired = true` this throws
+    /// `breach_check_missing`: omitting the check cannot bypass the gate.
+    #[wasm_bindgen(js_name = setPasswordUnchecked)]
+    pub fn set_password_unchecked(&mut self, password: String, confirmation: String) -> Result<JsValue, JsValue> {
+        let (password, confirmation) = (zeroize::Zeroizing::new(password), zeroize::Zeroizing::new(confirmation));
+        self.set_password_js(&password, &confirmation, None)
+    }
+
+    /// Generate the recovery phrase and master key (Argon2id, about a second).
+    /// Idempotent.
+    #[wasm_bindgen(js_name = beginPhrase)]
+    pub fn begin_phrase(&mut self) -> Result<(), JsValue> {
+        self.inner.begin_phrase().map_err(ceremony_error)
+    }
+
+    /// The phrase to show. Throws `phrase_unavailable` before `beginPhrase` or
+    /// after the phrase was confirmed (it is wiped then). The returned string
+    /// is a plain copy that lives in JS and cannot be wiped: call this only
+    /// while rendering the phrase and drop the reference afterwards.
+    pub fn phrase(&self) -> Result<String, JsValue> {
+        self.inner
+            .phrase()
+            .map(|p| p.as_str().to_owned())
+            .map_err(ceremony_error)
+    }
+
+    /// The user confirms they saved the phrase.
+    #[wasm_bindgen(js_name = acknowledgePhrase)]
+    pub fn acknowledge_phrase(&mut self) -> Result<(), JsValue> {
+        self.inner.acknowledge_phrase().map_err(ceremony_error)
+    }
+
+    /// 1-based word positions to ask for, ascending, stable for this phrase.
+    #[wasm_bindgen(js_name = challengePositions)]
+    pub fn challenge_positions(&self) -> Result<Vec<u32>, JsValue> {
+        self.inner.challenge_positions().map_err(ceremony_error)
+    }
+
+    /// `answers`: array of strings in `challengePositions` order. Throws
+    /// `phrase_word_mismatch` / `phrase_answer_count`; retryable.
+    #[wasm_bindgen(js_name = confirmPhrase)]
+    pub fn confirm_phrase(&mut self, answers: js_sys::Array) -> Result<(), JsValue> {
+        // Each answer is a word of the recovery phrase: hold the Rust copies in
+        // `Zeroizing` so they are wiped when this call returns.
+        let answers: Vec<zeroize::Zeroizing<String>> = answers
+            .iter()
+            .map(|v| zeroize::Zeroizing::new(v.as_string().unwrap_or_default()))
+            .collect();
+        self.inner.confirm_phrase(&answers).map_err(ceremony_error)
+    }
+
+    /// OPAQUE step 1. Returns the `RegistrationRequest` bytes for
+    /// `opaque/register-start`. Throws `step_not_done` until every other
+    /// required step is done.
+    #[wasm_bindgen(js_name = startRegistration)]
+    pub fn start_registration(&mut self) -> Result<Vec<u8>, JsValue> {
+        self.inner
+            .start_registration()
+            .map(|r| r.message)
+            .map_err(ceremony_error)
+    }
+
+    /// OPAQUE step 2, from the server's `register-start` response. Returns
+    /// `{ upload, x25519_public, recovery_check }` (all `Uint8Array`).
+    #[wasm_bindgen(js_name = finishRegistration)]
+    pub fn finish_registration(&mut self, server_message: &[u8]) -> Result<JsValue, JsValue> {
+        let r = self.inner.finish_registration(server_message).map_err(ceremony_error)?;
+        let obj = js_sys::Object::new();
+        for (key, bytes) in [
+            ("upload", r.upload.as_slice()),
+            ("x25519_public", &r.x25519_public[..]),
+            ("recovery_check", &r.recovery_check[..]),
+        ] {
+            js_sys::Reflect::set(&obj, &key.into(), &js_sys::Uint8Array::from(bytes).into())
+                .map_err(|e| JsValue::from(JsError::new(&format!("{e:?}"))))?;
+        }
+        Ok(obj.into())
+    }
+
+    /// The server rejected `register-finish` in a retryable way.
+    #[wasm_bindgen(js_name = registrationFailed)]
+    pub fn registration_failed(&mut self) {
+        self.inner.registration_failed();
+    }
+
+    /// The server accepted `register-finish`. Returns the 32-byte master key as
+    /// `Uint8Array`; the caller owns it and must wipe it when done (the same
+    /// contract as `generate_recovery_phrase`). The ceremony wipes the rest.
+    /// The only Rust-side copy of the key is a `Zeroizing` temporary that is
+    /// wiped as soon as the bytes have been copied into the JS array.
+    #[wasm_bindgen(js_name = accountCreated)]
+    pub fn account_created(&mut self) -> Result<js_sys::Uint8Array, JsValue> {
+        let key = self.inner.account_created().map_err(ceremony_error)?;
+        let bytes = zeroize::Zeroizing::new(key.to_bytes());
+        Ok(js_sys::Uint8Array::from(&bytes[..]))
+    }
+}
+
+impl WasmSignupCeremony {
+    fn set_password_js(
+        &mut self,
+        password: &str,
+        confirmation: &str,
+        check: Option<&onb::BreachCheck>,
+    ) -> Result<JsValue, JsValue> {
+        let eval = self
+            .try_set_password(password, confirmation, check)
+            .map_err(ceremony_error)?;
+        serde_wasm_bindgen::to_value(&password_evaluation_js(&eval))
+            .map_err(|e| JsValue::from(JsError::new(&e.to_string())))
+    }
+
+    /// Testable seams (no `JsValue`), used by the exported wrappers above.
+    fn try_set_password(
+        &mut self,
+        password: &str,
+        confirmation: &str,
+        check: Option<&onb::BreachCheck>,
+    ) -> Result<onb::PasswordEvaluation, onb::CeremonyError> {
+        self.inner.set_password(password, confirmation, check)
     }
 }
 
@@ -944,18 +1810,28 @@ pub struct WasmSearchIndex {
     inner: search_index::SearchIndex,
 }
 
+// Match deriveSharedFolderIndexKey and the server's 64-bucket layout.
+fn validate_search_index_shard_count(num_shards: u32) -> Result<(), JsError> {
+    if num_shards > search_index::DEFAULT_NUM_SHARDS {
+        return Err(JsError::new("num_shards must be at most 64"));
+    }
+    Ok(())
+}
+
 #[wasm_bindgen]
 impl WasmSearchIndex {
-    /// Empty index with the given shard count (clamped to ≥ 1).
+    /// Empty index with 1–64 shards (zero is clamped to 1).
     #[wasm_bindgen(constructor)]
-    pub fn new(num_shards: u32) -> WasmSearchIndex {
-        Self {
+    pub fn new(num_shards: u32) -> Result<WasmSearchIndex, JsError> {
+        validate_search_index_shard_count(num_shards)?;
+        Ok(Self {
             inner: search_index::SearchIndex::new(num_shards),
-        }
+        })
     }
 
     /// Build from `files` — a JS array of `{ fileId, name }` objects.
     pub fn build(files: JsValue, num_shards: u32) -> Result<WasmSearchIndex, JsError> {
+        validate_search_index_shard_count(num_shards)?;
         let arr = js_sys::Array::from(&files);
         let mut pairs: Vec<(String, String)> = Vec::with_capacity(arr.length() as usize);
         for item in arr.iter() {
@@ -974,6 +1850,7 @@ impl WasmSearchIndex {
         shards: JsValue,
         num_shards: u32,
     ) -> Result<WasmSearchIndex, JsError> {
+        validate_search_index_shard_count(num_shards)?;
         let mk = master_key_from_slice(master_key)?;
         let core_shards = js_to_shards(&shards)?;
         let inner = search_index::SearchIndex::from_encrypted_shards(&mk, &core_shards, num_shards)
@@ -1027,6 +1904,49 @@ impl WasmSearchIndex {
         let shards = self
             .inner
             .encrypt_buckets(&mk, &set)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(shards_to_js(&shards))
+    }
+
+    /// Reconstruct a shared folder's index from shards sealed under the folder
+    /// key (`encryptShardsWithFolderKey` output).
+    #[wasm_bindgen(js_name = fromEncryptedShardsWithFolderKey)]
+    pub fn from_encrypted_shards_with_folder_key(
+        folder_key: &[u8],
+        shards: JsValue,
+        num_shards: u32,
+    ) -> Result<WasmSearchIndex, JsError> {
+        validate_search_index_shard_count(num_shards)?;
+        let fk = file_key_from_slice(folder_key)?;
+        let core_shards = js_to_shards(&shards)?;
+        let inner = search_index::SearchIndex::from_encrypted_shards_with(
+            search_index::ShardKeySource::Folder(&fk),
+            &core_shards,
+            num_shards,
+        )
+        .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    /// Encrypt every non-empty shard page under the folder key.
+    #[wasm_bindgen(js_name = encryptShardsWithFolderKey)]
+    pub fn encrypt_shards_with_folder_key(&self, folder_key: &[u8]) -> Result<JsValue, JsError> {
+        let fk = file_key_from_slice(folder_key)?;
+        let shards = self
+            .inner
+            .encrypt_shards_with(search_index::ShardKeySource::Folder(&fk))
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(shards_to_js(&shards))
+    }
+
+    /// Encrypt only the given buckets under the folder key (incremental sync).
+    #[wasm_bindgen(js_name = encryptBucketsWithFolderKey)]
+    pub fn encrypt_buckets_with_folder_key(&self, folder_key: &[u8], buckets: Vec<u32>) -> Result<JsValue, JsError> {
+        let fk = file_key_from_slice(folder_key)?;
+        let set: std::collections::BTreeSet<u32> = buckets.into_iter().collect();
+        let shards = self
+            .inner
+            .encrypt_buckets_with(search_index::ShardKeySource::Folder(&fk), &set)
             .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(shards_to_js(&shards))
     }
@@ -1157,6 +2077,901 @@ pub fn decrypt_names(master_key: &[u8], items: JsValue) -> Result<JsValue, JsErr
 }
 
 // ---------------------------------------------------------------------------
+// Direct S3 transfers (task 2173): the client rules of `beebeeb_core::direct_transfer`
+// ---------------------------------------------------------------------------
+//
+// Thin wrappers. ALL logic lives in core; this section converts types. The web
+// client keeps its own `fetch`; it asks these rules whether a link may be
+// followed, what an API answer means, and what to do next (windows, renewals,
+// fallbacks), exactly as the CLI, desktop and mobile do.
+//
+// Conventions (as in the onboarding section): enum-like values cross as
+// lowercase string `kind`s (the `kind()`/`code()` of the core type), objects
+// are plain JS objects (maps serialize as objects, missing values as `null`),
+// counts, lengths and times cross as `f64` (never `BigInt`; every length here
+// is far below 2^53), and a caller error is thrown as an `Error` with a stable
+// string `code`. A planner is ONE sequence's cursor: drive it from one place.
+
+use beebeeb_core::direct_transfer as dt;
+
+/// JS-facing serializer: plain objects, `null` for absent values.
+fn direct_to_js<T: serde::Serialize>(value: &T) -> Result<JsValue, JsError> {
+    let serializer = serde_wasm_bindgen::Serializer::new()
+        .serialize_maps_as_objects(true)
+        .serialize_missing_as_null(true);
+    value.serialize(&serializer).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// An `Error` with a stable `code` property.
+fn direct_error(message: &str, code: &str) -> JsValue {
+    let err = js_sys::Error::new(message);
+    let _ = js_sys::Reflect::set(&err, &"code".into(), &JsValue::from_str(code));
+    err.into()
+}
+
+/// A failure the caller can branch on. It crosses to JS as an `Error` with a stable
+/// `code`; in Rust (tests) it is plain data, so the exported methods that return it
+/// can be called and checked without a JS engine. The message never contains a URL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectFailure {
+    message: String,
+    code: &'static str,
+}
+
+impl DirectFailure {
+    fn new(message: impl Into<String>, code: &'static str) -> Self {
+        Self {
+            message: message.into(),
+            code,
+        }
+    }
+}
+
+impl From<DirectFailure> for JsValue {
+    fn from(failure: DirectFailure) -> JsValue {
+        direct_error(&failure.message, failure.code)
+    }
+}
+
+/// A call that does not fit the planner's state: a bug in the caller.
+impl From<dt::PlanError> for DirectFailure {
+    fn from(e: dt::PlanError) -> Self {
+        Self::new(e.to_string(), e.code())
+    }
+}
+
+/// A jitter seed from the JS number the caller gave: its bits. A plain `as u64` turns every
+/// `Math.random()` (a number below 1) into 0, i.e. one retry schedule for every browser tab.
+fn direct_seed(seed: f64) -> u64 {
+    seed.to_bits()
+}
+
+// The shape of what `WasmDownloadPlanner.poll` returns, for the generated `.d.ts` (the JS values are
+// serialised from `DirectPollJs`: `kind` is the snake_case variant name, absent values are `null`).
+#[wasm_bindgen(typescript_custom_section)]
+const DIRECT_POLL_TS: &'static str = r#"
+export type DirectVerdict =
+    | { kind: "api_for_file" }
+    | { kind: "restart" }
+    | { kind: "terminal"; status: number; error: string | null }
+    | { kind: "corrupt" };
+
+export type DirectPoll =
+    | { kind: "request_window"; request: { object_version_id: string | null; start_index: number; count: number; renewal: boolean } }
+    | { kind: "fetch"; index: number; method: string; url: WasmSignedUrl; length: number; expires_at: string }
+    | { kind: "fetch_via_api"; index: number; object_version_id: string }
+    | { kind: "wait"; until_ms: number | null }
+    | { kind: "done" }
+    | { kind: "stop"; verdict: DirectVerdict };
+"#;
+
+/// A presigned storage link as the `fetch` step carries it: a bearer capability until it expires. It
+/// is an object, not a string, so that `console.log`, `String(url)`, a template literal and
+/// `JSON.stringify(step)` can never show it: all of them give the redacted form (scheme and host).
+/// The only way to the link is `raw()`, by name.
+#[wasm_bindgen]
+pub struct WasmSignedUrl {
+    url: String,
+}
+
+#[wasm_bindgen]
+impl WasmSignedUrl {
+    /// The full presigned link, to hand to `fetch`. Never log it.
+    pub fn raw(&self) -> String {
+        self.url.clone()
+    }
+
+    /// Scheme and host only: safe for a log line.
+    pub fn redacted(&self) -> String {
+        dt::redact(&self.url)
+    }
+
+    /// `String(url)` and template literals.
+    #[wasm_bindgen(js_name = toString)]
+    pub fn to_string_redacted(&self) -> String {
+        dt::redact(&self.url)
+    }
+
+    /// `JSON.stringify(step)`.
+    #[wasm_bindgen(js_name = toJSON)]
+    pub fn to_json_redacted(&self) -> String {
+        dt::redact(&self.url)
+    }
+}
+
+/// The poll as a JS object. The serializer writes the link as a plain string; it is replaced at once by
+/// a [`WasmSignedUrl`] (JS never holds the string in the object it is handed).
+fn direct_poll_to_js(dto: DirectPollJs) -> Result<JsValue, JsError> {
+    let link = match &dto {
+        DirectPollJs::Fetch { url, .. } => Some(url.clone()),
+        _ => None,
+    };
+    let object = direct_to_js(&dto)?;
+    if let Some(url) = link {
+        js_sys::Reflect::set(&object, &"url".into(), &JsValue::from(WasmSignedUrl { url }))
+            .map_err(|_| JsError::new("could not build the fetch step"))?;
+    }
+    Ok(object)
+}
+
+/// Milliseconds since the epoch cross as `f64` (a JS number); core counts in `i64`.
+fn direct_ms(now_ms: f64) -> i64 {
+    now_ms as i64
+}
+
+fn direct_discovery_from_js(discovery: JsValue) -> Result<dt::Discovery, DirectFailure> {
+    serde_wasm_bindgen::from_value(discovery).map_err(|e| DirectFailure::new(e.to_string(), "discovery_invalid"))
+}
+
+fn direct_outcome_from_js(outcome: JsValue) -> Result<DirectOutcomeJs, DirectFailure> {
+    serde_wasm_bindgen::from_value(outcome).map_err(|e| DirectFailure::new(e.to_string(), "outcome_invalid"))
+}
+
+#[derive(serde::Serialize)]
+struct DirectConstantsJs {
+    cap_object_download_v1: &'static str,
+    cap_object_upload_v1: &'static str,
+    capabilities_header: &'static str,
+    discovery_path: &'static str,
+    max_window: u32,
+    default_window: u32,
+    chunk_overhead: u32,
+    storage_connect_timeout_ms: u32,
+    storage_get_idle_ms: u32,
+    discovery_timeout_ms: u32,
+    api_call_timeout_ms: u32,
+    background_put_resource_timeout_ms: u32,
+}
+
+/// `{ cap_object_download_v1, cap_object_upload_v1, capabilities_header,
+/// discovery_path, max_window, default_window, chunk_overhead,
+/// storage_connect_timeout_ms, storage_get_idle_ms, discovery_timeout_ms,
+/// api_call_timeout_ms, background_put_resource_timeout_ms }`: the contract's
+/// names and numbers, and the time bounds every client applies, so no client re-types them.
+#[wasm_bindgen(js_name = directTransferConstants)]
+pub fn direct_transfer_constants() -> Result<JsValue, JsError> {
+    direct_to_js(&direct_constants())
+}
+
+fn direct_constants() -> DirectConstantsJs {
+    DirectConstantsJs {
+        cap_object_download_v1: dt::CAP_OBJECT_DOWNLOAD_V1,
+        cap_object_upload_v1: dt::CAP_OBJECT_UPLOAD_V1,
+        capabilities_header: dt::CAPABILITIES_HEADER,
+        discovery_path: dt::DISCOVERY_PATH,
+        max_window: dt::wire::MAX_WINDOW,
+        default_window: dt::wire::DEFAULT_WINDOW,
+        chunk_overhead: dt::wire::CHUNK_OVERHEAD as u32,
+        storage_connect_timeout_ms: direct_timeout_ms(dt::timeouts::STORAGE_CONNECT_TIMEOUT),
+        storage_get_idle_ms: direct_timeout_ms(dt::timeouts::STORAGE_GET_IDLE),
+        discovery_timeout_ms: direct_timeout_ms(dt::timeouts::DISCOVERY_TIMEOUT),
+        api_call_timeout_ms: direct_timeout_ms(dt::timeouts::API_CALL_TIMEOUT),
+        background_put_resource_timeout_ms: direct_timeout_ms(dt::timeouts::BACKGROUND_PUT_RESOURCE_TIMEOUT),
+    }
+}
+
+/// A fixed bound in milliseconds (every one is a few minutes at most).
+fn direct_timeout_ms(d: std::time::Duration) -> u32 {
+    u32::try_from(d.as_millis()).unwrap_or(u32::MAX)
+}
+
+/// A count of bytes that crossed as a JS number: finite, whole, and a number JS holds exactly (below 2^53).
+/// `code` is the stable failure code the caller branches on.
+fn direct_bytes(value: f64, code: &'static str) -> Result<u64, DirectFailure> {
+    if value.is_finite() && value >= 0.0 && value.fract() == 0.0 && value < 9_007_199_254_740_992.0 {
+        Ok(value as u64)
+    } else {
+        Err(DirectFailure::new("not a whole number of bytes", code))
+    }
+}
+
+/// A length that crossed as a JS number (see [`direct_bytes`]).
+fn direct_length(len: f64) -> Result<u64, DirectFailure> {
+    direct_bytes(len, "length_invalid")
+}
+
+/// The most a storage PUT of `len` ciphertext bytes may take, in milliseconds: a minute plus the
+/// chunk at 1 Mbit/s (`60 s + ceil(len / 131072) s`). Throws an `Error` with `code` `length_invalid`
+/// for a `len` that is not a whole, non-negative number.
+#[wasm_bindgen(js_name = storagePutTotalMs)]
+pub fn storage_put_total_ms(len: f64) -> Result<f64, DirectFailure> {
+    Ok(dt::timeouts::storage_put_total(direct_length(len)?).as_millis() as f64)
+}
+
+/// The most a storage GET of `len` ciphertext bytes may take, in milliseconds (the same formula as a PUT).
+/// Throws like `storagePutTotalMs`.
+#[wasm_bindgen(js_name = storageGetTotalMs)]
+pub fn storage_get_total_ms(len: f64) -> Result<f64, DirectFailure> {
+    Ok(dt::timeouts::storage_get_total(direct_length(len)?).as_millis() as f64)
+}
+
+/// `/api/v1/files/{id}/download-grants` for `file_id`.
+#[wasm_bindgen(js_name = directDownloadGrantsPath)]
+pub fn direct_download_grants_path(file_id: &str) -> String {
+    dt::download_grants_path(file_id)
+}
+
+/// Decode a discovery body (`GET /api/v1/transfer/capabilities`). Returns
+/// `{ download, upload, storage_hosts, storage_buckets: [{host, bucket}],
+/// max_window, url_ttl_seconds }`; unknown fields are ignored and missing lists
+/// are empty. Throws an `Error` with `code` `discovery_too_large` or
+/// `discovery_malformed`.
+#[wasm_bindgen(js_name = parseDirectDiscovery)]
+pub fn parse_direct_discovery(body: &[u8]) -> Result<JsValue, JsValue> {
+    let discovery = direct_parse_discovery(body)?;
+    direct_to_js(&discovery).map_err(JsValue::from)
+}
+
+/// May the client follow this storage link? Throws an `Error` whose `code` is
+/// the refusal (`malformed`, `not_https`, `userinfo`, `ip_literal`, `loopback`,
+/// `bad_host`, `port`, `host_not_listed`, `bucket_not_listed`, `bad_path`); the
+/// message never contains the URL. `discovery` is the object
+/// `parseDirectDiscovery` returned; `api_base` is the API origin in use.
+#[wasm_bindgen(js_name = checkStorageUrl)]
+pub fn check_storage_url_js(url: &str, discovery: JsValue, api_base: &str) -> Result<(), JsValue> {
+    let discovery = direct_discovery_from_js(discovery)?;
+    direct_check_url(url, &discovery, api_base).map_err(JsValue::from)
+}
+
+/// A URL for a log line: scheme and host only.
+#[wasm_bindgen(js_name = redactUrl)]
+pub fn redact_url(url: &str) -> String {
+    dt::redact(url)
+}
+
+/// Text that may contain URLs, made safe to print.
+#[wasm_bindgen(js_name = scrubText)]
+pub fn scrub_text(text: &str) -> String {
+    dt::scrub(text)
+}
+
+/// What an API answer means, as `{ kind, millis?, status?, error? }` with `kind`
+/// one of `proceed`, `not_supported`, `use_api_now`, `api_for_this_file`
+/// (for an UPLOAD call: this session cannot go direct, so abandon it and init again WITHOUT the
+/// capability token),
+/// `restart`, `backoff` (with `millis`), `terminal` (with `status`, `error`),
+/// `retry` (the pinned chunk route and the upload calls: a failure that may pass; the retry rules of
+/// the pinned route are `pinnedRetryDecision`, those of an upload are core's `UploadChunkState`, which is
+/// not exported yet, so do not pass an upload outcome to `pinnedRetryDecision`), `regrant`
+/// (`upload_commit` only: the staged chunk is not there, ask for a new link and send it again), `held`
+/// (`upload_commit` only: the server holds the chunk's commit lock, possibly for minutes: wait and
+/// commit again, `millis` is the server's stated wait or null). core's `UploadChunkState` gives a hold an
+/// allowance of its own (the lock TTL, 420 s, plus 30 s; never polling faster than once a second), but it
+/// is not exported yet: a host that handles `held` itself must bound the wait the same way (at least the
+/// server's lock TTL, or it abandons a chunk whose commit would have gone through), poll no faster than
+/// once a second, and not count a hold as one of its failures.
+/// `call` is `"discovery"`, `"download_grant"`, `"pinned_chunk"`, `"upload_grant"` or
+/// `"upload_commit"`; pass `status` 0 when there was
+/// no HTTP answer. `body` is whatever was read of the body (at most 64 KiB is
+/// looked at); `retry_after` is the raw header value.
+#[wasm_bindgen(js_name = classifyDirectAnswer)]
+pub fn classify_direct_answer(
+    call: &str,
+    status: u16,
+    content_type: Option<String>,
+    body: &[u8],
+    retry_after: Option<String>,
+) -> Result<JsValue, JsValue> {
+    let outcome = direct_classify(call, status, content_type.as_deref(), body, retry_after.as_deref())?;
+    direct_to_js(&outcome).map_err(JsValue::from)
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum DirectOutcomeJs {
+    Proceed,
+    NotSupported,
+    UseApiNow,
+    ApiForThisFile,
+    Restart,
+    Backoff {
+        millis: f64,
+    },
+    Terminal {
+        status: u16,
+        error: Option<String>,
+    },
+    Retry,
+    /// `upload_commit` only: the staged chunk is not there; ask for a new link and send it again.
+    Regrant,
+    /// `upload_commit` only: the server holds the chunk's commit lock (up to 420 s after a failed
+    /// copy); wait and commit again. `millis` is the server's stated wait, `null` when it sent none.
+    /// The host bounds the wait itself (at least 450 s in all, polls no faster than once a second, not
+    /// counted as a failure) until core's `UploadChunkState` is exported.
+    Held {
+        millis: Option<f64>,
+    },
+}
+
+impl DirectOutcomeJs {
+    fn from_core(o: &dt::Outcome) -> Self {
+        match o {
+            dt::Outcome::Proceed => Self::Proceed,
+            dt::Outcome::NotSupported => Self::NotSupported,
+            dt::Outcome::UseApiNow => Self::UseApiNow,
+            dt::Outcome::ApiForThisFile => Self::ApiForThisFile,
+            dt::Outcome::Restart => Self::Restart,
+            dt::Outcome::Backoff(d) => Self::Backoff {
+                millis: d.as_millis() as f64,
+            },
+            dt::Outcome::Terminal(t) => Self::Terminal {
+                status: t.status,
+                error: t.error.clone(),
+            },
+            dt::Outcome::Retry => Self::Retry,
+            dt::Outcome::Regrant => Self::Regrant,
+            dt::Outcome::Held(d) => Self::Held {
+                millis: d.map(|d| d.as_millis() as f64),
+            },
+            // `Outcome` is non-exhaustive: a variant added later is the safe one.
+            _ => Self::UseApiNow,
+        }
+    }
+
+    fn to_core(&self) -> dt::Outcome {
+        match self {
+            Self::Proceed => dt::Outcome::Proceed,
+            Self::NotSupported => dt::Outcome::NotSupported,
+            Self::UseApiNow => dt::Outcome::UseApiNow,
+            Self::ApiForThisFile => dt::Outcome::ApiForThisFile,
+            Self::Restart => dt::Outcome::Restart,
+            Self::Backoff { millis } => dt::Outcome::Backoff(std::time::Duration::from_millis(millis.max(0.0) as u64)),
+            Self::Terminal { status, error } => dt::Outcome::Terminal(dt::Terminal {
+                status: *status,
+                error: error.clone(),
+            }),
+            Self::Retry => dt::Outcome::Retry,
+            Self::Regrant => dt::Outcome::Regrant,
+            Self::Held { millis } => {
+                dt::Outcome::Held(millis.map(|m| std::time::Duration::from_millis(m.max(0.0) as u64)))
+            }
+        }
+    }
+}
+
+/// What to do after a failed attempt on the pinned per-chunk route: `{ kind: "wait", millis }` or
+/// `{ kind: "give_up" }`.
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum DirectRetryJs {
+    Wait { millis: f64 },
+    GiveUp,
+}
+
+/// The shared retry policy of the pinned per-chunk route (4 attempts, 150 s of waiting in all, a
+/// stated `Retry-After` kept, otherwise 1 s doubling). `outcome` is what `classifyDirectAnswer`
+/// returned for `call: "pinned_chunk"`; `attempt` is the 1-based number of the attempt that just
+/// failed; `waitedMs` is the total waited so far.
+#[wasm_bindgen(js_name = pinnedRetryDecision)]
+pub fn pinned_retry_decision(outcome: JsValue, attempt: u32, waited_ms: f64) -> Result<JsValue, JsValue> {
+    let outcome = direct_outcome_from_js(outcome)?;
+    direct_to_js(&direct_pinned_retry(&outcome, attempt, waited_ms)).map_err(JsValue::from)
+}
+
+// ── seams: plain Rust (no `JsValue`), used by the wrappers and by the tests ──
+
+fn direct_parse_discovery(body: &[u8]) -> Result<dt::Discovery, DirectFailure> {
+    dt::Discovery::from_json(body).map_err(|e| {
+        let code = match e {
+            dt::WireError::TooLarge(_) => "discovery_too_large",
+            dt::WireError::Malformed => "discovery_malformed",
+        };
+        DirectFailure::new(e.to_string(), code)
+    })
+}
+
+fn direct_pinned_retry(outcome: &DirectOutcomeJs, attempt: u32, waited_ms: f64) -> DirectRetryJs {
+    let waited = std::time::Duration::from_millis(waited_ms.max(0.0) as u64);
+    match dt::PinnedRetry::default().decide(attempt, waited, &outcome.to_core()) {
+        dt::RetryDecision::Wait(d) => DirectRetryJs::Wait {
+            millis: d.as_millis() as f64,
+        },
+        dt::RetryDecision::GiveUp => DirectRetryJs::GiveUp,
+    }
+}
+
+fn direct_check_url(url: &str, discovery: &dt::Discovery, api_base: &str) -> Result<(), DirectFailure> {
+    dt::check_storage_url(url, discovery, api_base).map_err(|r| DirectFailure::new(r.to_string(), r.code()))
+}
+
+fn direct_classify(
+    call: &str,
+    status: u16,
+    content_type: Option<&str>,
+    body: &[u8],
+    retry_after: Option<&str>,
+) -> Result<DirectOutcomeJs, DirectFailure> {
+    let call = dt::Call::from_code(call).ok_or_else(|| DirectFailure::new("unknown call", "unknown_call"))?;
+    let answer = dt::ApiAnswer::from_parts(status, content_type, body, retry_after);
+    Ok(DirectOutcomeJs::from_core(&dt::classify(call, &answer)))
+}
+
+#[derive(serde::Serialize)]
+struct DirectGrantRequestJs {
+    object_version_id: Option<String>,
+    start_index: u32,
+    count: u32,
+    renewal: bool,
+}
+
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum DirectVerdictJs {
+    ApiForFile,
+    Restart,
+    Terminal { status: u16, error: Option<String> },
+    Corrupt,
+}
+
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum DirectPollJs {
+    /// `POST` this body to `directDownloadGrantsPath(fileId)` with the
+    /// capability header.
+    RequestWindow {
+        request: DirectGrantRequestJs,
+    },
+    /// `GET url.raw()` (`url` is a `WasmSignedUrl`, not a string) with a client that sends
+    /// nothing else (no cookies, no `Authorization`), `redirect: "error"`; accept only `200`
+    /// whose `Content-Length` is `length`.
+    Fetch {
+        index: u32,
+        method: String,
+        url: String,
+        length: f64,
+        expires_at: String,
+    },
+    /// `GET /api/v1/files/{id}/chunks/{index}?object_version_id=<pinned>`.
+    FetchViaApi {
+        index: u32,
+        object_version_id: String,
+    },
+    /// `until_ms` is the next moment the planner can act by itself, `null` when
+    /// it waits for a request that is outstanding.
+    Wait {
+        until_ms: Option<f64>,
+    },
+    Done,
+    Stop {
+        verdict: DirectVerdictJs,
+    },
+}
+
+impl DirectPollJs {
+    fn from_core(p: &dt::Poll) -> Self {
+        match p {
+            dt::Poll::RequestWindow(r) => Self::RequestWindow {
+                request: DirectGrantRequestJs {
+                    object_version_id: r.object_version_id.clone(),
+                    start_index: r.start_index,
+                    count: r.count,
+                    renewal: r.renewal,
+                },
+            },
+            dt::Poll::Fetch { index, grant } => Self::Fetch {
+                index: *index,
+                method: grant.method.clone(),
+                url: grant.url.clone(),
+                length: grant.length as f64,
+                expires_at: grant.expires_at.clone(),
+            },
+            dt::Poll::FetchViaApi {
+                index,
+                object_version_id,
+            } => Self::FetchViaApi {
+                index: *index,
+                object_version_id: object_version_id.clone(),
+            },
+            dt::Poll::Wait { until_ms } => Self::Wait {
+                until_ms: until_ms.map(|t| t as f64),
+            },
+            dt::Poll::Done => Self::Done,
+            dt::Poll::Stop(v) => Self::Stop {
+                verdict: match v {
+                    dt::Verdict::ApiForFile => DirectVerdictJs::ApiForFile,
+                    dt::Verdict::Restart => DirectVerdictJs::Restart,
+                    dt::Verdict::Terminal(t) => DirectVerdictJs::Terminal {
+                        status: t.status,
+                        error: t.error.clone(),
+                    },
+                    dt::Verdict::Corrupt => DirectVerdictJs::Corrupt,
+                },
+            },
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+struct DirectGeometryJs {
+    chunk_count: u32,
+    chunk_size: f64,
+    encrypted_size: f64,
+    original_size: f64,
+}
+
+/// The download planner for ONE file: when to ask the API for a window of
+/// links, which chunk to fetch next (at most 4 in flight, in order), when to
+/// renew a link, and when a chunk goes to the pinned API route. It performs no
+/// I/O and holds no clock: pass `Date.now()` as `nowMs` on every call.
+///
+/// Drive it from one place:
+///
+/// ```js
+/// const p = new WasmDownloadPlanner(discovery, apiBase, fileId, seed)
+/// for (;;) {
+///   const w = p.poll(Date.now())
+///   switch (w.kind) {
+///     case "request_window": // POST, then windowAnswered(body) or windowFailed(outcome)
+///       break
+///     case "fetch": // GET w.url.raw() (w.url is a WasmSignedUrl, not a string), then fetchOk(w.index) or fetchFailed(w.index)
+///       break
+///     case "fetch_via_api": // pinned route, then fetchOk or apiFetchFailed
+///       break
+///     case "wait": // sleep until w.until_ms or until a request returns
+///       break
+///     case "done": return
+///     case "stop": return // discard partial output and act on w.verdict.kind
+///   }
+///   // chunks are decrypted IN ORDER: after each, consumed(index); if one does
+///   // not authenticate, chunkUnauthentic(index)
+/// }
+/// ```
+#[wasm_bindgen]
+pub struct WasmDownloadPlanner {
+    inner: dt::DownloadPlanner,
+}
+
+#[wasm_bindgen]
+impl WasmDownloadPlanner {
+    /// `discovery` is the object `parseDirectDiscovery` returned; `jitter_seed` is any number.
+    /// The seed is the number's IEEE-754 bits (`f64::to_bits`): `Math.random()` is fine, every
+    /// distinct number is a distinct seed (so two tabs do not share a retry schedule), the same
+    /// number repeats its schedule, and `0` and `-0` are two seeds. It is not a secret.
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        discovery: JsValue,
+        api_base: &str,
+        file_id: &str,
+        jitter_seed: f64,
+    ) -> Result<WasmDownloadPlanner, JsValue> {
+        let discovery = direct_discovery_from_js(discovery)?;
+        Ok(Self::from_parts(discovery, api_base, file_id, direct_seed(jitter_seed)))
+    }
+
+    /// What to do now: a `DirectPoll` (`{ kind, ... }`, see the class docs). For `kind: "fetch"` the
+    /// `url` is a `WasmSignedUrl`, not a string: pass `url.raw()` to `fetch` and nothing else.
+    #[wasm_bindgen(unchecked_return_type = "DirectPoll")]
+    pub fn poll(&mut self, now_ms: f64) -> Result<JsValue, JsError> {
+        direct_poll_to_js(self.poll_dto(direct_ms(now_ms)))
+    }
+
+    /// The window answer for the outstanding request, as the raw response body
+    /// (`Uint8Array`). Returns `"accepted"`, `"malformed"` (the body is not the
+    /// contract's JSON; handled like any window the server could not serve), or
+    /// the code of the contract violation (`transport`, `file_mismatch`,
+    /// `version_changed`, `geometry`, `grants`, `length`, `method`,
+    /// `authority_<refusal>`, `expiry`, `unexpected`). It never throws: poll
+    /// again.
+    #[wasm_bindgen(js_name = windowAnswered)]
+    pub fn window_answered(&mut self, body: &[u8], now_ms: f64) -> String {
+        self.answered_code(body, direct_ms(now_ms))
+    }
+
+    /// The window request failed. `outcome` is what `classifyDirectAnswer`
+    /// returned for the answer (or `{ kind: "use_api_now" }` for a network
+    /// error).
+    #[wasm_bindgen(js_name = windowFailed)]
+    pub fn window_failed(&mut self, outcome: JsValue, now_ms: f64) -> Result<(), JsValue> {
+        let outcome = direct_outcome_from_js(outcome)?;
+        self.failed_core(&outcome, direct_ms(now_ms));
+        Ok(())
+    }
+
+    /// A 2xx window response whose body could not be decoded at all.
+    #[wasm_bindgen(js_name = windowMalformed)]
+    pub fn window_malformed(&mut self) {
+        self.inner.window_malformed();
+    }
+
+    /// Chunk `index` arrived whole (status 200 and the right length).
+    #[wasm_bindgen(js_name = fetchOk)]
+    pub fn fetch_ok(&mut self, index: u32) -> Result<(), DirectFailure> {
+        self.inner.fetch_ok(index).map_err(DirectFailure::from)
+    }
+
+    /// The transfer of chunk `index` from storage failed (any non-200, a short
+    /// body, a wrong length, a network error, an expired link).
+    #[wasm_bindgen(js_name = fetchFailed)]
+    pub fn fetch_failed(&mut self, index: u32, now_ms: f64) -> Result<(), DirectFailure> {
+        self.inner
+            .fetch_failed(index, direct_ms(now_ms))
+            .map_err(DirectFailure::from)
+    }
+
+    /// The pinned API route failed for chunk `index` after the caller's own retries.
+    #[wasm_bindgen(js_name = apiFetchFailed)]
+    pub fn api_fetch_failed(&mut self, index: u32) -> Result<(), DirectFailure> {
+        self.inner.api_fetch_failed(index).map_err(DirectFailure::from)
+    }
+
+    /// Chunk `index` arrived but did not authenticate when decrypted.
+    #[wasm_bindgen(js_name = chunkUnauthentic)]
+    pub fn chunk_unauthentic(&mut self, index: u32) -> Result<(), DirectFailure> {
+        self.inner.chunk_unauthentic(index).map_err(DirectFailure::from)
+    }
+
+    /// Chunk `index` has been decrypted and written. Strictly in order.
+    pub fn consumed(&mut self, index: u32) -> Result<(), DirectFailure> {
+        self.inner.consumed(index).map_err(DirectFailure::from)
+    }
+
+    /// `{ chunk_count, chunk_size, encrypted_size, original_size }` once the
+    /// first window was accepted, else `null`.
+    pub fn geometry(&self) -> Result<JsValue, JsError> {
+        direct_to_js(&self.geometry_dto())
+    }
+
+    /// The pinned `object_version_id`, or `null` before the first window.
+    #[wasm_bindgen(js_name = pinnedVersion)]
+    pub fn pinned_version(&self) -> Option<String> {
+        self.inner.pinned_version().map(str::to_string)
+    }
+
+    /// Chunks decrypted and written so far.
+    #[wasm_bindgen(js_name = consumedCount)]
+    pub fn consumed_count(&self) -> u32 {
+        self.inner.consumed_count()
+    }
+
+    /// Chunk requests (storage or API) currently outstanding.
+    #[wasm_bindgen(js_name = inFlight)]
+    pub fn in_flight(&self) -> u32 {
+        self.inner.in_flight() as u32
+    }
+
+    /// Cap the ciphertext bytes held at once (fetching, or fetched and waiting to be decrypted in order):
+    /// the planner then holds `clamp(floor(bytes / (chunk_size + 28)), 1, 4)` chunks, so 64 MiB holds four
+    /// chunks of 4 MiB but one of 256 MiB. Call it before the first `poll`. Throws `bytes_invalid` for a
+    /// number that is not a whole, non-negative byte count.
+    #[wasm_bindgen(js_name = setMaxInFlightBytes)]
+    pub fn set_max_in_flight_bytes(&mut self, bytes: f64) -> Result<(), DirectFailure> {
+        self.inner
+            .set_max_in_flight_bytes(Some(direct_bytes(bytes, "bytes_invalid")?));
+        Ok(())
+    }
+
+    /// Did the storage breaker trip? It does when a chunk used up its renewals and no chunk of this
+    /// transfer has come whole from storage: from then on every remaining chunk is a `fetch_via_api` poll.
+    /// When the file ends with this `true`, tell `WasmDirectHealth.gaveUp("download", nowMs)`.
+    #[wasm_bindgen(js_name = storageGivenUp)]
+    pub fn storage_given_up(&self) -> bool {
+        self.inner.storage_given_up()
+    }
+}
+
+impl WasmDownloadPlanner {
+    fn from_parts(discovery: dt::Discovery, api_base: &str, file_id: &str, seed: u64) -> Self {
+        let config = dt::PlannerConfig::from_discovery(&discovery, seed);
+        Self {
+            inner: dt::DownloadPlanner::new(config, discovery, api_base, file_id),
+        }
+    }
+
+    fn failed_core(&mut self, outcome: &DirectOutcomeJs, now_ms: i64) {
+        self.inner.window_failed(outcome.to_core(), now_ms);
+    }
+
+    fn poll_dto(&mut self, now_ms: i64) -> DirectPollJs {
+        DirectPollJs::from_core(&self.inner.poll(now_ms))
+    }
+
+    fn answered_code(&mut self, body: &[u8], now_ms: i64) -> String {
+        self.inner.window_answered_bytes(body, now_ms).code().to_string()
+    }
+
+    fn geometry_dto(&self) -> Option<DirectGeometryJs> {
+        self.inner.geometry().map(|g| DirectGeometryJs {
+            chunk_count: g.chunk_count,
+            chunk_size: g.chunk_size as f64,
+            encrypted_size: g.encrypted_size as f64,
+            original_size: g.original_size as f64,
+        })
+    }
+}
+
+/// How long a discovery answer is trusted, and whether to ask again: one per API base.
+/// `lookup(nowMs)` is `{ kind: "fetch" | "cached" | "use_api", discovery? }`;
+/// `record(outcome, body, nowMs)` takes the `classifyDirectAnswer` result and the
+/// discovery body (or `null`).
+#[wasm_bindgen]
+pub struct WasmDirectDiscoveryCache {
+    inner: dt::DiscoveryCache,
+}
+
+impl Default for WasmDirectDiscoveryCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[wasm_bindgen]
+impl WasmDirectDiscoveryCache {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> WasmDirectDiscoveryCache {
+        Self {
+            inner: dt::DiscoveryCache::new(),
+        }
+    }
+
+    pub fn lookup(&self, now_ms: f64) -> Result<JsValue, JsError> {
+        direct_to_js(&self.lookup_dto(direct_ms(now_ms)))
+    }
+
+    pub fn record(&mut self, outcome: JsValue, body: Option<Vec<u8>>, now_ms: f64) -> Result<(), JsValue> {
+        let outcome = direct_outcome_from_js(outcome)?;
+        self.record_core(&outcome, body.as_deref(), direct_ms(now_ms));
+        Ok(())
+    }
+}
+
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum DirectLookupJs {
+    Fetch,
+    Cached { discovery: dt::Discovery },
+    UseApi,
+}
+
+impl WasmDirectDiscoveryCache {
+    fn lookup_dto(&self, now_ms: i64) -> DirectLookupJs {
+        match self.inner.lookup(now_ms) {
+            dt::Lookup::Fetch => DirectLookupJs::Fetch,
+            dt::Lookup::Cached(discovery) => DirectLookupJs::Cached { discovery },
+            dt::Lookup::UseApi => DirectLookupJs::UseApi,
+        }
+    }
+
+    fn record_core(&mut self, outcome: &DirectOutcomeJs, body: Option<&[u8]>, now_ms: i64) {
+        let discovery = body.and_then(|b| dt::Discovery::from_json(b).ok());
+        self.inner.record(&outcome.to_core(), discovery, now_ms);
+    }
+}
+
+/// A time that crossed as a JS number: finite. A NaN or infinity would become 0 or a saturated number and make the
+/// ten-minute hold silently ineffective, so the health methods refuse it with a stable code.
+fn direct_time(ms: f64) -> Result<i64, DirectFailure> {
+    if ms.is_finite() {
+        Ok(direct_ms(ms))
+    } else {
+        Err(DirectFailure::new("not a time in milliseconds", "time_invalid"))
+    }
+}
+
+/// The direction a JS string names: `"download"` or `"upload"`.
+fn direct_direction(direction: &str) -> Result<dt::Direction, DirectFailure> {
+    dt::Direction::from_code(direction)
+        .ok_or_else(|| DirectFailure::new("direction must be \"download\" or \"upload\"", "direction_invalid"))
+}
+
+/// Whether this client may start a direct transfer now, per direction: after a transfer gave up direct,
+/// no new one of that direction starts for ten minutes. One per API base and account; feed it
+/// `Date.now()` (or a monotonic clock, consistently). `lastGaveUpMs` / `restore` let a client persist the
+/// two timestamps. A recorded time later than "now" counts as expired.
+#[wasm_bindgen]
+pub struct WasmDirectHealth {
+    inner: dt::DirectHealth,
+}
+
+impl Default for WasmDirectHealth {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[wasm_bindgen]
+impl WasmDirectHealth {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> WasmDirectHealth {
+        Self {
+            inner: dt::DirectHealth::new(),
+        }
+    }
+
+    /// A transfer of `direction` gave up direct. Throws `direction_invalid` for anything but
+    /// `"download"` or `"upload"` (as every method here does).
+    #[wasm_bindgen(js_name = gaveUp)]
+    pub fn gave_up(&mut self, direction: &str, now_ms: f64) -> Result<(), DirectFailure> {
+        self.inner.gave_up(direct_direction(direction)?, direct_time(now_ms)?);
+        Ok(())
+    }
+
+    /// May a new direct transfer of `direction` start now?
+    #[wasm_bindgen(js_name = mayStart)]
+    pub fn may_start(&self, direction: &str, now_ms: f64) -> Result<bool, DirectFailure> {
+        Ok(self.inner.may_start(direct_direction(direction)?, direct_time(now_ms)?))
+    }
+
+    /// As `mayStart`, for a file that may already have given up direct: it never may again (`fileGaveUp`).
+    #[wasm_bindgen(js_name = mayStartFile)]
+    pub fn may_start_file(&self, direction: &str, now_ms: f64, file_gave_up: bool) -> Result<bool, DirectFailure> {
+        Ok(self
+            .inner
+            .may_start_file(direct_direction(direction)?, direct_time(now_ms)?, file_gave_up))
+    }
+
+    /// When the last give-up of `direction` was recorded, or `null`.
+    #[wasm_bindgen(js_name = lastGaveUpMs)]
+    pub fn last_gave_up_ms(&self, direction: &str) -> Result<Option<f64>, DirectFailure> {
+        Ok(self
+            .inner
+            .last_gave_up_ms(direct_direction(direction)?)
+            .map(|ms| ms as f64))
+    }
+
+    /// Put back a timestamp `lastGaveUpMs` returned earlier.
+    pub fn restore(&mut self, direction: &str, last_gave_up_ms: f64) -> Result<(), DirectFailure> {
+        self.inner
+            .restore(direct_direction(direction)?, direct_time(last_gave_up_ms)?);
+        Ok(())
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct DirectDiscoveryStateJs {
+    kind: String,
+    #[serde(default)]
+    upload: Option<bool>,
+}
+
+/// What to do with an unfinished upload found on disk. `recorded` is `"api"` or `"direct"` (what the resume
+/// record names); `discovery` is `{ kind, upload? }` with `kind` `"offers"` (and `upload: true | false`),
+/// `"not_supported"` (a JSON 404), `"unknown"` (a 5xx, a timeout, a bare 404: no usable answer) or
+/// `"unauthorized"` (401 or 403); `forcedApi` is the user's own switch. Returns `"continue_api"`,
+/// `"continue_direct"`, `"abandon_to_api"`, `"keep_record_and_fail"` or `"keep_record_and_reauthenticate"`.
+/// A recorded direct session is given up only on a definite no. Throws `recorded_invalid` or
+/// `discovery_state_invalid`.
+#[wasm_bindgen(js_name = resumeTransport)]
+pub fn resume_transport_js(recorded: &str, discovery: JsValue, forced_api: bool) -> Result<String, DirectFailure> {
+    let state: DirectDiscoveryStateJs = serde_wasm_bindgen::from_value(discovery)
+        .map_err(|e| DirectFailure::new(e.to_string(), "discovery_state_invalid"))?;
+    direct_resume_transport(recorded, &state.kind, state.upload, forced_api)
+}
+
+/// The seam `resumeTransport` calls, in plain Rust.
+fn direct_resume_transport(
+    recorded: &str,
+    kind: &str,
+    upload: Option<bool>,
+    forced_api: bool,
+) -> Result<String, DirectFailure> {
+    let recorded = dt::RecordedTransport::from_code(recorded)
+        .ok_or_else(|| DirectFailure::new("recorded must be \"api\" or \"direct\"", "recorded_invalid"))?;
+    let state = dt::DiscoveryState::from_parts(kind, upload)
+        .ok_or_else(|| DirectFailure::new("not a discovery state", "discovery_state_invalid"))?;
+    Ok(dt::resume_transport(recorded, state, forced_api).code().to_string())
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1164,6 +2979,29 @@ pub fn decrypt_names(master_key: &[u8], items: JsValue) -> Result<JsValue, JsErr
 mod tests {
     use super::*;
     use beebeeb_core::chunk_stream::ChunkDecryptor;
+
+    /// Doc comments are copied into the generated glue (JSDoc in the `.js` and `.d.ts`, Kotlin and Swift doc
+    /// comments in the UniFFI bindings). A block-comment closer inside one ends the comment early, which
+    /// is a SyntaxError in the glue; an opener starts a nested comment that Kotlin and Swift then wait to
+    /// see closed. Neither can be seen by `cargo test` of the generated code, so the source is checked.
+    #[test]
+    fn no_doc_comment_contains_a_block_comment_token() {
+        let offending: Vec<String> = include_str!("lib.rs")
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| {
+                let line = line.trim_start();
+                line.starts_with("///") || line.starts_with("//!")
+            })
+            .filter(|(_, line)| line.contains("/*") || line.contains("*/"))
+            .map(|(i, line)| format!("lib.rs:{}: {}", i + 1, line.trim()))
+            .collect();
+        assert!(
+            offending.is_empty(),
+            "use line comments (or words) inside doc comments, never a block-comment token:\n{}",
+            offending.join("\n")
+        );
+    }
 
     /// Deterministic, non-trivial test data.
     fn pattern(len: usize) -> Vec<u8> {
@@ -1174,7 +3012,11 @@ mod tests {
     /// concatenated plaintext — proves the wrapper emits the standard wire
     /// format and the FileKey derivation matches.
     fn decrypt_frames(mk: &kdf::MasterKey, file_id: &str, frames: &[Vec<u8>]) -> Vec<u8> {
-        let mut dec = ChunkDecryptor::for_push(mk, file_id);
+        let mut dec = ChunkDecryptor::for_push(
+            mk,
+            file_id,
+            beebeeb_core::chunk_stream::ExpectedChunkFormat::recorded_for(beebeeb_core::chunk_stream::WRITE_FORMAT),
+        );
         let mut out = Vec::new();
         for f in frames {
             out.extend_from_slice(&dec.push_frame(f).unwrap().data);
@@ -1237,10 +3079,1086 @@ mod tests {
         assert_eq!(decrypt_frames(&mk, file_id, &frames), data);
     }
 
+    #[test]
+    fn wasm_decryptor_roundtrip_and_v2_format() {
+        // Task 1908: the web decryptor (both constructors, pinned v2 as the
+        // metadata records it) reads v2 back in order; the web encryptor still
+        // writes v1 during the read-only rollout. Error paths throw JsError,
+        // which cannot be constructed off-wasm (see NOTE below), so only the
+        // success seams are exercised here; the rejection cases live in core.
+        use beebeeb_core::chunk_stream::{ChunkEncryptor, ChunkFormat, ExpectedChunkFormat};
+        let mk = kdf::derive_master_key("test-password", b"test-salt-16bytes").unwrap();
+        let mk_bytes = mk.to_bytes();
+        let file_id = "wasm-dec-1";
+        let data = pattern(40);
+        let enc = WasmChunkEncryptor::with_chunk_size(&mk_bytes, file_id.to_string(), data.len() as u64, 16).unwrap();
+        assert_eq!(enc.format(), 1, "web uploads stay v1 until the gated v2 switch");
+
+        // v2 frames as a client writes them after the switch (dev-only feature).
+        let mut enc = ChunkEncryptor::for_push_with_chunk_size(&mk, file_id, data.len() as u64, 16)
+            .unwrap()
+            .with_format(ChunkFormat::V2)
+            .unwrap();
+        let frames: Vec<Vec<u8>> = data.chunks(16).map(|c| enc.push_chunk(c).unwrap().data).collect();
+        enc.finish().unwrap();
+
+        // The name metadata a v2 upload writes records 2.
+        let ne = encrypt_name_with_chunk_format(&mk_bytes, file_id, "a.txt", None, 2).unwrap();
+        let meta = encrypt::decrypt_name_metadata(&mk, file_id, &ne).unwrap();
+        assert_eq!(meta.chunk_format, ExpectedChunkFormat::V2);
+        let pin = meta.chunk_format.as_u8();
+
+        let mut dec = WasmChunkDecryptor::new(&mk_bytes, file_id.to_string(), pin).unwrap();
+        assert_eq!(dec.format(), 0);
+        assert_eq!(dec.version_id(), None);
+        let mut out = Vec::new();
+        for f in &frames {
+            out.extend(dec.push_frame(f).unwrap());
+        }
+        assert_eq!(out, data);
+        assert_eq!(dec.format(), 2);
+        assert_eq!(dec.chunks_decrypted(), 3);
+        let vid = dec.version_id().unwrap();
+        assert_eq!(vid, frames[0][..12].to_vec());
+        let summary = dec.inner.finish().unwrap();
+        assert_eq!(summary.chunk_count, 3);
+
+        let fk = kdf::derive_file_key(&mk, file_id.as_bytes());
+        let mut dec = WasmChunkDecryptor::from_file_key(fk.as_bytes(), file_id.to_string(), pin).unwrap();
+        for f in &frames {
+            dec.push_frame(f).unwrap();
+        }
+        dec.inner.finish().unwrap();
+
+        // Random-access open at the right position and version.
+        let last = decrypt_chunk_frame(fk.as_bytes(), file_id, &vid, 2, true, 2, &frames[2]).unwrap();
+        assert_eq!(last, data[32..]);
+    }
+
     // NOTE: error-path coverage (bad key length, unknown profile, push beyond
     // plan, u32 chunk_count guard) lives in core's `chunk_stream` tests. It is
     // NOT duplicated here because the wrapper's error variant is a `JsError`,
     // whose constructor calls a wasm-bindgen import that panics on a non-wasm
     // host — so an `is_err()` assertion can't run under `cargo test`. The
     // wrapper's error paths are still compile-checked.
+    // ---- Onboarding wrappers (task 1744): non-JS seams only -----------------
+
+    #[test]
+    fn onboarding_password_evaluation_tokens_and_floor() {
+        let policy = onb::PasswordPolicy::from_server(1); // hostile server value
+        let e = onb::evaluate_password("aaaaaaa", &policy); // 7 chars < floor 12
+        let js = password_evaluation_js(&e);
+        assert_eq!(
+            js.min_length,
+            onb::MIN_LENGTH_FLOOR,
+            "floor applies through the wrapper"
+        );
+        assert!(!js.meets_minimum);
+        assert_eq!(js.strength, "too_short");
+        assert_eq!(js.hint, "need_more_characters");
+        assert_eq!(js.level, 1);
+
+        let strong = onb::evaluate_password("aaaaaaaaaaA1", &onb::PasswordPolicy::from_server(12));
+        let js = password_evaluation_js(&strong);
+        assert_eq!((js.strength, js.hint, js.level), ("strong", "none", 4));
+    }
+
+    #[test]
+    fn onboarding_breach_check_seam_prefix_and_outage_policy() {
+        let mut q = WasmBreachCheck::new("password".to_owned());
+        assert_eq!(q.prefix(), "5BAA6");
+        // Request failed (body = None): fail_open decides.
+        let open = q.record(&q.prefix(), None, true).unwrap();
+        let closed = q.record(&q.prefix(), None, false).unwrap();
+        assert_eq!(open, onb::BreachVerdict::CheckFailedAllowed);
+        assert_eq!(closed, onb::BreachVerdict::CheckFailedBlocked);
+        let hit = q
+            .record(&q.prefix(), Some("1E4C9B93F3F0682250B6CF8331B7EE68FD8:12\r\n"), true)
+            .unwrap();
+        assert_eq!(hit, onb::BreachVerdict::Breached { count: 12 });
+        let js = BreachVerdictJs::from_core(hit);
+        assert_eq!(
+            (js.kind.as_str(), js.count, js.allows_proceeding),
+            ("breached", 12.0, false)
+        );
+        // An empty body is an outage (review M2), not clean.
+        assert_eq!(
+            q.record(&q.prefix(), Some(""), true).unwrap(),
+            onb::BreachVerdict::CheckFailedAllowed
+        );
+    }
+
+    #[test]
+    fn onboarding_breach_check_seam_refuses_another_prefix() {
+        let mut q = WasmBreachCheck::new("password".to_owned());
+        let err = q
+            .record("ABCDE", Some("0018A45C4D1DEF81644B54AB7F969B88D65:1\r\n"), true)
+            .expect_err("a body for another prefix must be refused");
+        assert_eq!(err.code(), "breach_prefix_mismatch");
+        assert!(!q.check.is_answered());
+    }
+
+    #[test]
+    fn onboarding_ceremony_wrapper_binds_the_breach_check_and_gates_registration() {
+        const PW: &str = "correct horse battery staple";
+        let mut c = WasmSignupCeremony::new(12, true, 3, true, false);
+        assert_eq!(c.inner.step().as_str(), "verify_email");
+        c.email_verified();
+        assert_eq!(c.inner.step().as_str(), "set_password");
+
+        let short = c.try_set_password("short", "short", None);
+        assert_eq!(short.expect_err("too short").code(), "password_too_short");
+        // Required and absent.
+        let missing = c.try_set_password(PW, PW, None);
+        assert_eq!(missing.expect_err("missing").code(), "breach_check_missing");
+        // A clean verdict for ANOTHER password does not carry over.
+        let mut other = WasmBreachCheck::new("some other password!".to_owned());
+        other
+            .record(&other.prefix(), Some("0018A45C4D1DEF81644B54AB7F969B88D65:1\r\n"), true)
+            .unwrap();
+        let stale = c.try_set_password(PW, PW, Some(&other.check));
+        assert_eq!(stale.expect_err("stale").code(), "breach_check_stale");
+        // Breached.
+        let suffix = onb::BreachQuery::from_password(PW).suffix().to_owned();
+        let mut hit = WasmBreachCheck::new(PW.to_owned());
+        hit.record(&hit.prefix(), Some(&format!("{suffix}:3\r\n")), true)
+            .unwrap();
+        let breached = c.try_set_password(PW, PW, Some(&hit.check));
+        assert_eq!(breached.expect_err("breached").code(), "password_breached");
+        // Outage under the ceremony's own fail_open=false, whatever JS passed to evaluate().
+        let mut down = WasmBreachCheck::new(PW.to_owned());
+        down.record(&down.prefix(), None, true).unwrap();
+        let blocked = c.try_set_password(PW, PW, Some(&down.check));
+        assert_eq!(blocked.expect_err("blocked").code(), "breach_check_blocked");
+        // Clean.
+        let mut clean = WasmBreachCheck::new(PW.to_owned());
+        clean
+            .record(
+                &clean.prefix(),
+                Some("0018A45C4D1DEF81644B54AB7F969B88D65:1\r\n"),
+                false,
+            )
+            .unwrap();
+        assert!(c.try_set_password(PW, PW, Some(&clean.check)).is_ok());
+        // create_account is still gated on the phrase steps.
+        let early = c.inner.start_registration();
+        let Err(gated) = early else {
+            panic!("registration must be gated")
+        };
+        assert_eq!(gated.code(), "step_not_done");
+        // abandon() returns to a fresh ceremony.
+        c.abandon();
+        assert_eq!(c.inner.step().as_str(), "verify_email");
+    }
+
+    #[test]
+    fn recorded_pin_and_pinned_thumbnail_wrappers() {
+        // Task 1908 round 4, I-1 / P2-4 through the WASM wrappers (native
+        // seams; the JsError paths need a JS runtime).
+        let mk = kdf::derive_master_key("test-password", b"test-salt-16bytes").unwrap();
+        let mk_bytes = mk.to_bytes();
+        let id = "wasm-replace-v2";
+        let name = encrypt_name_with_chunk_format(&mk_bytes, id, "a.pdf", None, 2).unwrap();
+        let pin = encrypt::decrypt_file_metadata(&mk, id, &name).unwrap().chunk_format;
+        assert_eq!(pin.as_u8(), 2);
+        let data = pattern(40);
+        let mut enc = WasmChunkEncryptor::with_chunk_size(&mk_bytes, id.to_string(), data.len() as u64, 16)
+            .unwrap()
+            .with_recorded_pin(pin.as_u8())
+            .unwrap();
+        assert_eq!(enc.format(), 2, "a v2-pinned file must be written as v2");
+        let frames: Vec<Vec<u8>> = data.chunks(16).map(|c| enc.push_chunk(c).unwrap()).collect();
+        enc.finish_summary().unwrap();
+        let mut dec = ChunkDecryptor::for_push(&mk, id, pin);
+        let mut out = Vec::new();
+        for f in &frames {
+            out.extend_from_slice(&dec.push_frame(f).unwrap().data);
+        }
+        dec.finish().unwrap();
+        assert_eq!(out, data);
+
+        let unrec = WasmChunkEncryptor::with_chunk_size(&mk_bytes, "wasm-replace-v1".into(), 4, 16)
+            .unwrap()
+            .with_recorded_pin(0)
+            .unwrap();
+        assert_eq!(unrec.format(), beebeeb_core::chunk_stream::WRITE_FORMAT.as_u8());
+        let bad = WasmChunkEncryptor::with_chunk_size(&mk_bytes, "wasm-bad-pin".into(), 4, 16).unwrap();
+        assert!(recorded_pin_core(bad.inner, 1).is_err());
+
+        let fk = kdf::derive_file_key(&mk, b"wasm-thumb-pin");
+        let t = encrypt_thumbnail_for(fk.as_bytes(), b"thumb", 2).unwrap();
+        assert_eq!(decrypt_thumbnail(fk.as_bytes(), &t).unwrap(), b"thumb");
+        assert!(
+            beebeeb_core::encrypt::decrypt_chunk_raw(&fk, &t).is_err(),
+            "a v2-pinned thumbnail must not open under the raw file key"
+        );
+    }
+
+    #[test]
+    fn resume_policy_and_thumbnail_wrappers() {
+        // Task 1908 round 3: the resume rule and the thumbnail seal through the
+        // WASM wrappers (native seams; the JsError paths need a JS runtime).
+        let mk = kdf::derive_master_key("test-password", b"test-salt-16bytes").unwrap();
+        let enc =
+            beebeeb_core::chunk_stream::ChunkEncryptor::for_push_with_chunk_size(&mk, "wasm-resume", 10, 16).unwrap();
+        assert_eq!(resume_policy_str(&enc, Some(1)).unwrap(), "continue");
+        assert_eq!(resume_policy_str(&enc, None).unwrap(), "restart");
+        assert_eq!(resume_policy_str(&enc, Some(2)).unwrap(), "restart");
+        assert!(resume_policy_str(&enc, Some(9)).is_err());
+
+        let fk = kdf::derive_file_key(&mk, b"wasm-thumb");
+        let sealed = encrypt_thumbnail(fk.as_bytes(), b"thumb").unwrap();
+        assert_eq!(decrypt_thumbnail(fk.as_bytes(), &sealed).unwrap(), b"thumb");
+    }
+
+    #[test]
+    fn note_wrappers_follow_the_pin() {
+        // Task 1908 round 5 through the WASM wrappers: a note for a v2-pinned
+        // file never sits under the raw file key and never opens as the
+        // file's metadata; unrecorded follows the write switch.
+        let mk = kdf::derive_master_key("test-password", b"test-salt-16bytes").unwrap();
+        let id = "wasm-note-v2";
+        let name = beebeeb_core::encrypt::encrypt_name_with_chunk_format(
+            &mk,
+            id,
+            "a.pdf",
+            None,
+            beebeeb_core::chunk_stream::ExpectedChunkFormat::V2,
+        )
+        .unwrap();
+        let pin = beebeeb_core::encrypt::decrypt_file_metadata(&mk, id, &name)
+            .unwrap()
+            .chunk_format;
+        let fk = kdf::derive_file_key(&mk, id.as_bytes());
+        let note = encrypt_note_for(fk.as_bytes(), "wasm note", pin.as_u8()).unwrap();
+        assert_eq!(decrypt_note(fk.as_bytes(), &note).unwrap(), "wasm note");
+        let blob: EncryptedBlob = serde_json::from_str(&note).unwrap();
+        assert!(
+            beebeeb_core::encrypt::decrypt_metadata(&fk, &blob).is_err(),
+            "a v2-pinned note must not open under the raw file key"
+        );
+        assert!(
+            beebeeb_core::encrypt::decrypt_file_metadata(&mk, id, &note).is_err(),
+            "a v2 note must not open as the file's metadata"
+        );
+
+        let n0 = encrypt_note_for(fk.as_bytes(), "n0", 0).unwrap();
+        assert_eq!(decrypt_note(fk.as_bytes(), &n0).unwrap(), "n0");
+        let n = encrypt_note(fk.as_bytes(), "n").unwrap();
+        assert_eq!(decrypt_note(fk.as_bytes(), &n).unwrap(), "n");
+        assert!(note_for_core(&fk, "x", 1).is_err());
+        assert!(note_for_core(&fk, "x", 7).is_err());
+    }
+
+    /// Task 1958: the rename writer under a GIVEN key (here not derived from
+    /// any master key) keeps a v2 pin and seals under the name subkey; unknown
+    /// pin codes are errors.
+    #[test]
+    fn name_for_keeps_the_pin_under_a_given_key_1958() {
+        let fk = kdf::FileKey::from_bytes([0x29; 32]);
+        let sealed = encrypt_name_for(fk.as_bytes(), "w.pdf", Some("application/pdf".into()), 2).unwrap();
+        let meta = beebeeb_core::encrypt::decrypt_file_metadata_with_key(&fk, &sealed).unwrap();
+        assert_eq!((meta.name.as_str(), meta.chunk_format.as_u8()), ("w.pdf", 2));
+        let blob: EncryptedBlob = serde_json::from_str(&sealed).unwrap();
+        assert!(
+            beebeeb_core::encrypt::decrypt_metadata(&fk, &blob).is_err(),
+            "a v2-pinned name must not open under the raw file key"
+        );
+        let r0 = encrypt_name_for(fk.as_bytes(), "r0.txt", None, 0).unwrap();
+        let meta0 = beebeeb_core::encrypt::decrypt_file_metadata_with_key(&fk, &r0).unwrap();
+        assert_eq!(meta0.chunk_format.as_u8(), 0);
+        assert!(name_for_core(&fk, "x", None, 1).is_err());
+        assert!(name_for_core(&fk, "x", None, 7).is_err());
+    }
+}
+
+#[cfg(test)]
+mod direct_vector_tests {
+    //! The cross-client contract vectors, run through this crate's exported functions and
+    //! methods wherever they can run without a JS engine, and otherwise through the seam the
+    //! `JsValue` wrapper calls. The same file `beebeeb-core` runs through core directly: a
+    //! wrapper that drifts from core fails here.
+
+    use beebeeb_core::direct_transfer::vectors::{self, CacheSurface, HealthSurface, PlannerSurface, Surface};
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    struct WasmSurface;
+
+    struct WasmPlannerSurface(WasmDownloadPlanner);
+
+    struct WasmCacheSurface(WasmDirectDiscoveryCache);
+
+    struct WasmHealthSurface(WasmDirectHealth);
+
+    impl HealthSurface for WasmHealthSurface {
+        fn gave_up(&mut self, direction: &str, now_ms: i64) {
+            self.0.gave_up(direction, now_ms as f64).unwrap();
+        }
+        fn may_start(&self, direction: &str, now_ms: i64) -> bool {
+            self.0.may_start(direction, now_ms as f64).unwrap()
+        }
+        fn may_start_file(&self, direction: &str, now_ms: i64, file_gave_up: bool) -> bool {
+            self.0.may_start_file(direction, now_ms as f64, file_gave_up).unwrap()
+        }
+        fn last_gave_up_ms(&self, direction: &str) -> Option<i64> {
+            self.0.last_gave_up_ms(direction).unwrap().map(|ms| ms as i64)
+        }
+        fn restore(&mut self, direction: &str, last_gave_up_ms: i64) {
+            self.0.restore(direction, last_gave_up_ms as f64).unwrap();
+        }
+    }
+
+    impl CacheSurface for WasmCacheSurface {
+        fn lookup(&self, now_ms: i64) -> String {
+            match self.0.lookup_dto(now_ms) {
+                DirectLookupJs::Fetch => "fetch",
+                DirectLookupJs::Cached { .. } => "cached",
+                DirectLookupJs::UseApi => "use_api",
+            }
+            .to_string()
+        }
+
+        fn record(&mut self, outcome: &Value, body: Option<&[u8]>, now_ms: i64) {
+            let outcome: DirectOutcomeJs = serde_json::from_value(outcome.clone()).unwrap();
+            self.0.record_core(&outcome, body, now_ms);
+        }
+    }
+
+    /// The shape the vectors use: the flat fetch has no `method`/`expires_at`, numbers are integers.
+    fn poll_value(dto: DirectPollJs) -> Value {
+        let mut v = serde_json::to_value(dto).unwrap();
+        if v["kind"] == "fetch" {
+            v.as_object_mut().unwrap().remove("method");
+            v.as_object_mut().unwrap().remove("expires_at");
+        }
+        vectors::normalize_numbers(v)
+    }
+
+    impl Surface for WasmSurface {
+        type Planner = WasmPlannerSurface;
+        type Cache = WasmCacheSurface;
+        type Health = WasmHealthSurface;
+
+        fn cache(&self) -> WasmCacheSurface {
+            WasmCacheSurface(WasmDirectDiscoveryCache::new())
+        }
+
+        fn health(&self) -> WasmHealthSurface {
+            WasmHealthSurface(WasmDirectHealth::new())
+        }
+
+        fn resume_transport(&self, recorded: &str, discovery: &Value, forced_api: bool) -> String {
+            direct_resume_transport(
+                recorded,
+                discovery["kind"].as_str().unwrap(),
+                discovery["upload"].as_bool(),
+                forced_api,
+            )
+            .unwrap()
+        }
+
+        fn check_storage_url(&self, url: &str, discovery: &Value, api_base: &str) -> Result<(), String> {
+            let d: dt::Discovery = serde_json::from_value(discovery.clone()).map_err(|e| e.to_string())?;
+            direct_check_url(url, &d, api_base).map_err(|f| f.code.to_string())
+        }
+
+        fn classify(
+            &self,
+            call: &str,
+            status: u16,
+            content_type: Option<&str>,
+            body: &[u8],
+            retry_after: Option<&str>,
+        ) -> Value {
+            let outcome = direct_classify(call, status, content_type, body, retry_after).expect("known call");
+            vectors::normalize_numbers(serde_json::to_value(outcome).unwrap())
+        }
+
+        fn redact(&self, input: &str) -> String {
+            redact_url(input)
+        }
+
+        fn pinned_retry(&self, outcome: &Value, attempt: u32, waited_ms: u64) -> Value {
+            let outcome: DirectOutcomeJs = serde_json::from_value(outcome.clone()).unwrap();
+            vectors::normalize_numbers(
+                serde_json::to_value(direct_pinned_retry(&outcome, attempt, waited_ms as f64)).unwrap(),
+            )
+        }
+
+        fn scrub(&self, input: &str) -> String {
+            scrub_text(input)
+        }
+
+        fn chunk_length(&self, chunk_count: u32, chunk_size: u64, encrypted_size: u64, index: u32) -> Option<u64> {
+            dt::Geometry {
+                chunk_count,
+                chunk_size,
+                encrypted_size,
+                original_size: 0,
+            }
+            .chunk_length(index)
+        }
+
+        fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> WasmPlannerSurface {
+            let d: dt::Discovery = serde_json::from_value(discovery.clone()).unwrap();
+            WasmPlannerSurface(WasmDownloadPlanner::from_parts(d, api_base, file_id, seed))
+        }
+    }
+
+    impl PlannerSurface for WasmPlannerSurface {
+        fn poll(&mut self, now_ms: i64) -> Value {
+            poll_value(self.0.poll_dto(now_ms))
+        }
+
+        fn window_answered(&mut self, body: &[u8], now_ms: i64) -> Result<(), String> {
+            match self.0.window_answered(body, now_ms as f64).as_str() {
+                "accepted" => Ok(()),
+                code => Err(code.to_string()),
+            }
+        }
+
+        fn window_failed(&mut self, outcome: &Value, now_ms: i64) {
+            let outcome: DirectOutcomeJs = serde_json::from_value(outcome.clone()).unwrap();
+            self.0.failed_core(&outcome, now_ms);
+        }
+
+        fn window_malformed(&mut self) {
+            self.0.window_malformed();
+        }
+
+        fn fetch_ok(&mut self, index: u32) -> Result<(), String> {
+            self.0.fetch_ok(index).map_err(|f| f.code.to_string())
+        }
+
+        fn fetch_failed(&mut self, index: u32, now_ms: i64) -> Result<(), String> {
+            self.0
+                .fetch_failed(index, now_ms as f64)
+                .map_err(|f| f.code.to_string())
+        }
+
+        fn api_fetch_failed(&mut self, index: u32) -> Result<(), String> {
+            self.0.api_fetch_failed(index).map_err(|f| f.code.to_string())
+        }
+
+        fn chunk_unauthentic(&mut self, index: u32) -> Result<(), String> {
+            self.0.chunk_unauthentic(index).map_err(|f| f.code.to_string())
+        }
+
+        fn consumed(&mut self, index: u32) -> Result<(), String> {
+            self.0.consumed(index).map_err(|f| f.code.to_string())
+        }
+
+        fn inspect(&self) -> Value {
+            vectors::normalize_numbers(json!({
+                "geometry": serde_json::to_value(self.0.geometry_dto()).unwrap(),
+                "pinned_version": self.0.pinned_version(),
+                "consumed": self.0.consumed_count(),
+                "in_flight": self.0.in_flight(),
+            }))
+        }
+
+        fn set_max_in_flight_bytes(&mut self, bytes: u64) {
+            self.0.set_max_in_flight_bytes(bytes as f64).unwrap();
+        }
+
+        fn storage_given_up(&self) -> bool {
+            self.0.storage_given_up()
+        }
+    }
+
+    #[test]
+    fn the_wasm_seams_pass_every_row_of_the_vectors() {
+        let report = vectors::run_all(&WasmSurface);
+        assert_eq!(
+            report,
+            vectors::expected_report(),
+            "a section that did not run is a failure"
+        );
+    }
+
+    /// A length crosses as a JS number: only a finite, whole, non-negative number below 2^53 is a length.
+    #[test]
+    fn storage_totals_follow_core_and_refuse_a_length_that_is_not_one() {
+        // A 4 MiB chunk (plus the AEAD overhead): 60 s + 33 s, in milliseconds.
+        let len = (4 * 1024 * 1024 + 28) as f64;
+        assert_eq!(storage_put_total_ms(len).unwrap(), 93_000.0);
+        assert_eq!(storage_get_total_ms(len).unwrap(), 93_000.0);
+        assert_eq!(storage_put_total_ms(0.0).unwrap(), 60_000.0);
+        for bad in [-1.0, f64::NAN, f64::INFINITY, 1.5, 9_007_199_254_740_992.0] {
+            assert_eq!(storage_put_total_ms(bad).unwrap_err().code, "length_invalid", "{bad}");
+            assert_eq!(storage_get_total_ms(bad).unwrap_err().code, "length_invalid", "{bad}");
+        }
+    }
+
+    #[test]
+    fn health_refuses_a_direction_that_is_not_one() {
+        let mut h = WasmDirectHealth::new();
+        for bad in ["", "Download", "up", "both"] {
+            assert_eq!(h.gave_up(bad, 0.0).unwrap_err().code, "direction_invalid", "{bad:?}");
+            assert_eq!(h.may_start(bad, 0.0).unwrap_err().code, "direction_invalid");
+            assert_eq!(h.may_start_file(bad, 0.0, false).unwrap_err().code, "direction_invalid");
+            assert_eq!(h.last_gave_up_ms(bad).unwrap_err().code, "direction_invalid");
+            assert_eq!(h.restore(bad, 0.0).unwrap_err().code, "direction_invalid");
+        }
+        // Nothing was recorded by the refused calls.
+        assert_eq!(h.last_gave_up_ms("download").unwrap(), None);
+        assert_eq!(h.last_gave_up_ms("upload").unwrap(), None);
+    }
+
+    #[test]
+    fn health_refuses_a_time_that_is_not_a_number() {
+        // A NaN or infinite time would be turned into 0 or a saturated number, which makes the ten-minute hold silently
+        // ineffective (a give-up recorded at the epoch is 56 years old).
+        let mut h = WasmDirectHealth::new();
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(h.gave_up("download", bad).unwrap_err().code, "time_invalid", "{bad}");
+            assert_eq!(h.may_start("download", bad).unwrap_err().code, "time_invalid");
+            assert_eq!(
+                h.may_start_file("download", bad, false).unwrap_err().code,
+                "time_invalid"
+            );
+            assert_eq!(h.restore("download", bad).unwrap_err().code, "time_invalid");
+        }
+        assert_eq!(h.last_gave_up_ms("download").unwrap(), None, "nothing was recorded");
+    }
+
+    #[test]
+    fn resume_transport_refuses_names_it_does_not_know() {
+        let ok = |r: &str, k: &str, u: Option<bool>, f: bool| direct_resume_transport(r, k, u, f);
+        assert_eq!(ok("direct", "offers", Some(true), false).unwrap(), "continue_direct");
+        assert_eq!(ok("direct", "unknown", None, false).unwrap(), "keep_record_and_fail");
+        assert_eq!(
+            ok("sideways", "offers", Some(true), false).unwrap_err().code,
+            "recorded_invalid"
+        );
+        assert_eq!(
+            ok("direct", "offers", None, false).unwrap_err().code,
+            "discovery_state_invalid"
+        );
+        assert_eq!(
+            ok("direct", "maybe", None, false).unwrap_err().code,
+            "discovery_state_invalid"
+        );
+    }
+
+    #[test]
+    fn the_byte_cap_refuses_a_number_that_is_not_a_byte_count() {
+        let discovery = dt::Discovery {
+            download: vec![dt::CAP_OBJECT_DOWNLOAD_V1.into()],
+            ..Default::default()
+        };
+        let mut p = WasmDownloadPlanner::from_parts(discovery, "https://api.beebeeb.test", "f", 1);
+        for bad in [-1.0, f64::NAN, f64::INFINITY, 1.5, 9_007_199_254_740_992.0] {
+            assert_eq!(
+                p.set_max_in_flight_bytes(bad).unwrap_err().code,
+                "bytes_invalid",
+                "{bad}"
+            );
+        }
+        p.set_max_in_flight_bytes(0.0).unwrap();
+        p.set_max_in_flight_bytes(67_108_864.0).unwrap();
+        assert!(!p.storage_given_up(), "a new planner has not given up storage");
+    }
+
+    #[test]
+    fn the_constants_carry_core_s_time_bounds() {
+        let c = direct_constants();
+        assert_eq!(
+            u64::from(c.storage_connect_timeout_ms),
+            dt::timeouts::STORAGE_CONNECT_TIMEOUT.as_millis() as u64
+        );
+        assert_eq!(
+            u64::from(c.storage_get_idle_ms),
+            dt::timeouts::STORAGE_GET_IDLE.as_millis() as u64
+        );
+        assert_eq!(
+            u64::from(c.discovery_timeout_ms),
+            dt::timeouts::DISCOVERY_TIMEOUT.as_millis() as u64
+        );
+        assert_eq!(
+            u64::from(c.api_call_timeout_ms),
+            dt::timeouts::API_CALL_TIMEOUT.as_millis() as u64
+        );
+        assert_eq!(
+            u64::from(c.background_put_resource_timeout_ms),
+            dt::timeouts::BACKGROUND_PUT_RESOURCE_TIMEOUT.as_millis() as u64
+        );
+        assert_eq!(
+            (
+                c.storage_connect_timeout_ms,
+                c.storage_get_idle_ms,
+                c.discovery_timeout_ms,
+                c.api_call_timeout_ms,
+                c.background_put_resource_timeout_ms
+            ),
+            (15_000, 30_000, 15_000, 60_000, 240_000),
+            "the numbers of the clients design, 6.2"
+        );
+    }
+
+    #[test]
+    fn discovery_decoding_and_the_cache_follow_core() {
+        let body =
+            br#"{"download":["object-download-v1"],"upload":null,"storage_hosts":["s3.storage.test"],"future":1}"#;
+        let d = direct_parse_discovery(body).unwrap();
+        assert!(d.offers_download() && d.upload.is_empty());
+        assert_eq!(direct_parse_discovery(b"[]").unwrap_err().code, "discovery_malformed");
+        assert_eq!(
+            direct_parse_discovery(&vec![b' '; dt::wire::MAX_DISCOVERY_BYTES + 1])
+                .unwrap_err()
+                .code,
+            "discovery_too_large"
+        );
+
+        let mut cache = WasmDirectDiscoveryCache::new();
+        assert!(matches!(cache.lookup_dto(0), DirectLookupJs::Fetch));
+        cache.record_core(&DirectOutcomeJs::Proceed, Some(body), 1_000);
+        assert!(matches!(cache.lookup_dto(1_000), DirectLookupJs::Cached { .. }));
+        assert!(
+            matches!(cache.lookup_dto(1_000 + 10 * 60 * 1000), DirectLookupJs::Fetch),
+            "trusted for 10 minutes"
+        );
+        // A success whose body does not decode is a failed attempt; two of them stop the asking.
+        let mut bad = WasmDirectDiscoveryCache::new();
+        bad.record_core(&DirectOutcomeJs::Proceed, Some(b"nope"), 0);
+        bad.record_core(&DirectOutcomeJs::Proceed, None, 1);
+        assert!(matches!(bad.lookup_dto(2), DirectLookupJs::UseApi));
+        let mut gone = WasmDirectDiscoveryCache::new();
+        gone.record_core(&DirectOutcomeJs::NotSupported, None, 0);
+        assert!(
+            matches!(gone.lookup_dto(1), DirectLookupJs::UseApi),
+            "NotSupported is remembered"
+        );
+    }
+
+    #[test]
+    fn classify_refuses_an_unknown_call_and_outcomes_round_trip() {
+        assert_eq!(
+            direct_classify("nope", 200, None, b"", None).unwrap_err().code,
+            "unknown_call"
+        );
+        for outcome in [
+            json!({"kind": "backoff", "millis": 1500.0}),
+            json!({"kind": "terminal", "status": 403, "error": null}),
+            json!({"kind": "restart"}),
+            json!({"kind": "retry"}),
+            // The upload commit's "the staged chunk is not there": the JS side hands it back to core
+            // (a planner or a retry decision), where it must still be a regrant and not a catch-all.
+            json!({"kind": "regrant"}),
+            // The commit hold: with the server's stated wait, and without.
+            json!({"kind": "held", "millis": 3000.0}),
+            json!({"kind": "held", "millis": null}),
+        ] {
+            let parsed: DirectOutcomeJs = serde_json::from_value(outcome.clone()).unwrap();
+            assert_eq!(
+                serde_json::to_value(DirectOutcomeJs::from_core(&parsed.to_core())).unwrap(),
+                outcome
+            );
+        }
+    }
+
+    #[test]
+    fn a_math_random_seed_is_not_zero_and_distinct_numbers_are_distinct_seeds() {
+        let seeds: Vec<u64> = [0.0, 0.1, 0.25, 0.5, 0.75, 0.999_999]
+            .iter()
+            .map(|s| direct_seed(*s))
+            .collect();
+        for (i, a) in seeds.iter().enumerate() {
+            for b in &seeds[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        assert!(
+            seeds[1..].iter().all(|s| *s != 0),
+            "a number below 1 must not collapse to 0"
+        );
+        assert_eq!(direct_seed(42.0), direct_seed(42.0));
+    }
+
+    #[test]
+    fn a_signed_url_object_prints_only_scheme_and_host() {
+        let link = "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SECRETSIG";
+        let url = WasmSignedUrl { url: link.to_string() };
+        for shown in [url.to_string_redacted(), url.to_json_redacted(), url.redacted()] {
+            assert!(!shown.contains("SECRETSIG") && !shown.contains("X-Amz"), "{shown}");
+            assert!(shown.contains("s3.storage.test"), "{shown}");
+        }
+        assert_eq!(url.raw(), link, "the one way to the link is explicit");
+    }
+
+    #[test]
+    fn the_jitter_seed_reaches_the_planner() {
+        // The same failure, on planners seeded differently, waits different times (equal jitter);
+        // the same seed repeats. A binding that drops the seed would give every client one schedule.
+        let vectors = vectors::vectors();
+        let t0 = vectors["t0_ms"].as_i64().unwrap();
+        let file_id = vectors["file_id"].as_str().unwrap().to_string();
+        let wait_after_a_failure = |seed: u64| -> i64 {
+            let discovery: dt::Discovery = serde_json::from_value(vectors["discoveries"]["std"].clone()).unwrap();
+            let mut p = WasmDownloadPlanner::from_parts(discovery, "https://api.beebeeb.test", &file_id, seed);
+            p.poll_dto(t0);
+            let window = vectors["planner"][0]["steps"][2]["response"].clone();
+            assert_eq!(
+                p.window_answered(&serde_json::to_vec(&window).unwrap(), t0 as f64),
+                "accepted"
+            );
+            for _ in 0..3 {
+                p.poll_dto(t0);
+            }
+            p.fetch_failed(0, t0 as f64).unwrap();
+            match p.poll_dto(t0) {
+                DirectPollJs::Wait { until_ms: Some(t) } => t as i64,
+                _ => panic!("expected a wait for the renewal"),
+            }
+        };
+        let waits: Vec<i64> = (1..=6).map(wait_after_a_failure).collect();
+        assert!(waits.iter().any(|w| *w != waits[0]), "{waits:?}");
+        assert_eq!(wait_after_a_failure(3), wait_after_a_failure(3));
+    }
+
+    #[test]
+    fn the_constants_are_the_contracts_names_and_numbers() {
+        let c = serde_json::to_value(direct_constants()).unwrap();
+        assert_eq!(
+            c,
+            json!({
+                "cap_object_download_v1": "object-download-v1",
+                "cap_object_upload_v1": "object-upload-v1",
+                "capabilities_header": "X-Beebeeb-Capabilities",
+                "discovery_path": "/api/v1/transfer/capabilities",
+                "max_window": 32,
+                "default_window": 8,
+                "chunk_overhead": 28,
+                "storage_connect_timeout_ms": 15_000,
+                "storage_get_idle_ms": 30_000,
+                "discovery_timeout_ms": 15_000,
+                "api_call_timeout_ms": 60_000,
+                "background_put_resource_timeout_ms": 240_000,
+            })
+        );
+        assert_eq!(
+            direct_download_grants_path("11111111-1111-4111-8111-111111111111"),
+            "/api/v1/files/11111111-1111-4111-8111-111111111111/download-grants"
+        );
+    }
+
+    #[test]
+    fn no_signature_survives_the_planner_debug_or_the_error_text() {
+        // A planner that holds signed links: its Debug shows none of them.
+        let vectors = vectors::vectors();
+        let discovery: dt::Discovery = serde_json::from_value(vectors["discoveries"]["std"].clone()).unwrap();
+        let mut planner = WasmDownloadPlanner::from_parts(discovery, "https://api.beebeeb.test", "f", 1);
+        let window = json!({
+            "transport": "object-download-v1",
+            "file_id": "f",
+            "object_version_id": "22222222-2222-4222-8222-222222222222",
+            "chunk_count": 1, "chunk_size": 1000, "encrypted_size": 1028, "original_size": 1000,
+            "grants": [{"index": 0, "method": "GET", "length": 1028, "expires_at": "2027-01-15T08:05:00Z",
+                        "url": "https://s3.storage.test/bb-01/t/v/0.bin?X-Amz-Signature=SECRETSIG"}],
+            "next_index": null,
+        });
+        planner.poll_dto(1_800_000_000_000);
+        assert_eq!(
+            planner.window_answered(&serde_json::to_vec(&window).unwrap(), 1_800_000_000_000.0),
+            "accepted"
+        );
+        assert!(matches!(
+            planner.poll_dto(1_800_000_000_000),
+            DirectPollJs::Fetch { .. }
+        ));
+        let shown = format!("{:?}", planner.inner);
+        assert!(!shown.contains("SECRETSIG") && !shown.contains("X-Amz"), "{shown}");
+        // The error a refused link throws never contains the link.
+        let failure = direct_check_url(
+            "https://evil.test@s3.storage.test/bb-01/k?X-Amz-Signature=SECRETSIG",
+            &dt::Discovery::default(),
+            "https://api.beebeeb.test",
+        )
+        .unwrap_err();
+        let shown = format!("{failure:?} {}", failure.message);
+        assert_eq!(failure.code, "userinfo");
+        assert!(!shown.contains("SECRETSIG") && !shown.contains("evil.test"), "{shown}");
+    }
+
+    #[test]
+    fn folder_keyed_index_from_wasm() {
+        // wasm-bindgen imports cannot be called on the host, so this covers the
+        // core path the wrapper delegates to; the JS surface (both exports and
+        // the shard methods) is covered by beebeeb-wasm/js-tests/folder_link.test.cjs.
+        let folder_key = kdf::FileKey::from_bytes([0x5a; 32]);
+        let mut idx = search_index::SearchIndex::new(search_index::DEFAULT_NUM_SHARDS);
+        idx.upsert("f1", "NF_song.mp3");
+        let shards = idx
+            .encrypt_shards_with(search_index::ShardKeySource::Folder(&folder_key))
+            .unwrap();
+        let restored = search_index::SearchIndex::from_encrypted_shards_with(
+            search_index::ShardKeySource::Folder(&folder_key),
+            &shards,
+            idx.num_shards(),
+        )
+        .unwrap();
+        assert_eq!(
+            restored.query("nf"),
+            std::collections::BTreeSet::from(["f1".to_string()])
+        );
+        assert!(
+            search_index::SearchIndex::from_encrypted_shards_with(
+                search_index::ShardKeySource::Master(&kdf::MasterKey::from_bytes([0x11; 32])),
+                &shards,
+                idx.num_shards(),
+            )
+            .is_err()
+        );
+    }
+}
+
+/// L7 wire = nonce(12) || ciphertext+tag(48); UUID strings bind raw UUID bytes.
+#[wasm_bindgen(js_name = wrapFolderChild)]
+pub fn wrap_folder_child(
+    folder_key: &[u8],
+    shared_folder_id: &str,
+    item_id: &str,
+    kind: u8,
+    child_key: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    let folder = kdf::FileKey::from_bytes(
+        folder_key
+            .try_into()
+            .map_err(|_| JsError::new("folder key must be 32 bytes"))?,
+    );
+    let child = kdf::FileKey::from_bytes(
+        child_key
+            .try_into()
+            .map_err(|_| JsError::new("child key must be 32 bytes"))?,
+    );
+    let root = uuid::Uuid::parse_str(shared_folder_id).map_err(|_| JsError::new("invalid root UUID"))?;
+    let item = uuid::Uuid::parse_str(item_id).map_err(|_| JsError::new("invalid item UUID"))?;
+    let b = kdf::wrap_folder_child(&folder, root.as_bytes(), item.as_bytes(), kind, &child)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    Ok([b.nonce, b.ciphertext].concat())
+}
+#[wasm_bindgen(js_name = unwrapFolderChild)]
+pub fn unwrap_folder_child(
+    folder_key: &[u8],
+    shared_folder_id: &str,
+    item_id: &str,
+    kind: u8,
+    wrapped: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    if wrapped.len() != 60 {
+        return Err(JsError::new("child wrap must be 60 bytes"));
+    }
+    let folder = kdf::FileKey::from_bytes(
+        folder_key
+            .try_into()
+            .map_err(|_| JsError::new("folder key must be 32 bytes"))?,
+    );
+    let root = uuid::Uuid::parse_str(shared_folder_id).map_err(|_| JsError::new("invalid root UUID"))?;
+    let item = uuid::Uuid::parse_str(item_id).map_err(|_| JsError::new("invalid item UUID"))?;
+    let b = beebeeb_types::EncryptedBlob {
+        cipher_suite: beebeeb_types::CipherSuite::V1Aes256Gcm,
+        nonce: wrapped[..12].to_vec(),
+        ciphertext: wrapped[12..].to_vec(),
+    };
+    Ok(
+        kdf::unwrap_folder_child(&folder, root.as_bytes(), item.as_bytes(), kind, &b)
+            .map_err(|e| JsError::new(&e.to_string()))?
+            .as_bytes()
+            .to_vec(),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// L6 owner copies under the master key (task 2237b, decision L6)
+// ---------------------------------------------------------------------------
+//
+// Folder custody and a link's owner copies of K_c and of its token are sealed
+// with a purpose-bound key AND AAD (`label || UTF-8 record id`, see
+// `kdf::wrap_folder_custody`). Same wire as the L7 exports: nonce(12) ||
+// ciphertext+tag. The record id is the folder UUID / share UUID string the
+// client stores the record under. Incoming secrets are owned in `Zeroizing`
+// so every path wipes them; returned buffers belong to JS.
+
+fn l6_blob(wrapped: &[u8], what: &str) -> Result<EncryptedBlob, JsError> {
+    if wrapped.len() < 12 + 16 {
+        return Err(JsError::new(&format!("{what} wrap is too short")));
+    }
+    Ok(EncryptedBlob {
+        cipher_suite: CipherSuite::V1Aes256Gcm,
+        nonce: wrapped[..12].to_vec(),
+        ciphertext: wrapped[12..].to_vec(),
+    })
+}
+
+fn owned_key(key: &[u8]) -> Result<kdf::FileKey, JsError> {
+    let bytes =
+        zeroize::Zeroizing::new(<[u8; 32]>::try_from(key).map_err(|_| JsError::new("key must be exactly 32 bytes"))?);
+    Ok(kdf::FileKey::from_bytes(*bytes))
+}
+
+/// Seal an owner file-key adoption record with its own purpose key and AAD (L8).
+/// Item IDs use the exact UTF-8 string bytes used by the L6 exports.
+#[wasm_bindgen(js_name = wrapOwnerFileKey)]
+pub fn wrap_owner_file_key(master_key: &[u8], item_id: &str, file_key: &[u8]) -> Result<Vec<u8>, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let key = owned_key(file_key)?;
+    let blob = kdf::wrap_owner_file_key(&master, item_id.as_bytes(), &key).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok([blob.nonce, blob.ciphertext].concat())
+}
+
+/// Open only an L8 owner file-key record, requiring exactly 32 plaintext bytes.
+#[wasm_bindgen(js_name = unwrapOwnerFileKey)]
+pub fn unwrap_owner_file_key(master_key: &[u8], item_id: &str, wrapped: &[u8]) -> Result<Vec<u8>, JsError> {
+    if wrapped.len() != 60 {
+        return Err(JsError::new("owner file-key wrap must be 60 bytes"));
+    }
+    let master = master_key_from_slice(master_key)?;
+    let blob = l6_blob(wrapped, "owner file-key")?;
+    Ok(kdf::unwrap_owner_file_key(&master, item_id.as_bytes(), &blob)
+        .map_err(|e| JsError::new(&e.to_string()))?
+        .as_bytes()
+        .to_vec())
+}
+
+/// L9 (task 2255): open a LEGACY invite owner copy and return its key only when
+/// core proves it over the folder's rows, in ONE call. `rows` are the server's
+/// `GET /shares/invites/{id}/folder-keys` rows verbatim:
+/// `[{ file_id: string, encrypted_file_key: string }]`, the key in standard base64.
+/// They are read lazily, and core examines at most 64 distinct ids. Returns
+/// `undefined` when the copy does not open, holds text, or is not proven; the
+/// unproven candidate never reaches JS. Attack B (task 2255) is a named residual.
+#[wasm_bindgen(js_name = openLegacyInviteOwnerCopy)]
+pub fn open_legacy_invite_owner_copy(
+    master_key: &[u8],
+    folder_id: &str,
+    legacy_copy: &[u8],
+    rows: JsValue,
+) -> Result<Option<Vec<u8>>, JsError> {
+    use base64::Engine as _;
+    let master = master_key_from_slice(master_key)?;
+    if !js_sys::Array::is_array(&rows) {
+        return Err(JsError::new("rows must be an array"));
+    }
+    let rows = js_sys::Array::from(&rows);
+    // A malformed row reads as an empty id or wrap, which core skips.
+    let rows = rows.iter().map(|row| {
+        let field = |name: &str| {
+            js_sys::Reflect::get(&row, &name.into())
+                .ok()
+                .and_then(|v| v.as_string())
+                .unwrap_or_default()
+        };
+        let wrap = base64::engine::general_purpose::STANDARD
+            .decode(field("encrypted_file_key"))
+            .unwrap_or_default();
+        (field("file_id").into_bytes(), wrap)
+    });
+    Ok(
+        kdf::open_legacy_invite_owner_copy(&master, folder_id.as_bytes(), legacy_copy, rows)
+            .map(|key| key.as_bytes().to_vec()),
+    )
+}
+
+/// Seal a purpose-bound invite owner copy (L9).
+#[wasm_bindgen(js_name = wrapInviteOwnerCopy)]
+pub fn wrap_invite_owner_copy(master_key: &[u8], folder_id: &str, folder_key: &[u8]) -> Result<Vec<u8>, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let key = owned_key(folder_key)?;
+    let blob =
+        kdf::wrap_invite_owner_copy(&master, folder_id.as_bytes(), &key).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok([blob.nonce, blob.ciphertext].concat())
+}
+
+/// Open a purpose-bound invite owner copy; never performs a legacy fallback.
+#[wasm_bindgen(js_name = unwrapInviteOwnerCopy)]
+pub fn unwrap_invite_owner_copy(master_key: &[u8], folder_id: &str, wrapped: &[u8]) -> Result<Vec<u8>, JsError> {
+    if wrapped.len() != 60 {
+        return Err(JsError::new("decryption failed: invite owner copy must be 60 bytes"));
+    }
+    let master = master_key_from_slice(master_key)?;
+    let blob = l6_blob(wrapped, "invite owner copy")?;
+    Ok(kdf::unwrap_invite_owner_copy(&master, folder_id.as_bytes(), &blob)
+        .map_err(|e| JsError::new(&e.to_string()))?
+        .as_bytes()
+        .to_vec())
+}
+
+/// Seal a shared folder's key to the owner's master key (L6 custody record).
+#[wasm_bindgen(js_name = wrapFolderCustody)]
+pub fn wrap_folder_custody(master_key: &[u8], folder_id: &str, folder_key: &[u8]) -> Result<Vec<u8>, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let key = owned_key(folder_key)?;
+    let blob =
+        kdf::wrap_folder_custody(&master, folder_id.as_bytes(), &key).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok([blob.nonce, blob.ciphertext].concat())
+}
+
+/// Open an L6 custody record. Never accepts a legacy (unbound) owner copy.
+#[wasm_bindgen(js_name = unwrapFolderCustody)]
+pub fn unwrap_folder_custody(master_key: &[u8], folder_id: &str, wrapped: &[u8]) -> Result<Vec<u8>, JsError> {
+    if wrapped.len() != 60 {
+        return Err(JsError::new("custody wrap must be 60 bytes"));
+    }
+    let master = master_key_from_slice(master_key)?;
+    let blob = l6_blob(wrapped, "custody")?;
+    Ok(kdf::unwrap_folder_custody(&master, folder_id.as_bytes(), &blob)
+        .map_err(|e| JsError::new(&e.to_string()))?
+        .as_bytes()
+        .to_vec())
+}
+
+/// Seal a folder link's fragment key K_c to the owner's master key, bound to
+/// the link's share id (so the owner can copy the link again later).
+#[wasm_bindgen(js_name = wrapLinkOwnerKey)]
+pub fn wrap_link_owner_key(master_key: &[u8], share_id: &str, link_key: &[u8]) -> Result<Vec<u8>, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let key = owned_key(link_key)?;
+    let blob =
+        kdf::wrap_link_owner_key(&master, share_id.as_bytes(), &key).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok([blob.nonce, blob.ciphertext].concat())
+}
+
+/// Open a link's owner copy of K_c. K_c is the deliberate export: JS puts it
+/// in the link fragment. The master key never leaves the caller.
+#[wasm_bindgen(js_name = unwrapLinkOwnerKey)]
+pub fn unwrap_link_owner_key(master_key: &[u8], share_id: &str, wrapped: &[u8]) -> Result<Vec<u8>, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let blob = l6_blob(wrapped, "link owner key")?;
+    Ok(kdf::unwrap_link_owner_key(&master, share_id.as_bytes(), &blob)
+        .map_err(|e| JsError::new(&e.to_string()))?
+        .as_bytes()
+        .to_vec())
+}
+
+/// Seal a folder link's raw token to the owner's master key, bound to the
+/// link's share id.
+#[wasm_bindgen(js_name = wrapLinkOwnerToken)]
+pub fn wrap_link_owner_token(master_key: &[u8], share_id: &str, token: &[u8]) -> Result<Vec<u8>, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let token = zeroize::Zeroizing::new(token.to_vec());
+    let blob =
+        kdf::wrap_link_owner_token(&master, share_id.as_bytes(), &token).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok([blob.nonce, blob.ciphertext].concat())
+}
+
+/// Open a link's owner copy of its token.
+#[wasm_bindgen(js_name = unwrapLinkOwnerToken)]
+pub fn unwrap_link_owner_token(master_key: &[u8], share_id: &str, wrapped: &[u8]) -> Result<Vec<u8>, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let blob = l6_blob(wrapped, "link owner token")?;
+    Ok(kdf::unwrap_link_owner_token(&master, share_id.as_bytes(), &blob)
+        .map_err(|e| JsError::new(&e.to_string()))?
+        .to_vec())
+}
+
+/// Stretch a folder-link passphrase (Argon2id over the canonical NFC form,
+/// token-bound salt). Refuses an empty passphrase. Pass the result to
+/// `combineFolderLinkKey`; never send it to the server.
+#[wasm_bindgen(js_name = deriveFolderLinkPassphraseStretch)]
+pub fn derive_folder_link_passphrase_stretch(passphrase: &str, token: &str) -> Result<Vec<u8>, JsError> {
+    let stretch =
+        kdf::derive_folder_link_passphrase_stretch(passphrase, token).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(stretch.to_vec())
 }

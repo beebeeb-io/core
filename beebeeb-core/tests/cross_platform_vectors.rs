@@ -10,7 +10,7 @@
 
 use beebeeb_core::encrypt::{decrypt_chunk, decrypt_metadata, encrypt_metadata};
 use beebeeb_core::file_request::{derive_request_wrap_key, open_request_upload, unwrap_request_private};
-use beebeeb_core::kdf::{FileKey, MasterKey, derive_file_key, derive_master_key};
+use beebeeb_core::kdf::{FileKey, MasterKey, derive_file_key, derive_master_key, derive_shared_folder_index_key};
 use beebeeb_core::opaque::{
     OpaqueEnvelope, compute_recovery_check, derive_share_key, derive_x25519_private, derive_x25519_public,
     x25519_shared_secret,
@@ -46,6 +46,23 @@ fn bytes32(v: &serde_json::Value, field: &str) -> [u8; 32] {
     let b = decode_hex(v, field);
     b.try_into()
         .unwrap_or_else(|v: Vec<u8>| panic!("field '{field}' must be 32 bytes, got {}", v.len()))
+}
+
+// ---------------------------------------------------------------------------
+// 0. A shared folder's key id (task 2133)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn vector_folder_key_id() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "folder_key_id");
+    assert_eq!(v["info"].as_str(), Some("beebeeb/folder-key-id/v1"));
+    assert_eq!(v["salt"].as_str(), Some("none"));
+    let key = bytes32(&v, "folder_key_hex");
+    assert_eq!(
+        beebeeb_core::folder_key::folder_key_id(&key),
+        bytes32(&v, "expected_key_id_hex")
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -552,7 +569,132 @@ fn vector_file_request_seal_open() {
 }
 
 // ---------------------------------------------------------------------------
-// 17. Version guard — fail loudly if vectors.json format changes unexpectedly
+// 18. Share-key wrap (audit item K3) — pins the wire format web's
+//     wrapKeyForShare/unwrapKeyFromShare (repos/web/src/lib/crypto.ts)
+//     independently implements: nonce(12) || AES-256-GCM ciphertext (32-byte
+//     key + 16-byte tag) = 60 bytes, no AAD, raw 32-byte key (no KDF).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn vector_share_key_wrap_decrypt() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "share_key_wrap");
+
+    let wrap_key = FileKey::from_bytes(bytes32(&v, "wrap_key_hex"));
+    let nonce = decode_hex(&v, "nonce_hex");
+    let ciphertext = decode_hex(&v, "ciphertext_hex");
+    let expected_key_to_wrap = decode_hex(&v, "key_to_wrap_hex");
+
+    assert_eq!(
+        nonce.len() + ciphertext.len(),
+        60,
+        "share_key_wrap: nonce(12) || ciphertext(48) must total 60 bytes (the K3 wire format)"
+    );
+
+    let blob = EncryptedBlob {
+        cipher_suite: CipherSuite::V1Aes256Gcm,
+        nonce,
+        ciphertext,
+    };
+
+    let decrypted = decrypt_chunk(&wrap_key, &blob).unwrap();
+    assert_eq!(
+        decrypted, expected_key_to_wrap,
+        "share_key_wrap: decrypted key does not match vector — this is the interop contract \
+         web's unwrapKeyFromShare must also satisfy against this exact ciphertext"
+    );
+}
+
+#[test]
+fn vector_share_key_wrap_encrypt_roundtrip() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "share_key_wrap");
+
+    let wrap_key = FileKey::from_bytes(bytes32(&v, "wrap_key_hex"));
+    let expected_key_to_wrap = decode_hex(&v, "key_to_wrap_hex");
+
+    // Encrypt with a fresh random nonce, then decrypt — must reproduce the
+    // original 32-byte key. Mirrors what web's wrapKeyForShare ->
+    // unwrapKeyFromShare round trip must also do.
+    let blob = beebeeb_core::encrypt::encrypt_chunk(&wrap_key, &expected_key_to_wrap).unwrap();
+    let decrypted = decrypt_chunk(&wrap_key, &blob).unwrap();
+    assert_eq!(
+        decrypted, expected_key_to_wrap,
+        "share_key_wrap roundtrip: encrypt->decrypt must reproduce the original key"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 19. Thumbnail encryption (audit item K3) — pins the wire format web's
+//     thumbnail.ts (encryptThumbnailBlob / fetchAndDecryptThumbnail /
+//     fetchAndDecryptLargeThumbnail) independently implements: nonce(12) ||
+//     AES-256-GCM ciphertext, no AAD, over arbitrary-length plaintext.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn vector_thumbnail_encrypt_decrypt() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "thumbnail_encrypt");
+
+    let file_key = FileKey::from_bytes(bytes32(&v, "file_key_hex"));
+    let nonce = decode_hex(&v, "nonce_hex");
+    let ciphertext = decode_hex(&v, "ciphertext_hex");
+    let expected_plaintext = decode_hex(&v, "plaintext_hex");
+
+    let blob = EncryptedBlob {
+        cipher_suite: CipherSuite::V1Aes256Gcm,
+        nonce,
+        ciphertext,
+    };
+
+    let decrypted = decrypt_chunk(&file_key, &blob).unwrap();
+    assert_eq!(
+        decrypted, expected_plaintext,
+        "thumbnail_encrypt: decrypted plaintext does not match vector — this is the interop \
+         contract web's thumbnail decrypt path must also satisfy against this exact ciphertext"
+    );
+}
+
+#[test]
+fn vector_thumbnail_encrypt_roundtrip() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "thumbnail_encrypt");
+
+    let file_key = FileKey::from_bytes(bytes32(&v, "file_key_hex"));
+    let expected_plaintext = decode_hex(&v, "plaintext_hex");
+
+    let blob = beebeeb_core::encrypt::encrypt_chunk(&file_key, &expected_plaintext).unwrap();
+    let decrypted = decrypt_chunk(&file_key, &blob).unwrap();
+    assert_eq!(
+        decrypted, expected_plaintext,
+        "thumbnail_encrypt roundtrip: encrypt->decrypt must reproduce the original plaintext"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 19b. Shared-folder search-index key (version 8, task 2237) — the reader
+//      path every client implements must reproduce the published buckets.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn shared_folder_index_key_vector_is_reproducible() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "shared_folder_index_key");
+
+    let folder_key = FileKey::from_bytes(bytes32(&v, "folder_key_hex"));
+    let buckets = v["buckets"].as_array().expect("buckets array");
+    assert_eq!(buckets.len(), 3, "vector must pin buckets 0, 7 and 63");
+
+    for entry in buckets {
+        let bucket = entry["bucket"].as_u64().expect("bucket") as u32;
+        let expected = entry["expected_hex"].as_str().expect("expected_hex");
+        let got = hex::encode(derive_shared_folder_index_key(&folder_key, bucket).as_bytes());
+        assert_eq!(got, expected, "shared_folder_index_key diverged for bucket {bucket}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 20. Version guard — fail loudly if vectors.json format changes unexpectedly
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -565,8 +707,8 @@ fn vector_file_version_check() {
         .as_u64()
         .expect("vectors.json must have a 'version' field");
     assert_eq!(
-        version, 3,
-        "vectors.json version mismatch — expected 3, got {version}. \
+        version, 12,
+        "vectors.json version mismatch — expected 12, got {version}. \
          Update this test if you intentionally bumped the version."
     );
 
@@ -585,8 +727,349 @@ fn vector_file_version_check() {
         "recovery_phrase_roundtrip",
         "metadata_encrypt_decrypt",
         "file_request_seal_open",
+        "share_key_wrap",
+        "thumbnail_encrypt",
+        // Version 5 (task 1943): chunk format v2 + v2 name metadata.
+        "chunk_v2_stream",
+        "chunk_v2_single_frame",
+        "metadata_v2_name",
+        // Version 6 (task 1958): the name writer under a given per-file key.
+        "metadata_v2_name_filekey",
+        "metadata_v1_name_filekey",
+        // Version 7 (task 2133): a shared folder's key id.
+        "folder_key_id",
+        // Version 8 (task 2237): a shared folder's search-index bucket key.
+        "shared_folder_index_key",
+        // Version 9 (task 2237b): the public folder-link key combiner.
+        "combine_folder_link_key",
+        "key_wrap_v1",
+        "folder_link_passphrase",
+        "folder_link_passphrase_nfd",
+        "folder_custody_v1",
+        "link_owner_key_v1",
+        "link_owner_token_v1",
+        "folder_child_file_v1",
+        "folder_child_folder_v1",
+        "owner_wrapped_file_key",
+        "owner_wrapped_folder_key",
+        "folder_wrapped_file_key",
     ];
     for name in &required {
         assert!(names.contains(name), "vectors.json is missing required vector '{name}'");
+    }
+}
+
+// Owner/shared-folder custody: consume independent known answers, then check
+// shipped fresh-nonce writers against those same published keys.
+#[test]
+fn vector_owner_wrapped_file_key() {
+    let v = get_vector(&load_vectors(), "owner_wrapped_file_key");
+    check_owner_key_vector(&v, "file_id", "child_key_hex");
+}
+
+#[test]
+fn vector_owner_wrapped_folder_key() {
+    use beebeeb_core::owned_keys::{unwrap_folder_custody, wrap_folder_custody};
+    let v = get_vector(&load_vectors(), "owner_wrapped_folder_key");
+    let master = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let id = v["folder_id"].as_str().unwrap();
+    let expected = bytes32(&v, "folder_key_hex");
+    let frame = decode_hex(&v, "expected_frame_hex");
+    assert_eq!(&frame[..12], decode_hex(&v, "nonce_hex"));
+    assert_eq!(
+        unwrap_folder_custody(&master, id, &frame).unwrap().as_bytes(),
+        &expected
+    );
+    let shipped = wrap_folder_custody(&master, id, &FileKey::from_bytes(expected)).unwrap();
+    assert_eq!(shipped.len(), frame.len());
+    assert_eq!(
+        unwrap_folder_custody(&master, id, &shipped).unwrap().as_bytes(),
+        &expected
+    );
+}
+
+fn check_owner_key_vector(v: &serde_json::Value, id_field: &str, key_field: &str) {
+    use beebeeb_core::owned_keys::{unwrap_owner_file_key, wrap_owner_file_key};
+
+    let master = MasterKey::from_bytes(bytes32(v, "master_key_hex"));
+    let id = v[id_field].as_str().unwrap();
+    let expected = bytes32(v, key_field);
+    let frame = decode_hex(v, "expected_frame_hex");
+    assert_eq!(&frame[..12], decode_hex(v, "nonce_hex"));
+    assert_eq!(
+        unwrap_owner_file_key(&master, id, &frame).unwrap().as_bytes(),
+        &expected
+    );
+    let shipped = wrap_owner_file_key(&master, id, &FileKey::from_bytes(expected)).unwrap();
+    assert_eq!(shipped.len(), frame.len());
+    assert_eq!(
+        unwrap_owner_file_key(&master, id, &shipped).unwrap().as_bytes(),
+        &expected
+    );
+}
+
+#[test]
+fn vector_folder_wrapped_file_key() {
+    use beebeeb_core::owned_keys::{unwrap_child_key, wrap_child_key};
+
+    let v = get_vector(&load_vectors(), "folder_wrapped_file_key");
+    let folder = FileKey::from_bytes(bytes32(&v, "folder_key_hex"));
+    let expected = bytes32(&v, "child_key_hex");
+    let root = v["shared_folder_id"].as_str().unwrap();
+    let item = v["file_id"].as_str().unwrap();
+    let kind = u8::try_from(v["kind"].as_u64().unwrap()).unwrap();
+    let frame = decode_hex(&v, "expected_frame_hex");
+    assert_eq!(&frame[..12], decode_hex(&v, "nonce_hex"));
+    assert_eq!(
+        unwrap_child_key(&folder, root, item, kind, &frame).unwrap().as_bytes(),
+        &expected
+    );
+    let shipped = wrap_child_key(&folder, root, item, kind, &FileKey::from_bytes(expected)).unwrap();
+    assert_eq!(shipped.len(), frame.len());
+    assert_eq!(
+        unwrap_child_key(&folder, root, item, kind, &shipped)
+            .unwrap()
+            .as_bytes(),
+        &expected
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 21. Chunk format v2 (version 5, task 1943) — what every client's v2 READ
+//     path must do with these bytes, through the public reader only.
+// ---------------------------------------------------------------------------
+
+use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkFormat, ExpectedChunkFormat, chunk_aad_v2, open_chunk};
+
+/// A v2 vector's frames, decrypted in order by the streaming reader under the
+/// V2 pin, equal its plaintext, and the stream finishes (last frame seen). Each
+/// frame also opens on its own at its index (random access), its published AAD
+/// is the documented layout, and it does NOT open as a v1 frame.
+fn check_chunk_v2(name: &str) {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, name);
+    let mk = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let file_id = v["file_id"].as_str().unwrap();
+    let file_key = derive_file_key(&mk, file_id.as_bytes());
+    assert_eq!(
+        hex::encode(file_key.as_bytes()),
+        v["file_key_hex"].as_str().unwrap(),
+        "{name}: file key"
+    );
+    let version_id: [u8; 12] = decode_hex(&v, "version_id_hex").try_into().unwrap();
+    let frames = v["frames"].as_array().unwrap();
+    assert_eq!(frames.len() as u64, v["chunk_count"].as_u64().unwrap());
+
+    let mut dec = ChunkDecryptor::for_push(&mk, file_id, ExpectedChunkFormat::V2);
+    let mut plaintext = Vec::new();
+    let mut wire = Vec::new();
+    for f in frames {
+        let frame = decode_hex(f, "frame_hex");
+        let index = f["index"].as_u64().unwrap() as u32;
+        let is_last = f["is_last"].as_bool().unwrap();
+        assert_eq!(
+            hex::encode(chunk_aad_v2(file_id.as_bytes(), &version_id, index, is_last)),
+            f["aad_hex"].as_str().unwrap(),
+            "{name}: AAD of frame {index}"
+        );
+        let opened = open_chunk(&file_key, file_id, &version_id, index, is_last, ChunkFormat::V2, &frame).unwrap();
+        assert_eq!(
+            opened,
+            decode_hex(f, "plaintext_hex"),
+            "{name}: frame {index} (random access)"
+        );
+        assert!(
+            open_chunk(
+                &file_key,
+                file_id,
+                &version_id,
+                index,
+                is_last,
+                ChunkFormat::V1Legacy,
+                &frame
+            )
+            .is_err(),
+            "{name}: a v2 frame must not open as v1"
+        );
+        plaintext.extend(dec.push_frame(&frame).unwrap().data);
+        wire.extend(frame);
+    }
+    dec.finish().expect("the stream ends with its last frame");
+    assert_eq!(
+        detected_format(&mk, file_id, &decode_hex(&frames[0], "frame_hex")),
+        Some(ChunkFormat::V2)
+    );
+    assert_eq!(plaintext, decode_hex(&v, "plaintext_hex"), "{name}: plaintext");
+    assert_eq!(
+        hex::encode(&wire),
+        v["wire_hex"].as_str().unwrap(),
+        "{name}: wire = frames back to back"
+    );
+}
+
+/// The format a fresh reader detects for these frames when the metadata records
+/// nothing (`Unrecorded`): v2, from frame 0.
+fn detected_format(mk: &MasterKey, file_id: &str, frame0: &[u8]) -> Option<ChunkFormat> {
+    let mut dec = ChunkDecryptor::for_push(mk, file_id, ExpectedChunkFormat::Unrecorded);
+    dec.push_frame(frame0).unwrap();
+    dec.format()
+}
+
+#[test]
+fn vector_chunk_v2_stream_decrypt() {
+    check_chunk_v2("chunk_v2_stream");
+    // A multi-frame v2 file without its last frame is rejected (truncation).
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "chunk_v2_stream");
+    let mk = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let frames = v["frames"].as_array().unwrap();
+    assert!(frames.len() > 2, "the stream vector must have more than two frames");
+    let mut dec = ChunkDecryptor::for_push(&mk, v["file_id"].as_str().unwrap(), ExpectedChunkFormat::V2);
+    for f in &frames[..frames.len() - 1] {
+        dec.push_frame(&decode_hex(f, "frame_hex")).unwrap();
+    }
+    assert!(
+        dec.finish().is_err(),
+        "a v2 stream without its last frame must not finish"
+    );
+}
+
+#[test]
+fn vector_chunk_v2_single_frame_decrypt() {
+    check_chunk_v2("chunk_v2_single_frame");
+}
+
+#[test]
+fn vector_metadata_v2_name_decrypt() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "metadata_v2_name");
+    let mk = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let meta = beebeeb_core::encrypt::decrypt_file_metadata(
+        &mk,
+        v["file_id"].as_str().unwrap(),
+        v["name_encrypted"].as_str().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(meta.name, v["expected_name"].as_str().unwrap());
+    assert_eq!(meta.mime_type.as_deref(), v["expected_mime_type"].as_str());
+    assert_eq!(meta.chunk_format, ExpectedChunkFormat::V2);
+    assert_eq!(v["expected_chunk_format"].as_u64(), Some(2));
+    // Sealed under the name subkey: the raw file key alone does not open it.
+    let file_key = derive_file_key(&mk, v["file_id"].as_str().unwrap().as_bytes());
+    let blob: beebeeb_types::EncryptedBlob = serde_json::from_str(v["name_encrypted"].as_str().unwrap()).unwrap();
+    assert!(
+        decrypt_metadata(&file_key, &blob).is_err(),
+        "a v2 name must not open under the raw file key"
+    );
+    assert_eq!(hex::encode(&blob.nonce), v["nonce_hex"].as_str().unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// 22. The rename writer under a given per-file key (version 6, task 1958) —
+//     what every client's rename reader must read back, public API only.
+// ---------------------------------------------------------------------------
+
+fn file_key_of(v: &serde_json::Value) -> beebeeb_core::kdf::FileKey {
+    let bytes: [u8; 32] = hex::decode(v["file_key_hex"].as_str().unwrap())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    beebeeb_core::kdf::FileKey::from_bytes(bytes)
+}
+
+#[test]
+fn vector_metadata_name_filekey_reads_back_with_its_pin() {
+    let vectors = load_vectors();
+    for (name, pin) in [
+        ("metadata_v2_name_filekey", ExpectedChunkFormat::V2),
+        ("metadata_v1_name_filekey", ExpectedChunkFormat::Unrecorded),
+    ] {
+        let v = get_vector(&vectors, name);
+        let fk = file_key_of(&v);
+        let meta = beebeeb_core::encrypt::decrypt_file_metadata_with_key(&fk, v["name_encrypted"].as_str().unwrap())
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(meta.name, v["expected_name"].as_str().unwrap(), "{name}");
+        assert_eq!(meta.mime_type.as_deref(), v["expected_mime_type"].as_str(), "{name}");
+        assert_eq!(meta.chunk_format, pin, "{name}");
+        assert_eq!(
+            u64::from(pin.as_u8()),
+            v["expected_chunk_format"].as_u64().unwrap(),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn vector_metadata_v2_name_filekey_is_not_under_the_raw_key_and_v1_is() {
+    let vectors = load_vectors();
+    let raw_opens = |name: &str| {
+        let v = get_vector(&vectors, name);
+        let blob: beebeeb_types::EncryptedBlob = serde_json::from_str(v["name_encrypted"].as_str().unwrap()).unwrap();
+        beebeeb_core::encrypt::decrypt_metadata(&file_key_of(&v), &blob).is_ok()
+    };
+    assert!(
+        !raw_opens("metadata_v2_name_filekey"),
+        "a v2-pinned name is subkey-sealed"
+    );
+    assert!(
+        raw_opens("metadata_v1_name_filekey"),
+        "an unpinned name is legacy raw-key sealed"
+    );
+}
+
+/// The SHIPPED name writers against the published name vectors (task 1958
+/// round 2, I-1). A shipped writer draws a fresh nonce, so its bytes cannot
+/// equal a vector's; what can be compared is everything else. With each vector's
+/// own inputs, `encrypt_name_with_chunk_format` (master key, 1943) and
+/// `encrypt_name_for` (given key, 1958) must seal under the SAME key as the
+/// vector (raw file key or name subkey: each opens both blobs or neither) to the
+/// SAME plaintext, at the same length. A wrong key choice, a dropped pin or a
+/// different envelope in the shipped path is red here, not only in unit tests.
+#[test]
+fn vector_names_are_what_the_shipped_writers_seal() {
+    let vectors = load_vectors();
+    let cases: [(&str, bool); 3] = [
+        ("metadata_v2_name", true),
+        ("metadata_v2_name_filekey", false),
+        ("metadata_v1_name_filekey", false),
+    ];
+    for (name, master_key_writer) in cases {
+        let v = get_vector(&vectors, name);
+        let filename = v["expected_name"].as_str().unwrap();
+        let mime = v["expected_mime_type"].as_str();
+        let pin = ExpectedChunkFormat::from_u8(v["expected_chunk_format"].as_u64().unwrap() as u8).unwrap();
+        let file_key = file_key_of(&v);
+        let shipped = if master_key_writer {
+            let mk = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+            beebeeb_core::encrypt::encrypt_name_with_chunk_format(
+                &mk,
+                v["file_id"].as_str().unwrap(),
+                filename,
+                mime,
+                pin,
+            )
+        } else {
+            beebeeb_core::encrypt::encrypt_name_for(&file_key, filename, mime, pin)
+        }
+        .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let shipped: EncryptedBlob = serde_json::from_str(&shipped).unwrap();
+        let published: EncryptedBlob = serde_json::from_str(v["name_encrypted"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            shipped.ciphertext.len(),
+            published.ciphertext.len(),
+            "{name}: envelope length"
+        );
+        let name_key = FileKey::from_bytes(bytes32(&v, "name_key_hex"));
+        let mut opened = 0;
+        for (label, key) in [("raw file key", &file_key), ("name subkey", &name_key)] {
+            let want = decrypt_metadata(key, &published).ok();
+            let got = decrypt_metadata(key, &shipped).ok();
+            assert_eq!(
+                got, want,
+                "{name}: the shipped writer and the vector differ under the {label}"
+            );
+            opened += usize::from(want.is_some());
+        }
+        assert_eq!(opened, 1, "{name}: the vector opens under exactly one key");
     }
 }

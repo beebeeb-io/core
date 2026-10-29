@@ -37,3 +37,9 @@ zeroize = { version = "1", features = ["derive"] }
 
 [build-dependencies]
 uniffi = { version = "0.31.1", features = ["build"] }
+
+# Tests only: lets this crate's tests write v2 chunk frames while core's
+# WRITE_FORMAT is still v1 (task 1908 read-only rollout). Never in a shipped build.
+[dev-dependencies]
+beebeeb-core = { path = "../beebeeb-core", default-features = false, features = ["test-support"] }
+serde_json = "1"

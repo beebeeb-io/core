@@ -198,6 +198,42 @@ pub fn server_login_start(
     })
 }
 
+/// Server login start for an identity that has NO password file (unknown
+/// email, or an account that must look unknown): runs `ServerLogin::start`
+/// with `None`, which makes opaque-ke build a decoy `CredentialResponse` and a
+/// decoy `ServerLogin` state (task 1784, security review M11).
+///
+/// The OPRF key is still derived from the server setup and `username`, so a
+/// probe for the same identity is evaluated under the same key every time, and
+/// the response has exactly the shape and length of a real one. A client that
+/// finishes against it fails at `client_login_finish` for the same reason a
+/// wrong password does (the envelope cannot be opened), and the state returned
+/// here fails `server_login_finish` for any client message.
+pub fn server_login_start_fake(
+    server_setup_bytes: &[u8],
+    credential_request_bytes: &[u8],
+    username: &[u8],
+) -> Result<ServerLoginStartResult, CoreError> {
+    let server_setup = ServerSetup::<BeebeebCs>::deserialize(server_setup_bytes)
+        .map_err(|e| CoreError::Opaque(format!("invalid server setup: {e}")))?;
+    let request = CredentialRequest::deserialize(credential_request_bytes)
+        .map_err(|e| CoreError::Opaque(format!("invalid credential request: {e}")))?;
+    let mut rng = OsRng;
+    let result = ServerLogin::start(
+        &mut rng,
+        &server_setup,
+        None,
+        request,
+        username,
+        ServerLoginParameters::default(),
+    )
+    .map_err(|e| CoreError::Opaque(format!("server fake login start failed: {e}")))?;
+    Ok(ServerLoginStartResult {
+        message: result.message.serialize().to_vec(),
+        state: result.state.serialize().to_vec(),
+    })
+}
+
 pub struct ClientLoginFinishResult {
     pub message: Vec<u8>,
     pub session_key: Vec<u8>,
@@ -344,6 +380,39 @@ mod tests {
 
         assert_eq!(client_finish.session_key, server_session_key);
         assert!(!client_finish.export_key.is_empty());
+    }
+
+    #[test]
+    fn fake_login_start_matches_real_shape_and_never_authenticates() {
+        // Task 1784 (M11): the decoy a server returns for an identity it must
+        // not reveal. Same wire shape as a real start, and unusable.
+        let password = b"correct-horse-battery";
+        let username = b"carol@beebeeb.io";
+        let server_setup = create_server_setup();
+
+        let reg_start = client_registration_start(password).unwrap();
+        let reg_response = server_registration_start(&server_setup, &reg_start.message, username).unwrap();
+        let reg_upload = client_registration_finish(&reg_start.state, password, &reg_response).unwrap();
+        let password_file = server_registration_finish(&reg_upload).unwrap();
+
+        let login_start = client_login_start(password).unwrap();
+        let real = server_login_start(&server_setup, &password_file, &login_start.message, username).unwrap();
+        let fake = server_login_start_fake(&server_setup, &login_start.message, username).unwrap();
+
+        assert_eq!(real.message.len(), fake.message.len(), "response length must match");
+        assert_eq!(real.state.len(), fake.state.len(), "state length must match");
+
+        // The client cannot finish against the decoy, with the right password
+        // or any other: the same failure a wrong password produces.
+        assert!(client_login_finish(&login_start.state, password, &fake.message, 1).is_err());
+        assert!(client_login_finish(&login_start.state, b"anything-else", &fake.message, 1).is_err());
+
+        // A forged finalization cannot complete the decoy state either.
+        let junk = vec![0u8; 64];
+        assert!(server_login_finish(&fake.state, &junk).is_err());
+
+        // Garbage input is rejected like the real start rejects it.
+        assert!(server_login_start_fake(&server_setup, b"short", username).is_err());
     }
 
     #[test]

@@ -17,18 +17,21 @@
 
 ## Why this exists
 
-`core` is the one place beebeeb's cryptography lives. Every client depends on it, and none of them re-implement the crypto themselves: the web app consumes it as WebAssembly, the mobile apps through UniFFI bindings, and the CLI, server, and desktop sync engine as a native Rust git dependency. Writing key derivation and chunk encryption once — in audited Rust — means a fix or a hardening lands in every client at once, and there's no second implementation to drift, disagree, or get a corner wrong.
+`core` is the one place beebeeb's cryptography lives. Every client depends on it, and none of them re-implement the crypto themselves: the web app consumes it as WebAssembly, the mobile apps through UniFFI bindings, and the CLI, server, and desktop sync engine as a native Rust git dependency. Writing key derivation and chunk encryption once — in one open, auditable Rust core — means a fix or a hardening lands in every client at once, and there's no second implementation to drift, disagree, or get a corner wrong.
 
 ## Usage
 
-The flow is the same everywhere: derive a `MasterKey` from the user's password, derive a per-file `FileKey` from it, then encrypt or decrypt chunks under that file key. Raw key bytes never leave the device.
+The flow is the same everywhere: derive a `MasterKey` from the recovery phrase, derive a per-file `FileKey` from it, then encrypt or decrypt chunks under that file key. The password is not where the master key comes from: it signs in through OPAQUE (the server never learns it) and wraps the master key on the device. Raw key bytes never leave the device. (`kdf::derive_master_key(password, salt)` still exists for a legacy password-derived unlock path; signup does not use it.)
 
 ```rust
-use beebeeb_core::kdf::{derive_master_key, derive_file_key};
+use beebeeb_core::recovery::{generate_recovery_phrase, recover_from_phrase};
+use beebeeb_core::kdf::derive_file_key;
 use beebeeb_core::encrypt::{encrypt_chunk, decrypt_chunk};
 
-// 1. Master key from the password (Argon2id). `salt` is per-user, >= 16 bytes.
-let master = derive_master_key(password, salt)?;
+// 1. Master key from the recovery phrase: its 128-bit BIP39 entropy goes through
+//    Argon2id. At signup, generate both; on a new device, re-derive from the phrase.
+let (phrase, master) = generate_recovery_phrase()?;   // show `phrase` to the user once
+let master = recover_from_phrase(&phrase)?;           // same key, from the 12 words
 
 // 2. Per-file key from the master key (HKDF-SHA256), scoped to one file_id.
 let file_key = derive_file_key(&master, file_id);
@@ -87,12 +90,20 @@ Deeper build, binding-regeneration, and environment detail lives in [BUILDING.md
 
 Found a vulnerability? Email **security@beebeeb.io** — see [SECURITY.md](SECURITY.md).
 
+### Audit status
+
+`core` has not had an independent security audit yet. It is open source, as are the web, desktop, iOS and
+CLI apps built on it, so you can review the code yourself: the primitives are standard (AES-256-GCM,
+Argon2id, HKDF, X25519) and the cross-platform test vectors are in this repository. The server is closed
+source. Beebeeb has no investors and is paid for from our own savings and income, and so far that money
+has gone into building Beebeeb, not into an audit. We understand if you want an audit before you trust us.
+
 ### How this is built
 
-beebeeb is built by two founders working with AI coding agents. The agents write most of the code;
-we specify the work, review every diff, and merge it ourselves — which is why the public history
-shows one human author and some very large days. See
-[how we build beebeeb](https://github.com/beebeeb-io) for the full note.
+We are two founders, and we build Beebeeb with AI coding agents. The agents write most of the code; we
+specify the work, review every diff, run the tests and decide what ships. Every commit in this repository
+is merged by one of us, and the agents' `Co-Authored-By` trailers stay in the history, which is why it
+shows one author and some very large days.
 
 ## Part of beebeeb
 

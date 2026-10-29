@@ -26,7 +26,7 @@ jobs:
           toolchain: "1.96.0"
           components: clippy, rustfmt
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
 
       - name: cargo fmt
         run: cargo fmt -- --check
@@ -52,7 +52,63 @@ jobs:
         with:
           toolchain: "1.96.0"
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
 
       - name: cargo test
         run: cargo test --workspace
+
+  # The JS surface of beebeeb-wasm as a web client sees it. `cargo test` has no JS engine and never parses
+  # the glue wasm-bindgen generates: core #34 merged a doc comment that made beebeeb_wasm.js a SyntaxError and
+  # the whole workspace test run stayed green. run.sh builds both targets, `node --check`s the glue,
+  # `tsc --noEmit`s the .d.ts files and runs the node:test suite on the real module.
+  wasm-js:
+    name: WASM JS surface
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # action pinned; toolchain set below
+        with:
+          toolchain: "1.96.0"
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked --version 0.14.0
+
+      # run.sh type-checks the generated .d.ts with tsc; one pinned package, no lockfile needed.
+      - name: Install typescript
+        run: |
+          npm install --no-audit --no-fund --prefix "$RUNNER_TEMP/ts" typescript@5.6.3
+          echo "$RUNNER_TEMP/ts/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: beebeeb-wasm JS surface
+        run: beebeeb-wasm/js-tests/run.sh
+
+  claims-guard:
+    name: Claims guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # Shared engine (vendored verbatim from the workspace canonical): banned
+      # origins, host allow-list, provider names, banned claims, regions.
+      - name: Run claims guard
+        run: bash scripts/claims-guard/claims-guard.sh
+
+      # The canon CLAIM_SWEEP (docs/canon/public-claims.md) over the WHOLE tree.
+      # The engine above scans user-facing paths only; design/hifi/ mockups
+      # sat outside them and published a false external-audit claim for
+      # months. The self-test runs first so a sweep that cannot go red never
+      # reports green.
+      - name: Canon sweep self-test
+        if: always()
+        run: bash scripts/claims-guard/canon-sweep.sh --self-test
+      - name: Canon sweep (whole tree, must be 0 rows)
+        if: always()
+        run: bash scripts/claims-guard/canon-sweep.sh

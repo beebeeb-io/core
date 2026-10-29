@@ -12,7 +12,8 @@ use beebeeb_types::{ChunkProfile, plan_chunks};
 
 use crate::CoreError;
 use crate::chunk_stream::ChunkEncryptor;
-use crate::encrypt::{NONCE_LEN, TAG_LEN, decrypt_chunk_raw};
+use crate::chunk_stream::{ExpectedChunkFormat, StreamOpener};
+use crate::encrypt::{NONCE_LEN, TAG_LEN};
 use crate::kdf::{MasterKey, derive_file_key};
 
 /// Information about a single encrypted chunk written to disk.
@@ -189,9 +190,13 @@ pub fn encrypt_file_to_chunks(
 /// an existence-based cache cannot serve a truncated decrypt as if complete.
 /// (Same `.tmp` + atomic-rename + remove-on-error pattern as
 /// [`crate::encrypt::decrypt_contiguous_to_file`].)
+///
+/// `expected` comes from the file's encrypted metadata
+/// ([`crate::encrypt::decrypt_file_metadata`]) — task 1908.
 pub fn decrypt_chunks_to_file(
     master_key: &MasterKey,
     file_id: &str,
+    expected: ExpectedChunkFormat,
     chunk_paths: &[&Path],
     output_path: &Path,
     callback: Option<&dyn FileProgressCallback>,
@@ -208,7 +213,7 @@ pub fn decrypt_chunks_to_file(
 
     // Inner helper does the streaming decrypt into the .tmp; on ANY Err the
     // outer code removes the .tmp so no partial plaintext survives at output_path.
-    let result = decrypt_chunks_to_tmp(&file_key, chunk_paths, &tmp_path, callback);
+    let result = decrypt_chunks_to_tmp(&file_key, file_id, expected, chunk_paths, &tmp_path, callback);
 
     match result {
         Ok((total_bytes, chunks_processed)) => {
@@ -236,6 +241,8 @@ pub fn decrypt_chunks_to_file(
 /// every error path. Returns `(total_bytes, chunks_processed)` on success.
 fn decrypt_chunks_to_tmp(
     file_key: &crate::kdf::FileKey,
+    file_id: &str,
+    expected: ExpectedChunkFormat,
     chunk_paths: &[&Path],
     tmp_path: &Path,
     callback: Option<&dyn FileProgressCallback>,
@@ -247,13 +254,17 @@ fn decrypt_chunks_to_tmp(
 
     let mut total_bytes: u64 = 0;
     let mut chunks_processed: u32 = 0;
+    // Task 1908: the chunk files are one file's ordered stream. v2 binds each
+    // frame to (file_id, index, last), so a reordered/duplicated/missing chunk
+    // file, or a list that stops before the last chunk, fails here.
+    let mut opener = StreamOpener::new(file_key, file_id, expected);
 
     for (i, chunk_path) in chunk_paths.iter().enumerate() {
         // Read the entire chunk file
         let raw = fs::read(chunk_path).map_err(|e| CoreError::Io(format!("read chunk {i}: {e}")))?;
 
         // Decrypt: raw is nonce || ciphertext || tag
-        let plaintext = decrypt_chunk_raw(file_key, &raw)?;
+        let plaintext = opener.open_next(file_key, &raw)?.data;
 
         writer
             .write_all(&plaintext)
@@ -266,6 +277,9 @@ fn decrypt_chunks_to_tmp(
             cb.on_progress(chunks_processed, chunks_total);
         }
     }
+
+    // Truncation check (v2: the last chunk must have been seen).
+    opener.finish()?;
 
     writer
         .flush()
@@ -322,7 +336,15 @@ mod tests {
         // Decrypt
         let output_path = dir.join("output.bin");
         let chunk_paths: Vec<&Path> = result.chunks.iter().map(|c| c.output_path.as_path()).collect();
-        let dec_result = decrypt_chunks_to_file(&mk, "test-file-001", &chunk_paths, &output_path, None).unwrap();
+        let dec_result = decrypt_chunks_to_file(
+            &mk,
+            "test-file-001",
+            ExpectedChunkFormat::Unrecorded,
+            &chunk_paths,
+            &output_path,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(dec_result.total_bytes, content.len() as u64);
         assert_eq!(dec_result.chunks_processed, result.chunks.len() as u32);
@@ -355,7 +377,15 @@ mod tests {
 
         let output_path = dir.join("output.bin");
         let chunk_paths: Vec<&Path> = result.chunks.iter().map(|c| c.output_path.as_path()).collect();
-        let dec_result = decrypt_chunks_to_file(&mk, "empty-file", &chunk_paths, &output_path, None).unwrap();
+        let dec_result = decrypt_chunks_to_file(
+            &mk,
+            "empty-file",
+            ExpectedChunkFormat::Unrecorded,
+            &chunk_paths,
+            &output_path,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(dec_result.total_bytes, 0);
         let recovered = fs::read(&output_path).unwrap();
@@ -385,7 +415,15 @@ mod tests {
 
         let output_path = dir.join("output.bin");
         let chunk_paths: Vec<&Path> = result.chunks.iter().map(|c| c.output_path.as_path()).collect();
-        let dec_result = decrypt_chunks_to_file(&mk, "small-file", &chunk_paths, &output_path, None).unwrap();
+        let dec_result = decrypt_chunks_to_file(
+            &mk,
+            "small-file",
+            ExpectedChunkFormat::Unrecorded,
+            &chunk_paths,
+            &output_path,
+            None,
+        )
+        .unwrap();
 
         let recovered = fs::read(&output_path).unwrap();
         assert_eq!(recovered, content);
@@ -416,7 +454,15 @@ mod tests {
 
         let output_path = dir.join("output.bin");
         let chunk_paths: Vec<&Path> = result.chunks.iter().map(|c| c.output_path.as_path()).collect();
-        let dec_result = decrypt_chunks_to_file(&mk, "photo-file", &chunk_paths, &output_path, None).unwrap();
+        let dec_result = decrypt_chunks_to_file(
+            &mk,
+            "photo-file",
+            ExpectedChunkFormat::Unrecorded,
+            &chunk_paths,
+            &output_path,
+            None,
+        )
+        .unwrap();
 
         let recovered = fs::read(&output_path).unwrap();
         assert_eq!(recovered.len(), content.len());
@@ -446,7 +492,15 @@ mod tests {
 
         let output_path = dir.join("output.bin");
         let chunk_paths: Vec<&Path> = result.chunks.iter().map(|c| c.output_path.as_path()).collect();
-        let dec_result = decrypt_chunks_to_file(&mk, "doc-file", &chunk_paths, &output_path, None).unwrap();
+        let dec_result = decrypt_chunks_to_file(
+            &mk,
+            "doc-file",
+            ExpectedChunkFormat::Unrecorded,
+            &chunk_paths,
+            &output_path,
+            None,
+        )
+        .unwrap();
 
         let recovered = fs::read(&output_path).unwrap();
         assert_eq!(recovered, content);
@@ -526,7 +580,14 @@ mod tests {
         let wrong_mk = derive_master_key("wrong-password", b"wrong-salt-16byte").unwrap();
         let output_path = dir.join("output.bin");
         let chunk_paths: Vec<&Path> = result.chunks.iter().map(|c| c.output_path.as_path()).collect();
-        let dec_result = decrypt_chunks_to_file(&wrong_mk, "secret-file", &chunk_paths, &output_path, None);
+        let dec_result = decrypt_chunks_to_file(
+            &wrong_mk,
+            "secret-file",
+            ExpectedChunkFormat::Unrecorded,
+            &chunk_paths,
+            &output_path,
+            None,
+        );
 
         assert!(dec_result.is_err());
 
@@ -550,7 +611,14 @@ mod tests {
         // Try to decrypt with wrong file ID (derives different file key)
         let output_path = dir.join("output.bin");
         let chunk_paths: Vec<&Path> = result.chunks.iter().map(|c| c.output_path.as_path()).collect();
-        let dec_result = decrypt_chunks_to_file(&mk, "file-002", &chunk_paths, &output_path, None);
+        let dec_result = decrypt_chunks_to_file(
+            &mk,
+            "file-002",
+            ExpectedChunkFormat::Unrecorded,
+            &chunk_paths,
+            &output_path,
+            None,
+        );
 
         assert!(dec_result.is_err());
 
@@ -691,7 +759,14 @@ mod tests {
         let _ = fs::remove_file(&tmp_path);
 
         let chunk_paths: Vec<&Path> = enc.chunks.iter().map(|c| c.output_path.as_path()).collect();
-        let res = decrypt_chunks_to_file(&mk, "partial-file", &chunk_paths, &output_path, None);
+        let res = decrypt_chunks_to_file(
+            &mk,
+            "partial-file",
+            ExpectedChunkFormat::Unrecorded,
+            &chunk_paths,
+            &output_path,
+            None,
+        );
 
         assert!(res.is_err(), "mid-stream decrypt failure must return Err");
         assert!(
