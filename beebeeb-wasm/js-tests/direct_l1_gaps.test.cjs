@@ -95,6 +95,38 @@ test('pairsAllowed refuses a missing pair, a missing token and a bucket-case cha
   )
 })
 
+test('pairsAllowed: a bad direction is named before a bad pairs argument', () => {
+  const discovery = { download: ['object-download-v1'], upload: [], storage_buckets: [] }
+  assert.equal(
+    codeOf(() => wasm.pairsAllowed(discovery, 'sideways', 'not-an-array')),
+    'direction_invalid',
+    'the error-code order is as before K1: direction first',
+  )
+  assert.equal(codeOf(() => wasm.pairsAllowed(discovery, 'download', 'not-an-array')), 'pairs_invalid')
+})
+
+test('the count inputs refuse a number JS cannot hold exactly', () => {
+  assert.equal(codeOf(() => wasm.pacedUntilMs(0, 2 ** 53, 1)), 'bytes_invalid', '2^53 is not exact')
+  assert.equal(codeOf(() => wasm.checkStorageGet(200, 2 ** 53, 1)), 'length_invalid', '2^53 is not exact')
+})
+
+test('WasmStorageBody counts the body and refuses the first byte past the grant', () => {
+  const body = wasm.WasmStorageBody.fromHead(200, CHUNK, CHUNK)
+  body.push(CHUNK)
+  assert.deepEqual(body.finish(), { kind: 'stored' })
+
+  const short = wasm.WasmStorageBody.fromHead(200, CHUNK, CHUNK)
+  short.push(CHUNK - 1)
+  assert.equal(codeOf(() => short.push(2)), 'failed', 'past the grant throws')
+  assert.deepEqual(short.finish(), { kind: 'failed', status: 200 }, 'the refused bytes were not counted')
+
+  const empty = wasm.WasmStorageBody.fromHead(200, 0, 0)
+  assert.deepEqual(empty.finish(), { kind: 'stored' })
+
+  assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(206, CHUNK, CHUNK)), 'failed', 'a 206 head throws')
+  assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(200, null, CHUNK)), 'failed', 'no length throws')
+})
+
 test('directTransferConstants carries the three response caps', () => {
   const c = wasm.directTransferConstants()
   assert.equal(c.max_discovery_body_bytes, 256 * 1024)

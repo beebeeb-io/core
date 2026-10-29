@@ -982,6 +982,10 @@ external fun uniffi_beebeeb_uniffi_checksum_method_directsignedurl_raw(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_directsignedurl_redacted(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_finish(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_push(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk_frame(
@@ -1153,6 +1157,8 @@ external fun uniffi_beebeeb_uniffi_checksum_constructor_directdownloadplannerhan
 external fun uniffi_beebeeb_uniffi_checksum_constructor_directhealthhandle_new(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_directsignedurl_new(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_directstoragebodyhandle_from_head(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_folder_link(
 ): Short
@@ -1363,6 +1369,16 @@ external fun uniffi_beebeeb_uniffi_fn_method_directsignedurl_uniffi_trait_debug(
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_directsignedurl_uniffi_trait_display(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_clone_directstoragebodyhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_directstoragebodyhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_directstoragebodyhandle_from_head(`status`: Short,`contentLength`: RustBuffer.ByValue,`expected`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_directstoragebodyhandle_finish(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_directstoragebodyhandle_push(`ptr`: Long,`n`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_beebeeb_uniffi_fn_clone_filekeyhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_filekeyhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1929,13 +1945,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_download_grants_path() != 38361.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_max_in_flight_bytes() != 41345.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_max_in_flight_bytes() != 24727.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_paced_until_ms() != 40002.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_pairs_allowed() != 44854.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_pairs_allowed() != 6861.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_pinned_retry_decision() != 23908.toShort()) {
@@ -2226,6 +2242,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_directsignedurl_redacted() != 58321.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_finish() != 56174.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_push() != 19487.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk() != 50441.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2482,6 +2504,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_directsignedurl_new() != 57713.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_directstoragebodyhandle_from_head() != 7464.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_folder_link() != 22577.toShort()) {
@@ -6184,6 +6209,305 @@ public object FfiConverterTypeDirectSignedUrl: FfiConverter<DirectSignedUrl, Lon
     override fun allocationSize(value: DirectSignedUrl) = 8UL
 
     override fun write(value: DirectSignedUrl, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+/**
+ * A storage GET's body counted as it arrives, so no client counts body bytes on its own.
+ * `from_head` starts it (throwing `StorageBody` when the head is not a `200` of the grant's
+ * length), `push` counts the bytes read and throws as soon as they would pass the grant, and
+ * `finish` gives the answer.
+ */
+public interface DirectStorageBodyHandleInterface {
+    
+    /**
+     * The body's answer. Core's `StorageBody` is two counters, so reading it twice is harmless.
+     */
+    fun `finish`(): DirectStorageGetDto
+    
+    /**
+     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant.
+     */
+    fun `push`(`n`: kotlin.ULong)
+    
+    companion object
+}
+
+/**
+ * A storage GET's body counted as it arrives, so no client counts body bytes on its own.
+ * `from_head` starts it (throwing `StorageBody` when the head is not a `200` of the grant's
+ * length), `push` counts the bytes read and throws as soon as they would pass the grant, and
+ * `finish` gives the answer.
+ */
+open class DirectStorageBodyHandle: Disposable, AutoCloseable, DirectStorageBodyHandleInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_beebeeb_uniffi_fn_free_directstoragebodyhandle(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_beebeeb_uniffi_fn_clone_directstoragebodyhandle(handle, status)
+        }
+    }
+
+    
+    /**
+     * The body's answer. Core's `StorageBody` is two counters, so reading it twice is harmless.
+     */override fun `finish`(): DirectStorageGetDto {
+            return FfiConverterTypeDirectStorageGetDto.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directstoragebodyhandle_finish(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant.
+     */
+    @Throws(DirectTransferException::class)override fun `push`(`n`: kotlin.ULong)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(DirectTransferException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_directstoragebodyhandle_push(
+        it,
+        FfiConverterULong.lower(`n`),_status)
+}
+    }
+    
+    
+
+    
+
+    
+
+
+    
+    companion object {
+        
+    @Throws(DirectTransferException::class) fun `fromHead`(`status`: kotlin.UShort, `contentLength`: kotlin.ULong?, `expected`: kotlin.ULong): DirectStorageBodyHandle {
+            return FfiConverterTypeDirectStorageBodyHandle.lift(
+    uniffiRustCallWithError(DirectTransferException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_directstoragebodyhandle_from_head(
+    
+        FfiConverterUShort.lower(`status`),FfiConverterOptionalULong.lower(`contentLength`),FfiConverterULong.lower(`expected`),_status)
+}
+    )
+    }
+    
+
+        
+    }
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDirectStorageBodyHandle: FfiConverter<DirectStorageBodyHandle, Long> {
+    override fun lower(value: DirectStorageBodyHandle): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): DirectStorageBodyHandle {
+        return DirectStorageBodyHandle(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): DirectStorageBodyHandle {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: DirectStorageBodyHandle) = 8UL
+
+    override fun write(value: DirectStorageBodyHandle, buf: ByteBuffer) {
         buf.putLong(lower(value))
     }
 }
@@ -13025,6 +13349,18 @@ sealed class DirectTransferException: kotlin.Exception() {
     }
     
     /**
+     * A storage body operation failed: `failed` (the head was not a `200` of the grant's length,
+     * or a push would have passed the grant). The kind is core's `StorageGet::kind`.
+     */
+    class StorageBody(
+        
+        val `code`: kotlin.String
+        ) : DirectTransferException() {
+        override val message
+            get() = "code=${ `code` }"
+    }
+    
+    /**
      * `call` was none of `discovery`, `download_grant`, `pinned_chunk`.
      */
     class UnknownCall(
@@ -13061,7 +13397,10 @@ public object FfiConverterTypeDirectTransferError : FfiConverterRustBuffer<Direc
             3 -> DirectTransferException.Plan(
                 FfiConverterString.read(buf),
                 )
-            4 -> DirectTransferException.UnknownCall()
+            4 -> DirectTransferException.StorageBody(
+                FfiConverterString.read(buf),
+                )
+            5 -> DirectTransferException.UnknownCall()
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
     }
@@ -13079,6 +13418,11 @@ public object FfiConverterTypeDirectTransferError : FfiConverterRustBuffer<Direc
                 + FfiConverterString.allocationSize(value.`code`)
             )
             is DirectTransferException.Plan -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`code`)
+            )
+            is DirectTransferException.StorageBody -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
                 + FfiConverterString.allocationSize(value.`code`)
@@ -13107,8 +13451,13 @@ public object FfiConverterTypeDirectTransferError : FfiConverterRustBuffer<Direc
                 FfiConverterString.write(value.`code`, buf)
                 Unit
             }
-            is DirectTransferException.UnknownCall -> {
+            is DirectTransferException.StorageBody -> {
                 buf.putInt(4)
+                FfiConverterString.write(value.`code`, buf)
+                Unit
+            }
+            is DirectTransferException.UnknownCall -> {
+                buf.putInt(5)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -15830,8 +16179,9 @@ public object FfiConverterSequenceTypeCeremonyStepDto: FfiConverterRustBuffer<Li
     
 
         /**
-         * The ciphertext bytes a process of `class` may hold at once (256, 64, 64, 16 MiB). The planner
-         * clamps the chunk count to at least one, so this is a ceiling, never a reason to fail.
+         * The ciphertext bytes a process of `class` may hold at once (256, 64, 64, 16 MiB): a ceiling on
+         * the chunks held, never a reason to fail. The planner clamps the chunk count to at least one, so
+         * at least one chunk is always held, even a 256 MiB chunk in a 16 MiB class.
          */ fun `directMaxInFlightBytes`(`class`: DirectMemoryClassDto): kotlin.ULong {
             return FfiConverterULong.lift(
     uniffiRustCall() { _status ->
@@ -15858,9 +16208,10 @@ public object FfiConverterSequenceTypeCeremonyStepDto: FfiConverterRustBuffer<Li
     
 
         /**
-         * May this client use the direct transport for `direction`? True only when discovery offers it
-         * AND every pair in `discovery.storage_buckets` is in `pairs`. Hosts compare ASCII
-         * case-insensitively, buckets exactly.
+         * May this client use the direct transport for `direction`? True only when discovery offers it,
+         * names at least one `{host, bucket}` pair, AND every pair it names is in `pairs`. A discovery
+         * with no buckets is never allowed, not vacuously. Hosts compare ASCII case-insensitively,
+         * buckets exactly.
          */ fun `directPairsAllowed`(`discovery`: DirectDiscoveryDto, `direction`: DirectDirectionDto, `pairs`: List<DirectStorageBucketDto>): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     uniffiRustCall() { _status ->

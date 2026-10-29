@@ -2392,6 +2392,57 @@ fn storage_answer_json(got: dt::StorageGet) -> serde_json::Value {
     }
 }
 
+/// A storage GET's body as the bytes arrive, counted in core so no client counts its own.
+/// `WasmStorageBody.fromHead(status, contentLength, expected)` starts it; `push(n)` counts the bytes
+/// read and throws as soon as they would pass the grant; `finish()` gives `{ kind: "stored" }` or
+/// `{ kind: "failed", status: 200 }` and consumes the handle. Every count crosses as a JS number.
+#[wasm_bindgen]
+pub struct WasmStorageBody {
+    inner: dt::StorageBody,
+}
+
+#[wasm_bindgen]
+impl WasmStorageBody {
+    /// Start counting. `content_length` is the head's `Content-Length` (or `null`). Throws `failed`
+    /// when the head is not a `200` whose length is exactly `expected`.
+    #[wasm_bindgen(js_name = fromHead)]
+    pub fn from_head(
+        status: u16,
+        content_length: Option<f64>,
+        expected: f64,
+    ) -> Result<WasmStorageBody, DirectFailure> {
+        let content_length = match content_length {
+            Some(len) => Some(direct_length(len)?),
+            None => None,
+        };
+        dt::StorageBody::from_head(status, content_length, direct_length(expected)?)
+            .map(|inner| WasmStorageBody { inner })
+            .map_err(|failed| DirectFailure::new("the storage body failed", failed.kind()))
+    }
+
+    /// Count `n` more bytes read. Throws `failed` as soon as they would pass `expected`, so the
+    /// caller stops reading.
+    pub fn push(&mut self, n: f64) -> Result<(), DirectFailure> {
+        self.inner
+            .push(direct_bytes(n, "bytes_invalid")?)
+            .map_err(|failed| DirectFailure::new("the storage body failed", failed.kind()))
+    }
+
+    /// The body's answer; the handle is consumed.
+    #[wasm_bindgen(unchecked_return_type = "DirectStorageGet")]
+    pub fn finish(self) -> Result<JsValue, DirectFailure> {
+        direct_to_js(&self.finish_json()).map_err(|e| DirectFailure::new(format!("{e:?}"), "internal"))
+    }
+}
+
+impl WasmStorageBody {
+    /// [`WasmStorageBody::finish`]'s answer from the counted body, so the Rust test surface can run
+    /// it without a JS engine.
+    fn finish_json(self) -> serde_json::Value {
+        storage_answer_json(self.inner.finish())
+    }
+}
+
 /// When `wire_bytes` received since `start_ms` at `kbps` KiB/s lets the next storage
 /// request start. The three counts cross as JS numbers (`f64`), like every other count.
 /// `-Infinity` (`i64::MIN` in core) means there is no ceiling: a real deadline is a
@@ -2437,20 +2488,18 @@ fn memory_class_of(code: &str) -> Result<dt::MemoryClass, DirectFailure> {
 /// buckets exactly.
 #[wasm_bindgen(js_name = pairsAllowed)]
 pub fn pairs_allowed_js(discovery: JsValue, direction: &str, pairs: JsValue) -> Result<bool, DirectFailure> {
+    // `direction` first: the error-code order must stay as it was before K1, so a bad direction and
+    // a bad pairs argument together still name the direction.
+    let direction = direct_direction(direction)?;
     let discovery = direct_discovery_from_js(discovery)?;
     let pairs: Vec<dt::StorageBucket> =
         serde_wasm_bindgen::from_value(pairs).map_err(|e| DirectFailure::new(e.to_string(), "pairs_invalid"))?;
-    pairs_allowed_value(&discovery, direction, &pairs)
+    Ok(pairs_allowed_value(&discovery, direction, &pairs))
 }
 
 /// [`pairs_allowed_js`]'s seam: the export and the Rust test surface both call this.
-fn pairs_allowed_value(
-    discovery: &dt::Discovery,
-    direction: &str,
-    pairs: &[dt::StorageBucket],
-) -> Result<bool, DirectFailure> {
-    let direction = direct_direction(direction)?;
-    Ok(dt::pairs_allowed(discovery, direction, pairs))
+fn pairs_allowed_value(discovery: &dt::Discovery, direction: dt::Direction, pairs: &[dt::StorageBucket]) -> bool {
+    dt::pairs_allowed(discovery, direction, pairs)
 }
 
 /// A URL for a log line: scheme and host only.
@@ -3639,6 +3688,21 @@ mod direct_vector_tests {
             storage_body_json(received, expected)
         }
 
+        fn storage_body(&self, status: u16, content_length: Option<u64>, expected: u64, pushes: &[u64]) -> Value {
+            let mut body = match WasmStorageBody::from_head(status, content_length.map(|n| n as f64), expected as f64) {
+                Ok(body) => body,
+                // The head's failure carries the kind only; the status is the row's own (a 206 or a
+                // short 200). Head rows live in `storage_get`; this keeps the section honest.
+                Err(failed) => return json!({"kind": failed.code, "status": status}),
+            };
+            for n in pushes {
+                if let Err(failed) = body.push(*n as f64) {
+                    return json!({"kind": failed.code, "status": 200});
+                }
+            }
+            body.finish_json()
+        }
+
         fn paced_until_ms(&self, start_ms: i64, wire_bytes: u64, kbps: u64) -> i64 {
             // The export crosses the answer as a JS number (`-Infinity` for no ceiling); the
             // vectors file writes that sentinel as core's `i64::MIN`.
@@ -3655,7 +3719,7 @@ mod direct_vector_tests {
         fn pairs_allowed(&self, discovery: &Value, direction: &str, allowlist: &Value) -> bool {
             let d: dt::Discovery = serde_json::from_value(discovery.clone()).unwrap();
             let allowlist: Vec<dt::StorageBucket> = serde_json::from_value(allowlist.clone()).unwrap();
-            pairs_allowed_value(&d, direction, &allowlist).unwrap()
+            pairs_allowed_value(&d, direct_direction(direction).unwrap(), &allowlist)
         }
 
         fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> WasmPlannerSurface {

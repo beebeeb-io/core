@@ -5069,8 +5069,9 @@ pub fn direct_transfer_constants() -> DirectConstantsDto {
         discovery_timeout_ms: timeout_ms(dt::timeouts::DISCOVERY_TIMEOUT),
         api_call_timeout_ms: timeout_ms(dt::timeouts::API_CALL_TIMEOUT),
         background_put_resource_timeout_ms: timeout_ms(dt::timeouts::BACKGROUND_PUT_RESOURCE_TIMEOUT),
-        // The three response caps are appended last, so a client that copies fields positionally
-        // (older generated bindings) keeps every earlier field where it was.
+        // The three response caps are appended last. That does not make an older generated binding
+        // read them: a UniFFI record is decoded in field order and an older binding FAILS on the
+        // extra bytes, so the Swift and Kotlin bindings are regenerated on every core bump.
         max_discovery_body_bytes: dt::wire::MAX_DISCOVERY_BYTES as u32,
         max_grant_body_bytes: dt::wire::MAX_GRANT_BODY_BYTES as u32,
         max_chunk_body_bytes: beebeeb_core::chunk_stream::MAX_CHUNK_SIZE + dt::wire::CHUNK_OVERHEAD,
@@ -5128,6 +5129,11 @@ pub enum DirectTransferError {
     /// `not_in_flight`, `not_fetched`, `out_of_order`, `api_route_failure`.
     #[error("the planner was driven out of order: {code}")]
     Plan { code: String },
+
+    /// A storage body operation failed: `failed` (the head was not a `200` of the grant's length,
+    /// or a push would have passed the grant). The kind is core's `StorageGet::kind`.
+    #[error("the storage body failed: {code}")]
+    StorageBody { code: String },
 
     /// `call` was none of `discovery`, `download_grant`, `pinned_chunk`.
     #[error("unknown call")]
@@ -5254,6 +5260,46 @@ fn storage_get_dto(got: dt::StorageGet) -> DirectStorageGetDto {
     }
 }
 
+fn storage_body_error(failed: dt::StorageGet) -> DirectTransferError {
+    DirectTransferError::StorageBody {
+        code: failed.kind().to_owned(),
+    }
+}
+
+/// A storage GET's body counted as it arrives, so no client counts body bytes on its own.
+/// `from_head` starts it (throwing `StorageBody` when the head is not a `200` of the grant's
+/// length), `push` counts the bytes read and throws as soon as they would pass the grant, and
+/// `finish` gives the answer.
+#[derive(uniffi::Object)]
+pub struct DirectStorageBodyHandle {
+    inner: Mutex<dt::StorageBody>,
+}
+
+#[uniffi::export]
+impl DirectStorageBodyHandle {
+    #[uniffi::constructor]
+    pub fn from_head(
+        status: u16,
+        content_length: Option<u64>,
+        expected: u64,
+    ) -> Result<Arc<Self>, DirectTransferError> {
+        let body = dt::StorageBody::from_head(status, content_length, expected).map_err(storage_body_error)?;
+        Ok(Arc::new(Self {
+            inner: Mutex::new(body),
+        }))
+    }
+
+    /// Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant.
+    pub fn push(&self, n: u64) -> Result<(), DirectTransferError> {
+        lock_tolerant(&self.inner).push(n).map_err(storage_body_error)
+    }
+
+    /// The body's answer. Core's `StorageBody` is two counters, so reading it twice is harmless.
+    pub fn finish(&self) -> DirectStorageGetDto {
+        storage_get_dto(lock_tolerant(&self.inner).finish())
+    }
+}
+
 /// When `wire_bytes` received since `start_ms` at `kbps` KiB/s lets the next storage request
 /// start. `kbps == 0` returns `i64::MIN`: there is no ceiling.
 #[uniffi::export]
@@ -5281,16 +5327,29 @@ impl From<DirectMemoryClassDto> for dt::MemoryClass {
     }
 }
 
-/// The ciphertext bytes a process of `class` may hold at once (256, 64, 64, 16 MiB). The planner
-/// clamps the chunk count to at least one, so this is a ceiling, never a reason to fail.
+impl From<dt::MemoryClass> for DirectMemoryClassDto {
+    fn from(c: dt::MemoryClass) -> Self {
+        match c {
+            dt::MemoryClass::Native => DirectMemoryClassDto::Native,
+            dt::MemoryClass::Browser => DirectMemoryClassDto::Browser,
+            dt::MemoryClass::MobileApp => DirectMemoryClassDto::MobileApp,
+            dt::MemoryClass::MobileExtension => DirectMemoryClassDto::MobileExtension,
+        }
+    }
+}
+
+/// The ciphertext bytes a process of `class` may hold at once (256, 64, 64, 16 MiB): a ceiling on
+/// the chunks held, never a reason to fail. The planner clamps the chunk count to at least one, so
+/// at least one chunk is always held, even a 256 MiB chunk in a 16 MiB class.
 #[uniffi::export]
 pub fn direct_max_in_flight_bytes(class: DirectMemoryClassDto) -> u64 {
     dt::max_in_flight_bytes(class.into())
 }
 
-/// May this client use the direct transport for `direction`? True only when discovery offers it
-/// AND every pair in `discovery.storage_buckets` is in `pairs`. Hosts compare ASCII
-/// case-insensitively, buckets exactly.
+/// May this client use the direct transport for `direction`? True only when discovery offers it,
+/// names at least one `{host, bucket}` pair, AND every pair it names is in `pairs`. A discovery
+/// with no buckets is never allowed, not vacuously. Hosts compare ASCII case-insensitively,
+/// buckets exactly.
 #[uniffi::export]
 pub fn direct_pairs_allowed(
     discovery: DirectDiscoveryDto,
@@ -6233,16 +6292,14 @@ mod direct_transfer_binding_tests {
         }
     }
 
-    /// A storage answer as the contract's JSON. The kind is core's, not a copy in the test.
+    /// A storage answer as the contract's JSON: core's one shape (`vectors::storage_get_json`),
+    /// reached through the exported DTO so the export's mapping is part of what runs.
     fn storage_answer_json(dto: DirectStorageGetDto) -> Value {
         let got = match dto {
             DirectStorageGetDto::Stored => dt::StorageGet::Stored,
             DirectStorageGetDto::Failed { status } => dt::StorageGet::Failed { status },
         };
-        match got {
-            dt::StorageGet::Stored => json!({"kind": got.kind()}),
-            dt::StorageGet::Failed { status } => json!({"kind": got.kind(), "status": status}),
-        }
+        vectors::storage_get_json(got)
     }
 
     impl HealthSurface for UniffiHealth {
@@ -6485,19 +6542,29 @@ mod direct_transfer_binding_tests {
             storage_answer_json(direct_check_storage_body(received, expected))
         }
 
+        fn storage_body(&self, status: u16, content_length: Option<u64>, expected: u64, pushes: &[u64]) -> Value {
+            let body = match DirectStorageBodyHandle::from_head(status, content_length, expected) {
+                Ok(body) => body,
+                Err(DirectTransferError::StorageBody { .. }) => {
+                    return json!({"kind": "failed", "status": status});
+                }
+                Err(other) => panic!("unexpected error {other:?}"),
+            };
+            for n in pushes {
+                if body.push(*n).is_err() {
+                    return json!({"kind": "failed", "status": 200});
+                }
+            }
+            storage_answer_json(body.finish())
+        }
+
         fn paced_until_ms(&self, start_ms: i64, wire_bytes: u64, kbps: u64) -> i64 {
             direct_paced_until_ms(start_ms, wire_bytes, kbps)
         }
 
         fn max_in_flight_bytes(&self, class: &str) -> u64 {
-            let class = match class {
-                "native" => DirectMemoryClassDto::Native,
-                "browser" => DirectMemoryClassDto::Browser,
-                "mobile_app" => DirectMemoryClassDto::MobileApp,
-                "mobile_extension" => DirectMemoryClassDto::MobileExtension,
-                other => panic!("unknown memory class {other:?}"),
-            };
-            direct_max_in_flight_bytes(class)
+            let class = dt::MemoryClass::from_code(class).unwrap_or_else(|| panic!("unknown memory class {class:?}"));
+            direct_max_in_flight_bytes(class.into())
         }
 
         fn pairs_allowed(&self, discovery: &Value, direction: &str, allowlist: &Value) -> bool {
@@ -6591,6 +6658,38 @@ mod direct_transfer_binding_tests {
             report,
             vectors::expected_report(),
             "a section that did not run is a failure"
+        );
+    }
+
+    #[test]
+    fn the_storage_body_handle_counts_and_finishes() {
+        let chunk = 4 * 1024 * 1024 + 28;
+        let body = DirectStorageBodyHandle::from_head(200, Some(chunk), chunk).expect("an exact head");
+        body.push(chunk / 2).expect("inside the grant");
+        body.push(chunk - chunk / 2).expect("the rest of the grant");
+        assert_eq!(body.finish(), DirectStorageGetDto::Stored);
+        let empty = DirectStorageBodyHandle::from_head(200, Some(0), 0).expect("an empty chunk");
+        assert_eq!(empty.finish(), DirectStorageGetDto::Stored);
+    }
+
+    #[test]
+    fn the_storage_body_handle_refuses_a_bad_head_and_a_push_past_the_grant() {
+        let chunk = 4 * 1024 * 1024 + 28;
+        match DirectStorageBodyHandle::from_head(206, Some(chunk), chunk) {
+            Err(DirectTransferError::StorageBody { code }) => assert_eq!(code, "failed"),
+            _other => panic!("a 206 must be a failed head"),
+        }
+        let body = DirectStorageBodyHandle::from_head(200, Some(chunk), chunk).expect("an exact head");
+        body.push(chunk - 1).expect("inside the grant");
+        match body.push(2) {
+            Err(DirectTransferError::StorageBody { code }) => assert_eq!(code, "failed"),
+            Err(other) => panic!("a push past the grant must fail with a body error: {other:?}"),
+            Ok(()) => panic!("a push past the grant must fail"),
+        }
+        assert_eq!(
+            body.finish(),
+            DirectStorageGetDto::Failed { status: 200 },
+            "the refused bytes were not counted, so the body is still short"
         );
     }
 
