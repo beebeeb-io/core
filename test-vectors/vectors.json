@@ -263,6 +263,18 @@
       "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
     },
     {
+      "context_hex": "626565626565622d696e766974652d6f776e65722d636f70792d7631666f6c6465722d32323535",
+      "label": "beebeeb-invite-owner-copy-v1",
+      "master_key_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+      "name": "invite_owner_copy_v1",
+      "nonce_hex": "000102030405060708090a0b",
+      "note": "L6: HKDF info and AES-GCM AAD both equal label || UTF-8 record id; fixed nonce for this public test only.",
+      "plaintext_hex": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+      "purpose_key_hex": "df59dc74d106d59f30987fbc9a2cd3f6519389c9632d23946979ffd7e129069e",
+      "record_id": "folder-2255",
+      "wrapped_hex": "000102030405060708090a0b87a67fd4a3963817b3d53fbb7e057b4556aef4bc590fd256e1beed627958d6329c77f56c216cd23fe3f772333934978a"
+    },
+    {
       "context_hex": "626565626565622d666f6c6465722d637573746f64792d7631666f6c6465722d3232333763",
       "label": "beebeeb-folder-custody-v1",
       "master_key_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
@@ -358,17 +370,87 @@
       "shared_folder_id": "22222222-2222-4222-8222-222222222222"
     },
     {
-      "context_hex": "626565626565622d696e766974652d6f776e65722d636f70792d7631666f6c6465722d32323535",
-      "label": "beebeeb-invite-owner-copy-v1",
+      "client_meta_key_hex": "7d2b02da5f6ae330b0d74dfa80ea7b00d42369887dad84168e9343f9e464ad44",
       "master_key_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
-      "name": "invite_owner_copy_v1",
-      "nonce_hex": "000102030405060708090a0b",
-      "note": "L6: HKDF info and AES-GCM AAD both equal label || UTF-8 record id; fixed nonce for this public test only.",
-      "plaintext_hex": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
-      "purpose_key_hex": "df59dc74d106d59f30987fbc9a2cd3f6519389c9632d23946979ffd7e129069e",
-      "record_id": "folder-2255",
-      "wrapped_hex": "000102030405060708090a0b87a67fd4a3963817b3d53fbb7e057b4556aef4bc590fd256e1beed627958d6329c77f56c216cd23fe3f772333934978a"
+      "name": "client_meta_device_hostname",
+      "note": "task 1922: envelope = \"bbcm1.\" || base64url-no-pad(nonce(12) || AES-256-GCM ciphertext || tag(16)); plaintext = u16_be(len) || UTF-8 || zeros to max(32, roundup(2+len,32)). AAD = \"beebeeb/client-meta/v1\" || u32_be(36) || lowercase hyphenated record key || u32_be(0) || u8(1). Key = HKDF-SHA256(master, salt none, info \"beebeeb/client-meta/v1/key\"). Fixed nonce for this public KAT only.",
+      "row": {
+        "aad_hex": "626565626565622f636c69656e742d6d6574612f76310000002431393232303030302d303030302d343030302d383030302d3030303030303030303030310000000001",
+        "device_key": null,
+        "envelope": "bbcm1.MDEyMzQ1Njc4OTo7pI_MrXTtOle2DxlOloVCzGKZlCaX4kUGis-usbNwFCkQCo0euEEGZnLs82xt9qyM",
+        "envelope_len": 86,
+        "field": 1,
+        "nonce_hex": "303132333435363738393a3b",
+        "plaintext": "MacBook-Air",
+        "record_key": "19220000-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "client_meta_key_hex": "7d2b02da5f6ae330b0d74dfa80ea7b00d42369887dad84168e9343f9e464ad44",
+      "master_key_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+      "name": "client_meta_session_paths",
+      "note": "same envelope and key as client_meta_device_hostname; fields 3 (local path) and 4 (remote path) carry the parent device key in the AAD (u32_be(36) || device key). Fixed nonces for this public KAT only.",
+      "rows": [
+        {
+          "aad_hex": "626565626565622f636c69656e742d6d6574612f76310000002431393232303030302d303030302d343030302d383030302d3030303030303030303030310000002431393232303030302d303030302d343030302d383030302d30303030303030303030616103",
+          "device_key": "19220000-0000-4000-8000-0000000000aa",
+          "envelope": "bbcm1.QEFCQ0RFRkdISUpLJjYZYMFd6JX0HLdqtfovNXBqbU9_LH1v3va2NLTmuWevdXwJF8aO2x72Eniz390R",
+          "envelope_len": 86,
+          "field": 3,
+          "nonce_hex": "404142434445464748494a4b",
+          "plaintext": "/Users/guus/Taxes",
+          "record_key": "19220000-0000-4000-8000-000000000001"
+        },
+        {
+          "aad_hex": "626565626565622f636c69656e742d6d6574612f76310000002431393232303030302d303030302d343030302d383030302d3030303030303030303030310000002431393232303030302d303030302d343030302d383030302d30303030303030303030616104",
+          "device_key": "19220000-0000-4000-8000-0000000000aa",
+          "envelope": "bbcm1.UFFSU1RVVldYWVpbAkTxV-fhfMXM7Y2HtNRhlZC7oPo-2E3Rvr8qHtSsb3SvJjkHXbw1Fq32LieQPEv8",
+          "envelope_len": 86,
+          "field": 4,
+          "nonce_hex": "505152535455565758595a5b",
+          "plaintext": "/Taxes/2026",
+          "record_key": "19220000-0000-4000-8000-000000000001"
+        }
+      ]
+    },
+    {
+      "client_meta_key_hex": "7d2b02da5f6ae330b0d74dfa80ea7b00d42369887dad84168e9343f9e464ad44",
+      "master_key_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+      "name": "client_meta_padding_buckets",
+      "note": "u16_be(len) || UTF-8 padded with zeros to max(32, roundup(2+len,32)), so any two plaintexts in one 32-byte bucket have equal envelope length and the next bucket is 32 bytes longer. Fixed nonces for this public KAT only.",
+      "rows": [
+        {
+          "aad_hex": "626565626565622f636c69656e742d6d6574612f76310000002431393232303030302d303030302d343030302d383030302d3030303030303030303030310000002431393232303030302d303030302d343030302d383030302d30303030303030303030616102",
+          "device_key": "19220000-0000-4000-8000-0000000000aa",
+          "envelope": "bbcm1.YGFiY2RlZmdoaWprYzuxBMYyOSXTrByY01XWUM9ERIVL4gjC0ZgAV1yttbkNRAMrMESq4tv0U6Oj71pU",
+          "envelope_len": 86,
+          "field": 2,
+          "nonce_hex": "606162636465666768696a6b",
+          "plaintext": "abc",
+          "record_key": "19220000-0000-4000-8000-000000000001"
+        },
+        {
+          "aad_hex": "626565626565622f636c69656e742d6d6574612f76310000002431393232303030302d303030302d343030302d383030302d3030303030303030303030310000002431393232303030302d303030302d343030302d383030302d30303030303030303030616102",
+          "device_key": "19220000-0000-4000-8000-0000000000aa",
+          "envelope": "bbcm1.cHFyc3R1dnd4eXp7QgC4PlaAbQOBQ0yW2dK4FdO2M1i3cKcjBW_R2jb2cQrMtxrV97fUpVfs4lS_h3gS",
+          "envelope_len": 86,
+          "field": 2,
+          "nonce_hex": "707172737475767778797a7b",
+          "plaintext": "abcdefghij",
+          "record_key": "19220000-0000-4000-8000-000000000001"
+        },
+        {
+          "aad_hex": "626565626565622f636c69656e742d6d6574612f76310000002431393232303030302d303030302d343030302d383030302d3030303030303030303030310000002431393232303030302d303030302d343030302d383030302d30303030303030303030616102",
+          "device_key": "19220000-0000-4000-8000-0000000000aa",
+          "envelope": "bbcm1.gIGCg4SFhoeIiYqLeMrINOYxzlkxojAJ_eS9YCukawcJdSMr8I8FtsYEZnHPryHUQmtWVmtJ2bA5d91cui25sZNvfCJCnjsygf_jNNYTM0_QbLgrAKB3aT1m7MM",
+          "envelope_len": 129,
+          "field": 2,
+          "nonce_hex": "808182838485868788898a8b",
+          "plaintext": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "record_key": "19220000-0000-4000-8000-000000000001"
+        }
+      ]
     }
   ],
-  "version": 12
+  "version": 13
 }

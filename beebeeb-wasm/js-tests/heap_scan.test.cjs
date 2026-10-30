@@ -231,6 +231,13 @@ const AUDITED = [
   { name: 'WasmSearchIndex.encryptShardsWithFolderKey', line: 1933 },
   { name: 'WasmSearchIndex.encryptBucketsWithFolderKey', line: 1944 },
   { name: 'WasmSearchIndex.decrypt_names', line: 2023 },
+  // Client metadata handle (task 1922, merged from main): master-key input and
+  // the plaintext hostname/path arguments and results.
+  { name: 'ClientMetaKey.new', line: 3135 },
+  { name: 'ClientMetaKey.seal', line: 3131 },
+  { name: 'ClientMetaKey.open', line: 3131 },
+  { name: 'ClientMetaKey.openMany', line: 3169 },
+  { name: 'fitForSeal', line: 3188 },
 ];
 
 // ---------------------------------------------------------------------------
@@ -281,6 +288,15 @@ const versionId = H(V.chunk.version_id_hex);
 const chunkMk = H(V.chunk.master_key_hex); // master key of the v2 chunk fixture
 const chunkFileKey = H(V.chunk.file_key_hex); // its file key
 const gcmFileKey = H(V.gcm.file_key_hex); // file key of the AEAD fixture
+
+// Client metadata (task 1922, merged from main): the handle seals and opens
+// hostnames, device names and folder paths, so its arguments and results are
+// audited here too. The plaintext is long enough to have a 16-byte tail and
+// high-entropy, so the needle cannot collide with unrelated heap bytes.
+const cmMk = H(vec('client_meta_device_hostname').master_key_hex);
+const cmRecord = '19220000-0000-4000-8000-000000000001';
+const cmDevice = '19220000-0000-4000-8000-0000000000aa';
+const cmPlain = 'cm-scan-2254-9f8e7d6c5b4a39281706f5e4d3c2b1a0';
 
 // ---------------------------------------------------------------------------
 // Scanner
@@ -832,6 +848,39 @@ const CALLS = {
     const enc = wasm.encrypt_name_with_chunk_format(mk, itemId, SECRET_NAME, 'application/pdf', 2);
     s.secret('master key (in)', mk);
     s.secret('name (out)', attempt(() => wasm.decrypt_names(mk, [{ fileId: itemId, nameEncrypted: enc }])?.[0]?.name));
+  },
+  'ClientMetaKey.new': (s) => {
+    s.secret('master key (in)', cmMk);
+    const k = new wasm.ClientMetaKey(cmMk);
+    k.free();
+  },
+  'ClientMetaKey.seal': (s) => {
+    const k = new wasm.ClientMetaKey(cmMk);
+    s.secret('plaintext (in)', cmPlain);
+    attempt(() => k.seal(cmRecord, null, 1, cmPlain));
+    k.free();
+  },
+  'ClientMetaKey.open': (s) => {
+    const k = new wasm.ClientMetaKey(cmMk);
+    const env = k.seal(cmRecord, null, 1, cmPlain);
+    s.secret('plaintext (out)', attempt(() => k.open(cmRecord, null, 1, env)));
+    k.free();
+  },
+  'ClientMetaKey.openMany': (s) => {
+    const k = new wasm.ClientMetaKey(cmMk);
+    const env = k.seal(cmRecord, cmDevice, 3, cmPlain);
+    s.secret('plaintext (out)', attempt(() => {
+      const rows = k.openMany([
+        { recordKey: cmRecord, deviceKey: cmDevice, field: 3, envelope: env },
+        { recordKey: cmRecord, deviceKey: cmDevice, field: 3, envelope: env },
+      ]);
+      return [rows[0].value, rows[1].value];
+    }));
+    k.free();
+  },
+  fitForSeal: (s) => {
+    s.secret('plaintext (in)', cmPlain);
+    s.secret('plaintext (out)', wasm.fitForSeal(cmPlain));
   },
 };
 
