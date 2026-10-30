@@ -576,6 +576,18 @@ fn purpose_context(label: &[u8], id: &[u8]) -> Result<Vec<u8>, CoreError> {
     Ok([label, id].concat())
 }
 
+/// L16: exactly the record ids the new bindings accept. The L6 labels keep
+/// their historical `purpose_context` (non-empty) so their published vectors
+/// and on-the-wire bytes are unchanged; every NEW binding goes through this.
+fn purpose_context_16(label: &[u8], id: &[u8]) -> Result<Vec<u8>, CoreError> {
+    if id.len() != 16 {
+        return Err(CoreError::InvalidInput(
+            "wrap record id must be exactly 16 bytes".into(),
+        ));
+    }
+    Ok([label, id].concat())
+}
+
 fn purpose_key(master: &MasterKey, context: &[u8]) -> FileKey {
     let mut bytes = Zeroizing::new([0u8; 32]);
     Hkdf::<Sha256>::new(None, master.as_bytes())
@@ -855,6 +867,209 @@ pub fn unwrap_link_owner_token(
     blob: &beebeeb_types::EncryptedBlob,
 ) -> Result<Zeroizing<Vec<u8>>, CoreError> {
     purpose_unwrap(master, LINK_OWNER_TOKEN_LABEL, share_id, blob)
+}
+
+// ── L16: link labels, guest actor names, the legacy child opener ────────────
+
+/// L16a: purpose domain of a link label under the owner's master key.
+pub const LINK_LABEL_LABEL: &[u8] = b"beebeeb-link-label-v1";
+/// L16a: a label is 1 to 40 Unicode scalar values, counted after NFC.
+pub const LINK_LABEL_MAX_SCALARS: usize = 40;
+/// L16b: purpose domain of a guest actor name under the folder key.
+pub const FOLDER_ACTOR_NAME_INFO: &[u8] = b"beebeeb-folder-actor-name-v1";
+/// L16b: an actor name is 1 to 64 Unicode scalar values, counted after NFC.
+pub const FOLDER_ACTOR_NAME_MAX_SCALARS: usize = 64;
+/// L16d: a legacy (unbound) child wrap is nonce(12) || key(32) || tag(16).
+pub const LEGACY_CHILD_FRAME_LEN: usize = 12 + 32 + 16;
+
+/// L16c: canonical NFC, then the scalar bound. Used by both writers and
+/// openers, so a value core wrote is a value core opens and nothing longer
+/// reaches a client's UI.
+fn normalized_text(input: &str, max_scalars: usize, what: &str) -> Result<String, CoreError> {
+    use unicode_normalization::UnicodeNormalization;
+    let normalized: String = input.nfc().collect();
+    let count = normalized.chars().count();
+    if count == 0 || count > max_scalars {
+        return Err(CoreError::InvalidInput(format!(
+            "{what} must be 1 to {max_scalars} Unicode scalar values"
+        )));
+    }
+    Ok(normalized)
+}
+
+/// L16b: the opener drops what must never be shown: control characters and the
+/// bidi overrides that could reorder the owner's UI (a guest writes this text).
+fn strip_display_controls(text: &str) -> String {
+    text.chars()
+        .filter(|c| !c.is_control() && !matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'))
+        .collect()
+}
+
+fn random_nonce_12() -> Result<[u8; 12], CoreError> {
+    use rand::RngCore;
+    let mut nonce = [0u8; 12];
+    rand::rngs::OsRng
+        .try_fill_bytes(&mut nonce)
+        .map_err(|e| CoreError::Encryption(format!("OS randomness unavailable: {e}")))?;
+    Ok(nonce)
+}
+
+fn purpose_wrap_16_with_nonce(
+    master: &MasterKey,
+    label: &[u8],
+    id: &[u8],
+    plaintext: &[u8],
+    nonce: &[u8; 12],
+) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
+    let context = purpose_context_16(label, id)?;
+    let raw = crate::encrypt::seal_raw_with_nonce(&purpose_key(master, &context), nonce, plaintext, &context)?;
+    Ok(beebeeb_types::EncryptedBlob {
+        cipher_suite: beebeeb_types::CipherSuite::V1Aes256Gcm,
+        nonce: raw[..12].to_vec(),
+        ciphertext: raw[12..].to_vec(),
+    })
+}
+
+fn purpose_unwrap_16(
+    master: &MasterKey,
+    label: &[u8],
+    id: &[u8],
+    blob: &beebeeb_types::EncryptedBlob,
+) -> Result<Zeroizing<Vec<u8>>, CoreError> {
+    if blob.cipher_suite != beebeeb_types::CipherSuite::V1Aes256Gcm || blob.nonce.len() != 12 {
+        return Err(CoreError::Decryption);
+    }
+    let context = purpose_context_16(label, id)?;
+    crate::encrypt::open_raw_with_aad(
+        &purpose_key(master, &context),
+        &[blob.nonce.as_slice(), blob.ciphertext.as_slice()].concat(),
+        &context,
+    )
+    .map(Zeroizing::new)
+}
+
+/// L16a: seal a link label to the owner's master key, bound to the share id.
+/// HKDF info and AES-GCM AAD are both `"beebeeb-link-label-v1" || share_id`,
+/// exactly as [`wrap_link_owner_key`] binds its record.
+pub fn wrap_link_label(
+    master: &MasterKey,
+    share_id: &[u8],
+    text: &str,
+) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
+    let nonce = random_nonce_12()?;
+    let text = normalized_text(text, LINK_LABEL_MAX_SCALARS, "link label")?;
+    purpose_wrap_16_with_nonce(master, LINK_LABEL_LABEL, share_id, text.as_bytes(), &nonce)
+}
+
+/// [`wrap_link_label`] with a fixed nonce: the published-vector seam only.
+#[cfg(any(test, feature = "test-support"))]
+pub fn wrap_link_label_with_nonce(
+    master: &MasterKey,
+    share_id: &[u8],
+    text: &str,
+    nonce: &[u8; 12],
+) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
+    let text = normalized_text(text, LINK_LABEL_MAX_SCALARS, "link label")?;
+    purpose_wrap_16_with_nonce(master, LINK_LABEL_LABEL, share_id, text.as_bytes(), nonce)
+}
+
+/// L16a: open a link label. One key, one purpose; anything else is refused.
+pub fn unwrap_link_label(
+    master: &MasterKey,
+    share_id: &[u8],
+    blob: &beebeeb_types::EncryptedBlob,
+) -> Result<String, CoreError> {
+    let bytes = purpose_unwrap_16(master, LINK_LABEL_LABEL, share_id, blob)?;
+    let text = std::str::from_utf8(&bytes).map_err(|_| CoreError::Decryption)?;
+    normalized_text(text, LINK_LABEL_MAX_SCALARS, "link label")
+}
+
+fn actor_name_context(root_id: &[u8]) -> Result<Vec<u8>, CoreError> {
+    if root_id.len() != 16 {
+        return Err(CoreError::InvalidInput("root id must be exactly 16 bytes".into()));
+    }
+    Ok([FOLDER_ACTOR_NAME_INFO, root_id].concat())
+}
+
+fn actor_name_key(folder_key: &FileKey, context: &[u8]) -> FileKey {
+    let mut bytes = Zeroizing::new([0u8; 32]);
+    Hkdf::<Sha256>::new(None, folder_key.as_bytes())
+        .expand(context, &mut *bytes)
+        .expect("HKDF-SHA256 expand for 32 bytes cannot fail");
+    FileKey::from_bytes(*bytes)
+}
+
+/// L16b: seal a guest's display name under a folder-key subkey bound to the
+/// shared root, in the name writer's envelope container (a JSON
+/// `EncryptedBlob`). HKDF info and AES-GCM AAD are both
+/// `"beebeeb-folder-actor-name-v1" || root_id`.
+pub fn seal_folder_actor_name(folder_key: &FileKey, root_id: &[u8], text: &str) -> Result<String, CoreError> {
+    let nonce = random_nonce_12()?;
+    seal_folder_actor_name_impl(folder_key, root_id, text, &nonce)
+}
+
+/// [`seal_folder_actor_name`] with a fixed nonce: the published-vector seam only.
+#[cfg(any(test, feature = "test-support"))]
+pub fn seal_folder_actor_name_with_nonce(
+    folder_key: &FileKey,
+    root_id: &[u8],
+    text: &str,
+    nonce: &[u8; 12],
+) -> Result<String, CoreError> {
+    seal_folder_actor_name_impl(folder_key, root_id, text, nonce)
+}
+
+fn seal_folder_actor_name_impl(
+    folder_key: &FileKey,
+    root_id: &[u8],
+    text: &str,
+    nonce: &[u8; 12],
+) -> Result<String, CoreError> {
+    let context = actor_name_context(root_id)?;
+    let text = normalized_text(text, FOLDER_ACTOR_NAME_MAX_SCALARS, "actor name")?;
+    let raw =
+        crate::encrypt::seal_raw_with_nonce(&actor_name_key(folder_key, &context), nonce, text.as_bytes(), &context)?;
+    let blob = beebeeb_types::EncryptedBlob {
+        cipher_suite: beebeeb_types::CipherSuite::V1Aes256Gcm,
+        nonce: raw[..12].to_vec(),
+        ciphertext: raw[12..].to_vec(),
+    };
+    serde_json::to_string(&blob).map_err(|e| CoreError::Encryption(e.to_string()))
+}
+
+/// L16b: open a guest actor name. Exactly one envelope shape (the name
+/// writer's) under exactly one key; control characters and bidi overrides are
+/// stripped before the text is returned.
+pub fn open_folder_actor_name(folder_key: &FileKey, root_id: &[u8], blob: &str) -> Result<String, CoreError> {
+    let context = actor_name_context(root_id)?;
+    let blob: beebeeb_types::EncryptedBlob = serde_json::from_str(blob).map_err(|_| CoreError::Decryption)?;
+    if blob.cipher_suite != beebeeb_types::CipherSuite::V1Aes256Gcm || blob.nonce.len() != 12 {
+        return Err(CoreError::Decryption);
+    }
+    let raw = [blob.nonce.as_slice(), blob.ciphertext.as_slice()].concat();
+    let plaintext = Zeroizing::new(crate::encrypt::open_raw_with_aad(
+        &actor_name_key(folder_key, &context),
+        &raw,
+        &context,
+    )?);
+    let text = std::str::from_utf8(&plaintext).map_err(|_| CoreError::Decryption)?;
+    let text = normalized_text(text, FOLDER_ACTOR_NAME_MAX_SCALARS, "actor name")?;
+    Ok(strip_display_controls(&text))
+}
+
+/// L16d: the ONE legacy (unbound) child opener. Applies L9 rule 1: a 32-byte
+/// plaintext that is valid UTF-8 is refused, so a name/label blob sealed under
+/// the folder key can never be served as a child key.
+pub fn open_legacy_child_key(folder_key: &FileKey, frame: &[u8]) -> Option<FileKey> {
+    if frame.len() != LEGACY_CHILD_FRAME_LEN {
+        return None;
+    }
+    let opened = Zeroizing::new(crate::encrypt::open_raw_with_aad(folder_key, frame, &[]).ok()?);
+    let key: &[u8; 32] = opened.as_slice().try_into().ok()?;
+    if std::str::from_utf8(&opened).is_ok() {
+        return None;
+    }
+    Some(FileKey::from_bytes(*key))
 }
 
 /// Combine a folder link's fragment key `K_c` with an optional passphrase
@@ -1573,5 +1788,134 @@ mod invite_owner_copy_tests {
         let key = purpose_key(&master, &context);
         let nonce: [u8; 12] = raw[..12].try_into().unwrap();
         assert_eq!(seal_raw_with_nonce(&key, &nonce, &plaintext, &context).unwrap(), raw);
+    }
+}
+
+#[cfg(test)]
+mod l16_tests {
+    use super::*;
+    use crate::encrypt::seal_raw_with_nonce;
+
+    const SHARE: [u8; 16] = [0x11; 16];
+    const ROOT: [u8; 16] = [0x31; 16];
+
+    fn master() -> MasterKey {
+        MasterKey::from_bytes([0x40; 32])
+    }
+
+    /// A folder key whose bytes are never valid UTF-8 (0xF8 is a continuation byte).
+    fn folder_key() -> FileKey {
+        FileKey::from_bytes([0xF8; 32])
+    }
+
+    fn wire(blob: &beebeeb_types::EncryptedBlob) -> Vec<u8> {
+        [blob.nonce.as_slice(), blob.ciphertext.as_slice()].concat()
+    }
+
+    fn blob(wrapped: &[u8]) -> beebeeb_types::EncryptedBlob {
+        beebeeb_types::EncryptedBlob {
+            cipher_suite: beebeeb_types::CipherSuite::V1Aes256Gcm,
+            nonce: wrapped[..12].to_vec(),
+            ciphertext: wrapped[12..].to_vec(),
+        }
+    }
+
+    /// A label frame sealed under the real label key with the given plaintext:
+    /// what a compromised client could hand core's opener.
+    fn label_frame(plaintext: &[u8], nonce: [u8; 12]) -> beebeeb_types::EncryptedBlob {
+        let context = purpose_context_16(LINK_LABEL_LABEL, &SHARE).unwrap();
+        blob(&seal_raw_with_nonce(&purpose_key(&master(), &context), &nonce, plaintext, &context).unwrap())
+    }
+
+    /// A name envelope in the writer's shape under the real actor-name key.
+    fn actor_name_envelope(plaintext: &[u8], nonce: [u8; 12]) -> String {
+        let context = actor_name_context(&ROOT).unwrap();
+        let wrapped =
+            seal_raw_with_nonce(&actor_name_key(&folder_key(), &context), &nonce, plaintext, &context).unwrap();
+        serde_json::to_string(&blob(&wrapped)).unwrap()
+    }
+
+    #[test]
+    fn openers_refuse_a_plaintext_that_is_not_utf8() {
+        // 0xFF never appears in UTF-8; AES-GCM still authenticates it. The
+        // openers must not hand it to a client as text.
+        let frame = label_frame(b"\xff\xfe label", [0x01; 12]);
+        assert!(matches!(
+            unwrap_link_label(&master(), &SHARE, &frame),
+            Err(CoreError::Decryption)
+        ));
+        let envelope = actor_name_envelope(b"\xff\xfe name", [0x02; 12]);
+        assert!(matches!(
+            open_folder_actor_name(&folder_key(), &ROOT, &envelope),
+            Err(CoreError::Decryption)
+        ));
+    }
+
+    #[test]
+    fn openers_refuse_an_over_bound_plaintext_they_did_not_write() {
+        // The opener must not trust the writer's bound: a client can seal any
+        // length under the published key.
+        let over_long_label = "a".repeat(LINK_LABEL_MAX_SCALARS + 1);
+        assert!(wrap_link_label_with_nonce(&master(), &SHARE, &over_long_label, &[0x03; 12]).is_err());
+        let frame = label_frame(over_long_label.as_bytes(), [0x04; 12]);
+        assert!(matches!(
+            unwrap_link_label(&master(), &SHARE, &frame),
+            Err(CoreError::InvalidInput(_))
+        ));
+        let over_long_name = "b".repeat(FOLDER_ACTOR_NAME_MAX_SCALARS + 1);
+        assert!(seal_folder_actor_name_with_nonce(&folder_key(), &ROOT, &over_long_name, &[0x05; 12]).is_err());
+        let envelope = actor_name_envelope(over_long_name.as_bytes(), [0x06; 12]);
+        assert!(matches!(
+            open_folder_actor_name(&folder_key(), &ROOT, &envelope),
+            Err(CoreError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn the_bound_is_counted_after_nfc_so_expanding_text_is_refused() {
+        // U+0344 normalizes to two scalars (U+0308 U+0301), so 40 scalars of it
+        // become 80: without NFC-first counting a client could smuggle a
+        // double-length label past the bound.
+        let label = "\u{344}".repeat(LINK_LABEL_MAX_SCALARS);
+        assert_eq!(label.chars().count(), LINK_LABEL_MAX_SCALARS);
+        assert!(wrap_link_label_with_nonce(&master(), &SHARE, &label, &[0x07; 12]).is_err());
+        let frame = label_frame(label.as_bytes(), [0x08; 12]);
+        assert!(unwrap_link_label(&master(), &SHARE, &frame).is_err());
+        let name = "\u{344}".repeat(FOLDER_ACTOR_NAME_MAX_SCALARS);
+        assert!(seal_folder_actor_name_with_nonce(&folder_key(), &ROOT, &name, &[0x09; 12]).is_err());
+        let envelope = actor_name_envelope(name.as_bytes(), [0x0a; 12]);
+        assert!(open_folder_actor_name(&folder_key(), &ROOT, &envelope).is_err());
+    }
+
+    #[test]
+    fn the_actor_name_opener_strips_bidi_and_control_before_returning() {
+        let envelope = actor_name_envelope("Zo\u{202E}ë\u{2066}\u{0007}".as_bytes(), [0x0b; 12]);
+        assert_eq!(open_folder_actor_name(&folder_key(), &ROOT, &envelope).unwrap(), "Zoë");
+    }
+
+    #[test]
+    fn the_legacy_child_opener_refuses_a_key_that_is_utf8_text() {
+        // L9 rule 1 at the frame level: a name/label plaintext is valid UTF-8,
+        // a real key is not, so the same folder key can never serve both.
+        let name = br#"{"name":"Mama","mime_type":null}"#;
+        let name_blob = crate::encrypt::encrypt_chunk(&folder_key(), name).unwrap();
+        let name_frame = wire(&name_blob);
+        assert_eq!(name_frame.len(), LEGACY_CHILD_FRAME_LEN);
+        assert_eq!(
+            crate::encrypt::decrypt_chunk(&folder_key(), &name_blob)
+                .unwrap()
+                .as_slice(),
+            &name[..]
+        );
+        assert!(open_legacy_child_key(&folder_key(), &name_frame).is_none());
+        let key_bytes = [0xF8u8; 32];
+        let key_blob = crate::encrypt::encrypt_chunk(&folder_key(), &key_bytes).unwrap();
+        assert_eq!(
+            open_legacy_child_key(&folder_key(), &wire(&key_blob))
+                .unwrap()
+                .as_bytes()
+                .as_slice(),
+            &key_bytes[..]
+        );
     }
 }

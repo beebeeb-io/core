@@ -40,7 +40,7 @@ use crate::kdf::{MasterKey, derive_file_key};
 pub const VECTORS_FILE_VERSION: u64 = 14;
 
 /// Names of the v2 vectors, in the order they are published.
-pub const V2_VECTOR_NAMES: [&str; 26] = [
+pub const V2_VECTOR_NAMES: [&str; 29] = [
     "chunk_v2_stream",
     "chunk_v2_single_frame",
     "metadata_v2_name",
@@ -76,6 +76,10 @@ pub const V2_VECTOR_NAMES: [&str; 26] = [
     "client_meta_device_hostname",
     "client_meta_session_paths",
     "client_meta_padding_buckets",
+    // Version 14 (task 2275, L16): link labels, guest names, the legacy child opener.
+    "link_label_v1",
+    "folder_actor_name_v1",
+    "legacy_child_refusal_v1",
 ];
 
 /// A shared folder's key (bytes 0x80..=0x9f) for the `folder_key_id` vector.
@@ -172,6 +176,9 @@ pub fn v2_vectors() -> Vec<Value> {
         client_meta_hostname_vector(),
         client_meta_session_paths_vector(),
         client_meta_padding_buckets_vector(),
+        link_label_vector(),
+        folder_actor_name_vector(),
+        legacy_child_refusal_v1_vector(),
     ]
 }
 
@@ -270,6 +277,100 @@ fn upper_repair_split_vector() -> Value {
         "content_v2_frame_hex": hex(&v2_frame),
         "expected_content_v2_convention": "string",
         "expected_content_v2_key_hex": hex(lower_key.as_bytes()),
+    })
+}
+
+// ── Version 14 (task 2275, L16): link labels, guest names, legacy children ──
+
+/// Fixed share id of the link-label vector: a client-proposed L6a share UUID,
+/// whose 16 bytes are what the label is bound to.
+const LINK_LABEL_SHARE: &str = "22750000-0000-4000-8000-0000000000a1";
+/// Fixed shared-root id of the actor-name vector.
+const ACTOR_NAME_ROOT: &str = "22750000-0000-4000-8000-0000000000b1";
+/// The L16d name-shaped plaintext: valid UTF-8, 32 bytes, never a key.
+const LEGACY_NAME: &[u8; 32] = br#"{"name":"Mama","mime_type":null}"#;
+/// A 32-byte legacy child key: 0xF8 is never valid UTF-8.
+const LEGACY_CHILD: [u8; 32] = [0xF8; 32];
+
+fn link_label_vector() -> Value {
+    let share = uuid::Uuid::parse_str(LINK_LABEL_SHARE).unwrap();
+    let text = "Cafe\u{301} photos";
+    let nonce: [u8; 12] = std::array::from_fn(|i| 0x21 + i as u8);
+    let blob =
+        crate::kdf::wrap_link_label_with_nonce(&MasterKey::from_bytes(MASTER_KEY), share.as_bytes(), text, &nonce)
+            .unwrap();
+    let context = [crate::kdf::LINK_LABEL_LABEL, share.as_bytes()].concat();
+    let mut key = zeroize::Zeroizing::new([0u8; 32]);
+    hkdf::Hkdf::<sha2::Sha256>::new(None, &MASTER_KEY)
+        .expand(&context, &mut *key)
+        .unwrap();
+    json!({
+        "name": "link_label_v1",
+        "note": "L16a: HKDF info and AES-GCM AAD both equal beebeeb-link-label-v1 || the 16-byte share id; the label is normalized to NFC and must be 1..40 scalars; fixed nonce for this public test only.",
+        "master_key_hex": hex(&MASTER_KEY),
+        "share_id": LINK_LABEL_SHARE,
+        "share_id_hex": hex(share.as_bytes()),
+        "info_aad_hex": hex(&context),
+        "label_key_hex": hex(&*key),
+        "label_text": text,
+        "label_nfc": "Café photos",
+        "plaintext_hex": hex("Café photos".as_bytes()),
+        "nonce_hex": hex(&nonce),
+        "wrapped_hex": hex(&[blob.nonce, blob.ciphertext].concat()),
+    })
+}
+
+fn folder_actor_name_vector() -> Value {
+    use unicode_normalization::UnicodeNormalization;
+
+    let root = uuid::Uuid::parse_str(ACTOR_NAME_ROOT).unwrap();
+    let sealed_text = "Zo\u{65}\u{301} \u{202E}Guest\u{2066}\u{0007}";
+    let nonce: [u8; 12] = std::array::from_fn(|i| 0x31 + i as u8);
+    let envelope = crate::kdf::seal_folder_actor_name_with_nonce(
+        &crate::kdf::FileKey::from_bytes(FOLDER_KEY),
+        root.as_bytes(),
+        sealed_text,
+        &nonce,
+    )
+    .unwrap();
+    let context = [crate::kdf::FOLDER_ACTOR_NAME_INFO, root.as_bytes()].concat();
+    let mut key = zeroize::Zeroizing::new([0u8; 32]);
+    hkdf::Hkdf::<sha2::Sha256>::new(None, &FOLDER_KEY)
+        .expand(&context, &mut *key)
+        .unwrap();
+    let nfc: String = sealed_text.nfc().collect();
+    json!({
+        "name": "folder_actor_name_v1",
+        "note": "L16b: HKDF info and AES-GCM AAD both equal beebeeb-folder-actor-name-v1 || the 16-byte shared root id, under the folder key; the name is NFC and 1..64 scalars, and the opener strips controls and bidi overrides; fixed nonce for this public test only.",
+        "folder_key_hex": hex(&FOLDER_KEY),
+        "root_id": ACTOR_NAME_ROOT,
+        "root_id_hex": hex(root.as_bytes()),
+        "info_aad_hex": hex(&context),
+        "actor_name_key_hex": hex(&*key),
+        "sealed_text": sealed_text,
+        "plaintext_hex": hex(nfc.as_bytes()),
+        "actor_name": "Zoé Guest",
+        "nonce_hex": hex(&nonce),
+        "envelope": envelope,
+    })
+}
+
+fn legacy_child_refusal_v1_vector() -> Value {
+    let folder = crate::kdf::FileKey::from_bytes(FOLDER_KEY);
+    let name_nonce: [u8; 12] = std::array::from_fn(|i| 0x41 + i as u8);
+    let name_frame = crate::encrypt::seal_raw_with_nonce(&folder, &name_nonce, LEGACY_NAME, &[]).unwrap();
+    let child_nonce: [u8; 12] = std::array::from_fn(|i| 0x51 + i as u8);
+    let child_frame = crate::encrypt::seal_raw_with_nonce(&folder, &child_nonce, &LEGACY_CHILD, &[]).unwrap();
+    json!({
+        "name": "legacy_child_refusal_v1",
+        "note": "L16d: a legacy unbound child frame is nonce || AES-256-GCM (no AAD). A 32-byte plaintext that is valid UTF-8 is not a key (L9 rule 1): open_legacy_child_key must refuse the name-shaped frame and open the real child key. Fixed nonces for this public test only.",
+        "folder_key_hex": hex(&FOLDER_KEY),
+        "name_plaintext_hex": hex(LEGACY_NAME),
+        "name_nonce_hex": hex(&name_nonce),
+        "name_frame_hex": hex(&name_frame),
+        "child_key_hex": hex(&LEGACY_CHILD),
+        "child_nonce_hex": hex(&child_nonce),
+        "child_frame_hex": hex(&child_frame),
     })
 }
 

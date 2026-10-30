@@ -552,6 +552,45 @@
           "record_key": "19220000-0000-4000-8000-000000000001"
         }
       ]
+    },
+    {
+      "info_aad_hex": "626565626565622d6c696e6b2d6c6162656c2d7631227500000000400080000000000000a1",
+      "label_key_hex": "55be684b558e9b18e0164e50eaab6900826985fc48d8dfcebc0c8b862df47945",
+      "label_nfc": "Café photos",
+      "label_text": "Café photos",
+      "master_key_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+      "name": "link_label_v1",
+      "nonce_hex": "2122232425262728292a2b2c",
+      "note": "L16a: HKDF info and AES-GCM AAD both equal beebeeb-link-label-v1 || the 16-byte share id; the label is normalized to NFC and must be 1..40 scalars; fixed nonce for this public test only.",
+      "plaintext_hex": "436166c3a92070686f746f73",
+      "share_id": "22750000-0000-4000-8000-0000000000a1",
+      "share_id_hex": "227500000000400080000000000000a1",
+      "wrapped_hex": "2122232425262728292a2b2cab3fd0b5631413f471105e74866c168971ae66c8fcb3a7c53b69bd7f"
+    },
+    {
+      "actor_name": "Zoé Guest",
+      "actor_name_key_hex": "037a251c27783894ca1087c8085e5c5a1cbf30671ca35b08606db7a10b329ba5",
+      "envelope": "{\"cipher_suite\":\"V1Aes256Gcm\",\"nonce\":[49,50,51,52,53,54,55,56,57,58,59,60],\"ciphertext\":[4,167,218,221,73,92,113,47,126,30,28,25,110,186,121,59,20,60,176,124,175,167,100,41,133,92,55,189,181,33,50,8,159]}",
+      "folder_key_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "info_aad_hex": "626565626565622d666f6c6465722d6163746f722d6e616d652d7631227500000000400080000000000000b1",
+      "name": "folder_actor_name_v1",
+      "nonce_hex": "3132333435363738393a3b3c",
+      "note": "L16b: HKDF info and AES-GCM AAD both equal beebeeb-folder-actor-name-v1 || the 16-byte shared root id, under the folder key; the name is NFC and 1..64 scalars, and the opener strips controls and bidi overrides; fixed nonce for this public test only.",
+      "plaintext_hex": "5a6fc3a920e280ae4775657374e281a607",
+      "root_id": "22750000-0000-4000-8000-0000000000b1",
+      "root_id_hex": "227500000000400080000000000000b1",
+      "sealed_text": "Zoé ‮Guest⁦\u0007"
+    },
+    {
+      "child_frame_hex": "5152535455565758595a5b5cced3d41774bfd896e9a14bb622de7d1b1ca374a329062039809c8a4d9dabfdfc68da26df1cfae84f644b801a96ff9557",
+      "child_key_hex": "f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8",
+      "child_nonce_hex": "5152535455565758595a5b5c",
+      "folder_key_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "name": "legacy_child_refusal_v1",
+      "name_frame_hex": "4142434445464748494a4b4c2139a6c5cad3e76ec984340d32d51d5d231aafd4b36b4b5dbe1d527b73c3f1b3ee6ccb0f99e61c973f5ba6a1fea489e5",
+      "name_nonce_hex": "4142434445464748494a4b4c",
+      "name_plaintext_hex": "7b226e616d65223a224d616d61222c226d696d655f74797065223a6e756c6c7d",
+      "note": "L16d: a legacy unbound child frame is nonce || AES-256-GCM (no AAD). A 32-byte plaintext that is valid UTF-8 is not a key (L9 rule 1): open_legacy_child_key must refuse the name-shaped frame and open the real child key. Fixed nonces for this public test only."
     }
   ],
   "version": 14
