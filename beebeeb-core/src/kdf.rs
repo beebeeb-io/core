@@ -917,7 +917,8 @@ pub fn wrap_link_label(
     text: &str,
 ) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
     let nonce = random_nonce_12()?;
-    wrap_link_label_with_nonce(master, share_id, text, &nonce)
+    let text = normalized_text(text, LINK_LABEL_MAX_SCALARS, "link label")?;
+    purpose_wrap_16_with_nonce(master, LINK_LABEL_LABEL, share_id, text.as_bytes(), &nonce)
 }
 
 /// [`wrap_link_label`] with a fixed nonce: the published-vector seam only.
@@ -964,12 +965,21 @@ fn actor_name_key(folder_key: &FileKey, context: &[u8]) -> FileKey {
 /// `"beebeeb-folder-actor-name-v1" || root_id`.
 pub fn seal_folder_actor_name(folder_key: &FileKey, root_id: &[u8], text: &str) -> Result<String, CoreError> {
     let nonce = random_nonce_12()?;
-    seal_folder_actor_name_with_nonce(folder_key, root_id, text, &nonce)
+    seal_folder_actor_name_impl(folder_key, root_id, text, &nonce)
 }
 
 /// [`seal_folder_actor_name`] with a fixed nonce: the published-vector seam only.
 #[cfg(any(test, feature = "test-support"))]
 pub fn seal_folder_actor_name_with_nonce(
+    folder_key: &FileKey,
+    root_id: &[u8],
+    text: &str,
+    nonce: &[u8; 12],
+) -> Result<String, CoreError> {
+    seal_folder_actor_name_impl(folder_key, root_id, text, nonce)
+}
+
+fn seal_folder_actor_name_impl(
     folder_key: &FileKey,
     root_id: &[u8],
     text: &str,
@@ -1754,6 +1764,10 @@ mod l16_tests {
         FileKey::from_bytes([0xF8; 32])
     }
 
+    fn wire(blob: &beebeeb_types::EncryptedBlob) -> Vec<u8> {
+        [blob.nonce.as_slice(), blob.ciphertext.as_slice()].concat()
+    }
+
     fn blob(wrapped: &[u8]) -> beebeeb_types::EncryptedBlob {
         beebeeb_types::EncryptedBlob {
             cipher_suite: beebeeb_types::CipherSuite::V1Aes256Gcm,
@@ -1834,12 +1848,16 @@ mod l16_tests {
         // L9 rule 1 at the frame level: a name/label plaintext is valid UTF-8,
         // a real key is not, so the same folder key can never serve both.
         let name = br#"{"name":"Mama","mime_type":null}"#;
-        let frame = crate::encrypt::encrypt_chunk(&folder_key(), name).unwrap();
-        assert_eq!(frame.len(), LEGACY_CHILD_FRAME_LEN);
-        assert_eq!(crate::encrypt::decrypt_chunk(&folder_key(), &frame).unwrap().as_slice(), &name[..]);
-        assert!(open_legacy_child_key(&folder_key(), &frame).is_none());
+        let name_blob = crate::encrypt::encrypt_chunk(&folder_key(), name).unwrap();
+        let name_frame = wire(&name_blob);
+        assert_eq!(name_frame.len(), LEGACY_CHILD_FRAME_LEN);
+        assert_eq!(crate::encrypt::decrypt_chunk(&folder_key(), &name_blob).unwrap().as_slice(), &name[..]);
+        assert!(open_legacy_child_key(&folder_key(), &name_frame).is_none());
         let key_bytes = [0xF8u8; 32];
-        let key_frame = crate::encrypt::encrypt_chunk(&folder_key(), &key_bytes).unwrap();
-        assert_eq!(open_legacy_child_key(&folder_key(), &key_frame).unwrap().as_bytes(), &key_bytes);
+        let key_blob = crate::encrypt::encrypt_chunk(&folder_key(), &key_bytes).unwrap();
+        assert_eq!(
+            open_legacy_child_key(&folder_key(), &wire(&key_blob)).unwrap().as_bytes().as_slice(),
+            &key_bytes[..]
+        );
     }
 }

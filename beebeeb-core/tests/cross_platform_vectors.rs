@@ -10,7 +10,10 @@
 
 use beebeeb_core::encrypt::{decrypt_chunk, decrypt_metadata, encrypt_metadata};
 use beebeeb_core::file_request::{derive_request_wrap_key, open_request_upload, unwrap_request_private};
-use beebeeb_core::kdf::{FileKey, MasterKey, derive_file_key, derive_master_key, derive_shared_folder_index_key};
+use beebeeb_core::kdf::{
+    FileKey, MasterKey, derive_file_key, derive_master_key, derive_shared_folder_index_key, open_folder_actor_name,
+    open_legacy_child_key, unwrap_link_label,
+};
 use beebeeb_core::opaque::{
     OpaqueEnvelope, compute_recovery_check, derive_share_key, derive_x25519_private, derive_x25519_public,
     x25519_shared_secret,
@@ -707,8 +710,8 @@ fn vector_file_version_check() {
         .as_u64()
         .expect("vectors.json must have a 'version' field");
     assert_eq!(
-        version, 13,
-        "vectors.json version mismatch — expected 13, got {version}. \
+        version, 14,
+        "vectors.json version mismatch — expected 14, got {version}. \
          Update this test if you intentionally bumped the version."
     );
 
@@ -757,6 +760,10 @@ fn vector_file_version_check() {
         "client_meta_device_hostname",
         "client_meta_session_paths",
         "client_meta_padding_buckets",
+        // Version 14 (task 2275, L16): link labels, guest names, the legacy child opener.
+        "link_label_v1",
+        "folder_actor_name_v1",
+        "legacy_child_refusal_v1",
     ];
     for name in &required {
         assert!(names.contains(name), "vectors.json is missing required vector '{name}'");
@@ -1200,4 +1207,113 @@ fn published_client_meta_envelopes_open_with_a_raw_aes_gcm() {
         }
     }
     assert_eq!(checked, 6, "1 hostname + 2 session paths + 3 padding rows");
+}
+
+// ---------------------------------------------------------------------------
+// 13. Link labels, guest actor names, the legacy child opener (task 2275, L16)
+// ---------------------------------------------------------------------------
+
+fn frame_blob(v: &serde_json::Value, field: &str) -> EncryptedBlob {
+    let wrapped = decode_hex(v, field);
+    assert_eq!(&wrapped[..12], decode_hex(v, "nonce_hex"));
+    EncryptedBlob {
+        cipher_suite: CipherSuite::V1Aes256Gcm,
+        nonce: wrapped[..12].to_vec(),
+        ciphertext: wrapped[12..].to_vec(),
+    }
+}
+
+#[test]
+fn vector_link_label_opens_and_is_bound_to_the_share() {
+    use beebeeb_core::kdf::LINK_LABEL_LABEL;
+
+    let v = get_vector(&load_vectors(), "link_label_v1");
+    let master = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let share = uuid::Uuid::parse_str(v["share_id"].as_str().unwrap()).unwrap();
+    assert_eq!(share.as_bytes(), decode_hex(&v, "share_id_hex").as_slice());
+
+    // The context is the domain label || the 16 share-id bytes, and the key is
+    // HKDF-SHA256 of the master key under it.
+    let context = decode_hex(&v, "info_aad_hex");
+    assert_eq!(context, [LINK_LABEL_LABEL, share.as_bytes()].concat());
+    let mut key = [0u8; 32];
+    hkdf::Hkdf::<sha2::Sha256>::new(None, &bytes32(&v, "master_key_hex"))
+        .expand(&context, &mut key)
+        .unwrap();
+    assert_eq!(hex::encode(key), v["label_key_hex"].as_str().unwrap());
+
+    // The published frame opens to the NFC label, not the decomposed input.
+    let blob = frame_blob(&v, "wrapped_hex");
+    assert_eq!(
+        unwrap_link_label(&master, share.as_bytes(), &blob).unwrap(),
+        v["label_nfc"].as_str().unwrap()
+    );
+    assert_eq!(decode_hex(&v, "plaintext_hex"), v["label_nfc"].as_str().unwrap().as_bytes());
+
+    // Bound to this share and this master key only.
+    let mut other_share = *share.as_bytes();
+    other_share[15] ^= 1;
+    assert!(unwrap_link_label(&master, &other_share, &blob).is_err());
+    assert!(unwrap_link_label(&MasterKey::from_bytes([0x41; 32]), share.as_bytes(), &blob).is_err());
+}
+
+#[test]
+fn vector_folder_actor_name_opens_and_is_bound_to_the_root() {
+    use beebeeb_core::kdf::FOLDER_ACTOR_NAME_INFO;
+    use unicode_normalization::UnicodeNormalization;
+
+    let v = get_vector(&load_vectors(), "folder_actor_name_v1");
+    let folder = FileKey::from_bytes(bytes32(&v, "folder_key_hex"));
+    let root = uuid::Uuid::parse_str(v["root_id"].as_str().unwrap()).unwrap();
+    assert_eq!(root.as_bytes(), decode_hex(&v, "root_id_hex").as_slice());
+    let envelope = v["envelope"].as_str().unwrap();
+
+    // The context is the domain label || the 16 root-id bytes.
+    let context = decode_hex(&v, "info_aad_hex");
+    assert_eq!(context, [FOLDER_ACTOR_NAME_INFO, root.as_bytes()].concat());
+    let mut key = [0u8; 32];
+    hkdf::Hkdf::<sha2::Sha256>::new(None, &bytes32(&v, "folder_key_hex"))
+        .expand(&context, &mut key)
+        .unwrap();
+    assert_eq!(hex::encode(key), v["actor_name_key_hex"].as_str().unwrap());
+
+    // The sealed plaintext is the NFC of the input, and the opener returns it
+    // with the control and bidi characters stripped.
+    let sealed_text: String = v["sealed_text"].as_str().unwrap().nfc().collect();
+    assert_eq!(decode_hex(&v, "plaintext_hex"), sealed_text.as_bytes());
+    assert_eq!(
+        open_folder_actor_name(&folder, root.as_bytes(), envelope).unwrap(),
+        v["actor_name"].as_str().unwrap()
+    );
+
+    // Bound to this root and this folder key only.
+    let mut other_root = *root.as_bytes();
+    other_root[0] ^= 1;
+    assert!(open_folder_actor_name(&folder, &other_root, envelope).is_err());
+    assert!(open_folder_actor_name(&FileKey::from_bytes([0x81; 32]), root.as_bytes(), envelope).is_err());
+    // Exactly one envelope shape: the raw frame is not the JSON container.
+    assert!(open_folder_actor_name(&folder, root.as_bytes(), "not-an-envelope").is_err());
+}
+
+#[test]
+fn vector_legacy_child_refusal() {
+    let v = get_vector(&load_vectors(), "legacy_child_refusal_v1");
+    let folder = FileKey::from_bytes(bytes32(&v, "folder_key_hex"));
+    let name_text = decode_hex(&v, "name_plaintext_hex");
+    assert_eq!(name_text.len(), 32);
+    assert!(std::str::from_utf8(&name_text).is_ok(), "the red needs a UTF-8 name");
+
+    // The red: the generic no-AAD opener hands the name back as if it were a key.
+    let name_frame = decode_hex(&v, "name_frame_hex");
+    let name_blob = EncryptedBlob {
+        cipher_suite: CipherSuite::V1Aes256Gcm,
+        nonce: name_frame[..12].to_vec(),
+        ciphertext: name_frame[12..].to_vec(),
+    };
+    assert_eq!(decrypt_chunk(&folder, &name_blob).unwrap(), name_text);
+
+    // The refusal that closes it (L9 rule 1), while a real child key still opens.
+    assert!(open_legacy_child_key(&folder, &name_frame).is_none());
+    let child = open_legacy_child_key(&folder, &decode_hex(&v, "child_frame_hex")).expect("real legacy child key");
+    assert_eq!(child.as_bytes().as_slice(), &bytes32(&v, "child_key_hex")[..]);
 }

@@ -11,9 +11,11 @@ use beebeeb_core::encrypt::{decrypt_chunk, decrypt_name_with_key, encrypt_chunk,
 use beebeeb_core::kdf::{
     FileKey, MasterKey, open_folder_actor_name, open_legacy_child_key, seal_folder_actor_name, unwrap_folder_child,
     unwrap_folder_custody, unwrap_link_label, unwrap_link_owner_key, unwrap_owner_file_key, wrap_folder_child,
-    wrap_link_label, wrap_link_owner_key, wrap_link_owner_token, wrap_owner_file_key,
+    wrap_link_label, wrap_link_owner_key, wrap_owner_file_key,
+    unwrap_link_owner_token,
 };
 use beebeeb_core::CoreError;
+use beebeeb_types::EncryptedBlob;
 
 const SHARE_A: [u8; 16] = [0x11; 16];
 const SHARE_B: [u8; 16] = [0x22; 16];
@@ -29,11 +31,11 @@ fn folder_key() -> FileKey {
     FileKey::from_bytes([0x80; 32])
 }
 
-fn frame(blob: &beebeeb_core::encrypt::EncryptedBlob) -> Vec<u8> {
+fn frame(blob: &EncryptedBlob) -> Vec<u8> {
     [blob.nonce.as_slice(), blob.ciphertext.as_slice()].concat()
 }
 
-fn json(blob: &beebeeb_core::encrypt::EncryptedBlob) -> String {
+fn json(blob: &EncryptedBlob) -> String {
     serde_json::to_string(blob).unwrap()
 }
 
@@ -95,7 +97,7 @@ fn actor_name_round_trips_and_is_bound_to_the_root_and_key() {
     // Confusion matrix: the actor-name blob is not a label, not a name under
     // the raw folder key, not an L7 child wrap, not custody, and never opens
     // through the legacy child opener.
-    let as_blob: beebeeb_core::encrypt::EncryptedBlob = serde_json::from_str(&sealed).unwrap();
+    let as_blob: EncryptedBlob = serde_json::from_str(&sealed).unwrap();
     assert!(unwrap_link_label(&master(), &SHARE_A, &as_blob).is_err());
     assert!(unwrap_link_owner_key(&master(), &SHARE_A, &as_blob).is_err());
     assert_eq!(decrypt_name_with_key(&folder_key(), &sealed), None);
@@ -118,7 +120,7 @@ fn openers_refuse_wrong_shapes_and_bounds() {
         Err(CoreError::Decryption)
     ));
     // The web `{nonce, ciphertext}` shape is not the writer's container.
-    let short: beebeeb_core::encrypt::EncryptedBlob = serde_json::from_str(
+    let short: EncryptedBlob = serde_json::from_str(
         &seal_folder_actor_name(&folder_key(), &ROOT_A, "Mama").unwrap(),
     )
     .unwrap();
@@ -203,17 +205,17 @@ fn l7_and_l8_writers_still_produce_their_own_shapes() {
     let l7 = wrap_folder_child(&folder_key(), &ROOT_A, &ITEM, 1, &FileKey::from_bytes([0x0a; 32])).unwrap();
     assert_eq!(
         unwrap_folder_child(&folder_key(), &ROOT_A, &ITEM, 1, &l7).unwrap().as_bytes(),
-        [0x0a; 32]
+        &[0x0a; 32]
     );
     let l8 = wrap_owner_file_key(&master(), &ITEM, &FileKey::from_bytes([0x0b; 32])).unwrap();
     assert_eq!(
         unwrap_owner_file_key(&master(), &ITEM, &l8).unwrap().as_bytes(),
-        [0x0b; 32]
+        &[0x0b; 32]
     );
     let l6 = wrap_link_owner_key(&master(), &SHARE_A, &FileKey::from_bytes([0x0c; 32])).unwrap();
     assert_eq!(
         unwrap_link_owner_key(&master(), &SHARE_A, &l6).unwrap().as_bytes(),
-        [0x0c; 32]
+        &[0x0c; 32]
     );
     let name = encrypt_name_for(&folder_key(), "report.pdf", None, ExpectedChunkFormat::Unrecorded).unwrap();
     assert_eq!(decrypt_name_with_key(&folder_key(), &name).as_deref(), Some("report.pdf"));
