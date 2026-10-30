@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use zeroize::{Zeroize, Zeroizing};
 
 use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor, ChunkFormat, ExpectedChunkFormat, SessionResume};
+use beebeeb_core::client_meta;
 use beebeeb_core::constellation;
 use beebeeb_core::encrypt;
 use beebeeb_core::kdf;
@@ -515,6 +516,46 @@ pub struct EncryptedData {
 #[derive(uniffi::Record)]
 pub struct MasterKeyResult {
     pub key: Vec<u8>,
+}
+
+/// One encrypted client-metadata row (task 1922): `record_key` is the record's
+/// client key, `device_key` the parent device's (absent for the device
+/// hostname), `field` is 1-4 and `envelope` is a `bbcm1.` string.
+#[derive(uniffi::Record)]
+pub struct ClientMetaItem {
+    pub record_key: String,
+    pub device_key: Option<String>,
+    pub field: u8,
+    pub envelope: String,
+}
+
+/// One opened client-metadata row: `ok` false means this row failed and
+/// `value` is absent. One bad row never fails the batch.
+#[derive(uniffi::Record)]
+pub struct ClientMetaOpened {
+    pub ok: bool,
+    pub value: Option<String>,
+}
+
+fn client_meta_uuid(s: &str) -> Result<uuid::Uuid, CryptoError> {
+    uuid::Uuid::parse_str(s).map_err(|_| CryptoError::InvalidInput {
+        detail: "record_key/device_key must be a UUID".into(),
+    })
+}
+
+fn client_meta_optional_uuid(s: Option<&str>) -> Result<Option<uuid::Uuid>, CryptoError> {
+    s.map(client_meta_uuid).transpose()
+}
+
+fn client_meta_field(field: u8) -> Result<client_meta::ClientMetaField, CryptoError> {
+    client_meta::ClientMetaField::try_from(field).map_err(CryptoError::from)
+}
+
+/// Shorten a client-metadata string for sealing (task 1922): over 1024 UTF-8
+/// bytes, keep the last 1021 bytes on a char boundary behind a leading `…`.
+#[uniffi::export]
+pub fn fit_for_seal(s: String) -> String {
+    client_meta::fit_for_seal(&s)
 }
 
 /// Result of starting an OPAQUE registration or login.
@@ -1483,6 +1524,82 @@ impl MasterKeyHandle {
             })
             .collect();
         Ok(out)
+    }
+
+    /// Seal one encrypted client-metadata field (task 1922). `device_key` must
+    /// be `None` for field 1 (a device hostname) and `Some` for fields 2-4; the
+    /// derived key and the master key never cross FFI.
+    pub fn seal_client_meta(
+        &self,
+        record_key: String,
+        device_key: Option<String>,
+        field: u8,
+        plaintext: String,
+    ) -> Result<String, CryptoError> {
+        let record = client_meta_uuid(&record_key)?;
+        let device = client_meta_optional_uuid(device_key.as_deref())?;
+        let field = client_meta_field(field)?;
+        self.with_key(|mk| client_meta::seal_client_meta(mk, &record, device.as_ref(), field, &plaintext))?
+            .map_err(CryptoError::from)
+    }
+
+    /// Open one `bbcm1.` client-metadata envelope (task 1922).
+    pub fn open_client_meta(
+        &self,
+        record_key: String,
+        device_key: Option<String>,
+        field: u8,
+        envelope: String,
+    ) -> Result<String, CryptoError> {
+        let record = client_meta_uuid(&record_key)?;
+        let device = client_meta_optional_uuid(device_key.as_deref())?;
+        let field = client_meta_field(field)?;
+        self.with_key(|mk| client_meta::open_client_meta(mk, &record, device.as_ref(), field, &envelope))?
+            .map_err(CryptoError::from)
+    }
+
+    /// Open many client-metadata rows under ONE derived key (task 1922). Order
+    /// and length match `items`; a bad row yields `ok: false` for that row only.
+    /// A cleared key handle is an error for the whole call, not a batch of
+    /// `ok: false` rows that would look like decryption failures.
+    pub fn open_client_meta_many(&self, items: Vec<ClientMetaItem>) -> Result<Vec<ClientMetaOpened>, CryptoError> {
+        self.with_key(|mk| {
+            let key = client_meta::ClientMetaKey::new(mk);
+            // Parse the rows first so the valid ones go through core's one-key
+            // batch; per-row parse failures stay `ok: false`.
+            let mut parsed = Vec::with_capacity(items.len());
+            let mut shape_ok = Vec::with_capacity(items.len());
+            for item in items {
+                let row = client_meta_uuid(&item.record_key).and_then(|record| {
+                    Ok((
+                        record,
+                        client_meta_optional_uuid(item.device_key.as_deref())?,
+                        client_meta_field(item.field)?,
+                        item.envelope,
+                    ))
+                });
+                shape_ok.push(row.is_ok());
+                if let Ok(row) = row {
+                    parsed.push(row);
+                }
+            }
+            let mut opened = key.open_many(&parsed).into_iter();
+            shape_ok
+                .into_iter()
+                .map(|ok| {
+                    if !ok {
+                        return ClientMetaOpened { ok: false, value: None };
+                    }
+                    match opened.next() {
+                        Some(Ok(value)) => ClientMetaOpened {
+                            ok: true,
+                            value: Some(value),
+                        },
+                        _ => ClientMetaOpened { ok: false, value: None },
+                    }
+                })
+                .collect()
+        })
     }
 
     /// Encrypt a file from disk, writing each chunk as a `.enc` file.
@@ -6846,5 +6963,129 @@ mod direct_transfer_binding_tests {
             !err.to_string().contains("SECRETSIG") && !err.to_string().contains("evil.test"),
             "{err}"
         );
+    }
+}
+
+#[cfg(test)]
+mod client_meta_binding_tests {
+    //! Task 1922: the UniFFI `MasterKeyHandle` methods, keys staying in Rust.
+    use super::*;
+
+    fn master() -> Arc<MasterKeyHandle> {
+        MasterKeyHandle::from_keychain_bytes(vec![0x40u8; 32]).unwrap()
+    }
+
+    const RECORD: &str = "19220000-0000-4000-8000-000000000001";
+    const DEVICE: &str = "19220000-0000-4000-8000-0000000000aa";
+
+    #[test]
+    fn client_meta_round_trip_and_many() {
+        let m = master();
+        let host = m
+            .seal_client_meta(RECORD.into(), None, 1, "MacBook-Air".into())
+            .unwrap();
+        assert!(host.starts_with("bbcm1."));
+        assert_eq!(
+            m.open_client_meta(RECORD.into(), None, 1, host.clone()).unwrap(),
+            "MacBook-Air"
+        );
+        // Field 1 must not carry a device key.
+        assert!(
+            m.seal_client_meta(RECORD.into(), Some(DEVICE.into()), 1, "x".into())
+                .is_err()
+        );
+        let path = m
+            .seal_client_meta(RECORD.into(), Some(DEVICE.into()), 3, "/Users/guus/Taxes".into())
+            .unwrap();
+        let rows = m
+            .open_client_meta_many(vec![
+                ClientMetaItem {
+                    record_key: RECORD.into(),
+                    device_key: None,
+                    field: 1,
+                    envelope: host,
+                },
+                ClientMetaItem {
+                    record_key: RECORD.into(),
+                    device_key: Some(DEVICE.into()),
+                    field: 3,
+                    envelope: path,
+                },
+                ClientMetaItem {
+                    record_key: RECORD.into(),
+                    device_key: Some(DEVICE.into()),
+                    field: 4,
+                    envelope: "not-an-envelope".into(),
+                },
+                ClientMetaItem {
+                    record_key: "not-a-uuid".into(),
+                    device_key: None,
+                    field: 1,
+                    envelope: "bbcm1.x".into(),
+                },
+                ClientMetaItem {
+                    record_key: RECORD.into(),
+                    device_key: None,
+                    field: 5,
+                    envelope: "bbcm1.x".into(),
+                },
+            ])
+            .unwrap();
+        assert_eq!(rows.len(), 5);
+        assert!(rows[0].ok);
+        assert_eq!(rows[0].value.as_deref(), Some("MacBook-Air"));
+        assert!(rows[1].ok);
+        assert_eq!(rows[1].value.as_deref(), Some("/Users/guus/Taxes"));
+        for row in &rows[2..] {
+            assert!(!row.ok);
+            assert!(row.value.is_none());
+        }
+    }
+
+    /// A cleared key handle fails the whole batch; it must not turn into
+    /// silent `ok: false` rows that look like per-row decryption failures.
+    #[test]
+    fn a_cleared_handle_makes_the_batch_an_error() {
+        let m = master();
+        *m.inner.lock().unwrap() = None;
+        assert!(m.open_client_meta_many(vec![]).is_err());
+        assert!(m.seal_client_meta(RECORD.into(), None, 1, "x".into()).is_err());
+    }
+
+    /// The batch takes one lock and derives the key once: the export block has
+    /// no per-row `with_key` and no per-row `ClientMetaKey::new` any more.
+    #[test]
+    fn the_batch_derives_the_key_once() {
+        let src = include_str!("lib.rs");
+        let at = src
+            .find("pub fn open_client_meta_many")
+            .expect("the batch export exists");
+        let body = &src[at..];
+        let end = body.find("\n    }\n").expect("end of the batch function");
+        let body = &body[..end];
+        assert_eq!(
+            body.matches("with_key(").count(),
+            1,
+            "exactly one lock for the whole batch: {body}"
+        );
+        assert_eq!(
+            body.matches("ClientMetaKey::new").count(),
+            1,
+            "exactly one derive for the whole batch: {body}"
+        );
+        assert!(
+            !body.contains("open_client_meta_row"),
+            "the row helper is no longer called per row from the export block: {body}"
+        );
+    }
+
+    #[test]
+    fn fit_for_seal_is_exported_and_caps_at_1024_bytes() {
+        assert_eq!(fit_for_seal("short".into()), "short");
+        let long = "é".repeat(700);
+        let fitted = fit_for_seal(long);
+        assert!(fitted.len() <= 1024, "{} bytes", fitted.len());
+        assert!(fitted.starts_with('…'));
+        assert!(fitted.is_char_boundary(3));
     }
 }
