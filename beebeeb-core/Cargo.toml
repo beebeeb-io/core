@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 beebeeb-types = { path = "../beebeeb-types" }
-aes-gcm = "0.10"
+aes-gcm = { version = "0.10", features = ["zeroize"] }
 base64 = "0.22"
 argon2 = { version = "0.5", features = ["zeroize"] }
 rand = "0.8"
@@ -19,7 +19,10 @@ sha1 = "0.10"
 zeroize = { version = "1", features = ["derive"] }
 # Constant-time key comparison (task 2255, L9 legacy folder-key proof).
 subtle = "2.6"
-bip39 = { version = "2", features = ["rand"] }
+bip39 = { version = "2", features = ["rand", "zeroize"] }
+# Task 2254 (L17): wipe the AES key schedule on drop. aes-gcm 0.10.3's own
+# `zeroize` feature does not forward to `aes`, so enable it here too.
+aes = { version = "0.8", features = ["zeroize"] }
 thiserror = { workspace = true }
 opaque-ke = { version = "4.0.1", features = ["ristretto255", "argon2"] }
 x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
