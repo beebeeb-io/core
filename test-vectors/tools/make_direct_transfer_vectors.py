@@ -44,6 +44,11 @@ discoveries = {
         ],
     },
     "hosts_only": {"download": ["object-download-v1"], "storage_hosts": ["s3.storage.test"]},
+    # Listed buckets, but neither capability token: only the token rule can refuse it.
+    "no_tokens": {
+        "storage_hosts": ["s3.storage.test"],
+        "storage_buckets": [{"host": "s3.storage.test", "bucket": "bb-01"}],
+    },
     "empty": {},
     # Small windows so a 3-chunk file needs two of them.
     "small_window": {
@@ -388,8 +393,18 @@ cache.append({"name": "a discovery body sent as text", "steps": [
     record(T0, {"kind": "proceed"}, json.dumps(discoveries["std"])), lookup(T0 + 1, "cached")]})
 cache.append({"name": "a success whose body does not decode is a failed attempt", "steps": [
     record(T0, {"kind": "proceed"}, "not json"), record(T0 + 1, {"kind": "proceed"}), lookup(T0 + 2, "use_api")]})
-cache.append({"name": "an authorization answer counts as a failed attempt only", "steps": [
-    record(T0, {"kind": "terminal", "status": 401, "error": "unauthorized"}), lookup(T0 + 1, "fetch")]})
+AUTH_401 = {"kind": "terminal", "status": 401, "error": "unauthorized"}
+AUTH_403 = {"kind": "terminal", "status": 403, "error": "forbidden"}
+cache.append({"name": "repeated authorization answers are not routing failures", "steps": [
+    record(T0, AUTH_401), lookup(T0 + 1, "fetch"),
+    record(T0 + 1, AUTH_401), record(T0 + 2, AUTH_403), lookup(T0 + 3, "fetch")]})
+cache.append({"name": "authorization preserves the real failure budget and its expiry", "steps": [
+    record(T0, USE_API_NOW), record(T0 + 1, AUTH_403), lookup(T0 + 2, "fetch"),
+    record(T0 + 3, USE_API_NOW), lookup(T0 + 4, "use_api"), record(T0 + 5, AUTH_403),
+    lookup(T0 + 3 + TTL, "fetch")]})
+cache.append({"name": "authorization does not prolong expired discovery", "steps": [
+    record(T0, {"kind": "proceed"}, "@std"), record(T0 + TTL - 2, AUTH_401),
+    record(T0 + TTL - 1, AUTH_401), lookup(T0 + TTL - 1, "cached"), lookup(T0 + TTL, "fetch")]})
 
 redact = [
     {"input": f"{S3}/bb-01/tenant-0000/versions/v-1111/0.bin?X-Amz-Signature=abc&x=1", "expect": "https://s3.storage.test/<redacted>"},
@@ -859,6 +874,152 @@ for d, nm in ((OFFERS, "offers upload"), ({"kind": "offers", "upload": False}, "
     rt(f"forcing the API gives a direct session up whatever discovery says: {nm}", "direct", d, True, "abandon_to_api")
 
 
+# 20. K1: the storage-answer check every client applies to a storage GET (clients design 6.4:
+# the web used to accept status === 200 alone).
+CHUNK = 4 * MIB + 28
+storage_get = [
+    {"name": "a 200 with the grant's length is the chunk", "status": 200, "content_length": CHUNK, "expected": CHUNK,
+     "expect": {"kind": "stored"}, "source": "spec R1.7: a chunk is a 200 whose length is the grant's length"},
+    {"name": "a 200 one byte short is not the chunk", "status": 200, "content_length": CHUNK - 1, "expected": CHUNK,
+     "expect": {"kind": "failed", "status": 200}, "source": "spec R1.7: a short body never authenticates as the chunk"},
+    {"name": "a 200 one byte long is not the chunk", "status": 200, "content_length": CHUNK + 1, "expected": CHUNK,
+     "expect": {"kind": "failed", "status": 200}, "source": "spec R1.7: the length must be exact"},
+    {"name": "a 200 with no Content-Length is not the chunk", "status": 200, "content_length": None, "expected": CHUNK,
+     "expect": {"kind": "failed", "status": 200}, "source": "spec R1.7: a missing length cannot be checked, so it is a failure"},
+    {"name": "a 206 partial answer is not the chunk", "status": 206, "content_length": CHUNK, "expected": CHUNK,
+     "expect": {"kind": "failed", "status": 206}, "source": "client-side case: a proxy or a Range answer, no server route sends 206"},
+    {"name": "a 302 redirect is not the chunk", "status": 302, "content_length": CHUNK, "expected": CHUNK,
+     "expect": {"kind": "failed", "status": 302}, "source": "client-side case: storage redirects are refused (clients 3.1)"},
+    {"name": "a 403 is not the chunk", "status": 403, "content_length": CHUNK, "expected": CHUNK,
+     "expect": {"kind": "failed", "status": 403}, "source": "server: storage refuses an expired or wrong signature (S3 error body, never JSON)"},
+    {"name": "a 500 is not the chunk", "status": 500, "content_length": 0, "expected": CHUNK,
+     "expect": {"kind": "failed", "status": 500}, "source": "server: storage's own 5xx, a proxy's page"},
+    {"name": "no answer at all keeps status 0", "status": 0, "content_length": None, "expected": CHUNK,
+     "expect": {"kind": "failed", "status": 0}, "source": "client-side case: a network failure or timeout (no HTTP status)"},
+    {"name": "a 200 with a zero length for an empty expectation is stored", "status": 200, "content_length": 0, "expected": 0,
+     "expect": {"kind": "stored"}, "source": "spec R1.7: the rule is exactness, and an empty chunk is exact at zero"},
+    {"name": "a counted body one byte short is not the chunk", "check": "body", "received": CHUNK - 1, "expected": CHUNK,
+     "expect": {"kind": "failed", "status": 200},
+     "source": "spec R1.7: a truncated stream ends short even after a 200 head with the grant's length"},
+    {"name": "a counted body one byte long is not the chunk", "check": "body", "received": CHUNK + 1, "expected": CHUNK,
+     "expect": {"kind": "failed", "status": 200},
+     "source": "spec R1.7: a proxy that sends more than it declares is still not the chunk"},
+    {"name": "a counted body of exactly the grant is the chunk", "check": "body", "received": CHUNK, "expected": CHUNK,
+     "expect": {"kind": "stored"}, "source": "spec R1.7: the caller counts what it read; equal is the chunk"},
+]
+
+# 20b. K2 follow-up: the counted body as a stream (StorageBody), not only as one count. The head is
+# good except in the three head-failure rows; the pushes are what the caller read.
+storage_body = [
+    {"name": "pushes that add up to the grant are the chunk", "status": 200, "content_length": CHUNK,
+     "expected": CHUNK, "pushes": [CHUNK], "expect": {"kind": "stored"},
+     "source": "spec R1.7: the caller counts what it read; equal is the chunk"},
+    {"name": "a stream read in two pushes is still the chunk", "status": 200, "content_length": CHUNK,
+     "expected": CHUNK, "pushes": [CHUNK // 2, CHUNK - CHUNK // 2], "expect": {"kind": "stored"},
+     "source": "spec R1.7: the count is the sum of what arrived, not the shape of the reads"},
+    {"name": "a push that would pass the grant is refused at once", "status": 200, "content_length": CHUNK,
+     "expected": CHUNK, "pushes": [CHUNK - 1, 2], "expect": {"kind": "failed", "status": 200},
+     "source": "spec R1.7: a proxy that sends more than it declared is not the chunk; the count stops at the grant"},
+    {"name": "pushes that end short are not the chunk", "status": 200, "content_length": CHUNK,
+     "expected": CHUNK, "pushes": [CHUNK - 1], "expect": {"kind": "failed", "status": 200},
+     "source": "spec R1.7: a truncated stream ends short even after a 200 head with the grant's length"},
+    {"name": "an empty chunk is stored with no pushes", "status": 200, "content_length": 0,
+     "expected": 0, "pushes": [], "expect": {"kind": "stored"},
+     "source": "spec R1.7: the rule is exactness, and an empty chunk is exact at zero"},
+    {"name": "a zero-byte push never moves the count", "status": 200, "content_length": CHUNK,
+     "expected": CHUNK, "pushes": [0, CHUNK, 0], "expect": {"kind": "stored"},
+     "source": "spec R1.7: a read of nothing changes no count"},
+    {"name": "a push past a full grant is not the chunk", "status": 200, "content_length": CHUNK,
+     "expected": CHUNK, "pushes": [CHUNK, 1], "expect": {"kind": "failed", "status": 200},
+     "source": "spec R1.7: the first byte past the grant is refused, and a refused byte is never a stored chunk "
+               "(the refused byte is not counted, so without a latch the count would still equal the grant)"},
+    {"name": "a 403 head is not the chunk and keeps its status", "status": 403, "content_length": CHUNK,
+     "expected": CHUNK, "pushes": [], "expect": {"kind": "failed", "status": 403},
+     "source": "server: storage refuses an expired or wrong signature (S3 error body, never JSON); the status must "
+               "reach the caller from the binding's own error, not from the row"},
+    {"name": "a 206 head is not the chunk and keeps its status", "status": 206, "content_length": CHUNK,
+     "expected": CHUNK, "pushes": [], "expect": {"kind": "failed", "status": 206},
+     "source": "client-side case: a proxy or a Range answer, no server route sends 206"},
+    {"name": "no answer at all keeps status 0 at the head", "status": 0, "content_length": None,
+     "expected": CHUNK, "pushes": [], "expect": {"kind": "failed", "status": 0},
+     "source": "client-side case: a network failure or timeout (no HTTP status, and no length to check)"},
+]
+
+# 21. K1: pacing, desktop's formula with its four own test rows (direct_download.rs:194-199 and :1538-1544).
+pacing = [
+    {"name": "no ceiling means no wait", "start_ms": 1_000, "wire_bytes": 10_000, "kbps": 0,
+     "expect": "-9223372036854775808", "source": "desktop src-tauri/src/direct_download.rs:1540 (the ceiling is off: i64::MIN; the formula is :193-199)"},
+    {"name": "no bytes received yet is no wait", "start_ms": 1_000, "wire_bytes": 0, "kbps": 8,
+     "expect": 1_000, "source": "desktop src-tauri/src/direct_download.rs:1541"},
+    {"name": "8 KiB at 8 KiB/s is one second", "start_ms": 1_000, "wire_bytes": 8 * 1024, "kbps": 8,
+     "expect": 2_000, "source": "desktop src-tauri/src/direct_download.rs:1542"},
+    {"name": "the largest count saturates instead of wrapping", "start_ms": 0, "wire_bytes": "18446744073709551615", "kbps": 1,
+     "expect": "9223372036854775807", "source": "desktop src-tauri/src/direct_download.rs:1543 (u64::MAX at 1 KiB/s)"},
+    {"name": "a 4 MiB chunk at 1000 KiB/s takes four seconds", "start_ms": T0, "wire_bytes": CHUNK, "kbps": 1000,
+     "expect": T0 + 4_096, "source": "client policy: the formula, clients 6.3 (pacing moves out of desktop)"},
+    {"name": "less than a millisecond is no wait", "start_ms": 500, "wire_bytes": 1, "kbps": 1,
+     "expect": 500, "source": "client policy: integer division floors a started millisecond count"},
+    {"name": "a negative start is kept", "start_ms": -1_000, "wire_bytes": 1024, "kbps": 1,
+     "expect": 0, "source": "client policy: a monotonic clock before its epoch still adds the wait"},
+]
+
+# 22. K1: the storage allowlist rule (clients design 6.4: the web compared this in TypeScript).
+_storage_all = [{"host": "s3.storage.test", "bucket": "bb-01"}, {"host": "s3.storage.test", "bucket": "bb-02"},
+                {"host": "eu.storage.test", "bucket": "vault"}]
+pairs_allowed = [
+    {"name": "all three pairs allowlisted and download offered", "discovery": "std", "direction": "download",
+     "allowlist": _storage_all, "expect": True, "source": "spec R1.12: every listed pair must be one the client may use"},
+    {"name": "one pair missing from the allowlist", "discovery": "std", "direction": "download",
+     "allowlist": _storage_all[:2], "expect": False, "source": "spec R1.12: a discovery pair the CSP lacks turns direct off"},
+    {"name": "hosts compare ASCII case-insensitively", "discovery": "std", "direction": "download",
+     "allowlist": [{"host": "S3.STORAGE.TEST", "bucket": "bb-01"}, {"host": "S3.STORAGE.TEST", "bucket": "bb-02"},
+                   {"host": "EU.STORAGE.TEST", "bucket": "vault"}],
+     "expect": True, "source": "spec R1.12: DNS names are case-insensitive"},
+    {"name": "buckets compare exactly", "discovery": "std", "direction": "download",
+     "allowlist": [{"host": "s3.storage.test", "bucket": "BB-01"}, {"host": "s3.storage.test", "bucket": "bb-02"},
+                   {"host": "eu.storage.test", "bucket": "vault"}],
+     "expect": False, "source": "spec R1.12: S3 bucket names are case-sensitive"},
+    {"name": "download is allowed for std", "discovery": "std", "direction": "download", "allowlist": _storage_all,
+     "expect": True, "source": "spec R1.13: the token must be offered and the pairs allowlisted"},
+    {"name": "upload is not offered by std", "discovery": "std", "direction": "upload", "allowlist": _storage_all,
+     "expect": False, "source": "spec R1.13: a direction the server does not offer is never allowed"},
+    {"name": "an empty allowlist refuses every listed pair", "discovery": "std", "direction": "download",
+     "allowlist": [], "expect": False, "source": "spec R1.12: nothing listed, nothing allowed"},
+    {"name": "an empty allowlist is not allowed vacuously", "discovery": "hosts_only", "direction": "download",
+     "allowlist": [], "expect": False,
+     "source": "spec R1.12: every pair (of none) is allowlisted, but direct needs a listed bucket and check_storage_url "
+               "refuses every unlisted bucket; the web rule is the same "
+               "(!!discovery.storage_buckets?.length && every(...))"},
+    {"name": "a discovery with no buckets is not allowed", "discovery": "hosts_only", "direction": "download",
+     "allowlist": [{"host": "s3.storage.test", "bucket": "bb-01"}], "expect": False,
+     "source": "spec R1.12: no listed bucket leaves no storage route, whatever the allowlist says (the vacuous "
+               "`every` bug: offered && buckets.iter().all(listed) is true for no buckets)"},
+    {"name": "both dev pairs allowlisted", "discovery": "dev", "direction": "download",
+     "allowlist": [{"host": "127.0.0.1:9000", "bucket": "bb-dev"}, {"host": "localhost:9000", "bucket": "bb-dev"}],
+     "expect": True, "source": "spec R1.12: a loopback development pair is still a pair"},
+    {"name": "one dev pair missing", "discovery": "dev", "direction": "download",
+     "allowlist": [{"host": "127.0.0.1:9000", "bucket": "bb-dev"}],
+     "expect": False, "source": "spec R1.12: the discovery answer names a pair the allowlist lacks"},
+    {"name": "extra pairs in the allowlist do not hurt", "discovery": "std", "direction": "download",
+     "allowlist": _storage_all + [{"host": "other.storage.test", "bucket": "spare"}],
+     "expect": True, "source": "spec R1.12: the rule is every discovery pair, not only the allowlist"},
+    {"name": "a discovery with no tokens is never allowed", "discovery": "no_tokens", "direction": "download",
+     "allowlist": [{"host": "s3.storage.test", "bucket": "bb-01"}], "expect": False,
+     "source": "spec R1.13: the discovery lists buckets but no download token"},
+]
+
+# 23. K1: the memory classes and their byte caps (clients design 6.4: the web's 64 MiB policy).
+memory_class = [
+    {"name": "native holds 256 MiB", "class": "native", "expect": 256 * MIB,
+     "source": "clients design 6.4 / D23: CLI and desktop"},
+    {"name": "browser holds 64 MiB", "class": "browser", "expect": 64 * MIB,
+     "source": "clients design 6.4 / D23: the web's 64 MiB in-flight policy"},
+    {"name": "a mobile app holds 64 MiB", "class": "mobile_app", "expect": 64 * MIB,
+     "source": "clients design 6.4 / D23: iOS and Android foreground"},
+    {"name": "a mobile extension holds 16 MiB", "class": "mobile_extension", "expect": 16 * MIB,
+     "source": "clients design 6.4 / D23: the File Provider and backup extension"},
+]
+
 out = {
     "_provenance": "Task 2173 contract vectors for beebeeb_core::direct_transfer. Hand-authored from the spec "
                    "(R1.6, R1.12, R1.13, R2.6) and the core #33 review, not generated from the code. "
@@ -873,6 +1034,11 @@ out = {
     "redact": redact,
     "scrub": scrub,
     "chunk_length": geometry,
+    "storage_get": storage_get,
+    "storage_body": storage_body,
+    "pacing": pacing,
+    "pairs_allowed": pairs_allowed,
+    "memory_class": memory_class,
     "pinned_retry": pinned_retry,
     "discovery_cache": cache,
     "planner": scenarios,
@@ -880,4 +1046,4 @@ out = {
     "resume_transport": resume_transport,
 }
 json.dump(out, open(sys.argv[1], "w", encoding="utf-8"), indent=2, ensure_ascii=False)
-print("rows: authority", len(authority), "classify", len(classify), "pinned_retry", len(pinned_retry), "cache scenarios", len(cache), "planner scenarios", len(scenarios), "health", len(health), "resume_transport", len(resume_transport))
+print("rows: authority", len(authority), "classify", len(classify), "pinned_retry", len(pinned_retry), "cache scenarios", len(cache), "planner scenarios", len(scenarios), "health", len(health), "resume_transport", len(resume_transport), "storage_get", len(storage_get), "storage_body", len(storage_body), "pacing", len(pacing), "pairs_allowed", len(pairs_allowed), "memory_class", len(memory_class))

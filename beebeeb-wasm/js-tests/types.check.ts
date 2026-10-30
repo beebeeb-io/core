@@ -5,6 +5,11 @@ import {
   WasmDirectHealth,
   WasmDownloadPlanner,
   WasmSignedUrl,
+  checkStorageBody,
+  checkStorageGet,
+  maxInFlightBytes,
+  pacedUntilMs,
+  pairsAllowed,
   resumeTransport,
   storageGetTotalMs,
   storagePutTotalMs,
@@ -96,4 +101,19 @@ const putMs: number = storagePutTotalMs(4194332)
 const getMs: number = storageGetTotalMs(0)
 planner.setMaxInFlightBytes(64 * 1024 * 1024)
 const gaveUpStorage: boolean = planner.storageGivenUp()
-void [may, mayFile, lastGaveUp, lastIsANumber, action, putMs, getMs, gaveUpStorage]
+// The L1 gaps (task 2173 plan K1): the storage-answer check, pacing, the memory classes and the allowlist.
+const stored = checkStorageGet(200, 4194332, 4194332)
+if (stored.kind === "failed") {
+  const status: number = stored.status
+  void status
+}
+// @ts-expect-error a stored answer carries no status
+void stored.status
+const until = pacedUntilMs(1000, 8192, 8)
+const untilIsANumber: number = until
+const counted = checkStorageBody(4194332, 4194332)
+const cap: number = maxInFlightBytes("browser")
+maxInFlightBytes("desktop") // any string is typed; the export refuses an unknown one with class_invalid
+const allowed: boolean = pairsAllowed({ download: [], upload: [] }, "download", [])
+const chunkLen: number | null = planner.chunkLength(0)
+void [may, mayFile, lastGaveUp, lastIsANumber, action, putMs, getMs, gaveUpStorage, stored, counted, until, untilIsANumber, cap, allowed, chunkLen]

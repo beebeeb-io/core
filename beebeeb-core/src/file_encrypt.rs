@@ -69,6 +69,11 @@ pub trait FileProgressCallback: Send + Sync {
 /// `{output_dir}/{chunk_index}.enc.tmp`, followed by an atomic rename to `.enc`.
 ///
 /// Peak memory: 2x `chunk_size` (one read buffer + one ciphertext buffer).
+///
+/// Task 2275 L13 keeps this bare-id entry point for the on-disk path (it takes
+/// the id from its caller); new uploads go through `for_push_for_new_item` /
+/// `for_push_for_target`, which take the id from core.
+#[allow(deprecated)]
 pub fn encrypt_file_to_chunks(
     master_key: &MasterKey,
     file_id: &str,

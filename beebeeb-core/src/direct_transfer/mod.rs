@@ -21,6 +21,9 @@
 //! | [`resume`] | [`resume_transport()`]: what to do with an unfinished upload (a recorded direct session is given up only on a definite no) |
 //! | [`timeouts`] | the time bounds every client applies: connect, idle, API calls, and the storage totals (`60 s + len / 1 Mbit/s`) kept under the server's late-write fence |
 //! | [`upload`] | the direct upload: [`UploadGrant`] / [`UploadCommitted`] validation, [`UploadChunkState`] (grants, waits, fallback per chunk) |
+//! | [`storage`] | [`check_storage_get()`] / [`StorageBody`] / [`check_storage_body()`]: does a storage GET's head declare the grant's length, and do the bytes it delivered count to exactly that |
+//! | [`pacing`] | [`paced_until_ms()`]: when the download ceiling lets the next storage request start |
+//! | [`context`] | [`MemoryClass`] / [`max_in_flight_bytes()`] and [`pairs_allowed()`]: the process's byte cap and the storage allowlist |
 //! | this file | [`DiscoveryCache`]: how long discovery's answer is trusted |
 //!
 //! # What a client still has to do itself
@@ -31,7 +34,9 @@
 //!   cookies, no `Authorization`, redirects disabled, https only (loopback http
 //!   in development), and strip the URL from its own errors (reqwest
 //!   `.without_url()`); run any error text through [`scrub`] before printing it.
-//! * Check `200` and `Content-Length == grant.length` on every storage GET, and
+//! * Check `200` and `Content-Length == grant.length` on every storage GET, count
+//!   the bytes the body actually delivered ([`StorageBody`], or its one-shot form
+//!   [`check_storage_body()`]), and
 //!   decrypt with [`crate::chunk_stream`] (frame and AAD position checks), never
 //!   by trusting the manifest.
 //! * Publish plaintext only after every chunk has authenticated.
@@ -46,8 +51,11 @@
 
 pub mod authority;
 pub mod classify;
+pub mod context;
 pub mod health;
+pub mod pacing;
 pub mod resume;
+pub mod storage;
 pub mod timeouts;
 pub mod upload;
 pub mod upload_pipeline;
@@ -60,8 +68,11 @@ pub mod vectors;
 
 pub use authority::{MAX_URL_LEN, Refusal, check_storage_url, redact, scrub};
 pub use classify::{ApiAnswer, Call, Outcome, PinnedRetry, RetryDecision, Terminal, classify};
+pub use context::{MemoryClass, max_in_flight_bytes, pairs_allowed};
 pub use health::{DirectHealth, Direction, HEALTH_TRUST_MS};
+pub use pacing::paced_until_ms;
 pub use resume::{DiscoveryState, RecordedTransport, ResumeAction, resume_transport};
+pub use storage::{BODY_FINISHED_CODE, StorageBody, StorageGet, check_storage_body, check_storage_get};
 pub use timeouts::{
     API_CALL_TIMEOUT, BACKGROUND_PUT_RESOURCE_TIMEOUT, DISCOVERY_TIMEOUT, STORAGE_CONNECT_TIMEOUT, STORAGE_GET_IDLE,
     put_allowance, storage_get_total, storage_put_total, storage_put_total_shared,
@@ -167,7 +178,9 @@ impl DiscoveryCache {
 
     /// Record the result of a discovery call. `body` is the decoded answer when
     /// `outcome` is [`Outcome::Proceed`]; a `Proceed` whose body did not decode
-    /// is recorded as a failed attempt.
+    /// is recorded as a failed attempt. Authorization answers (401/403) leave
+    /// the cache and routing-failure budget unchanged: the caller must handle
+    /// reauthentication, rather than falling back to the API transport.
     pub fn record(&mut self, outcome: &Outcome, body: Option<Discovery>, now_ms: i64) {
         match (outcome, body) {
             (Outcome::Proceed, Some(discovery)) => {
@@ -178,6 +191,7 @@ impl DiscoveryCache {
                 };
             }
             (Outcome::NotSupported, _) => self.state = CacheState::NotSupported { at_ms: now_ms },
+            (Outcome::Terminal(answer), _) if matches!(answer.status, 401 | 403) => {}
             _ => {
                 // Failures older than the trust period are forgotten: this one starts a new count.
                 if self.failures > 0 && !within_trust(self.last_failure_ms, now_ms) {
@@ -310,7 +324,46 @@ mod tests {
             error: None,
         });
         c.record(&t, None, 0);
-        // Counted as a failed attempt only; re-authentication is the caller's business.
-        assert_eq!(c.lookup(1), Lookup::Fetch);
+        c.record(&t, None, 1);
+        c.record(
+            &Outcome::Terminal(Terminal {
+                status: 403,
+                error: None,
+            }),
+            None,
+            2,
+        );
+        // Re-authentication is the caller's business, not evidence that direct is unavailable.
+        assert_eq!(c.lookup(3), Lookup::Fetch);
+    }
+
+    #[test]
+    fn authorization_answers_preserve_the_real_failure_budget_and_expiry() {
+        let mut c = DiscoveryCache::new();
+        let refused = Outcome::Terminal(Terminal {
+            status: 403,
+            error: None,
+        });
+        c.record(&Outcome::UseApiNow, None, 1_000);
+        c.record(&refused, None, 2_000);
+        assert_eq!(c.lookup(2_001), Lookup::Fetch, "only one routing failure");
+        c.record(&Outcome::UseApiNow, None, 3_000);
+        assert_eq!(c.lookup(3_001), Lookup::UseApi, "real failures still count");
+        c.record(&refused, None, 4_000);
+        assert_eq!(c.lookup(3_000 + DISCOVERY_TTL_MS), Lookup::Fetch);
+    }
+
+    #[test]
+    fn authorization_answers_do_not_extend_expired_discovery() {
+        let mut c = DiscoveryCache::new();
+        c.record(&Outcome::Proceed, Some(offers()), 0);
+        let refused = Outcome::Terminal(Terminal {
+            status: 401,
+            error: None,
+        });
+        c.record(&refused, None, DISCOVERY_TTL_MS - 2);
+        c.record(&refused, None, DISCOVERY_TTL_MS - 1);
+        assert!(matches!(c.lookup(DISCOVERY_TTL_MS - 1), Lookup::Cached(_)));
+        assert_eq!(c.lookup(DISCOVERY_TTL_MS), Lookup::Fetch);
     }
 }

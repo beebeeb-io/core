@@ -8,12 +8,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Item id classes (task 2275 L12-L14): `item_id::new_foreign_item_id` / `is_foreign_item_id` /
+  `item_class` and the core-minted `item_id::NewItemId` (`owner()` v4, `foreign()` v8). Foreign ids
+  are RFC 9562 UUID v8 with the RFC 4122 variant in canonical lowercase hyphenated text; any other
+  text form is `InvalidInput`. `kdf::wrap_owner_file_key` / `unwrap_owner_file_key` now refuse a
+  non-foreign id (L8 is adoption-only), and every export inherits that. `owned_keys::resolve_owned_key`
+  takes the id class from the id, authenticates the served name, ignores owner wraps for owner rows
+  and returns a `KeyOrigin`, the resolved name and a `WriteTarget` (id + key + pin) for writable rows;
+  `DerivedUpperRepair` rows stay read-only with no target. New sealers: `encrypt_name_for_new_item` /
+  `encrypt_name_for_target`, `encrypt_note_for_new_item` / `encrypt_note_for_target`,
+  `encrypt_thumbnail_for_new_item` / `encrypt_thumbnail_for_target`, and
+  `ChunkEncryptor::for_push_for_new_item` / `for_push_for_target`; the old write entry points remain
+  and are documented as deprecated for writes. `owned_keys::resolve_request_row` resolves a 2236
+  request row (content under `C`, name under a derived key or `C`, read-only) and
+  `owned_keys::child_wrap_matches` does the L14 constant-time child-wrap check. WASM exports
+  `newForeignItemId`, `newOwnerItemId`, `isForeignItemId`, `resolveOwnedKey`, the six `*ForNewItem` /
+  `*ForTarget` sealers, `resolveRequestRow`, `childWrapMatches`; UniFFI exports
+  `MasterKeyHandle.resolve_owned_key` / `resolve_request_row`, `FileKeyHandle.child_wrap_matches`,
+  `new_foreign_item_id`, `new_owner_item_id`, `is_foreign_item_id`. Vectors version 14 adds
+  `item_ids` and re-publishes the L8 owner-file-key vector under a foreign id (vendored copies must
+  be refreshed: web `test/core-vectors-kat.test.ts`, mobile `CoreVectorsKATTests.swift` and
+  `CoreVectorsKATTest.kt`).
+
+### Changed
+- **Breaking:** `owned_keys::resolve_owned_key(master, item_id, owner_wrap, folder_wrap, name_encrypted,
+  first_chunk)` replaces the five-argument form; `foreign_added` is gone (the id class decides) and
+  `ResolvedOwnedKey` gains `name` and `write_target`. Callers must pass the served `name_encrypted`
+  and, for a plaintext-named file, its chunk 0.
+
+- `kdf::owner_file_key_for_name` with `kdf::OwnerKeyConvention` (`String`, `Binary`,
+  `UpperRepair`): resolves an owner's per-file key from the `(file_id, name_encrypted)`
+  pair and reports which id convention it came from. The repair convention reads files the
+  iOS File Provider sealed under an uppercase id (SF-0002) and is READ-ONLY — a client that
+  gets `UpperRepair` must not rename or write a new version, only save edits as a new file.
+  `kdf::owner_file_key_for_content` does the same per content version from that version's
+  first chunk frame (v1 legacy `nonce || ciphertext || tag`, or core's v2 frame 0), because
+  a Files-app edit could seal a later version under the lowercase id while the name and the
+  first version stayed under the uppercase one. A file is read-only if EITHER its name or ANY
+  version reports `UpperRepair`. Both resolvers accept only the canonical lowercase
+  hyphenated UUID form. The shared master-key readers (`decrypt_name_metadata`,
+  `decrypt_name_with_mime`, and therefore `decrypt_file_metadata` / `decrypt_name` /
+  `decrypt_names`) deliberately do NOT gain the uppercase candidate: they stay
+  two-convention (string, then binary), so a client that only bumps core cannot mistake an
+  uppercase-sealed file for a writable one. WASM `ownerFileKeyForName` /
+  `ownerFileKeyForContent`, UniFFI `MasterKeyHandle.owner_file_key_for_name` /
+  `owner_file_key_for_content` returning `OwnerFileKey`. Nothing writes under the uppercase
+  convention; no row is re-sealed or migrated. Vectors `upper_repair_v1` and
+  `upper_repair_split_v1` (vectors version 13).
+- `direct_transfer::storage::check_storage_get`: a storage GET delivered the chunk only for a
+  `200` whose `Content-Length` is exactly the grant's length; anything else is `Failed { status }`
+  (status `0`: no HTTP answer). `check_storage_body` applies the same rule to the bytes actually
+  counted (a truncated stream after a good head is still failed). `StorageGet::kind()` is the stable
+  `"stored"`/`"failed"` name bindings and vectors print. WASM `checkStorageGet` / `checkStorageBody`,
+  UniFFI `direct_check_storage_get` / `direct_check_storage_body`.
+- `direct_transfer::pacing::paced_until_ms`: desktop's download-ceiling formula (`kbps` is KiB/s,
+  `kbps == 0` is `i64::MIN`, saturating), so the direct path can hold requests back instead of
+  sleeping after each chunk. WASM `pacedUntilMs` crosses numbers as `f64` and reports the no-ceiling
+  case as `-Infinity` (test with `Number.isFinite`); UniFFI keeps `i64`/`u64`.
+- `direct_transfer::context`: `MemoryClass` with `max_in_flight_bytes` (256 MiB native, 64 MiB
+  browser, 64 MiB mobile app, 16 MiB mobile extension) and `pairs_allowed` (the direction must be
+  offered and every discovery storage pair allowlisted; hosts ASCII case-insensitive, buckets
+  exact, and a discovery that lists no pairs is refused rather than allowed vacuously). WASM
+  `maxInFlightBytes` / `pairsAllowed`, UniFFI `DirectMemoryClassDto` / `direct_max_in_flight_bytes`
+  / `direct_pairs_allowed`.
+- `WasmDownloadPlanner.chunkLength(index)` and `DirectDownloadPlannerHandle::chunk_length(index)`:
+  the ciphertext length of a chunk from the accepted window's geometry (`null`/`None` before it).
+- `directTransferConstants()` / `DirectConstantsDto` gain the response caps
+  `max_discovery_body_bytes` (256 KiB), `max_grant_body_bytes` (1 MiB) and `max_chunk_body_bytes`
+  (256 MiB + 28), so no client re-types them.
+- Contract vectors `test-vectors/direct_transfer.json`: `storage_get` (13 rows: 10 heads and 3 counted bodies), `pacing` (7),
+  `pairs_allowed` (12) and `memory_class` (4), each row naming its `source`; `vectors::run_all`
+  checks them on native, WASM and UniFFI.
 - Pure direct-upload pipeline planner (task 2173 C1-C2): one PUT lane per file, bounded
   commit overlap and ciphertext retention, per-chunk retries, separate ack/hold waits,
   interrupt draining, and grant-version-aware replay handling. Shared PUT totals scale
   with concurrent PUTs while staying thirty seconds below the server fence. This exposes
   Rust rules only; client drivers and the combined upload bindings follow separately,
   and the server's upload flag remains off.
+
+### Fixed
+- Discovery authorization answers (401/403) no longer consume or extend the routing-failure
+  budget. Reauthentication leaves cached discovery and real transport failures unchanged;
+  repeated authorization refusals no longer disable direct discovery for ten minutes.
 
 ### Security
 - Chunk format v2 (task 1908): file-content frames authenticate their position as AES-GCM

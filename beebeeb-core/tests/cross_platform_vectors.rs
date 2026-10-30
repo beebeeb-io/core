@@ -7,10 +7,11 @@
 //!
 //! If any test here fails after a code change, it means the change broke
 //! cross-platform compatibility and existing user data may become unreadable.
+#![allow(deprecated)]
 
 use beebeeb_core::encrypt::{decrypt_chunk, decrypt_metadata, encrypt_metadata};
 use beebeeb_core::file_request::{derive_request_wrap_key, open_request_upload, unwrap_request_private};
-use beebeeb_core::kdf::{FileKey, MasterKey, derive_file_key, derive_master_key};
+use beebeeb_core::kdf::{FileKey, MasterKey, derive_file_key, derive_master_key, derive_shared_folder_index_key};
 use beebeeb_core::opaque::{
     OpaqueEnvelope, compute_recovery_check, derive_share_key, derive_x25519_private, derive_x25519_public,
     x25519_shared_secret,
@@ -672,6 +673,28 @@ fn vector_thumbnail_encrypt_roundtrip() {
 }
 
 // ---------------------------------------------------------------------------
+// 19b. Shared-folder search-index key (version 8, task 2237) — the reader
+//      path every client implements must reproduce the published buckets.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn shared_folder_index_key_vector_is_reproducible() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "shared_folder_index_key");
+
+    let folder_key = FileKey::from_bytes(bytes32(&v, "folder_key_hex"));
+    let buckets = v["buckets"].as_array().expect("buckets array");
+    assert_eq!(buckets.len(), 3, "vector must pin buckets 0, 7 and 63");
+
+    for entry in buckets {
+        let bucket = entry["bucket"].as_u64().expect("bucket") as u32;
+        let expected = entry["expected_hex"].as_str().expect("expected_hex");
+        let got = hex::encode(derive_shared_folder_index_key(&folder_key, bucket).as_bytes());
+        assert_eq!(got, expected, "shared_folder_index_key diverged for bucket {bucket}");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 20. Version guard — fail loudly if vectors.json format changes unexpectedly
 // ---------------------------------------------------------------------------
 
@@ -685,8 +708,8 @@ fn vector_file_version_check() {
         .as_u64()
         .expect("vectors.json must have a 'version' field");
     assert_eq!(
-        version, 7,
-        "vectors.json version mismatch — expected 7, got {version}. \
+        version, 14,
+        "vectors.json version mismatch — expected 14, got {version}. \
          Update this test if you intentionally bumped the version."
     );
 
@@ -716,10 +739,135 @@ fn vector_file_version_check() {
         "metadata_v1_name_filekey",
         // Version 7 (task 2133): a shared folder's key id.
         "folder_key_id",
+        // Version 8 (task 2237): a shared folder's search-index bucket key.
+        "shared_folder_index_key",
+        // Version 9 (task 2237b): the public folder-link key combiner.
+        "combine_folder_link_key",
+        "key_wrap_v1",
+        "folder_link_passphrase",
+        "folder_link_passphrase_nfd",
+        "folder_custody_v1",
+        "link_owner_key_v1",
+        "link_owner_token_v1",
+        "folder_child_file_v1",
+        "folder_child_folder_v1",
+        "owner_wrapped_file_key",
+        "owner_wrapped_folder_key",
+        "folder_wrapped_file_key",
+        // Version 14 (task 2275): the two item id classes and refused text forms.
+        "item_ids",
+        // Version 13 (task 1922): the encrypted client-metadata envelope.
+        "client_meta_device_hostname",
+        "client_meta_session_paths",
+        "client_meta_padding_buckets",
     ];
     for name in &required {
         assert!(names.contains(name), "vectors.json is missing required vector '{name}'");
     }
+}
+
+/// Task 2275 L12: every published id class agrees with core's predicates, and
+/// every refused text form is refused.
+#[test]
+fn vector_item_ids() {
+    use beebeeb_core::item_id::{ItemClass, is_foreign_item_id, item_class};
+
+    let v = get_vector(&load_vectors(), "item_ids");
+    let class = |name: &str| match name {
+        "foreign" => ItemClass::Foreign,
+        "owner" => ItemClass::Owner,
+        other => panic!("unknown class {other}"),
+    };
+    let check = |rows: &serde_json::Value| {
+        for row in rows.as_array().unwrap() {
+            let id = row["id"].as_str().unwrap();
+            assert_eq!(item_class(id).unwrap(), class(row["class"].as_str().unwrap()), "{id}");
+        }
+    };
+    check(&v["foreign"]);
+    check(&v["owner"]);
+    for row in v["refused"].as_array().unwrap() {
+        let id = row["id"].as_str().unwrap();
+        assert_eq!(row["class"].as_str().unwrap(), "refused", "{id}");
+        assert!(row["is_foreign_error"].as_bool().unwrap(), "{id}");
+        assert!(is_foreign_item_id(id).is_err(), "{id}");
+        assert!(item_class(id).is_err(), "{id}");
+    }
+}
+
+// Owner/shared-folder custody: consume independent known answers, then check
+// shipped fresh-nonce writers against those same published keys.
+#[test]
+fn vector_owner_wrapped_file_key() {
+    let v = get_vector(&load_vectors(), "owner_wrapped_file_key");
+    check_owner_key_vector(&v, "file_id", "child_key_hex");
+}
+
+#[test]
+fn vector_owner_wrapped_folder_key() {
+    use beebeeb_core::owned_keys::{unwrap_folder_custody, wrap_folder_custody};
+    let v = get_vector(&load_vectors(), "owner_wrapped_folder_key");
+    let master = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let id = v["folder_id"].as_str().unwrap();
+    let expected = bytes32(&v, "folder_key_hex");
+    let frame = decode_hex(&v, "expected_frame_hex");
+    assert_eq!(&frame[..12], decode_hex(&v, "nonce_hex"));
+    assert_eq!(
+        unwrap_folder_custody(&master, id, &frame).unwrap().as_bytes(),
+        &expected
+    );
+    let shipped = wrap_folder_custody(&master, id, &FileKey::from_bytes(expected)).unwrap();
+    assert_eq!(shipped.len(), frame.len());
+    assert_eq!(
+        unwrap_folder_custody(&master, id, &shipped).unwrap().as_bytes(),
+        &expected
+    );
+}
+
+fn check_owner_key_vector(v: &serde_json::Value, id_field: &str, key_field: &str) {
+    use beebeeb_core::owned_keys::{unwrap_owner_file_key, wrap_owner_file_key};
+
+    let master = MasterKey::from_bytes(bytes32(v, "master_key_hex"));
+    let id = v[id_field].as_str().unwrap();
+    let expected = bytes32(v, key_field);
+    let frame = decode_hex(v, "expected_frame_hex");
+    assert_eq!(&frame[..12], decode_hex(v, "nonce_hex"));
+    assert_eq!(
+        unwrap_owner_file_key(&master, id, &frame).unwrap().as_bytes(),
+        &expected
+    );
+    let shipped = wrap_owner_file_key(&master, id, &FileKey::from_bytes(expected)).unwrap();
+    assert_eq!(shipped.len(), frame.len());
+    assert_eq!(
+        unwrap_owner_file_key(&master, id, &shipped).unwrap().as_bytes(),
+        &expected
+    );
+}
+
+#[test]
+fn vector_folder_wrapped_file_key() {
+    use beebeeb_core::owned_keys::{unwrap_child_key, wrap_child_key};
+
+    let v = get_vector(&load_vectors(), "folder_wrapped_file_key");
+    let folder = FileKey::from_bytes(bytes32(&v, "folder_key_hex"));
+    let expected = bytes32(&v, "child_key_hex");
+    let root = v["shared_folder_id"].as_str().unwrap();
+    let item = v["file_id"].as_str().unwrap();
+    let kind = u8::try_from(v["kind"].as_u64().unwrap()).unwrap();
+    let frame = decode_hex(&v, "expected_frame_hex");
+    assert_eq!(&frame[..12], decode_hex(&v, "nonce_hex"));
+    assert_eq!(
+        unwrap_child_key(&folder, root, item, kind, &frame).unwrap().as_bytes(),
+        &expected
+    );
+    let shipped = wrap_child_key(&folder, root, item, kind, &FileKey::from_bytes(expected)).unwrap();
+    assert_eq!(shipped.len(), frame.len());
+    assert_eq!(
+        unwrap_child_key(&folder, root, item, kind, &shipped)
+            .unwrap()
+            .as_bytes(),
+        &expected
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -960,4 +1108,128 @@ fn vector_names_are_what_the_shipped_writers_seal() {
         }
         assert_eq!(opened, 1, "{name}: the vector opens under exactly one key");
     }
+}
+
+// ---------------------------------------------------------------------------
+// 12. Encrypted client metadata (task 1922, vectors version 13)
+// ---------------------------------------------------------------------------
+
+fn open_client_meta_row(master: &MasterKey, row: &serde_json::Value, field: u8) -> Result<String, String> {
+    use beebeeb_core::client_meta::{ClientMetaField, open_client_meta};
+    let record = uuid::Uuid::parse_str(row["record_key"].as_str().unwrap()).unwrap();
+    let device = row["device_key"].as_str().map(|d| uuid::Uuid::parse_str(d).unwrap());
+    open_client_meta(
+        master,
+        &record,
+        device.as_ref(),
+        ClientMetaField::try_from(field).map_err(|e| e.to_string())?,
+        row["envelope"].as_str().unwrap(),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[test]
+fn vector_client_meta_device_hostname_opens() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "client_meta_device_hostname");
+    let master = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let row = &v["row"];
+    assert_eq!(row["field"].as_u64(), Some(1));
+    assert_eq!(row["device_key"], serde_json::Value::Null);
+    assert_eq!(
+        open_client_meta_row(&master, row, 1).unwrap(),
+        row["plaintext"].as_str().unwrap()
+    );
+    assert!(row["envelope"].as_str().unwrap().starts_with("bbcm1."));
+    // The AAD binds the field: opening it as another field must fail.
+    assert!(open_client_meta_row(&master, row, 2).is_err());
+}
+
+#[test]
+fn vector_client_meta_session_paths_open() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "client_meta_session_paths");
+    let master = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let rows = v["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    for (row, field) in rows.iter().zip([3u8, 4]) {
+        assert_eq!(row["field"].as_u64(), Some(u64::from(field)));
+        assert_eq!(
+            open_client_meta_row(&master, row, field).unwrap(),
+            row["plaintext"].as_str().unwrap()
+        );
+    }
+    // A session sealed under device A does not open under device B.
+    let mut row = rows[0].clone();
+    row["device_key"] = serde_json::Value::String("19220000-0000-4000-8000-0000000000bb".into());
+    assert!(open_client_meta_row(&master, &row, 3).is_err());
+}
+
+#[test]
+fn vector_client_meta_padding_buckets_are_ordered() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "client_meta_padding_buckets");
+    let master = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let rows = v["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    let lens: Vec<u64> = rows.iter().map(|r| r["envelope_len"].as_u64().unwrap()).collect();
+    assert_eq!(lens[0], lens[1], "two plaintexts in one 32-byte bucket, equal lengths");
+    assert!(lens[2] > lens[0], "the next bucket is longer");
+    for row in rows {
+        assert_eq!(
+            open_client_meta_row(&master, row, 2).unwrap(),
+            row["plaintext"].as_str().unwrap()
+        );
+    }
+}
+
+/// Every published v13 envelope opens with a raw AES-256-GCM using the vector's
+/// own `client_meta_key_hex` and `aad_hex`. The module proves the same thing, but
+/// this pins the HAND-BUILT AAD bytes published for other clients: if the layout
+/// in `client_meta_aad_hex` ever drifts, this fails even when core agrees with itself.
+#[test]
+fn published_client_meta_envelopes_open_with_a_raw_aes_gcm() {
+    use aes_gcm::aead::{Aead, Payload};
+    use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+    use base64::Engine;
+
+    let vectors = load_vectors();
+    let mut checked = 0;
+    for name in [
+        "client_meta_device_hostname",
+        "client_meta_session_paths",
+        "client_meta_padding_buckets",
+    ] {
+        let v = get_vector(&vectors, name);
+        let key = decode_hex(&v, "client_meta_key_hex");
+        let rows: Vec<&serde_json::Value> = match v["rows"].as_array() {
+            Some(rows) => rows.iter().collect(),
+            None => vec![&v["row"]],
+        };
+        for row in rows {
+            let aad = decode_hex(row, "aad_hex");
+            let envelope = row["envelope"].as_str().unwrap();
+            assert!(envelope.starts_with("bbcm1."), "{name}: {envelope}");
+            let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(&envelope["bbcm1.".len()..])
+                .unwrap();
+            let (nonce, ciphertext) = raw.split_at(12);
+            let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+            let plain = cipher
+                .decrypt(
+                    Nonce::from_slice(nonce),
+                    Payload {
+                        msg: ciphertext,
+                        aad: &aad,
+                    },
+                )
+                .expect("the published key and AAD must open the published envelope");
+            let len = usize::from(u16::from_be_bytes([plain[0], plain[1]]));
+            let want = row["plaintext"].as_str().unwrap().as_bytes();
+            assert_eq!(&plain[2..2 + len], want, "{name}");
+            assert!(plain[2 + len..].iter().all(|&b| b == 0), "{name}: zero padding");
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 6, "1 hostname + 2 session paths + 3 padding rows");
 }

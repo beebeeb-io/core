@@ -27,6 +27,7 @@ dependencies = [
  "cfg-if",
  "cipher",
  "cpufeatures 0.2.17",
+ "zeroize",
 ]
 
 [[package]]
@@ -41,6 +42,7 @@ dependencies = [
  "ctr",
  "ghash",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -97,6 +99,7 @@ dependencies = [
  "blake2",
  "cpufeatures 0.2.17",
  "password-hash",
+ "zeroize",
 ]
 
 [[package]]
@@ -218,6 +221,7 @@ dependencies = [
 name = "beebeeb-core"
 version = "0.1.0"
 dependencies = [
+ "aes",
  "aes-gcm",
  "argon2",
  "base64",
@@ -228,6 +232,7 @@ dependencies = [
  "flate2",
  "hex",
  "hkdf",
+ "hmac",
  "image",
  "opaque-ke",
  "p256",
@@ -239,6 +244,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
+ "subtle",
  "thiserror",
  "unicode-normalization",
  "url",
@@ -308,6 +314,7 @@ dependencies = [
 name = "beebeeb-wasm"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "beebeeb-core",
  "beebeeb-types",
  "getrandom 0.2.17",
@@ -331,6 +338,7 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "unicode-normalization",
+ "zeroize",
 ]
 
 [[package]]
@@ -2594,9 +2602,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.149"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
+checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
  "itoa",
  "memchr",

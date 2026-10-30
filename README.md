@@ -92,14 +92,18 @@ Found a vulnerability? Email **security@beebeeb.io** — see [SECURITY.md](SECUR
 
 ### Audit status
 
-`core` has **not** undergone an external audit. Its cryptography has been reviewed in house
-against the beebeeb audit-readiness scope; an independent audit is planned, and when it happens we
-will publish the findings — good and bad. Until then the honest word is *auditable*, not *audited*:
-the code is public, the primitives are standard (AES-256-GCM, Argon2id, HKDF, X25519), and the
-cross-platform test vectors are in this repository.
+`core` has not had an independent security audit yet. It is open source, as are the web, desktop, iOS and
+CLI apps built on it, so you can review the code yourself: the primitives are standard (AES-256-GCM,
+Argon2id, HKDF, X25519) and the cross-platform test vectors are in this repository. The server is closed
+source. Beebeeb has no investors and is paid for from our own savings and income, and so far that money
+has gone into building Beebeeb, not into an audit. We understand if you want an audit before you trust us.
 
-`core` is engineered with AI coding agents under our review; not yet externally audited. Every commit is
-merged by a human, and the agents' `Co-Authored-By` trailers stay in the history.
+### How this is built
+
+We are two founders, and we build Beebeeb with AI coding agents. The agents write most of the code; we
+specify the work, review every diff, run the tests and decide what ships. Every commit in this repository
+is merged by one of us, and the agents' `Co-Authored-By` trailers stay in the history, which is why it
+shows one author and some very large days.
 
 ## Part of beebeeb
 

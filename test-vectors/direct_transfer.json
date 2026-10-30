@@ -76,6 +76,17 @@
         "s3.storage.test"
       ]
     },
+    "no_tokens": {
+      "storage_hosts": [
+        "s3.storage.test"
+      ],
+      "storage_buckets": [
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-01"
+        }
+      ]
+    },
     "empty": {},
     "small_window": {
       "download": [
@@ -2070,6 +2081,588 @@
       "expect": null
     }
   ],
+  "storage_get": [
+    {
+      "name": "a 200 with the grant's length is the chunk",
+      "status": 200,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "expect": {
+        "kind": "stored"
+      },
+      "source": "spec R1.7: a chunk is a 200 whose length is the grant's length"
+    },
+    {
+      "name": "a 200 one byte short is not the chunk",
+      "status": 200,
+      "content_length": 4194331,
+      "expected": 4194332,
+      "expect": {
+        "kind": "failed",
+        "status": 200
+      },
+      "source": "spec R1.7: a short body never authenticates as the chunk"
+    },
+    {
+      "name": "a 200 one byte long is not the chunk",
+      "status": 200,
+      "content_length": 4194333,
+      "expected": 4194332,
+      "expect": {
+        "kind": "failed",
+        "status": 200
+      },
+      "source": "spec R1.7: the length must be exact"
+    },
+    {
+      "name": "a 200 with no Content-Length is not the chunk",
+      "status": 200,
+      "content_length": null,
+      "expected": 4194332,
+      "expect": {
+        "kind": "failed",
+        "status": 200
+      },
+      "source": "spec R1.7: a missing length cannot be checked, so it is a failure"
+    },
+    {
+      "name": "a 206 partial answer is not the chunk",
+      "status": 206,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "expect": {
+        "kind": "failed",
+        "status": 206
+      },
+      "source": "client-side case: a proxy or a Range answer, no server route sends 206"
+    },
+    {
+      "name": "a 302 redirect is not the chunk",
+      "status": 302,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "expect": {
+        "kind": "failed",
+        "status": 302
+      },
+      "source": "client-side case: storage redirects are refused (clients 3.1)"
+    },
+    {
+      "name": "a 403 is not the chunk",
+      "status": 403,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "expect": {
+        "kind": "failed",
+        "status": 403
+      },
+      "source": "server: storage refuses an expired or wrong signature (S3 error body, never JSON)"
+    },
+    {
+      "name": "a 500 is not the chunk",
+      "status": 500,
+      "content_length": 0,
+      "expected": 4194332,
+      "expect": {
+        "kind": "failed",
+        "status": 500
+      },
+      "source": "server: storage's own 5xx, a proxy's page"
+    },
+    {
+      "name": "no answer at all keeps status 0",
+      "status": 0,
+      "content_length": null,
+      "expected": 4194332,
+      "expect": {
+        "kind": "failed",
+        "status": 0
+      },
+      "source": "client-side case: a network failure or timeout (no HTTP status)"
+    },
+    {
+      "name": "a 200 with a zero length for an empty expectation is stored",
+      "status": 200,
+      "content_length": 0,
+      "expected": 0,
+      "expect": {
+        "kind": "stored"
+      },
+      "source": "spec R1.7: the rule is exactness, and an empty chunk is exact at zero"
+    },
+    {
+      "name": "a counted body one byte short is not the chunk",
+      "check": "body",
+      "received": 4194331,
+      "expected": 4194332,
+      "expect": {
+        "kind": "failed",
+        "status": 200
+      },
+      "source": "spec R1.7: a truncated stream ends short even after a 200 head with the grant's length"
+    },
+    {
+      "name": "a counted body one byte long is not the chunk",
+      "check": "body",
+      "received": 4194333,
+      "expected": 4194332,
+      "expect": {
+        "kind": "failed",
+        "status": 200
+      },
+      "source": "spec R1.7: a proxy that sends more than it declares is still not the chunk"
+    },
+    {
+      "name": "a counted body of exactly the grant is the chunk",
+      "check": "body",
+      "received": 4194332,
+      "expected": 4194332,
+      "expect": {
+        "kind": "stored"
+      },
+      "source": "spec R1.7: the caller counts what it read; equal is the chunk"
+    }
+  ],
+  "storage_body": [
+    {
+      "name": "pushes that add up to the grant are the chunk",
+      "status": 200,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [
+        4194332
+      ],
+      "expect": {
+        "kind": "stored"
+      },
+      "source": "spec R1.7: the caller counts what it read; equal is the chunk"
+    },
+    {
+      "name": "a stream read in two pushes is still the chunk",
+      "status": 200,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [
+        2097166,
+        2097166
+      ],
+      "expect": {
+        "kind": "stored"
+      },
+      "source": "spec R1.7: the count is the sum of what arrived, not the shape of the reads"
+    },
+    {
+      "name": "a push that would pass the grant is refused at once",
+      "status": 200,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [
+        4194331,
+        2
+      ],
+      "expect": {
+        "kind": "failed",
+        "status": 200
+      },
+      "source": "spec R1.7: a proxy that sends more than it declared is not the chunk; the count stops at the grant"
+    },
+    {
+      "name": "pushes that end short are not the chunk",
+      "status": 200,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [
+        4194331
+      ],
+      "expect": {
+        "kind": "failed",
+        "status": 200
+      },
+      "source": "spec R1.7: a truncated stream ends short even after a 200 head with the grant's length"
+    },
+    {
+      "name": "an empty chunk is stored with no pushes",
+      "status": 200,
+      "content_length": 0,
+      "expected": 0,
+      "pushes": [],
+      "expect": {
+        "kind": "stored"
+      },
+      "source": "spec R1.7: the rule is exactness, and an empty chunk is exact at zero"
+    },
+    {
+      "name": "a zero-byte push never moves the count",
+      "status": 200,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [
+        0,
+        4194332,
+        0
+      ],
+      "expect": {
+        "kind": "stored"
+      },
+      "source": "spec R1.7: a read of nothing changes no count"
+    },
+    {
+      "name": "a push past a full grant is not the chunk",
+      "status": 200,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [
+        4194332,
+        1
+      ],
+      "expect": {
+        "kind": "failed",
+        "status": 200
+      },
+      "source": "spec R1.7: the first byte past the grant is refused, and a refused byte is never a stored chunk (the refused byte is not counted, so without a latch the count would still equal the grant)"
+    },
+    {
+      "name": "a 403 head is not the chunk and keeps its status",
+      "status": 403,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [],
+      "expect": {
+        "kind": "failed",
+        "status": 403
+      },
+      "source": "server: storage refuses an expired or wrong signature (S3 error body, never JSON); the status must reach the caller from the binding's own error, not from the row"
+    },
+    {
+      "name": "a 206 head is not the chunk and keeps its status",
+      "status": 206,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [],
+      "expect": {
+        "kind": "failed",
+        "status": 206
+      },
+      "source": "client-side case: a proxy or a Range answer, no server route sends 206"
+    },
+    {
+      "name": "no answer at all keeps status 0 at the head",
+      "status": 0,
+      "content_length": null,
+      "expected": 4194332,
+      "pushes": [],
+      "expect": {
+        "kind": "failed",
+        "status": 0
+      },
+      "source": "client-side case: a network failure or timeout (no HTTP status, and no length to check)"
+    }
+  ],
+  "pacing": [
+    {
+      "name": "no ceiling means no wait",
+      "start_ms": 1000,
+      "wire_bytes": 10000,
+      "kbps": 0,
+      "expect": "-9223372036854775808",
+      "source": "desktop src-tauri/src/direct_download.rs:1540 (the ceiling is off: i64::MIN; the formula is :193-199)"
+    },
+    {
+      "name": "no bytes received yet is no wait",
+      "start_ms": 1000,
+      "wire_bytes": 0,
+      "kbps": 8,
+      "expect": 1000,
+      "source": "desktop src-tauri/src/direct_download.rs:1541"
+    },
+    {
+      "name": "8 KiB at 8 KiB/s is one second",
+      "start_ms": 1000,
+      "wire_bytes": 8192,
+      "kbps": 8,
+      "expect": 2000,
+      "source": "desktop src-tauri/src/direct_download.rs:1542"
+    },
+    {
+      "name": "the largest count saturates instead of wrapping",
+      "start_ms": 0,
+      "wire_bytes": "18446744073709551615",
+      "kbps": 1,
+      "expect": "9223372036854775807",
+      "source": "desktop src-tauri/src/direct_download.rs:1543 (u64::MAX at 1 KiB/s)"
+    },
+    {
+      "name": "a 4 MiB chunk at 1000 KiB/s takes four seconds",
+      "start_ms": 1800000000000,
+      "wire_bytes": 4194332,
+      "kbps": 1000,
+      "expect": 1800000004096,
+      "source": "client policy: the formula, clients 6.3 (pacing moves out of desktop)"
+    },
+    {
+      "name": "less than a millisecond is no wait",
+      "start_ms": 500,
+      "wire_bytes": 1,
+      "kbps": 1,
+      "expect": 500,
+      "source": "client policy: integer division floors a started millisecond count"
+    },
+    {
+      "name": "a negative start is kept",
+      "start_ms": -1000,
+      "wire_bytes": 1024,
+      "kbps": 1,
+      "expect": 0,
+      "source": "client policy: a monotonic clock before its epoch still adds the wait"
+    }
+  ],
+  "pairs_allowed": [
+    {
+      "name": "all three pairs allowlisted and download offered",
+      "discovery": "std",
+      "direction": "download",
+      "allowlist": [
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-01"
+        },
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-02"
+        },
+        {
+          "host": "eu.storage.test",
+          "bucket": "vault"
+        }
+      ],
+      "expect": true,
+      "source": "spec R1.12: every listed pair must be one the client may use"
+    },
+    {
+      "name": "one pair missing from the allowlist",
+      "discovery": "std",
+      "direction": "download",
+      "allowlist": [
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-01"
+        },
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-02"
+        }
+      ],
+      "expect": false,
+      "source": "spec R1.12: a discovery pair the CSP lacks turns direct off"
+    },
+    {
+      "name": "hosts compare ASCII case-insensitively",
+      "discovery": "std",
+      "direction": "download",
+      "allowlist": [
+        {
+          "host": "S3.STORAGE.TEST",
+          "bucket": "bb-01"
+        },
+        {
+          "host": "S3.STORAGE.TEST",
+          "bucket": "bb-02"
+        },
+        {
+          "host": "EU.STORAGE.TEST",
+          "bucket": "vault"
+        }
+      ],
+      "expect": true,
+      "source": "spec R1.12: DNS names are case-insensitive"
+    },
+    {
+      "name": "buckets compare exactly",
+      "discovery": "std",
+      "direction": "download",
+      "allowlist": [
+        {
+          "host": "s3.storage.test",
+          "bucket": "BB-01"
+        },
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-02"
+        },
+        {
+          "host": "eu.storage.test",
+          "bucket": "vault"
+        }
+      ],
+      "expect": false,
+      "source": "spec R1.12: S3 bucket names are case-sensitive"
+    },
+    {
+      "name": "download is allowed for std",
+      "discovery": "std",
+      "direction": "download",
+      "allowlist": [
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-01"
+        },
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-02"
+        },
+        {
+          "host": "eu.storage.test",
+          "bucket": "vault"
+        }
+      ],
+      "expect": true,
+      "source": "spec R1.13: the token must be offered and the pairs allowlisted"
+    },
+    {
+      "name": "upload is not offered by std",
+      "discovery": "std",
+      "direction": "upload",
+      "allowlist": [
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-01"
+        },
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-02"
+        },
+        {
+          "host": "eu.storage.test",
+          "bucket": "vault"
+        }
+      ],
+      "expect": false,
+      "source": "spec R1.13: a direction the server does not offer is never allowed"
+    },
+    {
+      "name": "an empty allowlist refuses every listed pair",
+      "discovery": "std",
+      "direction": "download",
+      "allowlist": [],
+      "expect": false,
+      "source": "spec R1.12: nothing listed, nothing allowed"
+    },
+    {
+      "name": "an empty allowlist is not allowed vacuously",
+      "discovery": "hosts_only",
+      "direction": "download",
+      "allowlist": [],
+      "expect": false,
+      "source": "spec R1.12: every pair (of none) is allowlisted, but direct needs a listed bucket and check_storage_url refuses every unlisted bucket; the web rule is the same (!!discovery.storage_buckets?.length && every(...))"
+    },
+    {
+      "name": "a discovery with no buckets is not allowed",
+      "discovery": "hosts_only",
+      "direction": "download",
+      "allowlist": [
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-01"
+        }
+      ],
+      "expect": false,
+      "source": "spec R1.12: no listed bucket leaves no storage route, whatever the allowlist says (the vacuous `every` bug: offered && buckets.iter().all(listed) is true for no buckets)"
+    },
+    {
+      "name": "both dev pairs allowlisted",
+      "discovery": "dev",
+      "direction": "download",
+      "allowlist": [
+        {
+          "host": "127.0.0.1:9000",
+          "bucket": "bb-dev"
+        },
+        {
+          "host": "localhost:9000",
+          "bucket": "bb-dev"
+        }
+      ],
+      "expect": true,
+      "source": "spec R1.12: a loopback development pair is still a pair"
+    },
+    {
+      "name": "one dev pair missing",
+      "discovery": "dev",
+      "direction": "download",
+      "allowlist": [
+        {
+          "host": "127.0.0.1:9000",
+          "bucket": "bb-dev"
+        }
+      ],
+      "expect": false,
+      "source": "spec R1.12: the discovery answer names a pair the allowlist lacks"
+    },
+    {
+      "name": "extra pairs in the allowlist do not hurt",
+      "discovery": "std",
+      "direction": "download",
+      "allowlist": [
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-01"
+        },
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-02"
+        },
+        {
+          "host": "eu.storage.test",
+          "bucket": "vault"
+        },
+        {
+          "host": "other.storage.test",
+          "bucket": "spare"
+        }
+      ],
+      "expect": true,
+      "source": "spec R1.12: the rule is every discovery pair, not only the allowlist"
+    },
+    {
+      "name": "a discovery with no tokens is never allowed",
+      "discovery": "no_tokens",
+      "direction": "download",
+      "allowlist": [
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-01"
+        }
+      ],
+      "expect": false,
+      "source": "spec R1.13: the discovery lists buckets but no download token"
+    }
+  ],
+  "memory_class": [
+    {
+      "name": "native holds 256 MiB",
+      "class": "native",
+      "expect": 268435456,
+      "source": "clients design 6.4 / D23: CLI and desktop"
+    },
+    {
+      "name": "browser holds 64 MiB",
+      "class": "browser",
+      "expect": 67108864,
+      "source": "clients design 6.4 / D23: the web's 64 MiB in-flight policy"
+    },
+    {
+      "name": "a mobile app holds 64 MiB",
+      "class": "mobile_app",
+      "expect": 67108864,
+      "source": "clients design 6.4 / D23: iOS and Android foreground"
+    },
+    {
+      "name": "a mobile extension holds 16 MiB",
+      "class": "mobile_extension",
+      "expect": 16777216,
+      "source": "clients design 6.4 / D23: the File Provider and backup extension"
+    }
+  ],
   "pinned_retry": [
     {
       "name": "first failure of a server hiccup waits 1 s",
@@ -2622,7 +3215,7 @@
       ]
     },
     {
-      "name": "an authorization answer counts as a failed attempt only",
+      "name": "repeated authorization answers are not routing failures",
       "steps": [
         {
           "op": "record",
@@ -2637,6 +3230,130 @@
         {
           "op": "lookup",
           "now": 1800000000001,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000000001,
+          "outcome": {
+            "kind": "terminal",
+            "status": 401,
+            "error": "unauthorized"
+          },
+          "body": null
+        },
+        {
+          "op": "record",
+          "now": 1800000000002,
+          "outcome": {
+            "kind": "terminal",
+            "status": 403,
+            "error": "forbidden"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000003,
+          "expect": "fetch"
+        }
+      ]
+    },
+    {
+      "name": "authorization preserves the real failure budget and its expiry",
+      "steps": [
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "record",
+          "now": 1800000000001,
+          "outcome": {
+            "kind": "terminal",
+            "status": 403,
+            "error": "forbidden"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000002,
+          "expect": "fetch"
+        },
+        {
+          "op": "record",
+          "now": 1800000000003,
+          "outcome": {
+            "kind": "use_api_now"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000000004,
+          "expect": "use_api"
+        },
+        {
+          "op": "record",
+          "now": 1800000000005,
+          "outcome": {
+            "kind": "terminal",
+            "status": 403,
+            "error": "forbidden"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600003,
+          "expect": "fetch"
+        }
+      ]
+    },
+    {
+      "name": "authorization does not prolong expired discovery",
+      "steps": [
+        {
+          "op": "record",
+          "now": 1800000000000,
+          "outcome": {
+            "kind": "proceed"
+          },
+          "body": "@std"
+        },
+        {
+          "op": "record",
+          "now": 1800000599998,
+          "outcome": {
+            "kind": "terminal",
+            "status": 401,
+            "error": "unauthorized"
+          },
+          "body": null
+        },
+        {
+          "op": "record",
+          "now": 1800000599999,
+          "outcome": {
+            "kind": "terminal",
+            "status": 401,
+            "error": "unauthorized"
+          },
+          "body": null
+        },
+        {
+          "op": "lookup",
+          "now": 1800000599999,
+          "expect": "cached"
+        },
+        {
+          "op": "lookup",
+          "now": 1800000600000,
           "expect": "fetch"
         }
       ]

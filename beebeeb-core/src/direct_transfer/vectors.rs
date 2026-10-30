@@ -16,8 +16,9 @@ use serde_json::{Value, json};
 
 use super::{
     ApiAnswer, Call, DirectHealth, Direction, Discovery, DiscoveryCache, DiscoveryState, DownloadPlanner, Geometry,
-    Lookup, Outcome, PinnedRetry, PlannerConfig, Poll, RecordedTransport, RetryDecision, Terminal, WindowAnswer,
-    check_storage_url, classify, redact, resume_transport, scrub,
+    Lookup, Outcome, PinnedRetry, PlannerConfig, Poll, RecordedTransport, RetryDecision, StorageBody, StorageBucket,
+    StorageGet, Terminal, WindowAnswer, check_storage_body, check_storage_get, check_storage_url, classify,
+    paced_until_ms, pairs_allowed, redact, resume_transport, scrub,
 };
 
 const API_PROD: &str = "https://api.beebeeb.test";
@@ -57,12 +58,63 @@ pub trait Surface {
     /// answer `{kind: "wait", millis}` or `{kind: "give_up"}`.
     fn pinned_retry(&self, outcome: &Value, attempt: u32, waited_ms: u64) -> Value;
     fn chunk_length(&self, chunk_count: u32, chunk_size: u64, encrypted_size: u64, index: u32) -> Option<u64>;
+    /// [`check_storage_get`] as `{kind: "stored"}` or `{kind: "failed", status}`.
+    fn check_storage_get(&self, status: u16, content_length: Option<u64>, expected: u64) -> Value;
+    /// [`check_storage_body`] as `{kind: "stored"}` or `{kind: "failed", status}`: the head passed,
+    /// so only the counted bytes decide. The one-shot form.
+    fn check_storage_body(&self, received: u64, expected: u64) -> Value;
+    /// [`StorageBody`] driven as a caller drives it: the head, then each of `pushes` in order; the
+    /// answer is the first failed push (the caller stops) or `finish()`'s.
+    fn storage_body(&self, status: u16, content_length: Option<u64>, expected: u64, pushes: &[u64]) -> Value;
+    /// [`paced_until_ms`] (`i64::MIN` means no ceiling).
+    fn paced_until_ms(&self, start_ms: i64, wire_bytes: u64, kbps: u64) -> i64;
+    /// [`super::max_in_flight_bytes`] for the class named by its code.
+    fn max_in_flight_bytes(&self, class: &str) -> u64;
+    /// [`pairs_allowed`]: `allowlist` is an array of `{host, bucket}`.
+    fn pairs_allowed(&self, discovery: &Value, direction: &str, allowlist: &Value) -> bool;
     fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> Self::Planner;
     fn cache(&self) -> Self::Cache;
     fn health(&self) -> Self::Health;
     /// [`resume_transport`]: `recorded` is `"api"` or `"direct"`, `discovery` is `{kind, upload?}` with `kind` one of
     /// `offers`, `not_supported`, `unknown`, `unauthorized`; the answer is the action's code.
     fn resume_transport(&self, recorded: &str, discovery: &Value, forced_api: bool) -> String;
+}
+
+/// One surface's storage-body handle as a caller drives it: the head's failure, the first refused
+/// push and the finish, each as the contract's JSON. Every surface implements this over its own
+/// binding, and [`drive_storage_body`] below is the ONE place the head → pushes → stop → finish
+/// contract lives, so the four surfaces cannot drive it differently.
+pub trait StorageBodySurface {
+    /// The handle the surface exports for one answer.
+    type Body;
+    /// The head's answer. `Err` is `{kind: "failed", status}` read from the surface's OWN error, so
+    /// a binding that drops the status fails the row.
+    fn body_from_head(&self, status: u16, content_length: Option<u64>, expected: u64) -> Result<Self::Body, Value>;
+    /// Count `n` more bytes. `Err` is the surface's own refusal `{kind, status}`.
+    fn body_push(&self, body: &mut Self::Body, n: u64) -> Result<(), Value>;
+    /// The body's answer.
+    fn body_finish(&self, body: Self::Body) -> Value;
+}
+
+/// Drive one storage body as a client does: the head, then each push in order, stopping at the first
+/// refused push (the caller stops reading), else the finish's answer.
+pub fn drive_storage_body<S: StorageBodySurface + ?Sized>(
+    surface: &S,
+    status: u16,
+    content_length: Option<u64>,
+    expected: u64,
+    pushes: &[u64],
+) -> Value {
+    let mut body = match surface.body_from_head(status, content_length, expected) {
+        Ok(body) => body,
+        Err(failed) => return failed,
+    };
+    for &n in pushes {
+        if let Err(failed) = surface.body_push(&mut body, n) {
+            return failed;
+        }
+    }
+    surface.body_finish(body)
 }
 
 /// The give-up memory as a surface exports it. Directions cross as their codes (`"download"`, `"upload"`).
@@ -114,6 +166,11 @@ pub struct Report {
     pub redact: usize,
     pub scrub: usize,
     pub chunk_length: usize,
+    pub storage_get: usize,
+    pub storage_body: usize,
+    pub pacing: usize,
+    pub pairs_allowed: usize,
+    pub memory_class: usize,
     pub pinned_retry: usize,
     pub cache_scenarios: usize,
     pub cache_steps: usize,
@@ -135,6 +192,11 @@ pub fn expected_report() -> Report {
         redact: len("redact"),
         scrub: len("scrub"),
         chunk_length: len("chunk_length"),
+        storage_get: len("storage_get"),
+        storage_body: len("storage_body"),
+        pacing: len("pacing"),
+        pairs_allowed: len("pairs_allowed"),
+        memory_class: len("memory_class"),
         pinned_retry: len("pinned_retry"),
         cache_scenarios: len("discovery_cache"),
         scenarios: len("planner"),
@@ -178,6 +240,14 @@ fn as_u64(v: &Value) -> u64 {
     match v {
         Value::String(s) => s.parse().expect("decimal u64"),
         other => other.as_u64().expect("u64"),
+    }
+}
+
+/// A signed number written as a JSON number or, beyond 2^53, as a decimal string.
+fn as_i64(v: &Value) -> i64 {
+    match v {
+        Value::String(s) => s.parse().expect("decimal i64"),
+        other => other.as_i64().expect("i64"),
     }
 }
 
@@ -246,6 +316,74 @@ pub fn run_all<S: Surface>(surface: &S) -> Report {
         let want = row["expect"].as_u64();
         assert_eq!(got, want, "chunk_length row {:?}", row["name"]);
         report.chunk_length += 1;
+    }
+
+    for row in v["storage_get"].as_array().expect("storage_get") {
+        let name = row["name"].as_str().unwrap();
+        let expected = as_u64(&row["expected"]);
+        let got = match row.get("check") {
+            // The body rows test the counted bytes, after a head that said 200 and the grant's length.
+            Some(c) if c == "body" => surface.check_storage_body(as_u64(&row["received"]), expected),
+            Some(other) => panic!("storage_get row {name:?}: unknown check {other:?}"),
+            None => surface.check_storage_get(
+                // A status is a u16: anything else is a broken row, not a wrap.
+                u16::try_from(as_u64(&row["status"])).expect("a status fits u16"),
+                // A missing key is a broken row; an explicit null means "no Content-Length".
+                match row.get("content_length") {
+                    Some(Value::Null) => None,
+                    Some(v) => Some(as_u64(v)),
+                    None => panic!("storage_get row {name:?}: no content_length (use null for none)"),
+                },
+                expected,
+            ),
+        };
+        assert_eq!(got, row["expect"], "storage_get row {name:?}");
+        report.storage_get += 1;
+    }
+
+    for row in v["storage_body"].as_array().expect("storage_body") {
+        let name = row["name"].as_str().unwrap();
+        let pushes: Vec<u64> = row["pushes"].as_array().expect("pushes").iter().map(as_u64).collect();
+        let got = surface.storage_body(
+            u16::try_from(as_u64(&row["status"])).expect("a status fits u16"),
+            match row.get("content_length") {
+                Some(Value::Null) => None,
+                Some(v) => Some(as_u64(v)),
+                None => panic!("storage_body row {name:?}: no content_length (use null for none)"),
+            },
+            as_u64(&row["expected"]),
+            &pushes,
+        );
+        assert_eq!(got, row["expect"], "storage_body row {name:?}");
+        report.storage_body += 1;
+    }
+
+    for row in v["pacing"].as_array().expect("pacing") {
+        let got = surface.paced_until_ms(
+            as_i64(&row["start_ms"]),
+            as_u64(&row["wire_bytes"]),
+            as_u64(&row["kbps"]),
+        );
+        assert_eq!(got, as_i64(&row["expect"]), "pacing row {:?}", row["name"]);
+        report.pacing += 1;
+    }
+
+    for row in v["pairs_allowed"].as_array().expect("pairs_allowed") {
+        let disc = &v["discoveries"][row["discovery"].as_str().unwrap()];
+        let got = surface.pairs_allowed(disc, row["direction"].as_str().unwrap(), &row["allowlist"]);
+        assert_eq!(
+            got,
+            row["expect"].as_bool().unwrap(),
+            "pairs_allowed row {:?}",
+            row["name"]
+        );
+        report.pairs_allowed += 1;
+    }
+
+    for row in v["memory_class"].as_array().expect("memory_class") {
+        let got = surface.max_in_flight_bytes(row["class"].as_str().unwrap());
+        assert_eq!(got, as_u64(&row["expect"]), "memory_class row {:?}", row["name"]);
+        report.memory_class += 1;
     }
 
     for row in v["pinned_retry"].as_array().expect("pinned_retry") {
@@ -602,6 +740,30 @@ fn direction_of(code: &str) -> Direction {
     Direction::from_code(code).unwrap_or_else(|| panic!("unknown direction {code:?}"))
 }
 
+/// One storage answer as the contract's JSON, from its own stable kind. Public so the WASM and
+/// UniFFI test surfaces share this one shape instead of each writing its own copy.
+pub fn storage_get_json(got: StorageGet) -> Value {
+    match got {
+        StorageGet::Stored => json!({"kind": got.kind()}),
+        StorageGet::Failed { status } => json!({"kind": got.kind(), "status": status}),
+    }
+}
+
+/// Core's storage body, as the shared [`drive_storage_body`] contract drives it. Every surface
+/// implements this same trait over its own binding.
+impl StorageBodySurface for CoreSurface {
+    type Body = StorageBody;
+    fn body_from_head(&self, status: u16, content_length: Option<u64>, expected: u64) -> Result<StorageBody, Value> {
+        StorageBody::from_head(status, content_length, expected).map_err(storage_get_json)
+    }
+    fn body_push(&self, body: &mut StorageBody, n: u64) -> Result<(), Value> {
+        body.push(n).map_err(storage_get_json)
+    }
+    fn body_finish(&self, body: StorageBody) -> Value {
+        storage_get_json(body.finish())
+    }
+}
+
 impl HealthSurface for DirectHealth {
     fn gave_up(&mut self, direction: &str, now_ms: i64) {
         DirectHealth::gave_up(self, direction_of(direction), now_ms);
@@ -682,6 +844,28 @@ impl Surface for CoreSurface {
             original_size: 0,
         }
         .chunk_length(index)
+    }
+    fn check_storage_get(&self, status: u16, content_length: Option<u64>, expected: u64) -> Value {
+        storage_get_json(check_storage_get(status, content_length, expected))
+    }
+    fn check_storage_body(&self, received: u64, expected: u64) -> Value {
+        storage_get_json(check_storage_body(received, expected))
+    }
+    fn storage_body(&self, status: u16, content_length: Option<u64>, expected: u64, pushes: &[u64]) -> Value {
+        drive_storage_body(self, status, content_length, expected, pushes)
+    }
+    fn paced_until_ms(&self, start_ms: i64, wire_bytes: u64, kbps: u64) -> i64 {
+        paced_until_ms(start_ms, wire_bytes, kbps)
+    }
+    fn max_in_flight_bytes(&self, class: &str) -> u64 {
+        let class = super::MemoryClass::from_code(class).unwrap_or_else(|| panic!("unknown memory class {class:?}"));
+        super::max_in_flight_bytes(class)
+    }
+    fn pairs_allowed(&self, discovery: &Value, direction: &str, allowlist: &Value) -> bool {
+        let d: Discovery = serde_json::from_value(discovery.clone()).expect("discovery");
+        let direction = Direction::from_code(direction).unwrap_or_else(|| panic!("unknown direction {direction:?}"));
+        let allowlist: Vec<StorageBucket> = serde_json::from_value(allowlist.clone()).expect("allowlist");
+        pairs_allowed(&d, direction, &allowlist)
     }
     fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> DownloadPlanner {
         let d: Discovery = serde_json::from_value(discovery.clone()).expect("discovery");
@@ -818,8 +1002,96 @@ mod tests {
                 CoreSurface.chunk_length(n, s, e, i)
             }
         }
+        fn check_storage_get(&self, status: u16, len: Option<u64>, expected: u64) -> Value {
+            if self.0 == "storage" {
+                return json!({"kind": "stored"});
+            }
+            CoreSurface.check_storage_get(status, len, expected)
+        }
+        fn check_storage_body(&self, received: u64, expected: u64) -> Value {
+            if self.0 == "storage_body_oneshot" {
+                // the one-shot that accepts any body at least as long as the grant
+                return if received >= expected {
+                    json!({"kind": "stored"})
+                } else {
+                    json!({"kind": "failed", "status": 200})
+                };
+            }
+            CoreSurface.check_storage_body(received, expected)
+        }
+        fn storage_body(&self, status: u16, content_length: Option<u64>, expected: u64, pushes: &[u64]) -> Value {
+            if self.0 == "storage_body" {
+                // a binding that checks the head correctly and then accepts any body at least as
+                // long as the grant (the real regression: the count drifts, so a row whose push
+                // was refused still stores)
+                let head = check_storage_get(status, content_length, expected);
+                if head != StorageGet::Stored {
+                    return storage_get_json(head);
+                }
+                let received: u64 = pushes.iter().fold(0u64, |a, n| a.saturating_add(*n));
+                return if received >= expected {
+                    json!({"kind": "stored"})
+                } else {
+                    json!({"kind": "failed", "status": 200})
+                };
+            }
+            drive_storage_body(self, status, content_length, expected, pushes)
+        }
+        fn paced_until_ms(&self, start_ms: i64, bytes: u64, kbps: u64) -> i64 {
+            if self.0 == "pacing" {
+                return start_ms;
+            }
+            CoreSurface.paced_until_ms(start_ms, bytes, kbps)
+        }
+        fn max_in_flight_bytes(&self, class: &str) -> u64 {
+            if self.0 == "memory_class" {
+                // a binding that reports the wrong ceiling for every class
+                return crate::direct_transfer::max_in_flight_bytes(crate::direct_transfer::MemoryClass::Native);
+            }
+            CoreSurface.max_in_flight_bytes(class)
+        }
+        fn pairs_allowed(&self, d: &Value, direction: &str, allowlist: &Value) -> bool {
+            if self.0 == "pairs_allowed" {
+                // The real regression (the rule core had before K1): `offered && every listed pair is
+                // allowlisted`. With no discovery buckets the `all` is vacuously true whatever the
+                // allowlist says, so this drift is independent of the allowlist.
+                let disc: Discovery = serde_json::from_value(d.clone()).expect("discovery");
+                let direction =
+                    Direction::from_code(direction).unwrap_or_else(|| panic!("unknown direction {direction:?}"));
+                let allowlist: Vec<StorageBucket> = serde_json::from_value(allowlist.clone()).expect("allowlist");
+                let offered = match direction {
+                    Direction::Download => disc.offers_download(),
+                    Direction::Upload => disc.offers_upload(),
+                };
+                let listed = |p: &StorageBucket| {
+                    allowlist
+                        .iter()
+                        .any(|a| a.host.eq_ignore_ascii_case(&p.host) && a.bucket == p.bucket)
+                };
+                return offered && disc.storage_buckets.iter().all(listed);
+            }
+            CoreSurface.pairs_allowed(d, direction, allowlist)
+        }
         fn planner(&self, d: &Value, api: &str, file: &str, seed: u64) -> DownloadPlanner {
             CoreSurface.planner(d, api, file, seed)
+        }
+    }
+
+    impl StorageBodySurface for Drift {
+        type Body = StorageBody;
+        fn body_from_head(
+            &self,
+            status: u16,
+            content_length: Option<u64>,
+            expected: u64,
+        ) -> Result<StorageBody, Value> {
+            CoreSurface.body_from_head(status, content_length, expected)
+        }
+        fn body_push(&self, body: &mut StorageBody, n: u64) -> Result<(), Value> {
+            CoreSurface.body_push(body, n)
+        }
+        fn body_finish(&self, body: StorageBody) -> Value {
+            CoreSurface.body_finish(body)
         }
     }
 
@@ -909,8 +1181,44 @@ mod tests {
         fn chunk_length(&self, n: u32, s: u64, e: u64, i: u32) -> Option<u64> {
             CoreSurface.chunk_length(n, s, e, i)
         }
+        fn check_storage_get(&self, status: u16, len: Option<u64>, expected: u64) -> Value {
+            CoreSurface.check_storage_get(status, len, expected)
+        }
+        fn check_storage_body(&self, received: u64, expected: u64) -> Value {
+            CoreSurface.check_storage_body(received, expected)
+        }
+        fn storage_body(&self, status: u16, content_length: Option<u64>, expected: u64, pushes: &[u64]) -> Value {
+            drive_storage_body(self, status, content_length, expected, pushes)
+        }
+        fn paced_until_ms(&self, start_ms: i64, bytes: u64, kbps: u64) -> i64 {
+            CoreSurface.paced_until_ms(start_ms, bytes, kbps)
+        }
+        fn max_in_flight_bytes(&self, class: &str) -> u64 {
+            CoreSurface.max_in_flight_bytes(class)
+        }
+        fn pairs_allowed(&self, d: &Value, direction: &str, allowlist: &Value) -> bool {
+            CoreSurface.pairs_allowed(d, direction, allowlist)
+        }
         fn planner(&self, d: &Value, api: &str, file: &str, seed: u64) -> ForgetfulPlanner {
             ForgetfulPlanner(CoreSurface.planner(d, api, file, seed), self.0)
+        }
+    }
+
+    impl StorageBodySurface for Forgetful {
+        type Body = StorageBody;
+        fn body_from_head(
+            &self,
+            status: u16,
+            content_length: Option<u64>,
+            expected: u64,
+        ) -> Result<StorageBody, Value> {
+            CoreSurface.body_from_head(status, content_length, expected)
+        }
+        fn body_push(&self, body: &mut StorageBody, n: u64) -> Result<(), Value> {
+            CoreSurface.body_push(body, n)
+        }
+        fn body_finish(&self, body: StorageBody) -> Value {
+            CoreSurface.body_finish(body)
         }
     }
 
@@ -923,9 +1231,14 @@ mod tests {
             report.authority >= 59
                 && report.classify >= 121
                 && report.chunk_length >= 8
+                && report.storage_get >= 8
+                && report.storage_body >= 10
+                && report.pacing >= 6
+                && report.pairs_allowed >= 8
+                && report.memory_class == 4
                 && report.pinned_retry >= 20
-                && report.cache_scenarios >= 9
-                && report.cache_steps >= 45,
+                && report.cache_scenarios >= 11
+                && report.cache_steps >= 60,
             "{report:?}"
         );
         assert!(
@@ -977,6 +1290,11 @@ mod tests {
             "authority",
             "classify",
             "chunk_length",
+            "storage_get",
+            "storage_body",
+            "pacing",
+            "pairs_allowed",
+            "memory_class",
             "pinned_retry",
             "discovery_cache",
             "planner",
@@ -996,6 +1314,105 @@ mod tests {
         }
     }
 
+    /// The pairs drift must be the vacuous-buckets rule, not an allowlist test: a discovery with
+    /// hosts and no buckets and a NON-empty allowlist is where the two differ.
+    #[test]
+    fn the_pairs_drift_is_the_vacuous_buckets_rule() {
+        let discovery = json!({
+            "download": ["object-download-v1"],
+            "storage_hosts": ["s3.storage.test"],
+        });
+        let allowlist = json!([{"host": "s3.storage.test", "bucket": "bb-01"}]);
+        assert!(
+            Drift("pairs_allowed").pairs_allowed(&discovery, "download", &allowlist),
+            "the drift must read no buckets as vacuously allowed, independent of the allowlist"
+        );
+        // And the file itself says that discovery is not allowed, so the runner goes red on it.
+        let rows = vectors();
+        let row = rows["pairs_allowed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == "a discovery with no buckets is not allowed")
+            .expect("the cross-binding regression row");
+        assert_eq!(row["expect"], json!(false));
+    }
+
+    /// Which `storage_body` rows a count drift fails, by name: exactly the rows whose push was
+    /// REFUSED (an overflow), not a head row and not a short row. If the drift still moved the head
+    /// check it would also fail the head-failure rows here; if it stored everything it would also
+    /// fail the short row.
+    #[test]
+    fn the_storage_body_drift_is_the_overflow_rows() {
+        let rows = vectors();
+        let mut drifted: Vec<&str> = Vec::new();
+        for row in rows["storage_body"].as_array().expect("storage_body") {
+            let name = row["name"].as_str().unwrap();
+            let pushes: Vec<u64> = row["pushes"].as_array().expect("pushes").iter().map(as_u64).collect();
+            let got = Drift("storage_body").storage_body(
+                u16::try_from(as_u64(&row["status"])).expect("a status fits u16"),
+                match row.get("content_length") {
+                    Some(Value::Null) => None,
+                    Some(v) => Some(as_u64(v)),
+                    None => panic!("storage_body row {name:?}: no content_length (use null for none)"),
+                },
+                as_u64(&row["expected"]),
+                &pushes,
+            );
+            if got != row["expect"] {
+                drifted.push(name);
+            }
+        }
+        assert_eq!(
+            drifted,
+            vec![
+                "a push that would pass the grant is refused at once",
+                "a push past a full grant is not the chunk",
+            ],
+            "the count drift must fail exactly the rows whose push was refused"
+        );
+    }
+
+    /// The one-shot drift accepts `received >= expected`, so it goes red on the counted-body rows of
+    /// `storage_get` (the rows with `check: "body"`) and nowhere else.
+    #[test]
+    fn the_storage_body_oneshot_drift_is_the_counted_body_rows() {
+        let rows = vectors();
+        let mut drifted: Vec<&str> = Vec::new();
+        let mut counted: Vec<&str> = Vec::new();
+        for row in rows["storage_get"].as_array().expect("storage_get") {
+            let name = row["name"].as_str().unwrap();
+            let expected = as_u64(&row["expected"]);
+            if row["check"] == "body" {
+                counted.push(name);
+                let got = Drift("storage_body_oneshot").check_storage_body(as_u64(&row["received"]), expected);
+                if got != row["expect"] {
+                    drifted.push(name);
+                }
+            } else {
+                let head = Drift("storage_body_oneshot").check_storage_get(
+                    u16::try_from(as_u64(&row["status"])).expect("a status fits u16"),
+                    match row.get("content_length") {
+                        Some(Value::Null) => None,
+                        Some(v) => Some(as_u64(v)),
+                        None => panic!("storage_get row {name:?}: no content_length (use null for none)"),
+                    },
+                    expected,
+                );
+                assert_eq!(
+                    head, row["expect"],
+                    "the one-shot drift must not move the head check, {name:?}"
+                );
+            }
+        }
+        assert!(!counted.is_empty(), "the file must have counted-body rows");
+        assert_eq!(
+            drifted,
+            vec!["a counted body one byte long is not the chunk"],
+            "`received >= expected` stores the overlong counted body, and only that counted row"
+        );
+    }
+
     #[test]
     fn the_runner_goes_red_when_a_surface_drifts() {
         for what in [
@@ -1006,6 +1423,12 @@ mod tests {
             "cache",
             "redact",
             "geometry",
+            "storage",
+            "storage_body",
+            "storage_body_oneshot",
+            "pacing",
+            "pairs_allowed",
+            "memory_class",
             "direction",
             "file_bit",
             "future",

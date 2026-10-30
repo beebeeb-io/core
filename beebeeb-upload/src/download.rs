@@ -809,6 +809,7 @@ mod tests {
     }
 
     /// v2 frames as every client writes them after task 1908 (32-byte chunks).
+    #[allow(deprecated)] // a test fixture: the id comes from the test, not from core
     fn v2_payload(mk: &beebeeb_core::kdf::MasterKey, file_id: &str, data: &[u8]) -> Vec<Vec<u8>> {
         use beebeeb_core::chunk_stream::{ChunkEncryptor, ChunkFormat};
         // WRITE_FORMAT is still v1 (read-only rollout phase), so these tests

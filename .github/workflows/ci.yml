@@ -19,14 +19,14 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # action pinned; toolchain set below
         with:
           toolchain: "1.96.0"
           components: clippy, rustfmt
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
 
       - name: cargo fmt
         run: cargo fmt -- --check
@@ -40,19 +40,32 @@ jobs:
         if: always()
         run: cargo clippy --workspace -- -D warnings
 
+      # The vectors are generated, never edited: the committed JSON must be byte-for-byte what the
+      # generator writes. Cheap (python only), so it runs with the fast checks, not after the tests.
+      # `if: always()` so a fmt or clippy failure does not silently skip it.
+      - name: contract vectors match their generator
+        if: always()
+        run: bash test-vectors/tools/check-direct-vectors-generated.sh
+
+      # The self-test must exit 0 (it rewrites a temp copy and the check REJECTS it) and non-zero
+      # otherwise, so this is a plain step: a check that cannot go red fails it.
+      - name: contract vector check can go red
+        if: always()
+        run: bash test-vectors/tools/check-direct-vectors-generated.sh --self-test
+
   test:
     name: Tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # action pinned; toolchain set below
         with:
           toolchain: "1.96.0"
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
 
       - name: cargo test
         run: cargo test --workspace
@@ -67,7 +80,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # action pinned; toolchain set below
         with:
@@ -94,7 +107,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Shared engine (vendored verbatim from the workspace canonical): banned
       # origins, host allow-list, provider names, banned claims, regions.

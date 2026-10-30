@@ -15,6 +15,8 @@
 //!    1908; once it is v2 they deliberately must NOT (downgrade guarantee).
 //!    The assertion follows `WRITE_FORMAT`, so the gated switch flips it.
 
+#![allow(deprecated)] // pre-L13 writers are the parity baseline
+
 use std::io::Cursor;
 
 use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor, ChunkFormat, ExpectedChunkFormat, WRITE_FORMAT};

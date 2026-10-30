@@ -1775,6 +1775,12 @@ public protocol DirectDownloadPlannerHandleProtocol: AnyObject, Sendable {
     func apiFetchFailed(index: UInt32) throws 
     
     /**
+     * The ciphertext length of chunk `index` once the first window was accepted, else `None`.
+     * The grant's `length` is this number; check a storage answer against it.
+     */
+    func chunkLength(index: UInt32)  -> UInt64?
+    
+    /**
      * Chunk `index` arrived but did not authenticate when decrypted.
      */
     func chunkUnauthentic(index: UInt32) throws 
@@ -1935,6 +1941,19 @@ open func apiFetchFailed(index: UInt32)throws   {try rustCallWithError(FfiConver
         FfiConverterUInt32.lower(index),$0
     )
 }
+}
+    
+    /**
+     * The ciphertext length of chunk `index` once the first window was accepted, else `None`.
+     * The grant's `length` is this number; check a storage answer against it.
+     */
+open func chunkLength(index: UInt32) -> UInt64?  {
+    return try!  FfiConverterOptionUInt64.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directdownloadplannerhandle_chunk_length(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt32.lower(index),$0
+    )
+})
 }
     
     /**
@@ -2568,6 +2587,170 @@ public func FfiConverterTypeDirectSignedUrl_lower(_ value: DirectSignedUrl) -> U
 
 
 /**
+ * A storage GET's body counted as it arrives, so no client counts body bytes on its own.
+ * `from_head` starts it (throwing `StorageBody` when the head is not a `200` of the grant's
+ * length), `push` counts the bytes read and throws as soon as they would pass the grant, and
+ * `finish` gives the answer and consumes the count.
+ */
+public protocol DirectStorageBodyHandleProtocol: AnyObject, Sendable {
+    
+    /**
+     * The body's answer; the count is consumed, and a second call gives the same answer.
+     */
+    func finish()  -> DirectStorageGetDto
+    
+    /**
+     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant. A push
+     * after `finish` is a CALLER bug, not a storage failure: it throws `Plan` with code
+     * `finished`, because the count was consumed by `finish` and there is no body left to count.
+     */
+    func push(n: UInt64) throws 
+    
+}
+/**
+ * A storage GET's body counted as it arrives, so no client counts body bytes on its own.
+ * `from_head` starts it (throwing `StorageBody` when the head is not a `200` of the grant's
+ * length), `push` counts the bytes read and throws as soon as they would pass the grant, and
+ * `finish` gives the answer and consumes the count.
+ */
+open class DirectStorageBodyHandle: DirectStorageBodyHandleProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_directstoragebodyhandle(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_directstoragebodyhandle(handle, $0) }
+    }
+
+    
+public static func fromHead(status: UInt16, contentLength: UInt64?, expected: UInt64)throws  -> DirectStorageBodyHandle  {
+    return try  FfiConverterTypeDirectStorageBodyHandle_lift(try rustCallWithError(FfiConverterTypeDirectTransferError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_directstoragebodyhandle_from_head(
+        FfiConverterUInt16.lower(status),
+        FfiConverterOptionUInt64.lower(contentLength),
+        FfiConverterUInt64.lower(expected),$0
+    )
+})
+}
+    
+
+    
+    /**
+     * The body's answer; the count is consumed, and a second call gives the same answer.
+     */
+open func finish() -> DirectStorageGetDto  {
+    return try!  FfiConverterTypeDirectStorageGetDto_lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directstoragebodyhandle_finish(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant. A push
+     * after `finish` is a CALLER bug, not a storage failure: it throws `Plan` with code
+     * `finished`, because the count was consumed by `finish` and there is no body left to count.
+     */
+open func push(n: UInt64)throws   {try rustCallWithError(FfiConverterTypeDirectTransferError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_directstoragebodyhandle_push(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(n),$0
+    )
+}
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDirectStorageBodyHandle: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = DirectStorageBodyHandle
+
+    public static func lift(_ handle: UInt64) throws -> DirectStorageBodyHandle {
+        return DirectStorageBodyHandle(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: DirectStorageBodyHandle) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DirectStorageBodyHandle {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: DirectStorageBodyHandle, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectStorageBodyHandle_lift(_ handle: UInt64) throws -> DirectStorageBodyHandle {
+    return try FfiConverterTypeDirectStorageBodyHandle.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectStorageBodyHandle_lower(_ value: DirectStorageBodyHandle) -> UInt64 {
+    return FfiConverterTypeDirectStorageBodyHandle.lower(value)
+}
+
+
+
+
+
+
+/**
  * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`
  * for a key derived from the account's master key, or via
  * [`FileKeyHandle::from_key_bytes`] for one the app holds as 32 bytes.
@@ -2681,6 +2864,28 @@ public protocol FileKeyHandleProtocol: AnyObject, Sendable {
      */
     func encryptThumbnailFor(plaintext: Data, recordedPin: UInt8) throws  -> Data
     
+    /**
+     * One-way public key identifier; never exports the key itself.
+     */
+    func keyId() throws  -> Data
+    
+    func unwrapFolderChild(sharedFolderId: String, itemId: String, kind: UInt8, nonce: Data, ciphertext: Data) throws  -> FileKeyHandle
+    
+    /**
+     * Authenticate a wrap and keep its exactly 32-byte plaintext in a handle.
+     */
+    func unwrapKey(nonce: Data, ciphertext: Data) throws  -> FileKeyHandle
+    
+    /**
+     * L7 authenticated child wrap. IDs are UUID strings; AAD uses their 16 raw bytes.
+     */
+    func wrapFolderChild(sharedFolderId: String, itemId: String, kind: UInt8, inner: FileKeyHandle) throws  -> EncryptedData
+    
+    /**
+     * AES-256-GCM key wrap, no AAD: 12-byte nonce and 48-byte ciphertext.
+     */
+    func wrapKey(inner: FileKeyHandle) throws  -> EncryptedData
+    
 }
 /**
  * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`
@@ -2739,6 +2944,32 @@ open class FileKeyHandle: FileKeyHandleProtocol, @unchecked Sendable {
 
     
     /**
+     * Combine a link fragment and optional 32-byte Argon2id stretch in core.
+     * Owned secret inputs are wiped on success and every error path.
+     */
+public static func fromFolderLink(kC: Data, passphraseStretch: Data?)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_from_folder_link(
+        FfiConverterData.lower(kC),
+        FfiConverterOptionData.lower(passphraseStretch),$0
+    )
+})
+}
+    
+    /**
+     * Stretch then combine; memory/KDF errors propagate without a plain-link fallback.
+     */
+public static func fromFolderLinkPassphrase(kC: Data, passphrase: String, token: String)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_from_folder_link_passphrase(
+        FfiConverterData.lower(kC),
+        FfiConverterString.lower(passphrase),
+        FfiConverterString.lower(token),$0
+    )
+})
+}
+    
+    /**
      * A handle for a per-file key the app holds as raw bytes and that is NOT
      * derived from the account's master key: a file-request upload's content
      * key (`open_request_upload`), a shared file's key. Task 1958 round 4: the
@@ -2754,6 +2985,16 @@ public static func fromKeyBytes(key: Data)throws  -> FileKeyHandle  {
     return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_from_key_bytes(
         FfiConverterData.lower(key),$0
+    )
+})
+}
+    
+    /**
+     * A fresh random key, independent of the account master key.
+     */
+public static func generate()throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_generate($0
     )
 })
 }
@@ -2972,6 +3213,70 @@ open func encryptThumbnailFor(plaintext: Data, recordedPin: UInt8)throws  -> Dat
             self.uniffiCloneHandle(),
         FfiConverterData.lower(plaintext),
         FfiConverterUInt8.lower(recordedPin),$0
+    )
+})
+}
+    
+    /**
+     * One-way public key identifier; never exports the key itself.
+     */
+open func keyId()throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_key_id(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+open func unwrapFolderChild(sharedFolderId: String, itemId: String, kind: UInt8, nonce: Data, ciphertext: Data)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_unwrap_folder_child(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(sharedFolderId),
+        FfiConverterString.lower(itemId),
+        FfiConverterUInt8.lower(kind),
+        FfiConverterData.lower(nonce),
+        FfiConverterData.lower(ciphertext),$0
+    )
+})
+}
+    
+    /**
+     * Authenticate a wrap and keep its exactly 32-byte plaintext in a handle.
+     */
+open func unwrapKey(nonce: Data, ciphertext: Data)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_unwrap_key(
+            self.uniffiCloneHandle(),
+        FfiConverterData.lower(nonce),
+        FfiConverterData.lower(ciphertext),$0
+    )
+})
+}
+    
+    /**
+     * L7 authenticated child wrap. IDs are UUID strings; AAD uses their 16 raw bytes.
+     */
+open func wrapFolderChild(sharedFolderId: String, itemId: String, kind: UInt8, inner: FileKeyHandle)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_wrap_folder_child(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(sharedFolderId),
+        FfiConverterString.lower(itemId),
+        FfiConverterUInt8.lower(kind),
+        FfiConverterTypeFileKeyHandle_lower(inner),$0
+    )
+})
+}
+    
+    /**
+     * AES-256-GCM key wrap, no AAD: 12-byte nonce and 48-byte ciphertext.
+     */
+open func wrapKey(inner: FileKeyHandle)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_filekeyhandle_wrap_key(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeFileKeyHandle_lower(inner),$0
     )
 })
 }
@@ -3354,6 +3659,54 @@ public protocol MasterKeyHandleProtocol: AnyObject, Sendable {
      */
     func exportForKeychain() throws  -> Data
     
+    /**
+     * L9 (task 2255): open a LEGACY invite owner copy; `Some` only when core
+     * proves it over the folder's `rows` (at most 64 distinct ids, one call).
+     * The unproven candidate never leaves core. Attack B is a named residual.
+     */
+    func openLegacyInviteOwnerCopy(folderId: String, legacyCopy: Data, rows: [LegacyFolderKeyRow]) throws  -> FileKeyHandle?
+    
+    func unwrapFolderCustody(folderId: String, nonce: Data, ciphertext: Data) throws  -> FileKeyHandle
+    
+    func unwrapInviteOwnerCopy(folderId: String, nonce: Data, ciphertext: Data) throws  -> FileKeyHandle
+    
+    /**
+     * The link fragment is the deliberate export exception: JS puts K_c in
+     * the URL. The account master key never crosses this boundary.
+     */
+    func unwrapLinkOwnerKey(shareId: String, nonce: Data, ciphertext: Data) throws  -> Data
+    
+    func unwrapLinkOwnerToken(shareId: String, nonce: Data, ciphertext: Data) throws  -> Data
+    
+    /**
+     * Open only L8 and return an opaque handle, never raw file-key bytes.
+     */
+    func unwrapOwnerFileKey(itemId: String, nonce: Data, ciphertext: Data) throws  -> FileKeyHandle
+    
+    /**
+     * Wrap bytes without exporting the master key across the FFI boundary.
+     */
+    func wrapBytes(bytes: Data) throws  -> EncryptedData
+    
+    func wrapFolderCustody(folderId: String, inner: FileKeyHandle) throws  -> EncryptedData
+    
+    func wrapInviteOwnerCopy(folderId: String, inner: FileKeyHandle) throws  -> EncryptedData
+    
+    /**
+     * Legacy direct-master wrap for existing protocols. Folder custody and
+     * link recovery MUST use the purpose-bound methods below instead.
+     */
+    func wrapKey(inner: FileKeyHandle) throws  -> EncryptedData
+    
+    func wrapLinkOwnerKey(shareId: String, inner: FileKeyHandle) throws  -> EncryptedData
+    
+    func wrapLinkOwnerToken(shareId: String, token: Data) throws  -> EncryptedData
+    
+    /**
+     * L8 owner adoption. Key material stays in native handles.
+     */
+    func wrapOwnerFileKey(itemId: String, inner: FileKeyHandle) throws  -> EncryptedData
+    
 }
 /**
  * Opaque handle to a MasterKey. The key bytes never leave Rust except via
@@ -3629,6 +3982,162 @@ open func exportForKeychain()throws  -> Data  {
     return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_export_for_keychain(
             self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * L9 (task 2255): open a LEGACY invite owner copy; `Some` only when core
+     * proves it over the folder's `rows` (at most 64 distinct ids, one call).
+     * The unproven candidate never leaves core. Attack B is a named residual.
+     */
+open func openLegacyInviteOwnerCopy(folderId: String, legacyCopy: Data, rows: [LegacyFolderKeyRow])throws  -> FileKeyHandle?  {
+    return try  FfiConverterOptionTypeFileKeyHandle.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_open_legacy_invite_owner_copy(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(folderId),
+        FfiConverterData.lower(legacyCopy),
+        FfiConverterSequenceTypeLegacyFolderKeyRow.lower(rows),$0
+    )
+})
+}
+    
+open func unwrapFolderCustody(folderId: String, nonce: Data, ciphertext: Data)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_folder_custody(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(folderId),
+        FfiConverterData.lower(nonce),
+        FfiConverterData.lower(ciphertext),$0
+    )
+})
+}
+    
+open func unwrapInviteOwnerCopy(folderId: String, nonce: Data, ciphertext: Data)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_invite_owner_copy(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(folderId),
+        FfiConverterData.lower(nonce),
+        FfiConverterData.lower(ciphertext),$0
+    )
+})
+}
+    
+    /**
+     * The link fragment is the deliberate export exception: JS puts K_c in
+     * the URL. The account master key never crosses this boundary.
+     */
+open func unwrapLinkOwnerKey(shareId: String, nonce: Data, ciphertext: Data)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_link_owner_key(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(shareId),
+        FfiConverterData.lower(nonce),
+        FfiConverterData.lower(ciphertext),$0
+    )
+})
+}
+    
+open func unwrapLinkOwnerToken(shareId: String, nonce: Data, ciphertext: Data)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_link_owner_token(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(shareId),
+        FfiConverterData.lower(nonce),
+        FfiConverterData.lower(ciphertext),$0
+    )
+})
+}
+    
+    /**
+     * Open only L8 and return an opaque handle, never raw file-key bytes.
+     */
+open func unwrapOwnerFileKey(itemId: String, nonce: Data, ciphertext: Data)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_owner_file_key(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(itemId),
+        FfiConverterData.lower(nonce),
+        FfiConverterData.lower(ciphertext),$0
+    )
+})
+}
+    
+    /**
+     * Wrap bytes without exporting the master key across the FFI boundary.
+     */
+open func wrapBytes(bytes: Data)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_bytes(
+            self.uniffiCloneHandle(),
+        FfiConverterData.lower(bytes),$0
+    )
+})
+}
+    
+open func wrapFolderCustody(folderId: String, inner: FileKeyHandle)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_folder_custody(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(folderId),
+        FfiConverterTypeFileKeyHandle_lower(inner),$0
+    )
+})
+}
+    
+open func wrapInviteOwnerCopy(folderId: String, inner: FileKeyHandle)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_invite_owner_copy(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(folderId),
+        FfiConverterTypeFileKeyHandle_lower(inner),$0
+    )
+})
+}
+    
+    /**
+     * Legacy direct-master wrap for existing protocols. Folder custody and
+     * link recovery MUST use the purpose-bound methods below instead.
+     */
+open func wrapKey(inner: FileKeyHandle)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_key(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeFileKeyHandle_lower(inner),$0
+    )
+})
+}
+    
+open func wrapLinkOwnerKey(shareId: String, inner: FileKeyHandle)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_link_owner_key(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(shareId),
+        FfiConverterTypeFileKeyHandle_lower(inner),$0
+    )
+})
+}
+    
+open func wrapLinkOwnerToken(shareId: String, token: Data)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_link_owner_token(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(shareId),
+        FfiConverterData.lower(token),$0
+    )
+})
+}
+    
+    /**
+     * L8 owner adoption. Key material stays in native handles.
+     */
+open func wrapOwnerFileKey(itemId: String, inner: FileKeyHandle)throws  -> EncryptedData  {
+    return try  FfiConverterTypeEncryptedData_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_owner_file_key(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(itemId),
+        FfiConverterTypeFileKeyHandle_lower(inner),$0
     )
 })
 }
@@ -5431,13 +5940,34 @@ public struct DirectConstantsDto: Equatable, Hashable {
     public var discoveryTimeoutMs: UInt32
     public var apiCallTimeoutMs: UInt32
     public var backgroundPutResourceTimeoutMs: UInt32
+    /**
+     * The largest discovery body a client should read.
+     */
+    public var maxDiscoveryBodyBytes: UInt32
+    /**
+     * The largest grant-window body a client should read.
+     */
+    public var maxGrantBodyBytes: UInt32
+    /**
+     * The largest ciphertext chunk the client will ever see (256 MiB plus the AEAD overhead).
+     */
+    public var maxChunkBodyBytes: UInt64
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
     public init(capObjectDownloadV1: String, capObjectUploadV1: String, capabilitiesHeader: String, discoveryPath: String, maxWindow: UInt32, defaultWindow: UInt32, chunkOverhead: UInt32, 
         /**
          * The time bounds every client applies (clients design 6.2), in milliseconds.
-         */storageConnectTimeoutMs: UInt32, storageGetIdleMs: UInt32, discoveryTimeoutMs: UInt32, apiCallTimeoutMs: UInt32, backgroundPutResourceTimeoutMs: UInt32) {
+         */storageConnectTimeoutMs: UInt32, storageGetIdleMs: UInt32, discoveryTimeoutMs: UInt32, apiCallTimeoutMs: UInt32, backgroundPutResourceTimeoutMs: UInt32, 
+        /**
+         * The largest discovery body a client should read.
+         */maxDiscoveryBodyBytes: UInt32, 
+        /**
+         * The largest grant-window body a client should read.
+         */maxGrantBodyBytes: UInt32, 
+        /**
+         * The largest ciphertext chunk the client will ever see (256 MiB plus the AEAD overhead).
+         */maxChunkBodyBytes: UInt64) {
         self.capObjectDownloadV1 = capObjectDownloadV1
         self.capObjectUploadV1 = capObjectUploadV1
         self.capabilitiesHeader = capabilitiesHeader
@@ -5450,6 +5980,9 @@ public struct DirectConstantsDto: Equatable, Hashable {
         self.discoveryTimeoutMs = discoveryTimeoutMs
         self.apiCallTimeoutMs = apiCallTimeoutMs
         self.backgroundPutResourceTimeoutMs = backgroundPutResourceTimeoutMs
+        self.maxDiscoveryBodyBytes = maxDiscoveryBodyBytes
+        self.maxGrantBodyBytes = maxGrantBodyBytes
+        self.maxChunkBodyBytes = maxChunkBodyBytes
     }
 
     
@@ -5479,7 +6012,10 @@ public struct FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer {
                 storageGetIdleMs: FfiConverterUInt32.read(from: &buf), 
                 discoveryTimeoutMs: FfiConverterUInt32.read(from: &buf), 
                 apiCallTimeoutMs: FfiConverterUInt32.read(from: &buf), 
-                backgroundPutResourceTimeoutMs: FfiConverterUInt32.read(from: &buf)
+                backgroundPutResourceTimeoutMs: FfiConverterUInt32.read(from: &buf), 
+                maxDiscoveryBodyBytes: FfiConverterUInt32.read(from: &buf), 
+                maxGrantBodyBytes: FfiConverterUInt32.read(from: &buf), 
+                maxChunkBodyBytes: FfiConverterUInt64.read(from: &buf)
         )
     }
 
@@ -5496,6 +6032,9 @@ public struct FfiConverterTypeDirectConstantsDto: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value.discoveryTimeoutMs, into: &buf)
         FfiConverterUInt32.write(value.apiCallTimeoutMs, into: &buf)
         FfiConverterUInt32.write(value.backgroundPutResourceTimeoutMs, into: &buf)
+        FfiConverterUInt32.write(value.maxDiscoveryBodyBytes, into: &buf)
+        FfiConverterUInt32.write(value.maxGrantBodyBytes, into: &buf)
+        FfiConverterUInt64.write(value.maxChunkBodyBytes, into: &buf)
     }
 }
 
@@ -6260,6 +6799,64 @@ public func FfiConverterTypeEncryptedShardDto_lift(_ buf: RustBuffer) throws -> 
 #endif
 public func FfiConverterTypeEncryptedShardDto_lower(_ value: EncryptedShardDto) -> RustBuffer {
     return FfiConverterTypeEncryptedShardDto.lower(value)
+}
+
+
+/**
+ * One row of a shared folder's legacy key table, for the L9 proof (task 2255):
+ * `file_id` as the server lists it, `wrap` = nonce(12) || ciphertext || tag.
+ */
+public struct LegacyFolderKeyRow: Equatable, Hashable {
+    public var fileId: String
+    public var wrap: Data
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(fileId: String, wrap: Data) {
+        self.fileId = fileId
+        self.wrap = wrap
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension LegacyFolderKeyRow: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLegacyFolderKeyRow: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LegacyFolderKeyRow {
+        return
+            try LegacyFolderKeyRow(
+                fileId: FfiConverterString.read(from: &buf), 
+                wrap: FfiConverterData.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LegacyFolderKeyRow, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.fileId, into: &buf)
+        FfiConverterData.write(value.wrap, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLegacyFolderKeyRow_lift(_ buf: RustBuffer) throws -> LegacyFolderKeyRow {
+    return try FfiConverterTypeLegacyFolderKeyRow.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLegacyFolderKeyRow_lower(_ value: LegacyFolderKeyRow) -> RustBuffer {
+    return FfiConverterTypeLegacyFolderKeyRow.lower(value)
 }
 
 
@@ -7831,6 +8428,90 @@ public func FfiConverterTypeDirectLookupDto_lower(_ value: DirectLookupDto) -> R
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
+ * The process class, which sets the ciphertext-in-flight cap.
+ */
+
+public enum DirectMemoryClassDto: Equatable, Hashable {
+    
+    case native
+    case browser
+    case mobileApp
+    case mobileExtension
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension DirectMemoryClassDto: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDirectMemoryClassDto: FfiConverterRustBuffer {
+    typealias SwiftType = DirectMemoryClassDto
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DirectMemoryClassDto {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .native
+        
+        case 2: return .browser
+        
+        case 3: return .mobileApp
+        
+        case 4: return .mobileExtension
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DirectMemoryClassDto, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .native:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .browser:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .mobileApp:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .mobileExtension:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectMemoryClassDto_lift(_ buf: RustBuffer) throws -> DirectMemoryClassDto {
+    return try FfiConverterTypeDirectMemoryClassDto.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectMemoryClassDto_lower(_ value: DirectMemoryClassDto) -> RustBuffer {
+    return FfiConverterTypeDirectMemoryClassDto.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
  * What an API answer means.
  */
 
@@ -8389,6 +9070,80 @@ public func FfiConverterTypeDirectRetryDecisionDto_lower(_ value: DirectRetryDec
 }
 
 
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * What a storage GET answer means. `Stored` only for a `200` whose `Content-Length` is exactly
+ * the grant's length; `Failed` carries the status (`0` means there was no HTTP answer).
+ */
+
+public enum DirectStorageGetDto: Equatable, Hashable {
+    
+    case stored
+    case failed(status: UInt16
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension DirectStorageGetDto: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDirectStorageGetDto: FfiConverterRustBuffer {
+    typealias SwiftType = DirectStorageGetDto
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DirectStorageGetDto {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .stored
+        
+        case 2: return .failed(status: try FfiConverterUInt16.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DirectStorageGetDto, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .stored:
+            writeInt(&buf, Int32(1))
+        
+        
+        case let .failed(status):
+            writeInt(&buf, Int32(2))
+            FfiConverterUInt16.write(status, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectStorageGetDto_lift(_ buf: RustBuffer) throws -> DirectStorageGetDto {
+    return try FfiConverterTypeDirectStorageGetDto.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectStorageGetDto_lower(_ value: DirectStorageGetDto) -> RustBuffer {
+    return FfiConverterTypeDirectStorageGetDto.lower(value)
+}
+
+
 
 /**
  * Why a call into the direct-transfer rules failed. Every variant carries a
@@ -8412,8 +9167,9 @@ public enum DirectTransferError: Swift.Error, Equatable, Hashable, Foundation.Lo
     case Discovery(code: String
     )
     /**
-     * A call that does not fit the planner's state (a bug in the caller):
-     * `not_in_flight`, `not_fetched`, `out_of_order`, `api_route_failure`.
+     * A call that does not fit the caller-driven state (a bug in the caller): the planner's
+     * `not_in_flight`, `not_fetched`, `out_of_order`, `api_route_failure`; or `finished`, which
+     * means the storage body handle was used after `finish` (the count was already consumed).
      */
     case Plan(code: String
     )
@@ -8421,6 +9177,14 @@ public enum DirectTransferError: Swift.Error, Equatable, Hashable, Foundation.Lo
      * `call` was none of `discovery`, `download_grant`, `pinned_chunk`.
      */
     case UnknownCall
+    /**
+     * A storage body operation failed: `failed` (the head was not a `200` of the grant's length,
+     * or a push would have passed the grant). The kind is core's `StorageGet::kind`; `status` is
+     * the status the head (or the refused push) answered, so the caller never re-derives it.
+     * Appended last so every earlier variant keeps its wire index.
+     */
+    case StorageBody(code: String, status: UInt16
+    )
 
     
 
@@ -8460,6 +9224,10 @@ public struct FfiConverterTypeDirectTransferError: FfiConverterRustBuffer {
             code: try FfiConverterString.read(from: &buf)
             )
         case 4: return .UnknownCall
+        case 5: return .StorageBody(
+            code: try FfiConverterString.read(from: &buf), 
+            status: try FfiConverterUInt16.read(from: &buf)
+            )
 
          default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -8490,6 +9258,12 @@ public struct FfiConverterTypeDirectTransferError: FfiConverterRustBuffer {
         case .UnknownCall:
             writeInt(&buf, Int32(4))
         
+        
+        case let .StorageBody(code,status):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(code, into: &buf)
+            FfiConverterUInt16.write(status, into: &buf)
+            
         }
     }
 }
@@ -9238,9 +10012,9 @@ public enum UploadError: Swift.Error, Equatable, Hashable, Foundation.LocalizedE
     
     case Network(detail: String
     )
-    case ServerError(status: UInt16, message: String
+    case ServerError(status: UInt16, detail: String
     )
-    case ClientError(status: UInt16, message: String
+    case ClientError(status: UInt16, detail: String
     )
     case RateLimited(retryAfterSecs: UInt64
     )
@@ -9286,11 +10060,11 @@ public struct FfiConverterTypeUploadError: FfiConverterRustBuffer {
             )
         case 2: return .ServerError(
             status: try FfiConverterUInt16.read(from: &buf), 
-            message: try FfiConverterString.read(from: &buf)
+            detail: try FfiConverterString.read(from: &buf)
             )
         case 3: return .ClientError(
             status: try FfiConverterUInt16.read(from: &buf), 
-            message: try FfiConverterString.read(from: &buf)
+            detail: try FfiConverterString.read(from: &buf)
             )
         case 4: return .RateLimited(
             retryAfterSecs: try FfiConverterUInt64.read(from: &buf)
@@ -9325,16 +10099,16 @@ public struct FfiConverterTypeUploadError: FfiConverterRustBuffer {
             FfiConverterString.write(detail, into: &buf)
             
         
-        case let .ServerError(status,message):
+        case let .ServerError(status,detail):
             writeInt(&buf, Int32(2))
             FfiConverterUInt16.write(status, into: &buf)
-            FfiConverterString.write(message, into: &buf)
+            FfiConverterString.write(detail, into: &buf)
             
         
-        case let .ClientError(status,message):
+        case let .ClientError(status,detail):
             writeInt(&buf, Int32(3))
             FfiConverterUInt16.write(status, into: &buf)
-            FfiConverterString.write(message, into: &buf)
+            FfiConverterString.write(detail, into: &buf)
             
         
         case let .RateLimited(retryAfterSecs):
@@ -10061,6 +10835,30 @@ fileprivate struct FfiConverterOptionTypeBreachCheckHandle: FfiConverterRustBuff
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeFileKeyHandle: FfiConverterRustBuffer {
+    typealias SwiftType = FileKeyHandle?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeFileKeyHandle.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeFileKeyHandle.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeCachedFileEntryData: FfiConverterRustBuffer {
     typealias SwiftType = CachedFileEntryData?
 
@@ -10553,6 +11351,31 @@ fileprivate struct FfiConverterSequenceTypeEncryptedShardDto: FfiConverterRustBu
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeLegacyFolderKeyRow: FfiConverterRustBuffer {
+    typealias SwiftType = [LegacyFolderKeyRow]
+
+    public static func write(_ value: [LegacyFolderKeyRow], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeLegacyFolderKeyRow.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [LegacyFolderKeyRow] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [LegacyFolderKeyRow]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeLegacyFolderKeyRow.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeObservedNodeDto: FfiConverterRustBuffer {
     typealias SwiftType = [ObservedNodeDto]
 
@@ -11013,6 +11836,30 @@ public func directBackgroundPutResourceTimeoutMs() -> UInt64  {
 })
 }
 /**
+ * Check the body a storage GET actually delivered: `Stored` only when the counted bytes are
+ * exactly the grant. `Content-Length` is only the head; a truncated stream ends short.
+ */
+public func directCheckStorageBody(received: UInt64, expected: UInt64) -> DirectStorageGetDto  {
+    return try!  FfiConverterTypeDirectStorageGetDto_lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_direct_check_storage_body(
+        FfiConverterUInt64.lower(received),
+        FfiConverterUInt64.lower(expected),$0
+    )
+})
+}
+/**
+ * Check a storage GET answer: `Stored` only for `200` with `Some(expected)`.
+ */
+public func directCheckStorageGet(status: UInt16, contentLength: UInt64?, expected: UInt64) -> DirectStorageGetDto  {
+    return try!  FfiConverterTypeDirectStorageGetDto_lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_direct_check_storage_get(
+        FfiConverterUInt16.lower(status),
+        FfiConverterOptionUInt64.lower(contentLength),
+        FfiConverterUInt64.lower(expected),$0
+    )
+})
+}
+/**
  * May the app follow this storage link? `api_base` is the API origin in use.
  * Throws `LinkRefused` with the refusal code; the message never contains the URL.
  */
@@ -11041,6 +11888,46 @@ public func directDownloadGrantsPath(fileId: String) -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_beebeeb_uniffi_fn_func_direct_download_grants_path(
         FfiConverterString.lower(fileId),$0
+    )
+})
+}
+/**
+ * The ciphertext bytes a process of `class` may hold at once (256, 64, 64, 16 MiB): a ceiling on
+ * the chunks held, never a reason to fail. The planner clamps the chunk count to at least one, so
+ * at least one chunk is always held, even a 256 MiB chunk in a 16 MiB class.
+ */
+public func directMaxInFlightBytes(`class`: DirectMemoryClassDto) -> UInt64  {
+    return try!  FfiConverterUInt64.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_direct_max_in_flight_bytes(
+        FfiConverterTypeDirectMemoryClassDto_lower(`class`),$0
+    )
+})
+}
+/**
+ * When `wire_bytes` received since `start_ms` at `kbps` KiB/s lets the next storage request
+ * start. `kbps == 0` returns `i64::MIN`: there is no ceiling.
+ */
+public func directPacedUntilMs(startMs: Int64, wireBytes: UInt64, kbps: UInt64) -> Int64  {
+    return try!  FfiConverterInt64.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_direct_paced_until_ms(
+        FfiConverterInt64.lower(startMs),
+        FfiConverterUInt64.lower(wireBytes),
+        FfiConverterUInt64.lower(kbps),$0
+    )
+})
+}
+/**
+ * May this client use the direct transport for `direction`? True only when discovery offers it,
+ * names at least one `{host, bucket}` pair, AND every pair it names is in `pairs`. A discovery
+ * with no buckets is never allowed, not vacuously. Hosts compare ASCII case-insensitively,
+ * buckets exactly.
+ */
+public func directPairsAllowed(discovery: DirectDiscoveryDto, direction: DirectDirectionDto, pairs: [DirectStorageBucketDto]) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_direct_pairs_allowed(
+        FfiConverterTypeDirectDiscoveryDto_lower(discovery),
+        FfiConverterTypeDirectDirectionDto_lower(direction),
+        FfiConverterSequenceTypeDirectStorageBucketDto.lower(pairs),$0
     )
 })
 }
@@ -11751,6 +12638,12 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_direct_background_put_resource_timeout_ms() != 64703) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_body() != 26492) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_get() != 41265) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_url() != 37576) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -11758,6 +12651,15 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_download_grants_path() != 38361) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_max_in_flight_bytes() != 24727) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_paced_until_ms() != 40002) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_pairs_allowed() != 6861) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_pinned_retry_decision() != 23908) {
@@ -11982,6 +12884,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_api_fetch_failed() != 34853) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_chunk_length() != 15665) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_directdownloadplannerhandle_chunk_unauthentic() != 20797) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -12045,6 +12950,12 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_directsignedurl_redacted() != 58321) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_finish() != 25858) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_push() != 65177) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk() != 50441) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -12085,6 +12996,21 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_thumbnail_for() != 63311) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_key_id() != 12051) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_unwrap_folder_child() != 38035) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_unwrap_key() != 46173) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_wrap_folder_child() != 38562) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_wrap_key() != 2716) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_fileprovidercachehandle_clear() != 34269) {
@@ -12142,6 +13068,45 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_export_for_keychain() != 50366) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_open_legacy_invite_owner_copy() != 59849) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_folder_custody() != 29894) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_invite_owner_copy() != 13280) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_link_owner_key() != 33903) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_link_owner_token() != 21189) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_owner_file_key() != 55056) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_bytes() != 63264) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_folder_custody() != 30373) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_invite_owner_copy() != 63555) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_key() != 6508) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_link_owner_key() != 31672) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_link_owner_token() != 17239) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_owner_file_key() != 19400) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_encrypt_buckets() != 883) {
@@ -12249,7 +13214,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_constructor_directsignedurl_new() != 57713) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_directstoragebodyhandle_from_head() != 7464) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_folder_link() != 22577) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_folder_link_passphrase() != 65362) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_key_bytes() != 50246) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_generate() != 28342) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_fileprovidercachehandle_open() != 22658) {
