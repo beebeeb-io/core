@@ -104,10 +104,8 @@ impl ClientMetaKey {
         field: ClientMetaField,
         plaintext: &str,
     ) -> Result<String, CoreError> {
-        let aad = aad_for(record_key, device_key, field)?;
-        let payload = payload_for(plaintext)?;
         let nonce = fresh_nonce()?;
-        seal_envelope(&self.key, &nonce, &payload, &aad)
+        seal_with_nonce(&self.key, record_key, device_key, field, plaintext, &nonce)
     }
 
     /// Open one field. See [`open_client_meta`].
@@ -200,27 +198,43 @@ fn aad_for(record_key: &Uuid, device_key: Option<&Uuid>, field: ClientMetaField)
 
     let mut aad = Vec::with_capacity(AAD_DOMAIN.len() + 4 + record.len() + 4 + device.len() + 1);
     aad.extend_from_slice(AAD_DOMAIN);
-    aad.extend_from_slice(&u32::try_from(record.len()).unwrap_or(u32::MAX).to_be_bytes());
+    aad.extend_from_slice(
+        &u32::try_from(record.len())
+            .expect("a client-meta record key is at most 36 bytes")
+            .to_be_bytes(),
+    );
     aad.extend_from_slice(record.as_bytes());
-    aad.extend_from_slice(&u32::try_from(device.len()).unwrap_or(u32::MAX).to_be_bytes());
+    aad.extend_from_slice(
+        &u32::try_from(device.len())
+            .expect("a client-meta device key is at most 36 bytes")
+            .to_be_bytes(),
+    );
     aad.extend_from_slice(device.as_bytes());
     aad.push(field as u8);
     Ok(aad)
 }
 
-/// `u16_be(len) || utf8 || zeros` padded to `max(32, roundup(2 + len, 32))`.
+/// `max(32, roundup(2 + len, 32))`: one padding rule for seal and open.
+fn padded_len(text_len: usize) -> usize {
+    (2 + text_len).div_ceil(32) * 32
+}
+
+/// `u16_be(len) || utf8 || zeros` padded to [`padded_len`].
 fn payload_for(plaintext: &str) -> Result<Zeroizing<Vec<u8>>, CoreError> {
     let bytes = plaintext.as_bytes();
     if bytes.len() > MAX_TEXT {
-        return Err(CoreError::InvalidInput(format!(
-            "client-meta plaintext is {} UTF-8 bytes, at most {MAX_TEXT} allowed (use fit_for_seal)",
-            bytes.len()
-        )));
+        // Fixed message: the actual length is exactly what padding hides.
+        return Err(CoreError::InvalidInput(
+            "client-meta plaintext exceeds the 1024-byte limit (use fit_for_seal)".into(),
+        ));
     }
-    let padded = (2 + bytes.len()).div_ceil(32) * 32;
-    let padded = padded.max(32);
+    let padded = padded_len(bytes.len());
     let mut payload = Zeroizing::new(Vec::with_capacity(padded));
-    payload.extend_from_slice(&u16::try_from(bytes.len()).unwrap_or(u16::MAX).to_be_bytes());
+    payload.extend_from_slice(
+        &u16::try_from(bytes.len())
+            .expect("MAX_TEXT is 1024, which fits u16")
+            .to_be_bytes(),
+    );
     payload.extend_from_slice(bytes);
     payload.resize(padded, 0);
     Ok(payload)
@@ -233,6 +247,21 @@ fn fresh_nonce() -> Result<[u8; NONCE_LEN], CoreError> {
         .try_fill_bytes(&mut *nonce)
         .map_err(|e| CoreError::Encryption(format!("OS randomness unavailable: {e}")))?;
     Ok(*nonce)
+}
+
+/// The one seal path: AAD, payload, then `seal_raw_with_nonce`. The public
+/// seal draws a fresh nonce; the vector seam and the core API both end up here.
+fn seal_with_nonce(
+    key: &FileKey,
+    record_key: &Uuid,
+    device_key: Option<&Uuid>,
+    field: ClientMetaField,
+    plaintext: &str,
+    nonce: &[u8; NONCE_LEN],
+) -> Result<String, CoreError> {
+    let aad = aad_for(record_key, device_key, field)?;
+    let payload = payload_for(plaintext)?;
+    seal_envelope(key, nonce, &payload, &aad)
 }
 
 fn seal_envelope(key: &FileKey, nonce: &[u8; NONCE_LEN], payload: &[u8], aad: &[u8]) -> Result<String, CoreError> {
@@ -266,9 +295,7 @@ fn open_envelope(key: &FileKey, envelope: &str, aad: &[u8]) -> Result<String, Co
     if len > MAX_TEXT {
         return Err(CoreError::Decryption);
     }
-    let padded = (2 + len).div_ceil(32) * 32;
-    let padded = padded.max(32);
-    if plain.len() != padded {
+    if plain.len() != padded_len(len) {
         return Err(CoreError::Decryption);
     }
     if plain[2 + len..].iter().any(|&b| b != 0) {
@@ -291,9 +318,7 @@ pub fn seal_client_meta_with_nonce(
     nonce: [u8; NONCE_LEN],
 ) -> Result<String, CoreError> {
     let key = client_meta_key(master);
-    let aad = aad_for(record_key, device_key, field)?;
-    let payload = payload_for(plaintext)?;
-    seal_envelope(&key, &nonce, &payload, &aad)
+    seal_with_nonce(&key, record_key, device_key, field, plaintext, &nonce)
 }
 
 /// Seal an arbitrary payload under a given nonce — `cfg(test)` only, so the
@@ -671,6 +696,65 @@ mod tests {
         want.extend_from_slice(&0u32.to_be_bytes());
         want.push(1);
         assert_eq!(aad, want);
+    }
+
+    #[test]
+    fn padding_buckets_decode_to_bodies_of_60_and_92_bytes() {
+        use base64::Engine;
+        let m = mk();
+        let body_len = |text: &str| {
+            let sealed =
+                seal_client_meta(&m, &record(), Some(&device_a()), ClientMetaField::SessionName, text).unwrap();
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(&sealed[ENVELOPE_PREFIX.len()..])
+                .unwrap()
+                .len()
+        };
+        // nonce(12) + padded payload(32) + tag(16); then one 32-byte bucket more.
+        assert_eq!(body_len(""), 60);
+        assert_eq!(body_len("abc"), 60);
+        assert_eq!(body_len(&"x".repeat(30)), 60);
+        assert_eq!(body_len(&"x".repeat(31)), 92);
+        assert_eq!(body_len(&"x".repeat(62)), 92);
+    }
+
+    #[test]
+    fn over_limit_envelopes_are_refused() {
+        use base64::Engine;
+        let m = mk();
+        let good = seal_client_meta(&m, &record(), Some(&device_a()), ClientMetaField::SessionName, "abc").unwrap();
+        let open = |s: &str| open_client_meta(&m, &record(), Some(&device_a()), ClientMetaField::SessionName, s);
+
+        // The 1452-character cap, refused before any base64 work.
+        let long = format!("{good}{}", "A".repeat(MAX_ENVELOPE_CHARS));
+        assert!(long.len() > MAX_ENVELOPE_CHARS);
+        assert_decryption(open(&long));
+
+        // The decoded MAX_BODY: one 32-byte bucket past the largest payload.
+        let too_big = format!(
+            "{ENVELOPE_PREFIX}{}",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(vec![0u8; MAX_BODY + 32])
+        );
+        assert_decryption(open(&too_big));
+    }
+
+    #[test]
+    fn the_over_limit_seal_error_does_not_leak_the_plaintext_length() {
+        let err = seal_client_meta(
+            &mk(),
+            &record(),
+            Some(&device_a()),
+            ClientMetaField::SessionLocalPath,
+            &"a".repeat(2000),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.ends_with("client-meta plaintext exceeds the 1024-byte limit (use fit_for_seal)"),
+            "{err}"
+        );
+        // The padding hides the length; the error must not publish it again.
+        assert!(!err.contains("2000"), "{err}");
     }
 
     #[test]

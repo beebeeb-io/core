@@ -1150,3 +1150,54 @@ fn vector_client_meta_padding_buckets_are_ordered() {
         );
     }
 }
+
+/// Every published v13 envelope opens with a raw AES-256-GCM using the vector's
+/// own `client_meta_key_hex` and `aad_hex`. The module proves the same thing, but
+/// this pins the HAND-BUILT AAD bytes published for other clients: if the layout
+/// in `client_meta_aad_hex` ever drifts, this fails even when core agrees with itself.
+#[test]
+fn published_client_meta_envelopes_open_with_a_raw_aes_gcm() {
+    use aes_gcm::aead::{Aead, Payload};
+    use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+    use base64::Engine;
+
+    let vectors = load_vectors();
+    let mut checked = 0;
+    for name in [
+        "client_meta_device_hostname",
+        "client_meta_session_paths",
+        "client_meta_padding_buckets",
+    ] {
+        let v = get_vector(&vectors, name);
+        let key = decode_hex(&v, "client_meta_key_hex");
+        let rows: Vec<&serde_json::Value> = match v["rows"].as_array() {
+            Some(rows) => rows.iter().collect(),
+            None => vec![&v["row"]],
+        };
+        for row in rows {
+            let aad = decode_hex(row, "aad_hex");
+            let envelope = row["envelope"].as_str().unwrap();
+            assert!(envelope.starts_with("bbcm1."), "{name}: {envelope}");
+            let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(&envelope["bbcm1.".len()..])
+                .unwrap();
+            let (nonce, ciphertext) = raw.split_at(12);
+            let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+            let plain = cipher
+                .decrypt(
+                    Nonce::from_slice(nonce),
+                    Payload {
+                        msg: ciphertext,
+                        aad: &aad,
+                    },
+                )
+                .expect("the published key and AAD must open the published envelope");
+            let len = usize::from(u16::from_be_bytes([plain[0], plain[1]]));
+            let want = row["plaintext"].as_str().unwrap().as_bytes();
+            assert_eq!(&plain[2..2 + len], want, "{name}");
+            assert!(plain[2 + len..].iter().all(|&b| b == 0), "{name}: zero padding");
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 6, "1 hostname + 2 session paths + 3 padding rows");
+}
