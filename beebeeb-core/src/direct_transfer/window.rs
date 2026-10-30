@@ -335,6 +335,7 @@ impl PlanError {
             PlanError::NotFetched(_) => "not_fetched",
             PlanError::OutOfOrder { .. } => "out_of_order",
             PlanError::ApiRouteFailure(_) => "api_route_failure",
+            PlanError::BadIdentifier => "bad_identifier",
         }
     }
 }
@@ -387,6 +388,8 @@ pub enum PlanError {
     OutOfOrder { expected: u32, got: u32 },
     #[error("chunk {0} is being fetched through the API route; report its failure with api_fetch_failed")]
     ApiRouteFailure(u32),
+    #[error("an identifier is not a UUID in the hyphenated form")]
+    BadIdentifier,
 }
 
 #[derive(Debug, Clone, Copy, Default)]

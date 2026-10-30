@@ -19,6 +19,7 @@ use std::fmt;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::authority::redact;
+use super::window::PlanError;
 
 /// Capability token: the client can download through grant windows.
 pub const CAP_OBJECT_DOWNLOAD_V1: &str = "object-download-v1";
@@ -50,6 +51,52 @@ pub use crate::chunk_stream::CHUNK_OVERHEAD;
 /// Path of the download-grant route for `file_id` (a UUID string).
 pub fn download_grants_path(file_id: &str) -> String {
     format!("/api/v1/files/{file_id}/download-grants")
+}
+
+/// Path of the pinned chunk route: one chunk of `object_version_id` through
+/// the API (the fallback when storage could not give it).
+///
+/// Both ids must be UUIDs in the hyphenated 36-character form; anything else is
+/// [`PlanError::BadIdentifier`], so a caller that pasted a server value never
+/// builds a request path out of it. The ids are percent-encoded (UUID
+/// characters are unreserved, so a valid id is unchanged).
+pub fn pinned_chunk_path(file_id: &str, index: u32, object_version_id: &str) -> Result<String, PlanError> {
+    if !is_hyphenated_uuid(file_id) {
+        return Err(PlanError::BadIdentifier);
+    }
+    if !is_hyphenated_uuid(object_version_id) {
+        return Err(PlanError::BadIdentifier);
+    }
+    Ok(format!(
+        "/api/v1/files/{}/chunks/{index}?object_version_id={}",
+        percent_encode_unreserved(file_id),
+        percent_encode_unreserved(object_version_id)
+    ))
+}
+
+/// Exactly `8-4-4-4-12` lowercase or uppercase hex, nothing else.
+fn is_hyphenated_uuid(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+    bytes.iter().enumerate().all(|(i, b)| match i {
+        8 | 13 | 18 | 23 => *b == b'-',
+        _ => b.is_ascii_hexdigit(),
+    })
+}
+
+/// Percent-encode everything outside the unreserved set (`ALPHA / DIGIT / - . _ ~`).
+fn percent_encode_unreserved(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
 }
 
 /// Why a body could not be decoded (never contains the body).
@@ -557,5 +604,54 @@ mod tests {
             r#"{"object_version_id":null,"start_index":0,"count":8,"renewal":false}"#
         );
         assert_eq!(download_grants_path("abc"), "/api/v1/files/abc/download-grants");
+    }
+
+    #[test]
+    fn the_pinned_chunk_path_is_built_from_two_validated_uuids() {
+        assert_eq!(
+            pinned_chunk_path(
+                "11111111-2222-4333-8444-555555555555",
+                3,
+                "22222222-3333-4444-8555-666666666666"
+            )
+            .unwrap(),
+            "/api/v1/files/11111111-2222-4333-8444-555555555555/chunks/3?object_version_id=22222222-3333-4444-8555-666666666666"
+        );
+        // Uppercase is a valid UUID and its characters are unreserved: unchanged.
+        assert_eq!(
+            pinned_chunk_path(
+                "AAAAAAAA-2222-4333-8444-555555555555",
+                0,
+                "BBBBBBBB-3333-4444-8555-666666666666"
+            )
+            .unwrap(),
+            "/api/v1/files/AAAAAAAA-2222-4333-8444-555555555555/chunks/0?object_version_id=BBBBBBBB-3333-4444-8555-666666666666"
+        );
+    }
+
+    #[test]
+    fn a_pinned_chunk_path_refuses_ids_that_are_not_uuids() {
+        let good = "11111111-2222-4333-8444-555555555555";
+        for bad in [
+            "abc",
+            "11111111-2222-4333-8444-55555555555",
+            "11111111-2222-4333-8444-5555555555555",
+            "11111111x2222-4333-8444-555555555555",
+            "11111111-2222-4333-8444-55555555555g",
+            "{11111111-2222-4333-8444-555555555555}",
+            "11111111222243338444555555555555",
+            "",
+        ] {
+            assert_eq!(
+                pinned_chunk_path(bad, 0, good),
+                Err(PlanError::BadIdentifier),
+                "file id {bad:?}"
+            );
+            assert_eq!(
+                pinned_chunk_path(good, 0, bad),
+                Err(PlanError::BadIdentifier),
+                "version {bad:?}"
+            );
+        }
     }
 }
