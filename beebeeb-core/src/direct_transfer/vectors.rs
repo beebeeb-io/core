@@ -1446,3 +1446,123 @@ mod tests {
         }
     }
 }
+
+/// The single event/action interpreter shared by native, WASM and UniFFI upload planners.
+/// Surfaces cross their real JSON boundary here, so missing or renamed fields are observable.
+pub trait PipelineSurface {
+    fn on(&mut self, event_json: &str, now_ms: u64) -> Result<Value, String>;
+    fn retained(&self) -> usize;
+    fn is_done(&self) -> bool;
+}
+
+impl PipelineSurface for super::upload_pipeline::PipelinePlan {
+    fn on(&mut self, event_json: &str, now_ms: u64) -> Result<Value, String> {
+        let event = super::upload_pipeline::PipelineEvent::from_json(event_json)?;
+        serde_json::to_value(self.on(event, now_ms)).map_err(|_| "invalid pipeline actions".into())
+    }
+    fn retained(&self) -> usize {
+        self.retained()
+    }
+    fn is_done(&self) -> bool {
+        self.is_done()
+    }
+}
+
+pub const PIPELINE_VECTORS_JSON: &str = include_str!("../../../test-vectors/direct_upload_pipeline.json");
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct PipelineReport {
+    pub scenarios: usize,
+    pub steps: usize,
+    pub failures: Vec<String>,
+}
+
+pub fn expected_pipeline_report() -> PipelineReport {
+    let v: Value = serde_json::from_str(PIPELINE_VECTORS_JSON).expect("pipeline vectors JSON");
+    let rows = v["scenarios"].as_array().expect("scenarios");
+    assert!(rows.len() >= 45, "non-vacuous scenario count");
+    assert_eq!(v["scenario_count"].as_u64(), Some(rows.len() as u64));
+    PipelineReport {
+        scenarios: rows.len(),
+        steps: rows.iter().map(|r| r["steps"].as_array().expect("steps").len()).sum(),
+        failures: Vec::new(),
+    }
+}
+
+pub fn run_pipeline_all<S: PipelineSurface>(
+    make: impl Fn(u64, Vec<u64>, super::upload_pipeline::GrantVersion, super::UploadChunkPolicy) -> S,
+) -> PipelineReport {
+    use std::time::Duration;
+    let v: Value = serde_json::from_str(PIPELINE_VECTORS_JSON).expect("pipeline vectors JSON");
+    let mut report = PipelineReport {
+        scenarios: 0,
+        steps: 0,
+        failures: Vec::new(),
+    };
+    let mut names = std::collections::BTreeSet::new();
+    for row in v["scenarios"].as_array().expect("scenarios") {
+        let name = row["name"].as_str().expect("scenario name");
+        assert!(names.insert(name), "duplicate pipeline scenario {name}");
+        assert!(
+            row["source"]
+                .as_str()
+                .is_some_and(|s| s.starts_with("task 2173 pipelining design ")),
+            "source for {name}"
+        );
+        let version = serde_json::from_value(row["version"].clone()).expect("grant version");
+        let mut policy = super::UploadChunkPolicy::default();
+        if let Some(p) = row.get("policy") {
+            for (key, value) in p.as_object().expect("policy") {
+                let n = value.as_u64().expect("policy integer");
+                match key.as_str() {
+                    "attempts" => policy.attempts = u32::try_from(n).expect("attempts u32"),
+                    "max_grants" => policy.max_grants = u32::try_from(n).expect("max_grants u32"),
+                    "budget_ms" => policy.budget = Duration::from_millis(n),
+                    "hold_budget_ms" => policy.hold_budget = Duration::from_millis(n),
+                    _ => panic!("unknown policy field {key}"),
+                }
+            }
+        }
+        let lengths = row["chunk_lens"]
+            .as_array()
+            .expect("chunk lengths")
+            .iter()
+            .map(|x| x.as_u64().expect("length u64"))
+            .collect();
+        let mut surface = make(
+            row["chunk_size_bytes"].as_u64().expect("chunk size"),
+            lengths,
+            version,
+            policy,
+        );
+        report.scenarios += 1;
+        for (i, step) in row["steps"].as_array().expect("scenario steps").iter().enumerate() {
+            report.steps += 1;
+            let got = surface.on(&step["event"].to_string(), step["now_ms"].as_u64().expect("now_ms"));
+            if got.as_ref().ok() != Some(&step["expect"]) {
+                report
+                    .failures
+                    .push(format!("{name} step {i}: actions {got:?}, expected {}", step["expect"]));
+                break;
+            }
+            if let Some(retained) = step.get("retained") {
+                if Some(surface.retained() as u64) != retained.as_u64() {
+                    report.failures.push(format!(
+                        "{name} step {i}: retained {}, expected {retained}",
+                        surface.retained()
+                    ));
+                    break;
+                }
+            }
+            if surface.is_done() != step["done"].as_bool().expect("done") {
+                report.failures.push(format!(
+                    "{name} step {i}: done {}, expected {}",
+                    surface.is_done(),
+                    step["done"]
+                ));
+                break;
+            }
+        }
+    }
+    report
+}

@@ -1,0 +1,7852 @@
+{
+  "source": "task 2173 pipelining design sections 3.3, 3.4, 4, 5, 6, 8",
+  "constants": {
+    "UPLOAD_COMMIT_SLOTS_SMALL": 2,
+    "UPLOAD_COMMIT_SLOTS_LARGE": 1,
+    "UPLOAD_COMMIT_SLOTS_SMALL_BELOW": 16777216,
+    "UPLOAD_PUT_LANES": 1,
+    "UPLOAD_FILE_CONCURRENCY_DEFAULT": 4,
+    "UPLOAD_FILE_CONCURRENCY_MAX": 8,
+    "UPLOAD_TAIL_FILES_MAX": 4,
+    "UPLOAD_API_REQUESTS_PER_SECOND_MAX": 60,
+    "UPLOAD_API_BURST": 20
+  },
+  "scenario_count": 66,
+  "scenarios": [
+    {
+      "name": "serial_chunk_flows_in_order",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "complete"
+            }
+          ],
+          "done": true,
+          "retained": 0
+        }
+      ]
+    },
+    {
+      "name": "zero_byte_file_is_one_chunk_through_the_pipeline",
+      "source": "task 2173 pipelining design I-P18; \u00a76",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "complete"
+            }
+          ],
+          "done": true,
+          "retained": 0
+        }
+      ]
+    },
+    {
+      "name": "commit_overlaps_next_grant",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 2
+        }
+      ]
+    },
+    {
+      "name": "grant_waits_for_free_lane",
+      "source": "task 2173 pipelining design I-P2; \u00a73.3 rule 1",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false,
+          "retained": 2
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 2
+        }
+      ]
+    },
+    {
+      "name": "second_commit_slot_under_16mib",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 2
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "one_commit_slot_from_16mib",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 16777216,
+      "chunk_lens": [
+        28,
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 2
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false,
+          "retained": 2
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        }
+      ]
+    },
+    {
+      "name": "a_short_tail_chunk_keeps_the_files_slot_count",
+      "source": "task 2173 pipelining design \u00a73.4; I-P6",
+      "chunk_size_bytes": 33554432,
+      "chunk_lens": [
+        28,
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 2
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false,
+          "retained": 2
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        }
+      ]
+    },
+    {
+      "name": "retained_never_exceeds_one_plus_slots",
+      "source": "task 2173 pipelining design I-P6; \u00a73.4",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28,
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 2
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 2,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 2,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 3
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 2
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 2
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 2
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false,
+          "retained": 3
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false,
+          "retained": 3
+        }
+      ]
+    },
+    {
+      "name": "accept_is_emitted_only_when_the_retention_rule_admits",
+      "source": "task 2173 pipelining design I-P20; \u00a73.3 rule 12",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28,
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 2
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 2,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 2,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 3
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 2
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 2
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 2
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false,
+          "retained": 3
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false,
+          "retained": 3
+        }
+      ]
+    },
+    {
+      "name": "grant_skipped_marks_stored_without_put_or_commit",
+      "source": "task 2173 pipelining design I-P4; \u00a76",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_skipped",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "release_lane"
+            },
+            {
+              "kind": "complete"
+            }
+          ],
+          "done": true,
+          "retained": 0
+        }
+      ]
+    },
+    {
+      "name": "commit_409_regrants_at_front_and_is_not_an_ack",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 409,
+            "outcome": {
+              "kind": "regrant"
+            }
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            },
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "held_commit_does_not_block_later_commits",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 409,
+            "outcome": {
+              "kind": "held",
+              "after_ms": 5000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 5000,
+              "wait_kind": {
+                "hold": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "hold_wait_is_not_a_gate",
+      "source": "task 2173 pipelining design I-P8; \u00a76",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 409,
+            "outcome": {
+              "kind": "held",
+              "after_ms": 5000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 5000,
+              "wait_kind": {
+                "hold": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "complete_waits_for_held_chunk",
+      "source": "task 2173 pipelining design I-P1; \u00a76",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 409,
+            "outcome": {
+              "kind": "held",
+              "after_ms": 5000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 5000,
+              "wait_kind": {
+                "hold": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 5000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 5001,
+          "event": {
+            "kind": "commit_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "complete"
+            }
+          ],
+          "done": true,
+          "retained": 0
+        }
+      ]
+    },
+    {
+      "name": "a_held_commit_keeps_the_only_large_slot",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 33554432,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 409,
+            "outcome": {
+              "kind": "held",
+              "after_ms": 5000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 5000,
+              "wait_kind": {
+                "hold": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 5000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 5001,
+          "event": {
+            "kind": "commit_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "first_grant_429_awaits_ack_then_asks_again",
+      "source": "task 2173 pipelining design I-P7; \u00a73.3 rule 5",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_refused",
+            "index": 0,
+            "status": 429,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 5000
+            },
+            "commits_outstanding": true
+          },
+          "expect": [
+            {
+              "kind": "await_ack",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 1000,
+          "event": {
+            "kind": "ack"
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "second_grant_429_is_a_counted_stated_wait_and_closes_the_gate",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_refused",
+            "index": 0,
+            "status": 429,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 5000
+            },
+            "commits_outstanding": true
+          },
+          "expect": [
+            {
+              "kind": "await_ack",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 1000,
+          "event": {
+            "kind": "ack"
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 1000,
+          "event": {
+            "kind": "grant_refused",
+            "index": 0,
+            "status": 429,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 300000
+            },
+            "commits_outstanding": true
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 121000,
+              "wait_kind": "gate"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 121000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "grant_429_without_commit_outstanding_waits_stated_time_clamped_120s",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_refused",
+            "index": 0,
+            "status": 429,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 300000
+            },
+            "commits_outstanding": false
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 120000,
+              "wait_kind": "gate"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 119999,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 120000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "ack_wait_budget_exhausted_falls_to_the_normal_path",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_refused",
+            "index": 0,
+            "status": 429,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 5000
+            },
+            "commits_outstanding": true
+          },
+          "expect": [
+            {
+              "kind": "await_ack",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 150000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 155000,
+              "wait_kind": "gate"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 155000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "a_tick_does_not_end_an_ack_wait_but_an_ack_does",
+      "source": "task 2173 pipelining design \u00a73.3 rule 5; F4",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_refused",
+            "index": 0,
+            "status": 429,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 5000
+            },
+            "commits_outstanding": true
+          },
+          "expect": [
+            {
+              "kind": "await_ack",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 1000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 1001,
+          "event": {
+            "kind": "ack"
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "a_503_grant_waits_and_does_not_await_an_ack",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_refused",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 5000
+            },
+            "commits_outstanding": true
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 5000,
+              "wait_kind": "gate"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 5000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "commit_429_closes_the_gate_not_the_commit_path",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 429,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 5000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 5000,
+              "wait_kind": "gate"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 5000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "commit_503_waits_only_its_chunk",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 5000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 5000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "a_stated_gate_holds_only_new_grants",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 429,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 5000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 5000,
+              "wait_kind": "gate"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 5000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "v2_put_412_goes_straight_to_commit",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v2",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": [
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7
+            ]
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ]
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_already_there",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "v1_put_412_is_a_failed_put",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_already_there",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 791,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 791,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "storage_403_expiry_gets_a_new_grant",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_failed",
+            "index": 0,
+            "status": 403
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 791,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 791,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "a_network_put_error_gets_a_new_grant",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_failed",
+            "index": 0,
+            "status": 0
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 791,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "v2_bad_digest_is_a_counted_failure",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v2",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": [
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7
+            ]
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ]
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_failed",
+            "index": 0,
+            "status": 400
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 791,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "give_up_from_commit_cancels_put_in_flight",
+      "source": "task 2173 pipelining design I-P5; \u00a73.3 rule 10",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 409,
+            "outcome": {
+              "kind": "api_for_this_file"
+            }
+          },
+          "expect": [
+            {
+              "kind": "cancel",
+              "index": 1
+            },
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "use_api"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "terminal_401_is_not_use_api",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 401,
+            "outcome": {
+              "kind": "terminal",
+              "status": 401,
+              "error": "refused"
+            }
+          },
+          "expect": [
+            {
+              "kind": "cancel",
+              "index": 1
+            },
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "terminal",
+                "status": 401,
+                "error": "refused"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "terminal_403_is_not_use_api",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 403,
+            "outcome": {
+              "kind": "terminal",
+              "status": 403,
+              "error": "refused"
+            }
+          },
+          "expect": [
+            {
+              "kind": "cancel",
+              "index": 1
+            },
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "terminal",
+                "status": 403,
+                "error": "refused"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "session_gone_is_its_own_give_up",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "session_gone"
+          },
+          "expect": [
+            {
+              "kind": "cancel",
+              "index": 0
+            },
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "session_gone"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "producer_error_is_not_an_api_give_up",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "producer_failed"
+          },
+          "expect": [
+            {
+              "kind": "cancel",
+              "index": 0
+            },
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "producer"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "interrupt_cancels_the_inflight_put",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "interrupt"
+          },
+          "expect": [
+            {
+              "kind": "cancel",
+              "index": 0
+            }
+          ],
+          "done": true
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "interrupt_commits_every_staged_chunk_once",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 33554432,
+      "chunk_lens": [
+        28,
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 2
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false,
+          "retained": 2
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "interrupt"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": true
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "interrupt_does_not_poll_an_already_held_commit",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 409,
+            "outcome": {
+              "kind": "held",
+              "after_ms": 5000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 5000,
+              "wait_kind": {
+                "hold": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "interrupt"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": true
+        },
+        {
+          "now_ms": 5000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "interrupt_before_start_admits_nothing",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "interrupt"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": true
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "digest_travels_with_regrant",
+      "source": "task 2173 pipelining design I-P3; \u00a73.5",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v2",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": [
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7
+            ]
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ]
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 409,
+            "outcome": {
+              "kind": "regrant"
+            }
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ]
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "release_lane_after_the_last_put_and_not_before",
+      "source": "task 2173 pipelining design I-P19; \u00a73.3 rule 11",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        }
+      ]
+    },
+    {
+      "name": "release_lane_after_a_skipped_last_grant",
+      "source": "task 2173 pipelining design I-P19; \u00a73.3 rule 11",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_skipped",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "release_lane"
+            },
+            {
+              "kind": "complete"
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "release_lane_again_after_a_tail_regrant",
+      "source": "task 2173 pipelining design I-P19; \u00a73.3 rule 11",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v2",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": [
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7
+            ]
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ]
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 409,
+            "outcome": {
+              "kind": "regrant"
+            }
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ]
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "a_second_chunk_produced_for_an_index_is_a_producer_give_up",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "cancel",
+              "index": 0
+            },
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "producer"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "a_changed_digest_on_a_regrant_is_a_producer_give_up",
+      "source": "task 2173 pipelining design I-P3; F9",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v2",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": [
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7
+            ]
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ]
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 409,
+            "outcome": {
+              "kind": "regrant"
+            }
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ]
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": [
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8
+            ]
+          },
+          "expect": [
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "producer"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "a_chunk_shorter_than_the_plan_is_a_producer_give_up_before_any_grant",
+      "source": "task 2173 pipelining design \u00a76; F7",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 27,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "producer"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "an_out_of_range_chunk_is_a_producer_give_up",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 99,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "producer"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "an_out_of_order_chunk_is_a_producer_give_up",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "producer"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "produce_requires_an_accept_permit",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "producer"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "a_v2_chunk_without_a_digest_is_a_producer_give_up",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v2",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "producer"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "a_tick_does_not_duplicate_accept",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "a_completed_plan_is_inert",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "complete"
+            }
+          ],
+          "done": true
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": true
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "interrupt"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "a_give_up_is_emitted_once",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_refused",
+            "index": 0,
+            "status": 409,
+            "outcome": {
+              "kind": "api_for_this_file"
+            },
+            "commits_outstanding": false
+          },
+          "expect": [
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "use_api"
+              }
+            }
+          ],
+          "done": true
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "an_empty_chunk_plan_is_refused",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "producer"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "a_plan_with_a_zero_ciphertext_length_is_refused",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        0
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "producer"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "grant_401_is_terminal",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_refused",
+            "index": 0,
+            "status": 401,
+            "outcome": {
+              "kind": "terminal",
+              "status": 401,
+              "error": null
+            },
+            "commits_outstanding": false
+          },
+          "expect": [
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "terminal",
+                "status": 401,
+                "error": null
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "ack_wait_ignores_chunk_not_stored",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_refused",
+            "index": 1,
+            "status": 429,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 5000
+            },
+            "commits_outstanding": true
+          },
+          "expect": [
+            {
+              "kind": "await_ack",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 409,
+            "outcome": {
+              "kind": "regrant"
+            }
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 1000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "seven_failures_of_one_chunk_do_not_spend_another_chunks_budget",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 1000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 1000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 1000,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 2000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 2000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 2000,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 3000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 3000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 3000,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 4000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 4000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 4000,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 5000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 5000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 5000,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 6000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 6000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 6000,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 7000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 7000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 7000,
+          "event": {
+            "kind": "commit_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 7000,
+          "event": {
+            "kind": "commit_failed",
+            "index": 1,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 8000,
+              "wait_kind": {
+                "chunk": 1
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 8000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 8001,
+          "event": {
+            "kind": "commit_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "complete"
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "the_eighth_failure_ends_the_chunk",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 1000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 1000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 1000,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 2000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 2000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 2000,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 3000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 3000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 3000,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 4000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 4000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 4000,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 5000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 5000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 5000,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 6000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 6000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 6000,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 7000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 7000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 7000,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "use_api"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "a_hold_does_not_spend_the_failure_allowance",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 409,
+            "outcome": {
+              "kind": "held",
+              "after_ms": 5000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 5000,
+              "wait_kind": {
+                "hold": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 5000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 5000,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 1000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 6000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 6000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 6001,
+          "event": {
+            "kind": "commit_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "complete"
+            }
+          ],
+          "done": true
+        }
+      ],
+      "policy": {
+        "attempts": 2
+      }
+    },
+    {
+      "name": "a_hold_keeps_the_next_grant_open",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 409,
+            "outcome": {
+              "kind": "held",
+              "after_ms": 5000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 5000,
+              "wait_kind": {
+                "hold": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "a_503_commit_keeps_the_next_grant_open",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 5000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 5000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "regrant_goes_before_a_queued_unsent_chunk",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 2,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 409,
+            "outcome": {
+              "kind": "regrant"
+            }
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            },
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "two_commit_waits_do_not_hold_each_other_with_the_gate",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28,
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            },
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 1,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 1,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 1
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 1
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 1
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 429,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 5000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 5000,
+              "wait_kind": "gate"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 1,
+            "status": 429,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 10000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 10000,
+              "wait_kind": "gate"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 5000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        }
+      ]
+    },
+    {
+      "name": "four_grants_are_the_bound_even_before_eight_failures",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_failed",
+            "index": 0,
+            "status": 403
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 791,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 791,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 791,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 791,
+          "event": {
+            "kind": "put_failed",
+            "index": 0,
+            "status": 403
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 2254,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 2254,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 2254,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 2254,
+          "event": {
+            "kind": "put_failed",
+            "index": 0,
+            "status": 403
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 5853,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 5853,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 5853,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 5853,
+          "event": {
+            "kind": "put_failed",
+            "index": 0,
+            "status": 403
+          },
+          "expect": [
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "use_api"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "the_counted_wait_budget_is_bounded",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 120000
+            }
+          },
+          "expect": [
+            {
+              "kind": "wait",
+              "until_ms": 120000,
+              "wait_kind": {
+                "chunk": 0
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 120000,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 120000,
+          "event": {
+            "kind": "commit_failed",
+            "index": 0,
+            "status": 503,
+            "outcome": {
+              "kind": "backoff",
+              "after_ms": 120000
+            }
+          },
+          "expect": [
+            {
+              "kind": "give_up",
+              "reason": {
+                "kind": "use_api"
+              }
+            }
+          ],
+          "done": true
+        }
+      ]
+    },
+    {
+      "name": "a_second_interrupt_does_not_resend_a_commit",
+      "source": "task 2173 pipelining design \u00a76; \u00a73.3",
+      "chunk_size_bytes": 4194304,
+      "chunk_lens": [
+        28
+      ],
+      "version": "v1",
+      "steps": [
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "tick"
+          },
+          "expect": [
+            {
+              "kind": "accept"
+            }
+          ],
+          "done": false,
+          "retained": 0
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "chunk_produced",
+            "index": 0,
+            "len": 28,
+            "digest": null
+          },
+          "expect": [
+            {
+              "kind": "grant",
+              "index": 0,
+              "digest": null
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "grant_ok",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "put",
+              "index": 0
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "put_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "commit",
+              "index": 0
+            },
+            {
+              "kind": "release_lane"
+            }
+          ],
+          "done": false,
+          "retained": 1
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "interrupt"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "interrupt"
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": false
+        },
+        {
+          "now_ms": 0,
+          "event": {
+            "kind": "commit_done",
+            "index": 0
+          },
+          "expect": [
+            {
+              "kind": "idle"
+            }
+          ],
+          "done": true
+        }
+      ]
+    }
+  ]
+}

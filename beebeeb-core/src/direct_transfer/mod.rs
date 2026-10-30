@@ -58,6 +58,7 @@ pub mod resume;
 pub mod storage;
 pub mod timeouts;
 pub mod upload;
+pub mod upload_pipeline;
 pub mod window;
 pub mod wire;
 
@@ -74,11 +75,17 @@ pub use resume::{DiscoveryState, RecordedTransport, ResumeAction, resume_transpo
 pub use storage::{BODY_FINISHED_CODE, StorageBody, StorageGet, check_storage_body, check_storage_get};
 pub use timeouts::{
     API_CALL_TIMEOUT, BACKGROUND_PUT_RESOURCE_TIMEOUT, DISCOVERY_TIMEOUT, STORAGE_CONNECT_TIMEOUT, STORAGE_GET_IDLE,
-    storage_get_total, storage_put_total,
+    put_allowance, storage_get_total, storage_put_total, storage_put_total_shared,
 };
 pub use upload::{
     COMMIT_HOLD_MARGIN, COMMIT_LOCK_TTL, MAX_GRANTS_PER_CHUNK, UPLOAD_CONTENT_TYPE, UploadChunkPolicy,
     UploadChunkState, UploadCommitted, UploadFailure, UploadGrant, UploadLink, UploadNext, UploadViolation, put_stored,
+};
+pub use upload_pipeline::{
+    GiveUpReason, GrantVersion, PipelineAction, PipelineEvent, PipelinePlan, UPLOAD_API_BURST,
+    UPLOAD_API_REQUESTS_PER_SECOND_MAX, UPLOAD_COMMIT_SLOTS_LARGE, UPLOAD_COMMIT_SLOTS_SMALL,
+    UPLOAD_COMMIT_SLOTS_SMALL_BELOW, UPLOAD_FILE_CONCURRENCY_DEFAULT, UPLOAD_FILE_CONCURRENCY_MAX, UPLOAD_PUT_LANES,
+    UPLOAD_TAIL_FILES_MAX, WaitKind, commit_slots,
 };
 pub use window::{DownloadPlanner, Geometry, PlanError, PlannerConfig, Poll, Verdict, Violation, WindowAnswer};
 pub use wire::{

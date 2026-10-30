@@ -79,6 +79,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Contract vectors `test-vectors/direct_transfer.json`: `storage_get` (13 rows: 10 heads and 3 counted bodies), `pacing` (7),
   `pairs_allowed` (12) and `memory_class` (4), each row naming its `source`; `vectors::run_all`
   checks them on native, WASM and UniFFI.
+- Pure direct-upload pipeline planner (task 2173 C1-C2): one PUT lane per file, bounded
+  commit overlap and ciphertext retention, per-chunk retries, separate ack/hold waits,
+  interrupt draining, and grant-version-aware replay handling. Shared PUT totals scale
+  with concurrent PUTs while staying thirty seconds below the server fence. This exposes
+  Rust rules only; client drivers and the combined upload bindings follow separately,
+  and the server's upload flag remains off.
 
 ### Fixed
 - Discovery authorization answers (401/403) no longer consume or extend the routing-failure
