@@ -405,6 +405,88 @@
       "name": "upper_repair_split_v1",
       "name_encrypted": "{\"cipher_suite\":\"V1Aes256Gcm\",\"nonce\":[95,95,95,95,95,95,95,95,95,95,95,95],\"ciphertext\":[4,67,151,86,160,40,102,140,245,4,159,253,136,107,33,50,75,233,75,180,203,191,86,231,56,241,181,49,184,35,247,110,152,88,130,247,171,70,58,168,101,169,150,238,26,143,90,149,134,87,10,146,226,22,53,225,189,246,35,250,80,49,122,252,151,180,125,228,40,130,105,146,40]}",
       "note": "SF-0002 split keys: name and content version 1 are v1 frames sealed under derive_file_key(master, UPPERCASE(file_id)); content version 2 is sealed under derive_file_key(master, file_id). Resolve each content version independently with owner_file_key_for_content. The file is READ-ONLY if the name OR any version reports upper_repair. Fixed nonces, published KAT only."
+    },
+    {
+      "client_meta_key_hex": "7d2b02da5f6ae330b0d74dfa80ea7b00d42369887dad84168e9343f9e464ad44",
+      "master_key_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+      "name": "client_meta_device_hostname",
+      "note": "task 1922: envelope = \"bbcm1.\" || base64url-no-pad(nonce(12) || AES-256-GCM ciphertext || tag(16)); plaintext = u16_be(len) || UTF-8 || zeros to max(32, roundup(2+len,32)). AAD = \"beebeeb/client-meta/v1\" || u32_be(36) || lowercase hyphenated record key || u32_be(0) || u8(1). Key = HKDF-SHA256(master, salt none, info \"beebeeb/client-meta/v1/key\"). Fixed nonce for this public KAT only.",
+      "row": {
+        "aad_hex": "626565626565622f636c69656e742d6d6574612f76310000002431393232303030302d303030302d343030302d383030302d3030303030303030303030310000000001",
+        "device_key": null,
+        "envelope": "bbcm1.MDEyMzQ1Njc4OTo7pI_MrXTtOle2DxlOloVCzGKZlCaX4kUGis-usbNwFCkQCo0euEEGZnLs82xt9qyM",
+        "envelope_len": 86,
+        "field": 1,
+        "nonce_hex": "303132333435363738393a3b",
+        "plaintext": "MacBook-Air",
+        "record_key": "19220000-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "client_meta_key_hex": "7d2b02da5f6ae330b0d74dfa80ea7b00d42369887dad84168e9343f9e464ad44",
+      "master_key_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+      "name": "client_meta_session_paths",
+      "note": "same envelope and key as client_meta_device_hostname; fields 3 (local path) and 4 (remote path) carry the parent device key in the AAD (u32_be(36) || device key). Fixed nonces for this public KAT only.",
+      "rows": [
+        {
+          "aad_hex": "626565626565622f636c69656e742d6d6574612f76310000002431393232303030302d303030302d343030302d383030302d3030303030303030303030310000002431393232303030302d303030302d343030302d383030302d30303030303030303030616103",
+          "device_key": "19220000-0000-4000-8000-0000000000aa",
+          "envelope": "bbcm1.QEFCQ0RFRkdISUpLJjYZYMFd6JX0HLdqtfovNXBqbU9_LH1v3va2NLTmuWevdXwJF8aO2x72Eniz390R",
+          "envelope_len": 86,
+          "field": 3,
+          "nonce_hex": "404142434445464748494a4b",
+          "plaintext": "/Users/guus/Taxes",
+          "record_key": "19220000-0000-4000-8000-000000000001"
+        },
+        {
+          "aad_hex": "626565626565622f636c69656e742d6d6574612f76310000002431393232303030302d303030302d343030302d383030302d3030303030303030303030310000002431393232303030302d303030302d343030302d383030302d30303030303030303030616104",
+          "device_key": "19220000-0000-4000-8000-0000000000aa",
+          "envelope": "bbcm1.UFFSU1RVVldYWVpbAkTxV-fhfMXM7Y2HtNRhlZC7oPo-2E3Rvr8qHtSsb3SvJjkHXbw1Fq32LieQPEv8",
+          "envelope_len": 86,
+          "field": 4,
+          "nonce_hex": "505152535455565758595a5b",
+          "plaintext": "/Taxes/2026",
+          "record_key": "19220000-0000-4000-8000-000000000001"
+        }
+      ]
+    },
+    {
+      "client_meta_key_hex": "7d2b02da5f6ae330b0d74dfa80ea7b00d42369887dad84168e9343f9e464ad44",
+      "master_key_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+      "name": "client_meta_padding_buckets",
+      "note": "u16_be(len) || UTF-8 padded with zeros to max(32, roundup(2+len,32)), so any two plaintexts in one 32-byte bucket have equal envelope length and the next bucket is 32 bytes longer. Fixed nonces for this public KAT only.",
+      "rows": [
+        {
+          "aad_hex": "626565626565622f636c69656e742d6d6574612f76310000002431393232303030302d303030302d343030302d383030302d3030303030303030303030310000002431393232303030302d303030302d343030302d383030302d30303030303030303030616102",
+          "device_key": "19220000-0000-4000-8000-0000000000aa",
+          "envelope": "bbcm1.YGFiY2RlZmdoaWprYzuxBMYyOSXTrByY01XWUM9ERIVL4gjC0ZgAV1yttbkNRAMrMESq4tv0U6Oj71pU",
+          "envelope_len": 86,
+          "field": 2,
+          "nonce_hex": "606162636465666768696a6b",
+          "plaintext": "abc",
+          "record_key": "19220000-0000-4000-8000-000000000001"
+        },
+        {
+          "aad_hex": "626565626565622f636c69656e742d6d6574612f76310000002431393232303030302d303030302d343030302d383030302d3030303030303030303030310000002431393232303030302d303030302d343030302d383030302d30303030303030303030616102",
+          "device_key": "19220000-0000-4000-8000-0000000000aa",
+          "envelope": "bbcm1.cHFyc3R1dnd4eXp7QgC4PlaAbQOBQ0yW2dK4FdO2M1i3cKcjBW_R2jb2cQrMtxrV97fUpVfs4lS_h3gS",
+          "envelope_len": 86,
+          "field": 2,
+          "nonce_hex": "707172737475767778797a7b",
+          "plaintext": "abcdefghij",
+          "record_key": "19220000-0000-4000-8000-000000000001"
+        },
+        {
+          "aad_hex": "626565626565622f636c69656e742d6d6574612f76310000002431393232303030302d303030302d343030302d383030302d3030303030303030303030310000002431393232303030302d303030302d343030302d383030302d30303030303030303030616102",
+          "device_key": "19220000-0000-4000-8000-0000000000aa",
+          "envelope": "bbcm1.gIGCg4SFhoeIiYqLeMrINOYxzlkxojAJ_eS9YCukawcJdSMr8I8FtsYEZnHPryHUQmtWVmtJ2bA5d91cui25sZNvfCJCnjsygf_jNNYTM0_QbLgrAKB3aT1m7MM",
+          "envelope_len": 129,
+          "field": 2,
+          "nonce_hex": "808182838485868788898a8b",
+          "plaintext": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "record_key": "19220000-0000-4000-8000-000000000001"
+        }
+      ]
     }
   ],
   "version": 13

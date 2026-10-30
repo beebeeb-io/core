@@ -38,7 +38,7 @@ use crate::kdf::{MasterKey, derive_file_key};
 pub const VECTORS_FILE_VERSION: u64 = 13;
 
 /// Names of the v2 vectors, in the order they are published.
-pub const V2_VECTOR_NAMES: [&str; 22] = [
+pub const V2_VECTOR_NAMES: [&str; 25] = [
     "chunk_v2_stream",
     "chunk_v2_single_frame",
     "metadata_v2_name",
@@ -67,6 +67,10 @@ pub const V2_VECTOR_NAMES: [&str; 22] = [
     // Version 13 (SF-0002): the split shape — name and content version 1 under
     // the uppercase id, content version 2 under the lowercase id.
     "upper_repair_split_v1",
+    // Version 13 (task 1922): the encrypted client-metadata envelope.
+    "client_meta_device_hostname",
+    "client_meta_session_paths",
+    "client_meta_padding_buckets",
 ];
 
 /// A shared folder's key (bytes 0x80..=0x9f) for the `folder_key_id` vector.
@@ -159,6 +163,9 @@ pub fn v2_vectors() -> Vec<Value> {
         owned_key_vector("folder_wrapped_file_key"),
         upper_repair_vector(),
         upper_repair_split_vector(),
+        client_meta_hostname_vector(),
+        client_meta_session_paths_vector(),
+        client_meta_padding_buckets_vector(),
     ]
 }
 
@@ -257,6 +264,105 @@ fn upper_repair_split_vector() -> Value {
         "content_v2_frame_hex": hex(&v2_frame),
         "expected_content_v2_convention": "string",
         "expected_content_v2_key_hex": hex(lower_key.as_bytes()),
+    })
+}
+
+// ── Version 13: encrypted client metadata (task 1922) ───────────────────────
+
+/// Fixed record (client) key of every client-metadata vector.
+const CLIENT_META_RECORD: &str = "19220000-0000-4000-8000-000000000001";
+/// Fixed parent device key of the session vectors.
+const CLIENT_META_DEVICE: &str = "19220000-0000-4000-8000-0000000000aa";
+
+/// The AAD, built here by hand (independently of the module) so the published
+/// vector pins the layout: domain || u32_be(36) || record || u32_be(len) || device || field.
+fn client_meta_aad_hex(record: &str, device: Option<&str>, field: u8) -> String {
+    let mut aad = crate::client_meta::AAD_DOMAIN.to_vec();
+    aad.extend_from_slice(&u32::try_from(record.len()).unwrap().to_be_bytes());
+    aad.extend_from_slice(record.as_bytes());
+    let device = device.unwrap_or("");
+    aad.extend_from_slice(&u32::try_from(device.len()).unwrap().to_be_bytes());
+    aad.extend_from_slice(device.as_bytes());
+    aad.push(field);
+    hex(&aad)
+}
+
+/// The derived key, computed with the hkdf crate directly, not via the module.
+fn client_meta_key_hex() -> String {
+    let hk = hkdf::Hkdf::<sha2::Sha256>::new(None, &MASTER_KEY);
+    let mut okm = [0u8; 32];
+    hk.expand(crate::client_meta::CLIENT_META_KEY_INFO, &mut okm).unwrap();
+    hex(&okm)
+}
+
+fn client_meta_row(record: &str, device: Option<&str>, field: u8, plaintext: &str, nonce_prefix: u8) -> Value {
+    use crate::client_meta::{ClientMetaField, seal_client_meta_with_nonce};
+    let field = ClientMetaField::try_from(field).unwrap();
+    let nonce: [u8; 12] = std::array::from_fn(|i| nonce_prefix.wrapping_add(i as u8));
+    let envelope = seal_client_meta_with_nonce(
+        &MasterKey::from_bytes(MASTER_KEY),
+        &uuid::Uuid::parse_str(record).unwrap(),
+        device.map(|d| uuid::Uuid::parse_str(d).unwrap()).as_ref(),
+        field,
+        plaintext,
+        nonce,
+    )
+    .unwrap();
+    json!({
+        "record_key": record,
+        "device_key": device,
+        "field": field as u8,
+        "plaintext": plaintext,
+        "nonce_hex": hex(&nonce),
+        "aad_hex": client_meta_aad_hex(record, device, field as u8),
+        "envelope": envelope,
+        "envelope_len": envelope.len(),
+    })
+}
+
+/// Field 1 (a device's own hostname): empty device key in the AAD.
+fn client_meta_hostname_vector() -> Value {
+    json!({
+        "name": "client_meta_device_hostname",
+        "note": "task 1922: envelope = \"bbcm1.\" || base64url-no-pad(nonce(12) || AES-256-GCM ciphertext || tag(16)); \
+            plaintext = u16_be(len) || UTF-8 || zeros to max(32, roundup(2+len,32)). AAD = \
+            \"beebeeb/client-meta/v1\" || u32_be(36) || lowercase hyphenated record key || u32_be(0) || u8(1). \
+            Key = HKDF-SHA256(master, salt none, info \"beebeeb/client-meta/v1/key\"). Fixed nonce for this public KAT only.",
+        "master_key_hex": hex(&MASTER_KEY),
+        "client_meta_key_hex": client_meta_key_hex(),
+        "row": client_meta_row(CLIENT_META_RECORD, None, 1, "MacBook-Air", 0x30),
+    })
+}
+
+/// Fields 3 and 4 (a session's local and remote path), bound to the parent device.
+fn client_meta_session_paths_vector() -> Value {
+    json!({
+        "name": "client_meta_session_paths",
+        "note": "same envelope and key as client_meta_device_hostname; fields 3 (local path) and 4 (remote path) \
+            carry the parent device key in the AAD (u32_be(36) || device key). Fixed nonces for this public KAT only.",
+        "master_key_hex": hex(&MASTER_KEY),
+        "client_meta_key_hex": client_meta_key_hex(),
+        "rows": [
+            client_meta_row(CLIENT_META_RECORD, Some(CLIENT_META_DEVICE), 3, "/Users/guus/Taxes", 0x40),
+            client_meta_row(CLIENT_META_RECORD, Some(CLIENT_META_DEVICE), 4, "/Taxes/2026", 0x50),
+        ],
+    })
+}
+
+/// Two plaintexts in one 32-byte bucket give equal envelope lengths; the next
+/// bucket is longer.
+fn client_meta_padding_buckets_vector() -> Value {
+    let small = client_meta_row(CLIENT_META_RECORD, Some(CLIENT_META_DEVICE), 2, "abc", 0x60);
+    let same_bucket = client_meta_row(CLIENT_META_RECORD, Some(CLIENT_META_DEVICE), 2, "abcdefghij", 0x70);
+    let next_bucket = client_meta_row(CLIENT_META_RECORD, Some(CLIENT_META_DEVICE), 2, &"x".repeat(31), 0x80);
+    json!({
+        "name": "client_meta_padding_buckets",
+        "note": "u16_be(len) || UTF-8 padded with zeros to max(32, roundup(2+len,32)), so any two plaintexts in one \
+            32-byte bucket have equal envelope length and the next bucket is 32 bytes longer. Fixed nonces for this \
+            public KAT only.",
+        "master_key_hex": hex(&MASTER_KEY),
+        "client_meta_key_hex": client_meta_key_hex(),
+        "rows": [small, same_bucket, next_bucket],
     })
 }
 
@@ -624,7 +730,7 @@ mod tests {
     }
 
     /// The drift guard: every published v2 vector is exactly what core's writer
-    /// produces from the fixed inputs today, and the file carries version 7.
+    /// produces from the fixed inputs today, and the file carries the published version.
     #[test]
     fn published_v2_vectors_match_core() {
         let doc = published();

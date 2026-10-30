@@ -1,5 +1,6 @@
 use wasm_bindgen::prelude::*;
 
+use beebeeb_core::client_meta as cm;
 use beebeeb_core::encrypt;
 use beebeeb_core::kdf;
 use beebeeb_core::recovery;
@@ -36,10 +37,10 @@ pub fn generate_share_token() -> String {
 /// Returns the 32-byte file key as `Uint8Array`.
 #[wasm_bindgen]
 pub fn derive_file_key(master_key: &[u8], file_id: &[u8]) -> Result<Vec<u8>, JsError> {
-    let mk_bytes: [u8; 32] = master_key
-        .try_into()
-        .map_err(|_| JsError::new("master_key must be exactly 32 bytes"))?;
-    let mk = kdf::MasterKey::from_bytes(mk_bytes);
+    let mk_bytes = zeroize::Zeroizing::new(
+        <[u8; 32]>::try_from(master_key).map_err(|_| JsError::new("master_key must be exactly 32 bytes"))?,
+    );
+    let mk = kdf::MasterKey::from_bytes(*mk_bytes);
     let fk = kdf::derive_file_key(&mk, file_id);
     Ok(fk.as_bytes().to_vec())
 }
@@ -1781,10 +1782,10 @@ fn file_key_from_slice(key: &[u8]) -> Result<kdf::FileKey, JsError> {
 /// Reconstruct a `MasterKey` from a 32-byte slice received from JS. The
 /// resulting `MasterKey` owns the bytes and zeroizes them on drop.
 fn master_key_from_slice(key: &[u8]) -> Result<kdf::MasterKey, JsError> {
-    let bytes: [u8; 32] = key
-        .try_into()
-        .map_err(|_| JsError::new("master_key must be exactly 32 bytes"))?;
-    Ok(kdf::MasterKey::from_bytes(bytes))
+    let bytes = zeroize::Zeroizing::new(
+        <[u8; 32]>::try_from(key).map_err(|_| JsError::new("master_key must be exactly 32 bytes"))?,
+    );
+    Ok(kdf::MasterKey::from_bytes(*bytes))
 }
 
 /// Convert an `EncryptedBlob` into a plain JS object with separate fields
@@ -3166,6 +3167,184 @@ fn direct_resume_transport(
 }
 
 // ---------------------------------------------------------------------------
+// Encrypted client metadata (task 1922)
+// ---------------------------------------------------------------------------
+
+/// Opaque handle holding ONLY the derived client-metadata key (task 1922).
+///
+/// Make it once when the vault unlocks, free it on lock. List views and SSE
+/// frames call `seal` / `open` / `openMany` on the handle, so the master key is
+/// not copied into WASM memory on every frame. The derived key never leaves
+/// Rust; the handle is zeroized on drop and `free()` is wasm-bindgen's own.
+#[wasm_bindgen]
+pub struct ClientMetaKey {
+    inner: cm::ClientMetaKey,
+}
+
+#[wasm_bindgen]
+impl ClientMetaKey {
+    /// Derive the key from a 32-byte master key. The bytes are taken into a
+    /// `Zeroizing` buffer and the master key is dropped before returning.
+    #[wasm_bindgen(constructor)]
+    pub fn new(master_key: Vec<u8>) -> Result<ClientMetaKey, JsError> {
+        Self::try_new(master_key).map_err(|e| JsError::new(&e))
+    }
+
+    /// Seal one field. `device_key` must be `null` for field 1 and set for 2-4.
+    pub fn seal(
+        &self,
+        record_key: &str,
+        device_key: Option<String>,
+        field: u32,
+        plaintext: &str,
+    ) -> Result<String, JsError> {
+        self.seal_seam(record_key, device_key.as_deref(), field, plaintext)
+            .map_err(|e| JsError::new(&e))
+    }
+
+    /// Open one field's `bbcm1.` envelope.
+    pub fn open(
+        &self,
+        record_key: &str,
+        device_key: Option<String>,
+        field: u32,
+        envelope: &str,
+    ) -> Result<String, JsError> {
+        self.open_seam(record_key, device_key.as_deref(), field, envelope)
+            .map_err(|e| JsError::new(&e))
+    }
+
+    /// Open many rows in one call: `items` is
+    /// `[{ recordKey, deviceKey?, field, envelope? }]`; the result is
+    /// `[{ ok: bool, value?: string }]`. One bad row never fails the batch: a
+    /// null envelope, a bad field or UUID, a malformed row and a failed open
+    /// each yield `{ ok: false }` for that row only.
+    #[wasm_bindgen(js_name = openMany)]
+    pub fn open_many(&self, items: JsValue) -> Result<JsValue, JsError> {
+        if !js_sys::Array::is_array(&items) {
+            return Err(JsError::new("items must be an array of client-meta rows"));
+        }
+        let array = js_sys::Array::from(&items);
+        let out: Vec<ClientMetaOpenedJs> = array
+            .iter()
+            .map(|el| match serde_wasm_bindgen::from_value::<ClientMetaItemJs>(el) {
+                Ok(item) => self.open_row_opened(item),
+                Err(_) => ClientMetaOpenedJs { ok: false, value: None },
+            })
+            .collect();
+        serde_wasm_bindgen::to_value(&out).map_err(|e| JsError::new(&e.to_string()))
+    }
+}
+
+/// Shorten a client-metadata string for sealing: over 1024 UTF-8 bytes, keep
+/// the last 1021 bytes on a char boundary behind a leading `…`.
+#[wasm_bindgen(js_name = fitForSeal)]
+pub fn fit_for_seal(s: &str) -> String {
+    cm::fit_for_seal(s)
+}
+
+impl ClientMetaKey {
+    /// Plain-Rust seams (no `JsValue`): the wrappers and the native tests both
+    /// call these, so a binding that drifts from core fails its own test.
+    fn try_new(master_key: Vec<u8>) -> Result<Self, String> {
+        let bytes = zeroize::Zeroizing::new(master_key);
+        let arr = zeroize::Zeroizing::new(
+            <[u8; 32]>::try_from(bytes.as_slice()).map_err(|_| "master_key must be exactly 32 bytes".to_string())?,
+        );
+        let master = kdf::MasterKey::from_bytes(*arr);
+        Ok(Self {
+            inner: cm::ClientMetaKey::new(&master),
+        })
+    }
+
+    fn seal_seam(
+        &self,
+        record_key: &str,
+        device_key: Option<&str>,
+        field: u32,
+        plaintext: &str,
+    ) -> Result<String, String> {
+        let record = client_meta_uuid(record_key)?;
+        let device = client_meta_optional_uuid(device_key)?;
+        let field = client_meta_field(field)?;
+        self.inner
+            .seal(&record, device.as_ref(), field, plaintext)
+            .map_err(|e| e.to_string())
+    }
+
+    fn open_seam(
+        &self,
+        record_key: &str,
+        device_key: Option<&str>,
+        field: u32,
+        envelope: &str,
+    ) -> Result<String, String> {
+        let record = client_meta_uuid(record_key)?;
+        let device = client_meta_optional_uuid(device_key)?;
+        let field = client_meta_field(field)?;
+        self.inner
+            .open(&record, device.as_ref(), field, envelope)
+            .map_err(|e| e.to_string())
+    }
+
+    fn open_row(&self, item: ClientMetaItemJs) -> Result<String, String> {
+        let envelope = item
+            .envelope
+            .as_deref()
+            .ok_or_else(|| "envelope is required for an open row".to_string())?;
+        self.open_seam(&item.record_key, item.device_key.as_deref(), item.field, envelope)
+    }
+
+    fn open_row_opened(&self, item: ClientMetaItemJs) -> ClientMetaOpenedJs {
+        match self.open_row(item) {
+            Ok(value) => ClientMetaOpenedJs {
+                ok: true,
+                value: Some(value),
+            },
+            Err(_) => ClientMetaOpenedJs { ok: false, value: None },
+        }
+    }
+
+    /// The per-row batch in plain Rust: the native tests have no JS engine, so
+    /// they exercise the same row isolation through this seam.
+    #[cfg(test)]
+    fn open_many_rows(&self, items: Vec<ClientMetaItemJs>) -> Vec<ClientMetaOpenedJs> {
+        items.into_iter().map(|item| self.open_row_opened(item)).collect()
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ClientMetaItemJs {
+    #[serde(rename = "recordKey")]
+    record_key: String,
+    #[serde(rename = "deviceKey", default)]
+    device_key: Option<String>,
+    field: u32,
+    envelope: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct ClientMetaOpenedJs {
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<String>,
+}
+
+fn client_meta_uuid(s: &str) -> Result<uuid::Uuid, String> {
+    uuid::Uuid::parse_str(s).map_err(|_| "record_key/device_key must be a UUID".to_string())
+}
+
+fn client_meta_optional_uuid(s: Option<&str>) -> Result<Option<uuid::Uuid>, String> {
+    s.map(client_meta_uuid).transpose()
+}
+
+/// Codes from JS are `u32`; narrow first, so 257 is refused instead of wrapping to 1.
+fn client_meta_field(field: u32) -> Result<cm::ClientMetaField, String> {
+    let field = u8::try_from(field).map_err(|_| "field must be 1-4".to_string())?;
+    cm::ClientMetaField::try_from(field).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -4385,4 +4564,139 @@ pub fn derive_folder_link_passphrase_stretch(passphrase: &str, token: &str) -> R
     let stretch =
         kdf::derive_folder_link_passphrase_stretch(passphrase, token).map_err(|e| JsError::new(&e.to_string()))?;
     Ok(stretch.to_vec())
+}
+
+#[cfg(test)]
+mod client_meta_binding_tests {
+    //! Task 1922: the WASM handle's own path (no JS engine needed for these).
+    use super::*;
+
+    fn handle() -> ClientMetaKey {
+        ClientMetaKey::try_new(vec![0x40u8; 32]).unwrap()
+    }
+
+    const RECORD: &str = "19220000-0000-4000-8000-000000000001";
+
+    #[test]
+    fn the_handle_seals_and_opens_every_field() {
+        let h = handle();
+        for (field, device) in [
+            (1u32, None),
+            (2, Some("19220000-0000-4000-8000-0000000000aa".to_string())),
+            (3, Some("19220000-0000-4000-8000-0000000000AA".to_string())),
+            (4, Some("19220000-0000-4000-8000-0000000000aa".to_string())),
+        ] {
+            let sealed = h.seal_seam(RECORD, device.as_deref(), field, "some value").unwrap();
+            assert!(sealed.starts_with("bbcm1."));
+            let opened = h.open_seam(RECORD, device.as_deref(), field, &sealed).unwrap();
+            assert_eq!(opened, "some value");
+        }
+    }
+
+    #[test]
+    fn the_handle_rejects_a_bad_master_key_and_a_bad_field() {
+        assert!(ClientMetaKey::try_new(vec![0u8; 31]).is_err());
+        let h = handle();
+        assert!(h.seal_seam("not-a-uuid", None, 1, "x").is_err());
+        assert!(h.seal_seam(RECORD, None, 5, "x").is_err());
+        // A u32 from JS: 257 used to wrap to 1 before the u8::try_from check.
+        assert!(h.seal_seam(RECORD, None, 257, "x").is_err());
+        assert!(h.seal_seam(RECORD, None, 256, "x").is_err());
+        assert!(h.open_seam(RECORD, None, 257, "bbcm1.x").is_err());
+        assert!(h.seal_seam(RECORD, None, 1, "x").unwrap().starts_with("bbcm1."));
+    }
+
+    #[test]
+    fn open_row_isolates_bad_rows() {
+        let h = handle();
+        let good = h.seal_seam(RECORD, None, 1, "host").unwrap();
+        assert_eq!(
+            h.open_row(ClientMetaItemJs {
+                record_key: RECORD.into(),
+                device_key: None,
+                field: 1,
+                envelope: Some(good),
+            })
+            .unwrap(),
+            "host"
+        );
+        assert!(
+            h.open_row(ClientMetaItemJs {
+                record_key: RECORD.into(),
+                device_key: None,
+                field: 2,
+                envelope: Some("bbcm1.nope".into()),
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a_null_envelope_row_fails_alone() {
+        let h = handle();
+        let good = h.seal_seam(RECORD, None, 1, "host").unwrap();
+        let rows = h.open_many_rows(vec![
+            ClientMetaItemJs {
+                record_key: RECORD.into(),
+                device_key: None,
+                field: 1,
+                envelope: Some(good),
+            },
+            // A null envelope is a per-row failure, not a batch failure.
+            ClientMetaItemJs {
+                record_key: RECORD.into(),
+                device_key: None,
+                field: 1,
+                envelope: None,
+            },
+            // Likewise a bad field, a bad UUID and a bad envelope.
+            ClientMetaItemJs {
+                record_key: RECORD.into(),
+                device_key: None,
+                field: 257,
+                envelope: Some("bbcm1.x".into()),
+            },
+            ClientMetaItemJs {
+                record_key: "not-a-uuid".into(),
+                device_key: None,
+                field: 1,
+                envelope: Some("bbcm1.x".into()),
+            },
+            ClientMetaItemJs {
+                record_key: RECORD.into(),
+                device_key: None,
+                field: 1,
+                envelope: Some("bbcm1.nope".into()),
+            },
+        ]);
+        assert_eq!(rows.len(), 5);
+        assert!(rows[0].ok);
+        assert_eq!(rows[0].value.as_deref(), Some("host"));
+        for row in &rows[1..] {
+            assert!(!row.ok, "a bad row never becomes ok");
+            assert!(row.value.is_none());
+        }
+    }
+
+    /// wasm-bindgen does not camel-case method names; the documented JS names are
+    /// explicit attributes. `cargo test` has no JS engine, so the source is checked
+    /// (the same style as `no_doc_comment_contains_a_block_comment_token`).
+    #[test]
+    fn the_client_meta_methods_use_the_documented_js_names() {
+        let src = include_str!("lib.rs");
+        for (attribute, method) in [
+            ("#[wasm_bindgen(js_name = openMany)]", "pub fn open_many("),
+            ("#[wasm_bindgen(js_name = fitForSeal)]", "pub fn fit_for_seal("),
+        ] {
+            let at = src
+                .find(method)
+                .unwrap_or_else(|| panic!("{method} is missing from the WASM surface"));
+            let before = &src[..at];
+            let window = &before[before.len().saturating_sub(200)..];
+            assert!(
+                window.contains(attribute),
+                "{method} must carry {attribute}; a missing js_name exposes the Rust name to JS"
+            );
+        }
+    }
 }

@@ -708,7 +708,7 @@ fn vector_file_version_check() {
         .expect("vectors.json must have a 'version' field");
     assert_eq!(
         version, 13,
-        "vectors.json version mismatch — expected 12, got {version}. \
+        "vectors.json version mismatch — expected 13, got {version}. \
          Update this test if you intentionally bumped the version."
     );
 
@@ -753,6 +753,10 @@ fn vector_file_version_check() {
         "owner_wrapped_file_key",
         "owner_wrapped_folder_key",
         "folder_wrapped_file_key",
+        // Version 13 (task 1922): the encrypted client-metadata envelope.
+        "client_meta_device_hostname",
+        "client_meta_session_paths",
+        "client_meta_padding_buckets",
     ];
     for name in &required {
         assert!(names.contains(name), "vectors.json is missing required vector '{name}'");
@@ -1072,4 +1076,128 @@ fn vector_names_are_what_the_shipped_writers_seal() {
         }
         assert_eq!(opened, 1, "{name}: the vector opens under exactly one key");
     }
+}
+
+// ---------------------------------------------------------------------------
+// 12. Encrypted client metadata (task 1922, vectors version 13)
+// ---------------------------------------------------------------------------
+
+fn open_client_meta_row(master: &MasterKey, row: &serde_json::Value, field: u8) -> Result<String, String> {
+    use beebeeb_core::client_meta::{ClientMetaField, open_client_meta};
+    let record = uuid::Uuid::parse_str(row["record_key"].as_str().unwrap()).unwrap();
+    let device = row["device_key"].as_str().map(|d| uuid::Uuid::parse_str(d).unwrap());
+    open_client_meta(
+        master,
+        &record,
+        device.as_ref(),
+        ClientMetaField::try_from(field).map_err(|e| e.to_string())?,
+        row["envelope"].as_str().unwrap(),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[test]
+fn vector_client_meta_device_hostname_opens() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "client_meta_device_hostname");
+    let master = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let row = &v["row"];
+    assert_eq!(row["field"].as_u64(), Some(1));
+    assert_eq!(row["device_key"], serde_json::Value::Null);
+    assert_eq!(
+        open_client_meta_row(&master, row, 1).unwrap(),
+        row["plaintext"].as_str().unwrap()
+    );
+    assert!(row["envelope"].as_str().unwrap().starts_with("bbcm1."));
+    // The AAD binds the field: opening it as another field must fail.
+    assert!(open_client_meta_row(&master, row, 2).is_err());
+}
+
+#[test]
+fn vector_client_meta_session_paths_open() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "client_meta_session_paths");
+    let master = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let rows = v["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    for (row, field) in rows.iter().zip([3u8, 4]) {
+        assert_eq!(row["field"].as_u64(), Some(u64::from(field)));
+        assert_eq!(
+            open_client_meta_row(&master, row, field).unwrap(),
+            row["plaintext"].as_str().unwrap()
+        );
+    }
+    // A session sealed under device A does not open under device B.
+    let mut row = rows[0].clone();
+    row["device_key"] = serde_json::Value::String("19220000-0000-4000-8000-0000000000bb".into());
+    assert!(open_client_meta_row(&master, &row, 3).is_err());
+}
+
+#[test]
+fn vector_client_meta_padding_buckets_are_ordered() {
+    let vectors = load_vectors();
+    let v = get_vector(&vectors, "client_meta_padding_buckets");
+    let master = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
+    let rows = v["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    let lens: Vec<u64> = rows.iter().map(|r| r["envelope_len"].as_u64().unwrap()).collect();
+    assert_eq!(lens[0], lens[1], "two plaintexts in one 32-byte bucket, equal lengths");
+    assert!(lens[2] > lens[0], "the next bucket is longer");
+    for row in rows {
+        assert_eq!(
+            open_client_meta_row(&master, row, 2).unwrap(),
+            row["plaintext"].as_str().unwrap()
+        );
+    }
+}
+
+/// Every published v13 envelope opens with a raw AES-256-GCM using the vector's
+/// own `client_meta_key_hex` and `aad_hex`. The module proves the same thing, but
+/// this pins the HAND-BUILT AAD bytes published for other clients: if the layout
+/// in `client_meta_aad_hex` ever drifts, this fails even when core agrees with itself.
+#[test]
+fn published_client_meta_envelopes_open_with_a_raw_aes_gcm() {
+    use aes_gcm::aead::{Aead, Payload};
+    use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+    use base64::Engine;
+
+    let vectors = load_vectors();
+    let mut checked = 0;
+    for name in [
+        "client_meta_device_hostname",
+        "client_meta_session_paths",
+        "client_meta_padding_buckets",
+    ] {
+        let v = get_vector(&vectors, name);
+        let key = decode_hex(&v, "client_meta_key_hex");
+        let rows: Vec<&serde_json::Value> = match v["rows"].as_array() {
+            Some(rows) => rows.iter().collect(),
+            None => vec![&v["row"]],
+        };
+        for row in rows {
+            let aad = decode_hex(row, "aad_hex");
+            let envelope = row["envelope"].as_str().unwrap();
+            assert!(envelope.starts_with("bbcm1."), "{name}: {envelope}");
+            let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(&envelope["bbcm1.".len()..])
+                .unwrap();
+            let (nonce, ciphertext) = raw.split_at(12);
+            let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+            let plain = cipher
+                .decrypt(
+                    Nonce::from_slice(nonce),
+                    Payload {
+                        msg: ciphertext,
+                        aad: &aad,
+                    },
+                )
+                .expect("the published key and AAD must open the published envelope");
+            let len = usize::from(u16::from_be_bytes([plain[0], plain[1]]));
+            let want = row["plaintext"].as_str().unwrap().as_bytes();
+            assert_eq!(&plain[2..2 + len], want, "{name}");
+            assert!(plain[2 + len..].iter().all(|&b| b == 0), "{name}: zero padding");
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 6, "1 hostname + 2 session paths + 3 padding rows");
 }
