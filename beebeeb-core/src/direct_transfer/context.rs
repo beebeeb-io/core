@@ -5,8 +5,8 @@
 //! * **How much ciphertext may be held at once**, by process class: a native app may hold 256 MiB,
 //!   a browser or a mobile app 64 MiB, a mobile extension 16 MiB. The planner clamps its chunk count
 //!   to at least one (`window.rs`), so this bounds how many chunks it holds; it does not make a chunk
-//!   smaller. A 256 MiB chunk is held even under a 16 MiB class. The direct path's driver (L2/K2)
-//!   always sets the cap.
+//!   smaller. A 256 MiB chunk is held even under a 16 MiB class. The L2 driver (plan task K2) WILL
+//!   set the cap; desktop's current driver (`direct_download.rs:227-228`) does not.
 //! * **Whether the pairs discovery names are all one the client may talk to.** The web keeps a
 //!   storage allowlist (CSP) and used to compare it itself. A direction is allowed only when the
 //!   server offers it, discovery lists at least one `{host, bucket}`, and every one it names is in
@@ -59,7 +59,8 @@ const MIB: u64 = 1024 * 1024;
 
 /// The ciphertext bytes a process of class `c` may hold at once. The planner clamps its chunk count
 /// to at least one, so this is a ceiling on how many chunks are held, never a promise that one chunk
-/// fits: a 256 MiB chunk is held even under a 16 MiB class. The L2 driver always sets the cap.
+/// fits: a 256 MiB chunk is held even under a 16 MiB class. The L2 driver (plan task K2) WILL set the
+/// cap; desktop's current driver (`direct_download.rs:227-228`) does not.
 pub const fn max_in_flight_bytes(c: MemoryClass) -> u64 {
     match c {
         MemoryClass::Native => 256 * MIB,
