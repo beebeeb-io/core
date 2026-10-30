@@ -205,6 +205,24 @@ fn resolve_owner_key(
     mut authenticates: impl FnMut(&FileKey) -> bool,
     no_match: &str,
 ) -> Result<(FileKey, OwnerKeyConvention), CoreError> {
+    resolve_owner_key_with(master_key, file_id, |key| authenticates(key).then_some(()), no_match)
+        .map(|(key, convention, ())| (key, convention))
+}
+
+/// Resolve the owner id conventions in order and return the first key whose
+/// `resolves` callback yields a value, with that key and its convention. This
+/// is the payload-returning form used by the item resolver (task 2275): the
+/// decrypted name metadata, or the chunk acceptance itself, is the proof.
+///
+/// One candidate at a time: each key is derived, tested by reference, and then
+/// either moved into the result (the match) or dropped (zeroizing its bytes)
+/// before the next derive.
+pub(crate) fn resolve_owner_key_with<T>(
+    master_key: &MasterKey,
+    file_id: &str,
+    mut resolves: impl FnMut(&FileKey) -> Option<T>,
+    no_match: &str,
+) -> Result<(FileKey, OwnerKeyConvention, T), CoreError> {
     let uuid = canonical_owner_uuid(file_id)?;
     let upper = file_id.to_ascii_uppercase();
     for convention in [
@@ -225,8 +243,8 @@ fn resolve_owner_key(
             }
         };
         let key = derive_file_key(master_key, id_bytes);
-        if authenticates(&key) {
-            return Ok((key, convention));
+        if let Some(payload) = resolves(&key) {
+            return Ok((key, convention, payload));
         }
         // `key` drops here, zeroizing its bytes, before the next derive.
     }
@@ -628,22 +646,42 @@ fn purpose_unwrap_key(
     Ok(FileKey::from_bytes(*key))
 }
 
+/// L8 owner-file-key adoption is for foreign (`F`) item ids only (task 2275,
+/// L12/L13). An owner item's key is derived from its id, so an envelope for an
+/// owner id would be a second, competing key; core refuses one.
+fn require_foreign_item_id(item_id: &[u8]) -> Result<(), CoreError> {
+    let id = std::str::from_utf8(item_id)
+        .map_err(|_| CoreError::InvalidInput("owner file key requires a foreign item id".into()))?;
+    if matches!(crate::item_id::is_foreign_item_id(id), Ok(true)) {
+        Ok(())
+    } else {
+        Err(CoreError::InvalidInput(
+            "owner file key requires a foreign item id".into(),
+        ))
+    }
+}
+
 /// Owner file-key adoption, bound to the item ID using the L6 encoding.
 /// Never accepts legacy name/content ciphertext or unbound owner wraps.
+///
+/// Only foreign (`F`) item ids are accepted; see [`require_foreign_item_id`].
 pub fn wrap_owner_file_key(
     master: &MasterKey,
     item_id: &[u8],
     key: &FileKey,
 ) -> Result<beebeeb_types::EncryptedBlob, CoreError> {
+    require_foreign_item_id(item_id)?;
     purpose_wrap(master, OWNER_FILE_KEY_LABEL, item_id, key.as_bytes())
 }
 
-/// Open only an L8 purpose-bound, exactly 32-byte owner file key.
+/// Open only an L8 purpose-bound, exactly 32-byte owner file key, and only for
+/// a foreign (`F`) item id.
 pub fn unwrap_owner_file_key(
     master: &MasterKey,
     item_id: &[u8],
     blob: &beebeeb_types::EncryptedBlob,
 ) -> Result<FileKey, CoreError> {
+    require_foreign_item_id(item_id)?;
     purpose_unwrap_key(master, OWNER_FILE_KEY_LABEL, item_id, blob)
 }
 
@@ -851,6 +889,7 @@ pub fn combine_folder_link_key(k_c: &[u8; 32], passphrase_stretch: Option<&[u8; 
 
 #[cfg(test)]
 mod tests {
+    #![allow(deprecated)]
     use super::*;
 
     #[test]
@@ -929,7 +968,7 @@ mod tests {
     #[test]
     fn l8_owner_file_key_requires_aad() {
         let master = MasterKey::from_bytes([0x40; 32]);
-        let item = b"11111111-1111-4111-8111-111111111111";
+        let item = b"11111111-1111-8111-8111-111111111111";
         let context = purpose_context(OWNER_FILE_KEY_LABEL, item).unwrap();
         let wrapping_key = purpose_key(&master, &context);
         let key = FileKey::from_bytes([0x60; 32]);
@@ -948,12 +987,12 @@ mod tests {
     #[test]
     fn l8_owner_file_key_requires_exactly_32_authenticated_bytes() {
         let master = MasterKey::from_bytes([0x40; 32]);
+        let item = b"11111111-1111-8111-8111-111111111111";
         for length in [0, 31, 32, 33, 64] {
             let blob =
-                purpose_wrap_with_nonce(&master, OWNER_FILE_KEY_LABEL, b"item", &vec![0x60; length], &[0x37; 12])
-                    .unwrap();
+                purpose_wrap_with_nonce(&master, OWNER_FILE_KEY_LABEL, item, &vec![0x60; length], &[0x37; 12]).unwrap();
             assert_eq!(
-                unwrap_owner_file_key(&master, b"item", &blob).is_ok(),
+                unwrap_owner_file_key(&master, item, &blob).is_ok(),
                 length == 32,
                 "length {length}"
             );
@@ -1493,9 +1532,11 @@ mod invite_owner_copy_tests {
         assert!(unwrap_invite_owner_copy(&master, b"folder", &legacy).is_err());
         let custody = wrap_folder_custody(&master, b"folder", &key).unwrap();
         assert!(unwrap_invite_owner_copy(&master, b"folder", &custody).is_err());
-        let owner_file = wrap_owner_file_key(&master, b"folder", &key).unwrap();
+        let foreign = b"11111111-1111-8111-8111-111111111111";
+        let owner_file = wrap_owner_file_key(&master, foreign, &key).unwrap();
         assert!(unwrap_invite_owner_copy(&master, b"folder", &owner_file).is_err());
         assert!(unwrap_owner_file_key(&master, b"folder", &copy).is_err());
+        assert!(unwrap_owner_file_key(&master, foreign, &owner_file).is_ok());
         assert!(wrap_invite_owner_copy(&master, b"", &key).is_err());
     }
     #[test]

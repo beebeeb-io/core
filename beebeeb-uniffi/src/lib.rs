@@ -883,6 +883,7 @@ pub fn decrypt_metadata(key: Vec<u8>, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Re
 /// Encrypt a filename + optional MIME type into the canonical JSON envelope.
 /// The result is a JSON string containing cipher_suite, nonce, and ciphertext.
 #[uniffi::export]
+#[allow(deprecated)]
 pub fn encrypt_name(
     master_key: Vec<u8>,
     file_id: String,
@@ -1322,6 +1323,148 @@ impl MasterKeyHandle {
         Ok(FileKeyHandle::new(key))
     }
 
+    /// Task 2275 L13: mint a new owner (O) item id for this master key. The id
+    /// stays inside the returned handle; only `id_text` leaves for the wire.
+    pub fn new_owner_item_id(&self) -> Result<Arc<NewItemIdHandle>, CryptoError> {
+        let master = self.with_key(|mk| kdf::MasterKey::from_bytes(mk.to_bytes()))?;
+        let id = beebeeb_core::item_id::NewItemId::owner(&master)?;
+        Ok(Arc::new(NewItemIdHandle { master, id }))
+    }
+
+    /// Task 2275 L13: mint a new foreign (F) item id for this master key.
+    pub fn new_foreign_item_id(&self) -> Result<Arc<NewItemIdHandle>, CryptoError> {
+        let master = self.with_key(|mk| kdf::MasterKey::from_bytes(mk.to_bytes()))?;
+        let id = beebeeb_core::item_id::NewItemId::foreign(&master)?;
+        Ok(Arc::new(NewItemIdHandle { master, id }))
+    }
+
+    /// Task 2275 L13: resume a minted id from the id text and tag persisted with
+    /// an upload session. The tag is re-checked in constant time, so a tampered
+    /// tag, a different id or a server-echoed id is refused.
+    pub fn resume_new_item_id(&self, item_id: String, tag: Vec<u8>) -> Result<Arc<NewItemIdHandle>, CryptoError> {
+        let master = self.with_key(|mk| kdf::MasterKey::from_bytes(mk.to_bytes()))?;
+        let id = beebeeb_core::item_id::NewItemId::resume(&master, &item_id, &tag)?;
+        Ok(Arc::new(NewItemIdHandle { master, id }))
+    }
+
+    /// Task 2275 L12: classify one row from its id and resolve its key. Key
+    /// material stays in native handles; no raw master or folder key crosses FFI.
+    ///
+    /// Owner ids derive (string, then binary, then the READ-ONLY upper repair)
+    /// and ignore `owner_wrap`/the folder wrap. Foreign ids never derive: the L8
+    /// envelope or the L7 child wrap must open AND authenticate the name. A
+    /// `kind` is the row kind (1 = file, 2 = folder) and is required: a
+    /// plaintext name on a FOLDER uses the string convention, a plaintext name
+    /// on a FILE must authenticate content chunk 0 (`first_chunk_frame`) and is
+    /// refused without one.
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_owned_key(
+        &self,
+        item_id: String,
+        kind: u8,
+        owner_wrap: Option<Vec<u8>>,
+        name_encrypted: String,
+        shared_folder_id: Option<String>,
+        folder_key: Option<Arc<FileKeyHandle>>,
+        folder_wrap: Option<Vec<u8>>,
+        first_chunk_frame: Option<Vec<u8>>,
+    ) -> Result<ResolvedItemKey, CryptoError> {
+        use beebeeb_core::owned_keys::{FirstChunk, FolderWrap, ItemKind, resolve_owned_key as core_resolve};
+
+        let item_kind = ItemKind::from_u8(kind)?;
+        let folder = match (shared_folder_id, folder_key, folder_wrap) {
+            (Some(root), Some(handle), Some(wrap)) => {
+                let key = handle.with_key(|k| kdf::FileKey::from_bytes(*k.as_bytes()))?;
+                Some((key, root, kind, wrap))
+            }
+            _ => None,
+        };
+        let folder_wrap = folder.as_ref().map(|(key, root, kind, wrap)| FolderWrap {
+            shared_folder_id: root,
+            kind: *kind,
+            folder_key: key,
+            wrapped_key: wrap,
+        });
+        let chunk = first_chunk_frame.as_deref().map(|frame| {
+            let split = frame.len().min(12);
+            FirstChunk {
+                nonce: &frame[..split],
+                ciphertext: &frame[split..],
+                index: 0,
+            }
+        });
+        let resolved = self.with_key(|mk| {
+            core_resolve(
+                mk,
+                &item_id,
+                item_kind,
+                owner_wrap.as_deref(),
+                folder_wrap,
+                &name_encrypted,
+                chunk,
+            )
+        })??;
+        let (name, mime_type, chunk_format, plaintext_name) = match &resolved.name {
+            beebeeb_core::owned_keys::ResolvedName::Encrypted(meta) => (
+                meta.name.clone(),
+                meta.mime_type.clone(),
+                meta.chunk_format.as_u8(),
+                false,
+            ),
+            beebeeb_core::owned_keys::ResolvedName::Plaintext(text) => (text.clone(), None, 0, true),
+        };
+        Ok(ResolvedItemKey {
+            key: FileKeyHandle::new(resolved.key),
+            content_key: resolved.content_key.map(FileKeyHandle::new),
+            origin: resolved.origin.as_str().to_string(),
+            name,
+            mime_type,
+            chunk_format,
+            plaintext_name,
+            write_target: resolved.write_target.map(|inner| Arc::new(WriteTargetHandle { inner })),
+        })
+    }
+
+    /// Task 2275: resolve a 2236 request row. Content under `C`; the name key is
+    /// a derived owner key when it authenticates the name, else `C`. Read-only.
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_request_row(
+        &self,
+        item_id: String,
+        request_id: Vec<u8>,
+        wrapped_request_private: Vec<u8>,
+        wrap_nonce: Vec<u8>,
+        sender_ephemeral_pubkey: Vec<u8>,
+        wrapped_content_key: Vec<u8>,
+        name_encrypted: String,
+    ) -> Result<RequestRowKeys, CryptoError> {
+        let e_pub: [u8; 32] = sender_ephemeral_pubkey
+            .try_into()
+            .map_err(|_| CryptoError::InvalidInput {
+                detail: "sender_ephemeral_pubkey must be exactly 32 bytes".into(),
+            })?;
+        let row = self.with_key(|mk| {
+            beebeeb_core::owned_keys::resolve_request_row(
+                mk,
+                &item_id,
+                &request_id,
+                &wrapped_request_private,
+                &wrap_nonce,
+                &e_pub,
+                &wrapped_content_key,
+                &name_encrypted,
+            )
+        })??;
+        Ok(RequestRowKeys {
+            content_key: FileKeyHandle::new(row.content_key),
+            name_key: FileKeyHandle::new(row.name_key),
+            name_origin: row.name_origin.as_str().to_string(),
+            name: row.name.name,
+            mime_type: row.name.mime_type,
+            chunk_format: row.name.chunk_format.as_u8(),
+        })
+    }
+
     /// L9 (task 2255): open a LEGACY invite owner copy; `Some` only when core
     /// proves it over the folder's `rows` (at most 64 distinct ids, one call).
     /// The unproven candidate never leaves core. Attack B is a named residual.
@@ -1453,6 +1596,7 @@ impl MasterKeyHandle {
     }
 
     /// Encrypt a filename + optional MIME type using the handle's master key.
+    #[allow(deprecated)]
     pub fn encrypt_name(
         &self,
         file_id: String,
@@ -1469,6 +1613,7 @@ impl MasterKeyHandle {
     /// `encrypt_name`). New file: the encryptor's format (2 only if it wrote
     /// v2). Rename / replace: the value `decrypt_file_metadata` returned for the
     /// file — never upgrade a file with v1 history, never drop a recorded 2.
+    #[allow(deprecated)]
     pub fn encrypt_name_with_chunk_format(
         &self,
         file_id: String,
@@ -1904,6 +2049,29 @@ impl FileKeyHandle {
             .map_err(Into::into)
     }
 
+    /// L14 (task 2275): does this row's L7 child wrap open to exactly this key?
+    /// False on any error, and the comparison is constant-time.
+    pub fn child_wrap_matches(
+        &self,
+        shared_folder_id: String,
+        item_id: String,
+        kind: u8,
+        wrapped: Vec<u8>,
+        expected: &FileKeyHandle,
+    ) -> Result<bool, CryptoError> {
+        self.with_key(|folder| {
+            let expected = expected.with_key(|k| kdf::FileKey::from_bytes(*k.as_bytes()))?;
+            Ok(beebeeb_core::owned_keys::child_wrap_matches(
+                folder,
+                &shared_folder_id,
+                &item_id,
+                kind,
+                &wrapped,
+                &expected,
+            ))
+        })?
+    }
+
     /// One-way public key identifier; never exports the key itself.
     pub fn key_id(&self) -> Result<Vec<u8>, CryptoError> {
         self.with_key(|fk| beebeeb_core::folder_key::folder_key_id(fk.as_bytes()).to_vec())
@@ -1960,6 +2128,7 @@ impl FileKeyHandle {
     /// `decrypt_file_metadata` returned (0 = unrecorded, 2 = v2). A v2 pin is
     /// always sealed under the thumbnail subkey; 0 behaves like
     /// `encrypt_thumbnail`. Any other code is an error.
+    #[allow(deprecated)]
     pub fn encrypt_thumbnail_for(&self, plaintext: Vec<u8>, recorded_pin: u8) -> Result<Vec<u8>, CryptoError> {
         let pin = ExpectedChunkFormat::from_u8(recorded_pin)?;
         let plaintext = Zeroizing::new(plaintext);
@@ -1982,6 +2151,7 @@ impl FileKeyHandle {
     /// `encrypt_note_for` with the file's recorded pin. The ONLY way to seal a
     /// note — not `encrypt_chunk` / an `encrypt_metadata`-style call under the
     /// file key (a raw-key note can stand in for a v2 file's name and content).
+    #[allow(deprecated)]
     pub fn encrypt_note(&self, note: String) -> Result<String, CryptoError> {
         let note = Zeroizing::new(note);
         self.with_key(|fk| encrypt::encrypt_note(fk, &note))?
@@ -1993,6 +2163,7 @@ impl FileKeyHandle {
     /// `decrypt_file_metadata` returned for this file (0 = unrecorded, 2 = v2),
     /// never a server field. A v2 pin is always sealed under the note subkey;
     /// 0 behaves like `encrypt_note`. Any other code is an error.
+    #[allow(deprecated)]
     pub fn encrypt_note_for(&self, note: String, recorded_pin: u8) -> Result<String, CryptoError> {
         let pin = ExpectedChunkFormat::from_u8(recorded_pin)?;
         let note = Zeroizing::new(note);
@@ -2166,10 +2337,134 @@ pub struct OwnerFileKey {
     pub convention: OwnerKeyConvention,
 }
 
+/// Opaque new-item id minted by core for one master key (task 2275, L13).
+///
+/// There is no constructor from text and no export turns arbitrary id text into
+/// a sealer input: a new-item write can only use an id core minted for this
+/// master key ([`MasterKeyHandle::new_owner_item_id`],
+/// [`MasterKeyHandle::new_foreign_item_id`]) or one resumed from a persisted id
+/// and tag ([`MasterKeyHandle::resume_new_item_id`]). `id_text` is the wire
+/// form; `tag` is the resume tag to store with the upload session.
+#[derive(uniffi::Object)]
+pub struct NewItemIdHandle {
+    master: kdf::MasterKey,
+    id: beebeeb_core::item_id::NewItemId,
+}
+
+#[uniffi::export]
+impl NewItemIdHandle {
+    /// The canonical id text to send on the wire.
+    pub fn id_text(&self) -> String {
+        self.id.as_str().to_string()
+    }
+
+    /// The resume tag to persist with the upload session (32 bytes).
+    pub fn tag(&self) -> Vec<u8> {
+        self.id.tag().to_vec()
+    }
+
+    /// Seal this new row's name. The id handle decides the key: an owner id
+    /// derives it. A new foreign id is refused here (L12: an F id never
+    /// derives its name key) — its name is sealed through the write target it
+    /// gets after adoption; only its content goes through
+    /// [`ChunkEncryptorHandle::for_push_for_new_item`].
+    pub fn encrypt_name(
+        &self,
+        filename: String,
+        mime_type: Option<String>,
+        chunk_format: u8,
+    ) -> Result<String, CryptoError> {
+        let pin = ExpectedChunkFormat::from_u8(chunk_format)?;
+        encrypt::encrypt_name_for_new_item(&self.master, &self.id, &filename, mime_type.as_deref(), pin)
+            .map_err(Into::into)
+    }
+
+    /// Seal this new row's note.
+    pub fn encrypt_note(&self, note: String, chunk_format: u8) -> Result<String, CryptoError> {
+        let pin = ExpectedChunkFormat::from_u8(chunk_format)?;
+        encrypt::encrypt_note_for_new_item(&self.master, &self.id, &note, pin).map_err(Into::into)
+    }
+
+    /// Seal this new row's thumbnail.
+    pub fn encrypt_thumbnail(&self, plaintext: Vec<u8>, chunk_format: u8) -> Result<Vec<u8>, CryptoError> {
+        let pin = ExpectedChunkFormat::from_u8(chunk_format)?;
+        encrypt::encrypt_thumbnail_for_new_item(&self.master, &self.id, &plaintext, pin).map_err(Into::into)
+    }
+}
+
+/// Opaque write target issued by [`MasterKeyHandle::resolve_owned_key`] (task
+/// 2275, L13).
+///
+/// A replacement is sealed through this handle only: the id, the key and the
+/// chunk-format pin all come from core's resolution, so a caller cannot point a
+/// write at another row or drop a recorded v2 pin.
+#[derive(uniffi::Object)]
+pub struct WriteTargetHandle {
+    inner: beebeeb_core::owned_keys::WriteTarget,
+}
+
+#[uniffi::export]
+impl WriteTargetHandle {
+    /// The row id the write must target.
+    pub fn item_id(&self) -> String {
+        self.inner.item_id().to_string()
+    }
+
+    /// The chunk-format pin the write must keep (0 = unrecorded, 2 = v2).
+    pub fn pin(&self) -> u8 {
+        self.inner.pin().as_u8()
+    }
+
+    /// Seal a replacement name under the target's key and pin.
+    pub fn encrypt_name(&self, filename: String, mime_type: Option<String>) -> Result<String, CryptoError> {
+        encrypt::encrypt_name_for_target(&self.inner, &filename, mime_type.as_deref()).map_err(Into::into)
+    }
+
+    /// Seal a replacement note under the target's key and pin.
+    pub fn encrypt_note(&self, note: String) -> Result<String, CryptoError> {
+        encrypt::encrypt_note_for_target(&self.inner, &note).map_err(Into::into)
+    }
+
+    /// Seal a replacement thumbnail under the target's key and pin.
+    pub fn encrypt_thumbnail(&self, plaintext: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
+        encrypt::encrypt_thumbnail_for_target(&self.inner, &plaintext).map_err(Into::into)
+    }
+}
+
 /// Decrypted name metadata (task 1908): `chunk_format` is what every content
 /// reader of the file must be given (0 = unrecorded, 2 = v2).
 #[derive(uniffi::Record)]
 pub struct NameMetadataDto {
+    pub name: String,
+    pub mime_type: Option<String>,
+    pub chunk_format: u8,
+}
+
+/// One resolved row (task 2275). `origin` is "derived", "derived_binary",
+/// "derived_upper_repair", "owner_wrap" or "folder_wrap". A row with
+/// `write_target == nil` is read-only (upper-repair name or content key): no
+/// rename, no new version. `content_key` is set only for an SF-0002 split row
+/// (name and content under different id conventions). `plaintext_name` marks a
+/// legacy plaintext name (no pin).
+#[derive(uniffi::Record)]
+pub struct ResolvedItemKey {
+    pub key: Arc<FileKeyHandle>,
+    pub content_key: Option<Arc<FileKeyHandle>>,
+    pub origin: String,
+    pub name: String,
+    pub mime_type: Option<String>,
+    pub chunk_format: u8,
+    pub plaintext_name: bool,
+    pub write_target: Option<Arc<WriteTargetHandle>>,
+}
+
+/// A 2236 request row (task 2275): content under `content_key`, name under
+/// `name_key` (`name_origin` says which).
+#[derive(uniffi::Record)]
+pub struct RequestRowKeys {
+    pub content_key: Arc<FileKeyHandle>,
+    pub name_key: Arc<FileKeyHandle>,
+    pub name_origin: String,
     pub name: String,
     pub mime_type: Option<String>,
     pub chunk_format: u8,
@@ -2244,6 +2539,7 @@ impl ChunkEncryptorHandle {
     ///
     /// `profile` must be one of: `"desktop"`, `"web"`, `"mobile"`, `"backup"`.
     #[uniffi::constructor]
+    #[allow(deprecated)]
     pub fn from_file(
         master_key: &MasterKeyHandle,
         file_id: String,
@@ -2274,6 +2570,7 @@ impl ChunkEncryptorHandle {
     /// PUSH constructor: the caller slices the plaintext and feeds chunks via
     /// [`push_chunk`](Self::push_chunk). Plan derived from (`file_size`, `profile`).
     #[uniffi::constructor]
+    #[allow(deprecated)]
     pub fn for_push(
         master_key: &MasterKeyHandle,
         file_id: String,
@@ -2282,6 +2579,39 @@ impl ChunkEncryptorHandle {
     ) -> Result<Arc<Self>, CryptoError> {
         let chunk_profile = parse_chunk_profile(&profile)?;
         let enc = master_key.with_key(|mk| ChunkEncryptor::for_push(mk, &file_id, file_size, chunk_profile))??;
+        Ok(Arc::new(Self {
+            inner: Mutex::new(Some(enc)),
+        }))
+    }
+
+    /// PUSH constructor for a NEW row minted by
+    /// [`MasterKeyHandle::new_owner_item_id`]/`new_foreign_item_id` (task 2275,
+    /// L13). The id comes from the handle; the content key is core's derivation
+    /// under that id, which is also the member's rule for a new foreign item.
+    #[uniffi::constructor]
+    pub fn for_push_for_new_item(
+        item_id: &NewItemIdHandle,
+        file_size: u64,
+        profile: String,
+    ) -> Result<Arc<Self>, CryptoError> {
+        let chunk_profile = parse_chunk_profile(&profile)?;
+        let enc = ChunkEncryptor::for_push_for_new_item(&item_id.master, &item_id.id, file_size, chunk_profile)?;
+        Ok(Arc::new(Self {
+            inner: Mutex::new(Some(enc)),
+        }))
+    }
+
+    /// PUSH replacement constructor for a resolved row (task 2275, L13). The
+    /// key, the id and the recorded chunk-format pin all come from the write
+    /// target, so a caller cannot drop a recorded v2 pin.
+    #[uniffi::constructor]
+    pub fn for_push_for_target(
+        target: &WriteTargetHandle,
+        file_size: u64,
+        profile: String,
+    ) -> Result<Arc<Self>, CryptoError> {
+        let chunk_profile = parse_chunk_profile(&profile)?;
+        let enc = ChunkEncryptor::for_push_for_target(&target.inner, file_size, chunk_profile)?;
         Ok(Arc::new(Self {
             inner: Mutex::new(Some(enc)),
         }))
@@ -2604,6 +2934,7 @@ mod chunk_stream_handle_tests {
 
     /// Task 1908: two equal-size v2 chunks (as a client writes them after the
     /// gated v2 switch). Core-written via the dev-only `test-support` feature.
+    #[allow(deprecated)]
     fn two_v2_frames(mk: &MasterKeyHandle, file_id: &str) -> (Vec<u8>, Vec<Vec<u8>>) {
         // 5 MiB on the "mobile" ladder (4 MiB chunks) => 2 chunks.
         let data: Vec<u8> = (0..5 * 1024 * 1024).map(|i| (i % 253) as u8).collect();
@@ -7585,5 +7916,123 @@ mod client_meta_binding_tests {
         assert!(fitted.len() <= 1024, "{} bytes", fitted.len());
         assert!(fitted.starts_with('…'));
         assert!(fitted.is_char_boundary(3));
+    }
+}
+
+/// Task 2275 L12: true for a canonical foreign (F) id; `InvalidInput` for any
+/// non-canonical text form.
+#[uniffi::export]
+pub fn is_foreign_item_id(item_id: String) -> Result<bool, CryptoError> {
+    beebeeb_core::item_id::is_foreign_item_id(&item_id).map_err(Into::into)
+}
+
+/// Task 2275 L13: the new-item and write-target handles are the only way to
+/// seal a new row or a replacement through the FFI. These tests pin the
+/// behaviour the clients rely on: mint → persist id + tag → resume, and the
+/// refusal of a tampered tag, a different id or a server-echoed id.
+#[cfg(test)]
+mod item_id_handle_tests {
+    use super::*;
+
+    fn master() -> Arc<MasterKeyHandle> {
+        MasterKeyHandle::from_keychain_bytes(vec![0x33; 32]).unwrap()
+    }
+
+    #[test]
+    fn resume_round_trips_and_refuses_a_tampered_tag_or_another_id() {
+        let master = master();
+        let minted = master.new_owner_item_id().unwrap();
+        let id_text = minted.id_text();
+        let tag = minted.tag();
+        assert_eq!(id_text.len(), 36);
+        assert_eq!(tag.len(), 32, "the resume tag is HMAC-SHA256");
+
+        let resumed = master.resume_new_item_id(id_text.clone(), tag.clone()).unwrap();
+        assert_eq!(resumed.id_text(), id_text);
+        assert_eq!(resumed.tag(), tag);
+
+        let mut tampered = tag.clone();
+        tampered[0] ^= 1;
+        assert!(
+            master.resume_new_item_id(id_text.clone(), tampered).is_err(),
+            "a tampered tag must not resume"
+        );
+
+        let other = master.new_owner_item_id().unwrap();
+        assert!(
+            master.resume_new_item_id(other.id_text(), tag.clone()).is_err(),
+            "another id's tag must not resume this id"
+        );
+
+        // A server-echoed id: same tag, one hex digit changed.
+        let mut echoed = id_text.clone();
+        let last = echoed.pop().unwrap();
+        echoed.push(if last == '0' { '1' } else { '0' });
+        assert!(
+            master.resume_new_item_id(echoed, tag.clone()).is_err(),
+            "a server-echoed id must not resume"
+        );
+        assert!(
+            master.resume_new_item_id(id_text, vec![0u8; 31]).is_err(),
+            "a short tag must not resume"
+        );
+    }
+
+    #[test]
+    fn foreign_mint_resumes_the_same_way_and_is_class_correct() {
+        let master = master();
+        let minted = master.new_foreign_item_id().unwrap();
+        assert!(is_foreign_item_id(minted.id_text()).unwrap());
+        let resumed = master.resume_new_item_id(minted.id_text(), minted.tag()).unwrap();
+        assert_eq!(resumed.id_text(), minted.id_text());
+        assert_eq!(resumed.tag(), minted.tag());
+        // L12: an F id never derives its name key, so every new-item metadata
+        // sealer refuses it — an F name is sealed through the write target
+        // after adoption. The member's content path does exist: the chunk
+        // encryptor derives the key from the member's master under the F id.
+        assert!(resumed.encrypt_name("theirs.txt".into(), None, 0).is_err());
+        assert!(resumed.encrypt_note("a note".into(), 0).is_err());
+        assert!(resumed.encrypt_thumbnail(vec![0u8; 8], 0).is_err());
+        let enc = ChunkEncryptorHandle::for_push_for_new_item(&resumed, 32, "cli".into()).unwrap();
+        assert_eq!(enc.push_chunk(vec![7u8; 32]).unwrap().index, 0);
+        assert_eq!(enc.chunks_emitted().unwrap(), 1);
+    }
+
+    #[test]
+    fn new_item_sealers_use_the_handle_key_and_the_target_carries_its_pin() {
+        let master = master();
+        let id = master.new_owner_item_id().unwrap();
+        let name = id.encrypt_name("new.txt".into(), Some("text/plain".into()), 0).unwrap();
+        let key = master.derive_file_key(id.id_text().into_bytes()).unwrap();
+        let meta = key.decrypt_file_metadata(name).unwrap();
+        assert_eq!(meta.name, "new.txt");
+        assert_eq!(meta.mime_type.as_deref(), Some("text/plain"));
+        assert_eq!(meta.chunk_format, 0);
+
+        // A plaintext-named FILE without chunk 0 is refused; a FOLDER resolves.
+        assert!(
+            master
+                .resolve_owned_key(id.id_text(), 1, None, "legacy.bin".into(), None, None, None, None)
+                .is_err()
+        );
+        let folder = master
+            .resolve_owned_key(id.id_text(), 2, None, "Legacy folder".into(), None, None, None, None)
+            .unwrap();
+        assert!(folder.content_key.is_none());
+        let target = folder.write_target.as_ref().expect("a folder row is writable");
+        assert_eq!(target.item_id(), id.id_text());
+        assert_eq!(target.pin(), 0);
+        let renamed = target.encrypt_name("renamed folder".into(), None).unwrap();
+        assert_eq!(
+            folder.key.decrypt_file_metadata(renamed).unwrap().name,
+            "renamed folder"
+        );
+
+        // An unknown row kind is refused rather than guessed.
+        assert!(
+            master
+                .resolve_owned_key(id.id_text(), 3, None, "x".into(), None, None, None, None)
+                .is_err()
+        );
     }
 }
