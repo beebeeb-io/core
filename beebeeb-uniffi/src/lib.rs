@@ -1322,6 +1322,116 @@ impl MasterKeyHandle {
         Ok(FileKeyHandle::new(key))
     }
 
+    /// Task 2275 L12: classify one row from its id and resolve its key. Key
+    /// material stays in native handles; no raw master or folder key crosses FFI.
+    ///
+    /// Owner ids derive (string, then binary, then the READ-ONLY upper repair)
+    /// and ignore `owner_wrap`/the folder wrap. Foreign ids never derive: the L8
+    /// envelope or the L7 child wrap must open AND authenticate the name. A
+    /// plaintext name is resolved for a folder (no chunk) by the string
+    /// convention, or for a file by `first_chunk_frame` (chunk 0).
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_owned_key(
+        &self,
+        item_id: String,
+        owner_wrap: Option<Vec<u8>>,
+        name_encrypted: String,
+        shared_folder_id: Option<String>,
+        kind: Option<u8>,
+        folder_key: Option<Arc<FileKeyHandle>>,
+        folder_wrap: Option<Vec<u8>>,
+        first_chunk_frame: Option<Vec<u8>>,
+    ) -> Result<ResolvedItemKey, CryptoError> {
+        use beebeeb_core::owned_keys::{FirstChunk, FolderWrap, resolve_owned_key as core_resolve};
+
+        let folder = match (shared_folder_id, kind, folder_key, folder_wrap) {
+            (Some(root), Some(kind), Some(handle), Some(wrap)) => {
+                let key = handle.with_key(|k| kdf::FileKey::from_bytes(*k.as_bytes()))?;
+                Some((key, root, kind, wrap))
+            }
+            _ => None,
+        };
+        let folder_wrap = folder.as_ref().map(|(key, root, kind, wrap)| FolderWrap {
+            shared_folder_id: root,
+            kind: *kind,
+            folder_key: key,
+            wrapped_key: wrap,
+        });
+        let chunk = first_chunk_frame.as_deref().map(|frame| {
+            let split = frame.len().min(12);
+            FirstChunk {
+                nonce: &frame[..split],
+                ciphertext: &frame[split..],
+                index: 0,
+            }
+        });
+        let resolved = self
+            .with_key(|mk| core_resolve(mk, &item_id, owner_wrap.as_deref(), folder_wrap, &name_encrypted, chunk))??;
+        let (name, mime_type, chunk_format, plaintext_name) = match &resolved.name {
+            beebeeb_core::owned_keys::ResolvedName::Encrypted(meta) => (
+                meta.name.clone(),
+                meta.mime_type.clone(),
+                meta.chunk_format.as_u8(),
+                false,
+            ),
+            beebeeb_core::owned_keys::ResolvedName::Plaintext(text) => (text.clone(), None, 0, true),
+        };
+        let (write_item_id, write_pin) = match &resolved.write_target {
+            Some(target) => (Some(target.item_id().to_string()), Some(target.pin().as_u8())),
+            None => (None, None),
+        };
+        Ok(ResolvedItemKey {
+            key: FileKeyHandle::new(resolved.key),
+            origin: resolved.origin.as_str().to_string(),
+            name,
+            mime_type,
+            chunk_format,
+            plaintext_name,
+            write_item_id,
+            write_pin,
+        })
+    }
+
+    /// Task 2275: resolve a 2236 request row. Content under `C`; the name key is
+    /// a derived owner key when it authenticates the name, else `C`. Read-only.
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_request_row(
+        &self,
+        item_id: String,
+        request_id: Vec<u8>,
+        wrapped_request_private: Vec<u8>,
+        wrap_nonce: Vec<u8>,
+        sender_ephemeral_pubkey: Vec<u8>,
+        wrapped_content_key: Vec<u8>,
+        name_encrypted: String,
+    ) -> Result<RequestRowKeys, CryptoError> {
+        let e_pub: [u8; 32] = sender_ephemeral_pubkey
+            .try_into()
+            .map_err(|_| CryptoError::InvalidInput {
+                detail: "sender_ephemeral_pubkey must be exactly 32 bytes".into(),
+            })?;
+        let row = self.with_key(|mk| {
+            beebeeb_core::owned_keys::resolve_request_row(
+                mk,
+                &item_id,
+                &request_id,
+                &wrapped_request_private,
+                &wrap_nonce,
+                &e_pub,
+                &wrapped_content_key,
+                &name_encrypted,
+            )
+        })??;
+        Ok(RequestRowKeys {
+            content_key: FileKeyHandle::new(row.content_key),
+            name_key: FileKeyHandle::new(row.name_key),
+            name_origin: row.name_origin.as_str().to_string(),
+            name: row.name.name,
+            mime_type: row.name.mime_type,
+            chunk_format: row.name.chunk_format.as_u8(),
+        })
+    }
+
     /// L9 (task 2255): open a LEGACY invite owner copy; `Some` only when core
     /// proves it over the folder's `rows` (at most 64 distinct ids, one call).
     /// The unproven candidate never leaves core. Attack B is a named residual.
@@ -1905,6 +2015,29 @@ impl FileKeyHandle {
     }
 
     /// One-way public key identifier; never exports the key itself.
+    /// L14 (task 2275): does this row's L7 child wrap open to exactly this key?
+    /// False on any error, and the comparison is constant-time.
+    pub fn child_wrap_matches(
+        &self,
+        shared_folder_id: String,
+        item_id: String,
+        kind: u8,
+        wrapped: Vec<u8>,
+        expected: &FileKeyHandle,
+    ) -> Result<bool, CryptoError> {
+        self.with_key(|folder| {
+            let expected = expected.with_key(|k| kdf::FileKey::from_bytes(*k.as_bytes()))?;
+            Ok(beebeeb_core::owned_keys::child_wrap_matches(
+                folder,
+                &shared_folder_id,
+                &item_id,
+                kind,
+                &wrapped,
+                &expected,
+            ))
+        })?
+    }
+
     pub fn key_id(&self) -> Result<Vec<u8>, CryptoError> {
         self.with_key(|fk| beebeeb_core::folder_key::folder_key_id(fk.as_bytes()).to_vec())
     }
@@ -2170,6 +2303,34 @@ pub struct OwnerFileKey {
 /// reader of the file must be given (0 = unrecorded, 2 = v2).
 #[derive(uniffi::Record)]
 pub struct NameMetadataDto {
+    pub name: String,
+    pub mime_type: Option<String>,
+    pub chunk_format: u8,
+}
+
+/// One resolved row (task 2275). `origin` is "derived", "derived_binary",
+/// "derived_upper_repair", "owner_wrap" or "folder_wrap". A row with
+/// `write_item_id == nil` is read-only (upper-repair): no rename, no new
+/// version. `plaintext_name` marks a legacy plaintext name (no pin).
+#[derive(uniffi::Record)]
+pub struct ResolvedItemKey {
+    pub key: Arc<FileKeyHandle>,
+    pub origin: String,
+    pub name: String,
+    pub mime_type: Option<String>,
+    pub chunk_format: u8,
+    pub plaintext_name: bool,
+    pub write_item_id: Option<String>,
+    pub write_pin: Option<u8>,
+}
+
+/// A 2236 request row (task 2275): content under `content_key`, name under
+/// `name_key` (`name_origin` says which).
+#[derive(uniffi::Record)]
+pub struct RequestRowKeys {
+    pub content_key: Arc<FileKeyHandle>,
+    pub name_key: Arc<FileKeyHandle>,
+    pub name_origin: String,
     pub name: String,
     pub mime_type: Option<String>,
     pub chunk_format: u8,
@@ -7270,4 +7431,26 @@ mod client_meta_binding_tests {
         assert!(fitted.starts_with('…'));
         assert!(fitted.is_char_boundary(3));
     }
+}
+
+/// Task 2275 L12: mint a new foreign (F) item id (canonical lowercase).
+#[uniffi::export]
+pub fn new_foreign_item_id() -> Result<String, CryptoError> {
+    beebeeb_core::item_id::new_foreign_item_id().map_err(Into::into)
+}
+
+/// Task 2275 L12: mint a new owner (O) item id (canonical lowercase UUID v4).
+#[uniffi::export]
+pub fn new_owner_item_id() -> Result<String, CryptoError> {
+    Ok(beebeeb_core::item_id::NewItemId::owner()
+        .map_err(CryptoError::from)?
+        .as_str()
+        .to_string())
+}
+
+/// Task 2275 L12: true for a canonical foreign (F) id; `InvalidInput` for any
+/// non-canonical text form.
+#[uniffi::export]
+pub fn is_foreign_item_id(item_id: String) -> Result<bool, CryptoError> {
+    beebeeb_core::item_id::is_foreign_item_id(&item_id).map_err(Into::into)
 }

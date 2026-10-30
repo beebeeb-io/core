@@ -77,7 +77,9 @@ use beebeeb_types::{ChunkPlan, ChunkProfile, ChunkStrategy, STORAGE_FORMAT_VERSI
 
 use crate::CoreError;
 use crate::encrypt::{NONCE_LEN, TAG_LEN, open_raw_with_aad, random_nonce, seal_raw_with_aad, seal_raw_with_nonce};
+use crate::item_id::{ItemClass, NewItemId, item_class};
 use crate::kdf::{FileKey, MasterKey, derive_file_key};
+use crate::owned_keys::WriteTarget;
 
 /// Per-chunk AEAD overhead on the wire: `nonce(12) + tag(16)` = 28 bytes. The ONE
 /// definition: `direct_transfer` sizes chunk lengths from it.
@@ -683,6 +685,43 @@ impl ChunkEncryptor {
     pub fn for_push(mk: &MasterKey, file_id: &str, file_size: u64, profile: ChunkProfile) -> Result<Self, CoreError> {
         let plan = plan_chunks(file_size, profile);
         Self::new(mk, file_id, plan, Source::Push)
+    }
+
+    /// **Push** writer for a brand-new row (task 2275, L13).
+    ///
+    /// The id is minted by core ([`NewItemId`]), so a client cannot seal a new
+    /// item under an arbitrary or pre-existing id. Only owner ids can be sealed
+    /// this way (their key is derived); a foreign row is adopted first and then
+    /// written through [`Self::for_push_for_target`].
+    pub fn for_push_for_new_item(
+        mk: &MasterKey,
+        item_id: &NewItemId,
+        file_size: u64,
+        profile: ChunkProfile,
+    ) -> Result<Self, CoreError> {
+        if item_class(item_id.as_str())? != ItemClass::Owner {
+            return Err(CoreError::InvalidInput(
+                "a new foreign item is sealed after adoption, through its write target".into(),
+            ));
+        }
+        Self::for_push(mk, item_id.as_str(), file_size, profile)
+    }
+
+    /// **Push** replacement writer for a resolved row (task 2275, L13).
+    ///
+    /// The key and the id come from the [`WriteTarget`] that
+    /// [`crate::owned_keys::resolve_owned_key`] issued, so a replacement cannot
+    /// be sealed under a guessed key or a different id. Call
+    /// [`with_recorded_pin`](Self::with_recorded_pin) with the target's pin
+    /// before the first chunk.
+    pub fn for_push_for_target(target: &WriteTarget, file_size: u64, profile: ChunkProfile) -> Result<Self, CoreError> {
+        let plan = plan_chunks(file_size, profile);
+        Self::new_with_file_key(
+            FileKey::from_bytes(*target.key().as_bytes()),
+            target.item_id(),
+            plan,
+            Source::Push,
+        )
     }
 
     /// **Push** constructor with an explicit, server-dictated chunk size.
@@ -3607,5 +3646,40 @@ mod review_round5_tests {
             assert_eq!(&frame.data[..NONCE_LEN], &three[i], "frame {i} uses its vector nonce");
         }
         ok.finish().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod write_shape_chunk_tests {
+    use super::*;
+
+    /// Task 2275 L13: a new-item writer uses the derived key and id, so with
+    /// the same nonces it emits the same frames as the derived constructor.
+    #[test]
+    fn new_item_chunk_writer_matches_the_derived_path() {
+        let mk = MasterKey::from_bytes(std::array::from_fn(|i| i as u8));
+        let id = NewItemId::owner().unwrap();
+        let nonces = vec![[0x21; NONCE_LEN]];
+        let mut via_new = ChunkEncryptor::for_push_for_new_item(&mk, &id, 20, ChunkProfile::Desktop)
+            .unwrap()
+            .with_format(ChunkFormat::V2)
+            .unwrap()
+            .with_vector_nonces(nonces.clone())
+            .unwrap();
+        let mut via_derived = ChunkEncryptor::for_push(&mk, id.as_str(), 20, ChunkProfile::Desktop)
+            .unwrap()
+            .with_format(ChunkFormat::V2)
+            .unwrap()
+            .with_vector_nonces(nonces)
+            .unwrap();
+        let data = vec![0x7eu8; 20];
+        assert_eq!(
+            via_new.push_chunk(&data).unwrap().data,
+            via_derived.push_chunk(&data).unwrap().data
+        );
+        assert_eq!(
+            via_new.finish().unwrap().total_ciphertext,
+            via_derived.finish().unwrap().total_ciphertext
+        );
     }
 }
