@@ -27,6 +27,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `owner_file_key_for_content` returning `OwnerFileKey`. Nothing writes under the uppercase
   convention; no row is re-sealed or migrated. Vectors `upper_repair_v1` and
   `upper_repair_split_v1` (vectors version 13).
+- Link labels and guest actor names (task 2275, L16): `kdf::wrap_link_label` /
+  `unwrap_link_label` seal a link's display label to the master key under
+  `HKDF-SHA256(master, "beebeeb-link-label-v1" || share_id)` with the same string as AAD (NFC,
+  1..40 Unicode scalar values); `kdf::seal_folder_actor_name` / `open_folder_actor_name` seal a
+  guest's name under the folder key, bound to the shared root, in the name writer's envelope
+  (NFC, 1..64 scalars, control characters and bidi overrides stripped on open). Both openers
+  accept one envelope shape under one key and refuse a non-16-byte id. `kdf::open_legacy_child_key`
+  is the one legacy unbound child opener (60-byte frame, no AAD) and refuses a 32-byte plaintext
+  that is valid UTF-8. WASM `wrapLinkLabel` / `unwrapLinkLabel` / `sealFolderActorName` /
+  `openFolderActorName` / `openLegacyChildKey`; UniFFI `MasterKeyHandle.wrap_link_label` /
+  `unwrap_link_label` and `FileKeyHandle.seal_folder_actor_name` / `open_folder_actor_name` /
+  `open_legacy_child_key`. Test vectors are version 14 (`link_label_v1`, `folder_actor_name_v1`,
+  `legacy_child_refusal_v1`).
 - `direct_transfer::storage::check_storage_get`: a storage GET delivered the chunk only for a
   `200` whose `Content-Length` is exactly the grant's length; anything else is `Failed { status }`
   (status `0`: no HTTP answer). `check_storage_body` applies the same rule to the bytes actually
