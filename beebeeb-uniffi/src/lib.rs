@@ -5130,14 +5130,16 @@ pub enum DirectTransferError {
     #[error("the planner was driven out of order: {code}")]
     Plan { code: String },
 
-    /// A storage body operation failed: `failed` (the head was not a `200` of the grant's length,
-    /// or a push would have passed the grant). The kind is core's `StorageGet::kind`.
-    #[error("the storage body failed: {code}")]
-    StorageBody { code: String },
-
     /// `call` was none of `discovery`, `download_grant`, `pinned_chunk`.
     #[error("unknown call")]
     UnknownCall,
+
+    /// A storage body operation failed: `failed` (the head was not a `200` of the grant's length,
+    /// or a push would have passed the grant). The kind is core's `StorageGet::kind`; `status` is
+    /// the status the head (or the refused push) answered, so the caller never re-derives it.
+    /// Appended last so every earlier variant keeps its wire index.
+    #[error("the storage body failed: {code} ({status})")]
+    StorageBody { code: String, status: u16 },
 }
 
 #[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
@@ -5263,16 +5265,24 @@ fn storage_get_dto(got: dt::StorageGet) -> DirectStorageGetDto {
 fn storage_body_error(failed: dt::StorageGet) -> DirectTransferError {
     DirectTransferError::StorageBody {
         code: failed.kind().to_owned(),
+        status: failed.status(),
     }
+}
+
+/// What a `DirectStorageBodyHandle` holds: the counted body, or the answer `finish` gave.
+/// `finish` consumes core's body, and asking twice must answer the same.
+enum StorageBodyState {
+    Counting(dt::StorageBody),
+    Answered(DirectStorageGetDto),
 }
 
 /// A storage GET's body counted as it arrives, so no client counts body bytes on its own.
 /// `from_head` starts it (throwing `StorageBody` when the head is not a `200` of the grant's
 /// length), `push` counts the bytes read and throws as soon as they would pass the grant, and
-/// `finish` gives the answer.
+/// `finish` gives the answer and consumes the count.
 #[derive(uniffi::Object)]
 pub struct DirectStorageBodyHandle {
-    inner: Mutex<dt::StorageBody>,
+    inner: Mutex<StorageBodyState>,
 }
 
 #[uniffi::export]
@@ -5285,18 +5295,32 @@ impl DirectStorageBodyHandle {
     ) -> Result<Arc<Self>, DirectTransferError> {
         let body = dt::StorageBody::from_head(status, content_length, expected).map_err(storage_body_error)?;
         Ok(Arc::new(Self {
-            inner: Mutex::new(body),
+            inner: Mutex::new(StorageBodyState::Counting(body)),
         }))
     }
 
-    /// Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant.
+    /// Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant, and for
+    /// any push after `finish` (the count is consumed).
     pub fn push(&self, n: u64) -> Result<(), DirectTransferError> {
-        lock_tolerant(&self.inner).push(n).map_err(storage_body_error)
+        match &mut *lock_tolerant(&self.inner) {
+            StorageBodyState::Counting(body) => body.push(n).map_err(storage_body_error),
+            StorageBodyState::Answered(_) => Err(storage_body_error(dt::StorageGet::Failed { status: 200 })),
+        }
     }
 
-    /// The body's answer. Core's `StorageBody` is two counters, so reading it twice is harmless.
+    /// The body's answer; the count is consumed, and a second call gives the same answer.
     pub fn finish(&self) -> DirectStorageGetDto {
-        storage_get_dto(lock_tolerant(&self.inner).finish())
+        let mut state = lock_tolerant(&self.inner);
+        if let StorageBodyState::Answered(answer) = &*state {
+            return *answer;
+        }
+        let held = std::mem::replace(&mut *state, StorageBodyState::Answered(DirectStorageGetDto::Stored));
+        let answer = match held {
+            StorageBodyState::Counting(body) => storage_get_dto(body.finish()),
+            StorageBodyState::Answered(answer) => answer,
+        };
+        *state = StorageBodyState::Answered(answer);
+        answer
     }
 }
 
@@ -5323,17 +5347,6 @@ impl From<DirectMemoryClassDto> for dt::MemoryClass {
             DirectMemoryClassDto::Browser => dt::MemoryClass::Browser,
             DirectMemoryClassDto::MobileApp => dt::MemoryClass::MobileApp,
             DirectMemoryClassDto::MobileExtension => dt::MemoryClass::MobileExtension,
-        }
-    }
-}
-
-impl From<dt::MemoryClass> for DirectMemoryClassDto {
-    fn from(c: dt::MemoryClass) -> Self {
-        match c {
-            dt::MemoryClass::Native => DirectMemoryClassDto::Native,
-            dt::MemoryClass::Browser => DirectMemoryClassDto::Browser,
-            dt::MemoryClass::MobileApp => DirectMemoryClassDto::MobileApp,
-            dt::MemoryClass::MobileExtension => DirectMemoryClassDto::MobileExtension,
         }
     }
 }
@@ -6271,7 +6284,9 @@ mod direct_transfer_binding_tests {
     //! crate. The same file `beebeeb-core` runs through core directly: a binding that drifts
     //! from core fails here.
 
-    use beebeeb_core::direct_transfer::vectors::{self, CacheSurface, HealthSurface, PlannerSurface, Surface};
+    use beebeeb_core::direct_transfer::vectors::{
+        self, CacheSurface, HealthSurface, PlannerSurface, StorageBodySurface, Surface,
+    };
     use serde_json::{Value, json};
 
     use super::*;
@@ -6543,19 +6558,9 @@ mod direct_transfer_binding_tests {
         }
 
         fn storage_body(&self, status: u16, content_length: Option<u64>, expected: u64, pushes: &[u64]) -> Value {
-            let body = match DirectStorageBodyHandle::from_head(status, content_length, expected) {
-                Ok(body) => body,
-                Err(DirectTransferError::StorageBody { .. }) => {
-                    return json!({"kind": "failed", "status": status});
-                }
-                Err(other) => panic!("unexpected error {other:?}"),
-            };
-            for n in pushes {
-                if body.push(*n).is_err() {
-                    return json!({"kind": "failed", "status": 200});
-                }
-            }
-            storage_answer_json(body.finish())
+            // The head → pushes → stop → finish contract lives once, in `vectors::drive_storage_body`;
+            // a failure's status comes from the binding's own error, never from the row.
+            vectors::drive_storage_body(self, status, content_length, expected, pushes)
         }
 
         fn paced_until_ms(&self, start_ms: i64, wire_bytes: u64, kbps: u64) -> i64 {
@@ -6563,8 +6568,16 @@ mod direct_transfer_binding_tests {
         }
 
         fn max_in_flight_bytes(&self, class: &str) -> u64 {
-            let class = dt::MemoryClass::from_code(class).unwrap_or_else(|| panic!("unknown memory class {class:?}"));
-            direct_max_in_flight_bytes(class.into())
+            // The class string maps to the DTO here, explicitly: production has no `MemoryClass`
+            // → DTO conversion (the cap only ever goes the other way).
+            let class = match class {
+                "native" => DirectMemoryClassDto::Native,
+                "browser" => DirectMemoryClassDto::Browser,
+                "mobile_app" => DirectMemoryClassDto::MobileApp,
+                "mobile_extension" => DirectMemoryClassDto::MobileExtension,
+                other => panic!("unknown memory class {other:?}"),
+            };
+            direct_max_in_flight_bytes(class)
         }
 
         fn pairs_allowed(&self, discovery: &Value, direction: &str, allowlist: &Value) -> bool {
@@ -6587,6 +6600,31 @@ mod direct_transfer_binding_tests {
                 file_id.to_owned(),
                 seed,
             ))
+        }
+    }
+
+    impl StorageBodySurface for UniffiSurface {
+        type Body = Arc<DirectStorageBodyHandle>;
+
+        fn body_from_head(&self, status: u16, content_length: Option<u64>, expected: u64) -> Result<Self::Body, Value> {
+            DirectStorageBodyHandle::from_head(status, content_length, expected).map_err(|e| match e {
+                // The status comes from the binding's error; the row only supplied the input.
+                DirectTransferError::StorageBody { code, status } => json!({"kind": code, "status": status}),
+                other => panic!("unexpected error {other:?}"),
+            })
+        }
+
+        fn body_push(&self, body: &mut Self::Body, n: u64) -> Result<(), Value> {
+            body.push(n).map_err(|e| {
+                let DirectTransferError::StorageBody { code, status } = e else {
+                    panic!("a push failure must be a body error: {e:?}");
+                };
+                json!({"kind": code, "status": status})
+            })
+        }
+
+        fn body_finish(&self, body: Self::Body) -> Value {
+            storage_answer_json(body.finish())
         }
     }
 
@@ -6672,17 +6710,62 @@ mod direct_transfer_binding_tests {
         assert_eq!(empty.finish(), DirectStorageGetDto::Stored);
     }
 
+    /// `finish` consumes core's count, so a second call answers the same and a push after it is a
+    /// failure — never a body that keeps counting behind a finished answer.
+    #[test]
+    fn the_storage_body_handle_consumes_its_count_once() {
+        let chunk = 4 * 1024 * 1024 + 28;
+        let body = DirectStorageBodyHandle::from_head(200, Some(chunk), chunk).expect("an exact head");
+        body.push(chunk).expect("the whole grant");
+        assert_eq!(body.finish(), DirectStorageGetDto::Stored);
+        assert_eq!(
+            body.finish(),
+            DirectStorageGetDto::Stored,
+            "a second finish answers the same"
+        );
+        assert!(
+            matches!(
+                body.push(1),
+                Err(DirectTransferError::StorageBody { ref code, status: 200 }) if code == "failed"
+            ),
+            "the count is consumed by finish"
+        );
+    }
+
+    /// The head's own status rides on the error, so a caller never re-derives it from its input.
+    #[test]
+    fn the_storage_body_error_carries_the_head_status() {
+        let chunk = 4 * 1024 * 1024 + 28;
+        for (status, content_length, expected_status) in
+            [(206u16, Some(chunk), 206u16), (403, Some(chunk), 403), (0, None, 0)]
+        {
+            match DirectStorageBodyHandle::from_head(status, content_length, chunk) {
+                Err(DirectTransferError::StorageBody { code, status: got }) => {
+                    assert_eq!(code, "failed", "{status}");
+                    assert_eq!(got, expected_status, "{status}");
+                }
+                _other => panic!("a {status} head of the grant's length must fail"),
+            }
+        }
+    }
+
     #[test]
     fn the_storage_body_handle_refuses_a_bad_head_and_a_push_past_the_grant() {
         let chunk = 4 * 1024 * 1024 + 28;
         match DirectStorageBodyHandle::from_head(206, Some(chunk), chunk) {
-            Err(DirectTransferError::StorageBody { code }) => assert_eq!(code, "failed"),
+            Err(DirectTransferError::StorageBody { code, status }) => {
+                assert_eq!(code, "failed");
+                assert_eq!(status, 206, "the head's own status rides on the error");
+            }
             _other => panic!("a 206 must be a failed head"),
         }
         let body = DirectStorageBodyHandle::from_head(200, Some(chunk), chunk).expect("an exact head");
         body.push(chunk - 1).expect("inside the grant");
         match body.push(2) {
-            Err(DirectTransferError::StorageBody { code }) => assert_eq!(code, "failed"),
+            Err(DirectTransferError::StorageBody { code, status }) => {
+                assert_eq!(code, "failed");
+                assert_eq!(status, 200);
+            }
             Err(other) => panic!("a push past the grant must fail with a body error: {other:?}"),
             Ok(()) => panic!("a push past the grant must fail"),
         }

@@ -2590,17 +2590,18 @@ public func FfiConverterTypeDirectSignedUrl_lower(_ value: DirectSignedUrl) -> U
  * A storage GET's body counted as it arrives, so no client counts body bytes on its own.
  * `from_head` starts it (throwing `StorageBody` when the head is not a `200` of the grant's
  * length), `push` counts the bytes read and throws as soon as they would pass the grant, and
- * `finish` gives the answer.
+ * `finish` gives the answer and consumes the count.
  */
 public protocol DirectStorageBodyHandleProtocol: AnyObject, Sendable {
     
     /**
-     * The body's answer. Core's `StorageBody` is two counters, so reading it twice is harmless.
+     * The body's answer; the count is consumed, and a second call gives the same answer.
      */
     func finish()  -> DirectStorageGetDto
     
     /**
-     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant.
+     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant, and for
+     * any push after `finish` (the count is consumed).
      */
     func push(n: UInt64) throws 
     
@@ -2609,7 +2610,7 @@ public protocol DirectStorageBodyHandleProtocol: AnyObject, Sendable {
  * A storage GET's body counted as it arrives, so no client counts body bytes on its own.
  * `from_head` starts it (throwing `StorageBody` when the head is not a `200` of the grant's
  * length), `push` counts the bytes read and throws as soon as they would pass the grant, and
- * `finish` gives the answer.
+ * `finish` gives the answer and consumes the count.
  */
 open class DirectStorageBodyHandle: DirectStorageBodyHandleProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
@@ -2675,7 +2676,7 @@ public static func fromHead(status: UInt16, contentLength: UInt64?, expected: UI
 
     
     /**
-     * The body's answer. Core's `StorageBody` is two counters, so reading it twice is harmless.
+     * The body's answer; the count is consumed, and a second call gives the same answer.
      */
 open func finish() -> DirectStorageGetDto  {
     return try!  FfiConverterTypeDirectStorageGetDto_lift(try! rustCall() {
@@ -2686,7 +2687,8 @@ open func finish() -> DirectStorageGetDto  {
 }
     
     /**
-     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant.
+     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant, and for
+     * any push after `finish` (the count is consumed).
      */
 open func push(n: UInt64)throws   {try rustCallWithError(FfiConverterTypeDirectTransferError_lift) {
     uniffi_beebeeb_uniffi_fn_method_directstoragebodyhandle_push(
@@ -9169,15 +9171,17 @@ public enum DirectTransferError: Swift.Error, Equatable, Hashable, Foundation.Lo
     case Plan(code: String
     )
     /**
-     * A storage body operation failed: `failed` (the head was not a `200` of the grant's length,
-     * or a push would have passed the grant). The kind is core's `StorageGet::kind`.
-     */
-    case StorageBody(code: String
-    )
-    /**
      * `call` was none of `discovery`, `download_grant`, `pinned_chunk`.
      */
     case UnknownCall
+    /**
+     * A storage body operation failed: `failed` (the head was not a `200` of the grant's length,
+     * or a push would have passed the grant). The kind is core's `StorageGet::kind`; `status` is
+     * the status the head (or the refused push) answered, so the caller never re-derives it.
+     * Appended last so every earlier variant keeps its wire index.
+     */
+    case StorageBody(code: String, status: UInt16
+    )
 
     
 
@@ -9216,10 +9220,11 @@ public struct FfiConverterTypeDirectTransferError: FfiConverterRustBuffer {
         case 3: return .Plan(
             code: try FfiConverterString.read(from: &buf)
             )
-        case 4: return .StorageBody(
-            code: try FfiConverterString.read(from: &buf)
+        case 4: return .UnknownCall
+        case 5: return .StorageBody(
+            code: try FfiConverterString.read(from: &buf), 
+            status: try FfiConverterUInt16.read(from: &buf)
             )
-        case 5: return .UnknownCall
 
          default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -9247,14 +9252,15 @@ public struct FfiConverterTypeDirectTransferError: FfiConverterRustBuffer {
             FfiConverterString.write(code, into: &buf)
             
         
-        case let .StorageBody(code):
-            writeInt(&buf, Int32(4))
-            FfiConverterString.write(code, into: &buf)
-            
-        
         case .UnknownCall:
-            writeInt(&buf, Int32(5))
+            writeInt(&buf, Int32(4))
         
+        
+        case let .StorageBody(code,status):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(code, into: &buf)
+            FfiConverterUInt16.write(status, into: &buf)
+            
         }
     }
 }
@@ -12941,10 +12947,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_directsignedurl_redacted() != 58321) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_finish() != 56174) {
+    if (uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_finish() != 25858) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_push() != 19487) {
+    if (uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_push() != 39701) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk() != 50441) {

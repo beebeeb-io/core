@@ -2242,10 +2242,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_directsignedurl_redacted() != 58321.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_finish() != 56174.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_finish() != 25858.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_push() != 19487.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_push() != 39701.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk() != 50441.toShort()) {
@@ -6313,17 +6313,18 @@ public object FfiConverterTypeDirectSignedUrl: FfiConverter<DirectSignedUrl, Lon
  * A storage GET's body counted as it arrives, so no client counts body bytes on its own.
  * `from_head` starts it (throwing `StorageBody` when the head is not a `200` of the grant's
  * length), `push` counts the bytes read and throws as soon as they would pass the grant, and
- * `finish` gives the answer.
+ * `finish` gives the answer and consumes the count.
  */
 public interface DirectStorageBodyHandleInterface {
     
     /**
-     * The body's answer. Core's `StorageBody` is two counters, so reading it twice is harmless.
+     * The body's answer; the count is consumed, and a second call gives the same answer.
      */
     fun `finish`(): DirectStorageGetDto
     
     /**
-     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant.
+     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant, and for
+     * any push after `finish` (the count is consumed).
      */
     fun `push`(`n`: kotlin.ULong)
     
@@ -6334,7 +6335,7 @@ public interface DirectStorageBodyHandleInterface {
  * A storage GET's body counted as it arrives, so no client counts body bytes on its own.
  * `from_head` starts it (throwing `StorageBody` when the head is not a `200` of the grant's
  * length), `push` counts the bytes read and throws as soon as they would pass the grant, and
- * `finish` gives the answer.
+ * `finish` gives the answer and consumes the count.
  */
 open class DirectStorageBodyHandle: Disposable, AutoCloseable, DirectStorageBodyHandleInterface
 {
@@ -6434,7 +6435,7 @@ open class DirectStorageBodyHandle: Disposable, AutoCloseable, DirectStorageBody
 
     
     /**
-     * The body's answer. Core's `StorageBody` is two counters, so reading it twice is harmless.
+     * The body's answer; the count is consumed, and a second call gives the same answer.
      */override fun `finish`(): DirectStorageGetDto {
             return FfiConverterTypeDirectStorageGetDto.lift(
     callWithHandle {
@@ -6450,7 +6451,8 @@ open class DirectStorageBodyHandle: Disposable, AutoCloseable, DirectStorageBody
 
     
     /**
-     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant.
+     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant, and for
+     * any push after `finish` (the count is consumed).
      */
     @Throws(DirectTransferException::class)override fun `push`(`n`: kotlin.ULong)
         = 
@@ -13349,24 +13351,28 @@ sealed class DirectTransferException: kotlin.Exception() {
     }
     
     /**
-     * A storage body operation failed: `failed` (the head was not a `200` of the grant's length,
-     * or a push would have passed the grant). The kind is core's `StorageGet::kind`.
-     */
-    class StorageBody(
-        
-        val `code`: kotlin.String
-        ) : DirectTransferException() {
-        override val message
-            get() = "code=${ `code` }"
-    }
-    
-    /**
      * `call` was none of `discovery`, `download_grant`, `pinned_chunk`.
      */
     class UnknownCall(
         ) : DirectTransferException() {
         override val message
             get() = ""
+    }
+    
+    /**
+     * A storage body operation failed: `failed` (the head was not a `200` of the grant's length,
+     * or a push would have passed the grant). The kind is core's `StorageGet::kind`; `status` is
+     * the status the head (or the refused push) answered, so the caller never re-derives it.
+     * Appended last so every earlier variant keeps its wire index.
+     */
+    class StorageBody(
+        
+        val `code`: kotlin.String, 
+        
+        val `status`: kotlin.UShort
+        ) : DirectTransferException() {
+        override val message
+            get() = "code=${ `code` }, status=${ `status` }"
     }
     
 
@@ -13397,10 +13403,11 @@ public object FfiConverterTypeDirectTransferError : FfiConverterRustBuffer<Direc
             3 -> DirectTransferException.Plan(
                 FfiConverterString.read(buf),
                 )
-            4 -> DirectTransferException.StorageBody(
+            4 -> DirectTransferException.UnknownCall()
+            5 -> DirectTransferException.StorageBody(
                 FfiConverterString.read(buf),
+                FfiConverterUShort.read(buf),
                 )
-            5 -> DirectTransferException.UnknownCall()
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
     }
@@ -13422,14 +13429,15 @@ public object FfiConverterTypeDirectTransferError : FfiConverterRustBuffer<Direc
                 4UL
                 + FfiConverterString.allocationSize(value.`code`)
             )
+            is DirectTransferException.UnknownCall -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
             is DirectTransferException.StorageBody -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
                 + FfiConverterString.allocationSize(value.`code`)
-            )
-            is DirectTransferException.UnknownCall -> (
-                // Add the size for the Int that specifies the variant plus the size needed for all fields
-                4UL
+                + FfiConverterUShort.allocationSize(value.`status`)
             )
         }
     }
@@ -13451,13 +13459,14 @@ public object FfiConverterTypeDirectTransferError : FfiConverterRustBuffer<Direc
                 FfiConverterString.write(value.`code`, buf)
                 Unit
             }
-            is DirectTransferException.StorageBody -> {
+            is DirectTransferException.UnknownCall -> {
                 buf.putInt(4)
-                FfiConverterString.write(value.`code`, buf)
                 Unit
             }
-            is DirectTransferException.UnknownCall -> {
+            is DirectTransferException.StorageBody -> {
                 buf.putInt(5)
+                FfiConverterString.write(value.`code`, buf)
+                FfiConverterUShort.write(value.`status`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
