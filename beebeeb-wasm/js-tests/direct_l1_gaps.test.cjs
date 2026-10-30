@@ -41,6 +41,15 @@ test('checkStorageGet: only 200 with the exact length is stored', () => {
     assert.equal(codeOf(() => wasm.checkStorageGet(200, bad, CHUNK)), 'length_invalid', `len ${bad}`)
     assert.equal(codeOf(() => wasm.checkStorageGet(200, null, bad)), 'length_invalid', `expected ${bad}`)
   }
+  // The status crosses the same validation as the body's head, never a silent truncation:
+  // 65736 is not a u16 and 200.9 is not a whole number.
+  for (const bad of [65736, 200.9]) {
+    assert.equal(codeOf(() => wasm.checkStorageGet(bad, CHUNK, CHUNK)), 'status_invalid', `status ${bad}`)
+    assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(bad, CHUNK, CHUNK)), 'status_invalid', `head ${bad}`)
+  }
+  // 1000 is a whole number that fits a u16: the binding only converts it, and core's rule (the
+  // same on every binding) makes it a failed head carrying 1000.
+  assert.deepEqual(wasm.checkStorageGet(1000, CHUNK, CHUNK), { kind: 'failed', status: 1000 })
 })
 
 test('pacedUntilMs carries desktop formula and the no-ceiling sentinel', () => {
@@ -145,12 +154,13 @@ test('WasmStorageBody counts the body and refuses the first byte past the grant'
   assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(200, null, CHUNK)), 'failed', 'no length throws')
 })
 
-test('WasmStorageBody.fromHead takes a whole status in 0..=999', () => {
+test('WasmStorageBody.fromHead takes a whole status that fits a u16', () => {
   assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(65736, CHUNK, CHUNK)), 'status_invalid')
   assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(200.9, CHUNK, CHUNK)), 'status_invalid')
   assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(-1, CHUNK, CHUNK)), 'status_invalid')
   assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(NaN, CHUNK, CHUNK)), 'status_invalid')
   assert.equal(statusOf(() => wasm.WasmStorageBody.fromHead(999, 0, 0)), 999, '999 is a whole status, not a bad one')
+  assert.equal(statusOf(() => wasm.WasmStorageBody.fromHead(1000, CHUNK, CHUNK)), 1000, '1000 fits a u16: a failed head, not a caller error')
 })
 
 test('directTransferConstants carries the three response caps', () => {

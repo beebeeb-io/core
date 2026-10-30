@@ -73,7 +73,7 @@ pub fn check_storage_body(received: u64, expected: u64) -> StorageGet {
 /// A refused `push` latches: the body overflowed, so `finish` is a failure and every later `push` is
 /// refused too. Without the latch a caller could read one byte past the grant, be told to stop, and
 /// still finish on a count that happens to equal the grant (the refused byte is not counted).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct StorageBody {
     expected: u64,
     received: u64,

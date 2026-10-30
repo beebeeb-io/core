@@ -5299,22 +5299,28 @@ impl DirectStorageBodyHandle {
         }))
     }
 
-    /// Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant, and for
-    /// any push after `finish` (the count is consumed).
+    /// Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant. A push
+    /// after `finish` is a CALLER bug, not a storage failure: it throws `Plan` with code
+    /// `finished`, because the count was consumed by `finish` and there is no body left to count.
     pub fn push(&self, n: u64) -> Result<(), DirectTransferError> {
         match &mut *lock_tolerant(&self.inner) {
             StorageBodyState::Counting(body) => body.push(n).map_err(storage_body_error),
-            StorageBodyState::Answered(_) => Err(storage_body_error(dt::StorageGet::Failed { status: 200 })),
+            StorageBodyState::Answered(_) => Err(DirectTransferError::Plan {
+                code: "finished".to_owned(),
+            }),
         }
     }
 
     /// The body's answer; the count is consumed, and a second call gives the same answer.
     pub fn finish(&self) -> DirectStorageGetDto {
         let mut state = lock_tolerant(&self.inner);
-        if let StorageBodyState::Answered(answer) = &*state {
-            return *answer;
-        }
-        let held = std::mem::replace(&mut *state, StorageBodyState::Answered(DirectStorageGetDto::Stored));
+        // Replace first, so both arms below are the answer the caller gets: the count (moved out
+        // of the lock) or the answer a previous `finish` left. No arm is unreachable, and no
+        // placeholder answer can escape.
+        let held = std::mem::replace(
+            &mut *state,
+            StorageBodyState::Answered(DirectStorageGetDto::Failed { status: 200 }),
+        );
         let answer = match held {
             StorageBodyState::Counting(body) => storage_get_dto(body.finish()),
             StorageBodyState::Answered(answer) => answer,
@@ -6568,14 +6574,15 @@ mod direct_transfer_binding_tests {
         }
 
         fn max_in_flight_bytes(&self, class: &str) -> u64 {
-            // The class string maps to the DTO here, explicitly: production has no `MemoryClass`
-            // → DTO conversion (the cap only ever goes the other way).
+            // Core's own code table names the class (no hand-coded strings here); the DTO mapping
+            // is test-local, because production has no `MemoryClass` → DTO conversion (the cap
+            // only ever goes the other way).
+            let class = dt::MemoryClass::from_code(class).unwrap_or_else(|| panic!("unknown memory class {class:?}"));
             let class = match class {
-                "native" => DirectMemoryClassDto::Native,
-                "browser" => DirectMemoryClassDto::Browser,
-                "mobile_app" => DirectMemoryClassDto::MobileApp,
-                "mobile_extension" => DirectMemoryClassDto::MobileExtension,
-                other => panic!("unknown memory class {other:?}"),
+                dt::MemoryClass::Native => DirectMemoryClassDto::Native,
+                dt::MemoryClass::Browser => DirectMemoryClassDto::Browser,
+                dt::MemoryClass::MobileApp => DirectMemoryClassDto::MobileApp,
+                dt::MemoryClass::MobileExtension => DirectMemoryClassDto::MobileExtension,
             };
             direct_max_in_flight_bytes(class)
         }
@@ -6711,7 +6718,8 @@ mod direct_transfer_binding_tests {
     }
 
     /// `finish` consumes core's count, so a second call answers the same and a push after it is a
-    /// failure — never a body that keeps counting behind a finished answer.
+    /// misuse (the count is gone) — never a storage failure, and never a body that keeps counting
+    /// behind a finished answer.
     #[test]
     fn the_storage_body_handle_consumes_its_count_once() {
         let chunk = 4 * 1024 * 1024 + 28;
@@ -6724,12 +6732,110 @@ mod direct_transfer_binding_tests {
             "a second finish answers the same"
         );
         assert!(
-            matches!(
-                body.push(1),
-                Err(DirectTransferError::StorageBody { ref code, status: 200 }) if code == "failed"
-            ),
-            "the count is consumed by finish"
+            matches!(body.push(1), Err(DirectTransferError::Plan { ref code }) if code == "finished"),
+            "a push after finish is a caller bug, not a storage answer"
         );
+        // And the finished answer is unchanged by the refused push.
+        assert_eq!(body.finish(), DirectStorageGetDto::Stored);
+    }
+
+    /// A status is only converted by the binding: a whole number that fits a `u16`. 1000 fits, so
+    /// it is a failed head carrying 1000 — the same class the WASM binding gives.
+    #[test]
+    fn a_status_outside_999_is_converted_and_left_to_core() {
+        let chunk = 4 * 1024 * 1024 + 28;
+        assert!(
+            matches!(
+                head_answer(1000, Some(chunk), chunk),
+                DirectTransferError::StorageBody { ref code, status: 1000 } if code == "failed"
+            ),
+            "a 1000 head is a failed head carrying 1000"
+        );
+        assert_eq!(
+            direct_check_storage_get(1000, Some(chunk), chunk),
+            DirectStorageGetDto::Failed { status: 1000 }
+        );
+    }
+
+    fn head_answer(status: u16, content_length: Option<u64>, expected: u64) -> DirectTransferError {
+        match DirectStorageBodyHandle::from_head(status, content_length, expected) {
+            Err(e) => e,
+            Ok(_) => panic!("a {status} head of the grant's length must be a failed head"),
+        }
+    }
+
+    /// The error enum is on the wire: its variant index IS the number a client decodes. `UnknownCall`
+    /// was index 4 and `StorageBody` was appended after it, so every earlier variant kept its index.
+    /// This pins the COMMITTED bindings (not the Rust source), because the drift a regeneration can
+    /// cause is exactly a variant inserted mid-enum.
+    #[test]
+    fn the_committed_bindings_keep_the_error_enum_order() {
+        let swift = include_str!("../bindings/beebeeb_uniffi.swift");
+        let swift_read = swift
+            .split("public struct FfiConverterTypeDirectTransferError")
+            .nth(1)
+            .expect("Swift: the error converter is generated")
+            .split("default: throw UniffiInternalError.unexpectedEnumCase")
+            .next()
+            .expect("Swift: the converter's read switch ends");
+        let swift_cases: Vec<(u32, &str)> = swift_read
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let rest = line.strip_prefix("case ")?;
+                let (index, name) = rest.split_once(": return .")?;
+                Some((index.parse().expect("a wire index"), name.split('(').next()?.trim()))
+            })
+            .collect();
+        assert_eq!(
+            swift_cases,
+            vec![
+                (1, "LinkRefused"),
+                (2, "Discovery"),
+                (3, "Plan"),
+                (4, "UnknownCall"),
+                (5, "StorageBody"),
+            ],
+            "Swift: DirectTransferError's wire order"
+        );
+
+        for kotlin in [
+            include_str!("../bindings/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
+            include_str!("../../bindings/kotlin/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
+        ] {
+            let read = kotlin
+                .split("public object FfiConverterTypeDirectTransferError")
+                .nth(1)
+                .expect("Kotlin: the error converter is generated")
+                .split("else -> throw RuntimeException")
+                .next()
+                .expect("Kotlin: the converter's read when ends");
+            let cases: Vec<(u32, &str)> = read
+                .lines()
+                .filter_map(|line| {
+                    let line = line.trim();
+                    let (index, rest) = line.split_once(" -> DirectTransferException.")?;
+                    let name = rest.split(['(', ')']).next()?;
+                    Some((index.parse().expect("a wire index"), name.trim()))
+                })
+                .collect();
+            assert_eq!(
+                cases,
+                vec![
+                    (1, "LinkRefused"),
+                    (2, "Discovery"),
+                    (3, "Plan"),
+                    (4, "UnknownCall"),
+                    (5, "StorageBody"),
+                ],
+                "Kotlin: DirectTransferError's wire order"
+            );
+            assert_eq!(
+                kotlin,
+                include_str!("../bindings/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
+                "the two committed Kotlin copies are identical"
+            );
+        }
     }
 
     /// The head's own status rides on the error, so a caller never re-derives it from its input.
