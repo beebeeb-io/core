@@ -2600,8 +2600,9 @@ public protocol DirectStorageBodyHandleProtocol: AnyObject, Sendable {
     func finish()  -> DirectStorageGetDto
     
     /**
-     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant, and for
-     * any push after `finish` (the count is consumed).
+     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant. A push
+     * after `finish` is a CALLER bug, not a storage failure: it throws `Plan` with code
+     * `finished`, because the count was consumed by `finish` and there is no body left to count.
      */
     func push(n: UInt64) throws 
     
@@ -2687,8 +2688,9 @@ open func finish() -> DirectStorageGetDto  {
 }
     
     /**
-     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant, and for
-     * any push after `finish` (the count is consumed).
+     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant. A push
+     * after `finish` is a CALLER bug, not a storage failure: it throws `Plan` with code
+     * `finished`, because the count was consumed by `finish` and there is no body left to count.
      */
 open func push(n: UInt64)throws   {try rustCallWithError(FfiConverterTypeDirectTransferError_lift) {
     uniffi_beebeeb_uniffi_fn_method_directstoragebodyhandle_push(
@@ -9165,8 +9167,9 @@ public enum DirectTransferError: Swift.Error, Equatable, Hashable, Foundation.Lo
     case Discovery(code: String
     )
     /**
-     * A call that does not fit the planner's state (a bug in the caller):
-     * `not_in_flight`, `not_fetched`, `out_of_order`, `api_route_failure`.
+     * A call that does not fit the caller-driven state (a bug in the caller): the planner's
+     * `not_in_flight`, `not_fetched`, `out_of_order`, `api_route_failure`; or `finished`, which
+     * means the storage body handle was used after `finish` (the count was already consumed).
      */
     case Plan(code: String
     )
@@ -12950,7 +12953,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_finish() != 25858) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_push() != 39701) {
+    if (uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_push() != 65177) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk() != 50441) {

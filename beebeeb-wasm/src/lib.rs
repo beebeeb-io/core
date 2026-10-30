@@ -2384,10 +2384,12 @@ pub fn check_storage_url_js(url: &str, discovery: JsValue, api_base: &str) -> Re
 }
 
 /// Was a storage GET answer the chunk we asked for? `{ kind: "stored" }` or
-/// `{ kind: "failed", status }`; status `0` means there was no HTTP answer at all.
-/// Only a `200` whose `Content-Length` is exactly `expected` is `stored`.
+/// `{ kind: "failed", status }`; a caller with no HTTP answer passes status `0` (exactly what
+/// `WasmStorageBody.fromHead` reports for it). Only a `200` whose `Content-Length` is exactly
+/// `expected` is `stored`.
 /// `status` crosses as a JS number and is validated exactly as `WasmStorageBody.fromHead` validates
-/// it (throws `status_invalid` for anything that is not a whole number that fits a `u16`).
+/// it: a whole number in `0..=65535`, else `status_invalid`. `undefined` is not a number and throws
+/// `status_invalid` too, so a caller cannot omit the answer it means to report.
 #[wasm_bindgen(js_name = checkStorageGet, unchecked_return_type = "DirectStorageGet")]
 pub fn check_storage_get_js(status: f64, content_length: Option<f64>, expected: f64) -> Result<JsValue, DirectFailure> {
     let value = check_storage_get_value(status, content_length, expected)?;
@@ -2438,6 +2440,8 @@ fn storage_answer_json(got: dt::StorageGet) -> serde_json::Value {
 /// `WasmStorageBody.fromHead(status, contentLength, expected)` starts it; `push(n)` counts the bytes
 /// read and throws as soon as they would pass the grant; `finish()` gives `{ kind: "stored" }` or
 /// `{ kind: "failed", status: 200 }` and consumes the handle. Every count crosses as a JS number.
+/// Because `finish()` takes the handle by value, a JS `push` after `finish` throws wasm-bindgen's
+/// moved-value error, which has no `code` (the count was consumed; there is nothing left to count).
 #[wasm_bindgen]
 pub struct WasmStorageBody {
     inner: dt::StorageBody,
@@ -3729,7 +3733,10 @@ mod direct_vector_tests {
         }
 
         fn check_storage_get(&self, status: u16, content_length: Option<u64>, expected: u64) -> Value {
-            storage_get_json(status, content_length, expected)
+            // Through the exported seam's own f64 conversion, so the surface cannot disagree with
+            // `checkStorageGet` about which statuses cross.
+            check_storage_get_value(status as f64, content_length.map(|n| n as f64), expected as f64)
+                .expect("the row's status and lengths fit the exported seam")
         }
 
         fn check_storage_body(&self, received: u64, expected: u64) -> Value {
@@ -3923,6 +3930,28 @@ mod direct_vector_tests {
                 assert_eq!(failed.status, Some(1000), "the head's own status rides on the error");
             }
             Ok(_) => panic!("a 1000 head is a failed head"),
+        }
+        // The u16 boundary: 65535 crosses and is core's failed head; 65536 cannot cross.
+        assert_eq!(
+            check_storage_get_value(65535.0, Some(chunk), chunk).unwrap(),
+            serde_json::json!({"kind": "failed", "status": 65535}),
+            "65535 is the largest HTTP status"
+        );
+        assert_eq!(
+            check_storage_get_value(65536.0, Some(chunk), chunk).unwrap_err().code,
+            "status_invalid",
+            "65536 does not fit a u16"
+        );
+        match WasmStorageBody::from_head(65535.0, Some(chunk), chunk) {
+            Err(failed) => {
+                assert_eq!(failed.code, "failed");
+                assert_eq!(failed.status, Some(65535), "the head's own status rides on the error");
+            }
+            Ok(_) => panic!("a 65535 head is a failed head"),
+        }
+        match WasmStorageBody::from_head(65536.0, Some(chunk), chunk) {
+            Err(failed) => assert_eq!(failed.code, "status_invalid", "fromHead(65536)"),
+            Ok(_) => panic!("65536 is not an HTTP status"),
         }
     }
 

@@ -5125,9 +5125,10 @@ pub enum DirectTransferError {
     #[error("the discovery answer could not be used: {code}")]
     Discovery { code: String },
 
-    /// A call that does not fit the planner's state (a bug in the caller):
-    /// `not_in_flight`, `not_fetched`, `out_of_order`, `api_route_failure`.
-    #[error("the planner was driven out of order: {code}")]
+    /// A call that does not fit the caller-driven state (a bug in the caller): the planner's
+    /// `not_in_flight`, `not_fetched`, `out_of_order`, `api_route_failure`; or `finished`, which
+    /// means the storage body handle was used after `finish` (the count was already consumed).
+    #[error("the planner or storage body was driven out of order: {code}")]
     Plan { code: String },
 
     /// `call` was none of `discovery`, `download_grant`, `pinned_chunk`.
@@ -5306,7 +5307,7 @@ impl DirectStorageBodyHandle {
         match &mut *lock_tolerant(&self.inner) {
             StorageBodyState::Counting(body) => body.push(n).map_err(storage_body_error),
             StorageBodyState::Answered(_) => Err(DirectTransferError::Plan {
-                code: "finished".to_owned(),
+                code: dt::BODY_FINISHED_CODE.to_owned(),
             }),
         }
     }
@@ -5314,9 +5315,10 @@ impl DirectStorageBodyHandle {
     /// The body's answer; the count is consumed, and a second call gives the same answer.
     pub fn finish(&self) -> DirectStorageGetDto {
         let mut state = lock_tolerant(&self.inner);
-        // Replace first, so both arms below are the answer the caller gets: the count (moved out
-        // of the lock) or the answer a previous `finish` left. No arm is unreachable, and no
-        // placeholder answer can escape.
+        // Replace first so the count is moved out of the lock before it is finished. The
+        // placeholder left in its place is `Failed { status: 200 }`, which fails closed: if a panic
+        // unwinds before the answer below is stored, the handle answers `failed`/200 (never
+        // `stored`) instead of pretending the body was complete.
         let held = std::mem::replace(
             &mut *state,
             StorageBodyState::Answered(DirectStorageGetDto::Failed { status: 200 }),
@@ -6297,6 +6299,13 @@ mod direct_transfer_binding_tests {
 
     use super::*;
 
+    /// The two committed Kotlin copies, loaded once so the enum-order test and the signed-url
+    /// surface test check the same files.
+    const KOTLIN_BINDINGS: [&str; 2] = [
+        include_str!("../bindings/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
+        include_str!("../../bindings/kotlin/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
+    ];
+
     struct UniffiSurface;
 
     struct UniffiPlanner(Arc<DirectDownloadPlannerHandle>);
@@ -6799,10 +6808,7 @@ mod direct_transfer_binding_tests {
             "Swift: DirectTransferError's wire order"
         );
 
-        for kotlin in [
-            include_str!("../bindings/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
-            include_str!("../../bindings/kotlin/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
-        ] {
+        for kotlin in KOTLIN_BINDINGS {
             let read = kotlin
                 .split("public object FfiConverterTypeDirectTransferError")
                 .nth(1)
@@ -6830,12 +6836,37 @@ mod direct_transfer_binding_tests {
                 ],
                 "Kotlin: DirectTransferError's wire order"
             );
-            assert_eq!(
-                kotlin,
-                include_str!("../bindings/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
-                "the two committed Kotlin copies are identical"
-            );
         }
+        assert!(KOTLIN_BINDINGS[0] == KOTLIN_BINDINGS[1], "the two Kotlin copies differ");
+    }
+
+    /// The Rust side of the same order: UniFFI writes a variant's index first, so lowering every
+    /// variant and reading the leading `i32` pins what a regeneration must keep. `UnknownCall` is
+    /// 4 because `StorageBody` was appended, never inserted.
+    #[test]
+    fn the_error_enum_lowers_in_the_committed_order() {
+        fn index(e: DirectTransferError) -> i32 {
+            let mut buf = Vec::new();
+            <DirectTransferError as uniffi::Lower<crate::UniFfiTag>>::write(e, &mut buf);
+            i32::from_be_bytes(buf[..4].try_into().expect("an i32 discriminant"))
+        }
+        let code = || "x".to_owned();
+        let indexes: Vec<i32> = vec![
+            DirectTransferError::LinkRefused { code: code() },
+            DirectTransferError::Discovery { code: code() },
+            DirectTransferError::Plan { code: code() },
+            DirectTransferError::UnknownCall,
+            DirectTransferError::StorageBody {
+                code: code(),
+                status: 200,
+            },
+        ]
+        .into_iter()
+        .map(index)
+        .collect();
+        assert_eq!(indexes, vec![1, 2, 3, 4, 5], "lowered in enum order");
+        assert_eq!(indexes[3], 4, "UnknownCall keeps the index the bindings expect");
+        assert_eq!(indexes[4], 5, "StorageBody stays last");
     }
 
     /// The head's own status rides on the error, so a caller never re-derives it from its input.
@@ -7051,10 +7082,7 @@ mod direct_transfer_binding_tests {
             "Swift: the constructor"
         );
         let header = include_str!("../bindings/beebeeb_uniffiFFI.h");
-        let kotlin_sources = [
-            include_str!("../bindings/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
-            include_str!("../../bindings/kotlin/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
-        ];
+        let kotlin_sources = KOTLIN_BINDINGS;
         // UniFFI 0.31.1's Kotlin `equals`/`hashCode` lower the object's handle with no destroyed check: comparing
         // or hashing a released link, grant or poll would be a use-after-free in native code. None is exported.
         for exported in [

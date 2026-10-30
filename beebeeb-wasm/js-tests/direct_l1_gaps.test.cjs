@@ -50,6 +50,25 @@ test('checkStorageGet: only 200 with the exact length is stored', () => {
   // 1000 is a whole number that fits a u16: the binding only converts it, and core's rule (the
   // same on every binding) makes it a failed head carrying 1000.
   assert.deepEqual(wasm.checkStorageGet(1000, CHUNK, CHUNK), { kind: 'failed', status: 1000 })
+  // The u16 boundary: 65535 crosses and is core's failed head; 65536 cannot cross.
+  assert.deepEqual(wasm.checkStorageGet(65535, CHUNK, CHUNK), { kind: 'failed', status: 65535 }, '65535 is an HTTP status')
+  assert.equal(codeOf(() => wasm.checkStorageGet(65536, CHUNK, CHUNK)), 'status_invalid', '65536 does not fit a u16')
+  assert.deepEqual(
+    (() => {
+      try {
+        return wasm.WasmStorageBody.fromHead(65535, CHUNK, CHUNK)
+      } catch (e) {
+        return { code: e.code, status: e.status }
+      }
+    })(),
+    { code: 'failed', status: 65535 },
+    'fromHead(65535) is a failed head carrying 65535'
+  )
+  assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(65536, CHUNK, CHUNK)), 'status_invalid', 'fromHead(65536)')
+  // A caller with no HTTP answer passes 0; omitting it is not a number and is refused rather than
+  // silently read as "no answer".
+  assert.deepEqual(wasm.checkStorageGet(0, null, CHUNK), { kind: 'failed', status: 0 })
+  assert.equal(codeOf(() => wasm.checkStorageGet(undefined, null, CHUNK)), 'status_invalid', 'undefined status')
 })
 
 test('pacedUntilMs carries desktop formula and the no-ceiling sentinel', () => {

@@ -2245,7 +2245,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_finish() != 25858.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_push() != 39701.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_push() != 65177.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk() != 50441.toShort()) {
@@ -6323,8 +6323,9 @@ public interface DirectStorageBodyHandleInterface {
     fun `finish`(): DirectStorageGetDto
     
     /**
-     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant, and for
-     * any push after `finish` (the count is consumed).
+     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant. A push
+     * after `finish` is a CALLER bug, not a storage failure: it throws `Plan` with code
+     * `finished`, because the count was consumed by `finish` and there is no body left to count.
      */
     fun `push`(`n`: kotlin.ULong)
     
@@ -6451,8 +6452,9 @@ open class DirectStorageBodyHandle: Disposable, AutoCloseable, DirectStorageBody
 
     
     /**
-     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant, and for
-     * any push after `finish` (the count is consumed).
+     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant. A push
+     * after `finish` is a CALLER bug, not a storage failure: it throws `Plan` with code
+     * `finished`, because the count was consumed by `finish` and there is no body left to count.
      */
     @Throws(DirectTransferException::class)override fun `push`(`n`: kotlin.ULong)
         = 
@@ -13339,8 +13341,9 @@ sealed class DirectTransferException: kotlin.Exception() {
     }
     
     /**
-     * A call that does not fit the planner's state (a bug in the caller):
-     * `not_in_flight`, `not_fetched`, `out_of_order`, `api_route_failure`.
+     * A call that does not fit the caller-driven state (a bug in the caller): the planner's
+     * `not_in_flight`, `not_fetched`, `out_of_order`, `api_route_failure`; or `finished`, which
+     * means the storage body handle was used after `finish` (the count was already consumed).
      */
     class Plan(
         

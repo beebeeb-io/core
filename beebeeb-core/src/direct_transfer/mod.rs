@@ -71,7 +71,7 @@ pub use context::{MemoryClass, max_in_flight_bytes, pairs_allowed};
 pub use health::{DirectHealth, Direction, HEALTH_TRUST_MS};
 pub use pacing::paced_until_ms;
 pub use resume::{DiscoveryState, RecordedTransport, ResumeAction, resume_transport};
-pub use storage::{StorageBody, StorageGet, check_storage_body, check_storage_get};
+pub use storage::{BODY_FINISHED_CODE, StorageBody, StorageGet, check_storage_body, check_storage_get};
 pub use timeouts::{
     API_CALL_TIMEOUT, BACKGROUND_PUT_RESOURCE_TIMEOUT, DISCOVERY_TIMEOUT, STORAGE_CONNECT_TIMEOUT, STORAGE_GET_IDLE,
     storage_get_total, storage_put_total,

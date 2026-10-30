@@ -53,6 +53,11 @@ pub fn check_storage_get(status: u16, content_length: Option<u64>, expected: u64
     }
 }
 
+/// The stable `code` a binding reports when a storage-body handle is pushed after `finish`: a
+/// caller bug, not a storage answer (the count was consumed by `finish`). Documented here so every
+/// binding and the vectors name the same code.
+pub const BODY_FINISHED_CODE: &str = "finished";
+
 /// Check the body a storage GET actually delivered, one-shot: [`StorageGet::Stored`] only when the
 /// received count equals the grant. The status is `200` because the head already passed; a short
 /// read or an overlong body is still a failed chunk. For a stream that is still arriving, count it
