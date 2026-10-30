@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `beebeeb-transfer`, the L2 driver crate for direct S3 downloads (task 2173, plan K2):
+  `download()` drives core's `DownloadPlanner` over any `DirectIo` transport (API calls,
+  bounded storage GETs, the pinned per-chunk route, injected sleep and clocks), decrypts
+  chunks in order through `ChunkDecryptor`, writes plaintext only after a chunk authenticates,
+  and reports `Done(stats)` or `UseApi(reason)`. Body checks go through core's `StorageBody`
+  (`from_head` / `push` / `finish`); a signed URL never reaches an event, error or `Debug`
+  string; `DirectStore` shares discovery and breaker health per `(api_base, account_id)`.
+  `test_support::ScriptedIo` and a conformance suite (`test-support` feature) check a
+  transport's redirect, cookie, credential, idle/total timeout and bounded-body behaviour
+  in-process. No tokio or reqwest in normal dependencies.
 - `kdf::owner_file_key_for_name` with `kdf::OwnerKeyConvention` (`String`, `Binary`,
   `UpperRepair`): resolves an owner's per-file key from the `(file_id, name_encrypted)`
   pair and reports which id convention it came from. The repair convention reads files the

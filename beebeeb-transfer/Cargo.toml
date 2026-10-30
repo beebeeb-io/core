@@ -1,0 +1,32 @@
+[package]
+name = "beebeeb-transfer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "The direct S3 download driver shared by Beebeeb's native clients (task 2173, plan K2)"
+authors.workspace = true
+
+[dependencies]
+beebeeb-core = { path = "../beebeeb-core" }
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+serde_json = { workspace = true }
+
+[features]
+default = []
+# The conformance suite and the scripted transport; a test seam, never a
+# shipped client feature.
+test-support = []
+
+[dev-dependencies]
+tokio = { workspace = true }
+# The reference transport the conformance suite runs against: a real HTTP
+# client, test builds only. The crate itself has no HTTP client and no runtime.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+
+[[test]]
+name = "conformance_selftest"
+path = "tests/conformance_selftest.rs"
+required-features = ["test-support"]
