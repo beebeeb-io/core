@@ -57,6 +57,20 @@ jobs:
       - name: cargo test
         run: cargo test --workspace
 
+      # The vectors are generated, never edited: the committed JSON must be byte-for-byte what the
+      # generator writes, and the self-test must prove the check can go red (it edits a temp copy).
+      - name: contract vectors match their generator
+        if: always()
+        run: bash test-vectors/tools/check-direct-vectors-generated.sh
+
+      - name: contract vector check can go red
+        if: always()
+        run: |
+          if bash test-vectors/tools/check-direct-vectors-generated.sh --self-test; then
+            echo "the generator check did not reject an edited copy" >&2
+            exit 1
+          fi
+
   # The JS surface of beebeeb-wasm as a web client sees it. `cargo test` has no JS engine and never parses
   # the glue wasm-bindgen generates: core #34 merged a doc comment that made beebeeb_wasm.js a SyntaxError and
   # the whole workspace test run stayed green. run.sh builds both targets, `node --check`s the glue,
