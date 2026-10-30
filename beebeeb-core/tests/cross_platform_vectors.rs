@@ -1248,7 +1248,10 @@ fn vector_link_label_opens_and_is_bound_to_the_share() {
         unwrap_link_label(&master, share.as_bytes(), &blob).unwrap(),
         v["label_nfc"].as_str().unwrap()
     );
-    assert_eq!(decode_hex(&v, "plaintext_hex"), v["label_nfc"].as_str().unwrap().as_bytes());
+    assert_eq!(
+        decode_hex(&v, "plaintext_hex"),
+        v["label_nfc"].as_str().unwrap().as_bytes()
+    );
 
     // Bound to this share and this master key only.
     let mut other_share = *share.as_bytes();

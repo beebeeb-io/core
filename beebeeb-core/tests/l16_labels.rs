@@ -6,15 +6,14 @@
 //! cases (an over-bound label, invalid UTF-8 under a valid tag) live in
 //! `kdf`'s unit tests, where the vector seams exist.
 
+use beebeeb_core::CoreError;
 use beebeeb_core::chunk_stream::ExpectedChunkFormat;
 use beebeeb_core::encrypt::{decrypt_chunk, decrypt_name_with_key, encrypt_chunk, encrypt_name_for};
 use beebeeb_core::kdf::{
     FileKey, MasterKey, open_folder_actor_name, open_legacy_child_key, seal_folder_actor_name, unwrap_folder_child,
-    unwrap_folder_custody, unwrap_link_label, unwrap_link_owner_key, unwrap_owner_file_key, wrap_folder_child,
-    wrap_link_label, wrap_link_owner_key, wrap_owner_file_key,
-    unwrap_link_owner_token,
+    unwrap_folder_custody, unwrap_link_label, unwrap_link_owner_key, unwrap_link_owner_token, unwrap_owner_file_key,
+    wrap_folder_child, wrap_link_label, wrap_link_owner_key, wrap_owner_file_key,
 };
-use beebeeb_core::CoreError;
 use beebeeb_types::EncryptedBlob;
 
 const SHARE_A: [u8; 16] = [0x11; 16];
@@ -109,7 +108,10 @@ fn actor_name_round_trips_and_is_bound_to_the_root_and_key() {
 #[test]
 fn actor_name_opener_strips_control_and_bidi_characters() {
     let sealed = seal_folder_actor_name(&folder_key(), &ROOT_A, "Ali\u{202E}ce\u{2066}\u{7}").unwrap();
-    assert_eq!(open_folder_actor_name(&folder_key(), &ROOT_A, &sealed).unwrap(), "Alice");
+    assert_eq!(
+        open_folder_actor_name(&folder_key(), &ROOT_A, &sealed).unwrap(),
+        "Alice"
+    );
 }
 
 #[test]
@@ -120,10 +122,8 @@ fn openers_refuse_wrong_shapes_and_bounds() {
         Err(CoreError::Decryption)
     ));
     // The web `{nonce, ciphertext}` shape is not the writer's container.
-    let short: EncryptedBlob = serde_json::from_str(
-        &seal_folder_actor_name(&folder_key(), &ROOT_A, "Mama").unwrap(),
-    )
-    .unwrap();
+    let short: EncryptedBlob =
+        serde_json::from_str(&seal_folder_actor_name(&folder_key(), &ROOT_A, "Mama").unwrap()).unwrap();
     let web_shape = serde_json::json!({ "nonce": short.nonce, "ciphertext": short.ciphertext }).to_string();
     assert!(matches!(
         open_folder_actor_name(&folder_key(), &ROOT_A, &web_shape),
@@ -154,7 +154,11 @@ fn openers_refuse_wrong_shapes_and_bounds() {
         Err(CoreError::InvalidInput(_))
     ));
     assert!(matches!(
-        unwrap_link_label(&master(), &[0u8; 15], &wrap_link_label(&master(), &SHARE_A, "Trip").unwrap()),
+        unwrap_link_label(
+            &master(),
+            &[0u8; 15],
+            &wrap_link_label(&master(), &SHARE_A, "Trip").unwrap()
+        ),
         Err(CoreError::InvalidInput(_))
     ));
     assert!(matches!(
@@ -177,7 +181,10 @@ fn legacy_child_opener_round_trips_a_real_key_and_refuses_frames_off_shape() {
     let blob = encrypt_chunk(&folder_key(), child.as_bytes()).unwrap();
     let frame = frame(&blob);
 
-    assert_eq!(open_legacy_child_key(&folder_key(), &frame).unwrap().as_bytes(), child.as_bytes());
+    assert_eq!(
+        open_legacy_child_key(&folder_key(), &frame).unwrap().as_bytes(),
+        child.as_bytes()
+    );
     // Wrong folder key, wrong frame length.
     assert!(open_legacy_child_key(&FileKey::from_bytes([0x81; 32]), &frame).is_none());
     assert!(open_legacy_child_key(&folder_key(), &frame[..59]).is_none());
@@ -204,7 +211,9 @@ fn l7_and_l8_writers_still_produce_their_own_shapes() {
     // Guard: the new functions did not change the existing L6/L7/L8 bytes.
     let l7 = wrap_folder_child(&folder_key(), &ROOT_A, &ITEM, 1, &FileKey::from_bytes([0x0a; 32])).unwrap();
     assert_eq!(
-        unwrap_folder_child(&folder_key(), &ROOT_A, &ITEM, 1, &l7).unwrap().as_bytes(),
+        unwrap_folder_child(&folder_key(), &ROOT_A, &ITEM, 1, &l7)
+            .unwrap()
+            .as_bytes(),
         &[0x0a; 32]
     );
     let l8 = wrap_owner_file_key(&master(), &ITEM, &FileKey::from_bytes([0x0b; 32])).unwrap();
@@ -218,5 +227,8 @@ fn l7_and_l8_writers_still_produce_their_own_shapes() {
         &[0x0c; 32]
     );
     let name = encrypt_name_for(&folder_key(), "report.pdf", None, ExpectedChunkFormat::Unrecorded).unwrap();
-    assert_eq!(decrypt_name_with_key(&folder_key(), &name).as_deref(), Some("report.pdf"));
+    assert_eq!(
+        decrypt_name_with_key(&folder_key(), &name).as_deref(),
+        Some("report.pdf")
+    );
 }

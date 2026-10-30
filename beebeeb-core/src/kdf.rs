@@ -563,7 +563,9 @@ fn purpose_context(label: &[u8], id: &[u8]) -> Result<Vec<u8>, CoreError> {
 /// and on-the-wire bytes are unchanged; every NEW binding goes through this.
 fn purpose_context_16(label: &[u8], id: &[u8]) -> Result<Vec<u8>, CoreError> {
     if id.len() != 16 {
-        return Err(CoreError::InvalidInput("wrap record id must be exactly 16 bytes".into()));
+        return Err(CoreError::InvalidInput(
+            "wrap record id must be exactly 16 bytes".into(),
+        ));
     }
     Ok([label, id].concat())
 }
@@ -987,7 +989,8 @@ fn seal_folder_actor_name_impl(
 ) -> Result<String, CoreError> {
     let context = actor_name_context(root_id)?;
     let text = normalized_text(text, FOLDER_ACTOR_NAME_MAX_SCALARS, "actor name")?;
-    let raw = crate::encrypt::seal_raw_with_nonce(&actor_name_key(folder_key, &context), nonce, text.as_bytes(), &context)?;
+    let raw =
+        crate::encrypt::seal_raw_with_nonce(&actor_name_key(folder_key, &context), nonce, text.as_bytes(), &context)?;
     let blob = beebeeb_types::EncryptedBlob {
         cipher_suite: beebeeb_types::CipherSuite::V1Aes256Gcm,
         nonce: raw[..12].to_vec(),
@@ -1796,7 +1799,10 @@ mod l16_tests {
         // 0xFF never appears in UTF-8; AES-GCM still authenticates it. The
         // openers must not hand it to a client as text.
         let frame = label_frame(b"\xff\xfe label", [0x01; 12]);
-        assert!(matches!(unwrap_link_label(&master(), &SHARE, &frame), Err(CoreError::Decryption)));
+        assert!(matches!(
+            unwrap_link_label(&master(), &SHARE, &frame),
+            Err(CoreError::Decryption)
+        ));
         let envelope = actor_name_envelope(b"\xff\xfe name", [0x02; 12]);
         assert!(matches!(
             open_folder_actor_name(&folder_key(), &ROOT, &envelope),
@@ -1811,7 +1817,10 @@ mod l16_tests {
         let over_long_label = "a".repeat(LINK_LABEL_MAX_SCALARS + 1);
         assert!(wrap_link_label_with_nonce(&master(), &SHARE, &over_long_label, &[0x03; 12]).is_err());
         let frame = label_frame(over_long_label.as_bytes(), [0x04; 12]);
-        assert!(matches!(unwrap_link_label(&master(), &SHARE, &frame), Err(CoreError::InvalidInput(_))));
+        assert!(matches!(
+            unwrap_link_label(&master(), &SHARE, &frame),
+            Err(CoreError::InvalidInput(_))
+        ));
         let over_long_name = "b".repeat(FOLDER_ACTOR_NAME_MAX_SCALARS + 1);
         assert!(seal_folder_actor_name_with_nonce(&folder_key(), &ROOT, &over_long_name, &[0x05; 12]).is_err());
         let envelope = actor_name_envelope(over_long_name.as_bytes(), [0x06; 12]);
@@ -1851,12 +1860,20 @@ mod l16_tests {
         let name_blob = crate::encrypt::encrypt_chunk(&folder_key(), name).unwrap();
         let name_frame = wire(&name_blob);
         assert_eq!(name_frame.len(), LEGACY_CHILD_FRAME_LEN);
-        assert_eq!(crate::encrypt::decrypt_chunk(&folder_key(), &name_blob).unwrap().as_slice(), &name[..]);
+        assert_eq!(
+            crate::encrypt::decrypt_chunk(&folder_key(), &name_blob)
+                .unwrap()
+                .as_slice(),
+            &name[..]
+        );
         assert!(open_legacy_child_key(&folder_key(), &name_frame).is_none());
         let key_bytes = [0xF8u8; 32];
         let key_blob = crate::encrypt::encrypt_chunk(&folder_key(), &key_bytes).unwrap();
         assert_eq!(
-            open_legacy_child_key(&folder_key(), &wire(&key_blob)).unwrap().as_bytes().as_slice(),
+            open_legacy_child_key(&folder_key(), &wire(&key_blob))
+                .unwrap()
+                .as_bytes()
+                .as_slice(),
             &key_bytes[..]
         );
     }
