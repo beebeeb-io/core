@@ -40,6 +40,19 @@ jobs:
         if: always()
         run: cargo clippy --workspace -- -D warnings
 
+      # The vectors are generated, never edited: the committed JSON must be byte-for-byte what the
+      # generator writes. Cheap (python only), so it runs with the fast checks, not after the tests.
+      # `if: always()` so a fmt or clippy failure does not silently skip it.
+      - name: contract vectors match their generator
+        if: always()
+        run: bash test-vectors/tools/check-direct-vectors-generated.sh
+
+      # The self-test must exit 0 (it rewrites a temp copy and the check REJECTS it) and non-zero
+      # otherwise, so this is a plain step: a check that cannot go red fails it.
+      - name: contract vector check can go red
+        if: always()
+        run: bash test-vectors/tools/check-direct-vectors-generated.sh --self-test
+
   test:
     name: Tests
     runs-on: ubuntu-latest

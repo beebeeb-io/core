@@ -19,6 +19,15 @@ function codeOf(fn) {
   return 'did not throw'
 }
 
+function statusOf(fn) {
+  try {
+    fn()
+  } catch (e) {
+    return e.status
+  }
+  return 'did not throw'
+}
+
 const CHUNK = 4 * 1024 * 1024 + 28
 
 test('checkStorageGet: only 200 with the exact length is stored', () => {
@@ -32,6 +41,34 @@ test('checkStorageGet: only 200 with the exact length is stored', () => {
     assert.equal(codeOf(() => wasm.checkStorageGet(200, bad, CHUNK)), 'length_invalid', `len ${bad}`)
     assert.equal(codeOf(() => wasm.checkStorageGet(200, null, bad)), 'length_invalid', `expected ${bad}`)
   }
+  // The status crosses the same validation as the body's head, never a silent truncation:
+  // 65736 is not a u16 and 200.9 is not a whole number.
+  for (const bad of [65736, 200.9]) {
+    assert.equal(codeOf(() => wasm.checkStorageGet(bad, CHUNK, CHUNK)), 'status_invalid', `status ${bad}`)
+    assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(bad, CHUNK, CHUNK)), 'status_invalid', `head ${bad}`)
+  }
+  // 1000 is a whole number that fits a u16: the binding only converts it, and core's rule (the
+  // same on every binding) makes it a failed head carrying 1000.
+  assert.deepEqual(wasm.checkStorageGet(1000, CHUNK, CHUNK), { kind: 'failed', status: 1000 })
+  // The u16 boundary: 65535 crosses and is core's failed head; 65536 cannot cross.
+  assert.deepEqual(wasm.checkStorageGet(65535, CHUNK, CHUNK), { kind: 'failed', status: 65535 }, '65535 is an HTTP status')
+  assert.equal(codeOf(() => wasm.checkStorageGet(65536, CHUNK, CHUNK)), 'status_invalid', '65536 does not fit a u16')
+  assert.deepEqual(
+    (() => {
+      try {
+        return wasm.WasmStorageBody.fromHead(65535, CHUNK, CHUNK)
+      } catch (e) {
+        return { code: e.code, status: e.status }
+      }
+    })(),
+    { code: 'failed', status: 65535 },
+    'fromHead(65535) is a failed head carrying 65535'
+  )
+  assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(65536, CHUNK, CHUNK)), 'status_invalid', 'fromHead(65536)')
+  // A caller with no HTTP answer passes 0; omitting it is not a number and is refused rather than
+  // silently read as "no answer".
+  assert.deepEqual(wasm.checkStorageGet(0, null, CHUNK), { kind: 'failed', status: 0 })
+  assert.equal(codeOf(() => wasm.checkStorageGet(undefined, null, CHUNK)), 'status_invalid', 'undefined status')
 })
 
 test('pacedUntilMs carries desktop formula and the no-ceiling sentinel', () => {
@@ -93,6 +130,56 @@ test('pairsAllowed refuses a missing pair, a missing token and a bucket-case cha
     false,
     'no listed bucket is not vacuously allowed',
   )
+})
+
+test('pairsAllowed: discovery is named first, then direction, then pairs', () => {
+  const discovery = { download: ['object-download-v1'], upload: [], storage_buckets: [] }
+  assert.equal(
+    codeOf(() => wasm.pairsAllowed('not-an-object', 'sideways', [])),
+    'discovery_invalid',
+    'a bad discovery is named before a bad direction',
+  )
+  assert.equal(
+    codeOf(() => wasm.pairsAllowed(discovery, 'sideways', 'not-an-array')),
+    'direction_invalid',
+    'a bad direction is named before a bad pairs argument',
+  )
+  assert.equal(codeOf(() => wasm.pairsAllowed(discovery, 'download', 'not-an-array')), 'pairs_invalid')
+})
+
+test('the count inputs refuse a number JS cannot hold exactly', () => {
+  assert.equal(codeOf(() => wasm.pacedUntilMs(0, 2 ** 53, 1)), 'bytes_invalid', '2^53 is not exact')
+  assert.equal(codeOf(() => wasm.checkStorageGet(200, 2 ** 53, 1)), 'length_invalid', '2^53 is not exact')
+})
+
+test('WasmStorageBody counts the body and refuses the first byte past the grant', () => {
+  const body = wasm.WasmStorageBody.fromHead(200, CHUNK, CHUNK)
+  body.push(CHUNK)
+  assert.deepEqual(body.finish(), { kind: 'stored' })
+
+  const short = wasm.WasmStorageBody.fromHead(200, CHUNK, CHUNK)
+  short.push(CHUNK - 1)
+  assert.equal(codeOf(() => short.push(2)), 'failed', 'past the grant throws')
+  assert.equal(statusOf(() => short.push(2)), 200, 'and the error carries the status')
+  assert.deepEqual(short.finish(), { kind: 'failed', status: 200 }, 'the refused bytes were not counted')
+
+  const empty = wasm.WasmStorageBody.fromHead(200, 0, 0)
+  assert.deepEqual(empty.finish(), { kind: 'stored' })
+
+  assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(206, CHUNK, CHUNK)), 'failed', 'a 206 head throws')
+  assert.equal(statusOf(() => wasm.WasmStorageBody.fromHead(206, CHUNK, CHUNK)), 206, 'with the head status')
+  assert.equal(statusOf(() => wasm.WasmStorageBody.fromHead(403, CHUNK, CHUNK)), 403)
+  assert.equal(statusOf(() => wasm.WasmStorageBody.fromHead(0, null, CHUNK)), 0, 'no answer keeps status 0')
+  assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(200, null, CHUNK)), 'failed', 'no length throws')
+})
+
+test('WasmStorageBody.fromHead takes a whole status that fits a u16', () => {
+  assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(65736, CHUNK, CHUNK)), 'status_invalid')
+  assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(200.9, CHUNK, CHUNK)), 'status_invalid')
+  assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(-1, CHUNK, CHUNK)), 'status_invalid')
+  assert.equal(codeOf(() => wasm.WasmStorageBody.fromHead(NaN, CHUNK, CHUNK)), 'status_invalid')
+  assert.equal(statusOf(() => wasm.WasmStorageBody.fromHead(999, 0, 0)), 999, '999 is a whole status, not a bad one')
+  assert.equal(statusOf(() => wasm.WasmStorageBody.fromHead(1000, CHUNK, CHUNK)), 1000, '1000 fits a u16: a failed head, not a caller error')
 })
 
 test('directTransferConstants carries the three response caps', () => {

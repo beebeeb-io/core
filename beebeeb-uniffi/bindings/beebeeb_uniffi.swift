@@ -2587,6 +2587,170 @@ public func FfiConverterTypeDirectSignedUrl_lower(_ value: DirectSignedUrl) -> U
 
 
 /**
+ * A storage GET's body counted as it arrives, so no client counts body bytes on its own.
+ * `from_head` starts it (throwing `StorageBody` when the head is not a `200` of the grant's
+ * length), `push` counts the bytes read and throws as soon as they would pass the grant, and
+ * `finish` gives the answer and consumes the count.
+ */
+public protocol DirectStorageBodyHandleProtocol: AnyObject, Sendable {
+    
+    /**
+     * The body's answer; the count is consumed, and a second call gives the same answer.
+     */
+    func finish()  -> DirectStorageGetDto
+    
+    /**
+     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant. A push
+     * after `finish` is a CALLER bug, not a storage failure: it throws `Plan` with code
+     * `finished`, because the count was consumed by `finish` and there is no body left to count.
+     */
+    func push(n: UInt64) throws 
+    
+}
+/**
+ * A storage GET's body counted as it arrives, so no client counts body bytes on its own.
+ * `from_head` starts it (throwing `StorageBody` when the head is not a `200` of the grant's
+ * length), `push` counts the bytes read and throws as soon as they would pass the grant, and
+ * `finish` gives the answer and consumes the count.
+ */
+open class DirectStorageBodyHandle: DirectStorageBodyHandleProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_directstoragebodyhandle(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_directstoragebodyhandle(handle, $0) }
+    }
+
+    
+public static func fromHead(status: UInt16, contentLength: UInt64?, expected: UInt64)throws  -> DirectStorageBodyHandle  {
+    return try  FfiConverterTypeDirectStorageBodyHandle_lift(try rustCallWithError(FfiConverterTypeDirectTransferError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_directstoragebodyhandle_from_head(
+        FfiConverterUInt16.lower(status),
+        FfiConverterOptionUInt64.lower(contentLength),
+        FfiConverterUInt64.lower(expected),$0
+    )
+})
+}
+    
+
+    
+    /**
+     * The body's answer; the count is consumed, and a second call gives the same answer.
+     */
+open func finish() -> DirectStorageGetDto  {
+    return try!  FfiConverterTypeDirectStorageGetDto_lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_directstoragebodyhandle_finish(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Count `n` more bytes. Throws `StorageBody` as soon as they would pass the grant. A push
+     * after `finish` is a CALLER bug, not a storage failure: it throws `Plan` with code
+     * `finished`, because the count was consumed by `finish` and there is no body left to count.
+     */
+open func push(n: UInt64)throws   {try rustCallWithError(FfiConverterTypeDirectTransferError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_directstoragebodyhandle_push(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(n),$0
+    )
+}
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDirectStorageBodyHandle: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = DirectStorageBodyHandle
+
+    public static func lift(_ handle: UInt64) throws -> DirectStorageBodyHandle {
+        return DirectStorageBodyHandle(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: DirectStorageBodyHandle) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DirectStorageBodyHandle {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: DirectStorageBodyHandle, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectStorageBodyHandle_lift(_ handle: UInt64) throws -> DirectStorageBodyHandle {
+    return try FfiConverterTypeDirectStorageBodyHandle.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDirectStorageBodyHandle_lower(_ value: DirectStorageBodyHandle) -> UInt64 {
+    return FfiConverterTypeDirectStorageBodyHandle.lower(value)
+}
+
+
+
+
+
+
+/**
  * Opaque handle to a FileKey. Created via `MasterKeyHandle::derive_file_key`
  * for a key derived from the account's master key, or via
  * [`FileKeyHandle::from_key_bytes`] for one the app holds as 32 bytes.
@@ -9003,8 +9167,9 @@ public enum DirectTransferError: Swift.Error, Equatable, Hashable, Foundation.Lo
     case Discovery(code: String
     )
     /**
-     * A call that does not fit the planner's state (a bug in the caller):
-     * `not_in_flight`, `not_fetched`, `out_of_order`, `api_route_failure`.
+     * A call that does not fit the caller-driven state (a bug in the caller): the planner's
+     * `not_in_flight`, `not_fetched`, `out_of_order`, `api_route_failure`; or `finished`, which
+     * means the storage body handle was used after `finish` (the count was already consumed).
      */
     case Plan(code: String
     )
@@ -9012,6 +9177,14 @@ public enum DirectTransferError: Swift.Error, Equatable, Hashable, Foundation.Lo
      * `call` was none of `discovery`, `download_grant`, `pinned_chunk`.
      */
     case UnknownCall
+    /**
+     * A storage body operation failed: `failed` (the head was not a `200` of the grant's length,
+     * or a push would have passed the grant). The kind is core's `StorageGet::kind`; `status` is
+     * the status the head (or the refused push) answered, so the caller never re-derives it.
+     * Appended last so every earlier variant keeps its wire index.
+     */
+    case StorageBody(code: String, status: UInt16
+    )
 
     
 
@@ -9051,6 +9224,10 @@ public struct FfiConverterTypeDirectTransferError: FfiConverterRustBuffer {
             code: try FfiConverterString.read(from: &buf)
             )
         case 4: return .UnknownCall
+        case 5: return .StorageBody(
+            code: try FfiConverterString.read(from: &buf), 
+            status: try FfiConverterUInt16.read(from: &buf)
+            )
 
          default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -9081,6 +9258,12 @@ public struct FfiConverterTypeDirectTransferError: FfiConverterRustBuffer {
         case .UnknownCall:
             writeInt(&buf, Int32(4))
         
+        
+        case let .StorageBody(code,status):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(code, into: &buf)
+            FfiConverterUInt16.write(status, into: &buf)
+            
         }
     }
 }
@@ -11709,8 +11892,9 @@ public func directDownloadGrantsPath(fileId: String) -> String  {
 })
 }
 /**
- * The ciphertext bytes a process of `class` may hold at once (256, 64, 64, 16 MiB). The planner
- * clamps the chunk count to at least one, so this is a ceiling, never a reason to fail.
+ * The ciphertext bytes a process of `class` may hold at once (256, 64, 64, 16 MiB): a ceiling on
+ * the chunks held, never a reason to fail. The planner clamps the chunk count to at least one, so
+ * at least one chunk is always held, even a 256 MiB chunk in a 16 MiB class.
  */
 public func directMaxInFlightBytes(`class`: DirectMemoryClassDto) -> UInt64  {
     return try!  FfiConverterUInt64.lift(try! rustCall() {
@@ -11733,9 +11917,10 @@ public func directPacedUntilMs(startMs: Int64, wireBytes: UInt64, kbps: UInt64) 
 })
 }
 /**
- * May this client use the direct transport for `direction`? True only when discovery offers it
- * AND every pair in `discovery.storage_buckets` is in `pairs`. Hosts compare ASCII
- * case-insensitively, buckets exactly.
+ * May this client use the direct transport for `direction`? True only when discovery offers it,
+ * names at least one `{host, bucket}` pair, AND every pair it names is in `pairs`. A discovery
+ * with no buckets is never allowed, not vacuously. Hosts compare ASCII case-insensitively,
+ * buckets exactly.
  */
 public func directPairsAllowed(discovery: DirectDiscoveryDto, direction: DirectDirectionDto, pairs: [DirectStorageBucketDto]) -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
@@ -12468,13 +12653,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_direct_download_grants_path() != 38361) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_func_direct_max_in_flight_bytes() != 41345) {
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_max_in_flight_bytes() != 24727) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_paced_until_ms() != 40002) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_func_direct_pairs_allowed() != 44854) {
+    if (uniffi_beebeeb_uniffi_checksum_func_direct_pairs_allowed() != 6861) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_pinned_retry_decision() != 23908) {
@@ -12765,6 +12950,12 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_directsignedurl_redacted() != 58321) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_finish() != 25858) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_push() != 65177) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk() != 50441) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -13021,6 +13212,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_directsignedurl_new() != 57713) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_directstoragebodyhandle_from_head() != 7464) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_folder_link() != 22577) {

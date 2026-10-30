@@ -1,14 +1,18 @@
 //! Was a storage GET answer the chunk we asked for? (task 2173, plan K1; clients design §6.4)
 //!
-//! The web pump already checked this in TypeScript: `storage-fetch.ts` refused anything that was not
-//! a `200`, compared `Content-Length` with the grant, and required `offset === length`. The rule every
-//! client applies is the same: **`Stored` means status `200` and `Content-Length` equal to the grant**,
-//! never a redirect, a `206` or a shorter/longer body. Anything else is a failure that carries the
-//! status (never the body and never the URL); status `0` means there was no HTTP answer at all.
+//! The web pump checked this in TypeScript on `fs/l13-s3-web-download` (unmerged): `storage-fetch.ts`
+//! refused anything that was not a `200`, compared `Content-Length` with the grant, and required
+//! `offset === length`. That branch reports status `0` where core carries the real status of a
+//! non-200 answer. The rule every client applies is the same: **`Stored` means status `200` and
+//! `Content-Length` equal to the grant**, never a redirect, a `206` or a shorter/longer body.
+//! Anything else is a failure that carries the status (never the body and never the URL); status `0`
+//! means there was no HTTP answer at all.
 //!
 //! `Content-Length` is only the head. `Stored` says the response *declared* the grant's length, so the
-//! caller must still count the bytes it actually reads and check them with [`check_storage_body`]: a
-//! truncated stream can end short, and a proxy can lie about the length it will send.
+//! caller must still count the bytes it actually reads: [`StorageBody`] holds that count for one
+//! response (head, pushes, finish); [`check_storage_body`] is the one-shot form for a caller that
+//! already has the count. A truncated stream can end short, and a proxy can lie about the length it
+//! will send.
 //!
 //! Pure data: no I/O, no clock.
 
@@ -29,6 +33,15 @@ impl StorageGet {
             StorageGet::Failed { .. } => "failed",
         }
     }
+
+    /// The HTTP status this answer carries: the head's own status when it failed, `200` when it is
+    /// the stored chunk (the head that passed was a `200`).
+    pub fn status(self) -> u16 {
+        match self {
+            StorageGet::Stored => 200,
+            StorageGet::Failed { status } => status,
+        }
+    }
 }
 
 /// Check a storage GET answer: [`StorageGet::Stored`] only for `200` with `Some(expected)`.
@@ -40,14 +53,78 @@ pub fn check_storage_get(status: u16, content_length: Option<u64>, expected: u64
     }
 }
 
-/// Check the body a storage GET actually delivered: [`StorageGet::Stored`] only when the received
-/// count equals the grant. The status is `200` because the head already passed; a short read or an
-/// overlong body is still a failed chunk.
+/// The stable `code` a binding reports when a storage-body handle is pushed after `finish`: a
+/// caller bug, not a storage answer (the count was consumed by `finish`). Documented here so every
+/// binding and the vectors name the same code.
+pub const BODY_FINISHED_CODE: &str = "finished";
+
+/// Check the body a storage GET actually delivered, one-shot: [`StorageGet::Stored`] only when the
+/// received count equals the grant. The status is `200` because the head already passed; a short
+/// read or an overlong body is still a failed chunk. For a stream that is still arriving, count it
+/// with [`StorageBody`] instead: it refuses the first byte past the grant, so a caller never holds
+/// more than the grant for a response that lies about its length.
 pub fn check_storage_body(received: u64, expected: u64) -> StorageGet {
     if received == expected {
         StorageGet::Stored
     } else {
         StorageGet::Failed { status: 200 }
+    }
+}
+
+/// One storage GET's head and the bytes read from it, checked as they arrive. No client counts body
+/// bytes on its own: `from_head` applies [`check_storage_get`], `push` refuses the first byte past
+/// the grant, and `finish` applies [`check_storage_body`] to the count.
+///
+/// A refused `push` latches: the body overflowed, so `finish` is a failure and every later `push` is
+/// refused too. Without the latch a caller could read one byte past the grant, be told to stop, and
+/// still finish on a count that happens to equal the grant (the refused byte is not counted).
+#[derive(Debug, PartialEq, Eq)]
+pub struct StorageBody {
+    expected: u64,
+    received: u64,
+    overflowed: bool,
+}
+
+impl StorageBody {
+    /// Start counting the body of a storage GET answer. `Err` is the head's own answer (see
+    /// [`check_storage_get`]): the caller stops without reading a body.
+    pub fn from_head(status: u16, content_length: Option<u64>, expected: u64) -> Result<StorageBody, StorageGet> {
+        match check_storage_get(status, content_length, expected) {
+            StorageGet::Stored => Ok(StorageBody {
+                expected,
+                received: 0,
+                overflowed: false,
+            }),
+            failed => Err(failed),
+        }
+    }
+
+    /// Count `n` more bytes. `Err(Failed { status: 200 })` as soon as they would pass the grant (or
+    /// the count would overflow a `u64`), so the caller stops reading; the count is left where it
+    /// was and the body is overflowed for good.
+    pub fn push(&mut self, n: u64) -> Result<(), StorageGet> {
+        if self.overflowed {
+            return Err(StorageGet::Failed { status: 200 });
+        }
+        let next = self.received.checked_add(n);
+        match next {
+            Some(next) if next <= self.expected => {
+                self.received = next;
+                Ok(())
+            }
+            _ => {
+                self.overflowed = true;
+                Err(StorageGet::Failed { status: 200 })
+            }
+        }
+    }
+
+    /// The body's answer: `Stored` only when the count is exactly the grant and no push was refused.
+    pub fn finish(self) -> StorageGet {
+        if self.overflowed {
+            return StorageGet::Failed { status: 200 };
+        }
+        check_storage_body(self.received, self.expected)
     }
 }
 
@@ -116,5 +193,104 @@ mod tests {
         assert_eq!(StorageGet::Stored.kind(), "stored");
         assert_eq!(StorageGet::Failed { status: 0 }.kind(), "failed");
         assert_eq!(StorageGet::Failed { status: 206 }.kind(), "failed");
+    }
+
+    #[test]
+    fn a_failed_head_never_counts() {
+        assert_eq!(
+            StorageBody::from_head(206, Some(CHUNK), CHUNK),
+            Err(StorageGet::Failed { status: 206 })
+        );
+        assert_eq!(
+            StorageBody::from_head(200, Some(CHUNK - 1), CHUNK),
+            Err(StorageGet::Failed { status: 200 }),
+            "a head that declares the wrong length never starts a count"
+        );
+        assert_eq!(
+            StorageBody::from_head(200, None, CHUNK),
+            Err(StorageGet::Failed { status: 200 }),
+            "no Content-Length is a failed head"
+        );
+        assert!(
+            StorageBody::from_head(200, Some(CHUNK), CHUNK).is_ok(),
+            "the exact head starts the count"
+        );
+    }
+
+    #[test]
+    fn push_refuses_the_first_byte_past_the_grant() {
+        let mut body = StorageBody::from_head(200, Some(CHUNK), CHUNK).expect("a good head");
+        assert_eq!(body.push(CHUNK), Ok(()), "the whole grant is taken");
+        let mut body = StorageBody::from_head(200, Some(CHUNK), CHUNK).expect("a good head");
+        assert_eq!(body.push(CHUNK / 2), Ok(()));
+        assert_eq!(body.push(CHUNK / 2 + 1), Err(StorageGet::Failed { status: 200 }));
+        let mut body = StorageBody::from_head(200, Some(0), 0).expect("an empty chunk");
+        assert_eq!(body.push(0), Ok(()), "zero bytes never pass the grant");
+        assert_eq!(
+            body.push(1),
+            Err(StorageGet::Failed { status: 200 }),
+            "even one byte past zero"
+        );
+    }
+
+    #[test]
+    fn finish_after_a_refused_push_is_never_stored() {
+        // The refused byte is not counted, so without the latch the count would still reach the
+        // grant: [CHUNK, 1] must fail, not store.
+        let mut body = StorageBody::from_head(200, Some(CHUNK), CHUNK).expect("a good head");
+        body.push(CHUNK).expect("the whole grant");
+        assert_eq!(body.push(1), Err(StorageGet::Failed { status: 200 }));
+        assert_eq!(
+            body.finish(),
+            StorageGet::Failed { status: 200 },
+            "a body that was refused a byte is never the chunk"
+        );
+        // The latch holds: no later push is counted, and the finish stays failed.
+        let mut body = StorageBody::from_head(200, Some(CHUNK), CHUNK).expect("a good head");
+        assert_eq!(body.push(CHUNK + 1), Err(StorageGet::Failed { status: 200 }));
+        assert_eq!(
+            body.push(1),
+            Err(StorageGet::Failed { status: 200 }),
+            "every later push is refused once the body overflowed"
+        );
+        assert_eq!(body.push(0), Err(StorageGet::Failed { status: 200 }));
+        assert_eq!(body.finish(), StorageGet::Failed { status: 200 });
+    }
+
+    #[test]
+    fn an_overflowing_push_is_refused_even_at_the_largest_grant() {
+        // `expected = u64::MAX` is a legal grant: the count must not wrap (`saturating_add` would
+        // have clamped and `received` would look like the whole grant).
+        let mut body = StorageBody::from_head(200, Some(u64::MAX), u64::MAX).expect("a good head");
+        assert_eq!(body.push(u64::MAX), Ok(()), "the whole grant is taken");
+        let mut body = StorageBody::from_head(200, Some(u64::MAX), u64::MAX).expect("a good head");
+        assert_eq!(body.push(u64::MAX - 1), Ok(()));
+        assert_eq!(
+            body.push(2),
+            Err(StorageGet::Failed { status: 200 }),
+            "a count past u64::MAX is refused, not wrapped"
+        );
+        assert_eq!(body.finish(), StorageGet::Failed { status: 200 });
+    }
+
+    #[test]
+    fn finish_is_stored_only_on_the_exact_count() {
+        let mut body = StorageBody::from_head(200, Some(CHUNK), CHUNK).expect("a good head");
+        body.push(CHUNK - 1).expect("inside the grant");
+        assert_eq!(
+            body.finish(),
+            StorageGet::Failed { status: 200 },
+            "a short body is not the chunk"
+        );
+        let mut body = StorageBody::from_head(200, Some(CHUNK), CHUNK).expect("a good head");
+        body.push(CHUNK).expect("the whole grant");
+        assert_eq!(body.finish(), StorageGet::Stored);
+        assert_eq!(
+            StorageBody::from_head(200, Some(0), 0)
+                .expect("an empty chunk")
+                .finish(),
+            StorageGet::Stored,
+            "an empty chunk is exact at zero"
+        );
     }
 }

@@ -76,6 +76,17 @@
         "s3.storage.test"
       ]
     },
+    "no_tokens": {
+      "storage_hosts": [
+        "s3.storage.test"
+      ],
+      "storage_buckets": [
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-01"
+        }
+      ]
+    },
     "empty": {},
     "small_window": {
       "download": [
@@ -2199,7 +2210,7 @@
         "kind": "failed",
         "status": 200
       },
-      "source": "spec R1.7: a proxy that sends more than it declared is still not the chunk"
+      "source": "spec R1.7: a proxy that sends more than it declares is still not the chunk"
     },
     {
       "name": "a counted body of exactly the grant is the chunk",
@@ -2210,6 +2221,141 @@
         "kind": "stored"
       },
       "source": "spec R1.7: the caller counts what it read; equal is the chunk"
+    }
+  ],
+  "storage_body": [
+    {
+      "name": "pushes that add up to the grant are the chunk",
+      "status": 200,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [
+        4194332
+      ],
+      "expect": {
+        "kind": "stored"
+      },
+      "source": "spec R1.7: the caller counts what it read; equal is the chunk"
+    },
+    {
+      "name": "a stream read in two pushes is still the chunk",
+      "status": 200,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [
+        2097166,
+        2097166
+      ],
+      "expect": {
+        "kind": "stored"
+      },
+      "source": "spec R1.7: the count is the sum of what arrived, not the shape of the reads"
+    },
+    {
+      "name": "a push that would pass the grant is refused at once",
+      "status": 200,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [
+        4194331,
+        2
+      ],
+      "expect": {
+        "kind": "failed",
+        "status": 200
+      },
+      "source": "spec R1.7: a proxy that sends more than it declared is not the chunk; the count stops at the grant"
+    },
+    {
+      "name": "pushes that end short are not the chunk",
+      "status": 200,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [
+        4194331
+      ],
+      "expect": {
+        "kind": "failed",
+        "status": 200
+      },
+      "source": "spec R1.7: a truncated stream ends short even after a 200 head with the grant's length"
+    },
+    {
+      "name": "an empty chunk is stored with no pushes",
+      "status": 200,
+      "content_length": 0,
+      "expected": 0,
+      "pushes": [],
+      "expect": {
+        "kind": "stored"
+      },
+      "source": "spec R1.7: the rule is exactness, and an empty chunk is exact at zero"
+    },
+    {
+      "name": "a zero-byte push never moves the count",
+      "status": 200,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [
+        0,
+        4194332,
+        0
+      ],
+      "expect": {
+        "kind": "stored"
+      },
+      "source": "spec R1.7: a read of nothing changes no count"
+    },
+    {
+      "name": "a push past a full grant is not the chunk",
+      "status": 200,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [
+        4194332,
+        1
+      ],
+      "expect": {
+        "kind": "failed",
+        "status": 200
+      },
+      "source": "spec R1.7: the first byte past the grant is refused, and a refused byte is never a stored chunk (the refused byte is not counted, so without a latch the count would still equal the grant)"
+    },
+    {
+      "name": "a 403 head is not the chunk and keeps its status",
+      "status": 403,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [],
+      "expect": {
+        "kind": "failed",
+        "status": 403
+      },
+      "source": "server: storage refuses an expired or wrong signature (S3 error body, never JSON); the status must reach the caller from the binding's own error, not from the row"
+    },
+    {
+      "name": "a 206 head is not the chunk and keeps its status",
+      "status": 206,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [],
+      "expect": {
+        "kind": "failed",
+        "status": 206
+      },
+      "source": "client-side case: a proxy or a Range answer, no server route sends 206"
+    },
+    {
+      "name": "no answer at all keeps status 0 at the head",
+      "status": 0,
+      "content_length": null,
+      "expected": 4194332,
+      "pushes": [],
+      "expect": {
+        "kind": "failed",
+        "status": 0
+      },
+      "source": "client-side case: a network failure or timeout (no HTTP status, and no length to check)"
     }
   ],
   "pacing": [
@@ -2410,6 +2556,19 @@
       "source": "spec R1.12: every pair (of none) is allowlisted, but direct needs a listed bucket and check_storage_url refuses every unlisted bucket; the web rule is the same (!!discovery.storage_buckets?.length && every(...))"
     },
     {
+      "name": "a discovery with no buckets is not allowed",
+      "discovery": "hosts_only",
+      "direction": "download",
+      "allowlist": [
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-01"
+        }
+      ],
+      "expect": false,
+      "source": "spec R1.12: no listed bucket leaves no storage route, whatever the allowlist says (the vacuous `every` bug: offered && buckets.iter().all(listed) is true for no buckets)"
+    },
+    {
       "name": "both dev pairs allowlisted",
       "discovery": "dev",
       "direction": "download",
@@ -2466,11 +2625,16 @@
     },
     {
       "name": "a discovery with no tokens is never allowed",
-      "discovery": "hosts_only",
-      "direction": "upload",
-      "allowlist": [],
+      "discovery": "no_tokens",
+      "direction": "download",
+      "allowlist": [
+        {
+          "host": "s3.storage.test",
+          "bucket": "bb-01"
+        }
+      ],
       "expect": false,
-      "source": "spec R1.13: hosts_only offers no upload token"
+      "source": "spec R1.13: the discovery lists buckets but no download token"
     }
   ],
   "memory_class": [

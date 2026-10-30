@@ -2167,10 +2167,13 @@ fn direct_to_js<T: serde::Serialize>(value: &T) -> Result<JsValue, JsError> {
     value.serialize(&serializer).map_err(|e| JsError::new(&e.to_string()))
 }
 
-/// An `Error` with a stable `code` property.
-fn direct_error(message: &str, code: &str) -> JsValue {
+/// A JS `Error` with the stable `code` and, when a storage body produced the failure, its `status`.
+fn direct_error_status(message: &str, code: &str, status: Option<u16>) -> JsValue {
     let err = js_sys::Error::new(message);
     let _ = js_sys::Reflect::set(&err, &"code".into(), &JsValue::from_str(code));
+    if let Some(status) = status {
+        let _ = js_sys::Reflect::set(&err, &"status".into(), &JsValue::from(status));
+    }
     err.into()
 }
 
@@ -2181,6 +2184,8 @@ fn direct_error(message: &str, code: &str) -> JsValue {
 pub struct DirectFailure {
     message: String,
     code: &'static str,
+    /// The HTTP status a storage-body failure carries, so a caller never has to re-derive it.
+    status: Option<u16>,
 }
 
 impl DirectFailure {
@@ -2188,13 +2193,23 @@ impl DirectFailure {
         Self {
             message: message.into(),
             code,
+            status: None,
+        }
+    }
+
+    /// A failure whose `Error` also carries the HTTP `status` (a storage body's head or push).
+    fn with_status(message: impl Into<String>, code: &'static str, status: u16) -> Self {
+        Self {
+            message: message.into(),
+            code,
+            status: Some(status),
         }
     }
 }
 
 impl From<DirectFailure> for JsValue {
     fn from(failure: DirectFailure) -> JsValue {
-        direct_error(&failure.message, failure.code)
+        direct_error_status(&failure.message, failure.code, failure.status)
     }
 }
 
@@ -2376,6 +2391,20 @@ fn direct_length(len: f64) -> Result<u64, DirectFailure> {
     direct_bytes(len, "length_invalid")
 }
 
+/// An HTTP status as a JS number: a whole number that fits a `u16`, else `status_invalid`. This is
+/// only the type conversion; what a status MEANS is core's rule, applied by the same core entry
+/// point on every binding, so the bindings cannot disagree about which statuses are accepted.
+fn direct_status(status: f64) -> Result<u16, DirectFailure> {
+    if status.is_finite() && status.fract() == 0.0 && (0.0..=u16::MAX as f64).contains(&status) {
+        Ok(status as u16)
+    } else {
+        Err(DirectFailure::new(
+            format!("{status} is not an HTTP status"),
+            "status_invalid",
+        ))
+    }
+}
+
 /// The most a storage PUT of `len` ciphertext bytes may take, in milliseconds: a minute plus the
 /// chunk at 1 Mbit/s (`60 s + ceil(len / 131072) s`). Throws an `Error` with `code` `length_invalid`
 /// for a `len` that is not a whole, non-negative number.
@@ -2420,16 +2449,31 @@ pub fn check_storage_url_js(url: &str, discovery: JsValue, api_base: &str) -> Re
 }
 
 /// Was a storage GET answer the chunk we asked for? `{ kind: "stored" }` or
-/// `{ kind: "failed", status }`; status `0` means there was no HTTP answer at all.
-/// Only a `200` whose `Content-Length` is exactly `expected` is `stored`.
+/// `{ kind: "failed", status }`; a caller with no HTTP answer passes status `0` (exactly what
+/// `WasmStorageBody.fromHead` reports for it). Only a `200` whose `Content-Length` is exactly
+/// `expected` is `stored`.
+/// `status` crosses as a JS number and is validated exactly as `WasmStorageBody.fromHead` validates
+/// it: a whole number in `0..=65535`, else `status_invalid`. `undefined` is not a number and throws
+/// `status_invalid` too, so a caller cannot omit the answer it means to report.
 #[wasm_bindgen(js_name = checkStorageGet, unchecked_return_type = "DirectStorageGet")]
-pub fn check_storage_get_js(status: u16, content_length: Option<f64>, expected: f64) -> Result<JsValue, DirectFailure> {
+pub fn check_storage_get_js(status: f64, content_length: Option<f64>, expected: f64) -> Result<JsValue, DirectFailure> {
+    let value = check_storage_get_value(status, content_length, expected)?;
+    direct_to_js(&value).map_err(|e| DirectFailure::new(format!("{e:?}"), "internal"))
+}
+
+/// [`check_storage_get_js`]'s answer from the JS numbers, as the contract's JSON, so the Rust test
+/// surface can run the same validation without a JS engine.
+fn check_storage_get_value(
+    status: f64,
+    content_length: Option<f64>,
+    expected: f64,
+) -> Result<serde_json::Value, DirectFailure> {
+    let status = direct_status(status)?;
     let content_length = match content_length {
         Some(len) => Some(direct_length(len)?),
         None => None,
     };
-    let value = storage_get_json(status, content_length, direct_length(expected)?);
-    direct_to_js(&value).map_err(|e| DirectFailure::new(format!("{e:?}"), "internal"))
+    Ok(storage_get_json(status, content_length, direct_length(expected)?))
 }
 
 /// Was the body a storage GET actually delivered the chunk? Same answer shape as
@@ -2454,6 +2498,62 @@ fn storage_answer_json(got: dt::StorageGet) -> serde_json::Value {
     match got {
         dt::StorageGet::Stored => serde_json::json!({"kind": got.kind()}),
         dt::StorageGet::Failed { status } => serde_json::json!({"kind": got.kind(), "status": status}),
+    }
+}
+
+/// A storage GET's body as the bytes arrive, counted in core so no client counts its own.
+/// `WasmStorageBody.fromHead(status, contentLength, expected)` starts it; `push(n)` counts the bytes
+/// read and throws as soon as they would pass the grant; `finish()` gives `{ kind: "stored" }` or
+/// `{ kind: "failed", status: 200 }` and consumes the handle. Every count crosses as a JS number.
+/// Because `finish()` takes the handle by value, a JS `push` after `finish` throws wasm-bindgen's
+/// moved-value error, which has no `code` (the count was consumed; there is nothing left to count).
+#[wasm_bindgen]
+pub struct WasmStorageBody {
+    inner: dt::StorageBody,
+}
+
+#[wasm_bindgen]
+impl WasmStorageBody {
+    /// Start counting. `status` is the head's HTTP status and must be a whole number that fits a
+    /// `u16`; `content_length` is the head's `Content-Length` (or `null`). Throws `status_invalid`
+    /// for a status that is not one, and `failed` (with its `status`) when the head is not a `200`
+    /// whose length is exactly `expected`.
+    #[wasm_bindgen(js_name = fromHead)]
+    pub fn from_head(
+        status: f64,
+        content_length: Option<f64>,
+        expected: f64,
+    ) -> Result<WasmStorageBody, DirectFailure> {
+        let status = direct_status(status)?;
+        let content_length = match content_length {
+            Some(len) => Some(direct_length(len)?),
+            None => None,
+        };
+        dt::StorageBody::from_head(status, content_length, direct_length(expected)?)
+            .map(|inner| WasmStorageBody { inner })
+            .map_err(|failed| DirectFailure::with_status("the storage body failed", failed.kind(), failed.status()))
+    }
+
+    /// Count `n` more bytes read. Throws `failed` (with its `status`) as soon as they would pass
+    /// `expected`, so the caller stops reading.
+    pub fn push(&mut self, n: f64) -> Result<(), DirectFailure> {
+        self.inner
+            .push(direct_bytes(n, "bytes_invalid")?)
+            .map_err(|failed| DirectFailure::with_status("the storage body failed", failed.kind(), failed.status()))
+    }
+
+    /// The body's answer; the handle is consumed.
+    #[wasm_bindgen(unchecked_return_type = "DirectStorageGet")]
+    pub fn finish(self) -> Result<JsValue, DirectFailure> {
+        direct_to_js(&self.finish_json()).map_err(|e| DirectFailure::new(format!("{e:?}"), "internal"))
+    }
+}
+
+impl WasmStorageBody {
+    /// [`WasmStorageBody::finish`]'s answer from the counted body, so the Rust test surface can run
+    /// it without a JS engine.
+    fn finish_json(self) -> serde_json::Value {
+        storage_answer_json(self.inner.finish())
     }
 }
 
@@ -2502,20 +2602,19 @@ fn memory_class_of(code: &str) -> Result<dt::MemoryClass, DirectFailure> {
 /// buckets exactly.
 #[wasm_bindgen(js_name = pairsAllowed)]
 pub fn pairs_allowed_js(discovery: JsValue, direction: &str, pairs: JsValue) -> Result<bool, DirectFailure> {
+    // Discovery first, then direction, then pairs: the order core's rule names its own inputs in,
+    // and the order K1 round 1 had (`3898b7c`). A bad discovery and a bad direction together name
+    // the discovery.
     let discovery = direct_discovery_from_js(discovery)?;
+    let direction = direct_direction(direction)?;
     let pairs: Vec<dt::StorageBucket> =
         serde_wasm_bindgen::from_value(pairs).map_err(|e| DirectFailure::new(e.to_string(), "pairs_invalid"))?;
-    pairs_allowed_value(&discovery, direction, &pairs)
+    Ok(pairs_allowed_value(&discovery, direction, &pairs))
 }
 
 /// [`pairs_allowed_js`]'s seam: the export and the Rust test surface both call this.
-fn pairs_allowed_value(
-    discovery: &dt::Discovery,
-    direction: &str,
-    pairs: &[dt::StorageBucket],
-) -> Result<bool, DirectFailure> {
-    let direction = direct_direction(direction)?;
-    Ok(dt::pairs_allowed(discovery, direction, pairs))
+fn pairs_allowed_value(discovery: &dt::Discovery, direction: dt::Direction, pairs: &[dt::StorageBucket]) -> bool {
+    dt::pairs_allowed(discovery, direction, pairs)
 }
 
 /// A URL for a log line: scheme and host only.
@@ -3752,7 +3851,9 @@ mod direct_vector_tests {
     //! `JsValue` wrapper calls. The same file `beebeeb-core` runs through core directly: a
     //! wrapper that drifts from core fails here.
 
-    use beebeeb_core::direct_transfer::vectors::{self, CacheSurface, HealthSurface, PlannerSurface, Surface};
+    use beebeeb_core::direct_transfer::vectors::{
+        self, CacheSurface, HealthSurface, PlannerSurface, StorageBodySurface, Surface,
+    };
     use serde_json::{Value, json};
 
     use super::*;
@@ -3875,11 +3976,20 @@ mod direct_vector_tests {
         }
 
         fn check_storage_get(&self, status: u16, content_length: Option<u64>, expected: u64) -> Value {
-            storage_get_json(status, content_length, expected)
+            // Through the exported seam's own f64 conversion, so the surface cannot disagree with
+            // `checkStorageGet` about which statuses cross.
+            check_storage_get_value(status as f64, content_length.map(|n| n as f64), expected as f64)
+                .expect("the row's status and lengths fit the exported seam")
         }
 
         fn check_storage_body(&self, received: u64, expected: u64) -> Value {
             storage_body_json(received, expected)
+        }
+
+        fn storage_body(&self, status: u16, content_length: Option<u64>, expected: u64, pushes: &[u64]) -> Value {
+            // The head → pushes → stop → finish contract lives once, in `vectors::drive_storage_body`;
+            // a failure's status comes from the binding's own error, never from the row.
+            vectors::drive_storage_body(self, status, content_length, expected, pushes)
         }
 
         fn paced_until_ms(&self, start_ms: i64, wire_bytes: u64, kbps: u64) -> i64 {
@@ -3898,12 +4008,33 @@ mod direct_vector_tests {
         fn pairs_allowed(&self, discovery: &Value, direction: &str, allowlist: &Value) -> bool {
             let d: dt::Discovery = serde_json::from_value(discovery.clone()).unwrap();
             let allowlist: Vec<dt::StorageBucket> = serde_json::from_value(allowlist.clone()).unwrap();
-            pairs_allowed_value(&d, direction, &allowlist).unwrap()
+            pairs_allowed_value(&d, direct_direction(direction).unwrap(), &allowlist)
         }
 
         fn planner(&self, discovery: &Value, api_base: &str, file_id: &str, seed: u64) -> WasmPlannerSurface {
             let d: dt::Discovery = serde_json::from_value(discovery.clone()).unwrap();
             WasmPlannerSurface(WasmDownloadPlanner::from_parts(d, api_base, file_id, seed))
+        }
+    }
+
+    impl StorageBodySurface for WasmSurface {
+        type Body = WasmStorageBody;
+
+        fn body_from_head(&self, status: u16, content_length: Option<u64>, expected: u64) -> Result<Self::Body, Value> {
+            WasmStorageBody::from_head(status as f64, content_length.map(|n| n as f64), expected as f64).map_err(|failed| {
+                // The status comes from the binding's error; the row only supplied the input.
+                json!({"kind": failed.code, "status": failed.status.expect("a storage body failure carries its status")})
+            })
+        }
+
+        fn body_push(&self, body: &mut Self::Body, n: u64) -> Result<(), Value> {
+            body.push(n as f64).map_err(|failed| {
+                json!({"kind": failed.code, "status": failed.status.expect("a storage body failure carries its status")})
+            })
+        }
+
+        fn body_finish(&self, body: Self::Body) -> Value {
+            body.finish_json()
         }
     }
 
@@ -3976,6 +4107,95 @@ mod direct_vector_tests {
             vectors::expected_report(),
             "a section that did not run is a failure"
         );
+    }
+
+    /// The storage body's failures carry the status the head (or the refused push) answered, so no
+    /// client re-derives it from its own input; a status that is not a whole number that fits a
+    /// `u16` is `status_invalid`.
+    #[test]
+    fn the_storage_body_error_carries_its_status() {
+        let chunk = (4 * 1024 * 1024 + 28) as f64;
+        match WasmStorageBody::from_head(206.0, Some(chunk), chunk) {
+            Err(failed) => {
+                assert_eq!(failed.code, "failed");
+                assert_eq!(failed.status, Some(206));
+            }
+            Ok(_) => panic!("a 206 head must throw"),
+        }
+        match WasmStorageBody::from_head(0.0, None, chunk) {
+            Err(failed) => assert_eq!(failed.status, Some(0), "no answer keeps status 0"),
+            Ok(_) => panic!("a head with no length must throw"),
+        }
+        let mut body = WasmStorageBody::from_head(200.0, Some(chunk), chunk).expect("an exact head");
+        body.push(chunk - 1.0).expect("inside the grant");
+        match body.push(2.0) {
+            Err(failed) => {
+                assert_eq!(failed.code, "failed");
+                assert_eq!(failed.status, Some(200));
+            }
+            Ok(()) => panic!("a push past the grant must throw"),
+        }
+        for bad in [65736.0, 200.9, -1.0, f64::NAN] {
+            match WasmStorageBody::from_head(bad, Some(chunk), chunk) {
+                Err(failed) => assert_eq!(failed.code, "status_invalid", "{bad}"),
+                Ok(_) => panic!("{bad} is not an HTTP status"),
+            }
+        }
+    }
+
+    /// `checkStorageGet` validates the head's status exactly as `WasmStorageBody.fromHead` does: a
+    /// number that is not a whole number fitting a `u16` is `status_invalid`, never a truncated
+    /// status that silently checks a different answer.
+    #[test]
+    fn check_storage_get_validates_its_status_like_the_body_head() {
+        let chunk = (4 * 1024 * 1024 + 28) as f64;
+        for bad in [65736.0, 200.9] {
+            assert_eq!(
+                check_storage_get_value(bad, Some(chunk), chunk).unwrap_err().code,
+                "status_invalid",
+                "checkStorageGet({bad})"
+            );
+            match WasmStorageBody::from_head(bad, Some(chunk), chunk) {
+                Err(failed) => assert_eq!(failed.code, "status_invalid", "fromHead({bad})"),
+                Ok(_) => panic!("fromHead({bad}) must throw status_invalid"),
+            }
+        }
+        // 1000 is a whole number that fits a u16: the bindings only convert the type. What it means
+        // is core's rule, so both bindings answer the same class (a failed head carrying 1000).
+        assert_eq!(
+            check_storage_get_value(1000.0, Some(chunk), chunk).unwrap(),
+            serde_json::json!({"kind": "failed", "status": 1000}),
+            "checkStorageGet(1000) is a failed head, not a caller error"
+        );
+        match WasmStorageBody::from_head(1000.0, Some(chunk), chunk) {
+            Err(failed) => {
+                assert_eq!(failed.code, "failed");
+                assert_eq!(failed.status, Some(1000), "the head's own status rides on the error");
+            }
+            Ok(_) => panic!("a 1000 head is a failed head"),
+        }
+        // The u16 boundary: 65535 crosses and is core's failed head; 65536 cannot cross.
+        assert_eq!(
+            check_storage_get_value(65535.0, Some(chunk), chunk).unwrap(),
+            serde_json::json!({"kind": "failed", "status": 65535}),
+            "65535 is the largest HTTP status"
+        );
+        assert_eq!(
+            check_storage_get_value(65536.0, Some(chunk), chunk).unwrap_err().code,
+            "status_invalid",
+            "65536 does not fit a u16"
+        );
+        match WasmStorageBody::from_head(65535.0, Some(chunk), chunk) {
+            Err(failed) => {
+                assert_eq!(failed.code, "failed");
+                assert_eq!(failed.status, Some(65535), "the head's own status rides on the error");
+            }
+            Ok(_) => panic!("a 65535 head is a failed head"),
+        }
+        match WasmStorageBody::from_head(65536.0, Some(chunk), chunk) {
+            Err(failed) => assert_eq!(failed.code, "status_invalid", "fromHead(65536)"),
+            Ok(_) => panic!("65536 is not an HTTP status"),
+        }
     }
 
     /// A length crosses as a JS number: only a finite, whole, non-negative number below 2^53 is a length.
