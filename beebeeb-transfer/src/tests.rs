@@ -1105,10 +1105,13 @@ async fn a_failed_discard_keeps_the_original_error() {
 
 #[tokio::test]
 async fn a_partial_write_error_counts_as_written() {
-    let (io, request, _) = scenario(Trigger::SinkWriteError);
+    // The FIRST write fails after accepting half of its bytes: no full byte
+    // was counted, but the sink is dirty and must not be treated as untouched.
+    let fx = Arc::new(Fixture::new(&vec![9u8; 1024], 1024));
+    let io = ScriptedIo::new(standard_handler(fx.clone()));
     let mut sink = MockSink::non_discardable();
-    sink.partial_error_on_write = Some(2);
-    let outcome = run_with_sink(&io, &DirectShared::new(), request, &mut sink, &Events::default()).await;
+    sink.partial_error_on_write = Some(1);
+    let outcome = run_with_sink(&io, &DirectShared::new(), request_for(&fx), &mut sink, &Events::default()).await;
     let Err(DownloadError::DirectFailedAfterWrite {
         written_plaintext_bytes,
         chunks_written,
@@ -1117,9 +1120,10 @@ async fn a_partial_write_error_counts_as_written() {
     else {
         panic!("a partial write counts as written: {outcome:?}");
     };
-    assert!(written_plaintext_bytes > 0);
-    assert_eq!(chunks_written, 2, "the failing write counts");
+    assert_eq!(written_plaintext_bytes, 0, "no whole byte was written");
+    assert_eq!(chunks_written, 1, "the failing write counts");
     assert!(matches!(cause, AfterWriteCause::Failed(_)));
+    assert_eq!(sink.discard_calls, 0);
 }
 
 #[tokio::test]
