@@ -161,11 +161,7 @@ impl Clock {
     }
 
     fn register(&self, which: Which, target: i64, waker: Waker) {
-        self.waiters.lock().unwrap().push(Waiter {
-            which,
-            target,
-            waker,
-        });
+        self.waiters.lock().unwrap().push(Waiter { which, target, waker });
     }
 
     /// The smallest positive step to the next waiter or to `target`.

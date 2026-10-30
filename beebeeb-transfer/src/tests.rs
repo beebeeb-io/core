@@ -903,7 +903,10 @@ enum Trigger {
 fn scenario(trigger: Trigger) -> (ScriptedIo, DownloadRequest, Arc<Fixture>) {
     let plain: Vec<u8> = (0..12 * 1024).map(|i| (i % 241) as u8).collect();
     let fx = Arc::new(Fixture::new(&plain, 1024));
-    let storage_fails = matches!(trigger, Trigger::PinnedGiveUp | Trigger::PinnedRestart | Trigger::Pinned401);
+    let storage_fails = matches!(
+        trigger,
+        Trigger::PinnedGiveUp | Trigger::PinnedRestart | Trigger::Pinned401
+    );
     let io = ScriptedIo::new({
         let fx = fx.clone();
         move |req, wall, _mono| match req {
@@ -975,10 +978,7 @@ async fn every_failure_after_a_write_follows_the_sink_table() {
         let (io, request, _) = scenario(trigger);
         let mut sink = sink_for(trigger, true);
         let outcome = run_with_sink(&io, &DirectShared::new(), request, &mut sink, &Events::default()).await;
-        assert_eq!(
-            sink.discard_calls, 1,
-            "{trigger:?}: discard called exactly once"
-        );
+        assert_eq!(sink.discard_calls, 1, "{trigger:?}: discard called exactly once");
         assert!(sink.data.is_empty(), "{trigger:?}: the sink is empty");
         match trigger {
             Trigger::PinnedGiveUp | Trigger::Refill404 => assert!(
@@ -1085,10 +1085,7 @@ async fn a_sink_whose_discard_fails_still_refuses_writes() {
     let mut sink = MockSink::failing_discard();
     sink.write(b"abc").unwrap();
     assert!(sink.discard().is_err());
-    assert!(
-        sink.write(b"d").is_err(),
-        "a failed discard still marks the sink dead"
-    );
+    assert!(sink.write(b"d").is_err(), "a failed discard still marks the sink dead");
 }
 
 #[tokio::test]
@@ -1096,10 +1093,7 @@ async fn a_failed_discard_keeps_the_original_error() {
     let (io, request, _) = scenario(Trigger::Pinned401);
     let mut sink = MockSink::failing_discard();
     let outcome = run_with_sink(&io, &DirectShared::new(), request, &mut sink, &Events::default()).await;
-    assert!(
-        matches!(outcome, Err(DownloadError::Unauthorized)),
-        "{outcome:?}"
-    );
+    assert!(matches!(outcome, Err(DownloadError::Unauthorized)), "{outcome:?}");
     assert_eq!(sink.discard_calls, 1);
 }
 
@@ -1111,7 +1105,14 @@ async fn a_partial_write_error_counts_as_written() {
     let io = ScriptedIo::new(standard_handler(fx.clone()));
     let mut sink = MockSink::non_discardable();
     sink.partial_error_on_write = Some(1);
-    let outcome = run_with_sink(&io, &DirectShared::new(), request_for(&fx), &mut sink, &Events::default()).await;
+    let outcome = run_with_sink(
+        &io,
+        &DirectShared::new(),
+        request_for(&fx),
+        &mut sink,
+        &Events::default(),
+    )
+    .await;
     let Err(DownloadError::DirectFailedAfterWrite {
         written_plaintext_bytes,
         chunks_written,
@@ -1148,10 +1149,7 @@ async fn no_message_after_a_write_says_nothing_was_written() {
     ];
     for error in errors {
         let text = format!("{error} {error:?}");
-        assert!(
-            !text.to_ascii_lowercase().contains("nothing was written"),
-            "{text}"
-        );
+        assert!(!text.to_ascii_lowercase().contains("nothing was written"), "{text}");
     }
 }
 
@@ -1161,10 +1159,7 @@ async fn discarded_events_carry_the_rolled_back_bytes() {
     let mut sink = MockSink::discardable();
     let events = Events::default();
     let outcome = run_with_sink(&io, &DirectShared::new(), request, &mut sink, &events).await;
-    assert!(
-        matches!(outcome, Ok(DownloadOutcome::UseApi(_))),
-        "{outcome:?}"
-    );
+    assert!(matches!(outcome, Ok(DownloadOutcome::UseApi(_))), "{outcome:?}");
     let discarded: Vec<TransferEvent> = events
         .0
         .lock()
@@ -1198,10 +1193,7 @@ async fn a_v1_file_whose_geometry_has_fewer_chunks_is_refused_not_done() {
     let mut request = request_for(&fx);
     request.chunk_count = fx.chunk_count + 1;
     let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request).await;
-    assert!(
-        matches!(outcome, Err(DownloadError::FileChanged)),
-        "{outcome:?}"
-    );
+    assert!(matches!(outcome, Err(DownloadError::FileChanged)), "{outcome:?}");
     assert!(sink.0.is_empty(), "zero bytes written");
 }
 
@@ -1233,7 +1225,10 @@ async fn pacing_holds_new_starts_and_polls_in_flight_replies() {
         matches!(outcome, Ok(DownloadOutcome::Done(_))),
         "{outcome:?} events {:?} requests {:?} mono {}",
         events.0,
-        io.requests().iter().map(|r| (r.request.path().to_string(), r.mono_ms)).collect::<Vec<_>>(),
+        io.requests()
+            .iter()
+            .map(|r| (r.request.path().to_string(), r.mono_ms))
+            .collect::<Vec<_>>(),
         io.mono_now()
     );
     assert_eq!(sink.data, plain);
@@ -1251,8 +1246,7 @@ async fn pacing_holds_new_starts_and_polls_in_flight_replies() {
         })
         .collect();
     assert!(!later.is_empty());
-    let paced_from =
-        beebeeb_core::direct_transfer::paced_until_ms(sink.write_times[0], 4 * (chunk as u64 + 28), 256);
+    let paced_from = beebeeb_core::direct_transfer::paced_until_ms(sink.write_times[0], 4 * (chunk as u64 + 28), 256);
     assert!(
         later.iter().all(|at| *at >= paced_from),
         "new storage starts held to the pace: {later:?} vs {paced_from}"
@@ -1352,11 +1346,7 @@ async fn discovery_outcomes_are_classified_by_status() {
     });
     let shared = DirectShared::new();
     assert!(matches!(
-        run_with_discovery(
-            json_reply(401, serde_json::json!({"error": "unauthorized"})),
-            &shared
-        )
-        .await,
+        run_with_discovery(json_reply(401, serde_json::json!({"error": "unauthorized"})), &shared).await,
         Err(DownloadError::Unauthorized)
     ));
     let shared = DirectShared::new();
@@ -1381,11 +1371,7 @@ async fn discovery_outcomes_are_classified_by_status() {
     // A JSON 404 is the server saying it does not offer it.
     let shared = DirectShared::new();
     assert!(matches!(
-        run_with_discovery(
-            json_reply(404, serde_json::json!({"error": "not_found"})),
-            &shared
-        )
-        .await,
+        run_with_discovery(json_reply(404, serde_json::json!({"error": "not_found"})), &shared).await,
         Ok(DownloadOutcome::UseApi(UseApiReason::NotSupported))
     ));
     // A parked lookup is unavailable, not "not supported".
@@ -1429,26 +1415,22 @@ async fn a_breaker_trip_survives_a_pinned_restart() {
     });
     let shared = DirectShared::new();
     let (outcome, sink, events) = run_download(&io, &shared, request_for(&fx)).await;
-    assert!(
-        matches!(outcome, Err(DownloadError::FileChanged)),
-        "{outcome:?}"
-    );
+    assert!(matches!(outcome, Err(DownloadError::FileChanged)), "{outcome:?}");
     assert!(sink.0.is_empty());
-    assert!(events
-        .0
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|e| matches!(e, TransferEvent::GaveUp(Direction::Download))));
+    assert!(
+        events
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, TransferEvent::GaveUp(Direction::Download)))
+    );
 
     let second = ScriptedIo::new(|_: &Request, _: i64, _: i64| panic!("a held download made a request"));
     second.set_wall(io.wall_now() + 1_000);
     second.set_mono(io.mono_now() + 1_000);
     let (held, _, _) = run_download(&second, &shared, request_for(&fx)).await;
-    assert!(matches!(
-        held,
-        Ok(DownloadOutcome::UseApi(UseApiReason::BreakerHold))
-    ));
+    assert!(matches!(held, Ok(DownloadOutcome::UseApi(UseApiReason::BreakerHold))));
     assert!(second.requests().is_empty());
 }
 
@@ -1485,11 +1467,7 @@ async fn the_version_check_ignores_ascii_case() {
 
 #[tokio::test]
 async fn concurrent_downloads_share_one_discovery_and_one_failure() {
-    async fn one(
-        io: &ScriptedIo,
-        shared: &DirectShared,
-        fx: &Fixture,
-    ) -> Result<DownloadOutcome, DownloadError> {
+    async fn one(io: &ScriptedIo, shared: &DirectShared, fx: &Fixture) -> Result<DownloadOutcome, DownloadError> {
         let mut sink = VecSink::default();
         let events = Events::default();
         let decryptor =
@@ -1528,10 +1506,7 @@ async fn concurrent_downloads_share_one_discovery_and_one_failure() {
     advance.abort();
     for outcome in [a, b, c, d] {
         assert!(
-            matches!(
-                outcome,
-                Ok(DownloadOutcome::UseApi(UseApiReason::DiscoveryUnavailable))
-            ),
+            matches!(outcome, Ok(DownloadOutcome::UseApi(UseApiReason::DiscoveryUnavailable))),
             "{outcome:?}"
         );
     }

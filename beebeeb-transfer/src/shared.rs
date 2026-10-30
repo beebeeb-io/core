@@ -166,13 +166,7 @@ impl DirectShared {
                 state.flight.waiters.push(cx.waker().clone());
                 Poll::Pending
             } else {
-                Poll::Ready(
-                    state
-                        .flight
-                        .last
-                        .clone()
-                        .unwrap_or(DiscoveryFlightResult::Unavailable),
-                )
+                Poll::Ready(state.flight.last.clone().unwrap_or(DiscoveryFlightResult::Unavailable))
             }
         })
         .await

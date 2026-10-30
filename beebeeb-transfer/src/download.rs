@@ -18,10 +18,9 @@ use std::time::Duration;
 
 use beebeeb_core::chunk_stream::ChunkDecryptor;
 use beebeeb_core::direct_transfer::{
-    self as dt, API_CALL_TIMEOUT, Call, Direction, Discovery, DownloadGrantResponse, DownloadPlanner,
-    MemoryClass, Outcome, PinnedRetry, PlannerConfig, Poll, StorageBody, StorageGet, Verdict, classify,
-    download_grants_path, max_in_flight_bytes, paced_until_ms, pinned_chunk_path, storage_get_total,
-    STORAGE_CONNECT_TIMEOUT, STORAGE_GET_IDLE,
+    self as dt, API_CALL_TIMEOUT, Call, Direction, Discovery, DownloadGrantResponse, DownloadPlanner, MemoryClass,
+    Outcome, PinnedRetry, PlannerConfig, Poll, STORAGE_CONNECT_TIMEOUT, STORAGE_GET_IDLE, StorageBody, StorageGet,
+    Verdict, classify, download_grants_path, max_in_flight_bytes, paced_until_ms, pinned_chunk_path, storage_get_total,
 };
 use bytes::Bytes;
 use futures_util::future::{Either, select};
@@ -402,93 +401,93 @@ async fn run<I: DirectIo>(
         if paced {
             wait_pace = Some(pace_until);
         } else {
-        loop {
-            match planner.poll(io.wall_ms()) {
-                Poll::RequestWindow(request) => {
-                    let path = download_grants_path(&req.file_id);
-                    let Ok(body) = serde_json::to_vec(&request) else {
-                        stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)));
-                    };
-                    tasks.push(Box::pin(async move {
-                        let reply = io
-                            .api(ApiCall {
-                                method: ApiMethod::Post,
-                                path,
-                                body: Some(body),
-                                capabilities: Some(dt::CAP_OBJECT_DOWNLOAD_V1),
-                                timeout: API_CALL_TIMEOUT,
-                                max_body: dt::wire::MAX_GRANT_BODY_BYTES,
-                            })
-                            .await;
-                        Event::Window(reply)
-                    }));
-                }
-                Poll::Fetch { index, grant } => {
-                    if !attempted.insert(index) {
-                        observer.event(TransferEvent::Renewed { index });
+            loop {
+                match planner.poll(io.wall_ms()) {
+                    Poll::RequestWindow(request) => {
+                        let path = download_grants_path(&req.file_id);
+                        let Ok(body) = serde_json::to_vec(&request) else {
+                            stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)));
+                        };
+                        tasks.push(Box::pin(async move {
+                            let reply = io
+                                .api(ApiCall {
+                                    method: ApiMethod::Post,
+                                    path,
+                                    body: Some(body),
+                                    capabilities: Some(dt::CAP_OBJECT_DOWNLOAD_V1),
+                                    timeout: API_CALL_TIMEOUT,
+                                    max_body: dt::wire::MAX_GRANT_BODY_BYTES,
+                                })
+                                .await;
+                            Event::Window(reply)
+                        }));
                     }
-                    let url = SignedUrl::new(grant.url);
-                    let expected_len = grant.length;
-                    let total = storage_get_total(expected_len);
-                    tasks.push(Box::pin(async move {
-                        let reply = io
-                            .storage_get(&url, expected_len, total, STORAGE_GET_IDLE, STORAGE_CONNECT_TIMEOUT)
-                            .await;
-                        Event::Storage {
-                            index,
-                            expected_len,
-                            reply,
+                    Poll::Fetch { index, grant } => {
+                        if !attempted.insert(index) {
+                            observer.event(TransferEvent::Renewed { index });
                         }
-                    }));
-                }
-                Poll::FetchViaApi {
-                    index,
-                    object_version_id,
-                } => {
-                    let Some(expected_len) = planner.geometry().and_then(|g| g.chunk_length(index)) else {
-                        stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)));
-                    };
-                    let Ok(path) = pinned_chunk_path(&req.file_id, index, &object_version_id) else {
-                        stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)));
-                    };
-                    tasks.push(Box::pin(async move {
-                        let result = pinned_fetch(io, path, expected_len).await;
-                        Event::Pinned { index, result }
-                    }));
-                }
-                Poll::Wait { until_ms } => {
-                    wait_wall = until_ms;
-                    break;
-                }
-                Poll::Done => {
-                    if decryptor.finish().is_err() {
-                        stop!(Err(DownloadError::Truncated));
+                        let url = SignedUrl::new(grant.url);
+                        let expected_len = grant.length;
+                        let total = storage_get_total(expected_len);
+                        tasks.push(Box::pin(async move {
+                            let reply = io
+                                .storage_get(&url, expected_len, total, STORAGE_GET_IDLE, STORAGE_CONNECT_TIMEOUT)
+                                .await;
+                            Event::Storage {
+                                index,
+                                expected_len,
+                                reply,
+                            }
+                        }));
                     }
-                    let stats = DownloadStats {
-                        plaintext_bytes: attempt.plaintext_bytes,
-                        ciphertext_bytes: attempt.ciphertext_bytes,
-                        chunks_storage,
-                        chunks_pinned,
-                        windows,
-                    };
-                    stop!(Ok(DownloadOutcome::Done(stats)));
-                }
-                Poll::Stop(verdict) => {
-                    stop!(match verdict {
-                        Verdict::ApiForFile => Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)),
-                        Verdict::Restart => Err(DownloadError::FileChanged),
-                        Verdict::Terminal(t) => match t.status {
-                            401 => Err(DownloadError::Unauthorized),
-                            403 => Err(DownloadError::Forbidden),
-                            _ => Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)),
-                        },
-                        Verdict::Corrupt => Err(DownloadError::Unauthentic {
-                            index: last_unauthentic,
-                        }),
-                    });
+                    Poll::FetchViaApi {
+                        index,
+                        object_version_id,
+                    } => {
+                        let Some(expected_len) = planner.geometry().and_then(|g| g.chunk_length(index)) else {
+                            stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)));
+                        };
+                        let Ok(path) = pinned_chunk_path(&req.file_id, index, &object_version_id) else {
+                            stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)));
+                        };
+                        tasks.push(Box::pin(async move {
+                            let result = pinned_fetch(io, path, expected_len).await;
+                            Event::Pinned { index, result }
+                        }));
+                    }
+                    Poll::Wait { until_ms } => {
+                        wait_wall = until_ms;
+                        break;
+                    }
+                    Poll::Done => {
+                        if decryptor.finish().is_err() {
+                            stop!(Err(DownloadError::Truncated));
+                        }
+                        let stats = DownloadStats {
+                            plaintext_bytes: attempt.plaintext_bytes,
+                            ciphertext_bytes: attempt.ciphertext_bytes,
+                            chunks_storage,
+                            chunks_pinned,
+                            windows,
+                        };
+                        stop!(Ok(DownloadOutcome::Done(stats)));
+                    }
+                    Poll::Stop(verdict) => {
+                        stop!(match verdict {
+                            Verdict::ApiForFile => Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)),
+                            Verdict::Restart => Err(DownloadError::FileChanged),
+                            Verdict::Terminal(t) => match t.status {
+                                401 => Err(DownloadError::Unauthorized),
+                                403 => Err(DownloadError::Forbidden),
+                                _ => Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)),
+                            },
+                            Verdict::Corrupt => Err(DownloadError::Unauthentic {
+                                index: last_unauthentic,
+                            }),
+                        });
+                    }
                 }
             }
-        }
         }
 
         // Never sleep while requests sit unpolled: race the sleep against the
@@ -733,10 +732,7 @@ async fn discovery<I: DirectIo>(
     }
 }
 
-fn discovery_result(
-    result: DiscoveryFlightResult,
-    observer: &dyn Observer,
-) -> Result<Discovery, DiscoveryFailure> {
+fn discovery_result(result: DiscoveryFlightResult, observer: &dyn Observer) -> Result<Discovery, DiscoveryFailure> {
     match result {
         DiscoveryFlightResult::Supported(discovery) => Ok(discovery),
         DiscoveryFlightResult::NotSupported => Err(DiscoveryFailure::NotSupported),
