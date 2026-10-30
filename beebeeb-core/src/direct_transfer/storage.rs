@@ -33,6 +33,15 @@ impl StorageGet {
             StorageGet::Failed { .. } => "failed",
         }
     }
+
+    /// The HTTP status this answer carries: the head's own status when it failed, `200` when it is
+    /// the stored chunk (the head that passed was a `200`).
+    pub fn status(self) -> u16 {
+        match self {
+            StorageGet::Stored => 200,
+            StorageGet::Failed { status } => status,
+        }
+    }
 }
 
 /// Check a storage GET answer: [`StorageGet::Stored`] only for `200` with `Some(expected)`.
@@ -60,10 +69,15 @@ pub fn check_storage_body(received: u64, expected: u64) -> StorageGet {
 /// One storage GET's head and the bytes read from it, checked as they arrive. No client counts body
 /// bytes on its own: `from_head` applies [`check_storage_get`], `push` refuses the first byte past
 /// the grant, and `finish` applies [`check_storage_body`] to the count.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// A refused `push` latches: the body overflowed, so `finish` is a failure and every later `push` is
+/// refused too. Without the latch a caller could read one byte past the grant, be told to stop, and
+/// still finish on a count that happens to equal the grant (the refused byte is not counted).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageBody {
     expected: u64,
     received: u64,
+    overflowed: bool,
 }
 
 impl StorageBody {
@@ -71,24 +85,40 @@ impl StorageBody {
     /// [`check_storage_get`]): the caller stops without reading a body.
     pub fn from_head(status: u16, content_length: Option<u64>, expected: u64) -> Result<StorageBody, StorageGet> {
         match check_storage_get(status, content_length, expected) {
-            StorageGet::Stored => Ok(StorageBody { expected, received: 0 }),
+            StorageGet::Stored => Ok(StorageBody {
+                expected,
+                received: 0,
+                overflowed: false,
+            }),
             failed => Err(failed),
         }
     }
 
-    /// Count `n` more bytes. `Err(Failed { status: 200 })` as soon as they would pass the grant, so
-    /// the caller stops reading; the count is left where it was.
+    /// Count `n` more bytes. `Err(Failed { status: 200 })` as soon as they would pass the grant (or
+    /// the count would overflow a `u64`), so the caller stops reading; the count is left where it
+    /// was and the body is overflowed for good.
     pub fn push(&mut self, n: u64) -> Result<(), StorageGet> {
-        let next = self.received.saturating_add(n);
-        if next > self.expected {
+        if self.overflowed {
             return Err(StorageGet::Failed { status: 200 });
         }
-        self.received = next;
-        Ok(())
+        let next = self.received.checked_add(n);
+        match next {
+            Some(next) if next <= self.expected => {
+                self.received = next;
+                Ok(())
+            }
+            _ => {
+                self.overflowed = true;
+                Err(StorageGet::Failed { status: 200 })
+            }
+        }
     }
 
-    /// The body's answer: `Stored` only when the count is exactly the grant.
+    /// The body's answer: `Stored` only when the count is exactly the grant and no push was refused.
     pub fn finish(self) -> StorageGet {
+        if self.overflowed {
+            return StorageGet::Failed { status: 200 };
+        }
         check_storage_body(self.received, self.expected)
     }
 }
@@ -190,12 +220,52 @@ mod tests {
         assert_eq!(body.push(CHUNK / 2), Ok(()));
         assert_eq!(body.push(CHUNK / 2 + 1), Err(StorageGet::Failed { status: 200 }));
         let mut body = StorageBody::from_head(200, Some(0), 0).expect("an empty chunk");
+        assert_eq!(body.push(0), Ok(()), "zero bytes never pass the grant");
         assert_eq!(
             body.push(1),
             Err(StorageGet::Failed { status: 200 }),
             "even one byte past zero"
         );
-        assert_eq!(body.push(0), Ok(()), "zero bytes never pass the grant");
+    }
+
+    #[test]
+    fn finish_after_a_refused_push_is_never_stored() {
+        // The refused byte is not counted, so without the latch the count would still reach the
+        // grant: [CHUNK, 1] must fail, not store.
+        let mut body = StorageBody::from_head(200, Some(CHUNK), CHUNK).expect("a good head");
+        body.push(CHUNK).expect("the whole grant");
+        assert_eq!(body.push(1), Err(StorageGet::Failed { status: 200 }));
+        assert_eq!(
+            body.finish(),
+            StorageGet::Failed { status: 200 },
+            "a body that was refused a byte is never the chunk"
+        );
+        // The latch holds: no later push is counted, and the finish stays failed.
+        let mut body = StorageBody::from_head(200, Some(CHUNK), CHUNK).expect("a good head");
+        assert_eq!(body.push(CHUNK + 1), Err(StorageGet::Failed { status: 200 }));
+        assert_eq!(
+            body.push(1),
+            Err(StorageGet::Failed { status: 200 }),
+            "every later push is refused once the body overflowed"
+        );
+        assert_eq!(body.push(0), Err(StorageGet::Failed { status: 200 }));
+        assert_eq!(body.finish(), StorageGet::Failed { status: 200 });
+    }
+
+    #[test]
+    fn an_overflowing_push_is_refused_even_at_the_largest_grant() {
+        // `expected = u64::MAX` is a legal grant: the count must not wrap (`saturating_add` would
+        // have clamped and `received` would look like the whole grant).
+        let mut body = StorageBody::from_head(200, Some(u64::MAX), u64::MAX).expect("a good head");
+        assert_eq!(body.push(u64::MAX), Ok(()), "the whole grant is taken");
+        let mut body = StorageBody::from_head(200, Some(u64::MAX), u64::MAX).expect("a good head");
+        assert_eq!(body.push(u64::MAX - 1), Ok(()));
+        assert_eq!(
+            body.push(2),
+            Err(StorageGet::Failed { status: 200 }),
+            "a count past u64::MAX is refused, not wrapped"
+        );
+        assert_eq!(body.finish(), StorageGet::Failed { status: 200 });
     }
 
     #[test]

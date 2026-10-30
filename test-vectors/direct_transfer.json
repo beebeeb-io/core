@@ -2305,6 +2305,57 @@
         "kind": "stored"
       },
       "source": "spec R1.7: a read of nothing changes no count"
+    },
+    {
+      "name": "a push past a full grant is not the chunk",
+      "status": 200,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [
+        4194332,
+        1
+      ],
+      "expect": {
+        "kind": "failed",
+        "status": 200
+      },
+      "source": "spec R1.7: the first byte past the grant is refused, and a refused byte is never a stored chunk (the refused byte is not counted, so without a latch the count would still equal the grant)"
+    },
+    {
+      "name": "a 403 head is not the chunk and keeps its status",
+      "status": 403,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [],
+      "expect": {
+        "kind": "failed",
+        "status": 403
+      },
+      "source": "server: storage refuses an expired or wrong signature (S3 error body, never JSON); the status must reach the caller from the binding's own error, not from the row"
+    },
+    {
+      "name": "a 206 head is not the chunk and keeps its status",
+      "status": 206,
+      "content_length": 4194332,
+      "expected": 4194332,
+      "pushes": [],
+      "expect": {
+        "kind": "failed",
+        "status": 206
+      },
+      "source": "client-side case: a proxy or a Range answer, no server route sends 206"
+    },
+    {
+      "name": "no answer at all keeps status 0 at the head",
+      "status": 0,
+      "content_length": null,
+      "expected": 4194332,
+      "pushes": [],
+      "expect": {
+        "kind": "failed",
+        "status": 0
+      },
+      "source": "client-side case: a network failure or timeout (no HTTP status, and no length to check)"
     }
   ],
   "pacing": [
@@ -2322,7 +2373,7 @@
       "wire_bytes": 0,
       "kbps": 8,
       "expect": 1000,
-      "source": "desktop src-tauri/src/direct_download.rs:1542"
+      "source": "desktop src-tauri/src/direct_download.rs:1541"
     },
     {
       "name": "8 KiB at 8 KiB/s is one second",

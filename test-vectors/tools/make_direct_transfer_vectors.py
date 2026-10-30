@@ -909,7 +909,7 @@ storage_get = [
 ]
 
 # 20b. K2 follow-up: the counted body as a stream (StorageBody), not only as one count. The head is
-# good in every row; the pushes are what the caller read.
+# good except in the three head-failure rows; the pushes are what the caller read.
 storage_body = [
     {"name": "pushes that add up to the grant are the chunk", "status": 200, "content_length": CHUNK,
      "expected": CHUNK, "pushes": [CHUNK], "expect": {"kind": "stored"},
@@ -929,6 +929,20 @@ storage_body = [
     {"name": "a zero-byte push never moves the count", "status": 200, "content_length": CHUNK,
      "expected": CHUNK, "pushes": [0, CHUNK, 0], "expect": {"kind": "stored"},
      "source": "spec R1.7: a read of nothing changes no count"},
+    {"name": "a push past a full grant is not the chunk", "status": 200, "content_length": CHUNK,
+     "expected": CHUNK, "pushes": [CHUNK, 1], "expect": {"kind": "failed", "status": 200},
+     "source": "spec R1.7: the first byte past the grant is refused, and a refused byte is never a stored chunk "
+               "(the refused byte is not counted, so without a latch the count would still equal the grant)"},
+    {"name": "a 403 head is not the chunk and keeps its status", "status": 403, "content_length": CHUNK,
+     "expected": CHUNK, "pushes": [], "expect": {"kind": "failed", "status": 403},
+     "source": "server: storage refuses an expired or wrong signature (S3 error body, never JSON); the status must "
+               "reach the caller from the binding's own error, not from the row"},
+    {"name": "a 206 head is not the chunk and keeps its status", "status": 206, "content_length": CHUNK,
+     "expected": CHUNK, "pushes": [], "expect": {"kind": "failed", "status": 206},
+     "source": "client-side case: a proxy or a Range answer, no server route sends 206"},
+    {"name": "no answer at all keeps status 0 at the head", "status": 0, "content_length": None,
+     "expected": CHUNK, "pushes": [], "expect": {"kind": "failed", "status": 0},
+     "source": "client-side case: a network failure or timeout (no HTTP status, and no length to check)"},
 ]
 
 # 21. K1: pacing, desktop's formula with its four own test rows (direct_download.rs:194-199 and :1538-1544).
@@ -936,7 +950,7 @@ pacing = [
     {"name": "no ceiling means no wait", "start_ms": 1_000, "wire_bytes": 10_000, "kbps": 0,
      "expect": "-9223372036854775808", "source": "desktop src-tauri/src/direct_download.rs:1540 (the ceiling is off: i64::MIN; the formula is :193-199)"},
     {"name": "no bytes received yet is no wait", "start_ms": 1_000, "wire_bytes": 0, "kbps": 8,
-     "expect": 1_000, "source": "desktop src-tauri/src/direct_download.rs:1542"},
+     "expect": 1_000, "source": "desktop src-tauri/src/direct_download.rs:1541"},
     {"name": "8 KiB at 8 KiB/s is one second", "start_ms": 1_000, "wire_bytes": 8 * 1024, "kbps": 8,
      "expect": 2_000, "source": "desktop src-tauri/src/direct_download.rs:1542"},
     {"name": "the largest count saturates instead of wrapping", "start_ms": 0, "wire_bytes": "18446744073709551615", "kbps": 1,
