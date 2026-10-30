@@ -7,6 +7,7 @@
 //!
 //! If any test here fails after a code change, it means the change broke
 //! cross-platform compatibility and existing user data may become unreadable.
+#![allow(deprecated)]
 
 use beebeeb_core::encrypt::{decrypt_chunk, decrypt_metadata, encrypt_metadata};
 use beebeeb_core::file_request::{derive_request_wrap_key, open_request_upload, unwrap_request_private};
@@ -756,6 +757,8 @@ fn vector_file_version_check() {
         "owner_wrapped_file_key",
         "owner_wrapped_folder_key",
         "folder_wrapped_file_key",
+        // Version 14 (task 2275): the two item id classes and refused text forms.
+        "item_ids",
         // Version 13 (task 1922): the encrypted client-metadata envelope.
         "client_meta_device_hostname",
         "client_meta_session_paths",
@@ -767,6 +770,35 @@ fn vector_file_version_check() {
     ];
     for name in &required {
         assert!(names.contains(name), "vectors.json is missing required vector '{name}'");
+    }
+}
+
+/// Task 2275 L12: every published id class agrees with core's predicates, and
+/// every refused text form is refused.
+#[test]
+fn vector_item_ids() {
+    use beebeeb_core::item_id::{ItemClass, is_foreign_item_id, item_class};
+
+    let v = get_vector(&load_vectors(), "item_ids");
+    let class = |name: &str| match name {
+        "foreign" => ItemClass::Foreign,
+        "owner" => ItemClass::Owner,
+        other => panic!("unknown class {other}"),
+    };
+    let check = |rows: &serde_json::Value| {
+        for row in rows.as_array().unwrap() {
+            let id = row["id"].as_str().unwrap();
+            assert_eq!(item_class(id).unwrap(), class(row["class"].as_str().unwrap()), "{id}");
+        }
+    };
+    check(&v["foreign"]);
+    check(&v["owner"]);
+    for row in v["refused"].as_array().unwrap() {
+        let id = row["id"].as_str().unwrap();
+        assert_eq!(row["class"].as_str().unwrap(), "refused", "{id}");
+        assert!(row["is_foreign_error"].as_bool().unwrap(), "{id}");
+        assert!(is_foreign_item_id(id).is_err(), "{id}");
+        assert!(item_class(id).is_err(), "{id}");
     }
 }
 

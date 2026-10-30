@@ -8,6 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Item id classes (task 2275 L12-L14): `item_id::new_foreign_item_id` / `is_foreign_item_id` /
+  `item_class` and the core-minted `item_id::NewItemId` (`owner()` v4, `foreign()` v8). Foreign ids
+  are RFC 9562 UUID v8 with the RFC 4122 variant in canonical lowercase hyphenated text; any other
+  text form is `InvalidInput`. `kdf::wrap_owner_file_key` / `unwrap_owner_file_key` now refuse a
+  non-foreign id (L8 is adoption-only), and every export inherits that. `owned_keys::resolve_owned_key`
+  takes the id class from the id, authenticates the served name, ignores owner wraps for owner rows
+  and returns a `KeyOrigin`, the resolved name and a `WriteTarget` (id + key + pin) for writable rows;
+  `DerivedUpperRepair` rows stay read-only with no target. New sealers: `encrypt_name_for_new_item` /
+  `encrypt_name_for_target`, `encrypt_note_for_new_item` / `encrypt_note_for_target`,
+  `encrypt_thumbnail_for_new_item` / `encrypt_thumbnail_for_target`, and
+  `ChunkEncryptor::for_push_for_new_item` / `for_push_for_target`; the old write entry points remain
+  and are documented as deprecated for writes. `owned_keys::resolve_request_row` resolves a 2236
+  request row (content under `C`, name under a derived key or `C`, read-only) and
+  `owned_keys::child_wrap_matches` does the L14 constant-time child-wrap check. WASM exports
+  `newForeignItemId`, `newOwnerItemId`, `isForeignItemId`, `resolveOwnedKey`, the six `*ForNewItem` /
+  `*ForTarget` sealers, `resolveRequestRow`, `childWrapMatches`; UniFFI exports
+  `MasterKeyHandle.resolve_owned_key` / `resolve_request_row`, `FileKeyHandle.child_wrap_matches`,
+  `new_foreign_item_id`, `new_owner_item_id`, `is_foreign_item_id`. Vectors version 14 adds
+  `item_ids` and re-publishes the L8 owner-file-key vector under a foreign id (vendored copies must
+  be refreshed: web `test/core-vectors-kat.test.ts`, mobile `CoreVectorsKATTests.swift` and
+  `CoreVectorsKATTest.kt`).
+
+### Changed
+- **Breaking:** `owned_keys::resolve_owned_key(master, item_id, owner_wrap, folder_wrap, name_encrypted,
+  first_chunk)` replaces the five-argument form; `foreign_added` is gone (the id class decides) and
+  `ResolvedOwnedKey` gains `name` and `write_target`. Callers must pass the served `name_encrypted`
+  and, for a plaintext-named file, its chunk 0.
+
 - `kdf::owner_file_key_for_name` with `kdf::OwnerKeyConvention` (`String`, `Binary`,
   `UpperRepair`): resolves an owner's per-file key from the `(file_id, name_encrypted)`
   pair and reports which id convention it came from. The repair convention reads files the

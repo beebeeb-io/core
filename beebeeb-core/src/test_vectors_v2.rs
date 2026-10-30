@@ -28,6 +28,8 @@
 //!
 //! [`encrypt_name_with_chunk_format`]: crate::encrypt::encrypt_name_with_chunk_format
 
+#![allow(deprecated)] // the vectors exercise pre-L13 writers on purpose
+
 use serde_json::{Value, json};
 
 use crate::chunk_stream::{ChunkEncryptor, ExpectedChunkFormat, VERSION_ID_LEN, chunk_aad_v2, derive_chunk_key_v2};
@@ -38,7 +40,7 @@ use crate::kdf::{MasterKey, derive_file_key};
 pub const VECTORS_FILE_VERSION: u64 = 14;
 
 /// Names of the v2 vectors, in the order they are published.
-pub const V2_VECTOR_NAMES: [&str; 28] = [
+pub const V2_VECTOR_NAMES: [&str; 29] = [
     "chunk_v2_stream",
     "chunk_v2_single_frame",
     "metadata_v2_name",
@@ -61,6 +63,9 @@ pub const V2_VECTOR_NAMES: [&str; 28] = [
     "owner_wrapped_file_key",
     "owner_wrapped_folder_key",
     "folder_wrapped_file_key",
+    // Version 14 (task 2275): the two item id classes and the text forms that
+    // are refused. F ids are RFC 9562 UUID v8 with the RFC 4122 variant.
+    "item_ids",
     // Version 13 (SF-0002): a name and a content chunk sealed under the
     // uppercase textual id, readable only through the READ-ONLY repair key.
     "upper_repair_v1",
@@ -165,6 +170,7 @@ pub fn v2_vectors() -> Vec<Value> {
         owned_key_vector("owner_wrapped_file_key"),
         owned_key_vector("owner_wrapped_folder_key"),
         owned_key_vector("folder_wrapped_file_key"),
+        item_ids_vector(),
         upper_repair_vector(),
         upper_repair_split_vector(),
         client_meta_hostname_vector(),
@@ -578,7 +584,8 @@ fn owned_key_vector(name: &str) -> Value {
     let child_bytes = std::array::from_fn(|i| 0xa0 + i as u8);
     let master = MasterKey::from_bytes(master_bytes);
     let folder = FileKey::from_bytes(FOLDER_KEY);
-    let file_id = "11111111-1111-4111-8111-111111111111";
+    // Task 2275 L12: an L8 owner envelope exists only for a foreign (F) id.
+    let file_id = "11111111-1111-8111-8111-111111111111";
     let folder_id = "22222222-2222-4222-8222-222222222222";
     let nonce = std::array::from_fn(|i| i as u8);
     let raw = |blob: beebeeb_types::EncryptedBlob| [blob.nonce, blob.ciphertext].concat();
@@ -637,6 +644,66 @@ fn owned_key_vector(name: &str) -> Value {
         vector["kind"] = json!(1);
     }
     vector
+}
+
+/// Task 2275 L12: the item id classes. Every listed id is fed through the real
+/// `new`/`is`/`class` predicates, so the vector pins the accepted text form.
+fn item_ids_vector() -> Value {
+    use crate::item_id::{is_foreign_item_id, item_class};
+
+    const FOREIGN: [&str; 3] = [
+        "11111111-1111-8111-8111-111111111111",
+        "aaaaaaaa-bbbb-8ccc-9ddd-eeeeeeeeeeee",
+        "00000000-0000-8000-8000-000000000000",
+    ];
+    const OWNER: [&str; 7] = [
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222",
+        "ffffffff-ffff-4fff-bfff-ffffffffffff",
+        "00000000-0000-0000-0000-000000000000",
+        "ffffffff-ffff-ffff-ffff-ffffffffffff",
+        // UUID v7 is not a foreign id.
+        "0190b0c2-1234-7abc-8def-0123456789ab",
+        // Version 8 with the wrong variant is not a foreign id either.
+        "11111111-1111-8111-c111-111111111111",
+    ];
+    let class_of = |id: &str| match item_class(id) {
+        Ok(crate::item_id::ItemClass::Foreign) => "foreign",
+        Ok(crate::item_id::ItemClass::Owner) => "owner",
+        Err(_) => "refused",
+    };
+    let foreign: Vec<Value> = FOREIGN
+        .iter()
+        .map(|id| json!({"id": id, "class": class_of(id)}))
+        .collect();
+    let owner: Vec<Value> = OWNER
+        .iter()
+        .map(|id| json!({"id": id, "class": class_of(id)}))
+        .collect();
+    // Text forms that must be refused outright (core returns InvalidInput).
+    let refused: Vec<Value> = [
+        "AAAAAAAA-BBBB-8CCC-9DDD-EEEEEEEEEEEE",
+        "{11111111-1111-8111-8111-111111111111}",
+        "11111111111181118111111111111111",
+    ]
+    .iter()
+    .map(|id| {
+        json!({
+            "id": id,
+            "class": class_of(id),
+            "is_foreign_error": is_foreign_item_id(id).is_err(),
+        })
+    })
+    .collect();
+    json!({
+        "name": "item_ids",
+        "note": "Task 2275 L12: foreign (F) ids are RFC 9562 UUID version 8 with the RFC 4122 variant in canonical \
+            lowercase hyphenated text; every other canonical UUID is an owner (O) id; any other text form is refused \
+            with InvalidInput.",
+        "foreign": foreign,
+        "owner": owner,
+        "refused": refused,
+    })
 }
 
 /// A shared folder's per-bucket search-index key (task 2237):
@@ -822,6 +889,7 @@ fn metadata_v2_name() -> Value {
 
 #[cfg(test)]
 mod tests {
+    #![allow(deprecated)]
     use super::*;
 
     const VECTORS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../test-vectors/vectors.json");

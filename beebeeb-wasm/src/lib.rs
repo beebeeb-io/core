@@ -715,6 +715,7 @@ impl WasmChunkEncryptor {
     /// (zeroized on drop). `profile` is one of `"desktop"`, `"web"`, `"mobile"`,
     /// `"backup"`.
     #[wasm_bindgen(constructor)]
+    #[allow(deprecated)] // the bare-id constructor stays for reads and legacy writes
     pub fn new(
         master_key: &[u8],
         file_id: String,
@@ -732,6 +733,7 @@ impl WasmChunkEncryptor {
     /// size. Use this when the v2 upload-init response overrode `chunk_size`
     /// so the client plan can't diverge from what the server expects.
     #[wasm_bindgen(js_name = withChunkSize)]
+    #[allow(deprecated)] // the bare-id constructor stays for reads and legacy writes
     pub fn with_chunk_size(
         master_key: &[u8],
         file_id: String,
@@ -746,6 +748,35 @@ impl WasmChunkEncryptor {
             chunk_size_bytes,
         )
         .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    /// Create a push-form encryptor for a NEW row minted by
+    /// `newOwnerItemId`/`newForeignItemId` (task 2275, L13).
+    ///
+    /// The id comes from the handle; the content key is core's derivation under
+    /// that id, which is also the member's rule for a new foreign item.
+    #[wasm_bindgen(js_name = forNewItem)]
+    pub fn for_new_item(item_id: &WasmNewItemId, file_size: u64, profile: &str) -> Result<WasmChunkEncryptor, JsError> {
+        let p = parse_profile(profile)?;
+        let inner = beebeeb_core::chunk_stream::ChunkEncryptor::for_push_for_new_item(
+            &item_id.master,
+            &item_id.id,
+            file_size,
+            p,
+        )
+        .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    /// Create a push-form replacement encryptor for a resolved row (task 2275,
+    /// L13). The key, the id and the recorded chunk-format pin all come from the
+    /// `WasmWriteTarget`, so a caller cannot drop a recorded v2 pin.
+    #[wasm_bindgen(js_name = forTarget)]
+    pub fn for_target(target: &WasmWriteTarget, file_size: u64, profile: &str) -> Result<WasmChunkEncryptor, JsError> {
+        let p = parse_profile(profile)?;
+        let inner = beebeeb_core::chunk_stream::ChunkEncryptor::for_push_for_target(&target.inner, file_size, p)
+            .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(Self { inner })
     }
 
@@ -994,6 +1025,7 @@ fn expected_from_u8(code: u8) -> Result<beebeeb_core::chunk_stream::ExpectedChun
 /// `decrypt_file_metadata` returned — never upgrade a file with v1 history,
 /// never drop a recorded 2.
 #[wasm_bindgen]
+#[allow(deprecated)]
 pub fn encrypt_name_with_chunk_format(
     master_key: &[u8],
     file_id: &str,
@@ -1075,6 +1107,7 @@ pub fn encrypt_thumbnail(file_key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, J
 /// `decrypt_file_metadata` (0 = unrecorded, 2 = v2). A v2 pin is always sealed
 /// under the thumbnail subkey; 0 behaves like `encrypt_thumbnail`.
 #[wasm_bindgen]
+#[allow(deprecated)]
 pub fn encrypt_thumbnail_for(file_key: &[u8], plaintext: &[u8], recorded_pin: u8) -> Result<Vec<u8>, JsError> {
     let fk = file_key_from_slice(file_key)?;
     let pin = expected_from_u8(recorded_pin)?;
@@ -1097,6 +1130,7 @@ pub fn decrypt_thumbnail(file_key: &[u8], frame: &[u8]) -> Result<Vec<u8>, JsErr
 /// note — not `encryptFilename` / `encrypt_metadata` under the file key (a
 /// raw-key note can stand in for a v2 file's name and content).
 #[wasm_bindgen]
+#[allow(deprecated)]
 pub fn encrypt_note(file_key: &[u8], note: &str) -> Result<String, JsError> {
     let fk = file_key_from_slice(file_key)?;
     encrypt::encrypt_note(&fk, note).map_err(|e| JsError::new(&e.to_string()))
@@ -1115,6 +1149,7 @@ pub fn encrypt_note_for(file_key: &[u8], note: &str, recorded_pin: u8) -> Result
 
 /// Native seam of [`encrypt_note_for`] (testable off-wasm, incl. the
 /// unknown-pin error path).
+#[allow(deprecated)]
 fn note_for_core(fk: &kdf::FileKey, note: &str, recorded_pin: u8) -> Result<String, beebeeb_core::CoreError> {
     let pin = beebeeb_core::chunk_stream::ExpectedChunkFormat::from_u8(recorded_pin)?;
     encrypt::encrypt_note_for(fk, note, pin)
@@ -3460,6 +3495,7 @@ fn client_meta_field(field: u32) -> Result<cm::ClientMetaField, String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(deprecated)]
     use super::*;
     use beebeeb_core::chunk_stream::ChunkDecryptor;
 
@@ -3857,6 +3893,7 @@ mod tests {
 
 #[cfg(test)]
 mod direct_vector_tests {
+    #![allow(deprecated)]
     //! The cross-client contract vectors, run through this crate's exported functions and
     //! methods wherever they can run without a JS engine, and otherwise through the seam the
     //! `JsValue` wrapper calls. The same file `beebeeb-core` runs through core directly: a
@@ -4860,6 +4897,7 @@ pub fn derive_folder_link_passphrase_stretch(passphrase: &str, token: &str) -> R
 
 #[cfg(test)]
 mod client_meta_binding_tests {
+    #![allow(deprecated)]
     //! Task 1922: the WASM handle's own path (no JS engine needed for these).
     use super::*;
 
@@ -4991,4 +5029,361 @@ mod client_meta_binding_tests {
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Item id classes and the resolved-item write shapes (task 2275 L12-L14)
+// ---------------------------------------------------------------------------
+
+/// An opaque new-item id minted by core for one master key (task 2275, L13).
+///
+/// There is no constructor from text and no export that turns arbitrary id text
+/// into a sealer input: a new-item write can only use an id core minted (or
+/// resumed from a persisted id + tag) for this master key. `idText` is the wire
+/// form; `tag` is the resume tag to persist with the upload session.
+#[wasm_bindgen]
+pub struct WasmNewItemId {
+    master: kdf::MasterKey,
+    id: beebeeb_core::item_id::NewItemId,
+}
+
+#[wasm_bindgen]
+impl WasmNewItemId {
+    /// The canonical id text to send on the wire.
+    #[wasm_bindgen(getter, js_name = idText)]
+    pub fn id_text(&self) -> String {
+        self.id.as_str().to_string()
+    }
+
+    /// The resume tag to persist with the upload session (32 bytes).
+    #[wasm_bindgen(getter)]
+    pub fn tag(&self) -> Vec<u8> {
+        self.id.tag().to_vec()
+    }
+}
+
+/// An opaque write target issued by `resolveOwnedKey` (task 2275, L13).
+///
+/// A replacement is sealed through this handle only: the id, the key and the
+/// chunk-format pin all come from core's resolution, so a caller cannot point a
+/// write at another row or drop a recorded v2 pin.
+#[wasm_bindgen]
+pub struct WasmWriteTarget {
+    inner: beebeeb_core::owned_keys::WriteTarget,
+}
+
+#[wasm_bindgen]
+impl WasmWriteTarget {
+    /// The row id the write must target.
+    #[wasm_bindgen(getter, js_name = itemId)]
+    pub fn item_id(&self) -> String {
+        self.inner.item_id().to_string()
+    }
+
+    /// The chunk-format pin the write must keep (0 = unrecorded, 2 = v2).
+    #[wasm_bindgen(getter)]
+    pub fn pin(&self) -> u8 {
+        self.inner.pin().as_u8()
+    }
+}
+
+/// Mint a new owner (O) item id (random UUID v4) for `master_key`.
+#[wasm_bindgen(js_name = newOwnerItemId)]
+pub fn new_owner_item_id(master_key: &[u8]) -> Result<WasmNewItemId, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let id = beebeeb_core::item_id::NewItemId::owner(&master).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(WasmNewItemId { master, id })
+}
+
+/// Mint a new foreign (F) item id (RFC 9562 UUID v8) for `master_key`.
+#[wasm_bindgen(js_name = newForeignItemId)]
+pub fn new_foreign_item_id(master_key: &[u8]) -> Result<WasmNewItemId, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let id = beebeeb_core::item_id::NewItemId::foreign(&master).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(WasmNewItemId { master, id })
+}
+
+/// Resume a minted id from the id text and tag persisted with an upload session
+/// (task 2275, L13). The tag is re-checked in constant time; a tampered tag, a
+/// different id or a server-echoed id is refused, so an interrupted upload can
+/// continue but a substituted id cannot be sealed.
+#[wasm_bindgen(js_name = resumeNewItemId)]
+pub fn resume_new_item_id(master_key: &[u8], item_id: &str, tag: &[u8]) -> Result<WasmNewItemId, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let id =
+        beebeeb_core::item_id::NewItemId::resume(&master, item_id, tag).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(WasmNewItemId { master, id })
+}
+
+/// True when `item_id` is a canonical foreign (F) id; InvalidInput (a JS throw)
+/// when the text is not canonical at all.
+#[wasm_bindgen(js_name = isForeignItemId)]
+pub fn is_foreign_item_id(item_id: &str) -> Result<bool, JsError> {
+    beebeeb_core::item_id::is_foreign_item_id(item_id).map_err(|e| JsError::new(&e.to_string()))
+}
+
+fn set(obj: &js_sys::Object, key: &str, value: JsValue) -> Result<(), JsError> {
+    js_sys::Reflect::set(obj, &key.into(), &value).map_err(|e| JsError::new(&format!("{e:?}")))?;
+    Ok(())
+}
+
+fn name_value(name: &beebeeb_core::owned_keys::ResolvedName) -> Result<JsValue, JsError> {
+    let obj = js_sys::Object::new();
+    match name {
+        beebeeb_core::owned_keys::ResolvedName::Encrypted(meta) => {
+            set(&obj, "name", JsValue::from_str(&meta.name))?;
+            set(
+                &obj,
+                "mimeType",
+                match &meta.mime_type {
+                    Some(mime) => JsValue::from_str(mime),
+                    None => JsValue::NULL,
+                },
+            )?;
+            set(&obj, "chunkFormat", JsValue::from_f64(meta.chunk_format.as_u8() as f64))?;
+        }
+        beebeeb_core::owned_keys::ResolvedName::Plaintext(text) => {
+            set(&obj, "plaintext", JsValue::from_str(text))?;
+            set(&obj, "chunkFormat", JsValue::from_f64(0.0))?;
+        }
+    }
+    Ok(obj.into())
+}
+
+/// Resolve one row's key from its id class (task 2275 L12).
+///
+/// `kind` is the row kind (1 = file, 2 = folder) and is required: a plaintext
+/// name on a FOLDER uses the string convention, a plaintext name on a FILE must
+/// authenticate content chunk 0 (`firstChunkFrame`) and is refused without one.
+///
+/// Returns `{ key: Uint8Array, contentKey: Uint8Array | null, origin: string,
+/// name: {name?, mimeType?, plaintext?, chunkFormat}, writeTarget:
+/// WasmWriteTarget | null }`. `origin` is "derived", "derived_binary",
+/// "derived_upper_repair", "owner_wrap" or "folder_wrap". `contentKey` is set
+/// only for an SF-0002 split row (name and content under different
+/// conventions). A row with an upper-repair name or content key is READ-ONLY and
+/// has no write target.
+///
+/// Owner ids never use `ownerWrap`/the folder wrap; foreign ids never derive a
+/// key and require one of them to open AND authenticate the name.
+#[wasm_bindgen(js_name = resolveOwnedKey)]
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_owned_key(
+    master_key: &[u8],
+    item_id: &str,
+    kind: u8,
+    owner_wrap: Option<Vec<u8>>,
+    name_encrypted: &str,
+    shared_folder_id: Option<String>,
+    folder_key: Option<Vec<u8>>,
+    folder_wrap: Option<Vec<u8>>,
+    first_chunk_frame: Option<Vec<u8>>,
+) -> Result<JsValue, JsError> {
+    use beebeeb_core::owned_keys::{FirstChunk, FolderWrap, ItemKind, resolve_owned_key as core_resolve};
+
+    let master = master_key_from_slice(master_key)?;
+    let item_kind = ItemKind::from_u8(kind).map_err(|e| JsError::new(&e.to_string()))?;
+    let folder = match (
+        shared_folder_id.as_deref(),
+        folder_key.as_deref(),
+        folder_wrap.as_deref(),
+    ) {
+        (Some(root), Some(key), Some(wrap)) => Some(FolderWrap {
+            shared_folder_id: root,
+            kind,
+            folder_key: &owned_key(key)?,
+            wrapped_key: wrap,
+        }),
+        _ => None,
+    };
+    let chunk = first_chunk_frame.as_deref().map(|frame| {
+        let split = frame.len().min(12);
+        FirstChunk {
+            nonce: &frame[..split],
+            ciphertext: &frame[split..],
+            index: 0,
+        }
+    });
+    let resolved = core_resolve(
+        &master,
+        item_id,
+        item_kind,
+        owner_wrap.as_deref(),
+        folder,
+        name_encrypted,
+        chunk,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
+
+    let obj = js_sys::Object::new();
+    set(
+        &obj,
+        "key",
+        js_sys::Uint8Array::from(resolved.key.as_bytes().as_slice()).into(),
+    )?;
+    set(
+        &obj,
+        "contentKey",
+        match &resolved.content_key {
+            Some(key) => js_sys::Uint8Array::from(key.as_bytes().as_slice()).into(),
+            None => JsValue::NULL,
+        },
+    )?;
+    set(&obj, "origin", JsValue::from_str(resolved.origin.as_str()))?;
+    set(&obj, "name", name_value(&resolved.name)?)?;
+    match &resolved.write_target {
+        None => set(&obj, "writeTarget", JsValue::NULL)?,
+        Some(_) => {
+            let handle = WasmWriteTarget {
+                inner: resolved.write_target.expect("checked above"),
+            };
+            set(&obj, "writeTarget", JsValue::from(handle))?;
+        }
+    }
+    Ok(obj.into())
+}
+
+fn pin_of(pin: u8) -> Result<beebeeb_core::chunk_stream::ExpectedChunkFormat, JsError> {
+    beebeeb_core::chunk_stream::ExpectedChunkFormat::from_u8(pin).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Seal a name for a NEW row minted by `newOwnerItemId`/`newForeignItemId`.
+///
+/// The id handle decides the key (L12): an owner id derives it. A new foreign
+/// id is refused (an F id never derives its name key) — an F name is sealed
+/// through the `writeTarget` it gets after adoption; only its content goes
+/// through `WasmChunkEncryptor.forNewItem`.
+#[wasm_bindgen(js_name = encryptNameForNewItem)]
+pub fn encrypt_name_for_new_item(
+    item_id: &WasmNewItemId,
+    filename: &str,
+    mime_type: Option<String>,
+    pin: u8,
+) -> Result<String, JsError> {
+    encrypt::encrypt_name_for_new_item(
+        &item_id.master,
+        &item_id.id,
+        filename,
+        mime_type.as_deref(),
+        pin_of(pin)?,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Seal a replacement name through the resolved row's write target. The key and
+/// the pin come from the target, so a caller cannot substitute either.
+#[wasm_bindgen(js_name = encryptNameForTarget)]
+pub fn encrypt_name_for_target(
+    target: &WasmWriteTarget,
+    filename: &str,
+    mime_type: Option<String>,
+) -> Result<String, JsError> {
+    encrypt::encrypt_name_for_target(&target.inner, filename, mime_type.as_deref())
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Seal a note for a NEW row minted by `newOwnerItemId`/`newForeignItemId`.
+#[wasm_bindgen(js_name = encryptNoteForNewItem)]
+pub fn encrypt_note_for_new_item(item_id: &WasmNewItemId, note: &str, pin: u8) -> Result<String, JsError> {
+    encrypt::encrypt_note_for_new_item(&item_id.master, &item_id.id, note, pin_of(pin)?)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Seal a replacement note through the resolved row's write target.
+#[wasm_bindgen(js_name = encryptNoteForTarget)]
+pub fn encrypt_note_for_target(target: &WasmWriteTarget, note: &str) -> Result<String, JsError> {
+    encrypt::encrypt_note_for_target(&target.inner, note).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Seal a thumbnail for a NEW row minted by `newOwnerItemId`/`newForeignItemId`.
+#[wasm_bindgen(js_name = encryptThumbnailForNewItem)]
+pub fn encrypt_thumbnail_for_new_item(item_id: &WasmNewItemId, plaintext: &[u8], pin: u8) -> Result<Vec<u8>, JsError> {
+    encrypt::encrypt_thumbnail_for_new_item(&item_id.master, &item_id.id, plaintext, pin_of(pin)?)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Seal a replacement thumbnail through the resolved row's write target.
+#[wasm_bindgen(js_name = encryptThumbnailForTarget)]
+pub fn encrypt_thumbnail_for_target(target: &WasmWriteTarget, plaintext: &[u8]) -> Result<Vec<u8>, JsError> {
+    encrypt::encrypt_thumbnail_for_target(&target.inner, plaintext).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Resolve a 2236 request row: `{contentKey, nameKey, nameOrigin, name,
+/// mimeType, chunkFormat}`. Read-only; no write target.
+#[wasm_bindgen(js_name = resolveRequestRow)]
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_request_row(
+    master_key: &[u8],
+    item_id: &str,
+    request_id: &[u8],
+    wrapped_request_private: &[u8],
+    wrap_nonce: &[u8],
+    sender_ephemeral_pubkey: &[u8],
+    wrapped_content_key: &[u8],
+    name_encrypted: &str,
+) -> Result<JsValue, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let e_pub: [u8; 32] = sender_ephemeral_pubkey
+        .try_into()
+        .map_err(|_| JsError::new("sender_ephemeral_pubkey must be exactly 32 bytes"))?;
+    let row = beebeeb_core::owned_keys::resolve_request_row(
+        &master,
+        item_id,
+        request_id,
+        wrapped_request_private,
+        wrap_nonce,
+        &e_pub,
+        wrapped_content_key,
+        name_encrypted,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
+    let obj = js_sys::Object::new();
+    set(
+        &obj,
+        "contentKey",
+        js_sys::Uint8Array::from(row.content_key.as_bytes().as_slice()).into(),
+    )?;
+    set(
+        &obj,
+        "nameKey",
+        js_sys::Uint8Array::from(row.name_key.as_bytes().as_slice()).into(),
+    )?;
+    set(&obj, "nameOrigin", JsValue::from_str(row.name_origin.as_str()))?;
+    set(&obj, "name", JsValue::from_str(&row.name.name))?;
+    set(
+        &obj,
+        "mimeType",
+        match &row.name.mime_type {
+            Some(mime) => JsValue::from_str(mime),
+            None => JsValue::NULL,
+        },
+    )?;
+    set(
+        &obj,
+        "chunkFormat",
+        JsValue::from_f64(row.name.chunk_format.as_u8() as f64),
+    )?;
+    Ok(obj.into())
+}
+
+/// L14: does this row's L7 wrap open to exactly `expectedKey`?
+#[wasm_bindgen(js_name = childWrapMatches)]
+pub fn child_wrap_matches(
+    folder_key: &[u8],
+    shared_folder_id: &str,
+    item_id: &str,
+    kind: u8,
+    wrapped: &[u8],
+    expected_key: &[u8],
+) -> Result<bool, JsError> {
+    let folder = owned_key(folder_key)?;
+    let expected = owned_key(expected_key)?;
+    Ok(beebeeb_core::owned_keys::child_wrap_matches(
+        &folder,
+        shared_folder_id,
+        item_id,
+        kind,
+        wrapped,
+        &expected,
+    ))
 }
