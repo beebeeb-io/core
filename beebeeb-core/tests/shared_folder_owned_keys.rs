@@ -1,8 +1,9 @@
+#![allow(deprecated)]
 use beebeeb_core::chunk_stream::ExpectedChunkFormat;
 use beebeeb_core::encrypt::{decrypt_file_metadata_with_key, encrypt_chunk_raw, encrypt_name_for};
 use beebeeb_core::kdf::{FileKey, MasterKey, derive_file_key};
 use beebeeb_core::owned_keys::{
-    FolderWrap, KeyOrigin, resolve_owned_key, unwrap_child_key, unwrap_folder_custody, unwrap_owner_file_key,
+    FolderWrap, ItemKind, KeyOrigin, resolve_owned_key, unwrap_child_key, unwrap_folder_custody, unwrap_owner_file_key,
     wrap_child_key, wrap_folder_custody, wrap_owner_file_key,
 };
 
@@ -98,6 +99,7 @@ fn resolution_order() {
         resolve_owned_key(
             &master,
             FILE_ID,
+            ItemKind::File,
             owner,
             Some(FolderWrap {
                 folder_key: &folder,
@@ -119,12 +121,32 @@ fn resolution_order() {
         assert_eq!(recovered.origin, KeyOrigin::FolderWrap);
         assert_eq!(recovered.key.as_bytes(), different_child.as_bytes());
     }
-    let moved_out = resolve_owned_key(&master, FILE_ID, Some(&owner_wrap), None, &owner_name, None).unwrap();
+    let moved_out = resolve_owned_key(
+        &master,
+        FILE_ID,
+        ItemKind::File,
+        Some(&owner_wrap),
+        None,
+        &owner_name,
+        None,
+    )
+    .unwrap();
     assert_eq!(moved_out.origin, KeyOrigin::OwnerWrap);
     assert_eq!(moved_out.key.as_bytes(), child().as_bytes());
     // The owner envelope's key must authenticate the name too: the shared
     // folder key's name does not open under the L8 key.
-    assert!(resolve_owned_key(&master, FILE_ID, Some(&owner_wrap), None, &folder_name, None).is_err());
+    assert!(
+        resolve_owned_key(
+            &master,
+            FILE_ID,
+            ItemKind::File,
+            Some(&owner_wrap),
+            None,
+            &folder_name,
+            None
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -135,11 +157,12 @@ fn foreign_never_derived() {
     let derived_name = encrypt_name_for(&derived, "derived.txt", None, ExpectedChunkFormat::Unrecorded).unwrap();
     let invalid = [0; 60];
     for owner in [None, Some(invalid.as_slice())] {
-        assert!(resolve_owned_key(&master, FILE_ID, owner, None, &derived_name, None).is_err());
+        assert!(resolve_owned_key(&master, FILE_ID, ItemKind::File, owner, None, &derived_name, None).is_err());
         assert!(
             resolve_owned_key(
                 &master,
                 FILE_ID,
+                ItemKind::File,
                 owner,
                 Some(FolderWrap {
                     folder_key: &folder,
@@ -155,7 +178,7 @@ fn foreign_never_derived() {
     }
     // Envelope presence with a name that does not authenticate blocks the row.
     for owner in [invalid.as_slice(), &[]] {
-        assert!(resolve_owned_key(&master, FILE_ID, Some(owner), None, &derived_name, None).is_err());
+        assert!(resolve_owned_key(&master, FILE_ID, ItemKind::File, Some(owner), None, &derived_name, None).is_err());
     }
 }
 
@@ -194,10 +217,18 @@ fn wrong_owner_or_id() {
 }
 
 #[test]
-fn legacy_derived_unchanged() {
+fn plaintext_named_file_without_a_chunk_is_refused() {
     const OWNER_FILE: &str = "66666666-6666-4666-8666-666666666666";
     let master = master();
-    let resolved = resolve_owned_key(&master, OWNER_FILE, None, None, "legacy.bin", None).unwrap();
+    // L12: a plaintext-named FILE picks its convention by authenticating content
+    // chunk 0, so a row without one must never resolve to a writable key.
+    let refused = resolve_owned_key(&master, OWNER_FILE, ItemKind::File, None, None, "legacy.bin", None);
+    assert!(
+        refused.is_err(),
+        "a plaintext-named file resolved without content chunk 0"
+    );
+    // A folder has no content chunk; its plaintext name is the string convention.
+    let resolved = resolve_owned_key(&master, OWNER_FILE, ItemKind::Folder, None, None, "Legacy folder", None).unwrap();
     assert_eq!(resolved.origin, KeyOrigin::Derived);
     assert_eq!(
         resolved.key.as_bytes(),
@@ -205,7 +236,7 @@ fn legacy_derived_unchanged() {
     );
     assert_eq!(
         resolved.name,
-        beebeeb_core::owned_keys::ResolvedName::Plaintext("legacy.bin".into())
+        beebeeb_core::owned_keys::ResolvedName::Plaintext("Legacy folder".into())
     );
     assert!(resolved.write_target.is_some());
     // An unrelated unusable folder inventory does not change ordinary owner files.
@@ -213,6 +244,7 @@ fn legacy_derived_unchanged() {
     let resolved = resolve_owned_key(
         &master,
         OWNER_FILE,
+        ItemKind::Folder,
         None,
         Some(FolderWrap {
             folder_key: &folder,
@@ -220,7 +252,7 @@ fn legacy_derived_unchanged() {
             kind: 1,
             wrapped_key: &[],
         }),
-        "legacy.bin",
+        "Legacy folder",
         None,
     )
     .unwrap();
@@ -248,6 +280,7 @@ fn folder_name_key_adoption() {
     let resolved = resolve_owned_key(
         &master,
         NESTED_ID,
+        ItemKind::Folder,
         None,
         Some(FolderWrap {
             folder_key: &folder,
@@ -262,7 +295,8 @@ fn folder_name_key_adoption() {
     let metadata = decrypt_file_metadata_with_key(&resolved.key, &name).unwrap();
     assert_eq!(metadata.name, "Guest holiday folder");
     let adoption = wrap_owner_file_key(&master, NESTED_ID, &resolved.key).unwrap();
-    let after_move = resolve_owned_key(&master, NESTED_ID, Some(&adoption), None, &name, None).unwrap();
+    let after_move =
+        resolve_owned_key(&master, NESTED_ID, ItemKind::Folder, Some(&adoption), None, &name, None).unwrap();
     assert_eq!(after_move.origin, KeyOrigin::OwnerWrap);
     assert_eq!(after_move.key.as_bytes(), random_key.as_bytes());
     assert_eq!(
@@ -361,6 +395,7 @@ mod review_l6_l7 {
         let legit = resolve_owned_key(
             &master,
             B,
+            ItemKind::File,
             None,
             Some(FolderWrap {
                 folder_key: &folder,
@@ -382,6 +417,7 @@ mod review_l6_l7 {
             let resolved = resolve_owned_key(
                 &master,
                 B,
+                ItemKind::File,
                 None,
                 Some(FolderWrap {
                     folder_key: &folder,
@@ -411,6 +447,7 @@ mod review_l6_l7 {
             resolve_owned_key(
                 &master,
                 FILE_ID,
+                ItemKind::File,
                 None,
                 Some(FolderWrap {
                     folder_key: &folder,
@@ -474,7 +511,7 @@ fn l8_resolver_never_reads_legacy_owner_format() {
     let old = encrypt_chunk_raw(&derive_file_key(&master, FILE_ID.as_bytes()), child().as_bytes()).unwrap();
     let name = encrypt_name_for(&child(), "x.txt", None, ExpectedChunkFormat::Unrecorded).unwrap();
     assert!(
-        resolve_owned_key(&master, FILE_ID, Some(&old), None, &name, None).is_err(),
+        resolve_owned_key(&master, FILE_ID, ItemKind::File, Some(&old), None, &name, None).is_err(),
         "resolver accepted legacy owner wrap"
     );
 }

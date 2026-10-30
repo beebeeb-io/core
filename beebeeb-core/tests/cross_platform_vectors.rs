@@ -7,6 +7,7 @@
 //!
 //! If any test here fails after a code change, it means the change broke
 //! cross-platform compatibility and existing user data may become unreadable.
+#![allow(deprecated)]
 
 use beebeeb_core::encrypt::{decrypt_chunk, decrypt_metadata, encrypt_metadata};
 use beebeeb_core::file_request::{derive_request_wrap_key, open_request_upload, unwrap_request_private};
@@ -788,7 +789,7 @@ fn vector_item_ids() {
     for row in v["refused"].as_array().unwrap() {
         let id = row["id"].as_str().unwrap();
         assert_eq!(row["class"].as_str().unwrap(), "refused", "{id}");
-        assert_eq!(row["is_foreign_error"].as_bool().unwrap(), true, "{id}");
+        assert!(row["is_foreign_error"].as_bool().unwrap(), "{id}");
         assert!(is_foreign_item_id(id).is_err(), "{id}");
         assert!(item_class(id).is_err(), "{id}");
     }

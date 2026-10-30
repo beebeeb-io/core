@@ -889,6 +889,7 @@ pub fn combine_folder_link_key(k_c: &[u8; 32], passphrase_stretch: Option<&[u8; 
 
 #[cfg(test)]
 mod tests {
+    #![allow(deprecated)]
     use super::*;
 
     #[test]

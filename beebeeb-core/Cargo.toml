@@ -12,6 +12,9 @@ base64 = "0.22"
 argon2 = { version = "0.5", features = ["zeroize"] }
 rand = "0.8"
 hkdf = "0.12"
+# HMAC-SHA256 for the new-item-id resume tag (task 2275 L13). Same crate version
+# hkdf already depends on, so the lockfile gains no new package.
+hmac = "0.12"
 sha2 = "0.10"
 # SHA-1 ONLY to address the k-anonymity breach corpus (onboarding::breach): the corpus is
 # keyed by SHA-1 prefix. Never used for integrity or authentication.

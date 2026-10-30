@@ -141,16 +141,55 @@ impl std::fmt::Debug for WriteTarget {
     }
 }
 
+/// Whether a row is a file or a folder (task 2275, L12). The kind decides the
+/// plaintext-name rule: a folder with a plaintext name uses the string
+/// convention, a file with a plaintext name must authenticate chunk 0.
+///
+/// The codes match the L7 child-wrap `kind` (1 = file, 2 = folder).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemKind {
+    /// A file row.
+    File,
+    /// A folder row.
+    Folder,
+}
+
+impl ItemKind {
+    /// Stable code: 1 = file, 2 = folder (the L7 child-wrap kind).
+    pub fn as_u8(self) -> u8 {
+        match self {
+            Self::File => 1,
+            Self::Folder => 2,
+        }
+    }
+
+    /// Parse the L7 kind code; any other value is [`CoreError::InvalidInput`].
+    pub fn from_u8(code: u8) -> Result<Self, CoreError> {
+        match code {
+            1 => Ok(Self::File),
+            2 => Ok(Self::Folder),
+            _ => Err(CoreError::InvalidInput(format!(
+                "item kind must be 1 (file) or 2 (folder), got {code}"
+            ))),
+        }
+    }
+}
+
 /// A resolved row.
 pub struct ResolvedOwnedKey {
-    /// The row's file key.
+    /// The row's file key (the name key).
     pub key: FileKey,
-    /// Where the key came from.
+    /// The content key when it differs from [`key`](Self::key) — an SF-0002
+    /// split row whose name and content versions resolved under different id
+    /// conventions. `None` means content is under `key`.
+    pub content_key: Option<FileKey>,
+    /// Where the name key came from.
     pub origin: KeyOrigin,
     /// The served name, authenticated where it is an envelope.
     pub name: ResolvedName,
     /// The write target, or `None` when the row is read-only (upper-repair
-    /// rows) — never `Some` for a foreign row without an authenticated name.
+    /// rows, or a split row where either key is upper-repair) — never `Some`
+    /// for a foreign row without an authenticated name.
     pub write_target: Option<WriteTarget>,
 }
 
@@ -159,6 +198,7 @@ impl std::fmt::Debug for ResolvedOwnedKey {
         f.debug_struct("ResolvedOwnedKey")
             .field("origin", &self.origin)
             .field("name", &self.name)
+            .field("split_content_key", &self.content_key.is_some())
             .field("write_target", &self.write_target)
             .finish_non_exhaustive()
     }
@@ -321,9 +361,13 @@ fn write_target(item_id: &str, key: &FileKey, origin: KeyOrigin, name: &Resolved
 ///
 /// Owner id, encrypted name: string, then binary, then read-only upper-repair;
 /// the first key that opens the name wins. `owner_wrap`/`folder_wrap` are
-/// ignored entirely.
+/// ignored entirely. When `first_chunk` is also given, the CONTENT convention
+/// is resolved from it too (an SF-0002 row can seal its name and a version
+/// under different conventions); a content key that differs from the name key
+/// is returned as [`ResolvedOwnedKey::content_key`], and either key resolving
+/// as upper-repair makes the row read-only (no write target).
 ///
-/// Owner id, plaintext name: a folder (`folder == true`) uses the string
+/// Owner id, plaintext name: a folder (`kind == Folder`) uses the string
 /// convention; a file must present `first_chunk` (index 0) that authenticates
 /// under one of the conventions; with no chunk it is an error.
 ///
@@ -333,13 +377,14 @@ fn write_target(item_id: &str, key: &FileKey, origin: KeyOrigin, name: &Resolved
 pub fn resolve_owned_key(
     master: &MasterKey,
     item_id: &str,
+    kind: ItemKind,
     owner_wrap: Option<&[u8]>,
     folder_wrap: Option<FolderWrap<'_>>,
     name_encrypted: &str,
     first_chunk: Option<FirstChunk<'_>>,
 ) -> Result<ResolvedOwnedKey, CoreError> {
     match crate::item_id::item_class(item_id)? {
-        crate::item_id::ItemClass::Owner => resolve_owner_row(master, item_id, name_encrypted, first_chunk),
+        crate::item_id::ItemClass::Owner => resolve_owner_row(master, item_id, kind, name_encrypted, first_chunk),
         crate::item_id::ItemClass::Foreign => {
             resolve_foreign_row(master, item_id, owner_wrap, folder_wrap, name_encrypted)
         }
@@ -349,6 +394,7 @@ pub fn resolve_owned_key(
 fn resolve_owner_row(
     master: &MasterKey,
     item_id: &str,
+    kind: ItemKind,
     name_encrypted: &str,
     first_chunk: Option<FirstChunk<'_>>,
 ) -> Result<ResolvedOwnedKey, CoreError> {
@@ -361,22 +407,49 @@ fn resolve_owner_row(
         )?;
         let origin = KeyOrigin::from_convention(convention);
         let name = ResolvedName::Encrypted(meta);
-        let target = write_target(item_id, &key, origin, &name);
+
+        // A stored version may have been sealed under a different convention
+        // (SF-0002 split row): authenticate chunk 0 as well and report the
+        // content key separately when it differs.
+        let mut content_key = None;
+        let mut read_only = matches!(origin, KeyOrigin::DerivedUpperRepair);
+        if let Some(chunk) = first_chunk {
+            let frame = chunk_frame(&chunk)?;
+            let (content, content_convention) = crate::kdf::owner_file_key_for_content(master, item_id, &frame)?;
+            let content_origin = KeyOrigin::from_convention(content_convention);
+            if matches!(content_origin, KeyOrigin::DerivedUpperRepair) {
+                read_only = true;
+            }
+            if content.as_bytes().ct_eq(key.as_bytes()).unwrap_u8() != 1 {
+                content_key = Some(content);
+            }
+        }
+        let target = if read_only {
+            None
+        } else {
+            write_target(item_id, &key, origin, &name)
+        };
         return Ok(ResolvedOwnedKey {
             key,
+            content_key,
             origin,
             name,
             write_target: target,
         });
     }
 
-    // A plaintext name proves nothing. No chunk means the caller declared a
-    // folder; the string convention is the only writable owner convention for
-    // one. A file must present chunk 0 and let it pick the convention.
+    // A plaintext name proves nothing. A folder uses the string convention
+    // (the only writable owner convention for one). A file must present chunk
+    // 0 and let it pick the convention; with no chunk it is unavailable.
     let plaintext = name_encrypted.to_string();
-    let (key, origin) = match first_chunk {
-        None => (derive_file_key(master, item_id.as_bytes()), KeyOrigin::Derived),
-        Some(chunk) => {
+    let (key, origin) = match (kind, first_chunk) {
+        (ItemKind::Folder, _) => (derive_file_key(master, item_id.as_bytes()), KeyOrigin::Derived),
+        (ItemKind::File, None) => {
+            return Err(CoreError::InvalidInput(
+                "a file with a plaintext name is identified by its first content chunk; none was given".into(),
+            ));
+        }
+        (ItemKind::File, Some(chunk)) => {
             let frame = chunk_frame(&chunk)?;
             let (key, convention) = crate::kdf::owner_file_key_for_content(master, item_id, &frame)?;
             (key, KeyOrigin::from_convention(convention))
@@ -386,6 +459,7 @@ fn resolve_owner_row(
     let target = write_target(item_id, &key, origin, &name);
     Ok(ResolvedOwnedKey {
         key,
+        content_key: None,
         origin,
         name,
         write_target: target,
@@ -407,6 +481,7 @@ fn resolve_foreign_row(
                     let target = write_target(item_id, &key, KeyOrigin::OwnerWrap, &name);
                     return Ok(ResolvedOwnedKey {
                         key,
+                        content_key: None,
                         origin: KeyOrigin::OwnerWrap,
                         name,
                         write_target: target,
@@ -427,6 +502,7 @@ fn resolve_foreign_row(
                     let target = write_target(item_id, &key, KeyOrigin::FolderWrap, &name);
                     return Ok(ResolvedOwnedKey {
                         key,
+                        content_key: None,
                         origin: KeyOrigin::FolderWrap,
                         name,
                         write_target: target,
@@ -471,6 +547,13 @@ pub fn resolve_request_row(
     if !name_encrypted.starts_with('{') {
         return Err(CoreError::InvalidInput(
             "a request row's name must be an encrypted envelope".into(),
+        ));
+    }
+    // Request rows are owner items. A foreign id resolves only through L8 or
+    // L7 (task 2275 L12), never through a request envelope.
+    if crate::item_id::item_class(item_id)? != crate::item_id::ItemClass::Owner {
+        return Err(CoreError::InvalidInput(
+            "a request row must have an owner item id; foreign items resolve only via L8 or L7".into(),
         ));
     }
     let request_private =

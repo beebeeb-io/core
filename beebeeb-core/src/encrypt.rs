@@ -91,6 +91,10 @@ pub fn decrypt_metadata(key: &FileKey, blob: &EncryptedBlob) -> Result<String, C
 /// [`encrypt_name_for_new_item`] (core-minted id); a replacement uses
 /// [`encrypt_name_for_target`] (the resolved row's key and pin). This
 /// entry point remains for readers, tests and rows core has not resolved.
+#[deprecated(
+    note = "task 2275 L13: use the NewItemId/WriteTarget sealers (encrypt_*_for_new_item / encrypt_*_for_target)"
+)]
+#[allow(deprecated)]
 pub fn encrypt_name(
     master_key: &crate::kdf::MasterKey,
     file_id: &str,
@@ -130,6 +134,9 @@ pub const METADATA_CHUNK_FORMAT_FIELD: &str = "chunk_format";
 ///
 /// [`ExpectedChunkFormat::Unrecorded`]: crate::chunk_stream::ExpectedChunkFormat::Unrecorded
 /// [`ExpectedChunkFormat::recorded_for`]: crate::chunk_stream::ExpectedChunkFormat::recorded_for
+#[deprecated(
+    note = "task 2275 L13: use the NewItemId/WriteTarget sealers (encrypt_*_for_new_item / encrypt_*_for_target)"
+)]
 pub fn encrypt_name_with_chunk_format(
     master_key: &crate::kdf::MasterKey,
     file_id: &str,
@@ -147,13 +154,11 @@ pub fn encrypt_name_with_chunk_format(
     encrypt_name_for(&file_key, filename, mime_type, chunk_format)
 }
 
-/// [`encrypt_name_with_chunk_format`] with an explicit seal — for the crate's own
-/// tests only (a subkey-sealed name on a v1 file, ahead of the
-/// [`METADATA_SEAL_WRITE`] switch). `cfg(test)`, so no build of a shipped client
-/// contains a writer that can choose the seal against the pin.
 /// Key for a brand-new row (task 2275, L13). Only an owner id can be sealed
 /// this way; a foreign row is adopted first and then written through its
-/// [`WriteTarget`].
+/// [`WriteTarget`]. (`NewItemId::foreign` exists for the content path, which
+/// derives the member's own key under the F id; a foreign row's name still
+/// goes through adoption.)
 fn new_item_name_key(master_key: &crate::kdf::MasterKey, item_id: &NewItemId) -> Result<FileKey, CoreError> {
     if item_class(item_id.as_str())? != ItemClass::Owner {
         return Err(CoreError::InvalidInput(
@@ -164,6 +169,7 @@ fn new_item_name_key(master_key: &crate::kdf::MasterKey, item_id: &NewItemId) ->
 }
 
 /// Seal the name of a **new** row (task 2275, L13): the id is minted by core.
+#[allow(deprecated)]
 pub fn encrypt_name_for_new_item(
     master_key: &crate::kdf::MasterKey,
     item_id: &NewItemId,
@@ -280,6 +286,10 @@ fn seal_name_envelope(
 /// client: a fixed nonce reused under one key breaks AES-GCM. It derives the
 /// file key and takes the shipped writer's own path ([`encrypt_name_for_nonce`]),
 /// so a vector is what the writer emits apart from the nonce, by construction.
+/// [`encrypt_name_with_chunk_format`] with an explicit seal — for the crate's own
+/// tests only (a subkey-sealed name on a v1 file, ahead of the
+/// [`METADATA_SEAL_WRITE`] switch). `cfg(test)`, so no build of a shipped client
+/// contains a writer that can choose the seal against the pin.
 #[cfg(any(test, feature = "test-support"))]
 pub fn encrypt_name_with_chunk_format_and_nonce(
     master_key: &crate::kdf::MasterKey,
@@ -386,6 +396,9 @@ pub const fn metadata_seal_for(format: crate::chunk_stream::ChunkFormat) -> Meta
 ///
 /// **Write shape (task 2275):** deprecated for writes — use
 /// [`encrypt_thumbnail_for_new_item`] or [`encrypt_thumbnail_for_target`].
+#[deprecated(
+    note = "task 2275 L13: use the NewItemId/WriteTarget sealers (encrypt_*_for_new_item / encrypt_*_for_target)"
+)]
 pub fn encrypt_thumbnail_for(
     file_key: &FileKey,
     plaintext: &[u8],
@@ -396,6 +409,7 @@ pub fn encrypt_thumbnail_for(
 }
 
 /// Seal a thumbnail for a **new** row (task 2275, L13), with core-minted id.
+#[allow(deprecated)]
 pub fn encrypt_thumbnail_for_new_item(
     master_key: &crate::kdf::MasterKey,
     item_id: &NewItemId,
@@ -407,6 +421,7 @@ pub fn encrypt_thumbnail_for_new_item(
 }
 
 /// Seal a replacement thumbnail through the row's [`WriteTarget`] (task 2275, L13).
+#[allow(deprecated)]
 pub fn encrypt_thumbnail_for_target(target: &WriteTarget, plaintext: &[u8]) -> Result<Vec<u8>, CoreError> {
     encrypt_thumbnail_for(target.key(), plaintext, target.pin())
 }
@@ -487,6 +502,9 @@ pub(crate) fn derive_note_key(file_key: &FileKey) -> FileKey {
 ///
 /// **Write shape (task 2275):** deprecated for writes — use
 /// [`encrypt_note_for_new_item`] or [`encrypt_note_for_target`].
+#[deprecated(
+    note = "task 2275 L13: use the NewItemId/WriteTarget sealers (encrypt_*_for_new_item / encrypt_*_for_target)"
+)]
 pub fn encrypt_note(file_key: &FileKey, note: &str) -> Result<String, CoreError> {
     encrypt_note_sealed(file_key, note, METADATA_SEAL_WRITE)
 }
@@ -496,6 +514,9 @@ pub fn encrypt_note(file_key: &FileKey, note: &str) -> Result<String, CoreError>
 /// and thumbnails: a v2 pin is ALWAYS sealed under the note subkey (the note
 /// can then never stand in for the file's name or content); `Unrecorded`
 /// follows [`METADATA_SEAL_WRITE`] (legacy during the read-only phase).
+#[deprecated(
+    note = "task 2275 L13: use the NewItemId/WriteTarget sealers (encrypt_*_for_new_item / encrypt_*_for_target)"
+)]
 pub fn encrypt_note_for(
     file_key: &FileKey,
     note: &str,
@@ -506,6 +527,7 @@ pub fn encrypt_note_for(
 }
 
 /// Seal a note for a **new** row (task 2275, L13), with core-minted id.
+#[allow(deprecated)]
 pub fn encrypt_note_for_new_item(
     master_key: &crate::kdf::MasterKey,
     item_id: &NewItemId,
@@ -517,6 +539,7 @@ pub fn encrypt_note_for_new_item(
 }
 
 /// Seal a replacement note through the row's [`WriteTarget`] (task 2275, L13).
+#[allow(deprecated)]
 pub fn encrypt_note_for_target(target: &WriteTarget, note: &str) -> Result<String, CoreError> {
     encrypt_note_for(target.key(), note, target.pin())
 }
@@ -1211,6 +1234,7 @@ fn decrypt_contiguous_to_tmp(
 
 #[cfg(test)]
 mod tests {
+    #![allow(deprecated)]
     use super::*;
     use crate::chunk_stream::ExpectedChunkFormat::{Unrecorded, V2};
     use crate::kdf::{derive_file_key, derive_master_key};
@@ -2021,6 +2045,7 @@ mod tests {
 /// Task 1958: `encrypt_name_for`, the rename writer under a GIVEN per-file key.
 #[cfg(test)]
 mod encrypt_name_for_tests_1958 {
+    #![allow(deprecated)]
     use super::*;
     use crate::chunk_stream::ExpectedChunkFormat;
 
@@ -2135,12 +2160,13 @@ mod encrypt_name_for_tests_1958 {
 /// path for the same id and nonce (same key, same pin, same plaintext).
 #[cfg(test)]
 mod write_shape_tests {
+    #![allow(deprecated)]
     use super::*;
 
     #[test]
     fn new_item_name_matches_the_derived_path_byte_for_byte() {
         let master = crate::kdf::MasterKey::from_bytes(std::array::from_fn(|i| i as u8));
-        let id = NewItemId::owner().unwrap();
+        let id = NewItemId::owner(&master).unwrap();
         let nonce = [0x42; NONCE_LEN];
         let key = new_item_name_key(&master, &id).unwrap();
         let via_new = encrypt_name_for_with_nonce(

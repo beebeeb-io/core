@@ -28,6 +28,8 @@
 //!
 //! [`encrypt_name_with_chunk_format`]: crate::encrypt::encrypt_name_with_chunk_format
 
+#![allow(deprecated)] // the vectors exercise pre-L13 writers on purpose
+
 use serde_json::{Value, json};
 
 use crate::chunk_stream::{ChunkEncryptor, ExpectedChunkFormat, VERSION_ID_LEN, chunk_aad_v2, derive_chunk_key_v2};
@@ -786,6 +788,7 @@ fn metadata_v2_name() -> Value {
 
 #[cfg(test)]
 mod tests {
+    #![allow(deprecated)]
     use super::*;
 
     const VECTORS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../test-vectors/vectors.json");

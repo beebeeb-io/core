@@ -14,15 +14,32 @@
 //! core; uppercase, braced, urn and non-hyphenated forms are refused with
 //! [`CoreError::InvalidInput`].
 //!
-//! [`NewItemId`] is the minting type for new rows: it has a private field and
-//! can only be built by core through [`NewItemId::owner`] or
-//! [`NewItemId::foreign`], so a client cannot seal a new item under an
-//! arbitrary (or a pre-existing) id.
+//! [`NewItemId`] is the minting type for new rows: it has private fields and
+//! can only be built by core through [`NewItemId::owner`], [`NewItemId::foreign`]
+//! or [`NewItemId::resume`], so a client cannot seal a new item under an
+//! arbitrary (or a pre-existing) id. Every mint also returns a *tag*: an
+//! HMAC-SHA256 under a master-derived purpose key over the id's canonical text.
+//! A client persists the tag with its upload session and passes it back to
+//! [`NewItemId::resume`] after a restart; core re-checks it in constant time, so
+//! an id the server echoed or invented cannot be resumed. No export computes a
+//! tag for an arbitrary id.
 
+use hkdf::Hkdf;
+use hmac::{Hmac, Mac};
 use rand::RngCore;
 use rand::rngs::OsRng;
+use sha2::Sha256;
+use subtle::ConstantTimeEq;
+use zeroize::Zeroizing;
 
 use crate::CoreError;
+use crate::kdf::MasterKey;
+
+/// HKDF-SHA256 `info` of the new-item-id tag key (ikm = the master key).
+pub const NEW_ITEM_TAG_INFO: &[u8] = b"beebeeb/new-item-id/v1";
+
+/// Length of a [`NewItemId`] resume tag in bytes.
+pub const NEW_ITEM_TAG_LEN: usize = 32;
 
 /// The class of an item id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -108,54 +125,91 @@ pub fn item_class(id: &str) -> Result<ItemClass, CoreError> {
 
 /// An id for a **new** item row, minted by core (task 2275, L13).
 ///
-/// The field is private, so a client cannot build one from an id of its
+/// The fields are private, so a client cannot build one from an id of its
 /// choosing. Use [`NewItemId::owner`] for a derived-key row and
-/// [`NewItemId::foreign`] for an adopted (L8) row.
+/// [`NewItemId::foreign`] for an adopted (L8) row. Both take the master key and
+/// also mint the [`tag`](Self::tag) that a persisted upload session must carry.
 ///
 /// ```compile_fail
-/// // The field is private: a caller cannot name an existing id as "new".
-/// let id = beebeeb_core::item_id::NewItemId { id: "11111111-1111-4111-8111-111111111111".into() };
+/// // The fields are private: a caller cannot name an existing id as "new".
+/// let id = beebeeb_core::item_id::NewItemId { id: "11111111-1111-4111-8111-111111111111".into(), tag: [0; 32] };
 /// ```
 ///
-/// Across an FFI boundary the WASM/uniffi layer mints with
-/// [`NewItemId::owner`]/[`NewItemId::foreign`] and hands the id text back to
-/// the client; [`NewItemId::from_minted_text`] then re-wraps that text for the
-/// sealing call, refusing any id of the wrong class.
+/// Across an FFI boundary the WASM/uniffi layer holds the minted handle and
+/// passes it back to the sealing calls. There is no constructor from id text
+/// and no export that computes a tag for an arbitrary id; after a restart the
+/// only way back is [`NewItemId::resume`] with the tag minted at creation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewItemId {
     id: String,
+    tag: [u8; NEW_ITEM_TAG_LEN],
 }
 
 impl NewItemId {
     /// Mint a new owner (`O`) id (random version 4 UUID).
-    pub fn owner() -> Result<Self, CoreError> {
-        Ok(Self {
-            id: new_owner_item_id()?,
-        })
+    pub fn owner(master: &MasterKey) -> Result<Self, CoreError> {
+        Self::minted(new_owner_item_id()?, master)
     }
 
     /// Mint a new foreign (`F`) id (random version 8 UUID).
-    pub fn foreign() -> Result<Self, CoreError> {
-        Ok(Self {
-            id: new_foreign_item_id()?,
-        })
+    pub fn foreign(master: &MasterKey) -> Result<Self, CoreError> {
+        Self::minted(new_foreign_item_id()?, master)
     }
 
-    /// Re-wrap a minted id text that crossed an FFI boundary (WASM/uniffi).
+    fn minted(id: String, master: &MasterKey) -> Result<Self, CoreError> {
+        let tag = new_item_tag(master, &id);
+        Ok(Self { id, tag })
+    }
+
+    /// Resume a create session persisted before a restart (task 2275, L13).
     ///
-    /// The class is re-derived from the id, so an owner id can never be
-    /// presented as a foreign new item or vice versa. This does not hand back
-    /// any authority: a client could mint an equivalent random id itself, and
-    /// writes to an existing row still require a `WriteTarget`.
-    pub fn from_minted_text(id: &str) -> Result<Self, CoreError> {
+    /// `tag` is the value [`tag`](Self::tag) returned when the id was minted and
+    /// the client stored next to its upload session. A tampered tag, a tag for a
+    /// different id, or an id with no tag (a server echo) is
+    /// [`CoreError::InvalidInput`]. The comparison is constant time.
+    pub fn resume(master: &MasterKey, id: &str, tag: &[u8]) -> Result<Self, CoreError> {
         parse_canonical(id)?;
-        Ok(Self { id: id.to_string() })
+        if tag.len() != NEW_ITEM_TAG_LEN {
+            return Err(CoreError::InvalidInput(format!(
+                "new-item tag must be {NEW_ITEM_TAG_LEN} bytes"
+            )));
+        }
+        let expected = new_item_tag(master, id);
+        if expected.ct_eq(tag).unwrap_u8() != 1 {
+            return Err(CoreError::InvalidInput("new-item tag does not match this id".into()));
+        }
+        Ok(Self {
+            id: id.to_string(),
+            tag: expected,
+        })
     }
 
     /// The canonical lowercase hyphenated id text.
     pub fn as_str(&self) -> &str {
         &self.id
     }
+
+    /// The resume tag minted with this id: HMAC-SHA256 under
+    /// `HKDF(master, NEW_ITEM_TAG_INFO)` over the id's canonical text. Persist
+    /// it with the upload session; never send it to a server.
+    pub fn tag(&self) -> &[u8; NEW_ITEM_TAG_LEN] {
+        &self.tag
+    }
+}
+
+/// Tag for `id` under `master`'s new-item purpose key. Crate-internal: only
+/// minting and [`NewItemId::resume`] may compute one.
+fn new_item_tag(master: &MasterKey, id: &str) -> [u8; NEW_ITEM_TAG_LEN] {
+    let hk = Hkdf::<Sha256>::new(None, master.as_bytes());
+    let mut key = Zeroizing::new([0u8; 32]);
+    hk.expand(NEW_ITEM_TAG_INFO, &mut *key)
+        .expect("HKDF-SHA256 expand for 32 bytes cannot fail");
+    let mut mac = Hmac::<Sha256>::new_from_slice(&*key).expect("HMAC accepts a 32-byte key");
+    mac.update(id.as_bytes());
+    let out = mac.finalize().into_bytes();
+    let mut tag = [0u8; NEW_ITEM_TAG_LEN];
+    tag.copy_from_slice(&out);
+    tag
 }
 
 #[cfg(test)]
@@ -197,5 +251,46 @@ mod tests {
             assert!(matches!(is_foreign_item_id(bad), Err(CoreError::InvalidInput(_))));
             assert!(matches!(item_class(bad), Err(CoreError::InvalidInput(_))));
         }
+    }
+
+    fn master(byte: u8) -> MasterKey {
+        MasterKey::from_bytes([byte; 32])
+    }
+
+    #[test]
+    fn mint_returns_a_stable_tag_and_resume_rechecks_it() {
+        let mk = master(0x11);
+        let minted = NewItemId::owner(&mk).unwrap();
+        assert_eq!(minted.tag().len(), NEW_ITEM_TAG_LEN);
+        // Minting the same id twice is not possible; the tag is bound to the id.
+        let resumed = NewItemId::resume(&mk, minted.as_str(), minted.tag()).unwrap();
+        assert_eq!(resumed.as_str(), minted.as_str());
+        assert_eq!(resumed.tag(), minted.tag());
+
+        // A tampered tag is refused.
+        let mut bad = *minted.tag();
+        bad[0] ^= 1;
+        assert!(matches!(
+            NewItemId::resume(&mk, minted.as_str(), &bad),
+            Err(CoreError::InvalidInput(_))
+        ));
+        // So is the tag of another id (and the id of another tag).
+        let other = NewItemId::owner(&mk).unwrap();
+        assert!(NewItemId::resume(&mk, minted.as_str(), other.tag()).is_err());
+        assert!(NewItemId::resume(&mk, other.as_str(), minted.tag()).is_err());
+        // A different master does not accept the tag.
+        assert!(NewItemId::resume(&master(0x22), minted.as_str(), minted.tag()).is_err());
+        // An id with no tag (a server echo) cannot be resumed.
+        assert!(NewItemId::resume(&mk, minted.as_str(), &[]).is_err());
+        // Nor can a non-canonical id.
+        assert!(NewItemId::resume(&mk, "not-a-uuid", minted.tag()).is_err());
+    }
+
+    #[test]
+    fn foreign_mint_also_carries_a_tag() {
+        let mk = master(0x33);
+        let minted = NewItemId::foreign(&mk).unwrap();
+        assert!(is_foreign_item_id(minted.as_str()).unwrap());
+        assert!(NewItemId::resume(&mk, minted.as_str(), minted.tag()).is_ok());
     }
 }

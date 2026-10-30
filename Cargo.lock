@@ -232,6 +232,7 @@ dependencies = [
  "flate2",
  "hex",
  "hkdf",
+ "hmac",
  "image",
  "opaque-ke",
  "p256",

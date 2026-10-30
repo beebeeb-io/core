@@ -1,3 +1,5 @@
+#![allow(deprecated)] // pre-L13 writers are the parity baseline
+
 use std::io::Cursor;
 
 use beebeeb_core::CoreError;

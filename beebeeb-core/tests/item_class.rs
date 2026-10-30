@@ -1,5 +1,6 @@
 //! Task 2275 L12/L13/L14: item id classes, the resolver's write shapes,
 //! request rows and the child-wrap equality check.
+#![allow(deprecated)]
 
 use aes_gcm::{
     Aes256Gcm, KeyInit, Nonce,
@@ -12,8 +13,8 @@ use beebeeb_core::item_id::{ItemClass, NewItemId, is_foreign_item_id, item_class
 use beebeeb_core::kdf::{FileKey, MasterKey, derive_file_key};
 use beebeeb_core::opaque::derive_x25519_public;
 use beebeeb_core::owned_keys::{
-    FirstChunk, FolderWrap, KeyOrigin, ResolvedName, child_wrap_matches, resolve_owned_key, resolve_request_row,
-    unwrap_child_key, wrap_child_key, wrap_owner_file_key,
+    FirstChunk, FolderWrap, ItemKind, KeyOrigin, ResolvedName, child_wrap_matches, resolve_owned_key,
+    resolve_request_row, unwrap_child_key, wrap_child_key, wrap_owner_file_key,
 };
 use hkdf::Hkdf;
 use sha2::Sha256;
@@ -92,6 +93,7 @@ fn a1_owner_row_never_uses_a_child_wrap() {
     let result = resolve_owned_key(
         &master,
         O_ID,
+        ItemKind::File,
         None,
         Some(FolderWrap {
             shared_folder_id: ROOT,
@@ -113,7 +115,7 @@ fn a3_owner_row_ignores_an_l8_envelope() {
     let envelope = l8_frame(&master, O_ID, &other());
     let derived = derive_file_key(&master, O_ID.as_bytes());
     let name = name_for(&derived, "mine.txt");
-    let resolved = resolve_owned_key(&master, O_ID, Some(&envelope), None, &name, None).unwrap();
+    let resolved = resolve_owned_key(&master, O_ID, ItemKind::File, Some(&envelope), None, &name, None).unwrap();
     assert_eq!(resolved.origin, KeyOrigin::Derived);
     assert_eq!(resolved.key.as_bytes(), derived.as_bytes());
     assert_ne!(resolved.key.as_bytes(), other().as_bytes());
@@ -137,7 +139,7 @@ fn a5_foreign_row_resolves_by_l8_then_by_child_wrap() {
     let key = other();
     let name = name_for(&key, "adopted.txt");
     let envelope = wrap_owner_file_key(&master, F_ID, &key).unwrap();
-    let by_envelope = resolve_owned_key(&master, F_ID, Some(&envelope), None, &name, None).unwrap();
+    let by_envelope = resolve_owned_key(&master, F_ID, ItemKind::File, Some(&envelope), None, &name, None).unwrap();
     assert_eq!(by_envelope.origin, KeyOrigin::OwnerWrap);
     assert_eq!(by_envelope.key.as_bytes(), key.as_bytes());
     let target = by_envelope.write_target.as_ref().expect("adopted row is writable");
@@ -151,6 +153,7 @@ fn a5_foreign_row_resolves_by_l8_then_by_child_wrap() {
     let by_wrap = resolve_owned_key(
         &master,
         F_ID_2,
+        ItemKind::File,
         None,
         Some(FolderWrap {
             shared_folder_id: ROOT,
@@ -174,7 +177,7 @@ fn a5_foreign_row_needs_the_wrap_key_to_authenticate_the_name() {
     // The envelope opens, but the name was sealed under a different key.
     let envelope = wrap_owner_file_key(&master, F_ID, &key).unwrap();
     let name = name_for(&derive_file_key(&master, F_ID.as_bytes()), "theirs.txt");
-    assert!(resolve_owned_key(&master, F_ID, Some(&envelope), None, &name, None).is_err());
+    assert!(resolve_owned_key(&master, F_ID, ItemKind::File, Some(&envelope), None, &name, None).is_err());
 }
 
 #[test]
@@ -182,9 +185,9 @@ fn a6_foreign_row_never_derives_a_key() {
     let master = master();
     let derived = derive_file_key(&master, F_ID.as_bytes());
     let name = name_for(&derived, "looks-owner.txt");
-    assert!(resolve_owned_key(&master, F_ID, None, None, &name, None).is_err());
+    assert!(resolve_owned_key(&master, F_ID, ItemKind::File, None, None, &name, None).is_err());
     let invalid = [0u8; 60];
-    assert!(resolve_owned_key(&master, F_ID, Some(&invalid), None, &name, None).is_err());
+    assert!(resolve_owned_key(&master, F_ID, ItemKind::File, Some(&invalid), None, &name, None).is_err());
 }
 
 // ── A23 / A25 ────────────────────────────────────────────────────────
@@ -200,7 +203,7 @@ fn a23_non_canonical_ids_are_refused() {
             Err(beebeeb_core::CoreError::InvalidInput(_))
         ));
         assert!(matches!(item_class(bad), Err(beebeeb_core::CoreError::InvalidInput(_))));
-        assert!(resolve_owned_key(&master(), bad, None, None, "x.txt", None).is_err());
+        assert!(resolve_owned_key(&master(), bad, ItemKind::File, None, None, "x.txt", None).is_err());
     }
 }
 
@@ -209,7 +212,7 @@ fn a25_uppercase_sealed_owner_row_is_derived_upper_repair_and_read_only() {
     let master = master();
     let upper_key = derive_file_key(&master, O_ID_2.to_uppercase().as_bytes());
     let name = name_for(&upper_key, "iphone-file.txt");
-    let resolved = resolve_owned_key(&master, O_ID_2, None, None, &name, None).unwrap();
+    let resolved = resolve_owned_key(&master, O_ID_2, ItemKind::File, None, None, &name, None).unwrap();
     assert_eq!(resolved.origin, KeyOrigin::DerivedUpperRepair);
     assert_eq!(resolved.key.as_bytes(), upper_key.as_bytes());
     assert!(
@@ -225,7 +228,7 @@ fn owner_conventions_string_then_binary() {
     let master = master();
     let string_key = derive_file_key(&master, O_ID.as_bytes());
     let name = name_for(&string_key, "string.txt");
-    let resolved = resolve_owned_key(&master, O_ID, None, None, &name, None).unwrap();
+    let resolved = resolve_owned_key(&master, O_ID, ItemKind::File, None, None, &name, None).unwrap();
     assert_eq!(resolved.origin, KeyOrigin::Derived);
     assert_eq!(
         resolved.write_target.as_ref().unwrap().pin(),
@@ -234,7 +237,7 @@ fn owner_conventions_string_then_binary() {
 
     let binary_key = derive_file_key(&master, uuid::Uuid::parse_str(O_ID).unwrap().as_bytes());
     let name = name_for(&binary_key, "binary.txt");
-    let resolved = resolve_owned_key(&master, O_ID, None, None, &name, None).unwrap();
+    let resolved = resolve_owned_key(&master, O_ID, ItemKind::File, None, None, &name, None).unwrap();
     assert_eq!(resolved.origin, KeyOrigin::DerivedBinary);
     assert_eq!(resolved.key.as_bytes(), binary_key.as_bytes());
     assert!(resolved.write_target.is_some());
@@ -245,7 +248,7 @@ fn owner_conventions_string_then_binary() {
 #[test]
 fn plaintext_folder_uses_the_string_convention() {
     let master = master();
-    let resolved = resolve_owned_key(&master, O_ID, None, None, "Legacy folder", None).unwrap();
+    let resolved = resolve_owned_key(&master, O_ID, ItemKind::Folder, None, None, "Legacy folder", None).unwrap();
     assert_eq!(resolved.origin, KeyOrigin::Derived);
     assert_eq!(
         resolved.key.as_bytes(),
@@ -259,22 +262,101 @@ fn plaintext_file_is_picked_by_chunk_zero() {
     let master = master();
     let binary_key = derive_file_key(&master, uuid::Uuid::parse_str(O_ID).unwrap().as_bytes());
     let frame = chunk_of(&binary_key, b"content");
-    let resolved = resolve_owned_key(&master, O_ID, None, None, "legacy.bin", Some(split_chunk(&frame, 0))).unwrap();
+    let resolved = resolve_owned_key(
+        &master,
+        O_ID,
+        ItemKind::File,
+        None,
+        None,
+        "legacy.bin",
+        Some(split_chunk(&frame, 0)),
+    )
+    .unwrap();
     assert_eq!(resolved.origin, KeyOrigin::DerivedBinary);
     assert_eq!(resolved.key.as_bytes(), binary_key.as_bytes());
 
     // A later chunk, or a chunk under an unknown key, cannot identify the row.
-    assert!(resolve_owned_key(&master, O_ID, None, None, "legacy.bin", Some(split_chunk(&frame, 1))).is_err());
+    assert!(
+        resolve_owned_key(
+            &master,
+            O_ID,
+            ItemKind::File,
+            None,
+            None,
+            "legacy.bin",
+            Some(split_chunk(&frame, 1))
+        )
+        .is_err()
+    );
     let stranger = chunk_of(&other(), b"content");
-    assert!(resolve_owned_key(&master, O_ID, None, None, "legacy.bin", Some(split_chunk(&stranger, 0))).is_err());
+    assert!(
+        resolve_owned_key(
+            &master,
+            O_ID,
+            ItemKind::File,
+            None,
+            None,
+            "legacy.bin",
+            Some(split_chunk(&stranger, 0))
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn split_row_reports_the_content_key_and_stays_read_only() {
+    let master = master();
+    // A row id with hex letters, so the uppercase convention is a distinct derive.
+    let name_key = derive_file_key(&master, O_ID_2.as_bytes());
+    let name = name_for(&name_key, "split.txt");
+    // The stored version was sealed under the uppercase (upper-repair) convention.
+    let content_key = derive_file_key(&master, O_ID_2.to_uppercase().as_bytes());
+    let frame = chunk_of(&content_key, b"content");
+    let resolved = resolve_owned_key(
+        &master,
+        O_ID_2,
+        ItemKind::File,
+        None,
+        None,
+        &name,
+        Some(split_chunk(&frame, 0)),
+    )
+    .unwrap();
+    assert_eq!(resolved.origin, KeyOrigin::Derived);
+    assert_eq!(resolved.key.as_bytes(), name_key.as_bytes());
+    let split = resolved
+        .content_key
+        .as_ref()
+        .expect("an SF-0002 split row must expose the content key separately");
+    assert_eq!(split.as_bytes(), content_key.as_bytes());
+    assert!(
+        resolved.write_target.is_none(),
+        "an upper-repair content key must make the whole row read-only"
+    );
+
+    // When the name and the version agree there is no split key and the row stays writable.
+    let same = chunk_of(&name_key, b"content");
+    let resolved = resolve_owned_key(
+        &master,
+        O_ID_2,
+        ItemKind::File,
+        None,
+        None,
+        &name,
+        Some(split_chunk(&same, 0)),
+    )
+    .unwrap();
+    assert!(resolved.content_key.is_none());
+    assert!(resolved.write_target.is_some());
 }
 
 // ── NewItemId / write shapes ─────────────────────────────────────────
 
 #[test]
 fn new_item_ids_are_core_minted_and_class_correct() {
-    let owner = NewItemId::owner().unwrap();
-    let foreign = NewItemId::foreign().unwrap();
+    let master = master();
+    let owner = NewItemId::owner(&master).unwrap();
+    let foreign = NewItemId::foreign(&master).unwrap();
     assert_eq!(item_class(owner.as_str()).unwrap(), ItemClass::Owner);
     assert_eq!(item_class(foreign.as_str()).unwrap(), ItemClass::Foreign);
     assert!(is_foreign_item_id(foreign.as_str()).unwrap());
@@ -284,7 +366,7 @@ fn new_item_ids_are_core_minted_and_class_correct() {
 #[test]
 fn new_item_and_target_sealers_use_the_derived_key() {
     let master = master();
-    let id = NewItemId::owner().unwrap();
+    let id = NewItemId::owner(&master).unwrap();
     let sealed = beebeeb_core::encrypt::encrypt_name_for_new_item(
         &master,
         &id,
@@ -298,7 +380,7 @@ fn new_item_and_target_sealers_use_the_derived_key() {
     assert_eq!(meta.mime_type.as_deref(), Some("text/plain"));
 
     // A foreign new id cannot be sealed before adoption.
-    let foreign = NewItemId::foreign().unwrap();
+    let foreign = NewItemId::foreign(&master).unwrap();
     assert!(
         beebeeb_core::encrypt::encrypt_name_for_new_item(
             &master,
@@ -312,7 +394,7 @@ fn new_item_and_target_sealers_use_the_derived_key() {
 
     // A replacement name goes through the resolved row's target, same key.
     let name = name_for(&derive_file_key(&master, O_ID.as_bytes()), "old.txt");
-    let resolved = resolve_owned_key(&master, O_ID, None, None, &name, None).unwrap();
+    let resolved = resolve_owned_key(&master, O_ID, ItemKind::File, None, None, &name, None).unwrap();
     let target = resolved.write_target.as_ref().unwrap();
     let replaced = beebeeb_core::encrypt::encrypt_name_for_target(target, "renamed.txt", None).unwrap();
     assert_eq!(
@@ -393,6 +475,31 @@ fn request_row_name_under_neither_is_an_error() {
     let fixture = request_fixture();
     let name = name_for(&other(), "upload.bin");
     assert!(fixture.resolve(&name).is_err());
+}
+
+#[test]
+fn request_row_refuses_a_foreign_item_id() {
+    let fixture = request_fixture();
+    let derived = derive_file_key(&fixture.master, F_ID.as_bytes());
+    let name = name_for(&derived, "upload.bin");
+    let result = resolve_request_row(
+        &fixture.master,
+        F_ID,
+        &fixture.request_id,
+        &fixture.wrapped_private,
+        &fixture.wrap_nonce,
+        &fixture.e_pub,
+        &fixture.wrapped_content_key,
+        &name,
+    );
+    let err = match result {
+        Ok(_) => panic!("a request row resolved for a foreign item id; foreign rows go through L8 or L7"),
+        Err(err) => err,
+    };
+    assert!(
+        err.to_string().contains("owner item id"),
+        "the refusal must be the class rule, not a side effect: {err}"
+    );
 }
 
 // ── L14 child wrap equality ──────────────────────────────────────────

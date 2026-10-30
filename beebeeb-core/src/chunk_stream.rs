@@ -77,7 +77,7 @@ use beebeeb_types::{ChunkPlan, ChunkProfile, ChunkStrategy, STORAGE_FORMAT_VERSI
 
 use crate::CoreError;
 use crate::encrypt::{NONCE_LEN, TAG_LEN, open_raw_with_aad, random_nonce, seal_raw_with_aad, seal_raw_with_nonce};
-use crate::item_id::{ItemClass, NewItemId, item_class};
+use crate::item_id::NewItemId;
 use crate::kdf::{FileKey, MasterKey, derive_file_key};
 use crate::owned_keys::WriteTarget;
 
@@ -668,6 +668,7 @@ impl ChunkEncryptor {
     ///
     /// Returns `Err` if the resulting `chunk_count` does not fit in `u32` or the
     /// chunk size does not fit in `usize`.
+    #[deprecated(note = "task 2275 L13: use for_push_for_new_item / for_push_for_target (the id comes from core)")]
     pub fn from_reader<R: Read + Send + 'static>(
         mk: &MasterKey,
         file_id: &str,
@@ -682,6 +683,7 @@ impl ChunkEncryptor {
     /// **Push** constructor: the caller slices the data and calls
     /// [`push_chunk`](Self::push_chunk). The plan is derived from `file_size` +
     /// `profile`.
+    #[deprecated(note = "task 2275 L13: use for_push_for_new_item / for_push_for_target (the id comes from core)")]
     pub fn for_push(mk: &MasterKey, file_id: &str, file_size: u64, profile: ChunkProfile) -> Result<Self, CoreError> {
         let plan = plan_chunks(file_size, profile);
         Self::new(mk, file_id, plan, Source::Push)
@@ -690,20 +692,18 @@ impl ChunkEncryptor {
     /// **Push** writer for a brand-new row (task 2275, L13).
     ///
     /// The id is minted by core ([`NewItemId`]), so a client cannot seal a new
-    /// item under an arbitrary or pre-existing id. Only owner ids can be sealed
-    /// this way (their key is derived); a foreign row is adopted first and then
-    /// written through [`Self::for_push_for_target`].
+    /// item under an arbitrary or pre-existing id. The content key is derived
+    /// from the master under that id, which is also the member's rule for a new
+    /// foreign (`F`) item (L12: a member's file key stays derived from the
+    /// member's own master under the F id). A replacement of an existing row
+    /// goes through [`Self::for_push_for_target`] instead.
+    #[allow(deprecated)]
     pub fn for_push_for_new_item(
         mk: &MasterKey,
         item_id: &NewItemId,
         file_size: u64,
         profile: ChunkProfile,
     ) -> Result<Self, CoreError> {
-        if item_class(item_id.as_str())? != ItemClass::Owner {
-            return Err(CoreError::InvalidInput(
-                "a new foreign item is sealed after adoption, through its write target".into(),
-            ));
-        }
         Self::for_push(mk, item_id.as_str(), file_size, profile)
     }
 
@@ -716,12 +716,15 @@ impl ChunkEncryptor {
     /// before the first chunk.
     pub fn for_push_for_target(target: &WriteTarget, file_size: u64, profile: ChunkProfile) -> Result<Self, CoreError> {
         let plan = plan_chunks(file_size, profile);
-        Self::new_with_file_key(
+        let enc = Self::new_with_file_key(
             FileKey::from_bytes(*target.key().as_bytes()),
             target.item_id(),
             plan,
             Source::Push,
-        )
+        )?;
+        // The resolved row's pin decides the frame format: a caller cannot drop
+        // a recorded V2 by forgetting `with_recorded_pin` (task 2275 L13).
+        enc.with_recorded_pin(target.pin())
     }
 
     /// **Push** constructor with an explicit, server-dictated chunk size.
@@ -732,6 +735,7 @@ impl ChunkEncryptor {
     /// `chunk_size_bytes` exceeds [`MAX_CHUNK_SIZE`] (resource-exhaustion guard
     /// against a hostile/misconfigured server value), the derived `chunk_count`
     /// does not fit in `u32`, or the size does not fit in `usize`.
+    #[deprecated(note = "task 2275 L13: use for_push_for_new_item / for_push_for_target (the id comes from core)")]
     pub fn for_push_with_chunk_size(
         mk: &MasterKey,
         file_id: &str,
@@ -1325,6 +1329,7 @@ pub(crate) fn read_exact_or_eof(reader: &mut dyn Read, buf: &mut [u8]) -> Result
 
 #[cfg(test)]
 mod tests {
+    #![allow(deprecated)]
     use super::*;
     use crate::encrypt::decrypt_chunk_raw;
     use crate::kdf::derive_master_key;
@@ -1885,6 +1890,7 @@ mod tests {
 /// against origin/main (where frames carry no AAD), see the task Notes.
 #[cfg(test)]
 mod binding_tests {
+    #![allow(deprecated)]
     use super::*;
     use crate::encrypt::decrypt_chunk_raw;
     use crate::kdf::derive_master_key;
@@ -2412,6 +2418,7 @@ mod binding_tests {
 /// P1-2 splicing frames across versions of one file id). Red first.
 #[cfg(test)]
 mod review_round2_tests {
+    #![allow(deprecated)]
     use super::*;
     use crate::kdf::derive_master_key;
 
@@ -2586,6 +2593,7 @@ mod review_round2_tests {
 /// content; files must not accept a plaintext name). Red first.
 #[cfg(test)]
 mod review_round3_tests {
+    #![allow(deprecated)]
     use super::*;
     use crate::encrypt::{
         MetadataSeal, decrypt_file_metadata, decrypt_file_metadata_with_key, decrypt_name_metadata,
@@ -2993,6 +3001,7 @@ mod review_round3_tests {
 /// pin-aware thumbnail writer (P2-4).
 #[cfg(test)]
 mod review_round4_tests {
+    #![allow(deprecated)]
     use super::*;
     use crate::encrypt::{
         METADATA_SEAL_WRITE, MetadataSeal, NAME_KEY_INFO, THUMBNAIL_KEY_INFO, decrypt_file_metadata,
@@ -3278,6 +3287,7 @@ mod review_round4_tests {
 /// subkey under the same seal rule as names and thumbnails.
 #[cfg(test)]
 mod review_round5_tests {
+    #![allow(deprecated)]
     use super::*;
     use crate::encrypt::{
         METADATA_SEAL_WRITE, MetadataSeal, NOTE_KEY_INFO, decrypt_file_metadata, decrypt_file_metadata_with_key,
@@ -3651,6 +3661,7 @@ mod review_round5_tests {
 
 #[cfg(test)]
 mod write_shape_chunk_tests {
+    #![allow(deprecated)]
     use super::*;
 
     /// Task 2275 L13: a new-item writer uses the derived key and id, so with
@@ -3658,7 +3669,7 @@ mod write_shape_chunk_tests {
     #[test]
     fn new_item_chunk_writer_matches_the_derived_path() {
         let mk = MasterKey::from_bytes(std::array::from_fn(|i| i as u8));
-        let id = NewItemId::owner().unwrap();
+        let id = NewItemId::owner(&mk).unwrap();
         let nonces = vec![[0x21; NONCE_LEN]];
         let mut via_new = ChunkEncryptor::for_push_for_new_item(&mk, &id, 20, ChunkProfile::Desktop)
             .unwrap()
@@ -3681,5 +3692,54 @@ mod write_shape_chunk_tests {
             via_new.finish().unwrap().total_ciphertext,
             via_derived.finish().unwrap().total_ciphertext
         );
+    }
+
+    /// Task 2275 L12: a member creating a foreign (F) item has no envelope yet,
+    /// so its content key is the member's own derivation under the F id. The
+    /// new-item chunk writer must accept that id instead of refusing it.
+    #[test]
+    fn foreign_new_item_chunk_writer_uses_the_members_derivation() {
+        let mk = MasterKey::from_bytes(std::array::from_fn(|i| i as u8));
+        let id = NewItemId::foreign(&mk).unwrap();
+        let nonces = vec![[0x31; NONCE_LEN]];
+        let mut via_new = ChunkEncryptor::for_push_for_new_item(&mk, &id, 12, ChunkProfile::Desktop)
+            .unwrap()
+            .with_format(ChunkFormat::V2)
+            .unwrap()
+            .with_vector_nonces(nonces.clone())
+            .unwrap();
+        let mut via_derived = ChunkEncryptor::for_push(&mk, id.as_str(), 12, ChunkProfile::Desktop)
+            .unwrap()
+            .with_format(ChunkFormat::V2)
+            .unwrap()
+            .with_vector_nonces(nonces)
+            .unwrap();
+        let data = vec![0x5au8; 12];
+        assert_eq!(
+            via_new.push_chunk(&data).unwrap().data,
+            via_derived.push_chunk(&data).unwrap().data
+        );
+    }
+
+    /// Task 2275 L13: the resolved row's recorded V2 pin is applied by the
+    /// target constructor itself, so a caller cannot drop it.
+    #[test]
+    fn target_chunk_writer_applies_the_recorded_pin() {
+        use crate::owned_keys::{ItemKind, resolve_owned_key};
+        let mk = MasterKey::from_bytes(std::array::from_fn(|i| i as u8));
+        const ID: &str = "66666666-6666-4666-8666-666666666666";
+        let key = crate::kdf::derive_file_key(&mk, ID.as_bytes());
+        let name = crate::encrypt::encrypt_name_for(&key, "v2.bin", None, ExpectedChunkFormat::V2).unwrap();
+        let resolved = resolve_owned_key(&mk, ID, ItemKind::File, None, None, &name, None).unwrap();
+        let target = resolved.write_target.as_ref().expect("a recorded V2 row is writable");
+        assert_eq!(target.pin(), ExpectedChunkFormat::V2);
+        let mut enc = ChunkEncryptor::for_push_for_target(target, 10, ChunkProfile::Desktop).unwrap();
+        assert_eq!(
+            enc.format(),
+            ChunkFormat::V2,
+            "for_push_for_target must apply the target's recorded pin"
+        );
+        enc.push_chunk(&[0x11; 10]).unwrap();
+        enc.finish().unwrap();
     }
 }
