@@ -4,3 +4,4 @@
 # rustdoc intra-doc links to this crate's own published API docs — a
 # doc-comment citation, never a runtime fetch (core makes no network calls).
 beebeeb-types/src/file.rs|docs.rs|rustdoc link to beebeeb-core's own API docs in a doc-comment; not a runtime call
+beebeeb-transfer/src/test_support/conformance.rs|192.0.2.1|RFC 5737 documentation address used only as an unroutable non-loopback host; the test asserts a plain-http link is refused before any connection, it is never contacted
