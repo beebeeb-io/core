@@ -23,6 +23,7 @@ The truth line is per binary: `test result: ok. N passed`. Count-history baselin
 
 - `MasterKey` — 32 bytes, NOT Clone, zeroized on drop. Created from password (Argon2id) or recovery phrase.
 - `FileKey` — 32 bytes, per-file via HKDF. `derive_file_key(master_key, file_id)`. `EncryptedBlob` — cipher_suite + nonce (Vec<u8>) + ciphertext (Vec<u8>).
+- Owner per-file key conventions (SF-0002): readers try the **string** id, then the legacy **binary** 16-byte UUID, then the read-only **upper_repair** (`UPPERCASE(id)`) convention, and `kdf::owner_file_key_for_name` reports which one won. `UpperRepair` is read-only — no rename, no new version, edits become a new file. Core never writes under it and never migrates a row.
 - `encrypt_chunk(key, plaintext)` / `decrypt_chunk(key, blob)` — generic AES-256-GCM, NO associated data (key wrap, search shards). **Not for file content** (goes through `chunk_stream`) — **and not for names, thumbnails or file notes** (purpose subkeys: `encrypt_name*`/`decrypt_file_metadata`, `encrypt_thumbnail[_for]`/`decrypt_thumbnail`, `encrypt_note[_for]`/`decrypt_note`).
 
 ## Shared folder key id (`folder_key.rs`)

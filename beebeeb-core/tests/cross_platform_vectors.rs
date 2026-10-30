@@ -707,7 +707,7 @@ fn vector_file_version_check() {
         .as_u64()
         .expect("vectors.json must have a 'version' field");
     assert_eq!(
-        version, 12,
+        version, 13,
         "vectors.json version mismatch — expected 12, got {version}. \
          Update this test if you intentionally bumped the version."
     );

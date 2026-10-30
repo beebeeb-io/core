@@ -144,6 +144,98 @@ pub fn derive_file_key(master_key: &MasterKey, file_id: &[u8]) -> FileKey {
     FileKey { bytes: *okm }
 }
 
+/// Which byte representation of an item id an owner's per-file key was derived
+/// from (SF-0002).
+///
+/// The first two are write-capable conventions. [`OwnerKeyConvention::UpperRepair`]
+/// is READ-ONLY: it exists only so the owner can open files that the iOS File
+/// Provider sealed under an uppercase id (`UUID().uuidString`). A client that
+/// receives `UpperRepair` must treat the file as read-only — no rename and no
+/// new version; an edit is saved as a new file. Core only reports the
+/// convention, it never re-seals or migrates an existing row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnerKeyConvention {
+    /// Canonical: `derive_file_key(master, file_id.as_bytes())`.
+    String,
+    /// Legacy: `derive_file_key(master, uuid.as_bytes())` (16 raw bytes).
+    Binary,
+    /// Read-only repair: `derive_file_key(master, file_id.to_ascii_uppercase().as_bytes())`.
+    UpperRepair,
+}
+
+impl OwnerKeyConvention {
+    /// Stable name for the bindings and vectors.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::String => "string",
+            Self::Binary => "binary",
+            Self::UpperRepair => "upper_repair",
+        }
+    }
+}
+
+/// The owner key candidates for `file_id`, in the order every reader tries
+/// them: the string convention, the legacy binary convention (only when
+/// `file_id` parses as a UUID), then the uppercase repair convention (only when
+/// uppercasing actually changes the id — an all-digit id never gets a third,
+/// identical derive).
+pub(crate) fn owner_key_candidates(master_key: &MasterKey, file_id: &str) -> Vec<(FileKey, OwnerKeyConvention)> {
+    let mut candidates = Vec::with_capacity(3);
+    candidates.push((
+        derive_file_key(master_key, file_id.as_bytes()),
+        OwnerKeyConvention::String,
+    ));
+    if let Ok(uuid) = file_id.parse::<uuid::Uuid>() {
+        candidates.push((derive_file_key(master_key, uuid.as_bytes()), OwnerKeyConvention::Binary));
+    }
+    let upper = file_id.to_ascii_uppercase();
+    if upper != file_id {
+        candidates.push((
+            derive_file_key(master_key, upper.as_bytes()),
+            OwnerKeyConvention::UpperRepair,
+        ));
+    }
+    candidates
+}
+
+/// Resolve the owner's per-file key for a file from the `(file_id,
+/// name_encrypted)` pair the server stores, and report which id convention the
+/// key came from (SF-0002).
+///
+/// Tries, in order, the string convention, the legacy binary convention (when
+/// `file_id` is a UUID) and the read-only uppercase repair convention (when
+/// uppercasing changes the id). Each candidate is checked by authenticating
+/// `name_encrypted` with the same envelope reader
+/// [`crate::encrypt::decrypt_name_metadata`] uses (name subkey then legacy raw
+/// key, native blob then web blob). The first candidate that authenticates
+/// wins.
+///
+/// A plaintext (non-envelope) name, or a name that authenticates under none of
+/// the candidates, is [`CoreError::InvalidInput`].
+///
+/// A returned [`OwnerKeyConvention::UpperRepair`] means READ-ONLY: the client
+/// must not rename the item or write a new version under this id. Core never
+/// writes under the uppercase convention and never migrates the row.
+pub fn owner_file_key_for_name(
+    master_key: &MasterKey,
+    file_id: &str,
+    name_encrypted: &str,
+) -> Result<(FileKey, OwnerKeyConvention), CoreError> {
+    if !name_encrypted.starts_with('{') {
+        return Err(CoreError::InvalidInput(
+            "name is not an encrypted envelope; no owner key convention to resolve".into(),
+        ));
+    }
+    for (key, convention) in owner_key_candidates(master_key, file_id) {
+        if crate::encrypt::name_envelope_authenticates(&key, name_encrypted) {
+            return Ok((key, convention));
+        }
+    }
+    Err(CoreError::InvalidInput(
+        "name does not authenticate under any known owner key convention".into(),
+    ))
+}
+
 /// Derive a purpose-bound subkey of a per-file key: `HKDF-SHA256(salt = none,
 /// ikm = file_key, info)`. Each purpose (v2 content frames, the name/MIME
 /// envelope, thumbnails, file notes) uses its own `info`, so a blob sealed for

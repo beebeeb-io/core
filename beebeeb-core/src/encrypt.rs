@@ -501,15 +501,7 @@ pub fn decrypt_name_metadata(
     if !name_encrypted.starts_with('{') {
         return Ok(legacy_plaintext_metadata(name_encrypted));
     }
-    let key_from_string = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
-    if let Some(pt) = decrypt_envelope_plaintext(&key_from_string, name_encrypted) {
-        return parse_name_metadata(&pt);
-    }
-    if let Some(key) = file_id
-        .parse::<uuid::Uuid>()
-        .ok()
-        .map(|u| crate::kdf::derive_file_key(master_key, u.as_bytes()))
-    {
+    for (key, _convention) in crate::kdf::owner_key_candidates(master_key, file_id) {
         if let Some(pt) = decrypt_envelope_plaintext(&key, name_encrypted) {
             return parse_name_metadata(&pt);
         }
@@ -634,12 +626,18 @@ fn parse_name_metadata(decrypted: &str) -> Result<NameMetadata, CoreError> {
 ///   current CLI + post-`bb repair` files (`TextEncoder.encode(fileId)` on web).
 /// - **Binary-UUID** — `derive_file_key(mk, uuid.as_bytes())` (the 16-byte form).
 ///   Legacy pre-`bb repair` CLI files.
+/// - **Upper-UUID (read-only repair)** — `derive_file_key(mk,
+///   file_id.to_ascii_uppercase().as_bytes())`, tried only when uppercasing
+///   changes the id. Files the iOS File Provider sealed under `UUID().uuidString`
+///   (SF-0002). A caller that needs to know which convention won uses
+///   [`crate::kdf::owner_file_key_for_name`], and must treat such a file as
+///   read-only.
 ///
 /// ## Fallback order (matches `repos/cli/src/crypto::decrypt_name`)
 ///
-/// string-UUID key first, then binary-UUID key; within each key the native blob
-/// is tried before the web base64 blob. The plaintext fast-path short-circuits
-/// before any key derivation.
+/// string-UUID key first, then binary-UUID key, then the uppercase repair key;
+/// within each key the native blob is tried before the web base64 blob. The
+/// plaintext fast-path short-circuits before any key derivation.
 ///
 /// Returns `CoreError::Decryption` only when the value looks encrypted but no
 /// combination succeeds (wrong key, corrupt blob).
@@ -670,21 +668,11 @@ pub fn decrypt_name_with_mime(
         return Ok((name_encrypted.to_string(), None));
     }
 
-    // Derive both candidate per-file keys. The web app derives from the UUID
-    // *string* bytes (TextEncoder.encode(fileId)); the legacy CLI derived from
-    // the 16-byte *binary* UUID. Try string-UUID first (the common case), then
-    // binary-UUID. If `file_id` is not a valid UUID we can still try the
-    // string-derived key — only the binary derivation is skipped.
-    let key_from_string = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
-    let key_from_binary = file_id
-        .parse::<uuid::Uuid>()
-        .ok()
-        .map(|u| crate::kdf::derive_file_key(master_key, u.as_bytes()));
-
-    if let Some(result) = decrypt_name_envelope(&key_from_string, name_encrypted) {
-        return Ok(result);
-    }
-    if let Some(key) = key_from_binary {
+    // Try every owner id convention: string-UUID first (the common case), then
+    // binary-UUID, then the read-only uppercase repair (SF-0002) when
+    // uppercasing changes the id. If `file_id` is not a valid UUID we can still
+    // try the string-derived key — only the binary derivation is skipped.
+    for (key, _convention) in crate::kdf::owner_key_candidates(master_key, file_id) {
         if let Some(result) = decrypt_name_envelope(&key, name_encrypted) {
             return Ok(result);
         }
@@ -725,6 +713,15 @@ fn decrypt_envelope_plaintext(file_key: &FileKey, name_encrypted: &str) -> Optio
     // legacy raw file key (every envelope written before).
     decrypt_envelope_plaintext_under(&derive_name_key(file_key), name_encrypted)
         .or_else(|| decrypt_envelope_plaintext_under(file_key, name_encrypted))
+}
+
+/// Whether `name_encrypted` authenticates under `file_key` — exactly the
+/// envelope reader [`decrypt_name_metadata`] uses, exposed crate-internally so
+/// [`crate::kdf::owner_file_key_for_name`] can test a candidate key without
+/// duplicating the format matrix. Touch only: the decrypted plaintext and the
+/// key are dropped (the key is zeroized) without being returned.
+pub(crate) fn name_envelope_authenticates(file_key: &FileKey, name_encrypted: &str) -> bool {
+    decrypt_envelope_plaintext(file_key, name_encrypted).is_some()
 }
 
 /// [`decrypt_envelope_plaintext`] under exactly one key.
