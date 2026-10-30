@@ -21,6 +21,8 @@ const SHARE_B: [u8; 16] = [0x22; 16];
 const ROOT_A: [u8; 16] = [0x31; 16];
 const ROOT_B: [u8; 16] = [0x42; 16];
 const ITEM: [u8; 16] = [0x53; 16];
+/// L8 owner-file-key envelopes are foreign (`F`) item ids only (task 2275 L12).
+const FOREIGN_ITEM_ID: &str = "11111111-1111-8111-8111-111111111111";
 
 fn master() -> MasterKey {
     MasterKey::from_bytes([0x40; 32])
@@ -63,7 +65,7 @@ fn label_is_bound_to_the_share_and_the_purpose() {
     assert!(unwrap_link_owner_key(&master(), &SHARE_A, &blob).is_err());
     assert!(unwrap_link_owner_token(&master(), &SHARE_A, &blob).is_err());
     assert!(unwrap_folder_custody(&master(), &SHARE_A, &blob).is_err());
-    assert!(unwrap_owner_file_key(&master(), &ITEM, &blob).is_err());
+    assert!(unwrap_owner_file_key(&master(), FOREIGN_ITEM_ID.as_bytes(), &blob).is_err());
     assert!(
         unwrap_folder_child(&folder_key(), &ROOT_A, &ITEM, 1, &blob).is_err(),
         "a label frame opens as an L7 child wrap"
@@ -216,9 +218,11 @@ fn l7_and_l8_writers_still_produce_their_own_shapes() {
             .as_bytes(),
         &[0x0a; 32]
     );
-    let l8 = wrap_owner_file_key(&master(), &ITEM, &FileKey::from_bytes([0x0b; 32])).unwrap();
+    let l8 = wrap_owner_file_key(&master(), FOREIGN_ITEM_ID.as_bytes(), &FileKey::from_bytes([0x0b; 32])).unwrap();
     assert_eq!(
-        unwrap_owner_file_key(&master(), &ITEM, &l8).unwrap().as_bytes(),
+        unwrap_owner_file_key(&master(), FOREIGN_ITEM_ID.as_bytes(), &l8)
+            .unwrap()
+            .as_bytes(),
         &[0x0b; 32]
     );
     let l6 = wrap_link_owner_key(&master(), &SHARE_A, &FileKey::from_bytes([0x0c; 32])).unwrap();
