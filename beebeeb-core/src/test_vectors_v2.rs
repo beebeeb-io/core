@@ -38,7 +38,7 @@ use crate::kdf::{MasterKey, derive_file_key};
 pub const VECTORS_FILE_VERSION: u64 = 13;
 
 /// Names of the v2 vectors, in the order they are published.
-pub const V2_VECTOR_NAMES: [&str; 21] = [
+pub const V2_VECTOR_NAMES: [&str; 22] = [
     "chunk_v2_stream",
     "chunk_v2_single_frame",
     "metadata_v2_name",
@@ -64,6 +64,9 @@ pub const V2_VECTOR_NAMES: [&str; 21] = [
     // Version 13 (SF-0002): a name and a content chunk sealed under the
     // uppercase textual id, readable only through the READ-ONLY repair key.
     "upper_repair_v1",
+    // Version 13 (SF-0002): the split shape — name and content version 1 under
+    // the uppercase id, content version 2 under the lowercase id.
+    "upper_repair_split_v1",
 ];
 
 /// A shared folder's key (bytes 0x80..=0x9f) for the `folder_key_id` vector.
@@ -155,6 +158,7 @@ pub fn v2_vectors() -> Vec<Value> {
         owned_key_vector("owner_wrapped_folder_key"),
         owned_key_vector("folder_wrapped_file_key"),
         upper_repair_vector(),
+        upper_repair_split_vector(),
     ]
 }
 
@@ -194,10 +198,65 @@ fn upper_repair_vector() -> Value {
         "expected_name": "uppercase-repair.pdf",
         "expected_mime_type": "application/pdf",
         "expected_convention": "upper_repair",
+        "expected_key_hex": hex(file_key.as_bytes()),
         "name_encrypted": name_encrypted,
         "content_plaintext_hex": hex(content),
         "content_nonce_hex": hex(&content_nonce),
         "content_frame_hex": hex(&content_frame),
+    })
+}
+
+/// SF-0002 split keys: the shape the File Provider left behind when a file was
+/// created before the fix and later edited in the Files app. The name and
+/// content version 1 are sealed under the uppercase id; content version 2 (the
+/// edit, `modifyItem`) is sealed under the lowercase id. The name's convention
+/// says nothing about version 2, so a client must resolve each version's key by
+/// authenticating that version's chunk 0.
+fn upper_repair_split_vector() -> Value {
+    let master = MasterKey::from_bytes(MASTER_KEY);
+    let upper = UPPER_FILE_ID.to_ascii_uppercase();
+    let upper_key = derive_file_key(&master, upper.as_bytes());
+    let lower_key = derive_file_key(&master, UPPER_FILE_ID.as_bytes());
+    let name_nonce = [0x5f; 12];
+    let name_encrypted = crate::encrypt::encrypt_name_for_with_nonce(
+        &upper_key,
+        "split-repair.pdf",
+        Some("application/pdf"),
+        crate::chunk_stream::ExpectedChunkFormat::Unrecorded,
+        name_nonce,
+    )
+    .unwrap();
+    let v1_plaintext = b"SF-0002 split content version 1";
+    let v1_nonce = [0x6f; 12];
+    let v1_frame = crate::encrypt::seal_raw_with_nonce(&upper_key, &v1_nonce, v1_plaintext, &[]).unwrap();
+    let v2_plaintext = b"SF-0002 split content version 2";
+    let v2_nonce = [0x7f; 12];
+    let v2_frame = crate::encrypt::seal_raw_with_nonce(&lower_key, &v2_nonce, v2_plaintext, &[]).unwrap();
+    json!({
+        "name": "upper_repair_split_v1",
+        "note": "SF-0002 split keys: name and content version 1 are v1 frames sealed under \
+            derive_file_key(master, UPPERCASE(file_id)); content version 2 is sealed under \
+            derive_file_key(master, file_id). Resolve each content version independently with \
+            owner_file_key_for_content. The file is READ-ONLY if the name OR any version reports \
+            upper_repair. Fixed nonces, published KAT only.",
+        "master_key_hex": hex(&MASTER_KEY),
+        "file_id": UPPER_FILE_ID,
+        "file_id_upper": upper,
+        "name_encrypted": name_encrypted,
+        "expected_name": "split-repair.pdf",
+        "expected_mime_type": "application/pdf",
+        "expected_name_convention": "upper_repair",
+        "expected_name_key_hex": hex(upper_key.as_bytes()),
+        "content_v1_plaintext_hex": hex(v1_plaintext),
+        "content_v1_nonce_hex": hex(&v1_nonce),
+        "content_v1_frame_hex": hex(&v1_frame),
+        "expected_content_v1_convention": "upper_repair",
+        "expected_content_v1_key_hex": hex(upper_key.as_bytes()),
+        "content_v2_plaintext_hex": hex(v2_plaintext),
+        "content_v2_nonce_hex": hex(&v2_nonce),
+        "content_v2_frame_hex": hex(&v2_frame),
+        "expected_content_v2_convention": "string",
+        "expected_content_v2_key_hex": hex(lower_key.as_bytes()),
     })
 }
 
@@ -642,19 +701,30 @@ mod tests {
             .clone()
     }
 
-    /// SF-0002 RED → GREEN: a name sealed under the uppercase id is unreadable
-    /// today and must read after the read-only repair.
+    /// SF-0002: the shared readers stay two-convention. A name sealed under the
+    /// uppercase id must NOT open through `decrypt_name_metadata`; only the
+    /// convention-reporting owner resolver may open it, and it says
+    /// `upper_repair` (read-only).
     #[test]
-    fn uppercase_sealed_name_reads_after_repair() {
+    fn shared_reader_refuses_uppercase_sealed_name() {
         let v = published_vector("upper_repair_v1");
         let master = MasterKey::from_bytes(hex_bytes(v["master_key_hex"].as_str().unwrap()));
         let file_id = v["file_id"].as_str().unwrap();
+        let name_encrypted = v["name_encrypted"].as_str().unwrap();
         assert_eq!(v["file_id_upper"].as_str().unwrap(), file_id.to_ascii_uppercase());
 
-        let meta = crate::encrypt::decrypt_name_metadata(&master, file_id, v["name_encrypted"].as_str().unwrap())
-            .expect("SF-0002: an owner must read a name sealed under the uppercase id");
-        assert_eq!(meta.name, v["expected_name"].as_str().unwrap());
-        assert_eq!(meta.mime_type.as_deref(), v["expected_mime_type"].as_str());
+        assert!(
+            matches!(
+                crate::encrypt::decrypt_name_metadata(&master, file_id, name_encrypted),
+                Err(crate::CoreError::Decryption)
+            ),
+            "the shared readers must try only string then binary, never the uppercase repair"
+        );
+
+        let (_key, convention) = crate::kdf::owner_file_key_for_name(&master, file_id, name_encrypted)
+            .expect("owner resolves the uppercase-sealed file");
+        assert_eq!(convention, crate::kdf::OwnerKeyConvention::UpperRepair);
+        assert_eq!(convention.as_str(), v["expected_convention"].as_str().unwrap());
     }
 
     #[test]
@@ -669,11 +739,82 @@ mod tests {
         .expect("owner resolves the uppercase-sealed file");
         assert_eq!(convention, crate::kdf::OwnerKeyConvention::UpperRepair);
         assert_eq!(convention.as_str(), v["expected_convention"].as_str().unwrap());
+        assert_eq!(key.as_bytes(), &hex_bytes(v["expected_key_hex"].as_str().unwrap()));
 
         let frame = hex_vec(v["content_frame_hex"].as_str().unwrap());
         let plaintext =
             crate::encrypt::open_raw_with_aad(&key, &frame, &[]).expect("chunk opens under the resolved key");
         assert_eq!(hex(&plaintext), v["content_plaintext_hex"].as_str().unwrap());
+    }
+
+    /// SF-0002 split keys (mobile #246 review): the name and each content
+    /// version are resolved independently. The name and version 1 sit under the
+    /// uppercase id, version 2 under the lowercase id; using the name's key for
+    /// version 2 must fail, and the resolver must never guess.
+    #[test]
+    fn split_file_resolves_name_and_each_version_independently() {
+        let v = published_vector("upper_repair_split_v1");
+        let master = MasterKey::from_bytes(hex_bytes(v["master_key_hex"].as_str().unwrap()));
+        let file_id = v["file_id"].as_str().unwrap();
+        let name_encrypted = v["name_encrypted"].as_str().unwrap();
+
+        let (name_key, name_convention) = crate::kdf::owner_file_key_for_name(&master, file_id, name_encrypted)
+            .expect("the split file's name resolves");
+        assert_eq!(name_convention, crate::kdf::OwnerKeyConvention::UpperRepair);
+        assert_eq!(
+            name_convention.as_str(),
+            v["expected_name_convention"].as_str().unwrap()
+        );
+        assert_eq!(
+            name_key.as_bytes(),
+            &hex_bytes(v["expected_name_key_hex"].as_str().unwrap())
+        );
+
+        let v1_frame = hex_vec(v["content_v1_frame_hex"].as_str().unwrap());
+        let (v1_key, v1_convention) = crate::kdf::owner_file_key_for_content(&master, file_id, &v1_frame)
+            .expect("version 1 resolves under the uppercase key");
+        assert_eq!(v1_convention, crate::kdf::OwnerKeyConvention::UpperRepair);
+        assert_eq!(
+            v1_convention.as_str(),
+            v["expected_content_v1_convention"].as_str().unwrap()
+        );
+        assert_eq!(
+            v1_key.as_bytes(),
+            &hex_bytes(v["expected_content_v1_key_hex"].as_str().unwrap())
+        );
+        let v1_plaintext =
+            crate::encrypt::open_raw_with_aad(&v1_key, &v1_frame, &[]).expect("version 1 opens under the resolved key");
+        assert_eq!(hex(&v1_plaintext), v["content_v1_plaintext_hex"].as_str().unwrap());
+
+        let v2_frame = hex_vec(v["content_v2_frame_hex"].as_str().unwrap());
+        let (v2_key, v2_convention) = crate::kdf::owner_file_key_for_content(&master, file_id, &v2_frame)
+            .expect("version 2 resolves under the lowercase key");
+        assert_eq!(v2_convention, crate::kdf::OwnerKeyConvention::String);
+        assert_eq!(
+            v2_convention.as_str(),
+            v["expected_content_v2_convention"].as_str().unwrap()
+        );
+        assert_eq!(
+            v2_key.as_bytes(),
+            &hex_bytes(v["expected_content_v2_key_hex"].as_str().unwrap())
+        );
+        let v2_plaintext =
+            crate::encrypt::open_raw_with_aad(&v2_key, &v2_frame, &[]).expect("version 2 opens under the resolved key");
+        assert_eq!(hex(&v2_plaintext), v["content_v2_plaintext_hex"].as_str().unwrap());
+
+        // The shape the fix prevents: the name's uppercase key does not open
+        // version 2, so a client cannot re-use it for the edit's content.
+        assert!(
+            crate::encrypt::open_raw_with_aad(&name_key, &v2_frame, &[]).is_err(),
+            "version 2 must not open under the name's uppercase key"
+        );
+
+        // Per-version resolution applies the same canonical-id rule as the name.
+        let upper_id = v["file_id_upper"].as_str().unwrap();
+        assert!(matches!(
+            crate::kdf::owner_file_key_for_content(&master, upper_id, &v1_frame),
+            Err(crate::CoreError::InvalidInput(_))
+        ));
     }
 
     #[test]
@@ -705,15 +846,19 @@ mod tests {
         assert_eq!(convention, crate::kdf::OwnerKeyConvention::Binary);
     }
 
+    /// SF-0002 P2-2: only the canonical lowercase hyphenated id is accepted. If
+    /// an uppercase id were accepted, the string convention (derived from those
+    /// bytes) would match the uppercase-sealed row and report `String`,
+    /// defeating the read-only distinction.
     #[test]
-    fn an_id_with_no_hex_letters_never_tries_a_third_derive() {
-        let master = MasterKey::from_bytes(MASTER_KEY);
-        let digits = "12345678-1234-4321-8123-123456789012";
-        assert_eq!(digits.to_ascii_uppercase(), digits);
-        assert_eq!(crate::kdf::owner_key_candidates(&master, digits).len(), 2);
-
-        let letters = "5f0c2a9e-3b1d-4c7e-9a2f-6d8e1b4c7a30";
-        assert_eq!(crate::kdf::owner_key_candidates(&master, letters).len(), 3);
+    fn uppercase_file_id_is_invalid_input() {
+        let v = published_vector("upper_repair_v1");
+        let master = MasterKey::from_bytes(hex_bytes(v["master_key_hex"].as_str().unwrap()));
+        let upper_id = v["file_id_upper"].as_str().unwrap();
+        assert!(matches!(
+            crate::kdf::owner_file_key_for_name(&master, upper_id, v["name_encrypted"].as_str().unwrap()),
+            Err(crate::CoreError::InvalidInput(_))
+        ));
     }
 
     #[test]

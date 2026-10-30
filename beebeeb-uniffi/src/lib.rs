@@ -1214,6 +1214,31 @@ impl MasterKeyHandle {
         })
     }
 
+    /// Resolve the owner's per-file key for ONE content version from the
+    /// canonical `file_id` and that version's first chunk frame, reporting which
+    /// id convention that version's key came from (SF-0002).
+    ///
+    /// The frame may be a v1 legacy frame (`nonce || ciphertext || tag`, no AAD —
+    /// what the iOS File Provider wrote) or core's v2 frame 0. Resolve each
+    /// version separately: the name's convention does not decide the content key.
+    ///
+    /// A file is READ-ONLY for the client if EITHER
+    /// [`owner_file_key_for_name`](Self::owner_file_key_for_name) or ANY of its
+    /// versions reports `OwnerKeyConvention.UpperRepair`: no rename, no new
+    /// version; save an edit as a new file.
+    pub fn owner_file_key_for_content(
+        &self,
+        file_id: String,
+        first_chunk_frame: Vec<u8>,
+    ) -> Result<OwnerFileKey, CryptoError> {
+        let (key, convention) =
+            self.with_key(|mk| kdf::owner_file_key_for_content(mk, &file_id, &first_chunk_frame))??;
+        Ok(OwnerFileKey {
+            key: FileKeyHandle::new(key),
+            convention: convention.into(),
+        })
+    }
+
     /// Legacy direct-master wrap for existing protocols. Folder custody and
     /// link recovery MUST use the purpose-bound methods below instead.
     pub fn wrap_key(&self, inner: &FileKeyHandle) -> Result<EncryptedData, CryptoError> {
@@ -6966,6 +6991,42 @@ mod sf_0002_upper_repair {
             master
                 .owner_file_key_for_name(file_id.into(), "plain.txt".into())
                 .is_err()
+        );
+    }
+
+    /// SF-0002 split keys: each content version resolves on its own, and the
+    /// name's `UpperRepair` does not stand in for version 2's `String`.
+    #[test]
+    fn split_file_resolves_each_version_independently() {
+        let v = vector("upper_repair_split_v1");
+        let master = MasterKeyHandle::from_keychain_bytes(bytes(&v, "master_key_hex")).unwrap();
+        let file_id = v["file_id"].as_str().unwrap().to_string();
+
+        let name = master
+            .owner_file_key_for_name(file_id.clone(), v["name_encrypted"].as_str().unwrap().to_string())
+            .unwrap();
+        assert!(matches!(name.convention, OwnerKeyConvention::UpperRepair));
+
+        let v1 = bytes(&v, "content_v1_frame_hex");
+        let v1_resolved = master.owner_file_key_for_content(file_id.clone(), v1.clone()).unwrap();
+        assert!(matches!(v1_resolved.convention, OwnerKeyConvention::UpperRepair));
+        assert_eq!(
+            v1_resolved
+                .key
+                .decrypt_chunk(v1[..12].to_vec(), v1[12..].to_vec())
+                .unwrap(),
+            bytes(&v, "content_v1_plaintext_hex")
+        );
+
+        let v2 = bytes(&v, "content_v2_frame_hex");
+        let v2_resolved = master.owner_file_key_for_content(file_id, v2.clone()).unwrap();
+        assert!(matches!(v2_resolved.convention, OwnerKeyConvention::String));
+        assert_eq!(
+            v2_resolved
+                .key
+                .decrypt_chunk(v2[..12].to_vec(), v2[12..].to_vec())
+                .unwrap(),
+            bytes(&v, "content_v2_plaintext_hex")
         );
     }
 }

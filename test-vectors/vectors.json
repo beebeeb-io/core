@@ -18,7 +18,7 @@
       "file_key_hex": "55e11db680c9a4d9c58e8b64de76cdd76566e518f3665360c35fc6a93d1170ae",
       "name": "chunk_encrypt_decrypt",
       "nonce_hex": "7ecb3cbf57d650614110e414",
-      "note": "nonce is random \u2014 use this vector for decrypt-only testing. To verify encrypt, check that decrypt(encrypt(plaintext)) == plaintext.",
+      "note": "nonce is random — use this vector for decrypt-only testing. To verify encrypt, check that decrypt(encrypt(plaintext)) == plaintext.",
       "plaintext_hex": "48656c6c6f2c2042656562656562212054686973206973206120746573742e"
     },
     {
@@ -53,7 +53,7 @@
       "expected_master_key_hex": "ad6a5e4a441039ba0e8749a22b36fb73f9ed046331a83f3ba16cb70f4fcb2bc4",
       "mnemonic": "hockey shallow swim case minimum artist refuse beauty party twelve swap small",
       "name": "recovery_phrase_roundtrip",
-      "note": "mnemonic is random \u2014 use this to verify recover_from_phrase(phrase) produces the expected key."
+      "note": "mnemonic is random — use this to verify recover_from_phrase(phrase) produces the expected key."
     },
     {
       "ciphertext_hex": "8c5a83be50f4a2c01c51264f3719c8a925a6f4a4a5a5aba2a6a6d873c4b6c45eb8172a0b9bac1111416ef44fd56210ff9622bc6504c13be5",
@@ -61,7 +61,7 @@
       "metadata": "photos/vacation/2025-summer/IMG_0042.jpg",
       "name": "metadata_encrypt_decrypt",
       "nonce_hex": "9603467161a492931251275c",
-      "note": "nonce is random \u2014 use this vector for decrypt-only testing. To verify encrypt, check that decrypt(encrypt(metadata)) == metadata."
+      "note": "nonce is random — use this vector for decrypt-only testing. To verify encrypt, check that decrypt(encrypt(metadata)) == metadata."
     },
     {
       "content_key_hex": "4242424242424242424242424242424242424242424242424242424242424242",
@@ -83,7 +83,7 @@
       "key_to_wrap_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
       "name": "share_key_wrap",
       "nonce_hex": "174e5553a15305c56b28ae60",
-      "note": "K3: pins web's wrapKeyForShare/unwrapKeyFromShare wire format \u2014 nonce(12) || AES-256-GCM ciphertext with 16-byte tag = 60 bytes for a 32-byte wrapped key, no AAD. nonce is random \u2014 use this vector for decrypt-only testing. To verify encrypt, check that decrypt(encrypt(key_to_wrap)) == key_to_wrap.",
+      "note": "K3: pins web's wrapKeyForShare/unwrapKeyFromShare wire format — nonce(12) || AES-256-GCM ciphertext with 16-byte tag = 60 bytes for a 32-byte wrapped key, no AAD. nonce is random — use this vector for decrypt-only testing. To verify encrypt, check that decrypt(encrypt(key_to_wrap)) == key_to_wrap.",
       "wrap_key_hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5"
     },
     {
@@ -91,7 +91,7 @@
       "file_key_hex": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
       "name": "thumbnail_encrypt",
       "nonce_hex": "a38f61c267c45539d71f941d",
-      "note": "K3: pins web's thumbnail.ts encrypt/decrypt wire format \u2014 nonce(12) || AES-256-GCM ciphertext, no AAD, over arbitrary-length plaintext. plaintext is a placeholder byte sequence, not a real WebP \u2014 the format is codec-agnostic. nonce is random \u2014 use this vector for decrypt-only testing. To verify encrypt, check that decrypt(encrypt(plaintext)) == plaintext.",
+      "note": "K3: pins web's thumbnail.ts encrypt/decrypt wire format — nonce(12) || AES-256-GCM ciphertext, no AAD, over arbitrary-length plaintext. plaintext is a placeholder byte sequence, not a real WebP — the format is codec-agnostic. nonce is random — use this vector for decrypt-only testing. To verify encrypt, check that decrypt(encrypt(plaintext)) == plaintext.",
       "plaintext_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f"
     },
     {
@@ -247,7 +247,7 @@
       "link_key_hex": "28033d9bbe8781dbbba4508cb6f38972e2fdccb894689c0e41b72d6cad6a4ac4",
       "name": "folder_link_passphrase",
       "note": "Argon2id v19, 256 MiB, 4 iterations, 2 lanes, 32 bytes; token-bound SHA-256 salt then folder-link HKDF.",
-      "passphrase": "folder caf\u00e9 2237",
+      "passphrase": "folder café 2237",
       "salt_hex": "ca6bed5537508ec3bc602d7ae7034040",
       "stretch_hex": "1b08b5a91605001c53cacc58aa794aea129e4d450cf8fbdf4e65ae30718037b0",
       "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
@@ -257,7 +257,7 @@
       "link_key_hex": "28033d9bbe8781dbbba4508cb6f38972e2fdccb894689c0e41b72d6cad6a4ac4",
       "name": "folder_link_passphrase_nfd",
       "note": "NFC-normalize before Argon2id; this NFD spelling equals folder_link_passphrase.",
-      "passphrase": "folder cafe\u0301 2237",
+      "passphrase": "folder café 2237",
       "salt_hex": "ca6bed5537508ec3bc602d7ae7034040",
       "stretch_hex": "1b08b5a91605001c53cacc58aa794aea129e4d450cf8fbdf4e65ae30718037b0",
       "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
@@ -374,6 +374,7 @@
       "content_nonce_hex": "6e6e6e6e6e6e6e6e6e6e6e6e",
       "content_plaintext_hex": "53462d3030303220726561642d6f6e6c792072657061697220636f6e74656e74",
       "expected_convention": "upper_repair",
+      "expected_key_hex": "0942d10929d2dd5fc1b1a45a0be064b73d040137d66928b9111398c79632d10d",
       "expected_mime_type": "application/pdf",
       "expected_name": "uppercase-repair.pdf",
       "file_id": "5f0c2a9e-3b1d-4c7e-9a2f-6d8e1b4c7a30",
@@ -382,6 +383,28 @@
       "name": "upper_repair_v1",
       "name_encrypted": "{\"cipher_suite\":\"V1Aes256Gcm\",\"nonce\":[94,94,94,94,94,94,94,94,94,94,94,94],\"ciphertext\":[92,204,65,69,136,159,200,122,13,221,135,58,76,72,36,180,173,104,246,76,151,109,78,232,118,180,46,165,27,142,119,171,10,32,39,104,122,27,141,210,139,238,127,174,197,158,249,127,189,242,11,85,3,105,169,54,189,62,1,11,215,16,226,215,22,165,38,201,173,69,173,236,147,36,216,254,205]}",
       "note": "SF-0002: name and content were sealed under derive_file_key(master, UPPERCASE(file_id)), the iOS File Provider convention. Read-only: derive the same key through owner_file_key_for_name, which reports upper_repair. Never rename or write a new version under this id; save an edit as a new file. Fixed nonces, published KAT only."
+    },
+    {
+      "content_v1_frame_hex": "6f6f6f6f6f6f6f6f6f6f6f6f037dfe50d6ac583ca7c51ae349f84e2ae48b1afef8f8ea9be953ad4ec8acf83d942cecb104cff72684805a01b4ee6c",
+      "content_v1_nonce_hex": "6f6f6f6f6f6f6f6f6f6f6f6f",
+      "content_v1_plaintext_hex": "53462d303030322073706c697420636f6e74656e742076657273696f6e2031",
+      "content_v2_frame_hex": "7f7f7f7f7f7f7f7f7f7f7f7fea371af4f9c8009ed8d89a355128736869cd634dcc982c5bab466a15a8f1c5816410dd6e53c651302d969c86392878",
+      "content_v2_nonce_hex": "7f7f7f7f7f7f7f7f7f7f7f7f",
+      "content_v2_plaintext_hex": "53462d303030322073706c697420636f6e74656e742076657273696f6e2032",
+      "expected_content_v1_convention": "upper_repair",
+      "expected_content_v1_key_hex": "0942d10929d2dd5fc1b1a45a0be064b73d040137d66928b9111398c79632d10d",
+      "expected_content_v2_convention": "string",
+      "expected_content_v2_key_hex": "26451b1e6a690f98fe26dd5ed37c345008353f350ab9d3a4ea22e03fc5e1ea43",
+      "expected_mime_type": "application/pdf",
+      "expected_name": "split-repair.pdf",
+      "expected_name_convention": "upper_repair",
+      "expected_name_key_hex": "0942d10929d2dd5fc1b1a45a0be064b73d040137d66928b9111398c79632d10d",
+      "file_id": "5f0c2a9e-3b1d-4c7e-9a2f-6d8e1b4c7a30",
+      "file_id_upper": "5F0C2A9E-3B1D-4C7E-9A2F-6D8E1B4C7A30",
+      "master_key_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+      "name": "upper_repair_split_v1",
+      "name_encrypted": "{\"cipher_suite\":\"V1Aes256Gcm\",\"nonce\":[95,95,95,95,95,95,95,95,95,95,95,95],\"ciphertext\":[4,67,151,86,160,40,102,140,245,4,159,253,136,107,33,50,75,233,75,180,203,191,86,231,56,241,181,49,184,35,247,110,152,88,130,247,171,70,58,168,101,169,150,238,26,143,90,149,134,87,10,146,226,22,53,225,189,246,35,250,80,49,122,252,151,180,125,228,40,130,105,146,40]}",
+      "note": "SF-0002 split keys: name and content version 1 are v1 frames sealed under derive_file_key(master, UPPERCASE(file_id)); content version 2 is sealed under derive_file_key(master, file_id). Resolve each content version independently with owner_file_key_for_content. The file is READ-ONLY if the name OR any version reports upper_repair. Fixed nonces, published KAT only."
     }
   ],
   "version": 13

@@ -174,41 +174,84 @@ impl OwnerKeyConvention {
     }
 }
 
-/// The owner key candidates for `file_id`, in the order every reader tries
-/// them: the string convention, the legacy binary convention (only when
-/// `file_id` parses as a UUID), then the uppercase repair convention (only when
-/// uppercasing actually changes the id — an all-digit id never gets a third,
-/// identical derive).
-pub(crate) fn owner_key_candidates(master_key: &MasterKey, file_id: &str) -> Vec<(FileKey, OwnerKeyConvention)> {
-    let mut candidates = Vec::with_capacity(3);
-    candidates.push((
-        derive_file_key(master_key, file_id.as_bytes()),
-        OwnerKeyConvention::String,
-    ));
-    if let Ok(uuid) = file_id.parse::<uuid::Uuid>() {
-        candidates.push((derive_file_key(master_key, uuid.as_bytes()), OwnerKeyConvention::Binary));
-    }
-    let upper = file_id.to_ascii_uppercase();
-    if upper != file_id {
-        candidates.push((
-            derive_file_key(master_key, upper.as_bytes()),
-            OwnerKeyConvention::UpperRepair,
+/// The canonical `file_id` rule every owner resolver applies: exactly the
+/// lowercase hyphenated UUID form the server stores. Any other spelling
+/// (uppercase, braced, unhyphenated) is [`CoreError::InvalidInput`]. Without
+/// this, an uppercase id would derive the uppercase key through the *string*
+/// convention and be reported as writable `String`.
+fn canonical_owner_uuid(file_id: &str) -> Result<uuid::Uuid, CoreError> {
+    let uuid = file_id
+        .parse::<uuid::Uuid>()
+        .map_err(|_| CoreError::InvalidInput("file id is not a canonical lowercase hyphenated UUID".into()))?;
+    if uuid.to_string() != file_id {
+        return Err(CoreError::InvalidInput(
+            "file id is not a canonical lowercase hyphenated UUID".into(),
         ));
     }
-    candidates
+    Ok(uuid)
 }
 
-/// Resolve the owner's per-file key for a file from the `(file_id,
+/// Run `authenticates` over the owner id conventions in order — string, legacy
+/// binary UUID, then the read-only uppercase repair (only when uppercasing
+/// changes the id) — and return the first key that passes, with its convention.
+///
+/// One candidate at a time: each key is derived, tested by reference, then
+/// dropped (zeroizing its bytes) before the next is derived. Nothing is
+/// collected into a `Vec` and no copy is moved out; the key returned to the
+/// caller is the only one that survives.
+fn resolve_owner_key(
+    master_key: &MasterKey,
+    file_id: &str,
+    mut authenticates: impl FnMut(&FileKey) -> bool,
+    no_match: &str,
+) -> Result<(FileKey, OwnerKeyConvention), CoreError> {
+    let uuid = canonical_owner_uuid(file_id)?;
+    let upper = file_id.to_ascii_uppercase();
+    for convention in [
+        OwnerKeyConvention::String,
+        OwnerKeyConvention::Binary,
+        OwnerKeyConvention::UpperRepair,
+    ] {
+        let id_bytes: &[u8] = match convention {
+            OwnerKeyConvention::String => file_id.as_bytes(),
+            OwnerKeyConvention::Binary => uuid.as_bytes(),
+            OwnerKeyConvention::UpperRepair => {
+                // An id with no lowercase letters uppercases to itself; the
+                // third derive would be byte-identical to the first. Skip it.
+                if upper == file_id {
+                    continue;
+                }
+                upper.as_bytes()
+            }
+        };
+        let key = derive_file_key(master_key, id_bytes);
+        if authenticates(&key) {
+            return Ok((key, convention));
+        }
+        // `key` drops here, zeroizing its bytes, before the next derive.
+    }
+    Err(CoreError::InvalidInput(no_match.into()))
+}
+
+/// Resolve the owner's per-file key for a file's NAME from the `(file_id,
 /// name_encrypted)` pair the server stores, and report which id convention the
 /// key came from (SF-0002).
 ///
-/// Tries, in order, the string convention, the legacy binary convention (when
-/// `file_id` is a UUID) and the read-only uppercase repair convention (when
-/// uppercasing changes the id). Each candidate is checked by authenticating
-/// `name_encrypted` with the same envelope reader
-/// [`crate::encrypt::decrypt_name_metadata`] uses (name subkey then legacy raw
-/// key, native blob then web blob). The first candidate that authenticates
-/// wins.
+/// `file_id` must be the canonical lowercase hyphenated UUID form the server
+/// stores; any other spelling (including an uppercase id) is
+/// [`CoreError::InvalidInput`], so a caller cannot get an uppercase-sealed row
+/// reported as [`OwnerKeyConvention::String`].
+///
+/// Tries, in order, the string convention, the legacy binary convention and the
+/// read-only uppercase repair convention (only when uppercasing changes the
+/// id). Each candidate is checked by authenticating `name_encrypted` with the
+/// same envelope reader [`crate::encrypt::decrypt_name_metadata`] uses (name
+/// subkey then legacy raw key, native blob then web blob). The first candidate
+/// that authenticates wins.
+///
+/// No candidate key is collected or moved: each is derived, tested, and dropped
+/// (zeroizing its bytes) before the next is derived, and the returned key is
+/// the only copy that survives.
 ///
 /// A plaintext (non-envelope) name, or a name that authenticates under none of
 /// the candidates, is [`CoreError::InvalidInput`].
@@ -216,6 +259,13 @@ pub(crate) fn owner_key_candidates(master_key: &MasterKey, file_id: &str) -> Vec
 /// A returned [`OwnerKeyConvention::UpperRepair`] means READ-ONLY: the client
 /// must not rename the item or write a new version under this id. Core never
 /// writes under the uppercase convention and never migrates the row.
+///
+/// Use [`owner_file_key_for_content`] as well, per content version: a file is
+/// READ-ONLY for the client if EITHER its name or ANY of its versions resolves
+/// as [`OwnerKeyConvention::UpperRepair`]. The iOS File Provider could seal the
+/// name under the uppercase id and a later edit's new content version under the
+/// lowercase one (or the reverse), so the name's convention does not decide the
+/// content key.
 pub fn owner_file_key_for_name(
     master_key: &MasterKey,
     file_id: &str,
@@ -226,14 +276,64 @@ pub fn owner_file_key_for_name(
             "name is not an encrypted envelope; no owner key convention to resolve".into(),
         ));
     }
-    for (key, convention) in owner_key_candidates(master_key, file_id) {
-        if crate::encrypt::name_envelope_authenticates(&key, name_encrypted) {
-            return Ok((key, convention));
-        }
-    }
-    Err(CoreError::InvalidInput(
-        "name does not authenticate under any known owner key convention".into(),
-    ))
+    resolve_owner_key(
+        master_key,
+        file_id,
+        |key| crate::encrypt::name_envelope_authenticates(key, name_encrypted),
+        "name does not authenticate under any known owner key convention",
+    )
+}
+
+/// Resolve the owner's per-file key for ONE stored content version of a file
+/// from the canonical `file_id` and that version's FIRST chunk frame, and report
+/// which id convention that version's key came from (SF-0002).
+///
+/// This exists because a file's name and its content versions can be sealed
+/// under DIFFERENT conventions: the iOS File Provider wrote the name and first
+/// version under the uppercase id, but `modifyItem` sealed a later version under
+/// the lowercase id. The content key must therefore be chosen per version, by
+/// authenticating that version's bytes, never inferred from the name's
+/// convention.
+///
+/// Accepted frame formats, through core's chunk reader with
+/// [`ExpectedChunkFormat::Unrecorded`] (frame 0 decides and locks):
+/// - **v1 legacy**: `nonce(12) || ciphertext || tag(16)`, no AAD — what the File
+///   Provider wrote through `FileKeyHandle.encryptChunk` and what
+///   [`crate::chunk_stream::WRITE_FORMAT`] still writes;
+/// - **v2**: core's position-bound frame 0 (its nonce is the version id); either
+///   `is_last` value is accepted, because only chunk 0 is authenticated here.
+///
+/// The caller must still open the rest of the version with the returned key and
+/// the format from its authenticated metadata ([`crate::chunk_stream`]); this
+/// helper authenticates chunk 0 only.
+///
+/// Same canonical-id rule as [`owner_file_key_for_name`]: anything but the
+/// lowercase hyphenated UUID form is [`CoreError::InvalidInput`].
+///
+/// A returned [`OwnerKeyConvention::UpperRepair`] means READ-ONLY: the client
+/// must not write this version or a new one under this id, and an edit becomes
+/// a new file. A file is READ-ONLY if EITHER its name
+/// ([`owner_file_key_for_name`]) or ANY of its versions resolves as
+/// `UpperRepair`.
+pub fn owner_file_key_for_content(
+    master_key: &MasterKey,
+    file_id: &str,
+    first_chunk_frame: &[u8],
+) -> Result<(FileKey, OwnerKeyConvention), CoreError> {
+    resolve_owner_key(
+        master_key,
+        file_id,
+        |key| {
+            crate::chunk_stream::ChunkDecryptor::for_push_with_file_key(
+                FileKey::from_bytes(*key.as_bytes()),
+                file_id,
+                crate::chunk_stream::ExpectedChunkFormat::Unrecorded,
+            )
+            .push_frame(first_chunk_frame)
+            .is_ok()
+        },
+        "first chunk frame does not authenticate under any known owner key convention",
+    )
 }
 
 /// Derive a purpose-bound subkey of a per-file key: `HKDF-SHA256(salt = none,
