@@ -1231,6 +1231,55 @@ impl MasterKeyHandle {
         })
     }
 
+    /// Resolve the owner's per-file key from the `(file_id, name_encrypted)`
+    /// pair the server stores, reporting which id convention produced it
+    /// (SF-0002).
+    ///
+    /// The string convention is tried first, then the legacy binary one, then
+    /// the uppercase repair one (only when uppercasing changes the id). The
+    /// first candidate whose key authenticates `name_encrypted` wins.
+    ///
+    /// `OwnerKeyConvention.UpperRepair` is READ-ONLY: treat the file as
+    /// read-only — no rename and no new version; save an edit as a new file.
+    /// Core only reports the convention; it never re-seals or migrates an
+    /// existing row.
+    pub fn owner_file_key_for_name(
+        &self,
+        file_id: String,
+        name_encrypted: String,
+    ) -> Result<OwnerFileKey, CryptoError> {
+        let (key, convention) = self.with_key(|mk| kdf::owner_file_key_for_name(mk, &file_id, &name_encrypted))??;
+        Ok(OwnerFileKey {
+            key: FileKeyHandle::new(key),
+            convention: convention.into(),
+        })
+    }
+
+    /// Resolve the owner's per-file key for ONE content version from the
+    /// canonical `file_id` and that version's first chunk frame, reporting which
+    /// id convention that version's key came from (SF-0002).
+    ///
+    /// The frame may be a v1 legacy frame (`nonce || ciphertext || tag`, no AAD —
+    /// what the iOS File Provider wrote) or core's v2 frame 0. Resolve each
+    /// version separately: the name's convention does not decide the content key.
+    ///
+    /// A file is READ-ONLY for the client if EITHER
+    /// [`owner_file_key_for_name`](Self::owner_file_key_for_name) or ANY of its
+    /// versions reports `OwnerKeyConvention.UpperRepair`: no rename, no new
+    /// version; save an edit as a new file.
+    pub fn owner_file_key_for_content(
+        &self,
+        file_id: String,
+        first_chunk_frame: Vec<u8>,
+    ) -> Result<OwnerFileKey, CryptoError> {
+        let (key, convention) =
+            self.with_key(|mk| kdf::owner_file_key_for_content(mk, &file_id, &first_chunk_frame))??;
+        Ok(OwnerFileKey {
+            key: FileKeyHandle::new(key),
+            convention: convention.into(),
+        })
+    }
+
     /// Legacy direct-master wrap for existing protocols. Folder custody and
     /// link recovery MUST use the purpose-bound methods below instead.
     pub fn wrap_key(&self, inner: &FileKeyHandle) -> Result<EncryptedData, CryptoError> {
@@ -2082,6 +2131,39 @@ impl From<SessionResume> for SessionResumeAction {
             SessionResume::RestartWithFreshSession => SessionResumeAction::RestartWithFreshSession,
         }
     }
+}
+
+/// Which byte representation of an item id an owner's per-file key was derived
+/// from (SF-0002).
+#[derive(uniffi::Enum)]
+pub enum OwnerKeyConvention {
+    /// Canonical string-id convention.
+    String,
+    /// Legacy 16-byte binary UUID convention.
+    Binary,
+    /// READ-ONLY repair convention: the id was uppercased before derivation
+    /// (the iOS File Provider defect). No rename and no new version; save an
+    /// edit as a new file.
+    UpperRepair,
+}
+
+impl From<kdf::OwnerKeyConvention> for OwnerKeyConvention {
+    fn from(c: kdf::OwnerKeyConvention) -> Self {
+        match c {
+            kdf::OwnerKeyConvention::String => Self::String,
+            kdf::OwnerKeyConvention::Binary => Self::Binary,
+            kdf::OwnerKeyConvention::UpperRepair => Self::UpperRepair,
+        }
+    }
+}
+
+/// The owner's per-file key for a file, plus which id convention produced it
+/// (SF-0002). The key stays in a [`FileKeyHandle`]; raw key bytes never cross
+/// FFI.
+#[derive(uniffi::Record)]
+pub struct OwnerFileKey {
+    pub key: Arc<FileKeyHandle>,
+    pub convention: OwnerKeyConvention,
 }
 
 /// Decrypted name metadata (task 1908): `chunk_format` is what every content
@@ -6962,6 +7044,106 @@ mod direct_transfer_binding_tests {
         assert!(
             !err.to_string().contains("SECRETSIG") && !err.to_string().contains("evil.test"),
             "{err}"
+        );
+    }
+}
+
+/// SF-0002: the uppercase-sealed owner repair through the UniFFI handles.
+#[cfg(test)]
+mod sf_0002_upper_repair {
+    use super::*;
+
+    fn vector(name: &str) -> serde_json::Value {
+        let doc: serde_json::Value = serde_json::from_str(include_str!("../../test-vectors/vectors.json")).unwrap();
+        doc["vectors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["name"] == name)
+            .unwrap_or_else(|| panic!("{name} missing"))
+            .clone()
+    }
+
+    fn bytes(v: &serde_json::Value, field: &str) -> Vec<u8> {
+        v[field]
+            .as_str()
+            .unwrap()
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|b| u8::from_str_radix(std::str::from_utf8(b).unwrap(), 16).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn owner_file_key_reports_upper_repair_and_opens_the_chunk() {
+        let v = vector("upper_repair_v1");
+        let master = MasterKeyHandle::from_keychain_bytes(bytes(&v, "master_key_hex")).unwrap();
+        let resolved = master
+            .owner_file_key_for_name(
+                v["file_id"].as_str().unwrap().to_string(),
+                v["name_encrypted"].as_str().unwrap().to_string(),
+            )
+            .unwrap();
+        assert!(matches!(resolved.convention, OwnerKeyConvention::UpperRepair));
+
+        let frame = bytes(&v, "content_frame_hex");
+        let plaintext = resolved
+            .key
+            .decrypt_chunk(frame[..12].to_vec(), frame[12..].to_vec())
+            .unwrap();
+        assert_eq!(plaintext, bytes(&v, "content_plaintext_hex"));
+    }
+
+    #[test]
+    fn a_canonical_row_reports_string_and_a_plaintext_name_is_refused() {
+        let master = MasterKeyHandle::from_keychain_bytes(vec![0x40; 32]).unwrap();
+        let file_id = "5f0c2a9e-3b1d-4c7e-9a2f-6d8e1b4c7a30";
+        let meta = master.decrypt_name_metadata(file_id.into(), {
+            master
+                .encrypt_name(file_id.into(), "canonical.txt".into(), None)
+                .unwrap()
+        });
+        assert!(meta.is_ok(), "canonical row name reads");
+        assert!(
+            master
+                .owner_file_key_for_name(file_id.into(), "plain.txt".into())
+                .is_err()
+        );
+    }
+
+    /// SF-0002 split keys: each content version resolves on its own, and the
+    /// name's `UpperRepair` does not stand in for version 2's `String`.
+    #[test]
+    fn split_file_resolves_each_version_independently() {
+        let v = vector("upper_repair_split_v1");
+        let master = MasterKeyHandle::from_keychain_bytes(bytes(&v, "master_key_hex")).unwrap();
+        let file_id = v["file_id"].as_str().unwrap().to_string();
+
+        let name = master
+            .owner_file_key_for_name(file_id.clone(), v["name_encrypted"].as_str().unwrap().to_string())
+            .unwrap();
+        assert!(matches!(name.convention, OwnerKeyConvention::UpperRepair));
+
+        let v1 = bytes(&v, "content_v1_frame_hex");
+        let v1_resolved = master.owner_file_key_for_content(file_id.clone(), v1.clone()).unwrap();
+        assert!(matches!(v1_resolved.convention, OwnerKeyConvention::UpperRepair));
+        assert_eq!(
+            v1_resolved
+                .key
+                .decrypt_chunk(v1[..12].to_vec(), v1[12..].to_vec())
+                .unwrap(),
+            bytes(&v, "content_v1_plaintext_hex")
+        );
+
+        let v2 = bytes(&v, "content_v2_frame_hex");
+        let v2_resolved = master.owner_file_key_for_content(file_id, v2.clone()).unwrap();
+        assert!(matches!(v2_resolved.convention, OwnerKeyConvention::String));
+        assert_eq!(
+            v2_resolved
+                .key
+                .decrypt_chunk(v2[..12].to_vec(), v2[12..].to_vec())
+                .unwrap(),
+            bytes(&v, "content_v2_plaintext_hex")
         );
     }
 }

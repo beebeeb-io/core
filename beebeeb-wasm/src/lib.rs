@@ -45,6 +45,70 @@ pub fn derive_file_key(master_key: &[u8], file_id: &[u8]) -> Result<Vec<u8>, JsE
     Ok(fk.as_bytes().to_vec())
 }
 
+/// Resolve the owner's per-file key for a file from the `(file_id,
+/// name_encrypted)` pair the server stores, and report which id convention the
+/// key came from (SF-0002). Returns `{ key: Uint8Array, convention }`, where
+/// `convention` is `"string"`, `"binary"` or `"upper_repair"`.
+///
+/// The string convention is tried first, then the legacy binary one, then the
+/// uppercase repair one (only when uppercasing changes the id). The first
+/// candidate whose key authenticates `name_encrypted` wins.
+///
+/// `"upper_repair"` is READ-ONLY: treat the file as read-only — no rename and
+/// no new version; save an edit as a new file. Core only reports the
+/// convention; it never re-seals or migrates an existing row.
+#[wasm_bindgen(js_name = ownerFileKeyForName)]
+pub fn owner_file_key_for_name(master_key: &[u8], file_id: &str, name_encrypted: &str) -> Result<JsValue, JsError> {
+    let mk = master_key_from_slice(master_key)?;
+    let (key, convention) =
+        kdf::owner_file_key_for_name(&mk, file_id, name_encrypted).map_err(|e| JsError::new(&e.to_string()))?;
+    let obj = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &obj,
+        &"key".into(),
+        &js_sys::Uint8Array::from(key.as_bytes().as_slice()).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(&obj, &"convention".into(), &JsValue::from_str(convention.as_str()))
+        .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    Ok(obj.into())
+}
+
+/// Resolve the owner's per-file key for ONE content version of a file from the
+/// canonical `file_id` and that version's first chunk frame, and report which
+/// id convention that version's key came from (SF-0002). Returns
+/// `{ key: Uint8Array, convention }`, where `convention` is `"string"`,
+/// `"binary"` or `"upper_repair"`.
+///
+/// The first chunk frame may be a v1 legacy frame (`nonce || ciphertext ||
+/// tag`, no AAD — what the iOS File Provider wrote) or core's v2 frame 0.
+///
+/// A file is READ-ONLY for the client if EITHER
+/// [`ownerFileKeyForName`](owner_file_key_for_name) or ANY of its versions
+/// reports `"upper_repair"`: no rename, no new version; save an edit as a new
+/// file. Resolve each version separately — the name's convention does not
+/// decide the content key.
+#[wasm_bindgen(js_name = ownerFileKeyForContent)]
+pub fn owner_file_key_for_content(
+    master_key: &[u8],
+    file_id: &str,
+    first_chunk_frame: &[u8],
+) -> Result<JsValue, JsError> {
+    let mk = master_key_from_slice(master_key)?;
+    let (key, convention) =
+        kdf::owner_file_key_for_content(&mk, file_id, first_chunk_frame).map_err(|e| JsError::new(&e.to_string()))?;
+    let obj = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &obj,
+        &"key".into(),
+        &js_sys::Uint8Array::from(key.as_bytes().as_slice()).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(&obj, &"convention".into(), &JsValue::from_str(convention.as_str()))
+        .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    Ok(obj.into())
+}
+
 // ---------------------------------------------------------------------------
 // Encryption
 // ---------------------------------------------------------------------------

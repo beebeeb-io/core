@@ -641,6 +641,11 @@ fn parse_name_metadata(decrypted: &str) -> Result<NameMetadata, CoreError> {
 /// is tried before the web base64 blob. The plaintext fast-path short-circuits
 /// before any key derivation.
 ///
+/// The uppercase repair convention (SF-0002) is deliberately NOT part of this
+/// shared reader: it is reachable only through
+/// [`crate::kdf::owner_file_key_for_name`], which reports the convention so a
+/// client can treat the file as read-only.
+///
 /// Returns `CoreError::Decryption` only when the value looks encrypted but no
 /// combination succeeds (wrong key, corrupt blob).
 ///
@@ -725,6 +730,15 @@ fn decrypt_envelope_plaintext(file_key: &FileKey, name_encrypted: &str) -> Optio
     // legacy raw file key (every envelope written before).
     decrypt_envelope_plaintext_under(&derive_name_key(file_key), name_encrypted)
         .or_else(|| decrypt_envelope_plaintext_under(file_key, name_encrypted))
+}
+
+/// Whether `name_encrypted` authenticates under `file_key` — exactly the
+/// envelope reader [`decrypt_name_metadata`] uses, exposed crate-internally so
+/// [`crate::kdf::owner_file_key_for_name`] can test a candidate key without
+/// duplicating the format matrix. This only borrows `file_key`; the caller owns
+/// the key and remains responsible for dropping it (which zeroizes its bytes).
+pub(crate) fn name_envelope_authenticates(file_key: &FileKey, name_encrypted: &str) -> bool {
+    decrypt_envelope_plaintext(file_key, name_encrypted).is_some()
 }
 
 /// [`decrypt_envelope_plaintext`] under exactly one key.

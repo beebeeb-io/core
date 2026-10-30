@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `kdf::owner_file_key_for_name` with `kdf::OwnerKeyConvention` (`String`, `Binary`,
+  `UpperRepair`): resolves an owner's per-file key from the `(file_id, name_encrypted)`
+  pair and reports which id convention it came from. The repair convention reads files the
+  iOS File Provider sealed under an uppercase id (SF-0002) and is READ-ONLY — a client that
+  gets `UpperRepair` must not rename or write a new version, only save edits as a new file.
+  `kdf::owner_file_key_for_content` does the same per content version from that version's
+  first chunk frame (v1 legacy `nonce || ciphertext || tag`, or core's v2 frame 0), because
+  a Files-app edit could seal a later version under the lowercase id while the name and the
+  first version stayed under the uppercase one. A file is read-only if EITHER its name or ANY
+  version reports `UpperRepair`. Both resolvers accept only the canonical lowercase
+  hyphenated UUID form. The shared master-key readers (`decrypt_name_metadata`,
+  `decrypt_name_with_mime`, and therefore `decrypt_file_metadata` / `decrypt_name` /
+  `decrypt_names`) deliberately do NOT gain the uppercase candidate: they stay
+  two-convention (string, then binary), so a client that only bumps core cannot mistake an
+  uppercase-sealed file for a writable one. WASM `ownerFileKeyForName` /
+  `ownerFileKeyForContent`, UniFFI `MasterKeyHandle.owner_file_key_for_name` /
+  `owner_file_key_for_content` returning `OwnerFileKey`. Nothing writes under the uppercase
+  convention; no row is re-sealed or migrated. Vectors `upper_repair_v1` and
+  `upper_repair_split_v1` (vectors version 13).
 - `direct_transfer::storage::check_storage_get`: a storage GET delivered the chunk only for a
   `200` whose `Content-Length` is exactly the grant's length; anything else is `Failed { status }`
   (status `0`: no HTTP answer). `check_storage_body` applies the same rule to the bytes actually
