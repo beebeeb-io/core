@@ -1,5 +1,16 @@
 use wasm_bindgen::prelude::*;
 
+// Task 2254 (decision L17): wipe every heap block as it is released, so the
+// temporary copies of secrets that wasm-bindgen allocates for arguments and
+// results do not survive in the WASM heap after an export returns. wasm32 only:
+// native builds (unit tests, CLIs) keep the platform allocator.
+#[cfg(target_arch = "wasm32")]
+mod zeroing_alloc;
+
+#[cfg(target_arch = "wasm32")]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: zeroing_alloc::ZeroingAllocator = zeroing_alloc::ZeroingAllocator;
+
 use beebeeb_core::encrypt;
 use beebeeb_core::kdf;
 use beebeeb_core::recovery;
