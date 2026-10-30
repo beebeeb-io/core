@@ -3,7 +3,9 @@
 //! Every request is recorded with the virtual clocks at the moment it was
 //! made, so a test can assert both what was asked and when. No socket is
 //! opened: `wall` and `mono` advance only through the test's calls and
-//! `sleep`.
+//! `sleep`. A reply can be made to arrive after a virtual delay, and a
+//! `sleep` advances the clocks in steps to the nearest pending waiter, so a
+//! reply that becomes due during a wait is observable before the wait ends.
 
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -71,12 +73,27 @@ pub struct Recorded {
     pub mono_ms: i64,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Which {
+    Wall,
+    Mono,
+}
+
+#[derive(Debug)]
+struct Waiter {
+    which: Which,
+    target: i64,
+    waker: Waker,
+}
+
 /// A handle on the scripted transport's virtual clocks, so a script can move
 /// time while it answers (a link that expires during a suspend).
 #[derive(Clone, Debug)]
 pub struct Clock {
     wall: Arc<AtomicI64>,
     mono: Arc<AtomicI64>,
+    waiters: Arc<Mutex<Vec<Waiter>>>,
 }
 
 impl Default for Clock {
@@ -90,6 +107,7 @@ impl Clock {
         Clock {
             wall: Arc::new(AtomicI64::new(WALL_START_MS)),
             mono: Arc::new(AtomicI64::new(0)),
+            waiters: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -103,14 +121,81 @@ impl Clock {
 
     pub fn set_wall(&self, ms: i64) {
         self.wall.store(ms, Ordering::SeqCst);
+        self.notify();
     }
 
     pub fn advance_wall(&self, ms: i64) {
         self.wall.fetch_add(ms, Ordering::SeqCst);
+        self.notify();
+    }
+
+    pub fn set_mono(&self, ms: i64) {
+        self.mono.store(ms, Ordering::SeqCst);
+        self.notify();
     }
 
     pub fn advance_mono(&self, ms: i64) {
         self.mono.fetch_add(ms, Ordering::SeqCst);
+        self.notify();
+    }
+
+    fn notify(&self) {
+        let waiters = {
+            let mut waiters = self.waiters.lock().unwrap();
+            let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut *waiters)
+                .into_iter()
+                .partition(|w| self.now(w.which) >= w.target);
+            *waiters = later;
+            due
+        };
+        for waiter in waiters {
+            waiter.waker.wake();
+        }
+    }
+
+    fn now(&self, which: Which) -> i64 {
+        match which {
+            Which::Wall => self.wall(),
+            Which::Mono => self.mono(),
+        }
+    }
+
+    fn register(&self, which: Which, target: i64, waker: Waker) {
+        self.waiters.lock().unwrap().push(Waiter {
+            which,
+            target,
+            waker,
+        });
+    }
+
+    /// The smallest positive step to the next waiter or to `target`.
+    fn next_delta(&self, target: i64) -> i64 {
+        let mut delta = (target - self.mono()).max(1);
+        for waiter in self.waiters.lock().unwrap().iter() {
+            let step = waiter.target - self.now(waiter.which);
+            if step > 0 {
+                delta = delta.min(step);
+            }
+        }
+        delta
+    }
+
+    fn advance_both(&self, ms: i64) {
+        self.wall.fetch_add(ms, Ordering::SeqCst);
+        self.mono.fetch_add(ms, Ordering::SeqCst);
+        self.notify();
+    }
+
+    async fn wait_until(&self, which: Which, target: i64) {
+        let clock = self.clone();
+        std::future::poll_fn(move |cx| {
+            if clock.now(which) >= target {
+                return Poll::Ready(());
+            }
+            clock.register(which, target, cx.waker().clone());
+            Poll::Pending
+        })
+        .await;
     }
 }
 
@@ -121,9 +206,13 @@ pub type Handler = Box<dyn Fn(&Request, i64, i64) -> Reply + Send + Sync>;
 pub struct ScriptedIo {
     handler: Handler,
     log: Mutex<Vec<Recorded>>,
-    wall: Arc<AtomicI64>,
-    mono: Arc<AtomicI64>,
+    clock: Clock,
     gate: Option<Arc<Gate>>,
+    /// Virtual delay before a storage GET answers, by chunk index; `None`
+    /// matches every request, a `Some(index)` entry wins over it.
+    delays: Vec<(Option<u32>, i64)>,
+    /// Virtual delay before an API call answers.
+    api_delay_ms: Option<i64>,
 }
 
 impl ScriptedIo {
@@ -131,18 +220,16 @@ impl ScriptedIo {
         ScriptedIo {
             handler: Box::new(handler),
             log: Mutex::new(Vec::new()),
-            wall: Arc::new(AtomicI64::new(WALL_START_MS)),
-            mono: Arc::new(AtomicI64::new(0)),
+            clock: Clock::new(),
             gate: None,
+            delays: Vec::new(),
+            api_delay_ms: None,
         }
     }
 
     /// The same clocks this transport uses, for a script that moves time.
     pub fn clock(&self) -> Clock {
-        Clock {
-            wall: self.wall.clone(),
-            mono: self.mono.clone(),
-        }
+        self.clock.clone()
     }
 
     /// A transport on an externally held clock, so the script itself can move
@@ -151,9 +238,10 @@ impl ScriptedIo {
         ScriptedIo {
             handler: Box::new(handler),
             log: Mutex::new(Vec::new()),
-            wall: clock.wall,
-            mono: clock.mono,
+            clock,
             gate: None,
+            delays: Vec::new(),
+            api_delay_ms: None,
         }
     }
 
@@ -164,28 +252,58 @@ impl ScriptedIo {
         self
     }
 
+    /// Every API call answers after this much virtual time.
+    pub fn with_api_delay(mut self, ms: i64) -> Self {
+        self.api_delay_ms = Some(ms);
+        self
+    }
+
+    /// Every storage GET answers after this much virtual time.
+    pub fn with_storage_delay(mut self, ms: i64) -> Self {
+        self.delays.push((None, ms));
+        self
+    }
+
+    /// A named chunk's storage GET answers after `ms` of virtual time.
+    pub fn with_storage_delay_for(mut self, index: u32, ms: i64) -> Self {
+        self.delays.push((Some(index), ms));
+        self
+    }
+
+    fn delay_for(&self, url: &str) -> Option<i64> {
+        let index = url
+            .split_once("i=")
+            .map(|(_, rest)| rest.split('&').next().unwrap_or(rest))
+            .and_then(|v| v.parse::<u32>().ok());
+        self.delays
+            .iter()
+            .find(|(which, _)| *which == index)
+            .or_else(|| self.delays.iter().find(|(which, _)| which.is_none()))
+            .map(|(_, ms)| *ms)
+    }
+
     pub fn wall_now(&self) -> i64 {
-        self.wall.load(Ordering::SeqCst)
+        self.clock.wall()
     }
 
     pub fn mono_now(&self) -> i64 {
-        self.mono.load(Ordering::SeqCst)
+        self.clock.mono()
     }
 
     pub fn set_wall(&self, ms: i64) {
-        self.wall.store(ms, Ordering::SeqCst);
+        self.clock.set_wall(ms);
     }
 
     pub fn advance_wall(&self, ms: i64) {
-        self.wall.fetch_add(ms, Ordering::SeqCst);
+        self.clock.advance_wall(ms);
     }
 
     pub fn set_mono(&self, ms: i64) {
-        self.mono.store(ms, Ordering::SeqCst);
+        self.clock.set_mono(ms);
     }
 
     pub fn advance_mono(&self, ms: i64) {
-        self.mono.fetch_add(ms, Ordering::SeqCst);
+        self.clock.advance_mono(ms);
     }
 
     pub fn requests(&self) -> Vec<Recorded> {
@@ -197,7 +315,7 @@ impl ScriptedIo {
     }
 
     fn record(&self, request: Request) -> (i64, i64) {
-        let (wall, mono) = (self.wall_now(), self.mono_now());
+        let (wall, mono) = (self.clock.wall(), self.clock.mono());
         self.log.lock().unwrap().push(Recorded {
             request,
             wall_ms: wall,
@@ -211,13 +329,23 @@ impl DirectIo for ScriptedIo {
     async fn api(&self, call: ApiCall) -> ApiReply {
         let request = Request::Api(call);
         let (wall, mono) = self.record(request.clone());
+        if let Some(delay) = self.api_delay_ms {
+            self.clock.wait_until(Which::Mono, mono + delay).await;
+        }
         match (self.handler)(&request, wall, mono) {
             Reply::Api(reply) => reply,
             other => panic!("the script answered an API call with {other:?}"),
         }
     }
 
-    async fn storage_get(&self, url: &SignedUrl, expected_len: u64, total: Duration) -> StorageReply {
+    async fn storage_get(
+        &self,
+        url: &SignedUrl,
+        expected_len: u64,
+        total: Duration,
+        _idle: Duration,
+        _connect: Duration,
+    ) -> StorageReply {
         if let Some(gate) = &self.gate {
             gate.arrive();
             gate.wait().await;
@@ -228,6 +356,10 @@ impl DirectIo for ScriptedIo {
             total,
         };
         let (wall, mono) = self.record(request.clone());
+        let url = url.expose().to_string();
+        if let Some(delay) = self.delay_for(&url) {
+            self.clock.wait_until(Which::Mono, mono + delay).await;
+        }
         let reply = match (self.handler)(&request, wall, mono) {
             Reply::Storage(reply) => reply,
             other => panic!("the script answered a storage GET with {other:?}"),
@@ -260,16 +392,23 @@ impl DirectIo for ScriptedIo {
 
     async fn sleep(&self, d: Duration) {
         let ms = i64::try_from(d.as_millis()).unwrap_or(i64::MAX);
-        self.wall.fetch_add(ms, Ordering::SeqCst);
-        self.mono.fetch_add(ms, Ordering::SeqCst);
+        let target = self.clock.mono() + ms;
+        if self.clock.mono() >= target {
+            return;
+        }
+        // Advance to the nearest pending waiter, or to the target when no
+        // waiter comes sooner. Stopping at a waiter lets the driver poll the
+        // tasks at the moment their reply is due, then continue the nap.
+        let delta = self.clock.next_delta(target);
+        self.clock.advance_both(delta);
     }
 
     fn wall_ms(&self) -> i64 {
-        self.wall_now()
+        self.clock.wall()
     }
 
     fn mono_ms(&self) -> i64 {
-        self.mono_now()
+        self.clock.mono()
     }
 }
 

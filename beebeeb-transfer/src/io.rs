@@ -49,7 +49,7 @@ pub struct ApiCall {
 
 /// What the API answered. `status` is `0` when there was no HTTP answer: a
 /// connect failure, a timeout or a TLS error.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct ApiReply {
     pub status: u16,
     pub content_type: Option<String>,
@@ -57,7 +57,24 @@ pub struct ApiReply {
     pub body: Vec<u8>,
 }
 
+/// Prints status, content type and body length only. A grant reply's body holds
+/// signed URLs: a derived `Debug` would put one (byte list included) in any
+/// `{:?}` panic message or log line.
+impl fmt::Debug for ApiReply {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ApiReply")
+            .field("status", &self.status)
+            .field("content_type", &self.content_type)
+            .field("body_len", &self.body.len())
+            .finish()
+    }
+}
+
 /// What a storage GET saw. `status` is `0` when there was no HTTP answer.
+///
+/// Every field is a number or bytes: there is no string field, so by its type a
+/// reply cannot carry the link (a transport that kept one would have to add a
+/// field of its own).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StorageReply {
     pub status: u16,
@@ -106,11 +123,16 @@ pub trait DirectIo: Send + Sync {
     /// Fetch one encrypted chunk from its link. At most `expected_len + 1`
     /// body bytes are read; anything else is a `status` (0 when there was no
     /// HTTP answer). The URL never reaches an error.
+    ///
+    /// `idle` cuts a body that delivered no byte for that long; `connect`
+    /// bounds opening the connection; `total` bounds the whole call.
     fn storage_get(
         &self,
         url: &SignedUrl,
         expected_len: u64,
         total: Duration,
+        idle: Duration,
+        connect: Duration,
     ) -> impl Future<Output = StorageReply> + Send;
 
     /// PUT one object to its link. The answer is the HTTP status; `0` when
@@ -133,5 +155,13 @@ pub trait DirectIo: Send + Sync {
 
     /// A monotonic millisecond clock: backoff and pacing. Never compared with
     /// `wall_ms`.
+    ///
+    /// It must be ONE process-wide clock: milliseconds since a process-global
+    /// epoch (a `static OnceLock<Instant>`), not since this transport was
+    /// created. The storage breaker and every shared entry compare the values a
+    /// previous transport instance recorded, so a per-instance clock would let
+    /// a fresh transport skip a hold it should respect. Two instances created a
+    /// second apart report values within 200 ms of each other at the same
+    /// moment (the conformance suite checks this).
     fn mono_ms(&self) -> i64;
 }

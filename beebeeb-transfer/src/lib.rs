@@ -39,7 +39,9 @@ pub mod test_support;
 #[cfg(test)]
 mod tests;
 
-pub use download::{DownloadError, DownloadOutcome, DownloadRequest, DownloadStats, PlaintextSink, download};
+pub use download::{
+    AfterWriteCause, DownloadError, DownloadOutcome, DownloadRequest, DownloadStats, PlaintextSink, download,
+};
 pub use io::{ApiCall, ApiMethod, ApiReply, DirectIo, SignedUrl, StorageReply};
 pub use observer::{ChunkVia, Observer, TransferEvent, TransportKind, UseApiReason};
 pub use shared::{DirectShared, DirectStore, HealthSnapshot};

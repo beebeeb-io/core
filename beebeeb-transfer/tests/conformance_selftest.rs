@@ -1,49 +1,120 @@
 //! The conformance suite's own self-tests: a reference transport passes, and a
-//! transport that follows redirects or sends cookies is caught. A real HTTP
-//! client (reqwest + tokio) is used here only; the crate itself has none.
+//! transport that follows redirects, sends cookies, sends the bearer to
+//! storage, has no read timeout or uses a per-instance monotonic clock is
+//! caught. A real HTTP client (reqwest + tokio) is used here only; the crate
+//! itself has none.
 
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use beebeeb_transfer::test_support::conformance::{self, refuse_plain_http};
-use beebeeb_transfer::{ApiCall, ApiReply, DirectIo, SignedUrl, StorageReply};
+use beebeeb_transfer::test_support::conformance;
+use beebeeb_transfer::{ApiCall, ApiMethod, ApiReply, DirectIo, SignedUrl, StorageReply};
 use bytes::Bytes;
 
-/// A correct transport, with two switches that make it wrong on purpose.
+#[derive(Clone, Copy)]
+struct Wrong {
+    follow_redirects: bool,
+    send_cookie: bool,
+    send_auth_to_storage: bool,
+    read_timeout: bool,
+    per_instance_clock: bool,
+}
+
+impl Wrong {
+    const NONE: Wrong = Wrong {
+        follow_redirects: false,
+        send_cookie: false,
+        send_auth_to_storage: false,
+        read_timeout: true,
+        per_instance_clock: false,
+    };
+}
+
+/// A correct transport, with switches that make it wrong on purpose.
 struct ReferenceIo {
     client: reqwest::Client,
-    send_cookie: bool,
+    base: String,
+    wrong: Wrong,
+    epoch: Instant,
 }
 
 impl ReferenceIo {
-    fn new(_api_base: &str, follow_redirects: bool, send_cookie: bool) -> ReferenceIo {
-        let redirect = if follow_redirects {
+    fn new(api_base: &str, wrong: Wrong) -> ReferenceIo {
+        let redirect = if wrong.follow_redirects {
             reqwest::redirect::Policy::limited(10)
         } else {
             reqwest::redirect::Policy::none()
         };
-        let client = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .redirect(redirect)
-            .connect_timeout(Duration::from_secs(15))
-            .read_timeout(Duration::from_secs(30))
-            .build()
-            .expect("the reference client builds");
-        ReferenceIo { client, send_cookie }
+            .connect_timeout(Duration::from_secs(15));
+        if wrong.read_timeout {
+            builder = builder.read_timeout(Duration::from_secs(30));
+        }
+        let client = builder.build().expect("the reference client builds");
+        ReferenceIo {
+            client,
+            base: api_base.trim_end_matches('/').to_string(),
+            wrong,
+            epoch: Instant::now(),
+        }
+    }
+
+    fn url(&self, path: &str) -> String {
+        format!("{}{path}", self.base)
     }
 }
 
 impl DirectIo for ReferenceIo {
-    async fn api(&self, _call: ApiCall) -> ApiReply {
-        ApiReply::default()
+    async fn api(&self, call: ApiCall) -> ApiReply {
+        let mut request = self
+            .client
+            .request(
+                match call.method {
+                    ApiMethod::Get => reqwest::Method::GET,
+                    ApiMethod::Post => reqwest::Method::POST,
+                },
+                self.url(&call.path),
+            )
+            .timeout(call.timeout)
+            .header("Authorization", "Bearer conformance-self-test")
+            .header("Accept", "application/json");
+        if let Some(body) = call.body {
+            request = request.body(body);
+        }
+        let response = match request.send().await {
+            Ok(response) => response,
+            Err(_) => return ApiReply::default(),
+        };
+        let status = response.status().as_u16();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        let body = response.bytes().await.map(|b| b.to_vec()).unwrap_or_default();
+        ApiReply {
+            status,
+            content_type,
+            retry_after: None,
+            body,
+        }
     }
 
-    async fn storage_get(&self, url: &SignedUrl, expected_len: u64, total: Duration) -> StorageReply {
-        if refuse_plain_http(url.expose()) {
-            return StorageReply::default();
-        }
+    async fn storage_get(
+        &self,
+        url: &SignedUrl,
+        expected_len: u64,
+        total: Duration,
+        _idle: Duration,
+        _connect: Duration,
+    ) -> StorageReply {
         let mut request = self.client.get(url.expose()).timeout(total);
-        if self.send_cookie {
+        if self.wrong.send_cookie {
             request = request.header("Cookie", "sid=1");
+        }
+        if self.wrong.send_auth_to_storage {
+            request = request.header("Authorization", "Bearer conformance-self-test");
         }
         let response = match request.send().await {
             Ok(response) => response,
@@ -95,6 +166,9 @@ impl DirectIo for ReferenceIo {
     }
 
     fn mono_ms(&self) -> i64 {
+        if self.wrong.per_instance_clock {
+            return self.epoch.elapsed().as_millis() as i64;
+        }
         static START: OnceLock<Instant> = OnceLock::new();
         START.get_or_init(Instant::now).elapsed().as_millis() as i64
     }
@@ -102,13 +176,17 @@ impl DirectIo for ReferenceIo {
 
 #[tokio::test]
 async fn conformance_passes_the_reference_transport() {
-    let report = conformance::run(|base: &str| ReferenceIo::new(base, false, false)).await;
+    let report = conformance::run(|base: &str| ReferenceIo::new(base, Wrong::NONE)).await;
     assert!(report.passed(), "{}", report.describe());
 }
 
 #[tokio::test]
 async fn conformance_fails_a_transport_that_follows_redirects() {
-    let report = conformance::run(|base: &str| ReferenceIo::new(base, true, false)).await;
+    let wrong = Wrong {
+        follow_redirects: true,
+        ..Wrong::NONE
+    };
+    let report = conformance::run(|base: &str| ReferenceIo::new(base, wrong)).await;
     assert!(!report.passed(), "{}", report.describe());
     assert!(
         report.failures().contains(&"redirects_are_not_followed"),
@@ -119,10 +197,61 @@ async fn conformance_fails_a_transport_that_follows_redirects() {
 
 #[tokio::test]
 async fn conformance_fails_a_transport_that_sends_cookies() {
-    let report = conformance::run(|base: &str| ReferenceIo::new(base, false, true)).await;
+    let wrong = Wrong {
+        send_cookie: true,
+        ..Wrong::NONE
+    };
+    let report = conformance::run(|base: &str| ReferenceIo::new(base, wrong)).await;
     assert!(!report.passed(), "{}", report.describe());
     assert!(
         report.failures().contains(&"cookies_are_not_sent"),
+        "{}",
+        report.describe()
+    );
+}
+
+#[tokio::test]
+async fn conformance_fails_a_transport_that_sends_the_bearer_to_storage() {
+    let wrong = Wrong {
+        send_auth_to_storage: true,
+        ..Wrong::NONE
+    };
+    let report = conformance::run(|base: &str| ReferenceIo::new(base, wrong)).await;
+    assert!(!report.passed(), "{}", report.describe());
+    assert!(
+        report
+            .failures()
+            .contains(&"no_credentials_or_client_headers_reach_storage"),
+        "{}",
+        report.describe()
+    );
+}
+
+#[tokio::test]
+async fn conformance_fails_a_transport_without_a_read_timeout() {
+    let wrong = Wrong {
+        read_timeout: false,
+        ..Wrong::NONE
+    };
+    let report = conformance::run(|base: &str| ReferenceIo::new(base, wrong)).await;
+    assert!(!report.passed(), "{}", report.describe());
+    assert!(
+        report.failures().contains(&"an_idle_body_times_out"),
+        "{}",
+        report.describe()
+    );
+}
+
+#[tokio::test]
+async fn conformance_fails_a_transport_with_a_per_instance_mono_clock() {
+    let wrong = Wrong {
+        per_instance_clock: true,
+        ..Wrong::NONE
+    };
+    let report = conformance::run(|base: &str| ReferenceIo::new(base, wrong)).await;
+    assert!(!report.passed(), "{}", report.describe());
+    assert!(
+        report.failures().contains(&"the_mono_clock_is_process_wide"),
         "{}",
         report.describe()
     );

@@ -18,16 +18,19 @@ use std::time::Duration;
 
 use beebeeb_core::chunk_stream::ChunkDecryptor;
 use beebeeb_core::direct_transfer::{
-    self as dt, API_CALL_TIMEOUT, Call, Direction, Discovery, DownloadGrantResponse, DownloadPlanner, Lookup,
+    self as dt, API_CALL_TIMEOUT, Call, Direction, Discovery, DownloadGrantResponse, DownloadPlanner,
     MemoryClass, Outcome, PinnedRetry, PlannerConfig, Poll, StorageBody, StorageGet, Verdict, classify,
-    download_grants_path, max_in_flight_bytes, paced_until_ms, storage_get_total,
+    download_grants_path, max_in_flight_bytes, paced_until_ms, pinned_chunk_path, storage_get_total,
+    STORAGE_CONNECT_TIMEOUT, STORAGE_GET_IDLE,
 };
 use bytes::Bytes;
+use futures_util::future::{Either, select};
 use futures_util::stream::{FuturesUnordered, StreamExt};
+use zeroize::Zeroizing;
 
 use crate::io::{ApiCall, ApiMethod, DirectIo, SignedUrl};
 use crate::observer::{ChunkVia, Observer, TransferEvent, TransportKind, UseApiReason};
-use crate::shared::DirectShared;
+use crate::shared::{DirectShared, DiscoveryFlightResult};
 
 /// What to download and how the caller wants it done.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,8 +57,42 @@ pub struct DownloadRequest {
 
 /// Where authenticated plaintext goes. The driver calls `write` in file order;
 /// nothing is written for a chunk that did not authenticate.
+///
+/// When an attempt fails after a write, the driver uses [`discardable`] and
+/// [`discard`] so `UseApi` can still promise an empty sink. A sink that cannot
+/// throw its bytes away must say so, and the driver reports
+/// [`DownloadError::DirectFailedAfterWrite`] instead of handing the file to the
+/// API path.
+///
+/// [`discardable`]: PlaintextSink::discardable
+/// [`discard`]: PlaintextSink::discard
 pub trait PlaintextSink: Send {
     fn write(&mut self, plain: &[u8]) -> std::io::Result<()>;
+    /// Can everything written so far be thrown away? A `.part` file or a memory
+    /// buffer: yes. stdout, a pipe: no.
+    fn discardable(&self) -> bool;
+    /// Throw away everything written. After it, every `write` returns an error
+    /// (the sink is dead, so it cannot be reused or stitched). Called by the
+    /// driver only when `discardable()` is true.
+    fn discard(&mut self) -> std::io::Result<()>;
+}
+
+/// Why an attempt that had already written plaintext failed.
+#[derive(Debug)]
+pub enum AfterWriteCause {
+    /// The direct attempt cannot finish, but the API path can serve the file.
+    ApiNeeded(UseApiReason),
+    /// The attempt failed for a reason the API path will not fix.
+    Failed(Box<DownloadError>),
+}
+
+impl fmt::Display for AfterWriteCause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AfterWriteCause::ApiNeeded(_) => f.write_str("the API path must serve the file"),
+            AfterWriteCause::Failed(error) => write!(f, "{error}"),
+        }
+    }
 }
 
 /// The file could not be downloaded directly, for a reason the API path will
@@ -67,13 +104,24 @@ pub enum DownloadError {
     /// The API answered 403.
     Forbidden,
     /// The pinned version is gone, or the server sent another version: fresh
-    /// metadata is needed; nothing was published.
+    /// metadata is needed.
     FileChanged,
     /// Chunk `index` did not authenticate from storage and then from the pinned
-    /// API route; nothing was published.
+    /// API route.
     Unauthentic { index: u32 },
+    /// The stream ended before the last chunk; the decryptor's integrity guard
+    /// refused the file.
+    Truncated,
     /// Writing to the caller's sink failed.
     Sink(std::io::Error),
+    /// Direct failed after plaintext had already reached a sink that cannot
+    /// discard it. The sink now holds a prefix of the file and must not be
+    /// reused or stitched.
+    DirectFailedAfterWrite {
+        written_plaintext_bytes: u64,
+        chunks_written: u32,
+        cause: AfterWriteCause,
+    },
 }
 
 impl fmt::Display for DownloadError {
@@ -81,12 +129,21 @@ impl fmt::Display for DownloadError {
         match self {
             DownloadError::Unauthorized => f.write_str("sign in again"),
             DownloadError::Forbidden => f.write_str("this account may not download the file"),
-            DownloadError::FileChanged => f.write_str("the file changed while it was downloading; nothing was written"),
-            DownloadError::Unauthentic { index } => write!(
-                f,
-                "chunk {index} did not authenticate from storage or from the API; nothing was written"
-            ),
+            DownloadError::FileChanged => f.write_str("the file changed while it was downloading"),
+            DownloadError::Unauthentic { index } => {
+                write!(f, "chunk {index} did not authenticate from storage or from the API")
+            }
+            DownloadError::Truncated => f.write_str("the download ended before its last chunk"),
             DownloadError::Sink(e) => write!(f, "writing the file failed: {e}"),
+            DownloadError::DirectFailedAfterWrite {
+                written_plaintext_bytes,
+                chunks_written,
+                cause,
+            } => write!(
+                f,
+                "the direct download failed after {written_plaintext_bytes} bytes in {chunks_written} chunks \
+                 and the output is incomplete: {cause}"
+            ),
         }
     }
 }
@@ -95,6 +152,10 @@ impl std::error::Error for DownloadError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             DownloadError::Sink(e) => Some(e),
+            DownloadError::DirectFailedAfterWrite { cause, .. } => match cause {
+                AfterWriteCause::Failed(error) => Some(error.as_ref()),
+                AfterWriteCause::ApiNeeded(_) => None,
+            },
             _ => None,
         }
     }
@@ -124,15 +185,125 @@ pub struct DownloadStats {
 pub enum DownloadOutcome {
     /// Every chunk authenticated and the sink holds the plaintext.
     Done(DownloadStats),
-    /// The API path must serve this file; `sink` received nothing.
+    /// The API path must serve this file; the sink holds nothing (never
+    /// written, or discarded).
     UseApi(UseApiReason),
+}
+
+/// The dirty flag and the counters of one attempt, plus the drop guard that
+/// applies the discard table when the future is dropped (cancel).
+struct Attempt<'a> {
+    sink: &'a mut dyn PlaintextSink,
+    observer: &'a dyn Observer,
+    /// Set BEFORE each write: a write that fails partway still counts.
+    dirty: bool,
+    plaintext_bytes: u64,
+    ciphertext_bytes: u64,
+    chunks_written: u32,
+    finished: bool,
+}
+
+impl<'a> Attempt<'a> {
+    fn new(sink: &'a mut dyn PlaintextSink, observer: &'a dyn Observer) -> Self {
+        Attempt {
+            sink,
+            observer,
+            dirty: false,
+            plaintext_bytes: 0,
+            ciphertext_bytes: 0,
+            chunks_written: 0,
+            finished: false,
+        }
+    }
+
+    fn write(&mut self, plain: &[u8]) -> std::io::Result<()> {
+        self.dirty = true;
+        self.chunks_written = self.chunks_written.saturating_add(1);
+        self.sink.write(plain)?;
+        self.plaintext_bytes = self.plaintext_bytes.saturating_add(plain.len() as u64);
+        Ok(())
+    }
+
+    fn note_ciphertext(&mut self, bytes: u64) {
+        self.ciphertext_bytes = self.ciphertext_bytes.saturating_add(bytes);
+    }
+
+    /// The ONE exit: apply the table to the attempt's final result.
+    fn finish(mut self, result: Result<DownloadOutcome, DownloadError>) -> Result<DownloadOutcome, DownloadError> {
+        self.finished = true;
+        if !self.dirty {
+            return result;
+        }
+        match &result {
+            // A done attempt keeps its plaintext.
+            Ok(DownloadOutcome::Done(_)) => result,
+            _ if self.sink.discardable() => {
+                // A failed discard is reported to the observer and never hides
+                // the original error or changes the outcome.
+                let _ = self.sink.discard();
+                self.observer.event(TransferEvent::Discarded {
+                    plaintext_bytes: self.plaintext_bytes,
+                    ciphertext_bytes: self.ciphertext_bytes,
+                });
+                result
+            }
+            _ => {
+                let cause = match result {
+                    Ok(DownloadOutcome::UseApi(reason)) => AfterWriteCause::ApiNeeded(reason),
+                    Err(error) => AfterWriteCause::Failed(Box::new(error)),
+                    Ok(DownloadOutcome::Done(_)) => unreachable!("handled above"),
+                };
+                Err(DownloadError::DirectFailedAfterWrite {
+                    written_plaintext_bytes: self.plaintext_bytes,
+                    chunks_written: self.chunks_written,
+                    cause,
+                })
+            }
+        }
+    }
+}
+
+impl Drop for Attempt<'_> {
+    fn drop(&mut self) {
+        if self.finished || !self.dirty {
+            return;
+        }
+        // Cancel: the future was dropped. Discard what can be discarded; there
+        // is no result to change.
+        if self.sink.discardable() {
+            let _ = self.sink.discard();
+            self.observer.event(TransferEvent::Discarded {
+                plaintext_bytes: self.plaintext_bytes,
+                ciphertext_bytes: self.ciphertext_bytes,
+            });
+        }
+    }
+}
+
+/// One attempt's result plus whether the planner gave up storage, so the ONE
+/// exit can record the breaker.
+struct AttemptEnd {
+    result: Result<DownloadOutcome, DownloadError>,
+    storage_given_up: bool,
+}
+
+impl AttemptEnd {
+    /// An exit before a planner exists.
+    fn plain(result: Result<DownloadOutcome, DownloadError>) -> Self {
+        AttemptEnd {
+            result,
+            storage_given_up: false,
+        }
+    }
 }
 
 /// Download one file through the direct transport.
 ///
-/// `Ok(UseApi(..))` means nothing was written and the caller's API path can take
-/// the file from the start. `Err(..)` is a failure the API path would not fix;
-/// nothing was published either.
+/// `Ok(UseApi(..))` means the sink holds nothing and the caller's API path can
+/// take the file from the start. `Err(..)` is a failure the API path would not
+/// fix. If an attempt wrote plaintext into a sink that cannot discard it, the
+/// error is [`DownloadError::DirectFailedAfterWrite`] and the caller must
+/// report an incomplete output, never retry into that sink.
 pub async fn download<I: DirectIo>(
     io: &I,
     shared: &DirectShared,
@@ -141,21 +312,59 @@ pub async fn download<I: DirectIo>(
     sink: &mut dyn PlaintextSink,
     observer: &dyn Observer,
 ) -> Result<DownloadOutcome, DownloadError> {
+    let mut attempt = Attempt::new(sink, observer);
+    let end = run(io, shared, &req, decryptor, &mut attempt, observer).await;
+    finish_attempt(attempt, end, io, shared, observer)
+}
+
+/// The single exit: record the breaker on every exit, then apply the sink
+/// table.
+fn finish_attempt<I: DirectIo>(
+    attempt: Attempt<'_>,
+    end: AttemptEnd,
+    io: &I,
+    shared: &DirectShared,
+    observer: &dyn Observer,
+) -> Result<DownloadOutcome, DownloadError> {
+    if end.storage_given_up {
+        shared.gave_up_download(io.mono_ms());
+        observer.event(TransferEvent::GaveUp(Direction::Download));
+    }
+    attempt.finish(end.result)
+}
+
+#[allow(clippy::too_many_lines)]
+async fn run<I: DirectIo>(
+    io: &I,
+    shared: &DirectShared,
+    req: &DownloadRequest,
+    mut decryptor: ChunkDecryptor,
+    attempt: &mut Attempt<'_>,
+    observer: &dyn Observer,
+) -> AttemptEnd {
     if req.forced_api {
         observer.event(TransferEvent::Decided(TransportKind::Api));
-        return Ok(DownloadOutcome::UseApi(UseApiReason::ForcedApi));
+        return AttemptEnd::plain(Ok(DownloadOutcome::UseApi(UseApiReason::ForcedApi)));
     }
     if !shared.may_start_download(io.mono_ms()) {
         observer.event(TransferEvent::Decided(TransportKind::Api));
-        return Ok(DownloadOutcome::UseApi(UseApiReason::BreakerHold));
+        return AttemptEnd::plain(Ok(DownloadOutcome::UseApi(UseApiReason::BreakerHold)));
     }
 
-    let Some(discovery) = discovery(io, shared, observer).await else {
-        return Ok(DownloadOutcome::UseApi(UseApiReason::NotSupported));
+    let discovery = match discovery(io, shared, observer).await {
+        Ok(discovery) => discovery,
+        Err(DiscoveryFailure::NotSupported) => {
+            return AttemptEnd::plain(Ok(DownloadOutcome::UseApi(UseApiReason::NotSupported)));
+        }
+        Err(DiscoveryFailure::Unavailable) => {
+            return AttemptEnd::plain(Ok(DownloadOutcome::UseApi(UseApiReason::DiscoveryUnavailable)));
+        }
+        Err(DiscoveryFailure::Unauthorized) => return AttemptEnd::plain(Err(DownloadError::Unauthorized)),
+        Err(DiscoveryFailure::Forbidden) => return AttemptEnd::plain(Err(DownloadError::Forbidden)),
     };
     if !discovery.offers_download() {
         observer.event(TransferEvent::Decided(TransportKind::Api));
-        return Ok(DownloadOutcome::UseApi(UseApiReason::NotSupported));
+        return AttemptEnd::plain(Ok(DownloadOutcome::UseApi(UseApiReason::NotSupported)));
     }
 
     observer.event(TransferEvent::Decided(TransportKind::Direct));
@@ -163,21 +372,42 @@ pub async fn download<I: DirectIo>(
     let mut planner = DownloadPlanner::new(config, discovery, &req.api_base, &req.file_id);
     planner.set_max_in_flight_bytes(Some(max_in_flight_bytes(req.memory)));
 
-    let mut decryptor = decryptor;
     let mut tasks: FuturesUnordered<Task<'_>> = FuturesUnordered::new();
     let mut ready: BTreeMap<u32, Bytes> = BTreeMap::new();
     let mut attempted: HashSet<u32> = HashSet::new();
-    let mut stats = DownloadStats::default();
+    let mut chunks_storage = 0u32;
+    let mut chunks_pinned = 0u32;
+    let mut windows = 0u32;
     let mut last_unauthentic = 0u32;
     let start_mono = io.mono_ms();
+    let mut pace_until = 0i64;
+
+    macro_rules! stop {
+        ($e:expr) => {
+            return AttemptEnd {
+                result: $e,
+                storage_given_up: planner.storage_given_up(),
+            }
+        };
+    }
 
     loop {
-        let wake: Option<i64> = loop {
+        // Deadlines gathered while asking the planner what to do next.
+        let mut wait_wall: Option<i64> = None;
+        let mut wait_pace: Option<i64> = None;
+        // While the pace holds, do not poll the planner at all: a Poll::Fetch
+        // marks the chunk in flight, so a fetch that is not started yet must
+        // not be consumed. Windows and replies already in tasks still run.
+        let paced = req.kbps_limit.is_some() && io.mono_ms() < pace_until;
+        if paced {
+            wait_pace = Some(pace_until);
+        } else {
+        loop {
             match planner.poll(io.wall_ms()) {
                 Poll::RequestWindow(request) => {
                     let path = download_grants_path(&req.file_id);
                     let Ok(body) = serde_json::to_vec(&request) else {
-                        return Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile));
+                        stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)));
                     };
                     tasks.push(Box::pin(async move {
                         let reply = io
@@ -201,7 +431,9 @@ pub async fn download<I: DirectIo>(
                     let expected_len = grant.length;
                     let total = storage_get_total(expected_len);
                     tasks.push(Box::pin(async move {
-                        let reply = io.storage_get(&url, expected_len, total).await;
+                        let reply = io
+                            .storage_get(&url, expected_len, total, STORAGE_GET_IDLE, STORAGE_CONNECT_TIMEOUT)
+                            .await;
                         Event::Storage {
                             index,
                             expected_len,
@@ -214,30 +446,35 @@ pub async fn download<I: DirectIo>(
                     object_version_id,
                 } => {
                     let Some(expected_len) = planner.geometry().and_then(|g| g.chunk_length(index)) else {
-                        return Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile));
+                        stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)));
                     };
-                    let file_id = req.file_id.clone();
+                    let Ok(path) = pinned_chunk_path(&req.file_id, index, &object_version_id) else {
+                        stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)));
+                    };
                     tasks.push(Box::pin(async move {
-                        let result = pinned_fetch(io, &file_id, index, &object_version_id, expected_len).await;
+                        let result = pinned_fetch(io, path, expected_len).await;
                         Event::Pinned { index, result }
                     }));
                 }
-                Poll::Wait { until_ms } => break until_ms,
+                Poll::Wait { until_ms } => {
+                    wait_wall = until_ms;
+                    break;
+                }
                 Poll::Done => {
                     if decryptor.finish().is_err() {
-                        record_breaker(io, shared, observer, &planner);
-                        return Err(DownloadError::Unauthentic {
-                            index: last_unauthentic,
-                        });
+                        stop!(Err(DownloadError::Truncated));
                     }
-                    if planner.storage_given_up() {
-                        record_breaker(io, shared, observer, &planner);
-                    }
-                    return Ok(DownloadOutcome::Done(stats));
+                    let stats = DownloadStats {
+                        plaintext_bytes: attempt.plaintext_bytes,
+                        ciphertext_bytes: attempt.ciphertext_bytes,
+                        chunks_storage,
+                        chunks_pinned,
+                        windows,
+                    };
+                    stop!(Ok(DownloadOutcome::Done(stats)));
                 }
                 Poll::Stop(verdict) => {
-                    record_breaker(io, shared, observer, &planner);
-                    return match verdict {
+                    stop!(match verdict {
                         Verdict::ApiForFile => Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)),
                         Verdict::Restart => Err(DownloadError::FileChanged),
                         Verdict::Terminal(t) => match t.status {
@@ -248,24 +485,42 @@ pub async fn download<I: DirectIo>(
                         Verdict::Corrupt => Err(DownloadError::Unauthentic {
                             index: last_unauthentic,
                         }),
-                    };
+                    });
                 }
+            }
+        }
+        }
+
+        // Never sleep while requests sit unpolled: race the sleep against the
+        // next event.
+        let nap = match (wait_wall, wait_pace) {
+            (None, None) => None,
+            (wall, pace) => {
+                let mut shortest: Option<u64> = None;
+                if let Some(at) = wall {
+                    let ms = (at - io.wall_ms()).max(0) as u64;
+                    shortest = Some(shortest.map_or(ms, |s| s.min(ms)));
+                }
+                if let Some(at) = pace {
+                    let ms = (at - io.mono_ms()).max(0) as u64;
+                    shortest = Some(shortest.map_or(ms, |s| s.min(ms)));
+                }
+                shortest.map(Duration::from_millis)
             }
         };
 
         let event = if tasks.is_empty() {
-            match wake {
-                Some(at) => {
-                    let nap = (at - io.wall_ms()).max(0);
-                    io.sleep(Duration::from_millis(nap as u64)).await;
+            match nap {
+                Some(nap) => {
+                    io.sleep(nap).await;
                     None
                 }
                 // Nothing outstanding and nothing scheduled: never hang a
                 // download on a stuck planner; the API path is always correct.
-                None => return Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)),
+                None => stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile))),
             }
         } else {
-            tasks.next().await
+            next_event(&mut tasks, io, nap).await
         };
 
         match event {
@@ -280,13 +535,19 @@ pub async fn download<I: DirectIo>(
                 match classify(Call::DownloadGrant, &answer) {
                     Outcome::Proceed => match DownloadGrantResponse::from_json(&reply.body) {
                         Ok(window) => {
+                            // The grant route's geometry must agree with what
+                            // the caller asked for; a different file is not
+                            // something the API path fixes.
+                            if window.chunk_count != req.chunk_count {
+                                stop!(Err(DownloadError::FileChanged));
+                            }
                             if let Some(expected) = &req.pinned_version {
-                                if &window.object_version_id != expected {
-                                    return Err(DownloadError::FileChanged);
+                                if !window.object_version_id.eq_ignore_ascii_case(expected) {
+                                    stop!(Err(DownloadError::FileChanged));
                                 }
                             }
                             if planner.window_answered(window, io.wall_ms()).is_ok() {
-                                stats.windows += 1;
+                                windows += 1;
                             }
                         }
                         Err(_) => planner.window_malformed(),
@@ -311,9 +572,9 @@ pub async fn download<I: DirectIo>(
                 match (stored, reply.body) {
                     (StorageGet::Stored, Some(body)) => {
                         if planner.fetch_ok(index).is_err() {
-                            return Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile));
+                            stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)));
                         }
-                        stats.chunks_storage += 1;
+                        chunks_storage += 1;
                         observer.event(TransferEvent::Chunk {
                             index,
                             via: ChunkVia::Storage,
@@ -322,7 +583,7 @@ pub async fn download<I: DirectIo>(
                     }
                     _ => {
                         if planner.fetch_failed(index, io.wall_ms()).is_err() {
-                            return Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile));
+                            stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)));
                         }
                     }
                 }
@@ -330,22 +591,22 @@ pub async fn download<I: DirectIo>(
             Some(Event::Pinned { index, result }) => match result {
                 Pinned::Ok(bytes) => {
                     if planner.fetch_ok(index).is_err() {
-                        return Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile));
+                        stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)));
                     }
-                    stats.chunks_pinned += 1;
+                    chunks_pinned += 1;
                     observer.event(TransferEvent::Chunk {
                         index,
                         via: ChunkVia::Pinned,
                     });
                     ready.insert(index, Bytes::from(bytes));
                 }
-                Pinned::Terminal(401) => return Err(DownloadError::Unauthorized),
-                Pinned::Terminal(403) => return Err(DownloadError::Forbidden),
-                Pinned::Terminal(_) => return Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)),
-                Pinned::Restart => return Err(DownloadError::FileChanged),
+                Pinned::Terminal(401) => stop!(Err(DownloadError::Unauthorized)),
+                Pinned::Terminal(403) => stop!(Err(DownloadError::Forbidden)),
+                Pinned::Terminal(_) => stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile))),
+                Pinned::Restart => stop!(Err(DownloadError::FileChanged)),
                 Pinned::GiveUp => {
                     if planner.api_fetch_failed(index).is_err() {
-                        return Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile));
+                        stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)));
                     }
                 }
             },
@@ -355,30 +616,33 @@ pub async fn download<I: DirectIo>(
         loop {
             let next = planner.consumed_count();
             let Some(frame) = ready.remove(&next) else { break };
+            let frame_len = frame.len() as u64;
             match decryptor.push_frame(&frame) {
                 Ok(chunk) => {
-                    sink.write(&chunk.data)?;
-                    stats.plaintext_bytes += chunk.data.len() as u64;
-                    stats.ciphertext_bytes += frame.len() as u64;
-                    observer.event(TransferEvent::Bytes(chunk.data.len() as u64));
+                    // The chunk's plaintext is wiped after the write.
+                    let plain = Zeroizing::new(chunk.data);
+                    if let Err(error) = attempt.write(&plain) {
+                        stop!(Err(DownloadError::Sink(error)));
+                    }
+                    attempt.note_ciphertext(frame_len);
+                    observer.event(TransferEvent::Bytes(plain.len() as u64));
+                    // The set is only an event dedupe: a consumed index can
+                    // never be fetched again, so it must not grow with the file.
+                    attempted.remove(&next);
                     if planner.consumed(next).is_err() {
-                        return Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile));
+                        stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)));
                     }
                     if let Some(kbps) = req.kbps_limit {
-                        let until = paced_until_ms(start_mono, stats.ciphertext_bytes, kbps);
-                        let now = io.mono_ms();
-                        if until > now {
-                            io.sleep(Duration::from_millis((until - now) as u64)).await;
-                        }
+                        pace_until = pace_until.max(paced_until_ms(start_mono, attempt.ciphertext_bytes, kbps));
                     }
                 }
                 Err(_) => {
                     if req.allow_legacy_chunk0 && next == 0 {
-                        return Ok(DownloadOutcome::UseApi(UseApiReason::LegacyFile));
+                        stop!(Ok(DownloadOutcome::UseApi(UseApiReason::LegacyFile)));
                     }
                     last_unauthentic = next;
                     if planner.chunk_unauthentic(next).is_err() {
-                        return Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile));
+                        stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)));
                     }
                     break;
                 }
@@ -387,15 +651,56 @@ pub async fn download<I: DirectIo>(
     }
 }
 
-/// One discovery answer, from the shared cache when it is fresh.
-async fn discovery<I: DirectIo>(io: &I, shared: &DirectShared, observer: &dyn Observer) -> Option<Discovery> {
+/// Wait for the next task event, but no longer than `nap`; the sleep is raced
+/// against the tasks so a reply that arrives during the wait is handled at
+/// once.
+async fn next_event<'a, I: DirectIo>(
+    tasks: &mut FuturesUnordered<Task<'a>>,
+    io: &I,
+    nap: Option<Duration>,
+) -> Option<Event> {
+    let Some(nap) = nap else {
+        return tasks.next().await;
+    };
+    let sleep = io.sleep(nap);
+    let next = tasks.next();
+    futures_util::pin_mut!(sleep);
+    futures_util::pin_mut!(next);
+    match select(next, sleep).await {
+        Either::Left((event, _)) => event,
+        Either::Right(((), _)) => None,
+    }
+}
+
+/// Why discovery did not produce a usable answer.
+enum DiscoveryFailure {
+    NotSupported,
+    Unavailable,
+    Unauthorized,
+    Forbidden,
+}
+
+/// One discovery answer, from the shared cache, the one in-flight flight, or
+/// this caller's own request.
+async fn discovery<I: DirectIo>(
+    io: &I,
+    shared: &DirectShared,
+    observer: &dyn Observer,
+) -> Result<Discovery, DiscoveryFailure> {
     let now = io.wall_ms();
-    let lookup = shared.discovery_lookup(now);
-    let fetched = matches!(lookup, Lookup::Fetch);
-    let (outcome, discovery) = match lookup {
-        Lookup::Cached(discovery) => (Outcome::Proceed, Some(discovery)),
-        Lookup::UseApi => (Outcome::UseApiNow, None),
-        Lookup::Fetch => {
+    let start = shared.discovery_start(now);
+    match start {
+        crate::shared::DiscoveryStart::Cached(discovery) => Ok(discovery),
+        crate::shared::DiscoveryStart::NotSupported => Err(DiscoveryFailure::NotSupported),
+        crate::shared::DiscoveryStart::Unavailable => {
+            observer.event(TransferEvent::Decided(TransportKind::Api));
+            Err(DiscoveryFailure::Unavailable)
+        }
+        crate::shared::DiscoveryStart::Follow => {
+            let result = shared.discovery_follow().await;
+            discovery_result(result, observer)
+        }
+        crate::shared::DiscoveryStart::Lead => {
             let reply = io
                 .api(ApiCall {
                     method: ApiMethod::Get,
@@ -412,31 +717,35 @@ async fn discovery<I: DirectIo>(io: &I, shared: &DirectShared, observer: &dyn Ob
                 &reply.body,
                 reply.retry_after.as_deref(),
             );
-            match classify(Call::Discovery, &answer) {
+            let result = match classify(Call::Discovery, &answer) {
                 Outcome::Proceed => match Discovery::from_json(&reply.body) {
-                    Ok(discovery) => (Outcome::Proceed, Some(discovery)),
-                    Err(_) => (Outcome::UseApiNow, None),
+                    Ok(discovery) => DiscoveryFlightResult::Supported(discovery),
+                    Err(_) => DiscoveryFlightResult::Unavailable,
                 },
-                other => (other, None),
-            }
+                Outcome::NotSupported => DiscoveryFlightResult::NotSupported,
+                Outcome::Terminal(t) if t.status == 401 => DiscoveryFlightResult::Unauthorized,
+                Outcome::Terminal(_) => DiscoveryFlightResult::Forbidden,
+                _ => DiscoveryFlightResult::Unavailable,
+            };
+            shared.discovery_finished(result.clone(), io.wall_ms());
+            discovery_result(result, observer)
         }
-    };
-    let fresh = matches!(outcome, Outcome::Proceed) && discovery.is_some();
-    if fetched {
-        shared.record_discovery(&outcome, discovery.clone(), now);
-    }
-    if fresh {
-        discovery
-    } else {
-        observer.event(TransferEvent::Decided(TransportKind::Api));
-        None
     }
 }
 
-fn record_breaker<I: DirectIo>(io: &I, shared: &DirectShared, observer: &dyn Observer, planner: &DownloadPlanner) {
-    if planner.storage_given_up() {
-        shared.gave_up_download(io.mono_ms());
-        observer.event(TransferEvent::GaveUp(Direction::Download));
+fn discovery_result(
+    result: DiscoveryFlightResult,
+    observer: &dyn Observer,
+) -> Result<Discovery, DiscoveryFailure> {
+    match result {
+        DiscoveryFlightResult::Supported(discovery) => Ok(discovery),
+        DiscoveryFlightResult::NotSupported => Err(DiscoveryFailure::NotSupported),
+        DiscoveryFlightResult::Unavailable => {
+            observer.event(TransferEvent::Decided(TransportKind::Api));
+            Err(DiscoveryFailure::Unavailable)
+        }
+        DiscoveryFlightResult::Unauthorized => Err(DiscoveryFailure::Unauthorized),
+        DiscoveryFlightResult::Forbidden => Err(DiscoveryFailure::Forbidden),
     }
 }
 
@@ -463,7 +772,7 @@ enum Pinned {
 type Task<'a> = Pin<Box<dyn Future<Output = Event> + Send + 'a>>;
 
 /// One chunk through the pinned API route, with core's retry policy.
-async fn pinned_fetch<I: DirectIo>(io: &I, file_id: &str, index: u32, version: &str, expected_len: u64) -> Pinned {
+async fn pinned_fetch<I: DirectIo>(io: &I, path: String, expected_len: u64) -> Pinned {
     let retry = PinnedRetry::default();
     let mut waited = Duration::ZERO;
     let mut attempt = 1u32;
@@ -471,7 +780,7 @@ async fn pinned_fetch<I: DirectIo>(io: &I, file_id: &str, index: u32, version: &
         let reply = io
             .api(ApiCall {
                 method: ApiMethod::Get,
-                path: format!("/api/v1/files/{file_id}/chunks/{index}?object_version_id={version}"),
+                path: path.clone(),
                 body: None,
                 capabilities: None,
                 // The body, not the API's own timeout, bounds this call.

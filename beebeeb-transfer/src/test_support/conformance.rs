@@ -1,10 +1,17 @@
 //! The transport conformance suite (plan K2).
 //!
 //! A client's [`DirectIo`] must keep the storage-side contract, not just work
-//! against a happy server: no redirect, no cookie, no credential or client
-//! header on a presigned link, a bounded read, a bounded total, no URL in an
-//! error, and no plain http to a host that is not loopback. `run` starts an
+//! against a happy server: a credential on the API call but never on a
+//! presigned link, no redirect followed, no cookie, a bounded read, a bounded
+//! idle and total, one process-wide monotonic clock. `run` starts an
 //! in-process HTTP server on `127.0.0.1` and reports one check per rule.
+//!
+//! Before fetching a link, a transport must call core's
+//! [`check_storage_url`](beebeeb_core::direct_transfer::check_storage_url): it
+//! refuses a non-https host (loopback development aside), an off-list host, an
+//! unlisted bucket, a non-default port and dot segments. The suite cannot
+//! express those rules against its own arbitrary paths, so it does not pretend
+//! to; the transports use the core helper directly.
 //!
 //! The suite is feature-gated (`test-support`): it is a test seam, never part
 //! of a shipped client.
@@ -14,9 +21,10 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use beebeeb_core::direct_transfer::{DISCOVERY_PATH, STORAGE_CONNECT_TIMEOUT, STORAGE_GET_IDLE};
 use bytes::Bytes;
 
-use crate::io::{ApiCall, ApiReply, DirectIo, SignedUrl, StorageReply};
+use crate::io::{ApiCall, ApiMethod, ApiReply, DirectIo, SignedUrl, StorageReply};
 
 /// One check's result.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,14 +168,15 @@ fn serve(mut stream: TcpStream, seen: &Mutex<Vec<Seen>>) {
         "/redirect" => respond(&mut stream, 302, &[("Location", "/ok?len=4")], b""),
         "/cookie" => respond(&mut stream, 200, &[("Set-Cookie", "sid=1")], b"abcd"),
         "/idle" => {
-            // Headers and two bytes, then silence: a half-open connection.
+            // Headers and two bytes, then silence: a half-open connection that
+            // outlives any client total the suite passes.
             let _ = write!(
                 stream,
                 "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n"
             );
             let _ = stream.write_all(&[7u8; 2]);
             let _ = stream.flush();
-            std::thread::sleep(Duration::from_secs(31));
+            std::thread::sleep(Duration::from_secs(45));
         }
         "/slow" => {
             // A body that arrives slower than the call's total allows.
@@ -202,16 +211,6 @@ fn respond(stream: &mut TcpStream, status: u16, headers: &[(&str, &str)], body: 
     let _ = stream.flush();
 }
 
-/// Is `url` plain http to a host that is not loopback? A transport must refuse
-/// that without connecting.
-fn plain_http_off_loopback(url: &str) -> bool {
-    let rest = url.strip_prefix("http://").or_else(|| url.strip_prefix("HTTP://"));
-    let Some(rest) = rest else { return false };
-    let authority = rest.split('/').next().unwrap_or(rest);
-    let host = authority.rsplit_once(':').map(|(h, _)| h).unwrap_or(authority);
-    !matches!(host, "127.0.0.1" | "localhost" | "[::1]")
-}
-
 /// Run every check against a transport built by `make`; `make` receives the
 /// suite's API base (loopback http, as in development).
 pub async fn run<T: DirectIo>(make: impl Fn(&str) -> T) -> ConformanceReport {
@@ -219,10 +218,39 @@ pub async fn run<T: DirectIo>(make: impl Fn(&str) -> T) -> ConformanceReport {
     let io = make(&server.base);
     let mut checks = Vec::new();
 
+    // The API call carries the credential. Checked first, so the storage
+    // checks below are meaningful: a transport that never authenticates would
+    // pass them vacuously.
+    let _ = io
+        .api(ApiCall {
+            method: ApiMethod::Get,
+            path: DISCOVERY_PATH.to_string(),
+            body: None,
+            capabilities: None,
+            timeout: Duration::from_secs(5),
+            max_body: 64 * 1024,
+        })
+        .await;
+    let api_auth = server
+        .seen()
+        .iter()
+        .any(|s| s.path() == DISCOVERY_PATH && s.header("authorization").is_some());
+    checks.push(check(
+        "the_api_call_carries_the_credential",
+        api_auth,
+        format!("{} request(s) to the API", server.count_path(DISCOVERY_PATH)),
+    ));
+
     // Redirects are not followed: the link is a bearer capability and its
     // target is not the authority the grant was checked against.
     let redirect = io
-        .storage_get(&SignedUrl::new(server.url("/redirect")), 4, Duration::from_secs(5))
+        .storage_get(
+            &SignedUrl::new(server.url("/redirect")),
+            4,
+            Duration::from_secs(5),
+            STORAGE_GET_IDLE,
+            STORAGE_CONNECT_TIMEOUT,
+        )
         .await;
     let followed = server.count_path("/ok") > 0;
     checks.push(check(
@@ -233,10 +261,22 @@ pub async fn run<T: DirectIo>(make: impl Fn(&str) -> T) -> ConformanceReport {
 
     // A cookie a storage host sets is never sent back, and none is sent at all.
     let _ = io
-        .storage_get(&SignedUrl::new(server.url("/cookie")), 4, Duration::from_secs(5))
+        .storage_get(
+            &SignedUrl::new(server.url("/cookie")),
+            4,
+            Duration::from_secs(5),
+            STORAGE_GET_IDLE,
+            STORAGE_CONNECT_TIMEOUT,
+        )
         .await;
     let _ = io
-        .storage_get(&SignedUrl::new(server.url("/ok?len=4")), 4, Duration::from_secs(5))
+        .storage_get(
+            &SignedUrl::new(server.url("/ok?len=4")),
+            4,
+            Duration::from_secs(5),
+            STORAGE_GET_IDLE,
+            STORAGE_CONNECT_TIMEOUT,
+        )
         .await;
     let cookies: Vec<String> = server
         .seen()
@@ -253,6 +293,7 @@ pub async fn run<T: DirectIo>(make: impl Fn(&str) -> T) -> ConformanceReport {
     let leaked: Vec<String> = server
         .seen()
         .iter()
+        .filter(|s| s.path() != DISCOVERY_PATH)
         .flat_map(|s| s.headers.iter())
         .filter(|(name, _)| {
             name.eq_ignore_ascii_case("authorization") || name.to_ascii_lowercase().starts_with("x-beebeeb-")
@@ -265,21 +306,35 @@ pub async fn run<T: DirectIo>(make: impl Fn(&str) -> T) -> ConformanceReport {
         format!("headers seen: {leaked:?}"),
     ));
 
-    // A body that goes silent fails at the idle bound.
+    // A body that goes silent fails at the idle bound, before the (longer)
+    // total.
     let started = Instant::now();
     let idle = io
-        .storage_get(&SignedUrl::new(server.url("/idle")), 100, Duration::from_secs(35))
+        .storage_get(
+            &SignedUrl::new(server.url("/idle")),
+            100,
+            STORAGE_GET_IDLE + Duration::from_secs(10),
+            STORAGE_GET_IDLE,
+            STORAGE_CONNECT_TIMEOUT,
+        )
         .await;
+    let idle_elapsed = started.elapsed();
     checks.push(check(
         "an_idle_body_times_out",
-        idle.status == 0,
-        format!("status {} after {:?}", idle.status, started.elapsed()),
+        idle.status == 0 && idle_elapsed <= STORAGE_GET_IDLE + Duration::from_secs(2),
+        format!("status {} after {idle_elapsed:?}", idle.status),
     ));
 
     // The call's total bounds the whole body.
     let started = Instant::now();
     let slow = io
-        .storage_get(&SignedUrl::new(server.url("/slow")), 1000, Duration::from_millis(150))
+        .storage_get(
+            &SignedUrl::new(server.url("/slow")),
+            1000,
+            Duration::from_millis(150),
+            STORAGE_GET_IDLE,
+            STORAGE_CONNECT_TIMEOUT,
+        )
         .await;
     let elapsed = started.elapsed();
     checks.push(check(
@@ -291,7 +346,13 @@ pub async fn run<T: DirectIo>(make: impl Fn(&str) -> T) -> ConformanceReport {
     // At most `expected_len + 1` bytes are read, so an overlong body is one
     // byte too many and memory stays bounded.
     let overlong = io
-        .storage_get(&SignedUrl::new(server.url("/ok?len=8")), 4, Duration::from_secs(5))
+        .storage_get(
+            &SignedUrl::new(server.url("/ok?len=8")),
+            4,
+            Duration::from_secs(5),
+            STORAGE_GET_IDLE,
+            STORAGE_CONNECT_TIMEOUT,
+        )
         .await;
     let read = overlong.body.as_ref().map(Bytes::len);
     checks.push(check(
@@ -300,39 +361,21 @@ pub async fn run<T: DirectIo>(make: impl Fn(&str) -> T) -> ConformanceReport {
         format!("status {}, body bytes {read:?}", overlong.status),
     ));
 
-    // Nothing that leaves a failed fetch carries the link.
-    let secret = "SECRETSIG2173";
-    let url = SignedUrl::new(server.url(&format!("/ok?len=4&X-Amz-Signature={secret}")));
-    let _ = io.storage_get(&url, 4, Duration::from_secs(5)).await;
-    let text = format!("{idle:?} {slow:?} {overlong:?} {url} {url:?}");
+    // The monotonic clock is process-wide: an instance created a second later
+    // reports the same epoch.
+    std::thread::sleep(Duration::from_secs(1));
+    let second = make(&server.base);
+    // Both are sampled at the same moment, from instances created 1 s apart.
+    let first_mono = io.mono_ms();
+    let second_mono = second.mono_ms();
+    let skew = (second_mono - first_mono).abs();
     checks.push(check(
-        "no_url_reaches_a_debug_string",
-        !text.contains("X-Amz-Signature"),
-        "formatted replies and the link".to_string(),
-    ));
-
-    // Plain http to a host that is not loopback is refused without connecting.
-    let started = Instant::now();
-    let off_host = io
-        .storage_get(
-            &SignedUrl::new("http://192.0.2.1/b/k?X-Amz-Signature=SECRETSIG2173"),
-            4,
-            Duration::from_secs(5),
-        )
-        .await;
-    let elapsed = started.elapsed();
-    checks.push(check(
-        "plain_http_to_a_non_loopback_host_is_refused",
-        off_host.status == 0 && elapsed < Duration::from_secs(2),
-        format!("status {} after {elapsed:?}", off_host.status),
+        "the_mono_clock_is_process_wide",
+        skew <= 200,
+        format!("two instances created 1 s apart differ by {skew} ms"),
     ));
 
     ConformanceReport { checks }
-}
-
-/// Re-export for transports that want to reuse the rule the suite checks.
-pub fn refuse_plain_http(url: &str) -> bool {
-    plain_http_off_loopback(url)
 }
 
 /// A transport that does nothing, for `make` closures that need a fallback.
@@ -343,7 +386,14 @@ impl DirectIo for NullIo {
         ApiReply::default()
     }
 
-    async fn storage_get(&self, _url: &SignedUrl, _expected_len: u64, _total: Duration) -> StorageReply {
+    async fn storage_get(
+        &self,
+        _url: &SignedUrl,
+        _expected_len: u64,
+        _total: Duration,
+        _idle: Duration,
+        _connect: Duration,
+    ) -> StorageReply {
         StorageReply::default()
     }
 

@@ -29,6 +29,9 @@ pub enum UseApiReason {
     BreakerHold,
     /// The server does not offer the direct transport.
     NotSupported,
+    /// Discovery gave no usable answer (a 5xx, a bare 404/405, a redirect, a
+    /// transport failure, or its retry budget is spent): try again later.
+    DiscoveryUnavailable,
     /// The server or the planner said the API serves this file.
     ApiForFile,
     /// Chunk 0 did not authenticate and the caller allowed the legacy readers.
@@ -49,6 +52,11 @@ pub enum TransferEvent {
     GaveUp(Direction),
     /// Plaintext bytes were written to the sink.
     Bytes(u64),
+    /// Everything written so far was thrown away, so progress can roll back.
+    Discarded {
+        plaintext_bytes: u64,
+        ciphertext_bytes: u64,
+    },
 }
 
 /// Receives [`TransferEvent`]s. The default does nothing.
