@@ -91,8 +91,8 @@ pub use window::{DownloadPlanner, Geometry, PlanError, PlannerConfig, Poll, Verd
 pub use wire::{
     CAP_OBJECT_DOWNLOAD_V1, CAP_OBJECT_UPLOAD_V1, CAPABILITIES_HEADER, ChunkGrant, DISCOVERY_PATH, Discovery,
     DownloadGrantRequest, DownloadGrantResponse, MAX_UPLOAD_BODY_BYTES, StorageBucket, UploadCommitRequest,
-    UploadCommitResponse, UploadGrantRequest, UploadGrantResponse, WireError, download_grants_path, upload_commit_path,
-    upload_grant_path, upload_init_selects_direct,
+    UploadCommitResponse, UploadGrantRequest, UploadGrantResponse, WireError, download_grants_path, pinned_chunk_path,
+    upload_commit_path, upload_grant_path, upload_init_selects_direct,
 };
 
 /// How long a discovery answer is trusted (spec: at most 10 minutes per API base).
