@@ -10,6 +10,7 @@
 //! Nothing that leaves this module carries a URL: storage links travel only as
 //! [`SignedUrl`], and events and errors carry numbers and enum values only.
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::future::Future;
@@ -117,7 +118,10 @@ pub enum DownloadError {
     /// discard it. The sink now holds a prefix of the file and must not be
     /// reused or stitched.
     DirectFailedAfterWrite {
+        /// Bytes handed to the sink, including the bytes of a write that
+        /// failed partway (they may already be on the output).
         written_plaintext_bytes: u64,
+        /// Writes attempted; the last one may be partial.
         chunks_written: u32,
         cause: AfterWriteCause,
     },
@@ -140,8 +144,8 @@ impl fmt::Display for DownloadError {
                 cause,
             } => write!(
                 f,
-                "the direct download failed after {written_plaintext_bytes} bytes in {chunks_written} chunks \
-                 and the output is incomplete: {cause}"
+                "the direct download failed after at least {written_plaintext_bytes} bytes in {chunks_written} \
+                 chunks and the output is incomplete: {cause}"
             ),
         }
     }
@@ -218,13 +222,30 @@ impl<'a> Attempt<'a> {
     fn write(&mut self, plain: &[u8]) -> std::io::Result<()> {
         self.dirty = true;
         self.chunks_written = self.chunks_written.saturating_add(1);
-        self.sink.write(plain)?;
+        // Count before the call: a write that fails partway may already have
+        // put bytes on the output, so the error must not claim fewer.
         self.plaintext_bytes = self.plaintext_bytes.saturating_add(plain.len() as u64);
-        Ok(())
+        self.sink.write(plain)
     }
 
     fn note_ciphertext(&mut self, bytes: u64) {
         self.ciphertext_bytes = self.ciphertext_bytes.saturating_add(bytes);
+    }
+
+    /// Throw the written bytes away and report which of the two happened: a
+    /// successful rollback, or a discard that failed (the bytes may remain).
+    fn discard_sink(&mut self) {
+        let event = match self.sink.discard() {
+            Ok(()) => TransferEvent::Discarded {
+                plaintext_bytes: self.plaintext_bytes,
+                ciphertext_bytes: self.ciphertext_bytes,
+            },
+            Err(_) => TransferEvent::DiscardFailed {
+                plaintext_bytes: self.plaintext_bytes,
+                ciphertext_bytes: self.ciphertext_bytes,
+            },
+        };
+        self.observer.event(event);
     }
 
     /// The ONE exit: apply the table to the attempt's final result.
@@ -239,11 +260,7 @@ impl<'a> Attempt<'a> {
             _ if self.sink.discardable() => {
                 // A failed discard is reported to the observer and never hides
                 // the original error or changes the outcome.
-                let _ = self.sink.discard();
-                self.observer.event(TransferEvent::Discarded {
-                    plaintext_bytes: self.plaintext_bytes,
-                    ciphertext_bytes: self.ciphertext_bytes,
-                });
+                self.discard_sink();
                 result
             }
             _ => {
@@ -270,11 +287,7 @@ impl Drop for Attempt<'_> {
         // Cancel: the future was dropped. Discard what can be discarded; there
         // is no result to change.
         if self.sink.discardable() {
-            let _ = self.sink.discard();
-            self.observer.event(TransferEvent::Discarded {
-                plaintext_bytes: self.plaintext_bytes,
-                ciphertext_bytes: self.ciphertext_bytes,
-            });
+            self.discard_sink();
         }
     }
 }
@@ -292,6 +305,45 @@ impl AttemptEnd {
         AttemptEnd {
             result,
             storage_given_up: false,
+        }
+    }
+}
+
+/// Records the storage breaker when the attempt is dropped (the future was
+/// cancelled) after the planner gave up storage. The normal exits record it in
+/// [`finish_attempt`] and disarm this guard.
+struct CancelBreaker<'a, I: DirectIo> {
+    shared: &'a DirectShared,
+    io: &'a I,
+    given_up: Cell<bool>,
+    armed: Cell<bool>,
+}
+
+impl<'a, I: DirectIo> CancelBreaker<'a, I> {
+    fn new(shared: &'a DirectShared, io: &'a I) -> Self {
+        CancelBreaker {
+            shared,
+            io,
+            given_up: Cell::new(false),
+            armed: Cell::new(true),
+        }
+    }
+
+    /// Refresh the planner's view; called before every await.
+    fn set(&self, given_up: bool) {
+        self.given_up.set(given_up);
+    }
+
+    /// The normal exit recorded the breaker itself.
+    fn disarm(&self) {
+        self.armed.set(false);
+    }
+}
+
+impl<I: DirectIo> Drop for CancelBreaker<'_, I> {
+    fn drop(&mut self) {
+        if self.armed.get() && self.given_up.get() {
+            self.shared.gave_up_download(self.io.mono_ms());
         }
     }
 }
@@ -353,6 +405,7 @@ async fn run<I: DirectIo>(
     let discovery = match discovery(io, shared, observer).await {
         Ok(discovery) => discovery,
         Err(DiscoveryFailure::NotSupported) => {
+            observer.event(TransferEvent::Decided(TransportKind::Api));
             return AttemptEnd::plain(Ok(DownloadOutcome::UseApi(UseApiReason::NotSupported)));
         }
         Err(DiscoveryFailure::Unavailable) => {
@@ -370,6 +423,7 @@ async fn run<I: DirectIo>(
     let config = PlannerConfig::from_discovery(&discovery, req.jitter_seed);
     let mut planner = DownloadPlanner::new(config, discovery, &req.api_base, &req.file_id);
     planner.set_max_in_flight_bytes(Some(max_in_flight_bytes(req.memory)));
+    let breaker = CancelBreaker::new(shared, io);
 
     let mut tasks: FuturesUnordered<Task<'_>> = FuturesUnordered::new();
     let mut ready: BTreeMap<u32, Bytes> = BTreeMap::new();
@@ -382,12 +436,17 @@ async fn run<I: DirectIo>(
     let mut pace_until = 0i64;
 
     macro_rules! stop {
-        ($e:expr) => {
+        ($e:expr) => {{
+            let given_up = planner.storage_given_up();
+            breaker.set(given_up);
+            if given_up {
+                breaker.disarm();
+            }
             return AttemptEnd {
                 result: $e,
-                storage_given_up: planner.storage_given_up(),
-            }
-        };
+                storage_given_up: given_up,
+            };
+        }};
     }
 
     loop {
@@ -508,6 +567,9 @@ async fn run<I: DirectIo>(
             }
         };
 
+        // A cancel at the next await must record the breaker exactly as the
+        // normal exits do, so refresh the guard's view first.
+        breaker.set(planner.storage_given_up());
         let event = if tasks.is_empty() {
             match nap {
                 Some(nap) => {
@@ -618,6 +680,9 @@ async fn run<I: DirectIo>(
             let frame_len = frame.len() as u64;
             match decryptor.push_frame(&frame) {
                 Ok(chunk) => {
+                    if let Some(error) = unexpected_chunk(chunk.index, next) {
+                        stop!(Err(error));
+                    }
                     // The chunk's plaintext is wiped after the write.
                     let plain = Zeroizing::new(chunk.data);
                     if let Err(error) = attempt.write(&plain) {
@@ -648,6 +713,13 @@ async fn run<I: DirectIo>(
             }
         }
     }
+}
+
+/// Defence in depth: the decryptor's own index must be the one the planner
+/// expects next. Core binds the index into the v2 AAD, so a drift here is a
+/// bug or a downgrade, never a valid stream.
+pub(crate) fn unexpected_chunk(index: u32, next: u32) -> Option<DownloadError> {
+    (index != next).then_some(DownloadError::Unauthentic { index: next })
 }
 
 /// Wait for the next task event, but no longer than `nap`; the sleep is raced
@@ -700,6 +772,7 @@ async fn discovery<I: DirectIo>(
             discovery_result(result, observer)
         }
         crate::shared::DiscoveryStart::Lead => {
+            let mut lead = shared.discovery_lead();
             let reply = io
                 .api(ApiCall {
                     method: ApiMethod::Get,
@@ -727,6 +800,7 @@ async fn discovery<I: DirectIo>(
                 _ => DiscoveryFlightResult::Unavailable,
             };
             shared.discovery_finished(result.clone(), io.wall_ms());
+            lead.disarm();
             discovery_result(result, observer)
         }
     }

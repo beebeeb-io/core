@@ -20,7 +20,8 @@ pub enum ChunkVia {
     Pinned,
 }
 
-/// Why the driver handed the file to the API path without fetching anything.
+/// Why the driver handed the file to the API path. The sink holds nothing: it
+/// was never written, or everything written was discarded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UseApiReason {
     /// The caller forced the API path.
@@ -54,6 +55,13 @@ pub enum TransferEvent {
     Bytes(u64),
     /// Everything written so far was thrown away, so progress can roll back.
     Discarded {
+        plaintext_bytes: u64,
+        ciphertext_bytes: u64,
+    },
+    /// The sink's `discard()` failed: the bytes may still be there. The outcome
+    /// is unchanged (the original `UseApi`/`Err` stands) and the caller must
+    /// delete the partial output itself.
+    DiscardFailed {
         plaintext_bytes: u64,
         ciphertext_bytes: u64,
     },

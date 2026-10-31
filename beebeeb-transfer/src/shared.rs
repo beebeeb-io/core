@@ -119,6 +119,39 @@ impl DirectShared {
         }
     }
 
+    /// The guard for the one caller that runs discovery. Dropping it before
+    /// [`discovery_finished`](Self::discovery_finished) (a cancel, or a panic
+    /// inside the call) ends the flight as `Unavailable` without a cache write,
+    /// so no later download follows a flight that never ends.
+    pub(crate) fn discovery_lead(&self) -> DiscoveryLead<'_> {
+        DiscoveryLead {
+            shared: self,
+            armed: true,
+        }
+    }
+
+    /// End an abandoned flight: the answer is `Unavailable` (no cache write)
+    /// and every follower is woken to read it.
+    fn discovery_abandoned(&self) {
+        let mut state = self.discovery.lock().unwrap();
+        if !state.flight.running {
+            return;
+        }
+        state.flight.running = false;
+        state.flight.last = Some(DiscoveryFlightResult::Unavailable);
+        let waiters = std::mem::take(&mut state.flight.waiters);
+        drop(state);
+        for waker in waiters {
+            waker.wake();
+        }
+    }
+
+    /// The number of followers waiting on the flight (tests).
+    #[cfg(test)]
+    pub(crate) fn discovery_waiters(&self) -> usize {
+        self.discovery.lock().unwrap().flight.waiters.len()
+    }
+
     /// Record a finished flight and wake every follower with the same answer.
     pub(crate) fn discovery_finished(&self, result: DiscoveryFlightResult, now_ms: i64) {
         {
@@ -163,7 +196,13 @@ impl DirectShared {
         std::future::poll_fn(|cx| {
             let mut state = self.discovery.lock().unwrap();
             if state.flight.running {
-                state.flight.waiters.push(cx.waker().clone());
+                // One waiter per task: a repeated poll replaces its waker
+                // instead of growing the list.
+                let waker = cx.waker();
+                match state.flight.waiters.iter_mut().find(|w| w.will_wake(waker)) {
+                    Some(slot) => *slot = waker.clone(),
+                    None => state.flight.waiters.push(waker.clone()),
+                }
                 Poll::Pending
             } else {
                 Poll::Ready(state.flight.last.clone().unwrap_or(DiscoveryFlightResult::Unavailable))
@@ -238,6 +277,30 @@ impl DirectShared {
             waker.wake();
         }
         *self.health.lock().unwrap() = DirectHealth::new();
+    }
+}
+
+/// The one caller that runs discovery. If it is dropped before
+/// [`DirectShared::discovery_finished`] (the future was cancelled, or the call
+/// panicked), the flight ends as `Unavailable` and its followers are woken.
+#[derive(Debug)]
+pub(crate) struct DiscoveryLead<'a> {
+    shared: &'a DirectShared,
+    armed: bool,
+}
+
+impl DiscoveryLead<'_> {
+    /// The flight finished normally: nothing to undo.
+    pub(crate) fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for DiscoveryLead<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.shared.discovery_abandoned();
+        }
     }
 }
 

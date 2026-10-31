@@ -22,6 +22,8 @@ default = []
 test-support = []
 
 [dev-dependencies]
+# `with_format` (v2 fixtures) is behind core's test-support feature.
+beebeeb-core = { path = "../beebeeb-core", features = ["test-support"] }
 tokio = { workspace = true }
 # The reference transport the conformance suite runs against: a real HTTP
 # client, test builds only. The crate itself has no HTTP client and no runtime.

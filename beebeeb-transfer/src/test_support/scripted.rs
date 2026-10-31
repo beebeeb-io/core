@@ -209,6 +209,9 @@ pub struct ScriptedIo {
     delays: Vec<(Option<u32>, i64)>,
     /// Virtual delay before an API call answers.
     api_delay_ms: Option<i64>,
+    /// Virtual delay before an API call whose path starts with this prefix
+    /// answers; a match wins over `api_delay_ms`.
+    api_delays: Vec<(String, i64)>,
 }
 
 impl ScriptedIo {
@@ -220,6 +223,7 @@ impl ScriptedIo {
             gate: None,
             delays: Vec::new(),
             api_delay_ms: None,
+            api_delays: Vec::new(),
         }
     }
 
@@ -238,6 +242,7 @@ impl ScriptedIo {
             gate: None,
             delays: Vec::new(),
             api_delay_ms: None,
+            api_delays: Vec::new(),
         }
     }
 
@@ -251,6 +256,13 @@ impl ScriptedIo {
     /// Every API call answers after this much virtual time.
     pub fn with_api_delay(mut self, ms: i64) -> Self {
         self.api_delay_ms = Some(ms);
+        self
+    }
+
+    /// API calls whose path starts with `prefix` answer after `ms` of virtual
+    /// time, even when a global API delay is set.
+    pub fn with_api_delay_for(mut self, prefix: impl Into<String>, ms: i64) -> Self {
+        self.api_delays.push((prefix.into(), ms));
         self
     }
 
@@ -323,9 +335,14 @@ impl ScriptedIo {
 
 impl DirectIo for ScriptedIo {
     async fn api(&self, call: ApiCall) -> ApiReply {
+        let path_delay = self
+            .api_delays
+            .iter()
+            .find(|(prefix, _)| call.path.starts_with(prefix))
+            .map(|(_, ms)| *ms);
         let request = Request::Api(call);
         let (wall, mono) = self.record(request.clone());
-        if let Some(delay) = self.api_delay_ms {
+        if let Some(delay) = path_delay.or(self.api_delay_ms) {
             self.clock.wait_until(Which::Mono, mono + delay).await;
         }
         match (self.handler)(&request, wall, mono) {
