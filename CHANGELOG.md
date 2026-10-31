@@ -60,14 +60,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HKDF-SHA256(master, "beebeeb-link-label-v1" || share_id)` with the same string as AAD (NFC,
   1..40 Unicode scalar values); `kdf::seal_folder_actor_name` / `open_folder_actor_name` seal a
   guest's name under the folder key, bound to the shared root, in the name writer's envelope
-  (NFC, 1..64 scalars, control characters and bidi overrides stripped on open). Both openers
-  accept one envelope shape under one key and refuse a non-16-byte id. `kdf::open_legacy_child_key`
-  is the one legacy unbound child opener (60-byte frame, no AAD) and refuses a 32-byte plaintext
-  that is valid UTF-8. WASM `wrapLinkLabel` / `unwrapLinkLabel` / `sealFolderActorName` /
+  (NFC, 1..64 scalars, display-control characters stripped on open). Both openers refuse a
+  plaintext that is not already NFC (core's writers seal NFC) and refuse a non-16-byte id. The
+  actor-name opener requires exactly the byte string `seal_folder_actor_name` writes (an extra
+  field, another key order or added whitespace is refused) and strips every `Cc` character plus
+  the format/separator characters that can hide or reorder text (U+00AD, U+061C, U+180E,
+  U+200B-U+200F, U+2028-U+202E, U+2060-U+2064, U+2066-U+206F, U+FEFF, U+FFF9-U+FFFB, U+E0001,
+  U+E0020-U+E007F); the 1..64 bound is checked again after stripping, so a name made only of
+  stripped characters is refused instead of returning an empty string.
+  `kdf::open_legacy_child_key` is the one legacy unbound child opener (60-byte frame, no AAD)
+  and refuses a 32-byte plaintext that is valid UTF-8; a genuine random legacy child key that
+  happens to be UTF-8 (about 2^-30) is refused and reads as a wrong key (accepted L9 residual,
+  recorded on the function). WASM `wrapLinkLabel` / `unwrapLinkLabel` / `sealFolderActorName` /
   `openFolderActorName` / `openLegacyChildKey`; UniFFI `MasterKeyHandle.wrap_link_label` /
   `unwrap_link_label` and `FileKeyHandle.seal_folder_actor_name` / `open_folder_actor_name` /
-  `open_legacy_child_key`. Test vectors are version 14 (`link_label_v1`, `folder_actor_name_v1`,
-  `legacy_child_refusal_v1`).
+  `open_legacy_child_key`. Test vectors are version 15 (`link_label_v1`, `folder_actor_name_v1`,
+  `legacy_child_refusal_v1`); version 14 is main's `item_ids` set alone. Vendored copies must be
+  refreshed to 15: web `test/core-vectors-kat.test.ts`, mobile `CoreVectorsKATTests.swift` and
+  `CoreVectorsKATTest.kt`.
 - `direct_transfer::storage::check_storage_get`: a storage GET delivered the chunk only for a
   `200` whose `Content-Length` is exactly the grant's length; anything else is `Failed { status }`
   (status `0`: no HTTP answer). `check_storage_body` applies the same rule to the bytes actually

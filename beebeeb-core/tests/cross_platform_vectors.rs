@@ -711,8 +711,8 @@ fn vector_file_version_check() {
         .as_u64()
         .expect("vectors.json must have a 'version' field");
     assert_eq!(
-        version, 14,
-        "vectors.json version mismatch — expected 14, got {version}. \
+        version, 15,
+        "vectors.json version mismatch — expected 15, got {version}. \
          Update this test if you intentionally bumped the version."
     );
 
@@ -763,7 +763,7 @@ fn vector_file_version_check() {
         "client_meta_device_hostname",
         "client_meta_session_paths",
         "client_meta_padding_buckets",
-        // Version 14 (task 2275, L16): link labels, guest names, the legacy child opener.
+        // Version 15 (task 2275, L16): link labels, guest names, the legacy child opener.
         "link_label_v1",
         "folder_actor_name_v1",
         "legacy_child_refusal_v1",

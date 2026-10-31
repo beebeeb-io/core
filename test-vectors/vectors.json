@@ -593,5 +593,5 @@
       "note": "L16d: a legacy unbound child frame is nonce || AES-256-GCM (no AAD). A 32-byte plaintext that is valid UTF-8 is not a key (L9 rule 1): open_legacy_child_key must refuse the name-shaped frame and open the real child key. Fixed nonces for this public test only."
     }
   ],
-  "version": 14
+  "version": 15
 }
