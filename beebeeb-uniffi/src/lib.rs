@@ -2105,10 +2105,9 @@ impl FileKeyHandle {
     /// wrong key, or a 32-byte plaintext that is valid UTF-8).
     pub fn open_legacy_child_key(&self, frame: Vec<u8>) -> Result<Option<Arc<FileKeyHandle>>, CryptoError> {
         let opened = self.with_key(|k| kdf::open_legacy_child_key(k, &frame))?;
-        match opened {
-            Some(key) => Ok(Some(FileKeyHandle::from_key_bytes(key.as_bytes().to_vec())?)),
-            None => Ok(None),
-        }
+        // The key was just derived by core: wrap it directly, never through its
+        // bytes (no extra heap copy of key material).
+        Ok(opened.map(FileKeyHandle::new))
     }
 
     /// L14 (task 2275): does this row's L7 child wrap open to exactly this key?

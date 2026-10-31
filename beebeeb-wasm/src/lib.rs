@@ -4849,11 +4849,7 @@ pub fn unwrap_link_label(master_key: &[u8], share_id: &str, wrapped: &[u8]) -> R
 /// Returns the name writer's JSON envelope.
 #[wasm_bindgen(js_name = sealFolderActorName)]
 pub fn seal_folder_actor_name(folder_key: &[u8], shared_folder_id: &str, name: &str) -> Result<String, JsError> {
-    let folder = kdf::FileKey::from_bytes(
-        folder_key
-            .try_into()
-            .map_err(|_| JsError::new("folder key must be 32 bytes"))?,
-    );
+    let folder = file_key_from_slice(folder_key)?;
     let root = uuid::Uuid::parse_str(shared_folder_id).map_err(|_| JsError::new("invalid root UUID"))?;
     kdf::seal_folder_actor_name(&folder, root.as_bytes(), name).map_err(|e| JsError::new(&e.to_string()))
 }
@@ -4863,11 +4859,7 @@ pub fn seal_folder_actor_name(folder_key: &[u8], shared_folder_id: &str, name: &
 /// refused.
 #[wasm_bindgen(js_name = openFolderActorName)]
 pub fn open_folder_actor_name(folder_key: &[u8], shared_folder_id: &str, envelope: &str) -> Result<String, JsError> {
-    let folder = kdf::FileKey::from_bytes(
-        folder_key
-            .try_into()
-            .map_err(|_| JsError::new("folder key must be 32 bytes"))?,
-    );
+    let folder = file_key_from_slice(folder_key)?;
     let root = uuid::Uuid::parse_str(shared_folder_id).map_err(|_| JsError::new("invalid root UUID"))?;
     kdf::open_folder_actor_name(&folder, root.as_bytes(), envelope).map_err(|e| JsError::new(&e.to_string()))
 }
@@ -4877,11 +4869,7 @@ pub fn open_folder_actor_name(folder_key: &[u8], shared_folder_id: &str, envelop
 /// Returns `undefined` when the frame is not a legacy child wrap.
 #[wasm_bindgen(js_name = openLegacyChildKey)]
 pub fn open_legacy_child_key(folder_key: &[u8], wrapped: &[u8]) -> Result<Option<Vec<u8>>, JsError> {
-    let folder = kdf::FileKey::from_bytes(
-        folder_key
-            .try_into()
-            .map_err(|_| JsError::new("folder key must be 32 bytes"))?,
-    );
+    let folder = file_key_from_slice(folder_key)?;
     Ok(kdf::open_legacy_child_key(&folder, wrapped).map(|key| key.as_bytes().to_vec()))
 }
 
