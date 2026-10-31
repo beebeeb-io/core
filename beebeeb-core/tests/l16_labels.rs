@@ -10,9 +10,12 @@ use beebeeb_core::CoreError;
 use beebeeb_core::chunk_stream::ExpectedChunkFormat;
 use beebeeb_core::encrypt::{decrypt_chunk, decrypt_name_with_key, encrypt_chunk, encrypt_name_for};
 use beebeeb_core::kdf::{
-    FileKey, MasterKey, open_folder_actor_name, open_legacy_child_key, seal_folder_actor_name, unwrap_folder_child,
-    unwrap_folder_custody, unwrap_link_label, unwrap_link_owner_key, unwrap_link_owner_token, unwrap_owner_file_key,
-    wrap_folder_child, wrap_link_label, wrap_link_owner_key, wrap_owner_file_key,
+    FILE_KEY_INFO, FOLDER_ACTOR_NAME_INFO, FOLDER_CHILD_LABEL, FOLDER_CUSTODY_LABEL, FOLDER_LINK_KEY_INFO,
+    FOLDER_LINK_PASSPHRASE_SALT_LABEL, FileKey, INVITE_OWNER_COPY_LABEL, LEGACY_CHILD_FRAME_LEN, LINK_LABEL_LABEL,
+    LINK_OWNER_KEY_LABEL, LINK_OWNER_TOKEN_LABEL, MasterKey, OWNER_FILE_KEY_LABEL, SEARCH_INDEX_SHARD_INFO,
+    SHARED_FOLDER_INDEX_KEY_INFO, open_folder_actor_name, open_legacy_child_key, seal_folder_actor_name,
+    unwrap_folder_child, unwrap_folder_custody, unwrap_link_label, unwrap_link_owner_key, unwrap_link_owner_token,
+    unwrap_owner_file_key, wrap_folder_child, wrap_link_label, wrap_link_owner_key, wrap_owner_file_key,
 };
 use beebeeb_types::EncryptedBlob;
 
@@ -59,24 +62,156 @@ fn label_is_bound_to_the_share_and_the_purpose() {
         unwrap_link_label(&MasterKey::from_bytes([0x41; 32]), &SHARE_A, &blob),
         Err(CoreError::Decryption)
     ));
+}
 
-    // Confusion matrix: a label frame is not an L6 owner wrap, custody, L8
-    // envelope, L7 child wrap or an actor name.
-    assert!(unwrap_link_owner_key(&master(), &SHARE_A, &blob).is_err());
-    assert!(unwrap_link_owner_token(&master(), &SHARE_A, &blob).is_err());
-    assert!(unwrap_folder_custody(&master(), &SHARE_A, &blob).is_err());
-    assert!(unwrap_owner_file_key(&master(), FOREIGN_ITEM_ID.as_bytes(), &blob).is_err());
+/// S5(a): every HKDF info/AAD label in `kdf` is distinct and no label is a
+/// prefix of another, so two derivations can never share a key by accident
+/// (and `label || id` can never be forged from a shorter label plus a longer id).
+#[test]
+fn every_kdf_label_is_distinct_and_not_a_prefix_of_another() {
+    let labels: [(&str, &[u8]); 13] = [
+        ("FILE_KEY_INFO", FILE_KEY_INFO),
+        ("SEARCH_INDEX_SHARD_INFO", SEARCH_INDEX_SHARD_INFO),
+        ("SHARED_FOLDER_INDEX_KEY_INFO", SHARED_FOLDER_INDEX_KEY_INFO),
+        ("FOLDER_LINK_KEY_INFO", FOLDER_LINK_KEY_INFO),
+        ("FOLDER_LINK_PASSPHRASE_SALT_LABEL", FOLDER_LINK_PASSPHRASE_SALT_LABEL),
+        ("FOLDER_CHILD_LABEL", FOLDER_CHILD_LABEL),
+        ("OWNER_FILE_KEY_LABEL", OWNER_FILE_KEY_LABEL),
+        ("FOLDER_CUSTODY_LABEL", FOLDER_CUSTODY_LABEL),
+        ("LINK_OWNER_KEY_LABEL", LINK_OWNER_KEY_LABEL),
+        ("LINK_OWNER_TOKEN_LABEL", LINK_OWNER_TOKEN_LABEL),
+        ("INVITE_OWNER_COPY_LABEL", INVITE_OWNER_COPY_LABEL),
+        ("LINK_LABEL_LABEL", LINK_LABEL_LABEL),
+        ("FOLDER_ACTOR_NAME_INFO", FOLDER_ACTOR_NAME_INFO),
+    ];
+    for (i, (a_name, a)) in labels.iter().enumerate() {
+        for (b_name, b) in labels.iter().skip(i + 1) {
+            assert_ne!(a, b, "{a_name} and {b_name} are the same HKDF label");
+            assert!(
+                !a.starts_with(b) && !b.starts_with(a),
+                "{a_name} and {b_name}: one label is a prefix of the other"
+            );
+        }
+    }
+}
+
+/// S5(b): cross-open rows that feed a REAL output of one writer to another
+/// opener, with the SAME 16-byte id where the formats allow it, and require the
+/// failure to be the AEAD (`CoreError::Decryption`) rather than a length or id
+/// check. The label text is 32 bytes so its ciphertext is 48 bytes — the L7
+/// child wrap's length — and the row cannot fail on the length check instead.
+#[test]
+fn cross_open_rows_fail_the_aead_not_a_length_or_id_check() {
+    let label_text = "0123456789abcdef0123456789abcdef";
+    assert_eq!(label_text.len(), 32);
+    let label = wrap_link_label(&master(), &SHARE_A, label_text).unwrap();
+    assert_eq!(label.ciphertext.len(), 48);
+
+    // A label frame into the other purpose openers, same id bytes as its share.
+    assert!(matches!(
+        unwrap_link_owner_key(&master(), &SHARE_A, &label),
+        Err(CoreError::Decryption)
+    ));
+    assert!(matches!(
+        unwrap_link_owner_token(&master(), &SHARE_A, &label),
+        Err(CoreError::Decryption)
+    ));
+    assert!(matches!(
+        unwrap_folder_custody(&master(), &SHARE_A, &label),
+        Err(CoreError::Decryption)
+    ));
     assert!(
-        unwrap_folder_child(&folder_key(), &ROOT_A, &ITEM, 1, &blob).is_err(),
-        "a label frame opens as an L7 child wrap"
+        matches!(
+            unwrap_folder_child(&folder_key(), &SHARE_A, &ITEM, 1, &label),
+            Err(CoreError::Decryption)
+        ),
+        "a 48-byte label ciphertext must fail the L7 AEAD, not its length check"
     );
     assert!(
-        open_folder_actor_name(&folder_key(), &ROOT_A, &json(&blob)).is_err(),
-        "a label frame opens as an actor name"
+        matches!(
+            open_folder_actor_name(&folder_key(), &SHARE_A, &json(&label)),
+            Err(CoreError::Decryption)
+        ),
+        "a label envelope with the same 16 id bytes must fail the actor-name AEAD"
     );
+    // L8's context can only carry a 36-byte F item id, so the same id bytes are
+    // not expressible; given a valid id the refusal is still the AEAD.
+    assert!(matches!(
+        unwrap_owner_file_key(&master(), FOREIGN_ITEM_ID.as_bytes(), &label),
+        Err(CoreError::Decryption)
+    ));
 
-    // Neither label nor actor name opens through the legacy child opener.
-    assert!(open_legacy_child_key(&folder_key(), &frame(&blob)).is_none());
+    // The reverse direction: a real actor-name envelope, a real L7 child wrap
+    // and a real L8 owner wrap into the label opener, same id bytes where the
+    // format allows it.
+    // 32 bytes of name: the same 48-byte ciphertext as the label, so the row
+    // below reaches the AEAD of every opener that has a length check.
+    let sealed = seal_folder_actor_name(&folder_key(), &ROOT_A, &"n".repeat(32)).unwrap();
+    let named: EncryptedBlob = serde_json::from_str(&sealed).unwrap();
+    assert_eq!(named.ciphertext.len(), 48);
+    assert!(matches!(
+        unwrap_link_label(&master(), &ROOT_A, &named),
+        Err(CoreError::Decryption)
+    ));
+
+    let child = wrap_folder_child(&folder_key(), &SHARE_A, &ITEM, 1, &FileKey::from_bytes([0x0a; 32])).unwrap();
+    assert!(matches!(
+        unwrap_link_label(&master(), &SHARE_A, &child),
+        Err(CoreError::Decryption)
+    ));
+
+    let owner = wrap_owner_file_key(&master(), FOREIGN_ITEM_ID.as_bytes(), &FileKey::from_bytes([0x0b; 32])).unwrap();
+    assert!(matches!(
+        unwrap_link_label(&master(), &SHARE_A, &owner),
+        Err(CoreError::Decryption)
+    ));
+
+    // A 60-byte output of each writer (a 32-byte plaintext) reaches the legacy
+    // child opener's AEAD and is refused there too, not by its length check.
+    assert_eq!(frame(&label).len(), LEGACY_CHILD_FRAME_LEN);
+    assert!(open_legacy_child_key(&folder_key(), &frame(&label)).is_none());
+    assert_eq!(frame(&named).len(), LEGACY_CHILD_FRAME_LEN);
+    assert!(open_legacy_child_key(&folder_key(), &frame(&named)).is_none());
+}
+
+/// S3: exactly one envelope shape. The opener re-serializes what it parsed the
+/// way `seal_folder_actor_name` writes it and requires byte equality.
+#[test]
+fn the_actor_name_opener_refuses_every_other_envelope_shape() {
+    let sealed = seal_folder_actor_name(&folder_key(), &ROOT_A, "Mama").unwrap();
+    assert_eq!(open_folder_actor_name(&folder_key(), &ROOT_A, &sealed).unwrap(), "Mama");
+
+    // An extra field.
+    let mut value: serde_json::Value = serde_json::from_str(&sealed).unwrap();
+    value["extra"] = serde_json::json!("field");
+    assert!(matches!(
+        open_folder_actor_name(&folder_key(), &ROOT_A, &value.to_string()),
+        Err(CoreError::Decryption)
+    ));
+
+    // Reordered keys.
+    let blob: EncryptedBlob = serde_json::from_str(&sealed).unwrap();
+    let reordered = serde_json::json!({
+        "ciphertext": blob.ciphertext,
+        "nonce": blob.nonce,
+        "cipher_suite": blob.cipher_suite,
+    })
+    .to_string();
+    assert!(matches!(
+        open_folder_actor_name(&folder_key(), &ROOT_A, &reordered),
+        Err(CoreError::Decryption)
+    ));
+
+    // Added whitespace, inside the object and at the ends.
+    let padded = sealed.replacen('{', "{ ", 1).replacen('}', " }", 1);
+    assert!(matches!(
+        open_folder_actor_name(&folder_key(), &ROOT_A, &padded),
+        Err(CoreError::Decryption)
+    ));
+    assert!(matches!(
+        open_folder_actor_name(&folder_key(), &ROOT_A, &format!("\n{sealed}\n")),
+        Err(CoreError::Decryption)
+    ));
 }
 
 #[test]
@@ -97,13 +232,29 @@ fn actor_name_round_trips_and_is_bound_to_the_root_and_key() {
 
     // Confusion matrix: the actor-name blob is not a label, not a name under
     // the raw folder key, not an L7 child wrap, not custody, and never opens
-    // through the legacy child opener.
-    let as_blob: EncryptedBlob = serde_json::from_str(&sealed).unwrap();
-    assert!(unwrap_link_label(&master(), &SHARE_A, &as_blob).is_err());
-    assert!(unwrap_link_owner_key(&master(), &SHARE_A, &as_blob).is_err());
-    assert_eq!(decrypt_name_with_key(&folder_key(), &sealed), None);
-    assert!(unwrap_folder_child(&folder_key(), &ROOT_A, &ITEM, 2, &as_blob).is_err());
-    assert!(unwrap_folder_custody(&master(), &ROOT_A, &as_blob).is_err());
+    // through the legacy child opener. The name is 32 bytes, so the L7 row
+    // reaches the AEAD instead of failing its 48-byte length check.
+    let thirty_two = "n".repeat(32);
+    let matrix_sealed = seal_folder_actor_name(&folder_key(), &ROOT_A, &thirty_two).unwrap();
+    let as_blob: EncryptedBlob = serde_json::from_str(&matrix_sealed).unwrap();
+    assert_eq!(as_blob.ciphertext.len(), 48);
+    assert!(matches!(
+        unwrap_link_label(&master(), &ROOT_A, &as_blob),
+        Err(CoreError::Decryption)
+    ));
+    assert!(matches!(
+        unwrap_link_owner_key(&master(), &ROOT_A, &as_blob),
+        Err(CoreError::Decryption)
+    ));
+    assert_eq!(decrypt_name_with_key(&folder_key(), &matrix_sealed), None);
+    assert!(matches!(
+        unwrap_folder_child(&folder_key(), &ROOT_A, &ITEM, 2, &as_blob),
+        Err(CoreError::Decryption)
+    ));
+    assert!(matches!(
+        unwrap_folder_custody(&master(), &ROOT_A, &as_blob),
+        Err(CoreError::Decryption)
+    ));
     assert!(open_legacy_child_key(&folder_key(), &frame(&as_blob)).is_none());
 }
 
