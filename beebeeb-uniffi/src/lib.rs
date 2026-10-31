@@ -1567,8 +1567,9 @@ impl MasterKeyHandle {
             .map_err(Into::into)
     }
 
-    /// L16a: open a link label (NFC, 1..40 Unicode scalar values). One key,
-    /// one envelope shape; anything else is a decryption failure.
+    /// L16a: open a link label. One key, one envelope shape. Returns the label
+    /// in NFC (normalized, not refused); invalid UTF-8 or a label outside 1..40
+    /// Unicode scalar values after NFC is a decryption failure.
     pub fn unwrap_link_label(
         &self,
         share_id: String,
@@ -2080,7 +2081,13 @@ impl FileKeyHandle {
     }
 
     /// L16b: seal a guest's display name under the folder key, bound to the
-    /// shared root. Returns the name writer's JSON envelope.
+    /// shared root. Seals core's `kdf::sanitize_actor_name(name)`: NFC; the
+    /// display controls of its strip table removed (ZWNJ, ZWJ, variation
+    /// selectors and tag characters are kept); NFC again; then a leading
+    /// combining mark, a result outside 1..64 Unicode scalar values and a
+    /// visibly blank name are refused (`InvalidInput`). Returns the envelope:
+    /// a JSON object with exactly the keys `cipher_suite`, `nonce` and
+    /// `ciphertext`.
     pub fn seal_folder_actor_name(&self, shared_folder_id: String, name: String) -> Result<String, CryptoError> {
         let root = uuid::Uuid::parse_str(&shared_folder_id).map_err(|_| CryptoError::InvalidInput {
             detail: "invalid shared folder UUID".into(),
@@ -2089,9 +2096,11 @@ impl FileKeyHandle {
             .map_err(Into::into)
     }
 
-    /// L16b: open a guest's display name; control characters and bidi
-    /// overrides are stripped, and anything that is not that one envelope under
-    /// that one key is refused.
+    /// L16b: open a guest's display name. The envelope must be a JSON object
+    /// with exactly the keys `cipher_suite`, `nonce` and `ciphertext` (any key
+    /// order, any whitespace) under the one actor-name key; the plaintext goes
+    /// through the writer's `sanitize_actor_name` rule and is returned
+    /// sanitized. Every refusal is a decryption failure.
     pub fn open_folder_actor_name(&self, shared_folder_id: String, envelope: String) -> Result<String, CryptoError> {
         let root = uuid::Uuid::parse_str(&shared_folder_id).map_err(|_| CryptoError::InvalidInput {
             detail: "invalid shared folder UUID".into(),
@@ -7983,7 +7992,7 @@ mod client_meta_binding_tests {
 #[cfg(test)]
 mod l16_binding_tests {
     //! Task 2275, L16: link labels, guest actor names and the one legacy child
-    //! opener through the UniFFI handles, plus the published v14 vectors. No
+    //! opener through the UniFFI handles, plus the published v16 vectors. No
     //! raw key bytes cross this boundary.
     use super::*;
 

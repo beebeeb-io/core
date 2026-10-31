@@ -57,26 +57,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `upper_repair_split_v1` (vectors version 13).
 - Link labels and guest actor names (task 2275, L16): `kdf::wrap_link_label` /
   `unwrap_link_label` seal a link's display label to the master key under
-  `HKDF-SHA256(master, "beebeeb-link-label-v1" || share_id)` with the same string as AAD (NFC,
-  1..40 Unicode scalar values); `kdf::seal_folder_actor_name` / `open_folder_actor_name` seal a
-  guest's name under the folder key, bound to the shared root, in the name writer's envelope
-  (NFC, 1..64 scalars, display-control characters stripped on open). Both openers refuse a
-  plaintext that is not already NFC (core's writers seal NFC) and refuse a non-16-byte id. The
-  actor-name opener requires exactly the byte string `seal_folder_actor_name` writes (an extra
-  field, another key order or added whitespace is refused) and strips every `Cc` character plus
-  the format/separator characters that can hide or reorder text (U+00AD, U+061C, U+180E,
-  U+200B-U+200F, U+2028-U+202E, U+2060-U+2064, U+2066-U+206F, U+FEFF, U+FFF9-U+FFFB, U+E0001,
-  U+E0020-U+E007F); the 1..64 bound is checked again after stripping, so a name made only of
-  stripped characters is refused instead of returning an empty string.
+  `HKDF-SHA256(master, "beebeeb-link-label-v1" || share_id)` with the same string as AAD; the label
+  is NFC and 1..40 Unicode scalar values after NFC. `kdf::seal_folder_actor_name` /
+  `open_folder_actor_name` seal a guest's name under
+  `HKDF-SHA256(folder key, "beebeeb-folder-actor-name-v1" || root_id)` with the same string as AAD.
+  Both sides of the actor name apply ONE rule, `kdf::sanitize_actor_name`, and the writer seals its
+  result, so core never seals a name its own opener refuses: (1) NFC; (2) strip every `Cc`
+  character and U+00AD, U+061C, U+180E, U+200B, U+200E, U+200F, U+2028-U+202E, U+2060-U+2064,
+  U+2066-U+206F, U+FEFF, U+FFF9-U+FFFB, while keeping U+200C ZWNJ, U+200D ZWJ, the variation
+  selectors and the tag characters U+E0020-U+E007F (Persian and Indic spelling, emoji ZWJ
+  sequences and subdivision flags need them); (3) NFC again; (4) refuse a leading combining mark;
+  (5) 1..64 scalars, counted after steps 1-4; (6) refuse a visibly blank name, one with no
+  character that is neither whitespace nor an invisible filler (Hangul fillers, U+2800, U+034F,
+  the Mongolian and other variation selectors, Khmer inherent vowels, U+1D173-U+1D17A, ZWNJ, ZWJ,
+  the tags, and every other Default_Ignorable_Code_Point that is not stripped). The writer refuses
+  with `InvalidInput`; the openers normalize instead of refusing non-NFC plaintext, and refuse
+  anything else they cannot display with `Decryption`; a non-16-byte id is `InvalidInput`. The
+  actor-name envelope is a JSON text value with exactly the keys `cipher_suite`, `nonce` and
+  `ciphertext` (all required, none `null`, no other or repeated key); key order and JSON
+  whitespace are free, so a hop that re-encodes the JSON keeps it openable.
   `kdf::open_legacy_child_key` is the one legacy unbound child opener (60-byte frame, no AAD)
   and refuses a 32-byte plaintext that is valid UTF-8; a genuine random legacy child key that
   happens to be UTF-8 (about 2^-30) is refused and reads as a wrong key (accepted L9 residual,
   recorded on the function). WASM `wrapLinkLabel` / `unwrapLinkLabel` / `sealFolderActorName` /
   `openFolderActorName` / `openLegacyChildKey`; UniFFI `MasterKeyHandle.wrap_link_label` /
   `unwrap_link_label` and `FileKeyHandle.seal_folder_actor_name` / `open_folder_actor_name` /
-  `open_legacy_child_key`. Test vectors are version 15 (`link_label_v1`, `folder_actor_name_v1`,
-  `legacy_child_refusal_v1`); version 14 is main's `item_ids` set alone. Vendored copies must be
-  refreshed to 15: web `test/core-vectors-kat.test.ts`, mobile `CoreVectorsKATTests.swift` and
+  `open_legacy_child_key`. Test vectors are version 16 (`link_label_v1`, `folder_actor_name_v1`,
+  `legacy_child_refusal_v1`); version 14 is main's `item_ids` set alone, and 15 is not used (it
+  named an earlier draft of these vectors on the unmerged branch). Vendored copies must be
+  refreshed to 16: web `test/core-vectors-kat.test.ts`, mobile `CoreVectorsKATTests.swift` and
   `CoreVectorsKATTest.kt`.
 - `direct_transfer::storage::check_storage_get`: a storage GET delivered the chunk only for a
   `200` whose `Content-Length` is exactly the grant's length; anything else is `Failed { status }`

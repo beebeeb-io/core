@@ -4836,7 +4836,9 @@ pub fn wrap_link_label(master_key: &[u8], share_id: &str, label: &str) -> Result
     Ok([blob.nonce, blob.ciphertext].concat())
 }
 
-/// Open a link label (NFC, 1..40 Unicode scalar values); one key, one shape.
+/// Open a link label; one key, one shape. Returns the label in NFC (a non-NFC
+/// plaintext is normalized, not refused); invalid UTF-8 or a label outside
+/// 1..40 Unicode scalar values after NFC is a decryption failure.
 #[wasm_bindgen(js_name = unwrapLinkLabel)]
 pub fn unwrap_link_label(master_key: &[u8], share_id: &str, wrapped: &[u8]) -> Result<String, JsError> {
     let master = master_key_from_slice(master_key)?;
@@ -4846,7 +4848,13 @@ pub fn unwrap_link_label(master_key: &[u8], share_id: &str, wrapped: &[u8]) -> R
 }
 
 /// Seal a guest's display name under the folder key, bound to the shared root.
-/// Returns the name writer's JSON envelope.
+/// Seals `sanitize_actor_name(name)` (core `kdf::sanitize_actor_name`): NFC;
+/// controls, bidi controls and the other display controls of its strip table
+/// removed (ZWNJ, ZWJ, variation selectors and tag characters are kept); NFC
+/// again; then a leading combining mark, a result outside 1..64 Unicode scalar
+/// values and a visibly blank name are refused (invalid input). Returns the
+/// envelope: a JSON object with exactly the keys `cipher_suite`, `nonce` and
+/// `ciphertext`.
 #[wasm_bindgen(js_name = sealFolderActorName)]
 pub fn seal_folder_actor_name(folder_key: &[u8], shared_folder_id: &str, name: &str) -> Result<String, JsError> {
     let folder = file_key_from_slice(folder_key)?;
@@ -4854,9 +4862,11 @@ pub fn seal_folder_actor_name(folder_key: &[u8], shared_folder_id: &str, name: &
     kdf::seal_folder_actor_name(&folder, root.as_bytes(), name).map_err(|e| JsError::new(&e.to_string()))
 }
 
-/// Open a guest's display name; control characters and bidi overrides are
-/// stripped, and anything that is not that one envelope under that one key is
-/// refused.
+/// Open a guest's display name. The envelope must be a JSON object with
+/// exactly the keys `cipher_suite`, `nonce` and `ciphertext` (any key order,
+/// any whitespace) that opens under the one actor-name key; the plaintext then
+/// goes through the same `sanitize_actor_name` rule as the writer and is
+/// returned sanitized. Every refusal is a decryption failure.
 #[wasm_bindgen(js_name = openFolderActorName)]
 pub fn open_folder_actor_name(folder_key: &[u8], shared_folder_id: &str, envelope: &str) -> Result<String, JsError> {
     let folder = file_key_from_slice(folder_key)?;
