@@ -18,6 +18,8 @@ struct Wrong {
     send_auth_to_storage: bool,
     read_timeout: bool,
     per_instance_clock: bool,
+    uncapped_api: bool,
+    api_timeout: bool,
 }
 
 impl Wrong {
@@ -27,6 +29,8 @@ impl Wrong {
         send_auth_to_storage: false,
         read_timeout: true,
         per_instance_clock: false,
+        uncapped_api: false,
+        api_timeout: true,
     };
 }
 
@@ -76,9 +80,11 @@ impl DirectIo for ReferenceIo {
                 },
                 self.url(&call.path),
             )
-            .timeout(call.timeout)
             .header("Authorization", "Bearer conformance-self-test")
             .header("Accept", "application/json");
+        if self.wrong.api_timeout {
+            request = request.timeout(call.timeout);
+        }
         if let Some(body) = call.body {
             request = request.body(body);
         }
@@ -92,7 +98,24 @@ impl DirectIo for ReferenceIo {
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .map(str::to_string);
-        let body = response.bytes().await.map(|b| b.to_vec()).unwrap_or_default();
+        let body = if self.wrong.uncapped_api {
+            response.bytes().await.map(|b| b.to_vec()).unwrap_or_default()
+        } else {
+            // At most `max_body` bytes, then stop: the caller asked for no more.
+            let mut body: Vec<u8> = Vec::new();
+            let mut response = response;
+            while body.len() < call.max_body {
+                match response.chunk().await {
+                    Ok(Some(piece)) => {
+                        let room = call.max_body - body.len();
+                        body.extend_from_slice(&piece[..piece.len().min(room)]);
+                    }
+                    Ok(None) => break,
+                    Err(_) => return ApiReply::default(),
+                }
+            }
+            body
+        };
         ApiReply {
             status,
             content_type,
@@ -237,6 +260,36 @@ async fn conformance_fails_a_transport_without_a_read_timeout() {
     assert!(!report.passed(), "{}", report.describe());
     assert!(
         report.failures().contains(&"an_idle_body_times_out"),
+        "{}",
+        report.describe()
+    );
+}
+
+#[tokio::test]
+async fn conformance_fails_a_transport_that_reads_the_whole_api_body() {
+    let wrong = Wrong {
+        uncapped_api: true,
+        ..Wrong::NONE
+    };
+    let report = conformance::run(|base: &str| ReferenceIo::new(base, wrong)).await;
+    assert!(!report.passed(), "{}", report.describe());
+    assert!(
+        report.failures().contains(&"the_api_call_reads_at_most_max_body"),
+        "{}",
+        report.describe()
+    );
+}
+
+#[tokio::test]
+async fn conformance_fails_a_transport_without_an_api_timeout() {
+    let wrong = Wrong {
+        api_timeout: false,
+        ..Wrong::NONE
+    };
+    let report = conformance::run(|base: &str| ReferenceIo::new(base, wrong)).await;
+    assert!(!report.passed(), "{}", report.describe());
+    assert!(
+        report.failures().contains(&"the_api_timeout_bounds_the_call"),
         "{}",
         report.describe()
     );

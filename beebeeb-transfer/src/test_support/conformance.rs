@@ -343,6 +343,43 @@ pub async fn run<T: DirectIo>(make: impl Fn(&str) -> T) -> ConformanceReport {
         format!("status {} after {elapsed:?}", slow.status),
     ));
 
+    // The API call reads at most `max_body` bytes, so a large reply cannot
+    // grow memory past what the caller asked for.
+    let capped = io
+        .api(ApiCall {
+            method: ApiMethod::Get,
+            path: "/ok?len=64".to_string(),
+            body: None,
+            capabilities: None,
+            timeout: Duration::from_secs(5),
+            max_body: 8,
+        })
+        .await;
+    checks.push(check(
+        "the_api_call_reads_at_most_max_body",
+        capped.status == 200 && capped.body.len() <= 8,
+        format!("status {}, body bytes {}", capped.status, capped.body.len()),
+    ));
+
+    // The call's own timeout bounds the API body, not the client's default.
+    let started = Instant::now();
+    let slow_api = io
+        .api(ApiCall {
+            method: ApiMethod::Get,
+            path: "/slow".to_string(),
+            body: None,
+            capabilities: None,
+            timeout: Duration::from_millis(150),
+            max_body: 64,
+        })
+        .await;
+    let api_elapsed = started.elapsed();
+    checks.push(check(
+        "the_api_timeout_bounds_the_call",
+        slow_api.status == 0 && api_elapsed < Duration::from_secs(3),
+        format!("status {} after {api_elapsed:?}", slow_api.status),
+    ));
+
     // At most `expected_len + 1` bytes are read, so an overlong body is one
     // byte too many and memory stays bounded.
     let overlong = io
