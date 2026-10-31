@@ -90,7 +90,7 @@ test('L8 owner file-key exports open the independent Python KAT and round-trip',
   const wrap = wasm.wrapOwnerFileKey(master, v.file_id, bytes(v.child_key_hex));
   assert.equal(wrap.length, 60);
   assert.equal(hex(wasm.unwrapOwnerFileKey(master, v.file_id, wrap)), v.child_key_hex);
-  assert.throws(() => wasm.unwrapOwnerFileKey(master, v.folder_id, wrap), /decryption failed/);
+  assert.throws(() => wasm.unwrapOwnerFileKey(master, v.folder_id, wrap), /foreign item id/);
   assert.throws(() => wasm.unwrapOwnerFileKey(new Uint8Array(32).fill(0xff), v.file_id, wrap), /decryption failed/);
   assert.throws(() => wasm.unwrapFolderCustody(master, v.file_id, wrap), /decryption failed/);
   const custody = wasm.wrapFolderCustody(master, v.file_id, bytes(v.child_key_hex));
@@ -134,8 +134,8 @@ test('L8 rejects invalid key/frame lengths and empty record IDs', () => {
   for (const length of [0, 12, 28, 59, 61, 92]) {
     assert.throws(() => wasm.unwrapOwnerFileKey(key, 'f', new Uint8Array(length)), /must be 60 bytes/);
   }
-  assert.throws(() => wasm.wrapOwnerFileKey(key, '', key), /record id must not be empty/);
-  assert.throws(() => wasm.unwrapOwnerFileKey(key, '', new Uint8Array(60)), /record id must not be empty/);
+  assert.throws(() => wasm.wrapOwnerFileKey(key, '', key), /foreign item id/);
+  assert.throws(() => wasm.unwrapOwnerFileKey(key, '', new Uint8Array(60)), /foreign item id/);
 });
 
 test('L9 invite owner copy vector and purpose binding', () => {

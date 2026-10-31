@@ -14,6 +14,7 @@ pub mod folder_key;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod fp_cache;
 pub mod hash;
+pub mod item_id;
 pub mod kdf;
 pub mod media;
 pub mod metadata_wire;

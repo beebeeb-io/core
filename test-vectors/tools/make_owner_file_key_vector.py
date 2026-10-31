@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 def owner_vector():
     master = bytes(range(32))
     child = bytes(range(0xA0, 0xC0))
-    item = "11111111-1111-4111-8111-111111111111"
+    item = "11111111-1111-8111-8111-111111111111"
     nonce = bytes(range(12))
     context = b"beebeeb-owner-file-key-v1" + item.encode("utf-8")
     key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=context).derive(master)
