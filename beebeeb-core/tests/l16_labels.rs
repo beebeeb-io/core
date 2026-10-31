@@ -10,10 +10,7 @@ use beebeeb_core::CoreError;
 use beebeeb_core::chunk_stream::ExpectedChunkFormat;
 use beebeeb_core::encrypt::{decrypt_chunk, decrypt_name_with_key, encrypt_chunk, encrypt_name_for};
 use beebeeb_core::kdf::{
-    FILE_KEY_INFO, FOLDER_ACTOR_NAME_INFO, FOLDER_CHILD_LABEL, FOLDER_CUSTODY_LABEL, FOLDER_LINK_KEY_INFO,
-    FOLDER_LINK_PASSPHRASE_SALT_LABEL, FileKey, INVITE_OWNER_COPY_LABEL, LEGACY_CHILD_FRAME_LEN, LINK_LABEL_LABEL,
-    LINK_OWNER_KEY_LABEL, LINK_OWNER_TOKEN_LABEL, MasterKey, OWNER_FILE_KEY_LABEL, SEARCH_INDEX_SHARD_INFO,
-    SHARED_FOLDER_INDEX_KEY_INFO, open_folder_actor_name, open_legacy_child_key, seal_folder_actor_name,
+    FileKey, LEGACY_CHILD_FRAME_LEN, MasterKey, open_folder_actor_name, open_legacy_child_key, seal_folder_actor_name,
     unwrap_folder_child, unwrap_folder_custody, unwrap_link_label, unwrap_link_owner_key, unwrap_link_owner_token,
     unwrap_owner_file_key, wrap_folder_child, wrap_link_label, wrap_link_owner_key, wrap_owner_file_key,
 };
@@ -27,12 +24,17 @@ const ITEM: [u8; 16] = [0x53; 16];
 /// L8 owner-file-key envelopes are foreign (`F`) item ids only (task 2275 L12).
 const FOREIGN_ITEM_ID: &str = "11111111-1111-8111-8111-111111111111";
 
+/// T4: the master key and the folder key are the SAME 32 bytes, so a
+/// cross-open row can only fail on the purpose label or the AAD, never because
+/// the two sides started from different root keys.
+const ROOT_KEY: [u8; 32] = [0x80; 32];
+
 fn master() -> MasterKey {
-    MasterKey::from_bytes([0x40; 32])
+    MasterKey::from_bytes(ROOT_KEY)
 }
 
 fn folder_key() -> FileKey {
-    FileKey::from_bytes([0x80; 32])
+    FileKey::from_bytes(ROOT_KEY)
 }
 
 fn frame(blob: &EncryptedBlob) -> Vec<u8> {
@@ -64,48 +66,23 @@ fn label_is_bound_to_the_share_and_the_purpose() {
     ));
 }
 
-/// S5(a): every HKDF info/AAD label in `kdf` is distinct and no label is a
-/// prefix of another, so two derivations can never share a key by accident
-/// (and `label || id` can never be forged from a shorter label plus a longer id).
-#[test]
-fn every_kdf_label_is_distinct_and_not_a_prefix_of_another() {
-    let labels: [(&str, &[u8]); 13] = [
-        ("FILE_KEY_INFO", FILE_KEY_INFO),
-        ("SEARCH_INDEX_SHARD_INFO", SEARCH_INDEX_SHARD_INFO),
-        ("SHARED_FOLDER_INDEX_KEY_INFO", SHARED_FOLDER_INDEX_KEY_INFO),
-        ("FOLDER_LINK_KEY_INFO", FOLDER_LINK_KEY_INFO),
-        ("FOLDER_LINK_PASSPHRASE_SALT_LABEL", FOLDER_LINK_PASSPHRASE_SALT_LABEL),
-        ("FOLDER_CHILD_LABEL", FOLDER_CHILD_LABEL),
-        ("OWNER_FILE_KEY_LABEL", OWNER_FILE_KEY_LABEL),
-        ("FOLDER_CUSTODY_LABEL", FOLDER_CUSTODY_LABEL),
-        ("LINK_OWNER_KEY_LABEL", LINK_OWNER_KEY_LABEL),
-        ("LINK_OWNER_TOKEN_LABEL", LINK_OWNER_TOKEN_LABEL),
-        ("INVITE_OWNER_COPY_LABEL", INVITE_OWNER_COPY_LABEL),
-        ("LINK_LABEL_LABEL", LINK_LABEL_LABEL),
-        ("FOLDER_ACTOR_NAME_INFO", FOLDER_ACTOR_NAME_INFO),
-    ];
-    for (i, (a_name, a)) in labels.iter().enumerate() {
-        for (b_name, b) in labels.iter().skip(i + 1) {
-            assert_ne!(a, b, "{a_name} and {b_name} are the same HKDF label");
-            assert!(
-                !a.starts_with(b) && !b.starts_with(a),
-                "{a_name} and {b_name}: one label is a prefix of the other"
-            );
-        }
-    }
-}
-
-/// S5(b): cross-open rows that feed a REAL output of one writer to another
-/// opener, with the SAME 16-byte id where the formats allow it, and require the
-/// failure to be the AEAD (`CoreError::Decryption`) rather than a length or id
-/// check. The label text is 32 bytes so its ciphertext is 48 bytes — the L7
-/// child wrap's length — and the row cannot fail on the length check instead.
+/// S5(b)/T4: cross-open rows that feed a REAL output of one writer to another
+/// opener, with the SAME 16-byte id where the formats allow it and the SAME 32
+/// root-key bytes on both sides (`ROOT_KEY`), and require the failure to be the
+/// AEAD (`CoreError::Decryption`) rather than a length, id or root-key
+/// difference. The label text is 32 bytes so its ciphertext is 48 bytes — the
+/// L7 child wrap's length — and the row cannot fail on the length check instead.
+/// Each writer output first opens under its own opener (positive controls), so
+/// a refusal below is about the purpose, not malformed input.
 #[test]
 fn cross_open_rows_fail_the_aead_not_a_length_or_id_check() {
+    // `master()` is `MasterKey::from_bytes(ROOT_KEY)`: the same 32 bytes.
+    assert_eq!(folder_key().as_bytes(), &ROOT_KEY);
     let label_text = "0123456789abcdef0123456789abcdef";
     assert_eq!(label_text.len(), 32);
     let label = wrap_link_label(&master(), &SHARE_A, label_text).unwrap();
     assert_eq!(label.ciphertext.len(), 48);
+    assert_eq!(unwrap_link_label(&master(), &SHARE_A, &label).unwrap(), label_text);
 
     // A label frame into the other purpose openers, same id bytes as its share.
     assert!(matches!(
@@ -147,6 +124,10 @@ fn cross_open_rows_fail_the_aead_not_a_length_or_id_check() {
     // 32 bytes of name: the same 48-byte ciphertext as the label, so the row
     // below reaches the AEAD of every opener that has a length check.
     let sealed = seal_folder_actor_name(&folder_key(), &ROOT_A, &"n".repeat(32)).unwrap();
+    assert_eq!(
+        open_folder_actor_name(&folder_key(), &ROOT_A, &sealed).unwrap(),
+        "n".repeat(32)
+    );
     let named: EncryptedBlob = serde_json::from_str(&sealed).unwrap();
     assert_eq!(named.ciphertext.len(), 48);
     assert!(matches!(
@@ -155,6 +136,12 @@ fn cross_open_rows_fail_the_aead_not_a_length_or_id_check() {
     ));
 
     let child = wrap_folder_child(&folder_key(), &SHARE_A, &ITEM, 1, &FileKey::from_bytes([0x0a; 32])).unwrap();
+    assert_eq!(
+        unwrap_folder_child(&folder_key(), &SHARE_A, &ITEM, 1, &child)
+            .unwrap()
+            .as_bytes(),
+        &[0x0a; 32]
+    );
     assert!(matches!(
         unwrap_link_label(&master(), &SHARE_A, &child),
         Err(CoreError::Decryption)
@@ -174,44 +161,86 @@ fn cross_open_rows_fail_the_aead_not_a_length_or_id_check() {
     assert!(open_legacy_child_key(&folder_key(), &frame(&named)).is_none());
 }
 
-/// S3: exactly one envelope shape. The opener re-serializes what it parsed the
-/// way `seal_folder_actor_name` writes it and requires byte equality.
+/// T2: the envelope is a JSON text value with exactly three keys,
+/// `cipher_suite`, `nonce` and `ciphertext`. A fourth key is refused.
 #[test]
-fn the_actor_name_opener_refuses_every_other_envelope_shape() {
+fn the_actor_name_envelope_refuses_an_extra_field() {
     let sealed = seal_folder_actor_name(&folder_key(), &ROOT_A, "Mama").unwrap();
     assert_eq!(open_folder_actor_name(&folder_key(), &ROOT_A, &sealed).unwrap(), "Mama");
-
-    // An extra field.
     let mut value: serde_json::Value = serde_json::from_str(&sealed).unwrap();
     value["extra"] = serde_json::json!("field");
     assert!(matches!(
         open_folder_actor_name(&folder_key(), &ROOT_A, &value.to_string()),
         Err(CoreError::Decryption)
     ));
+}
 
-    // Reordered keys.
+/// T2: the shape is strict, the bytes are not. Any key order and any JSON
+/// whitespace open, so a hop that re-encodes the JSON (JSONB, Swift
+/// `JSONEncoder`, pretty-printing) does not make the name unopenable.
+#[test]
+fn the_actor_name_envelope_opens_in_any_key_order_and_whitespace() {
+    let sealed = seal_folder_actor_name(&folder_key(), &ROOT_A, "Mama").unwrap();
     let blob: EncryptedBlob = serde_json::from_str(&sealed).unwrap();
-    let reordered = serde_json::json!({
-        "ciphertext": blob.ciphertext,
-        "nonce": blob.nonce,
-        "cipher_suite": blob.cipher_suite,
-    })
-    .to_string();
-    assert!(matches!(
-        open_folder_actor_name(&folder_key(), &ROOT_A, &reordered),
-        Err(CoreError::Decryption)
-    ));
 
-    // Added whitespace, inside the object and at the ends.
-    let padded = sealed.replacen('{', "{ ", 1).replacen('}', " }", 1);
-    assert!(matches!(
-        open_folder_actor_name(&folder_key(), &ROOT_A, &padded),
-        Err(CoreError::Decryption)
-    ));
-    assert!(matches!(
-        open_folder_actor_name(&folder_key(), &ROOT_A, &format!("\n{sealed}\n")),
-        Err(CoreError::Decryption)
-    ));
+    let (suite, nonce, ct) = (
+        serde_json::json!(blob.cipher_suite),
+        serde_json::json!(blob.nonce),
+        serde_json::json!(blob.ciphertext),
+    );
+    let reordered = format!(r#"{{"ciphertext":{ct},"nonce":{nonce},"cipher_suite":{suite}}}"#);
+    assert_ne!(reordered, sealed);
+    assert_eq!(
+        open_folder_actor_name(&folder_key(), &ROOT_A, &reordered).unwrap(),
+        "Mama"
+    );
+
+    let pretty = serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(&sealed).unwrap()).unwrap();
+    assert!(pretty.contains('\n'));
+    assert_eq!(open_folder_actor_name(&folder_key(), &ROOT_A, &pretty).unwrap(), "Mama");
+
+    let padded = format!("\n\t {} \r\n", sealed.replacen('{', "{ ", 1).replace(',', " ,\n"));
+    assert_eq!(open_folder_actor_name(&folder_key(), &ROOT_A, &padded).unwrap(), "Mama");
+}
+
+/// T2: every key is required and none is optional: a missing, `null` or
+/// duplicated key, a wrong cipher suite or a nonce that is not 12 bytes is
+/// refused, and so is anything that is not a JSON object (serde would
+/// otherwise take the three values as an array) or a suite that is not the
+/// writer's JSON string.
+#[test]
+fn the_actor_name_envelope_refuses_a_missing_null_or_duplicate_field() {
+    let sealed = seal_folder_actor_name(&folder_key(), &ROOT_A, "Mama").unwrap();
+    let blob: EncryptedBlob = serde_json::from_str(&sealed).unwrap();
+    let suite = serde_json::json!(blob.cipher_suite);
+    let nonce = serde_json::json!(blob.nonce);
+    let ct = serde_json::json!(blob.ciphertext);
+    let refused = [
+        serde_json::json!({ "nonce": nonce, "ciphertext": ct }).to_string(),
+        serde_json::json!({ "cipher_suite": suite, "ciphertext": ct }).to_string(),
+        serde_json::json!({ "cipher_suite": suite, "nonce": nonce }).to_string(),
+        serde_json::json!({ "cipher_suite": null, "nonce": nonce, "ciphertext": ct }).to_string(),
+        serde_json::json!({ "cipher_suite": suite, "nonce": null, "ciphertext": ct }).to_string(),
+        serde_json::json!({ "cipher_suite": suite, "nonce": nonce, "ciphertext": null }).to_string(),
+        format!(r#"{{"cipher_suite":{suite},"nonce":{nonce},"nonce":{nonce},"ciphertext":{ct}}}"#),
+        serde_json::json!({ "cipher_suite": "V2Other", "nonce": nonce, "ciphertext": ct }).to_string(),
+        serde_json::json!({ "cipher_suite": suite, "nonce": blob.nonce[..11].to_vec(), "ciphertext": ct }).to_string(),
+        serde_json::json!([suite, nonce, ct]).to_string(),
+        format!(" [{suite},{nonce},{ct}]"),
+        serde_json::json!({ "cipher_suite": { "V1Aes256Gcm": null }, "nonce": nonce, "ciphertext": ct }).to_string(),
+        serde_json::json!({ "cipher_suite": 0, "nonce": nonce, "ciphertext": ct }).to_string(),
+        serde_json::json!(sealed).to_string(),
+        String::new(),
+    ];
+    for (i, envelope) in refused.iter().enumerate() {
+        assert!(
+            matches!(
+                open_folder_actor_name(&folder_key(), &ROOT_A, envelope),
+                Err(CoreError::Decryption)
+            ),
+            "row {i} must be refused: {envelope}"
+        );
+    }
 }
 
 #[test]

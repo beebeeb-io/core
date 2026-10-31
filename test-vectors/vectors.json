@@ -561,7 +561,7 @@
       "master_key_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
       "name": "link_label_v1",
       "nonce_hex": "2122232425262728292a2b2c",
-      "note": "L16a: HKDF info and AES-GCM AAD both equal beebeeb-link-label-v1 || the 16-byte share id; the label is normalized to NFC and must be 1..40 scalars; fixed nonce for this public test only.",
+      "note": "L16a: HKDF info and AES-GCM AAD both equal beebeeb-link-label-v1 || the 16-byte share id. Writer and opener normalize the label to NFC (the opener normalizes, it does not refuse non-NFC plaintext) and require 1..40 scalars after NFC. Fixed nonce for this public test only.",
       "plaintext_hex": "436166c3a92070686f746f73",
       "share_id": "22750000-0000-4000-8000-0000000000a1",
       "share_id_hex": "227500000000400080000000000000a1",
@@ -570,16 +570,16 @@
     {
       "actor_name": "Zoé Guest",
       "actor_name_key_hex": "037a251c27783894ca1087c8085e5c5a1cbf30671ca35b08606db7a10b329ba5",
-      "envelope": "{\"cipher_suite\":\"V1Aes256Gcm\",\"nonce\":[49,50,51,52,53,54,55,56,57,58,59,60],\"ciphertext\":[4,167,218,221,73,92,113,47,126,30,28,25,110,186,121,59,20,60,176,124,175,167,100,41,133,92,55,189,181,33,50,8,159]}",
+      "envelope": "{\"cipher_suite\":\"V1Aes256Gcm\",\"nonce\":[49,50,51,52,53,54,55,56,57,58,59,60],\"ciphertext\":[4,167,218,221,73,249,132,228,74,31,83,16,117,93,174,162,19,218,153,77,74,3,20,103,229,21]}",
       "folder_key_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
       "info_aad_hex": "626565626565622d666f6c6465722d6163746f722d6e616d652d7631227500000000400080000000000000b1",
       "name": "folder_actor_name_v1",
       "nonce_hex": "3132333435363738393a3b3c",
-      "note": "L16b: HKDF info and AES-GCM AAD both equal beebeeb-folder-actor-name-v1 || the 16-byte shared root id, under the folder key; the name is NFC and 1..64 scalars, and the opener strips controls and bidi overrides; fixed nonce for this public test only.",
-      "plaintext_hex": "5a6fc3a920e280ae4775657374e281a607",
+      "note": "L16b: HKDF info and AES-GCM AAD both equal beebeeb-folder-actor-name-v1 || the 16-byte shared root id, under the folder key. Writer and opener apply ONE rule, sanitize_actor_name: NFC; strip every Cc character and U+00AD, U+061C, U+180E, U+200B, U+200E, U+200F, U+2028-U+202E, U+2060-U+2064, U+2066-U+206F, U+FEFF, U+FFF9-U+FFFB (U+200C ZWNJ, U+200D ZWJ, the variation selectors and the tags U+E0020-U+E007F are kept); NFC again; refuse a leading combining mark; 1..64 scalars after that; refuse a visibly blank name (only whitespace and invisible fillers). The writer seals the sanitized writer_input (plaintext_hex) and the opener returns actor_name. The envelope is a JSON object with exactly the keys cipher_suite, nonce and ciphertext; key order and whitespace are free. Fixed nonce for this public test only.",
+      "plaintext_hex": "5a6fc3a9204775657374",
       "root_id": "22750000-0000-4000-8000-0000000000b1",
       "root_id_hex": "227500000000400080000000000000b1",
-      "sealed_text": "Zoé ‮Guest⁦\u0007"
+      "writer_input": "Zoé ‮Guest⁦\u0007"
     },
     {
       "child_frame_hex": "5152535455565758595a5b5cced3d41774bfd896e9a14bb622de7d1b1ca374a329062039809c8a4d9dabfdfc68da26df1cfae84f644b801a96ff9557",
@@ -593,5 +593,5 @@
       "note": "L16d: a legacy unbound child frame is nonce || AES-256-GCM (no AAD). A 32-byte plaintext that is valid UTF-8 is not a key (L9 rule 1): open_legacy_child_key must refuse the name-shaped frame and open the real child key. Fixed nonces for this public test only."
     }
   ],
-  "version": 15
+  "version": 16
 }

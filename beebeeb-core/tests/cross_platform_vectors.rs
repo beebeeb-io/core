@@ -13,7 +13,7 @@ use beebeeb_core::encrypt::{decrypt_chunk, decrypt_metadata, encrypt_metadata};
 use beebeeb_core::file_request::{derive_request_wrap_key, open_request_upload, unwrap_request_private};
 use beebeeb_core::kdf::{
     FileKey, MasterKey, derive_file_key, derive_master_key, derive_shared_folder_index_key, open_folder_actor_name,
-    open_legacy_child_key, unwrap_link_label,
+    open_legacy_child_key, sanitize_actor_name, unwrap_link_label,
 };
 use beebeeb_core::opaque::{
     OpaqueEnvelope, compute_recovery_check, derive_share_key, derive_x25519_private, derive_x25519_public,
@@ -711,8 +711,8 @@ fn vector_file_version_check() {
         .as_u64()
         .expect("vectors.json must have a 'version' field");
     assert_eq!(
-        version, 15,
-        "vectors.json version mismatch — expected 15, got {version}. \
+        version, 16,
+        "vectors.json version mismatch — expected 16, got {version}. \
          Update this test if you intentionally bumped the version."
     );
 
@@ -763,7 +763,7 @@ fn vector_file_version_check() {
         "client_meta_device_hostname",
         "client_meta_session_paths",
         "client_meta_padding_buckets",
-        // Version 15 (task 2275, L16): link labels, guest names, the legacy child opener.
+        // Version 16 (task 2275, L16): link labels, guest names, the legacy child opener.
         "link_label_v1",
         "folder_actor_name_v1",
         "legacy_child_refusal_v1",
@@ -1312,14 +1312,49 @@ fn vector_folder_actor_name_opens_and_is_bound_to_the_root() {
         .unwrap();
     assert_eq!(hex::encode(key), v["actor_name_key_hex"].as_str().unwrap());
 
-    // The sealed plaintext is the NFC of the input, and the opener returns it
-    // with the control and bidi characters stripped.
-    let sealed_text: String = v["sealed_text"].as_str().unwrap().nfc().collect();
-    assert_eq!(decode_hex(&v, "plaintext_hex"), sealed_text.as_bytes());
+    // The writer sealed the sanitized input (NFC, controls stripped, NFC
+    // again), and the opener returns exactly that.
+    let actor_name = v["actor_name"].as_str().unwrap();
+    let writer_input = v["writer_input"].as_str().unwrap();
+    assert_ne!(writer_input, actor_name);
+    assert_eq!(sanitize_actor_name(writer_input).unwrap(), actor_name);
+    assert_eq!(decode_hex(&v, "plaintext_hex"), actor_name.as_bytes());
+    assert_eq!(actor_name, actor_name.nfc().collect::<String>());
     assert_eq!(
         open_folder_actor_name(&folder, root.as_bytes(), envelope).unwrap(),
-        v["actor_name"].as_str().unwrap()
+        actor_name
     );
+
+    // Independently of core's opener: a raw AES-256-GCM open of the envelope
+    // under the published key and AAD gives the published plaintext.
+    {
+        use aes_gcm::aead::{Aead, Payload};
+        use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+        let parsed: serde_json::Value = serde_json::from_str(envelope).unwrap();
+        let keys: Vec<&String> = parsed.as_object().unwrap().keys().collect();
+        assert_eq!(keys.len(), 3, "exactly three keys: {keys:?}");
+        let bytes = |field: &str| -> Vec<u8> {
+            parsed[field]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|b| u8::try_from(b.as_u64().unwrap()).unwrap())
+                .collect()
+        };
+        assert_eq!(parsed["cipher_suite"], "V1Aes256Gcm");
+        assert_eq!(bytes("nonce"), decode_hex(&v, "nonce_hex"));
+        let plain = Aes256Gcm::new_from_slice(&decode_hex(&v, "actor_name_key_hex"))
+            .unwrap()
+            .decrypt(
+                Nonce::from_slice(&bytes("nonce")),
+                Payload {
+                    msg: &bytes("ciphertext"),
+                    aad: &context,
+                },
+            )
+            .unwrap();
+        assert_eq!(plain, decode_hex(&v, "plaintext_hex"));
+    }
 
     // Bound to this root and this folder key only.
     let mut other_root = *root.as_bytes();
