@@ -121,6 +121,9 @@ fn allocate_argon_memory(block_count: usize) -> Result<Zeroizing<Vec<argon2::Blo
     Ok(Zeroizing::new(memory))
 }
 
+/// The per-file key derivation label (file content, key wrap and v1 metadata).
+pub const FILE_KEY_INFO: &[u8] = b"beebeeb-file-key-v1";
+
 /// Derive a per-file encryption key from a master key using HKDF-SHA256.
 ///
 /// `file_id` must be unique per file (typically a random UUID assigned at creation).
@@ -135,7 +138,7 @@ pub fn derive_file_key(master_key: &MasterKey, file_id: &[u8]) -> FileKey {
     let hk = Hkdf::<Sha256>::new(None, master_key.as_bytes());
 
     let mut info = Vec::with_capacity(19 + file_id.len());
-    info.extend_from_slice(b"beebeeb-file-key-v1");
+    info.extend_from_slice(FILE_KEY_INFO);
     info.extend_from_slice(file_id);
 
     let mut okm = Zeroizing::new([0u8; 32]);
@@ -366,6 +369,9 @@ pub fn derive_file_subkey(file_key: &FileKey, info: &[u8]) -> FileKey {
     FileKey { bytes: *okm }
 }
 
+/// The account search-index shard label.
+pub const SEARCH_INDEX_SHARD_INFO: &[u8] = b"beebeeb-search-index-shard-v1";
+
 /// Derive a per-shard key for the encrypted search index (task 0778).
 ///
 /// Each shard (bucket) of the search index is encrypted under its own key,
@@ -379,7 +385,7 @@ pub fn derive_search_index_key(master_key: &MasterKey, bucket: u32) -> FileKey {
     let hk = Hkdf::<Sha256>::new(None, master_key.as_bytes());
 
     let mut info = Vec::with_capacity(29 + 4);
-    info.extend_from_slice(b"beebeeb-search-index-shard-v1");
+    info.extend_from_slice(SEARCH_INDEX_SHARD_INFO);
     info.extend_from_slice(&bucket.to_le_bytes());
 
     let mut okm = Zeroizing::new([0u8; 32]);
@@ -897,12 +903,63 @@ fn normalized_text(input: &str, max_scalars: usize, what: &str) -> Result<String
     Ok(normalized)
 }
 
-/// L16b: the opener drops what must never be shown: control characters and the
-/// bidi overrides that could reorder the owner's UI (a guest writes this text).
+/// L16b (S1): every character the actor-name opener removes before a guest's
+/// text can reach the owner's UI. The table is the whole rule — no dependency
+/// and no Unicode-category lookup at run time — so adding or dropping a
+/// character is a visible edit here:
+///
+/// - Cc: U+0000-U+001F (C0 controls) and U+007F-U+009F (DEL and C1 controls);
+/// - U+00AD soft hyphen, U+061C Arabic letter mark, U+180E Mongolian vowel
+///   separator;
+/// - U+200B-U+200F zero-width space/joiners and the LRM/RLM marks;
+/// - U+2028-U+202E the line and paragraph separators and the bidi embeddings
+///   and overrides;
+/// - U+2060-U+2064 the word joiner and the invisible operators;
+/// - U+2066-U+206F the bidi isolates and the deprecated format characters;
+/// - U+FEFF the zero-width no-break space (BOM), U+FFF9-U+FFFB the interlinear
+///   annotations, U+E0001 and U+E0020-U+E007F the language tag and tag
+///   characters.
+///
+/// `the_actor_name_opener_strips_each_display_hazard` opens one name per entry
+/// with that character in it; dropping an entry turns that case red.
+const STRIPPED_DISPLAY_RANGES: [(u32, u32); 13] = [
+    (0x0000, 0x001F),   // Cc: C0 controls
+    (0x007F, 0x009F),   // Cc: DEL and C1 controls
+    (0x00AD, 0x00AD),   // soft hyphen
+    (0x061C, 0x061C),   // Arabic letter mark
+    (0x180E, 0x180E),   // Mongolian vowel separator
+    (0x200B, 0x200F),   // zero-width space/joiners, LRM, RLM
+    (0x2028, 0x202E),   // line/paragraph separators, bidi embeddings and overrides
+    (0x2060, 0x2064),   // word joiner, invisible operators
+    (0x2066, 0x206F),   // bidi isolates, deprecated format characters
+    (0xFEFF, 0xFEFF),   // zero-width no-break space (BOM)
+    (0xFFF9, 0xFFFB),   // interlinear annotations
+    (0xE0001, 0xE0001), // language tag
+    (0xE0020, 0xE007F), // tag characters
+];
+
+fn is_stripped_display_char(c: char) -> bool {
+    let cp = c as u32;
+    STRIPPED_DISPLAY_RANGES.iter().any(|(lo, hi)| cp >= *lo && cp <= *hi)
+}
+
+/// L16b: the opener drops what must never be shown. A guest writes this text,
+/// so anything that can hide or reorder the characters around it is removed
+/// before the owner's client sees it (the table above is the rule).
 fn strip_display_controls(text: &str) -> String {
-    text.chars()
-        .filter(|c| !c.is_control() && !matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'))
-        .collect()
+    text.chars().filter(|c| !is_stripped_display_char(*c)).collect()
+}
+
+/// L16c (S7): core's writers always seal NFC, so an opener refuses a plaintext
+/// that is not already NFC instead of silently normalizing a value core never
+/// wrote.
+fn require_nfc(text: &str) -> Result<&str, CoreError> {
+    use unicode_normalization::UnicodeNormalization;
+    if text.nfc().eq(text.chars()) {
+        Ok(text)
+    } else {
+        Err(CoreError::Decryption)
+    }
 }
 
 fn random_nonce_12() -> Result<[u8; 12], CoreError> {
@@ -981,7 +1038,14 @@ pub fn unwrap_link_label(
 ) -> Result<String, CoreError> {
     let bytes = purpose_unwrap_16(master, LINK_LABEL_LABEL, share_id, blob)?;
     let text = std::str::from_utf8(&bytes).map_err(|_| CoreError::Decryption)?;
-    normalized_text(text, LINK_LABEL_MAX_SCALARS, "link label")
+    let text = require_nfc(text)?;
+    let count = text.chars().count();
+    if count == 0 || count > LINK_LABEL_MAX_SCALARS {
+        return Err(CoreError::InvalidInput(format!(
+            "link label must be 1 to {LINK_LABEL_MAX_SCALARS} Unicode scalar values"
+        )));
+    }
+    Ok(text.to_string())
 }
 
 fn actor_name_context(root_id: &[u8]) -> Result<Vec<u8>, CoreError> {
@@ -1038,28 +1102,59 @@ fn seal_folder_actor_name_impl(
 }
 
 /// L16b: open a guest actor name. Exactly one envelope shape (the name
-/// writer's) under exactly one key; control characters and bidi overrides are
-/// stripped before the text is returned.
+/// writer's) under exactly one key; the plaintext must already be NFC, and
+/// every character that can hide or reorder text is stripped before the name
+/// is returned. The stripped result must itself be 1..64 scalars.
 pub fn open_folder_actor_name(folder_key: &FileKey, root_id: &[u8], blob: &str) -> Result<String, CoreError> {
     let context = actor_name_context(root_id)?;
-    let blob: beebeeb_types::EncryptedBlob = serde_json::from_str(blob).map_err(|_| CoreError::Decryption)?;
-    if blob.cipher_suite != beebeeb_types::CipherSuite::V1Aes256Gcm || blob.nonce.len() != 12 {
+    let parsed: beebeeb_types::EncryptedBlob = serde_json::from_str(blob).map_err(|_| CoreError::Decryption)?;
+    // S3: exactly one envelope shape. `seal_folder_actor_name_impl` writes
+    // `serde_json::to_string(&blob)`, so only that byte string is an envelope:
+    // an extra field, a different key order or added whitespace is refused.
+    let canonical = serde_json::to_string(&parsed).map_err(|_| CoreError::Decryption)?;
+    if canonical != blob {
         return Err(CoreError::Decryption);
     }
-    let raw = [blob.nonce.as_slice(), blob.ciphertext.as_slice()].concat();
+    if parsed.cipher_suite != beebeeb_types::CipherSuite::V1Aes256Gcm || parsed.nonce.len() != 12 {
+        return Err(CoreError::Decryption);
+    }
+    let raw = [parsed.nonce.as_slice(), parsed.ciphertext.as_slice()].concat();
     let plaintext = Zeroizing::new(crate::encrypt::open_raw_with_aad(
         &actor_name_key(folder_key, &context),
         &raw,
         &context,
     )?);
     let text = std::str::from_utf8(&plaintext).map_err(|_| CoreError::Decryption)?;
-    let text = normalized_text(text, FOLDER_ACTOR_NAME_MAX_SCALARS, "actor name")?;
-    Ok(strip_display_controls(&text))
+    let text = require_nfc(text)?;
+    let count = text.chars().count();
+    if count == 0 || count > FOLDER_ACTOR_NAME_MAX_SCALARS {
+        return Err(CoreError::InvalidInput(format!(
+            "actor name must be 1 to {FOLDER_ACTOR_NAME_MAX_SCALARS} Unicode scalar values"
+        )));
+    }
+    // S2: strip first, then bound what the client will actually display. A name
+    // that is only stripped characters would come back empty; one that grows
+    // past the bound here is refused like any other unopenable envelope.
+    let display = strip_display_controls(text);
+    let display_count = display.chars().count();
+    if display_count == 0 || display_count > FOLDER_ACTOR_NAME_MAX_SCALARS {
+        return Err(CoreError::Decryption);
+    }
+    Ok(display)
 }
 
 /// L16d: the ONE legacy (unbound) child opener. Applies L9 rule 1: a 32-byte
 /// plaintext that is valid UTF-8 is refused, so a name/label blob sealed under
 /// the folder key can never be served as a child key.
+///
+/// Accepted residual (L9, recorded with this opener): a genuine random 32-byte
+/// legacy child key is valid UTF-8 with probability about 2^-30 (a 32-byte
+/// string is UTF-8 when it is 32 ASCII bytes, or shorter with multibyte
+/// sequences). Such a key is refused here and the caller (which only sees
+/// `None`) can only report it as a wrong key. That is accepted because no
+/// format can tell it apart from a name-shaped plaintext without weakening the
+/// rule, and the chance is far below the rate at which a real key is lost to a
+/// wrong folder key.
 pub fn open_legacy_child_key(folder_key: &FileKey, frame: &[u8]) -> Option<FileKey> {
     if frame.len() != LEGACY_CHILD_FRAME_LEN {
         return None;
@@ -1891,6 +1986,98 @@ mod l16_tests {
     fn the_actor_name_opener_strips_bidi_and_control_before_returning() {
         let envelope = actor_name_envelope("Zo\u{202E}ë\u{2066}\u{0007}".as_bytes(), [0x0b; 12]);
         assert_eq!(open_folder_actor_name(&folder_key(), &ROOT, &envelope).unwrap(), "Zoë");
+    }
+
+    /// S1: one case per entry of `STRIPPED_DISPLAY_RANGES`. A character that is
+    /// missing from the table survives into the owner's UI, so this fails by
+    /// naming the code point.
+    #[test]
+    fn the_actor_name_opener_strips_each_display_hazard() {
+        let per_range = [
+            '\u{0007}',  // C0 control
+            '\u{0085}',  // C1 control (NEL)
+            '\u{00AD}',  // soft hyphen
+            '\u{061C}',  // Arabic letter mark
+            '\u{180E}',  // Mongolian vowel separator
+            '\u{200B}',  // zero-width space
+            '\u{200E}',  // LRM
+            '\u{200F}',  // RLM
+            '\u{2028}',  // line separator
+            '\u{202E}',  // right-to-left override
+            '\u{2060}',  // word joiner
+            '\u{2064}',  // invisible plus
+            '\u{2066}',  // left-to-right isolate
+            '\u{206F}',  // deprecated format character
+            '\u{FEFF}',  // BOM
+            '\u{FFF9}',  // interlinear annotation anchor
+            '\u{E0001}', // language tag
+            '\u{E007F}', // cancel tag
+        ];
+        for (i, c) in per_range.iter().enumerate() {
+            let text = format!("A{c}B");
+            let nonce: [u8; 12] = std::array::from_fn(|n| 0x20 + i as u8 + n as u8);
+            let envelope = actor_name_envelope(text.as_bytes(), nonce);
+            assert_eq!(
+                open_folder_actor_name(&folder_key(), &ROOT, &envelope).unwrap(),
+                "AB",
+                "U+{:04X} was not stripped",
+                *c as u32
+            );
+        }
+    }
+
+    /// S2: the bound is checked again AFTER stripping, so a name that is only
+    /// stripped characters can never come back empty.
+    #[test]
+    fn the_actor_name_opener_refuses_a_name_that_is_only_stripped_characters() {
+        for (i, text) in ["\u{202E}", "\u{0007}", "\u{200B}\u{2066}", "\u{FEFF}\u{00AD}"]
+            .iter()
+            .enumerate()
+        {
+            let nonce: [u8; 12] = std::array::from_fn(|n| 0x30 + i as u8 + n as u8);
+            let envelope = actor_name_envelope(text.as_bytes(), nonce);
+            assert!(
+                matches!(
+                    open_folder_actor_name(&folder_key(), &ROOT, &envelope),
+                    Err(CoreError::Decryption)
+                ),
+                "a name made only of U+{:04X} must be refused",
+                text.chars().next().unwrap() as u32
+            );
+        }
+    }
+
+    /// S7: core's writers seal NFC, so an opener refuses plaintext that is not
+    /// already NFC instead of normalizing a value core never wrote.
+    #[test]
+    fn openers_refuse_a_plaintext_that_is_not_nfc() {
+        let nfd = "Cafe\u{301}";
+        let frame = label_frame(nfd.as_bytes(), [0x2e; 12]);
+        assert!(matches!(
+            unwrap_link_label(&master(), &SHARE, &frame),
+            Err(CoreError::Decryption)
+        ));
+        let envelope = actor_name_envelope(nfd.as_bytes(), [0x2f; 12]);
+        assert!(matches!(
+            open_folder_actor_name(&folder_key(), &ROOT, &envelope),
+            Err(CoreError::Decryption)
+        ));
+
+        // The writers themselves still normalize, so the same text through the
+        // public writer opens (the refusal is about what the opener accepts).
+        assert_eq!(
+            unwrap_link_label(&master(), &SHARE, &wrap_link_label(&master(), &SHARE, nfd).unwrap()).unwrap(),
+            "Café"
+        );
+        assert_eq!(
+            open_folder_actor_name(
+                &folder_key(),
+                &ROOT,
+                &seal_folder_actor_name(&folder_key(), &ROOT, nfd).unwrap()
+            )
+            .unwrap(),
+            "Café"
+        );
     }
 
     #[test]
