@@ -1,6 +1,6 @@
 'use strict';
 // Task 2275, L16: link labels, guest actor names and the one legacy child
-// opener. Pins the WASM exports against core's published vectors (version 14)
+// opener. Pins the WASM exports against core's published vectors (version 15)
 // and the bindings both new formats rely on.
 const assert = require('node:assert/strict');
 const test = require('node:test');
@@ -39,12 +39,27 @@ test('labels round-trip, normalize to NFC and stay bound to the share', () => {
   assert.equal(wasm.unwrapLinkLabel(MASTER, SHARE, wrapped), 'Café photos');
   assert.throws(() => wasm.unwrapLinkLabel(MASTER, SHARE_B, wrapped), /decryption failed/);
   assert.throws(() => wasm.unwrapLinkLabel(new Uint8Array(32).fill(0x41), SHARE, wrapped), /decryption failed/);
-  // Purpose separation: a label frame is not an owner wrap, a token or a name.
+  // Purpose separation: a real label frame is not an owner wrap, a token, a
+  // custody record or an actor name. Every row feeds this test's own writer
+  // output; none hands a placeholder to the opener.
   assert.throws(() => wasm.unwrapLinkOwnerKey(MASTER, SHARE, wrapped), /decryption failed/);
   assert.throws(() => wasm.unwrapLinkOwnerToken(MASTER, SHARE, wrapped), /decryption failed/);
-  // A custody record is a 60-byte frame; a label frame is not one of those either.
-  assert.throws(() => wasm.unwrapFolderCustody(MASTER, SHARE, new Uint8Array(60)), /decryption failed/);
-  assert.throws(() => wasm.openFolderActorName(FOLDER, ROOT, hex(wrapped)), /decryption failed/);
+  // A custody record is a 60-byte frame, so use a 32-byte label: the real
+  // 60-byte frame reaches the AEAD instead of the binding's length check.
+  const big = wasm.wrapLinkLabel(MASTER, SHARE, '0123456789abcdef0123456789abcdef');
+  assert.equal(big.length, 60);
+  // Non-vacuity: these exact bytes are an openable label frame under their own
+  // opener, so the refusals below are about the purpose, not malformed input.
+  assert.equal(wasm.unwrapLinkLabel(MASTER, SHARE, big), '0123456789abcdef0123456789abcdef');
+  assert.throws(() => wasm.unwrapFolderCustody(MASTER, SHARE, big), /decryption failed/);
+  // The name writer's envelope, built from the real frame, under the same
+  // 16 id bytes: the actor-name opener must refuse it at the AEAD.
+  const envelopeFromLabel = JSON.stringify({
+    cipher_suite: 'V1Aes256Gcm',
+    nonce: Array.from(big.slice(0, 12)),
+    ciphertext: Array.from(big.slice(12)),
+  });
+  assert.throws(() => wasm.openFolderActorName(FOLDER, SHARE, envelopeFromLabel), /decryption failed/);
   // The bound is enforced before sealing.
   assert.throws(() => wasm.wrapLinkLabel(MASTER, SHARE, 'x'.repeat(41)), /1 to 40/);
 });
@@ -54,8 +69,15 @@ test('actor names round-trip, strip bidi and stay bound to the root and key', ()
   assert.equal(wasm.openFolderActorName(FOLDER, ROOT, envelope), 'Zoë Guest');
   assert.throws(() => wasm.openFolderActorName(FOLDER, ROOT_B, envelope), /decryption failed/);
   assert.throws(() => wasm.openFolderActorName(new Uint8Array(32).fill(0x81), ROOT, envelope), /decryption failed/);
-  // One shape: the envelope is not a label frame, and a raw frame is not an envelope.
-  assert.throws(() => wasm.unwrapLinkLabel(MASTER, SHARE, new Uint8Array(12)), /too short/);
+  // One shape: the real envelope's bytes are not a label frame (the label
+  // opener refuses the actual actor-name output), and text that is not an
+  // envelope is refused too.
+  // Non-vacuity: the envelope opens under its own opener and root (above), so
+  // the label opener refuses a real, well-formed actor name.
+  assert.throws(
+    () => wasm.unwrapLinkLabel(MASTER, SHARE, new Uint8Array(Buffer.from(envelope, 'utf8'))),
+    /decryption failed/,
+  );
   assert.throws(() => wasm.openFolderActorName(FOLDER, ROOT, 'not-an-envelope'), /decryption failed/);
   // The bound is enforced before sealing.
   assert.throws(() => wasm.sealFolderActorName(FOLDER, ROOT, 'x'.repeat(65)), /1 to 64/);
