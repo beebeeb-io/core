@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `beebeeb-transfer`, the L2 driver crate for direct S3 downloads (task 2173, plan K2):
+  `download()` drives core's `DownloadPlanner` over any `DirectIo` transport (API calls,
+  bounded storage GETs, the pinned per-chunk route, injected sleep and clocks), decrypts
+  chunks in order through `ChunkDecryptor`, writes plaintext only after a chunk authenticates,
+  and reports `Done(stats)` or `UseApi(reason)`. Body checks go through core's `StorageBody`
+  (`from_head` / `push` / `finish`); a signed URL never reaches an event, error or `Debug`
+  string; `DirectStore` shares discovery and breaker health per `(api_base, account_id)`.
+  `test_support::ScriptedIo` and a conformance suite (`test-support` feature) check a
+  transport's redirect, cookie, credential, idle/total timeout and bounded-body behaviour
+  in-process. No tokio or reqwest in normal dependencies.
 - Item id classes (task 2275 L12-L14): `item_id::new_foreign_item_id` / `is_foreign_item_id` /
   `item_class` and the core-minted `item_id::NewItemId` (`owner()` v4, `foreign()` v8). Foreign ids
   are RFC 9562 UUID v8 with the RFC 4122 variant in canonical lowercase hyphenated text; any other
