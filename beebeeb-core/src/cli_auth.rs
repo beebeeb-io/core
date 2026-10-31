@@ -57,7 +57,7 @@ use crate::CoreError;
 /// HKDF `info` label for the CLI auth key. MUST match the web client
 /// (`repos/web/src/pages/cli-auth.tsx`) and never change without a coordinated
 /// migration — it is part of the wire contract.
-const CLI_AUTH_INFO: &[u8] = b"beebeeb-cli-auth-v1";
+pub(crate) const CLI_AUTH_INFO: &[u8] = b"beebeeb-cli-auth-v1";
 
 /// The CLI's ephemeral P-256 keypair for one login attempt.
 ///

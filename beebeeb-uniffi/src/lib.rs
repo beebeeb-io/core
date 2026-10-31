@@ -1557,6 +1557,37 @@ impl MasterKeyHandle {
         Ok(key.as_bytes().to_vec())
     }
 
+    /// L16a: seal a link label to the master key, bound to the 16-byte share id.
+    pub fn wrap_link_label(&self, share_id: String, text: String) -> Result<EncryptedData, CryptoError> {
+        let share = uuid::Uuid::parse_str(&share_id).map_err(|_| CryptoError::InvalidInput {
+            detail: "invalid share UUID".into(),
+        })?;
+        self.with_key(|mk| kdf::wrap_link_label(mk, share.as_bytes(), &text))?
+            .map(|blob| encrypted_blob_to_data(&blob))
+            .map_err(Into::into)
+    }
+
+    /// L16a: open a link label. One key, one envelope shape. Returns the label
+    /// in NFC (normalized, not refused); invalid UTF-8 or a label outside 1..40
+    /// Unicode scalar values after NFC is a decryption failure.
+    pub fn unwrap_link_label(
+        &self,
+        share_id: String,
+        nonce: Vec<u8>,
+        ciphertext: Vec<u8>,
+    ) -> Result<String, CryptoError> {
+        let share = uuid::Uuid::parse_str(&share_id).map_err(|_| CryptoError::InvalidInput {
+            detail: "invalid share UUID".into(),
+        })?;
+        let blob = EncryptedBlob {
+            cipher_suite: CipherSuite::V1Aes256Gcm,
+            nonce,
+            ciphertext,
+        };
+        let text = self.with_key(|mk| kdf::unwrap_link_label(mk, share.as_bytes(), &blob))??;
+        Ok(text)
+    }
+
     pub fn wrap_link_owner_token(&self, share_id: String, token: Vec<u8>) -> Result<EncryptedData, CryptoError> {
         let token = Zeroizing::new(token);
         self.with_key(|mk| kdf::wrap_link_owner_token(mk, share_id.as_bytes(), &token))?
@@ -2047,6 +2078,45 @@ impl FileKeyHandle {
         self.with_key(|k| kdf::unwrap_folder_child(k, root.as_bytes(), item.as_bytes(), kind, &blob))?
             .map(Self::new)
             .map_err(Into::into)
+    }
+
+    /// L16b: seal a guest's display name under the folder key, bound to the
+    /// shared root. Seals core's `kdf::sanitize_actor_name(name)`: NFC; the
+    /// display controls of its strip table removed (ZWNJ, ZWJ, variation
+    /// selectors and tag characters are kept); NFC again; then a leading
+    /// combining mark, a result outside 1..64 Unicode scalar values and a
+    /// visibly blank name are refused (`InvalidInput`). Returns the envelope:
+    /// a JSON object with exactly the keys `cipher_suite`, `nonce` and
+    /// `ciphertext`.
+    pub fn seal_folder_actor_name(&self, shared_folder_id: String, name: String) -> Result<String, CryptoError> {
+        let root = uuid::Uuid::parse_str(&shared_folder_id).map_err(|_| CryptoError::InvalidInput {
+            detail: "invalid shared folder UUID".into(),
+        })?;
+        self.with_key(|k| kdf::seal_folder_actor_name(k, root.as_bytes(), &name))?
+            .map_err(Into::into)
+    }
+
+    /// L16b: open a guest's display name. The envelope must be a JSON object
+    /// with exactly the keys `cipher_suite`, `nonce` and `ciphertext` (any key
+    /// order, any whitespace) under the one actor-name key; the plaintext goes
+    /// through the writer's `sanitize_actor_name` rule and is returned
+    /// sanitized. Every refusal is a decryption failure.
+    pub fn open_folder_actor_name(&self, shared_folder_id: String, envelope: String) -> Result<String, CryptoError> {
+        let root = uuid::Uuid::parse_str(&shared_folder_id).map_err(|_| CryptoError::InvalidInput {
+            detail: "invalid shared folder UUID".into(),
+        })?;
+        self.with_key(|k| kdf::open_folder_actor_name(k, root.as_bytes(), &envelope))?
+            .map_err(Into::into)
+    }
+
+    /// L16d: the one legacy (unbound) child opener. A 60-byte frame under this
+    /// folder key; `None` when it is not a legacy child wrap (wrong length,
+    /// wrong key, or a 32-byte plaintext that is valid UTF-8).
+    pub fn open_legacy_child_key(&self, frame: Vec<u8>) -> Result<Option<Arc<FileKeyHandle>>, CryptoError> {
+        let opened = self.with_key(|k| kdf::open_legacy_child_key(k, &frame))?;
+        // The key was just derived by core: wrap it directly, never through its
+        // bytes (no extra heap copy of key material).
+        Ok(opened.map(FileKeyHandle::new))
     }
 
     /// L14 (task 2275): does this row's L7 child wrap open to exactly this key?
@@ -7916,6 +7986,141 @@ mod client_meta_binding_tests {
         assert!(fitted.len() <= 1024, "{} bytes", fitted.len());
         assert!(fitted.starts_with('…'));
         assert!(fitted.is_char_boundary(3));
+    }
+}
+
+#[cfg(test)]
+mod l16_binding_tests {
+    //! Task 2275, L16: link labels, guest actor names and the one legacy child
+    //! opener through the UniFFI handles, plus the published v16 vectors. No
+    //! raw key bytes cross this boundary.
+    use super::*;
+
+    const SHARE: &str = "22750000-0000-4000-8000-0000000000a1";
+    const SHARE_B: &str = "22750000-0000-4000-8000-0000000000a2";
+    const ROOT: &str = "22750000-0000-4000-8000-0000000000b1";
+    const ROOT_B: &str = "22750000-0000-4000-8000-0000000000b2";
+
+    fn master() -> Arc<MasterKeyHandle> {
+        MasterKeyHandle::from_keychain_bytes(vec![0x40u8; 32]).unwrap()
+    }
+
+    fn folder() -> Arc<FileKeyHandle> {
+        FileKeyHandle::from_key_bytes(vec![0x80u8; 32]).unwrap()
+    }
+
+    fn vector(name: &str) -> serde_json::Value {
+        let doc: serde_json::Value = serde_json::from_str(include_str!("../../test-vectors/vectors.json")).unwrap();
+        doc["vectors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["name"] == name)
+            .unwrap()
+            .clone()
+    }
+
+    fn bytes(v: &serde_json::Value, field: &str) -> Vec<u8> {
+        v[field]
+            .as_str()
+            .unwrap()
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|b| u8::from_str_radix(std::str::from_utf8(b).unwrap(), 16).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn the_published_l16_vectors_open_through_the_handles() {
+        let label = vector("link_label_v1");
+        let wrapped = bytes(&label, "wrapped_hex");
+        let text = MasterKeyHandle::from_keychain_bytes(bytes(&label, "master_key_hex"))
+            .unwrap()
+            .unwrap_link_label(
+                label["share_id"].as_str().unwrap().into(),
+                wrapped[..12].to_vec(),
+                wrapped[12..].to_vec(),
+            )
+            .unwrap();
+        assert_eq!(text, label["label_nfc"].as_str().unwrap());
+
+        let name = vector("folder_actor_name_v1");
+        let opened = FileKeyHandle::from_key_bytes(bytes(&name, "folder_key_hex"))
+            .unwrap()
+            .open_folder_actor_name(
+                name["root_id"].as_str().unwrap().into(),
+                name["envelope"].as_str().unwrap().into(),
+            )
+            .unwrap();
+        assert_eq!(opened, name["actor_name"].as_str().unwrap());
+    }
+
+    #[test]
+    fn labels_round_trip_normalize_and_stay_bound_to_the_share() {
+        let m = master();
+        let sealed = m.wrap_link_label(SHARE.into(), "Cafe\u{301} photos".into()).unwrap();
+        assert_eq!(sealed.nonce.len(), 12);
+        assert_eq!(
+            m.unwrap_link_label(SHARE.into(), sealed.nonce.clone(), sealed.ciphertext.clone())
+                .unwrap(),
+            "Café photos"
+        );
+        assert!(
+            m.unwrap_link_label(SHARE_B.into(), sealed.nonce.clone(), sealed.ciphertext.clone())
+                .is_err()
+        );
+        assert!(
+            MasterKeyHandle::from_keychain_bytes(vec![0x41u8; 32])
+                .unwrap()
+                .unwrap_link_label(SHARE.into(), sealed.nonce.clone(), sealed.ciphertext.clone())
+                .is_err()
+        );
+        assert!(m.wrap_link_label(SHARE.into(), "x".repeat(41)).is_err());
+        assert!(m.wrap_link_label("not-a-uuid".into(), "ok".into()).is_err());
+    }
+
+    #[test]
+    fn actor_names_round_trip_strip_bidi_and_stay_bound() {
+        let f = folder();
+        let envelope = f
+            .seal_folder_actor_name(ROOT.into(), "Zo\u{eb}\u{202e} Guest\u{2066}\u{7}".into())
+            .unwrap();
+        assert_eq!(
+            f.open_folder_actor_name(ROOT.into(), envelope.clone()).unwrap(),
+            "Zoë Guest"
+        );
+        assert!(f.open_folder_actor_name(ROOT_B.into(), envelope.clone()).is_err());
+        assert!(
+            FileKeyHandle::from_key_bytes(vec![0x81u8; 32])
+                .unwrap()
+                .open_folder_actor_name(ROOT.into(), envelope.clone())
+                .is_err()
+        );
+        assert!(f.open_folder_actor_name(ROOT.into(), "not-an-envelope".into()).is_err());
+        assert!(f.seal_folder_actor_name(ROOT.into(), "x".repeat(65)).is_err());
+    }
+
+    #[test]
+    fn the_legacy_child_opener_refuses_a_name_and_returns_a_real_key() {
+        let v = vector("legacy_child_refusal_v1");
+        let f = FileKeyHandle::from_key_bytes(bytes(&v, "folder_key_hex")).unwrap();
+        assert!(f.open_legacy_child_key(bytes(&v, "name_frame_hex")).unwrap().is_none());
+        assert!(f.open_legacy_child_key(vec![0u8; 59]).unwrap().is_none());
+        let child = f.open_legacy_child_key(bytes(&v, "child_frame_hex")).unwrap().unwrap();
+        assert_eq!(
+            child.key_id().unwrap(),
+            beebeeb_core::folder_key::folder_key_id(
+                <&[u8; 32]>::try_from(bytes(&v, "child_key_hex").as_slice()).unwrap()
+            )
+            .to_vec()
+        );
+        assert!(
+            FileKeyHandle::from_key_bytes(vec![0x81u8; 32])
+                .unwrap()
+                .open_legacy_child_key(bytes(&v, "child_frame_hex"))
+                .unwrap()
+                .is_none()
+        );
     }
 }
 

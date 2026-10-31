@@ -4824,6 +4824,65 @@ pub fn unwrap_link_owner_token(master_key: &[u8], share_id: &str, wrapped: &[u8]
         .to_vec())
 }
 
+// ── L16: link labels, guest actor names, the legacy child opener ────────────
+
+/// Seal a link label to the owner's master key, bound to the 16-byte share id.
+/// Wire = nonce(12) || ciphertext+tag, like the L6 wraps.
+#[wasm_bindgen(js_name = wrapLinkLabel)]
+pub fn wrap_link_label(master_key: &[u8], share_id: &str, label: &str) -> Result<Vec<u8>, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let share = uuid::Uuid::parse_str(share_id).map_err(|_| JsError::new("invalid share UUID"))?;
+    let blob = kdf::wrap_link_label(&master, share.as_bytes(), label).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok([blob.nonce, blob.ciphertext].concat())
+}
+
+/// Open a link label; one key, one shape. Returns the label in NFC (a non-NFC
+/// plaintext is normalized, not refused); invalid UTF-8 or a label outside
+/// 1..40 Unicode scalar values after NFC is a decryption failure.
+#[wasm_bindgen(js_name = unwrapLinkLabel)]
+pub fn unwrap_link_label(master_key: &[u8], share_id: &str, wrapped: &[u8]) -> Result<String, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let share = uuid::Uuid::parse_str(share_id).map_err(|_| JsError::new("invalid share UUID"))?;
+    let blob = l6_blob(wrapped, "link label")?;
+    kdf::unwrap_link_label(&master, share.as_bytes(), &blob).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Seal a guest's display name under the folder key, bound to the shared root.
+/// Seals `sanitize_actor_name(name)` (core `kdf::sanitize_actor_name`): NFC;
+/// controls, bidi controls and the other display controls of its strip table
+/// removed (ZWNJ, ZWJ, variation selectors and tag characters are kept); NFC
+/// again; then a leading combining mark, a result outside 1..64 Unicode scalar
+/// values and a visibly blank name are refused (invalid input). Returns the
+/// envelope: a JSON object with exactly the keys `cipher_suite`, `nonce` and
+/// `ciphertext`.
+#[wasm_bindgen(js_name = sealFolderActorName)]
+pub fn seal_folder_actor_name(folder_key: &[u8], shared_folder_id: &str, name: &str) -> Result<String, JsError> {
+    let folder = file_key_from_slice(folder_key)?;
+    let root = uuid::Uuid::parse_str(shared_folder_id).map_err(|_| JsError::new("invalid root UUID"))?;
+    kdf::seal_folder_actor_name(&folder, root.as_bytes(), name).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Open a guest's display name. The envelope must be a JSON object with
+/// exactly the keys `cipher_suite`, `nonce` and `ciphertext` (any key order,
+/// any whitespace) that opens under the one actor-name key; the plaintext then
+/// goes through the same `sanitize_actor_name` rule as the writer and is
+/// returned sanitized. Every refusal is a decryption failure.
+#[wasm_bindgen(js_name = openFolderActorName)]
+pub fn open_folder_actor_name(folder_key: &[u8], shared_folder_id: &str, envelope: &str) -> Result<String, JsError> {
+    let folder = file_key_from_slice(folder_key)?;
+    let root = uuid::Uuid::parse_str(shared_folder_id).map_err(|_| JsError::new("invalid root UUID"))?;
+    kdf::open_folder_actor_name(&folder, root.as_bytes(), envelope).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// The one legacy (unbound) child opener: a 60-byte frame under the folder
+/// key, refused when its 32-byte plaintext is valid UTF-8 (L9 rule 1).
+/// Returns `undefined` when the frame is not a legacy child wrap.
+#[wasm_bindgen(js_name = openLegacyChildKey)]
+pub fn open_legacy_child_key(folder_key: &[u8], wrapped: &[u8]) -> Result<Option<Vec<u8>>, JsError> {
+    let folder = file_key_from_slice(folder_key)?;
+    Ok(kdf::open_legacy_child_key(&folder, wrapped).map(|key| key.as_bytes().to_vec()))
+}
+
 /// Stretch a folder-link passphrase (Argon2id over the canonical NFC form,
 /// token-bound salt). Refuses an empty passphrase. Pass the result to
 /// `combineFolderLinkKey`; never send it to the server.
