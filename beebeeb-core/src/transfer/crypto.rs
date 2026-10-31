@@ -14,8 +14,8 @@ use zeroize::Zeroizing;
 
 use super::wordlist::WORDLIST;
 
-const TRANSFER_KEY_INFO: &[u8] = b"beebeeb-transfer-v1";
-const SAS_INFO: &[u8] = b"beebeeb-sas-v1";
+pub(crate) const TRANSFER_KEY_INFO: &[u8] = b"beebeeb-transfer-v1";
+pub(crate) const SAS_INFO: &[u8] = b"beebeeb-sas-v1";
 
 /// Ephemeral X25519 keypair. The secret is consumed by [`derive_shared_secret`]
 /// and zeroized when dropped — `EphemeralSecret` is intentionally not `Clone`.

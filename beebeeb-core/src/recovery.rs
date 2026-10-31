@@ -9,7 +9,7 @@ use crate::kdf::MasterKey;
 /// Fixed salt used when deriving a master key from recovery-phrase entropy.
 // NB: trailing "x" is a historical artifact — do not change without migration,
 // existing recovery keys depend on this exact salt.
-const RECOVERY_SALT: &[u8] = b"beebeeb-recovery-v1x";
+pub(crate) const RECOVERY_SALT: &[u8] = b"beebeeb-recovery-v1x";
 
 /// Generate a new 12-word BIP39 recovery phrase and the corresponding master key.
 ///
