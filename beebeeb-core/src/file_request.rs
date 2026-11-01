@@ -35,9 +35,9 @@ use crate::kdf::{FileKey, MasterKey};
 use crate::opaque::{derive_x25519_public, x25519_shared_secret};
 
 /// HKDF `info` prefix for deriving the per-request private-key-wrapping key.
-const PRIV_WRAP_INFO: &[u8] = b"beebeeb-file-request-priv-v1";
+pub(crate) const PRIV_WRAP_INFO: &[u8] = b"beebeeb-file-request-priv-v1";
 /// HKDF `info` prefix for deriving the per-upload seal key.
-const SEAL_INFO: &[u8] = b"beebeeb-file-request-seal-v1";
+pub(crate) const SEAL_INFO: &[u8] = b"beebeeb-file-request-seal-v1";
 
 /// The result of sealing a content key to a request public key.
 ///

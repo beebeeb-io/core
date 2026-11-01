@@ -16,6 +16,8 @@ pub mod fp_cache;
 pub mod hash;
 pub mod item_id;
 pub mod kdf;
+#[cfg(test)]
+mod label_table_tests;
 pub mod media;
 pub mod metadata_wire;
 pub mod onboarding;
