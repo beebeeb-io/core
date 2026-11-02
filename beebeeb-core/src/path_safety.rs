@@ -90,9 +90,10 @@ pub fn check_component_for(name: &str, portable: bool, windows: bool) -> Result<
         if name.chars().any(|c| c.is_control()) {
             return Err(UnsafeName("contains a control character"));
         }
-        // Bidi controls are not `char::is_control`, but they let a name render
-        // as a different name. Refuse them wherever a path may be shown or
-        // interpreted by the host.
+        // Bidi overrides and isolates are not `char::is_control`, but they let
+        // a name render as a different name. Refuse them wherever a path may be
+        // shown or interpreted by the host. (Bidi MARKS are real text in Hebrew
+        // and Arabic, so they are only stripped by `sanitize_component`.)
         if name.chars().any(is_bidi_control) {
             return Err(UnsafeName("contains a bidirection-control character"));
         }
@@ -122,11 +123,20 @@ pub fn check_component_for(name: &str, portable: bool, windows: bool) -> Result<
     Ok(())
 }
 
-/// Bidirectional-control characters (embeddings, overrides, isolates). They are
-/// not control characters to `char::is_control`, but a name containing one can
-/// render as a different name (`evil\u{202e}fdp.exe` shows as `evilexe.pdf`).
+/// Bidirectional OVERRIDE and ISOLATE characters. They are not control
+/// characters to `char::is_control`, but a name containing one can render as a
+/// different name (`evil\u{202e}fdp.exe` shows as `evilexe.pdf`), so they are
+/// refused outright.
 fn is_bidi_control(c: char) -> bool {
-    matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200e}' | '\u{200f}' | '\u{061c}')
+    matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+}
+
+/// Bidirectional MARKS: LEFT-TO-RIGHT MARK, RIGHT-TO-LEFT MARK and ARABIC
+/// LETTER MARK. These are ordinary text in Hebrew and Arabic — refusing them
+/// would reject legitimate names — but they still let a renderer reorder
+/// neighbouring characters, so [`sanitize_component`] removes them.
+fn is_bidi_mark(c: char) -> bool {
+    matches!(c, '\u{200e}' | '\u{200f}' | '\u{061c}')
 }
 
 /// One name as it may appear INSIDE AN ARCHIVE.
@@ -141,15 +151,19 @@ fn is_bidi_control(c: char) -> bool {
 /// - trailing dots and spaces become `_` (Windows silently strips them);
 /// - a reserved device name (`CON`, `NUL`, `COM1`, ... with or without an
 ///   extension) gets a leading `_`;
-/// - bidi overrides are removed.
+/// - bidi overrides, isolates and marks are removed.
 ///
 /// Rewriting can make two names equal; the caller de-duplicates afterwards.
 /// The result always satisfies the strictest rule set, or the name is refused.
 pub fn sanitize_component(name: &str, rules: Rules) -> Result<String, UnsafeName> {
-    // Strip bidi controls BEFORE the check: they are a rendering hazard the
-    // archive rule rewrites, not traversal. Everything structural still sees
-    // the same name (filtering bidi cannot create a separator or a `..`).
-    let visible: String = name.chars().filter(|c| !is_bidi_control(*c)).collect();
+    // Strip bidi controls and marks BEFORE the check: they are a rendering
+    // hazard the archive rule rewrites, not traversal. Everything structural
+    // still sees the same name (filtering bidi cannot create a separator or a
+    // `..`).
+    let visible: String = name
+        .chars()
+        .filter(|c| !is_bidi_control(*c) && !is_bidi_mark(*c))
+        .collect();
     check_component(&visible, rules)?;
     let mut out: String = visible
         .chars()

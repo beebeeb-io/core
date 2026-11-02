@@ -172,13 +172,12 @@
       "reason": "bidirection"
     },
     {
-      "id": "path_reject_bidi_mark",
+      "id": "path_accept_hebrew_with_rtl_mark",
       "kind": "check",
-      "name": "a‎b",
+      "name": "\u05e2\u05d1\u05e8\u05d9\u05ea\u200f.txt",
       "portable": true,
       "windows": true,
-      "expect": "reject",
-      "reason": "bidirection"
+      "expect": "ok"
     },
     {
       "id": "path_accept_con_on_linux",
@@ -325,6 +324,13 @@
       "name": "evil‮fdp.exe",
       "expect": "ok",
       "expected": "evilfdp.exe"
+    },
+    {
+      "id": "path_sanitize_bidi_marks",
+      "kind": "sanitize",
+      "name": "a\u200eb",
+      "expect": "ok",
+      "expected": "ab"
     },
     {
       "id": "path_sanitize_keeps_clean",
