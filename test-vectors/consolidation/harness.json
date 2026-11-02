@@ -1,0 +1,14 @@
+{
+  "description": "The consolidation vector harness itself (spec §16.5): every file in this directory names its source, describes the concept, and carries at least one named case. An empty case list is a red, never a pass.",
+  "source": "core (spec §16.5)",
+  "cases": [
+    {
+      "id": "a-file-with-an-empty-case-list-is-a-red",
+      "expected": "rejected"
+    },
+    {
+      "id": "a-case-without-an-id-is-a-red",
+      "expected": "rejected"
+    }
+  ]
+}
