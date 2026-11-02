@@ -1,0 +1,226 @@
+{
+  "description": "Move 6 — one backoff policy: the exponential ladder (500 ms base, 30 s cap, six total attempts), deterministic full jitter, which outcomes retry (429 and 5xx and network only), Retry-After honouring, and the exhaustion boundary. The module is pure — it returns a delay, the transport sleeps.",
+  "source": "beebeeb-upload/src/retry.rs with_retry (5 retries, 500 ms base, 30 s cap, Retry-After wins) generalised into core; the CLI (200 ms → 5 s), desktop (429-only, x-ratelimit-reset) and web (429-only, short-window ceiling) policies stay local per the map §4.2 case 7",
+  "cases": [
+    {
+      "id": "retry_ladder_0",
+      "kind": "ladder",
+      "retry": 0,
+      "expected_ms": 0
+    },
+    {
+      "id": "retry_ladder_1",
+      "kind": "ladder",
+      "retry": 1,
+      "expected_ms": 500
+    },
+    {
+      "id": "retry_ladder_2",
+      "kind": "ladder",
+      "retry": 2,
+      "expected_ms": 1000
+    },
+    {
+      "id": "retry_ladder_3",
+      "kind": "ladder",
+      "retry": 3,
+      "expected_ms": 2000
+    },
+    {
+      "id": "retry_ladder_4",
+      "kind": "ladder",
+      "retry": 4,
+      "expected_ms": 4000
+    },
+    {
+      "id": "retry_ladder_5",
+      "kind": "ladder",
+      "retry": 5,
+      "expected_ms": 8000
+    },
+    {
+      "id": "retry_ladder_6",
+      "kind": "ladder",
+      "retry": 6,
+      "expected_ms": 16000
+    },
+    {
+      "id": "retry_ladder_caps_at_30s",
+      "kind": "ladder",
+      "retry": 7,
+      "expected_ms": 30000
+    },
+    {
+      "id": "retry_jitter_bounds_zero",
+      "kind": "jitter",
+      "jitter": "full",
+      "retry": 1,
+      "sample_permille": 0,
+      "expected_ms": 0
+    },
+    {
+      "id": "retry_jitter_bounds_mid",
+      "kind": "jitter",
+      "jitter": "full",
+      "retry": 1,
+      "sample_permille": 250,
+      "expected_ms": 125
+    },
+    {
+      "id": "retry_jitter_bounds_full",
+      "kind": "jitter",
+      "jitter": "full",
+      "retry": 1,
+      "sample_permille": 1000,
+      "expected_ms": 500
+    },
+    {
+      "id": "retry_jitter_none_ignores_sample",
+      "kind": "jitter",
+      "jitter": "none",
+      "retry": 1,
+      "sample_permille": 250,
+      "expected_ms": 500
+    },
+    {
+      "id": "retry_jitter_respects_cap",
+      "kind": "jitter",
+      "jitter": "full",
+      "retry": 7,
+      "sample_permille": 1000,
+      "expected_ms": 30000
+    },
+    {
+      "id": "retry_429_with_retry_after",
+      "kind": "decision",
+      "attempts_made": 1,
+      "outcome": {
+        "status": 429
+      },
+      "retry_after_seconds": 5,
+      "expected_ms": 5000
+    },
+    {
+      "id": "retry_429_without_retry_after",
+      "kind": "decision",
+      "attempts_made": 1,
+      "outcome": {
+        "status": 429
+      },
+      "retry_after_seconds": null,
+      "expected_ms": 500
+    },
+    {
+      "id": "retry_5xx",
+      "kind": "decision",
+      "attempts_made": 2,
+      "outcome": {
+        "status": 503
+      },
+      "retry_after_seconds": null,
+      "expected_ms": 1000
+    },
+    {
+      "id": "retry_network_error",
+      "kind": "decision",
+      "attempts_made": 3,
+      "outcome": "network",
+      "retry_after_seconds": null,
+      "expected_ms": 2000
+    },
+    {
+      "id": "retry_client_error_stops",
+      "kind": "decision",
+      "attempts_made": 1,
+      "outcome": {
+        "status": 400
+      },
+      "retry_after_seconds": null,
+      "expected_ms": null
+    },
+    {
+      "id": "retry_budget_last",
+      "kind": "decision",
+      "attempts_made": 5,
+      "outcome": {
+        "status": 500
+      },
+      "retry_after_seconds": null,
+      "expected_ms": 8000
+    },
+    {
+      "id": "retry_budget_exhausted",
+      "kind": "decision",
+      "attempts_made": 6,
+      "outcome": {
+        "status": 500
+      },
+      "retry_after_seconds": null,
+      "expected_ms": null
+    },
+    {
+      "id": "retry_success_stops",
+      "kind": "decision",
+      "attempts_made": 1,
+      "outcome": "success",
+      "retry_after_seconds": null,
+      "expected_ms": null
+    },
+    {
+      "id": "retry_fatal_stops",
+      "kind": "decision",
+      "attempts_made": 1,
+      "outcome": "fatal",
+      "retry_after_seconds": null,
+      "expected_ms": null
+    },
+    {
+      "id": "retry_parse_zero",
+      "kind": "parse",
+      "value": "0",
+      "expected_seconds": 0
+    },
+    {
+      "id": "retry_parse_seconds",
+      "kind": "parse",
+      "value": "5",
+      "expected_seconds": 5
+    },
+    {
+      "id": "retry_parse_trims",
+      "kind": "parse",
+      "value": " 7 ",
+      "expected_seconds": 7
+    },
+    {
+      "id": "retry_parse_leading_zeros",
+      "kind": "parse",
+      "value": "007",
+      "expected_seconds": 7
+    },
+    {
+      "id": "retry_parse_rejects_negative",
+      "kind": "parse",
+      "value": "-1",
+      "expected_seconds": null
+    },
+    {
+      "id": "retry_parse_rejects_fraction",
+      "kind": "parse",
+      "value": "1.5",
+      "expected_seconds": null
+    },
+    {
+      "id": "retry_parse_rejects_empty",
+      "kind": "parse",
+      "value": "",
+      "expected_seconds": null
+    },
+    {
+      "id": "retry_parse_rejects_http_date",
+      "kind": "parse",
+      "value": "Wed, 21 Oct 2015 07:28:00 GMT",
+      "expected_seconds": null
+    }
+  ]
+}

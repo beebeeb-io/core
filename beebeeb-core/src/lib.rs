@@ -27,6 +27,7 @@ pub mod opaque_protocol;
 pub mod owned_keys;
 pub mod pdf;
 pub mod recovery;
+pub mod retry;
 pub mod search_index;
 pub mod search_sync;
 pub mod share_token;
