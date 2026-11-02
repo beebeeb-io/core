@@ -63,7 +63,7 @@ impl fmt::Display for ShareRoute {
 }
 
 /// A parsed share link.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ShareLink {
     /// Scheme, authority and any base path the link was minted under, with no
     /// trailing slash. A legacy host is kept as it was, never rewritten.
@@ -74,6 +74,19 @@ pub struct ShareLink {
     pub token: String,
     /// The percent-decoded `#key=` value, exactly as the builder handed it in.
     pub key: String,
+}
+
+impl fmt::Debug for ShareLink {
+    /// The key is client key material (`K_c`): it must never reach a log line,
+    /// a panic message or a crash report. `base_url`, `route` and `token` are
+    /// public by definition and stay.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "ShareLink {{ base_url: {:?}, route: {:?}, token: {:?}, key: <redacted> }}",
+            self.base_url, self.route, self.token
+        )
+    }
 }
 
 impl ShareLink {

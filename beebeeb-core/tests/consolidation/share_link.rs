@@ -56,6 +56,13 @@ fn share_link_cases_match_core() {
                 if let Some(key_hex) = expected["key_hex"].as_str() {
                     assert_eq!(key_bytes(&link.key), Some(hex_bytes(key_hex)), "{id}: key_bytes");
                 }
+                // The Debug impl is a log surface: the key never goes there.
+                let debug = format!("{link:?}");
+                assert!(
+                    !debug.contains(link.key.as_str()),
+                    "{id}: Debug must not contain the key: {debug}"
+                );
+                assert!(debug.contains("key: <redacted>"), "{id}: Debug must mark the key redacted");
             }
             "parse-error" => {
                 rejected += 1;
