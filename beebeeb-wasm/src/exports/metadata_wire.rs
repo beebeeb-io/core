@@ -20,17 +20,22 @@ use wasm_bindgen::prelude::*;
 /// # Names, thumbnails and notes are not this pair
 ///
 /// The envelope is generic: no AAD, no field identity, so a reader can open a
-/// value sealed for one field as if it were another. New writes keep the
-/// fields apart by PURPOSE SUBKEY: one per-file HKDF subkey per purpose
+/// value sealed for one field as if it were another. The fields are kept
+/// apart by PURPOSE SUBKEY: one per-file HKDF subkey per purpose
 /// (`beebeeb/name/v1`, `beebeeb/thumb/v1`, `beebeeb/note/v1` in core's
-/// `encrypt`), and a thumbnail additionally seals with an empty AAD.
+/// `encrypt`). Subkeys apply to a file whose metadata records a v2 pin —
+/// every name, thumbnail and note write for that file is subkey-sealed — and
+/// to every write once the gated core `WRITE_FORMAT` switch flips. Until then
+/// core's `METADATA_SEAL_WRITE` is `Legacy`, so a non-v2 file's names,
+/// thumbnails and notes are sealed under the raw file key.
 ///
 /// Use `encryptNameForNewItem` / `encryptNameForTarget` for a name,
 /// `encryptThumbnailForNewItem` / `encryptThumbnailForTarget` for a
 /// thumbnail, and `encryptNoteForNewItem` / `encryptNoteForTarget` for a
-/// note. Read them with `decryptFileMetadata`, `decryptNote` and
-/// `decryptThumbnail`. Never use `decryptMetadata` for them: it checks no
-/// AAD and cannot tell which field a value was sealed for.
+/// note. Read them with `decrypt_file_metadata`, `decrypt_note` and
+/// `decrypt_thumbnail` (snake_case: these exports have no `js_name`). Never
+/// use `decrypt_metadata` for them: it checks no AAD and cannot tell which
+/// field a value was sealed for.
 #[wasm_bindgen(js_name = encodeMetadataEnvelope)]
 pub fn encode_metadata_envelope(nonce: &[u8], ciphertext: &[u8]) -> Result<String, JsError> {
     MetadataEnvelope {

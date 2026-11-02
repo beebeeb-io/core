@@ -110,10 +110,15 @@ impl MetadataEnvelope {
     ///
     /// This is the generic envelope: it carries no AAD and no field identity,
     /// so a reader can open a value sealed for one field as if it were
-    /// another. New writes keep the fields apart by PURPOSE SUBKEY: one
-    /// per-file HKDF subkey per purpose (`beebeeb/name/v1`,
-    /// `beebeeb/thumb/v1`, `beebeeb/note/v1`, all in [`crate::encrypt`]), and a
-    /// thumbnail additionally seals with an empty AAD.
+    /// another. The fields are kept apart by PURPOSE SUBKEY: one per-file HKDF
+    /// subkey per purpose (`beebeeb/name/v1`, `beebeeb/thumb/v1`,
+    /// `beebeeb/note/v1`, all in [`crate::encrypt`]). Subkeys apply to a file
+    /// whose metadata records a v2 pin — every name, thumbnail and note write
+    /// for that file is subkey-sealed — and to every write once the gated
+    /// [`crate::chunk_stream::WRITE_FORMAT`] switch flips. Until then
+    /// [`crate::encrypt::METADATA_SEAL_WRITE`] is
+    /// [`crate::encrypt::MetadataSeal::Legacy`], so a non-v2 file's names,
+    /// thumbnails and notes are sealed under the raw file key.
     ///
     /// Seal a name with [`crate::encrypt::encrypt_name_for_new_item`] (a new
     /// row) or [`crate::encrypt::encrypt_name_for_target`] (an existing row);
