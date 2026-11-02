@@ -54,8 +54,10 @@ pub const MAX_PATH_BYTES: usize = 4096;
 /// Windows device names that cannot be used as file names (with or without an
 /// extension).
 const WINDOWS_RESERVED: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2",
-    "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+    "COM8", "COM9", "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    // Windows also reserves the superscript spellings (U+00B9, U+00B2, U+00B3).
+    "COM\u{b9}", "COM\u{b2}", "COM\u{b3}", "LPT\u{b9}", "LPT\u{b2}", "LPT\u{b3}",
 ];
 
 /// Check one name (a single path component, never a path).
@@ -87,6 +89,12 @@ pub fn check_component_for(name: &str, portable: bool, windows: bool) -> Result<
         }
         if name.chars().any(|c| c.is_control()) {
             return Err(UnsafeName("contains a control character"));
+        }
+        // Bidi controls are not `char::is_control`, but they let a name render
+        // as a different name. Refuse them wherever a path may be shown or
+        // interpreted by the host.
+        if name.chars().any(is_bidi_control) {
+            return Err(UnsafeName("contains a bidirection-control character"));
         }
         let bytes = name.as_bytes();
         if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
@@ -138,10 +146,13 @@ fn is_bidi_control(c: char) -> bool {
 /// Rewriting can make two names equal; the caller de-duplicates afterwards.
 /// The result always satisfies the strictest rule set, or the name is refused.
 pub fn sanitize_component(name: &str, rules: Rules) -> Result<String, UnsafeName> {
-    check_component(name, rules)?;
-    let mut out: String = name
+    // Strip bidi controls BEFORE the check: they are a rendering hazard the
+    // archive rule rewrites, not traversal. Everything structural still sees
+    // the same name (filtering bidi cannot create a separator or a `..`).
+    let visible: String = name.chars().filter(|c| !is_bidi_control(*c)).collect();
+    check_component(&visible, rules)?;
+    let mut out: String = visible
         .chars()
-        .filter(|c| !is_bidi_control(*c))
         .map(|c| {
             if matches!(c, ':' | '<' | '>' | '"' | '|' | '?' | '*') {
                 '_'

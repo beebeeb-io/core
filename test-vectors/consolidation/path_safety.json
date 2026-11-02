@@ -100,6 +100,87 @@
       "reason": "reserved Windows device"
     },
     {
+      "id": "path_reject_reserved_com0",
+      "kind": "check",
+      "name": "COM0",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "reserved Windows device"
+    },
+    {
+      "id": "path_reject_reserved_lpt0",
+      "kind": "check",
+      "name": "LPT0.txt",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "reserved Windows device"
+    },
+    {
+      "id": "path_reject_reserved_com_sup1",
+      "kind": "check",
+      "name": "COM¹",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "reserved Windows device"
+    },
+    {
+      "id": "path_reject_reserved_lpt_sup2",
+      "kind": "check",
+      "name": "LPT².log",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "reserved Windows device"
+    },
+    {
+      "id": "path_reject_reserved_conin",
+      "kind": "check",
+      "name": "CONIN$",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "reserved Windows device"
+    },
+    {
+      "id": "path_reject_reserved_conout",
+      "kind": "check",
+      "name": "CONOUT$",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "reserved Windows device"
+    },
+    {
+      "id": "path_reject_bidi_override",
+      "kind": "check",
+      "name": "evil‮fdp.exe",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "bidirection"
+    },
+    {
+      "id": "path_reject_bidi_isolate",
+      "kind": "check",
+      "name": "a⁦b⁩",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "bidirection"
+    },
+    {
+      "id": "path_reject_bidi_mark",
+      "kind": "check",
+      "name": "a‎b",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "bidirection"
+    },
+    {
       "id": "path_accept_con_on_linux",
       "kind": "check",
       "name": "CON",
