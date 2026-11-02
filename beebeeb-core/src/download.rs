@@ -210,6 +210,17 @@ pub fn checked_frame_size(total_len: u64, chunk_count: u32, chunk_size: Option<u
 /// count is a response-shape error, never a silent truncation. A frame that
 /// fails authentication is `ChunkDecryption` for that index. `on_chunk` is
 /// called after each frame with `(decrypted_so_far, chunk_count)`.
+///
+/// # Partial output on error
+///
+/// **The writer's contents MUST be discarded on any `Err`.** Frames are written
+/// as they authenticate, so an error can arrive after a prefix is already on
+/// disk: that prefix is authenticated plaintext but not the whole file (a
+/// truncated download, or — for a v2 stream whose final frame never carried
+/// its last-chunk seal — a stream that is not provably complete). Treating it
+/// as the file would hand the caller a silently truncated document. Callers
+/// write to a temporary path and delete it on error; never rename a partial
+/// file into place.
 pub fn decrypt_frames_to<W: Write, F: FnMut(u32, u32)>(
     file_key: &FileKey,
     file_id: &str,
@@ -275,12 +286,55 @@ pub fn decrypt_chunks_to<W: Write, F: FnMut(u32, u32)>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chunk_stream::{ChunkEncryptor, ChunkFormat};
 
     #[test]
     fn boundaries_cover_the_payload_once() {
         let boundaries = compute_chunk_boundaries(1000, 3).unwrap();
         assert_eq!(boundaries, vec![(0, 333), (333, 666), (666, 1000)]);
         assert_eq!(chunk_offset(1000, 3, 2).unwrap(), 666);
+    }
+
+    #[test]
+    fn an_understated_v2_count_is_incomplete_after_writing() {
+        let key = FileKey::from_bytes([7u8; 32]);
+        let file_id = "3f1c0e7a-0000-4000-8000-000000000002";
+        let plaintext: Vec<u8> = (0..100u8).collect();
+        let mut encryptor = ChunkEncryptor::for_push_with_file_key(
+            FileKey::from_bytes(*key.as_bytes()),
+            file_id,
+            plaintext.len() as u64,
+            40,
+        )
+            .expect("encryptor")
+            .with_format(ChunkFormat::V2)
+            .expect("v2 format");
+        let frames: Vec<Vec<u8>> = plaintext
+            .chunks(40)
+            .map(|chunk| encryptor.push_chunk(chunk).expect("push_chunk").data)
+            .collect();
+        encryptor.finish().expect("finish");
+
+        // Three real frames; the header understates two, so both frames open
+        // and are written, but the stream never presents its last-chunk seal.
+        let refs: Vec<&[u8]> = frames[..2].iter().map(|frame| frame.as_slice()).collect();
+        let mut out = Vec::new();
+        let error = decrypt_frames_to(
+            &key,
+            file_id,
+            ExpectedChunkFormat::V2,
+            2,
+            &refs,
+            &mut out,
+            |_, _| {},
+        )
+        .expect_err("an understated count must not look complete");
+        assert!(
+            matches!(error, DownloadFailure::Incomplete { chunks: 2, .. }),
+            "expected Incomplete after 2 chunk(s), got {error:?}"
+        );
+        // The authenticated prefix is on the writer and MUST be discarded.
+        assert_eq!(out.len(), 80, "the prefix written before the error is a truncated file");
     }
 
     #[test]
