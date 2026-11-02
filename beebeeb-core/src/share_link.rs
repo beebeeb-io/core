@@ -25,7 +25,7 @@
 use std::fmt;
 
 use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 
 /// Which route a share link lives on: `/s/` for a file or bundle share,
 /// `/f/` for a folder link.
@@ -67,6 +67,10 @@ impl fmt::Display for ShareRoute {
 pub struct ShareLink {
     /// Scheme, authority and any base path the link was minted under, with no
     /// trailing slash. A legacy host is kept as it was, never rewritten.
+    ///
+    /// **UNTRUSTED.** It comes from a link someone sent the user: never join it
+    /// to a local path, never fetch it without the storage-URL authority check,
+    /// and never present it as a trusted origin without showing the full host.
     pub base_url: String,
     /// `/s/` or `/f/`.
     pub route: ShareRoute,
@@ -158,16 +162,39 @@ pub fn build_for(app_url: &str, token: &str, key: &str, route: ShareRoute) -> St
     )
 }
 
-/// Parse a share link on either route and on any host (legacy hosts included).
+/// Parse a share link on either route and on any https host (legacy hosts
+/// included).
 ///
 /// The query string is ignored and may be present. The fragment value is
 /// percent-decoded; it is not interpreted further, so both base64 alphabets
 /// survive to [`key_bytes`].
+///
+/// # Refusals
+///
+/// The input is treated as attacker-controlled. A link is refused unless it is
+/// a plain printable-ASCII URL with no backslash, over `https` (plain `http` is
+/// allowed only for `localhost`, `127.0.0.1` and `[::1]`, for local
+/// development), with no userinfo, and with a token in the canonical
+/// [`crate::share_token`] format (27 URL-safe base64 characters = 20 bytes).
+/// This is the same grammar rule `direct_transfer::authority` applies to a
+/// storage link: the parsers that will later consume the URL silently drop
+/// control characters and treat `\` as `/`, so what is checked must be what is
+/// read.
 pub fn parse(url: &str) -> Result<ShareLink, ShareLinkError> {
-    let (scheme, rest) = url.split_once("://").ok_or(ShareLinkError::NotAShareLink)?;
-    if scheme.is_empty() || scheme.contains('/') {
+    // Visible ASCII only: WHATWG-family parsers drop tabs/newlines and trim
+    // spaces, so a control character could make the checked host differ from
+    // the fetched one. `\` is `/` to those parsers and changes the path.
+    if url.is_empty() || !url.bytes().all(|byte| (0x21..=0x7e).contains(&byte)) || url.contains('\\') {
         return Err(ShareLinkError::NotAShareLink);
     }
+    let (scheme, rest) = if let Some(rest) = strip_prefix_ci(url, "https://") {
+        (&url[.."https://".len()], rest)
+    } else if let Some(rest) = strip_prefix_ci(url, "http://") {
+        (&url[.."http://".len()], rest)
+    } else {
+        return Err(ShareLinkError::NotAShareLink);
+    };
+
     let (before_fragment, fragment) = rest.split_once('#').ok_or(ShareLinkError::MissingFragment)?;
     let before_query = before_fragment.split('?').next().unwrap_or("");
 
@@ -178,6 +205,13 @@ pub fn parse(url: &str) -> Result<ShareLink, ShareLinkError> {
     if authority.is_empty() {
         return Err(ShareLinkError::NotAShareLink);
     }
+    // Credentials never belong in a link a client follows or shows.
+    if authority.contains('@') {
+        return Err(ShareLinkError::NotAShareLink);
+    }
+    if scheme.eq_ignore_ascii_case("http://") && !is_loopback_authority(authority) {
+        return Err(ShareLinkError::NotAShareLink);
+    }
 
     let segments: Vec<&str> = path.split('/').filter(|segment| !segment.is_empty()).collect();
     if segments.len() < 2 {
@@ -185,11 +219,14 @@ pub fn parse(url: &str) -> Result<ShareLink, ShareLinkError> {
     }
     let token = segments[segments.len() - 1];
     let route = ShareRoute::from_segment(segments[segments.len() - 2]).ok_or(ShareLinkError::NotAShareLink)?;
+    if !is_share_token(token) {
+        return Err(ShareLinkError::NotAShareLink);
+    }
 
     let base_url = if segments.len() > 2 {
-        format!("{scheme}://{authority}/{}", segments[..segments.len() - 2].join("/"))
+        format!("{scheme}{authority}/{}", segments[..segments.len() - 2].join("/"))
     } else {
-        format!("{scheme}://{authority}")
+        format!("{scheme}{authority}")
     };
 
     let encoded_key = fragment.strip_prefix("key=").ok_or(ShareLinkError::MissingKey)?;
@@ -204,6 +241,56 @@ pub fn parse(url: &str) -> Result<ShareLink, ShareLinkError> {
         token: token.to_string(),
         key,
     })
+}
+
+/// ASCII-case-insensitive prefix check.
+fn strip_prefix_ci<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = value.get(..prefix.len())?;
+    head.eq_ignore_ascii_case(prefix).then(|| &value[prefix.len()..])
+}
+
+/// The host part of an authority, with an optional numeric port allowed.
+/// Returns `None` for a bracketed form that is not `[host]` or `[host]:port`.
+fn authority_host(authority: &str) -> Option<&str> {
+    if let Some(rest) = authority.strip_prefix('[') {
+        let (host, tail) = rest.split_once(']')?;
+        match tail {
+            "" => Some(host),
+            _ => {
+                let port = tail.strip_prefix(':')?;
+                (port.bytes().all(|byte| byte.is_ascii_digit())).then_some(host)
+            }
+        }
+    } else {
+        let (host, port) = match authority.split_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (authority, None),
+        };
+        if let Some(port) = port {
+            if port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+        }
+        Some(host)
+    }
+}
+
+/// `http` is permitted only for the three loopback spellings, for local
+/// development; every public host must be `https`.
+fn is_loopback_authority(authority: &str) -> bool {
+    matches!(
+        authority_host(authority),
+        Some(host) if host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
+    )
+}
+
+/// A token in the one canonical share-token format: 27 URL-safe base64
+/// characters decoding to [`crate::share_token::SHARE_TOKEN_BYTES`] bytes.
+fn is_share_token(token: &str) -> bool {
+    token.len() == 27
+        && URL_SAFE_NO_PAD
+            .decode(token)
+            .is_ok_and(|bytes| bytes.len() == crate::share_token::SHARE_TOKEN_BYTES)
 }
 
 /// Decode a `#key=` value as bytes, accepting standard base64 (legacy links)

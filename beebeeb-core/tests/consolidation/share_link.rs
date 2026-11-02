@@ -87,10 +87,18 @@ fn share_link_cases_match_core() {
 
     assert_eq!(
         (built, parsed, rejected, keys),
-        (5, 7, 7, 5),
+        (5, 8, 11, 5),
         "the named cases of move 9 are all present"
     );
-    for required in ["share_parse_raw_s", "share_parse_b64url_f", "share_parse_legacy_host"] {
+    for required in [
+        "share_parse_raw_s",
+        "share_parse_b64url_f",
+        "share_parse_legacy_host",
+        "share_parse_reject_javascript",
+        "share_parse_reject_userinfo_backslash",
+        "share_parse_reject_dotdot_token",
+        "share_parse_http_loopback",
+    ] {
         assert!(
             cases.iter().any(|case| case["id"] == required),
             "{required} is a named compatibility case"

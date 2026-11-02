@@ -172,6 +172,41 @@
       "expected": "not_a_share_link"
     },
     {
+      "id": "share_parse_reject_javascript",
+      "kind": "parse-error",
+      "url": "javascript://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": "not_a_share_link"
+    },
+    {
+      "id": "share_parse_reject_userinfo_backslash",
+      "kind": "parse-error",
+      "url": "https://evil.com\\@app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": "not_a_share_link"
+    },
+    {
+      "id": "share_parse_reject_dotdot_token",
+      "kind": "parse-error",
+      "url": "https://app.beebeeb.io/s/..#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": "not_a_share_link"
+    },
+    {
+      "id": "share_parse_reject_http_public_host",
+      "kind": "parse-error",
+      "url": "http://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": "not_a_share_link"
+    },
+    {
+      "id": "share_parse_http_loopback",
+      "kind": "parse",
+      "url": "http://localhost:3000/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": {
+        "base_url": "http://localhost:3000",
+        "route": "s",
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhM",
+        "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+      }
+    },
+    {
       "id": "share_key_bytes_standard_padded",
       "kind": "key-bytes",
       "key": "+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/s=",
