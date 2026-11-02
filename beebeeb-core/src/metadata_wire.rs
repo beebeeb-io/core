@@ -108,11 +108,22 @@ impl MetadataEnvelope {
     ///
     /// # Names, thumbnails and notes are not this pair
     ///
-    /// This is the generic envelope: it carries no AAD and no field identity.
-    /// Names, thumbnails and notes are sealed as whole envelopes with their
-    /// own AAD and must go through [`crate::encrypt::decrypt_file_metadata`],
-    /// [`crate::encrypt::encrypt_name`] (or the `encrypt_name_*` variants) and
-    /// [`crate::encrypt::decrypt_note`] — never through
+    /// This is the generic envelope: it carries no AAD and no field identity,
+    /// so a reader can open a value sealed for one field as if it were
+    /// another. New writes keep the fields apart by PURPOSE SUBKEY: one
+    /// per-file HKDF subkey per purpose (`beebeeb/name/v1`,
+    /// `beebeeb/thumb/v1`, `beebeeb/note/v1`, all in [`crate::encrypt`]), and a
+    /// thumbnail additionally seals with an empty AAD.
+    ///
+    /// Seal a name with [`crate::encrypt::encrypt_name_for_new_item`] (a new
+    /// row) or [`crate::encrypt::encrypt_name_for_target`] (an existing row);
+    /// a thumbnail with `encrypt_thumbnail_for_new_item` /
+    /// `encrypt_thumbnail_for_target`; a note with
+    /// `encrypt_note_for_new_item` / `encrypt_note_for_target`.
+    /// [`crate::encrypt::encrypt_name`] is `#[deprecated]` for writes. Read
+    /// with [`crate::encrypt::decrypt_file_metadata`],
+    /// [`crate::encrypt::decrypt_note`] and
+    /// [`crate::encrypt::decrypt_thumbnail`] — never through
     /// [`crate::encrypt::decrypt_metadata`], which checks no AAD and cannot
     /// tell which field a value was sealed for.
     pub fn encode(&self) -> Result<String, CoreError> {

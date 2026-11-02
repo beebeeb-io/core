@@ -19,11 +19,18 @@ use wasm_bindgen::prelude::*;
 ///
 /// # Names, thumbnails and notes are not this pair
 ///
-/// The envelope is generic: no AAD, no field identity. Names, thumbnails and
-/// notes are whole envelopes sealed with their own AAD; encrypt and decrypt
-/// them with `decryptFileMetadata`, the `encryptName*` functions and
-/// `decryptNote`. Never use `decryptMetadata` for them: it checks no AAD and
-/// cannot tell which field a value was sealed for.
+/// The envelope is generic: no AAD, no field identity, so a reader can open a
+/// value sealed for one field as if it were another. New writes keep the
+/// fields apart by PURPOSE SUBKEY: one per-file HKDF subkey per purpose
+/// (`beebeeb/name/v1`, `beebeeb/thumb/v1`, `beebeeb/note/v1` in core's
+/// `encrypt`), and a thumbnail additionally seals with an empty AAD.
+///
+/// Use `encryptNameForNewItem` / `encryptNameForTarget` for a name,
+/// `encryptThumbnailForNewItem` / `encryptThumbnailForTarget` for a
+/// thumbnail, and `encryptNoteForNewItem` / `encryptNoteForTarget` for a
+/// note. Read them with `decryptFileMetadata`, `decryptNote` and
+/// `decryptThumbnail`. Never use `decryptMetadata` for them: it checks no
+/// AAD and cannot tell which field a value was sealed for.
 #[wasm_bindgen(js_name = encodeMetadataEnvelope)]
 pub fn encode_metadata_envelope(nonce: &[u8], ciphertext: &[u8]) -> Result<String, JsError> {
     MetadataEnvelope {
