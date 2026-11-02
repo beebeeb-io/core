@@ -41,14 +41,29 @@ async fn fill_to(resp: &mut reqwest::Response, buf: &mut Vec<u8>, want: usize) -
     Ok(())
 }
 
-/// Drain the rest of the response body into `buf`.
+/// Append one body read to `buf`, refusing a frame over `limit` BEFORE the
+/// bytes are buffered. `limit` is a parameter so the boundary is testable
+/// without allocating a maximum-size frame.
+fn push_frame_bytes(buf: &mut Vec<u8>, bytes: &[u8], limit: usize) -> Result<(), UploadError> {
+    if buf.len().saturating_add(bytes.len()) > limit {
+        return Err(UploadError::InvalidResponse(format!(
+            "frame exceeds the maximum {limit} bytes"
+        )));
+    }
+    buf.extend_from_slice(bytes);
+    Ok(())
+}
+
+/// Drain the rest of the response body into `buf`, capped at one maximum wire
+/// frame. The last frame (and the single-frame `usize::MAX` case) has no size
+/// header to trust, so the cap is enforced here while reading.
 async fn drain_rest(resp: &mut reqwest::Response, buf: &mut Vec<u8>) -> Result<(), UploadError> {
     while let Some(b) = resp
         .chunk()
         .await
         .map_err(|e| UploadError::Network(format!("reading response body: {e}")))?
     {
-        buf.extend_from_slice(&b);
+        push_frame_bytes(buf, &b, beebeeb_core::download::MAX_FRAME_SIZE)?;
     }
     Ok(())
 }
@@ -778,6 +793,26 @@ mod tests {
         assert!(!dir.join("output.bin.tmp").exists());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn oversized_last_frame_is_refused_without_buffering() {
+        // A no-header last frame is drained, not sized; the cap lives in
+        // `push_frame_bytes` so the extra bytes never reach the buffer.
+        let mut buf = vec![0u8; 8];
+        let err = push_frame_bytes(&mut buf, &[1], 8).expect_err("a frame over the limit must be refused");
+        assert!(matches!(err, UploadError::InvalidResponse(_)), "got {err:?}");
+        assert_eq!(buf.len(), 8, "the refused byte is not buffered");
+
+        // The production limit is one maximum chunk plus the GCM overhead.
+        assert_eq!(
+            beebeeb_core::download::MAX_FRAME_SIZE,
+            256 * 1024 * 1024 + 28,
+            "MAX_CHUNK_SIZE + nonce(12) + tag(16)"
+        );
+        let mut ok = Vec::new();
+        push_frame_bytes(&mut ok, &[1, 2, 3], 3).expect("a frame at the limit is accepted");
+        assert_eq!(ok.len(), 3);
     }
 
     #[test]

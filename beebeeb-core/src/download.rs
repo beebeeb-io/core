@@ -19,6 +19,11 @@ use crate::kdf::FileKey;
 /// Smallest legal wire frame: `nonce(12) || tag(16)` with no plaintext.
 pub const MIN_FRAME_LEN: usize = CHUNK_OVERHEAD as usize;
 
+/// Largest legal wire frame: the largest plaintext chunk plus `nonce(12) ||
+/// tag(16)`. A reader must refuse anything larger, including a legacy
+/// no-header frame whose average or drained remainder would exceed it.
+pub const MAX_FRAME_SIZE: usize = MAX_CHUNK_SIZE as usize + CHUNK_OVERHEAD as usize;
+
 /// What a finished download decrypt wrote.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DecryptSummary {
@@ -197,6 +202,13 @@ pub fn checked_frame_size(total_len: u64, chunk_count: u32, chunk_size: Option<u
         });
     }
     let average = total_len / chunk_count as u64;
+    // The legacy no-header path is untrusted too: an average larger than one
+    // maximum chunk would ask the reader to buffer an absurd frame.
+    if average > MAX_FRAME_SIZE as u64 {
+        return Err(DownloadFailure::InvalidResponse(format!(
+            "average frame size {average} exceeds the maximum {MAX_FRAME_SIZE}"
+        )));
+    }
     usize::try_from(average).map_err(|_| {
         DownloadFailure::InvalidResponse(format!(
             "average frame size {average} does not fit this platform's usize"
@@ -361,6 +373,22 @@ mod tests {
         assert_eq!(
             checked_frame_size(1024, 2, Some(MAX_CHUNK_SIZE)).unwrap(),
             MAX_CHUNK_SIZE as usize + CHUNK_OVERHEAD as usize
+        );
+    }
+
+    #[test]
+    fn an_oversized_legacy_average_is_refused() {
+        // No size header: the average is all the reader has. One byte over the
+        // maximum frame must be refused, exactly at it must pass.
+        let over = (MAX_FRAME_SIZE as u64 + 1) * 2;
+        let failure = checked_frame_size(over, 2, None).unwrap_err();
+        assert!(
+            matches!(failure, DownloadFailure::InvalidResponse(_)),
+            "expected InvalidResponse, got {failure:?}"
+        );
+        assert_eq!(
+            checked_frame_size((MAX_FRAME_SIZE as u64) * 2, 2, None).unwrap(),
+            MAX_FRAME_SIZE
         );
     }
 
