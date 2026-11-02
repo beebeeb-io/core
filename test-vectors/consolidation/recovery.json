@@ -1,0 +1,243 @@
+{
+  "description": "Move 8 \u2014 one recovery-phrase split and count. Normalisation trims, lowercases and collapses every run of Unicode whitespace (ASCII, NBSP U+00A0, ideographic U+3000) to one space, matching mobile's normalizePhrase; the count predicate is the 12-word rule and progress reports (entered, required).",
+  "source": "core recovery.rs RECOVERY_WORD_COUNT = 12 + bip39; mobile src/lib/recovery-phrase.ts normalizePhrase/wordsFromPhrase (map \u00a75.3 move 8); desktop's three per-screen paste splits (map \u00a74.2 case 15)",
+  "cases": [
+    {
+      "id": "recovery_split_12_words",
+      "kind": "split",
+      "input": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "expected_words": [
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "about"
+      ],
+      "expected_count": 12,
+      "expected_complete": true
+    },
+    {
+      "id": "recovery_split_24_words",
+      "kind": "split",
+      "input": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
+      "expected_words": [
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "art"
+      ],
+      "expected_count": 24,
+      "expected_complete": false
+    },
+    {
+      "id": "recovery_split_double_spaces",
+      "kind": "split",
+      "input": "  abandon  abandon  abandon  abandon  abandon  abandon  abandon  abandon  abandon  abandon  abandon  about  ",
+      "expected_words": [
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "about"
+      ],
+      "expected_count": 12,
+      "expected_complete": true
+    },
+    {
+      "id": "recovery_split_nbsp",
+      "kind": "split",
+      "input": "abandon\u00a0abandon\u00a0abandon\u00a0abandon\u00a0abandon\u00a0abandon\u00a0abandon\u00a0abandon\u00a0abandon\u00a0abandon\u00a0abandon\u00a0about",
+      "expected_words": [
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "about"
+      ],
+      "expected_count": 12,
+      "expected_complete": true
+    },
+    {
+      "id": "recovery_split_ideographic_space",
+      "kind": "split",
+      "input": "abandon\u3000abandon\u3000abandon\u3000abandon\u3000abandon\u3000abandon\u3000abandon\u3000abandon\u3000abandon\u3000abandon\u3000abandon\u3000about",
+      "expected_words": [
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "about"
+      ],
+      "expected_count": 12,
+      "expected_complete": true
+    },
+    {
+      "id": "recovery_split_newlines_and_tabs",
+      "kind": "split",
+      "input": "abandon\n\tabandon\n\tabandon\n\tabandon\n\tabandon\n\tabandon\n\tabandon\n\tabandon\n\tabandon\n\tabandon\n\tabandon\n\tabout",
+      "expected_words": [
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "about"
+      ],
+      "expected_count": 12,
+      "expected_complete": true
+    },
+    {
+      "id": "recovery_split_uppercase",
+      "kind": "split",
+      "input": "ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABANDON ABOUT",
+      "expected_words": [
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "about"
+      ],
+      "expected_count": 12,
+      "expected_complete": true
+    },
+    {
+      "id": "recovery_split_trim",
+      "kind": "split",
+      "input": "\n  abandon\tabandon\tabandon\tabandon\tabandon\tabandon\tabandon\tabandon\tabandon\tabandon\tabandon\tabout  \r\n",
+      "expected_words": [
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "about"
+      ],
+      "expected_count": 12,
+      "expected_complete": true
+    },
+    {
+      "id": "recovery_split_empty",
+      "kind": "split",
+      "input": "",
+      "expected_words": [],
+      "expected_count": 0,
+      "expected_complete": false
+    },
+    {
+      "id": "recovery_split_whitespace_only",
+      "kind": "split",
+      "input": " \t\n\u00a0\u3000 ",
+      "expected_words": [],
+      "expected_count": 0,
+      "expected_complete": false
+    },
+    {
+      "id": "recovery_split_11_words",
+      "kind": "split",
+      "input": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon",
+      "expected_words": [
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon"
+      ],
+      "expected_count": 11,
+      "expected_complete": false
+    },
+    {
+      "id": "recovery_split_word_outside_list",
+      "kind": "split",
+      "input": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon zzzz",
+      "expected_words": [
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "abandon",
+        "zzzz"
+      ],
+      "expected_count": 12,
+      "expected_complete": true
+    }
+  ]
+}

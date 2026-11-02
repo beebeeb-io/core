@@ -48,6 +48,61 @@ pub fn recover_from_phrase(phrase: &str) -> Result<MasterKey, CoreError> {
     derive_key_from_entropy(&entropy)
 }
 
+/// Normalize a recovery phrase the way the clients do: trim, lowercase, and
+/// collapse every run of Unicode whitespace — spaces, tabs, newlines, and the
+/// non-breaking (U+00A0) / ideographic (U+3000) spaces an iPad IME can insert
+/// — to a single ASCII space.
+///
+/// This is the one split rule behind the paste and counter UIs. It validates
+/// neither the words nor the checksum, and it does not change
+/// [`recover_from_phrase`].
+pub fn normalize_phrase(input: &str) -> String {
+    let mut normalized = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if ch.is_whitespace() {
+            if !normalized.is_empty() && !normalized.ends_with(' ') {
+                normalized.push(' ');
+            }
+        } else {
+            normalized.extend(ch.to_lowercase());
+        }
+    }
+    if normalized.ends_with(' ') {
+        normalized.pop();
+    }
+    normalized
+}
+
+/// The individual words of a (possibly messy) phrase, after
+/// [`normalize_phrase`]. Empty input yields an empty list, never `[""]`.
+pub fn split_phrase(input: &str) -> Vec<String> {
+    let normalized = normalize_phrase(input);
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+    normalized.split(' ').map(str::to_string).collect()
+}
+
+/// How many words the phrase has after normalisation (0 for empty input).
+pub fn phrase_word_count(input: &str) -> usize {
+    let normalized = normalize_phrase(input);
+    if normalized.is_empty() {
+        0
+    } else {
+        normalized.split(' ').count()
+    }
+}
+
+/// Whether the phrase has exactly [`RECOVERY_WORD_COUNT`] words.
+pub fn phrase_is_complete(input: &str) -> bool {
+    phrase_word_count(input) == RECOVERY_WORD_COUNT
+}
+
+/// Progress for the UI: `(words entered, words required)`.
+pub fn phrase_progress(input: &str) -> (usize, usize) {
+    (phrase_word_count(input), RECOVERY_WORD_COUNT)
+}
+
 fn derive_key_from_entropy(entropy: &[u8]) -> Result<MasterKey, CoreError> {
     use argon2::{Algorithm, Argon2, Params, Version};
 
