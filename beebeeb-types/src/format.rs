@@ -53,20 +53,24 @@ pub fn format_si(bytes: i64) -> String {
 /// Same ladder and precision rule as [`format_si`], on 1,024: `1 KiB` (1,024),
 /// `1 MiB`, `1 GiB`, `1.0 TiB` (1,099,511,627,776).
 pub fn format_binary(bytes: i64) -> String {
-    if bytes < IEC_BASE as i64 {
-        return format!("{bytes} B");
+    let kib = IEC_BASE as i64;
+    if bytes < kib {
+        return format!("{} {}", bytes, IEC_UNITS[0]);
     }
-    if bytes < IEC_BASE.pow(2) as i64 {
-        return format!("{} KiB", bytes / 1_024);
+    let mib = IEC_BASE.pow(2) as i64;
+    if bytes < mib {
+        return format!("{} {}", bytes / kib, IEC_UNITS[1]);
     }
-    if bytes < IEC_BASE.pow(3) as i64 {
-        return format!("{} MiB", bytes / 1_048_576);
+    let gib = IEC_BASE.pow(3) as i64;
+    if bytes < gib {
+        return format!("{} {}", bytes / mib, IEC_UNITS[2]);
     }
-    if bytes < IEC_BASE.pow(4) as i64 {
-        return format!("{} GiB", bytes / 1_073_741_824);
+    let tib = IEC_BASE.pow(4) as i64;
+    if bytes < tib {
+        return format!("{} {}", bytes / gib, IEC_UNITS[3]);
     }
-    let tib = bytes as f64 / 1_099_511_627_776.0;
-    format!("{tib:.1} TiB")
+    let value = bytes as f64 / tib as f64;
+    format!("{value:.1} {}", IEC_UNITS[4])
 }
 
 /// Formats a byte count in decimal units with an explicit number of decimals.

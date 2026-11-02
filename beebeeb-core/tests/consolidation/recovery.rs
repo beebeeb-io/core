@@ -8,7 +8,6 @@
 
 use beebeeb_core::recovery::{normalize_phrase, phrase_is_complete, phrase_progress, phrase_word_count, split_phrase};
 use beebeeb_types::RECOVERY_WORD_COUNT;
-use serde_json::Value;
 
 pub const CONCEPT: &str = "recovery";
 
