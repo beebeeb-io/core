@@ -333,6 +333,24 @@
       "reason": "'.' and '..'"
     },
     {
+      "id": "path_reject_zero_width_space_only_host",
+      "kind": "check",
+      "name": "\u200b",
+      "portable": false,
+      "windows": false,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_dot_lrm_dot_host",
+      "kind": "check",
+      "name": ".\u200e.",
+      "portable": false,
+      "windows": false,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
       "id": "path_accept_con_on_linux",
       "kind": "check",
       "name": "CON",
