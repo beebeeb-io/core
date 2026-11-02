@@ -230,7 +230,8 @@ impl DownloadClient {
         // when the file size is not a multiple of the chunk size. Only legacy V1
         // responses (no header) fall back to the `total / chunk_count` average,
         // which matches `compute_chunk_boundaries`.
-        let frame_size = beebeeb_core::download::frame_size(total, chunk_count, chunk_size);
+        let frame_size =
+            beebeeb_core::download::checked_frame_size(total, chunk_count, chunk_size).map_err(map_download_failure)?;
 
         // Write to .tmp then atomic rename.
         let tmp_path = format!("{output_path}.tmp");
