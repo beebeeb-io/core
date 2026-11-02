@@ -351,6 +351,15 @@
       "reason": "'.' and '..'"
     },
     {
+      "id": "path_reject_soft_hyphen_only_host",
+      "kind": "check",
+      "name": "\u00ad",
+      "portable": false,
+      "windows": false,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
       "id": "path_accept_con_on_linux",
       "kind": "check",
       "name": "CON",

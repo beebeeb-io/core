@@ -33,7 +33,7 @@ fn expect_ok_or_reason(case: &Value, result: Result<(), impl std::fmt::Display>)
 #[test]
 fn path_safety_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 68, "every named path-safety case is present");
+    assert_eq!(cases.len(), 69, "every named path-safety case is present");
 
     let mut checks = 0;
     let mut sanitized = 0;
@@ -122,7 +122,7 @@ fn path_safety_cases_match_core() {
         }
     }
 
-    assert_eq!((checks, sanitized, rel_joins, contained), (51, 11, 4, 2));
+    assert_eq!((checks, sanitized, rel_joins, contained), (52, 11, 4, 2));
     for required in [
         "path_reject_dotdot",
         "path_reject_reserved_con",
