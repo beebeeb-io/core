@@ -74,21 +74,23 @@ pub struct ShareLink {
     pub base_url: String,
     /// `/s/` or `/f/`.
     pub route: ShareRoute,
-    /// The public, unguessable share token.
+    /// The share token: a bearer secret, not a public label. Anyone holding
+    /// it can list, download from and upload into the folder (the server keeps
+    /// only `sha256(token)`), so treat it like a password and never log it.
     pub token: String,
     /// The percent-decoded `#key=` value, exactly as the builder handed it in.
     pub key: String,
 }
 
 impl fmt::Debug for ShareLink {
-    /// The key is client key material (`K_c`): it must never reach a log line,
-    /// a panic message or a crash report. `base_url`, `route` and `token` are
-    /// public by definition and stay.
+    /// The key is client key material (`K_c`) and the token is a bearer secret
+    /// (it grants folder list/download/upload), so neither must ever reach a log
+    /// line, a panic message or a crash report. `base_url` and `route` stay.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "ShareLink {{ base_url: {:?}, route: {:?}, token: {:?}, key: <redacted> }}",
-            self.base_url, self.route, self.token
+            "ShareLink {{ base_url: {:?}, route: {:?}, token: <redacted>, key: <redacted> }}",
+            self.base_url, self.route
         )
     }
 }

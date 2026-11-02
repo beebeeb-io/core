@@ -62,7 +62,12 @@ fn share_link_cases_match_core() {
                     !debug.contains(link.key.as_str()),
                     "{id}: Debug must not contain the key: {debug}"
                 );
+                assert!(
+                    !debug.contains(link.token.as_str()),
+                    "{id}: Debug must not contain the token: {debug}"
+                );
                 assert!(debug.contains("key: <redacted>"), "{id}: Debug must mark the key redacted");
+                assert!(debug.contains("token: <redacted>"), "{id}: Debug must mark the token redacted");
             }
             "parse-error" => {
                 rejected += 1;
