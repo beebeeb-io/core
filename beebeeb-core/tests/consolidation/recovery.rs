@@ -31,7 +31,9 @@ fn recovery_cases_match_core() {
         let expected_count = case["expected_count"].as_u64().expect("expected_count") as usize;
         let expected_complete = case["expected_complete"].as_bool().expect("expected_complete");
 
-        assert_eq!(split_phrase(input), expected_words, "{id}: split");
+        let split_words = split_phrase(input);
+        let split: Vec<&str> = split_words.iter().map(|word| word.as_str()).collect();
+        assert_eq!(split, expected_words, "{id}: split");
         assert_eq!(phrase_word_count(input), expected_count, "{id}: count");
         assert_eq!(phrase_is_complete(input), expected_complete, "{id}: complete");
         assert_eq!(
@@ -41,14 +43,19 @@ fn recovery_cases_match_core() {
         );
 
         let normalized = normalize_phrase(input);
-        assert_eq!(normalized, expected_words.join(" "), "{id}: normalisation");
+        let expected_normalized = expected_words.join(" ");
+        assert_eq!(normalized.as_str(), expected_normalized, "{id}: normalisation");
         assert_eq!(
-            normalize_phrase(&normalized),
-            normalized,
+            normalize_phrase(&normalized).as_str(),
+            normalized.as_str(),
             "{id}: normalisation is idempotent"
         );
         assert!(!normalized.contains("  "), "{id}: no doubled space survives");
-        assert_eq!(normalized.trim(), normalized, "{id}: no edge space survives");
+        assert_eq!(
+            normalized.trim(),
+            normalized.as_str(),
+            "{id}: no edge space survives"
+        );
     }
 
     assert_eq!(splits, 12, "the split cases");

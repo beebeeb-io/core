@@ -56,7 +56,10 @@ pub fn recover_from_phrase(phrase: &str) -> Result<MasterKey, CoreError> {
 /// This is the one split rule behind the paste and counter UIs. It validates
 /// neither the words nor the checksum, and it does not change
 /// [`recover_from_phrase`].
-pub fn normalize_phrase(input: &str) -> String {
+///
+/// The result is a recovery-phrase candidate, so it is wiped on drop like the
+/// entropy it will be parsed into.
+pub fn normalize_phrase(input: &str) -> Zeroizing<String> {
     let mut normalized = String::with_capacity(input.len());
     for ch in input.chars() {
         if ch.is_whitespace() {
@@ -70,27 +73,44 @@ pub fn normalize_phrase(input: &str) -> String {
     if normalized.ends_with(' ') {
         normalized.pop();
     }
-    normalized
+    Zeroizing::new(normalized)
 }
 
 /// The individual words of a (possibly messy) phrase, after
 /// [`normalize_phrase`]. Empty input yields an empty list, never `[""]`.
-pub fn split_phrase(input: &str) -> Vec<String> {
+///
+/// Each word is wiped on drop: partial phrases are just as sensitive as the
+/// complete one.
+pub fn split_phrase(input: &str) -> Vec<Zeroizing<String>> {
     let normalized = normalize_phrase(input);
     if normalized.is_empty() {
         return Vec::new();
     }
-    normalized.split(' ').map(str::to_string).collect()
+    normalized
+        .split(' ')
+        .map(|word| Zeroizing::new(word.to_string()))
+        .collect()
+}
+
+/// Count the whitespace-separated runs directly, without materialising the
+/// normalised phrase (lowercasing and collapsing never changes word counts).
+fn count_words(input: &str) -> usize {
+    let mut words = 0;
+    let mut in_word = false;
+    for ch in input.chars() {
+        if ch.is_whitespace() {
+            in_word = false;
+        } else if !in_word {
+            words += 1;
+            in_word = true;
+        }
+    }
+    words
 }
 
 /// How many words the phrase has after normalisation (0 for empty input).
 pub fn phrase_word_count(input: &str) -> usize {
-    let normalized = normalize_phrase(input);
-    if normalized.is_empty() {
-        0
-    } else {
-        normalized.split(' ').count()
-    }
+    count_words(input)
 }
 
 /// Whether the phrase has exactly [`RECOVERY_WORD_COUNT`] words.
