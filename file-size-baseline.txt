@@ -1,0 +1,13 @@
+# file-size-baseline.txt: source files over the size limit when the ratchet started, `<lines> <path>`.
+# Limits: 1,200 lines per source file, 1,500 under tests/. Written by scripts/check-file-sizes.sh --init-baseline
+# (workspace) from 7dc9d7bcebd0 on 2026-11-02. Entries only go down: `check-file-sizes.sh . --update-baseline`
+# lowers or drops them. Never add a path or raise a count here; split the file instead (token plan Phase 4).
+3745 beebeeb-core/src/chunk_stream.rs
+1216 beebeeb-core/src/direct_transfer/upload.rs
+1568 beebeeb-core/src/direct_transfer/vectors.rs
+3256 beebeeb-core/src/direct_transfer/window.rs
+2191 beebeeb-core/src/encrypt.rs
+2482 beebeeb-core/src/kdf.rs
+1795 beebeeb-transfer/src/tests.rs
+8243 beebeeb-uniffi/src/lib.rs
+5387 beebeeb-wasm/src/lib.rs
