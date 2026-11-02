@@ -45,7 +45,8 @@ pub fn build_share_link(
     ))
 }
 
-/// Parse a share link on either route and on any host. Returns
+/// Parse a share link on either route and on any `https` host (legacy hosts
+/// included; plain `http` only for loopback). Returns
 /// `{ base_url, route, token, key }`; `key` is the percent-decoded fragment
 /// value, not yet decoded as bytes — use `shareKeyBytes(key)` for that.
 ///

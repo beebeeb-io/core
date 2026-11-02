@@ -15,7 +15,7 @@ const vectors = require(process.env.BB_VECTOR_PATH || path.join(__dirname, '../.
 const hex = (bytes) => (bytes === null || bytes === undefined ? null : Buffer.from(bytes).toString('hex'));
 
 nodeTest('the share-link vector: build, parse, the error codes and key bytes agree with every case', () => {
-  assert.equal(vectors.cases.length, 29, 'every case in share_link.json is exercised');
+  assert.equal(vectors.cases.length, 31, 'every case in share_link.json is exercised');
 
   for (const c of vectors.cases) {
     if (c.kind === 'build') {
@@ -44,25 +44,28 @@ nodeTest('the share-link vector: build, parse, the error codes and key bytes agr
 });
 
 nodeTest('build keeps each route encoding, and a link parses back to what built it', () => {
-  const token = 'AAECAwQFBgcICQoLDA0ODxAREhM';
+  // Each route mints its own token size: `/s/` 20 bytes (27 chars), `/f/` 32
+  // bytes (43 chars, the server's folder-link token).
+  const sToken = 'AAECAwQFBgcICQoLDA0ODxAREhM';
+  const fToken = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
   const key = '-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s';
 
   // Without a route the builder mints the canonical `/s/` link; `"f"` is the
   // folder route, and its base64url key is left byte-identical.
   assert.equal(
-    wasm.buildShareLink('https://app.beebeeb.io', token, key),
-    `https://app.beebeeb.io/s/${token}#key=${key}`,
+    wasm.buildShareLink('https://app.beebeeb.io', sToken, key),
+    `https://app.beebeeb.io/s/${sToken}#key=${key}`,
   );
   assert.equal(
-    wasm.buildShareLink('https://app.beebeeb.io', token, key, 'f'),
-    `https://app.beebeeb.io/f/${token}#key=${key}`,
+    wasm.buildShareLink('https://app.beebeeb.io', fToken, key, 'f'),
+    `https://app.beebeeb.io/f/${fToken}#key=${key}`,
   );
 
-  const parsed = wasm.parseShareLink(wasm.buildShareLink('https://app.beebeeb.io', token, key, 'f'));
-  assert.deepEqual(parsed, { base_url: 'https://app.beebeeb.io', route: 'f', token, key });
+  const parsed = wasm.parseShareLink(wasm.buildShareLink('https://app.beebeeb.io', fToken, key, 'f'));
+  assert.deepEqual(parsed, { base_url: 'https://app.beebeeb.io', route: 'f', token: fToken, key });
 
   // A route that is neither `s` nor `f` is refused rather than guessed.
-  assert.throws(() => wasm.buildShareLink('https://app.beebeeb.io', token, key, 'x'), /unknown share route/);
+  assert.throws(() => wasm.buildShareLink('https://app.beebeeb.io', sToken, key, 'x'), /unknown share route/);
 });
 
 nodeTest('both live encodings survive one round trip: raw #key on /s/ and base64url on /f/', () => {
@@ -73,7 +76,7 @@ nodeTest('both live encodings survive one round trip: raw #key on /s/ and base64
   assert.equal(raw.key, '+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/s=');
   assert.equal(hex(wasm.shareKeyBytes(raw.key)), 'fb'.repeat(32));
 
-  const b64url = wasm.parseShareLink('https://app.beebeeb.io/f/AAECAwQFBgcICQoLDA0ODxAREhM#key=-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s');
+  const b64url = wasm.parseShareLink('https://app.beebeeb.io/f/AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8#key=-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s');
   assert.equal(b64url.key, '-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s');
   assert.equal(hex(wasm.shareKeyBytes(b64url.key)), 'fb'.repeat(32));
 });

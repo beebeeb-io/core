@@ -87,7 +87,7 @@ fn share_link_cases_match_core() {
 
     assert_eq!(
         (built, parsed, rejected, keys),
-        (5, 8, 11, 5),
+        (5, 8, 13, 5),
         "the named cases of move 9 are all present"
     );
     for required in [
@@ -97,6 +97,8 @@ fn share_link_cases_match_core() {
         "share_parse_reject_javascript",
         "share_parse_reject_userinfo_backslash",
         "share_parse_reject_dotdot_token",
+        "share_parse_reject_s_token_on_f",
+        "share_parse_reject_f_token_on_s",
         "share_parse_http_loopback",
     ] {
         assert!(

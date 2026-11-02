@@ -174,8 +174,10 @@ pub fn build_for(app_url: &str, token: &str, key: &str, route: ShareRoute) -> St
 /// The input is treated as attacker-controlled. A link is refused unless it is
 /// a plain printable-ASCII URL with no backslash, over `https` (plain `http` is
 /// allowed only for `localhost`, `127.0.0.1` and `[::1]`, for local
-/// development), with no userinfo, and with a token in the canonical
-/// [`crate::share_token`] format (27 URL-safe base64 characters = 20 bytes).
+/// development), with no userinfo, and with a token in the route's canonical
+/// format: `/s/` is 27 URL-safe base64 characters (20 bytes, the
+/// [`crate::share_token`] format), `/f/` is 43 characters (32 bytes, what the
+/// server mints for a folder link).
 /// This is the same grammar rule `direct_transfer::authority` applies to a
 /// storage link: the parsers that will later consume the URL silently drop
 /// control characters and treat `\` as `/`, so what is checked must be what is
@@ -219,7 +221,7 @@ pub fn parse(url: &str) -> Result<ShareLink, ShareLinkError> {
     }
     let token = segments[segments.len() - 1];
     let route = ShareRoute::from_segment(segments[segments.len() - 2]).ok_or(ShareLinkError::NotAShareLink)?;
-    if !is_share_token(token) {
+    if !is_share_token(token, route) {
         return Err(ShareLinkError::NotAShareLink);
     }
 
@@ -284,13 +286,15 @@ fn is_loopback_authority(authority: &str) -> bool {
     )
 }
 
-/// A token in the one canonical share-token format: 27 URL-safe base64
-/// characters decoding to [`crate::share_token::SHARE_TOKEN_BYTES`] bytes.
-fn is_share_token(token: &str) -> bool {
-    token.len() == 27
-        && URL_SAFE_NO_PAD
-            .decode(token)
-            .is_ok_and(|bytes| bytes.len() == crate::share_token::SHARE_TOKEN_BYTES)
+/// A token in the route's canonical format, URL-safe base64 with no padding:
+/// `/s/` decodes to [`crate::share_token::SHARE_TOKEN_BYTES`] bytes (27 chars),
+/// `/f/` to 32 bytes (43 chars), the size the server mints for a folder link.
+fn is_share_token(token: &str, route: ShareRoute) -> bool {
+    let (chars, bytes) = match route {
+        ShareRoute::Single => (27, crate::share_token::SHARE_TOKEN_BYTES),
+        ShareRoute::Folder => (43, 32),
+    };
+    token.len() == chars && URL_SAFE_NO_PAD.decode(token).is_ok_and(|decoded| decoded.len() == bytes)
 }
 
 /// Decode a `#key=` value as bytes, accepting standard base64 (legacy links)
