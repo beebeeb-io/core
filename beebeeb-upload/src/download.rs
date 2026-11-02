@@ -862,14 +862,17 @@ mod tests {
 
     /// Serve one HTTP response whose body stops short of its `Content-Length`,
     /// so the client sees a mid-body failure after the bytes that arrived.
-    fn serve_truncated_body(body: Vec<u8>, declared_length: usize, extra_headers: &str) -> (String, std::thread::JoinHandle<()>) {
+    fn serve_truncated_body(
+        body: Vec<u8>,
+        declared_length: usize,
+        extra_headers: &str,
+    ) -> (String, std::thread::JoinHandle<()>) {
         use std::io::{Read, Write};
 
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
         let addr = listener.local_addr().unwrap();
-        let head = format!(
-            "HTTP/1.1 200 OK\r\nContent-Length: {declared_length}\r\n{extra_headers}Connection: close\r\n\r\n"
-        );
+        let head =
+            format!("HTTP/1.1 200 OK\r\nContent-Length: {declared_length}\r\n{extra_headers}Connection: close\r\n\r\n");
         let handle = std::thread::spawn(move || {
             let (mut sock, _) = listener.accept().expect("accept");
             let mut request = Vec::new();
@@ -918,11 +921,8 @@ mod tests {
         // failure happens after frame 0 was decrypted and written to `{out}.tmp`.
         let mut body = frame.clone();
         body.extend_from_slice(&frame[..10]);
-        let (base, server) = serve_truncated_body(
-            body,
-            frame.len() * 2,
-            "X-Chunk-Count: 2\r\nX-Original-Size: 128\r\n",
-        );
+        let (base, server) =
+            serve_truncated_body(body, frame.len() * 2, "X-Chunk-Count: 2\r\nX-Original-Size: 128\r\n");
 
         let dir = std::env::temp_dir().join("beebeeb_download_partial");
         let _ = std::fs::remove_dir_all(&dir);
@@ -933,10 +933,19 @@ mod tests {
         let callback = CountingCallback(std::sync::atomic::AtomicU32::new(0));
         let client = DownloadClient::new(&base, "test-token");
         let result = client
-            .download_and_decrypt(&mk, "file-partial", ExpectedChunkFormat::Unrecorded, out, Some(&callback))
+            .download_and_decrypt(
+                &mk,
+                "file-partial",
+                ExpectedChunkFormat::Unrecorded,
+                out,
+                Some(&callback),
+            )
             .await;
 
-        assert!(result.is_err(), "a body shorter than Content-Length must fail the download");
+        assert!(
+            result.is_err(),
+            "a body shorter than Content-Length must fail the download"
+        );
         assert_eq!(
             callback.0.load(std::sync::atomic::Ordering::SeqCst),
             1,

@@ -31,18 +31,8 @@ fn route_from_js(route: Option<String>) -> Result<ShareRoute, JsError> {
 /// Build `{app_url}/{s|f}/{token}#key={key}`. `route` is `"s"` (the default
 /// when omitted or `null`) or `"f"`.
 #[wasm_bindgen(js_name = buildShareLink)]
-pub fn build_share_link(
-    app_url: &str,
-    token: &str,
-    key: &str,
-    route: Option<String>,
-) -> Result<String, JsError> {
-    Ok(share_link::build_for(
-        app_url,
-        token,
-        key,
-        route_from_js(route)?,
-    ))
+pub fn build_share_link(app_url: &str, token: &str, key: &str, route: Option<String>) -> Result<String, JsError> {
+    Ok(share_link::build_for(app_url, token, key, route_from_js(route)?))
 }
 
 /// Parse a share link on either route and on any `https` host (legacy hosts

@@ -296,7 +296,10 @@ fn is_share_token(token: &str, route: ShareRoute) -> bool {
         ShareRoute::Single => (27, crate::share_token::SHARE_TOKEN_BYTES),
         ShareRoute::Folder => (43, 32),
     };
-    token.len() == chars && URL_SAFE_NO_PAD.decode(token).is_ok_and(|decoded| decoded.len() == bytes)
+    token.len() == chars
+        && URL_SAFE_NO_PAD
+            .decode(token)
+            .is_ok_and(|decoded| decoded.len() == bytes)
 }
 
 /// Decode a `#key=` value as bytes, accepting standard base64 (legacy links)

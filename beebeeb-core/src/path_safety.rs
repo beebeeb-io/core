@@ -56,10 +56,39 @@ pub const MAX_PATH_BYTES: usize = 4096;
 /// Windows device names that cannot be used as file names (with or without an
 /// extension).
 const WINDOWS_RESERVED: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-    "COM8", "COM9", "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "CONIN$",
+    "CONOUT$",
+    "COM0",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "LPT0",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
     // Windows also reserves the superscript spellings (U+00B9, U+00B2, U+00B3).
-    "COM\u{b9}", "COM\u{b2}", "COM\u{b3}", "LPT\u{b9}", "LPT\u{b2}", "LPT\u{b3}",
+    "COM\u{b9}",
+    "COM\u{b2}",
+    "COM\u{b3}",
+    "LPT\u{b9}",
+    "LPT\u{b2}",
+    "LPT\u{b3}",
 ];
 
 /// Check one name (a single path component, never a path).
@@ -340,10 +369,7 @@ mod symlink_tests {
                 .duration_since(UNIX_EPOCH)
                 .expect("clock after 1970")
                 .as_nanos();
-            let dir = std::env::temp_dir().join(format!(
-                "beebeeb-path-safety-{label}-{}-{nanos}",
-                std::process::id()
-            ));
+            let dir = std::env::temp_dir().join(format!("beebeeb-path-safety-{label}-{}-{nanos}", std::process::id()));
             std::fs::create_dir_all(&dir).expect("create scratch dir");
             Self(dir)
         }
@@ -370,8 +396,8 @@ mod symlink_tests {
         std::fs::write(&outside, b"do not touch").expect("write outside marker");
         std::os::unix::fs::symlink(&outside, root.join("link.txt")).expect("create symlink");
 
-        let error = safe_child(&root, "link.txt", Rules::Portable)
-            .expect_err("a symlink as the target must be refused");
+        let error =
+            safe_child(&root, "link.txt", Rules::Portable).expect_err("a symlink as the target must be refused");
         assert!(
             error.contains("refusing to write through it"),
             "unexpected error: {error}"

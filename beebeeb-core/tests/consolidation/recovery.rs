@@ -51,11 +51,7 @@ fn recovery_cases_match_core() {
             "{id}: normalisation is idempotent"
         );
         assert!(!normalized.contains("  "), "{id}: no doubled space survives");
-        assert_eq!(
-            normalized.trim(),
-            normalized.as_str(),
-            "{id}: no edge space survives"
-        );
+        assert_eq!(normalized.trim(), normalized.as_str(), "{id}: no edge space survives");
     }
 
     assert_eq!(splits, 12, "the split cases");

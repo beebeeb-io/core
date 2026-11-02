@@ -88,8 +88,5 @@ pub fn thumbnail_budget(variant: &str, bytes: f64) -> Result<String, JsError> {
 #[wasm_bindgen(js_name = thumbnailFormat)]
 pub fn thumbnail_format(variant: &str, platform: &str) -> Result<String, JsError> {
     let policy = ThumbnailPolicy::for_variant(variant_from_js(variant)?);
-    Ok(policy
-        .format_for(platform_from_js(platform)?)
-        .as_str()
-        .to_owned())
+    Ok(policy.format_for(platform_from_js(platform)?).as_str().to_owned())
 }

@@ -182,9 +182,7 @@ pub fn checked_frame_size(total_len: u64, chunk_count: u32, chunk_size: Option<u
             )));
         }
         return usize::try_from(with_overhead).map_err(|_| {
-            DownloadFailure::InvalidResponse(format!(
-                "frame size {with_overhead} does not fit this platform's usize"
-            ))
+            DownloadFailure::InvalidResponse(format!("frame size {with_overhead} does not fit this platform's usize"))
         });
     }
     let average = total_len / chunk_count as u64;
@@ -304,9 +302,9 @@ mod tests {
             plaintext.len() as u64,
             40,
         )
-            .expect("encryptor")
-            .with_format(ChunkFormat::V2)
-            .expect("v2 format");
+        .expect("encryptor")
+        .with_format(ChunkFormat::V2)
+        .expect("v2 format");
         let frames: Vec<Vec<u8>> = plaintext
             .chunks(40)
             .map(|chunk| encryptor.push_chunk(chunk).expect("push_chunk").data)
@@ -317,16 +315,8 @@ mod tests {
         // and are written, but the stream never presents its last-chunk seal.
         let refs: Vec<&[u8]> = frames[..2].iter().map(|frame| frame.as_slice()).collect();
         let mut out = Vec::new();
-        let error = decrypt_frames_to(
-            &key,
-            file_id,
-            ExpectedChunkFormat::V2,
-            2,
-            &refs,
-            &mut out,
-            |_, _| {},
-        )
-        .expect_err("an understated count must not look complete");
+        let error = decrypt_frames_to(&key, file_id, ExpectedChunkFormat::V2, 2, &refs, &mut out, |_, _| {})
+            .expect_err("an understated count must not look complete");
         assert!(
             matches!(error, DownloadFailure::Incomplete { chunks: 2, .. }),
             "expected Incomplete after 2 chunk(s), got {error:?}"

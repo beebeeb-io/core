@@ -76,11 +76,7 @@ pub fn retry_delay_ms(policy: JsValue, retry: u32) -> Result<f64, JsError> {
 /// sample in permille (`0..=1000`; larger values are clamped). A `"none"`
 /// policy ignores the sample.
 #[wasm_bindgen(js_name = retryJitteredDelayMs)]
-pub fn retry_jittered_delay_ms(
-    policy: JsValue,
-    retry: u32,
-    sample_permille: u32,
-) -> Result<f64, JsError> {
+pub fn retry_jittered_delay_ms(policy: JsValue, retry: u32, sample_permille: u32) -> Result<f64, JsError> {
     Ok(policy_from_js(&policy)?.jittered_delay_ms(retry, sample_permille) as f64)
 }
 

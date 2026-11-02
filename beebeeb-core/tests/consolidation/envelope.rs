@@ -112,7 +112,10 @@ fn envelope_cases_match_core() {
                     matches!(err, CoreError::InvalidInput(_)),
                     "{case_id}: expected InvalidInput, got {err:?}"
                 );
-                assert!(err.to_string().contains(want), "{case_id}: `{err}` must contain `{want}`");
+                assert!(
+                    err.to_string().contains(want),
+                    "{case_id}: `{err}` must contain `{want}`"
+                );
             }
             other => panic!("{case_id}: unknown case kind `{other}`"),
         }
