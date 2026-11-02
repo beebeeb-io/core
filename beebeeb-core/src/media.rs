@@ -62,6 +62,22 @@ pub fn is_previewable_by_extension(filename: &str) -> bool {
     )
 }
 
+/// One preview decision per row of a name list.
+///
+/// `Vec<bool>` is bit-packed by Rust, so 10,000 names cost one FFI/wasm
+/// crossing and about 1.25 KB instead of a crossing per row.
+pub type BitSet = Vec<bool>;
+
+/// Answers [`is_previewable_by_extension`] for a whole list in one call.
+///
+/// The result is aligned with `names`: `result[i]` is the answer for
+/// `names[i]`, byte-for-byte the same answer the single-name predicate gives.
+/// Clients with an encrypted listing use this so a list of files costs one
+/// boundary crossing instead of one per row.
+pub fn previewable_batch(names: &[String]) -> BitSet {
+    names.iter().map(|name| is_previewable_by_extension(name)).collect()
+}
+
 /// Guess the MIME type from a filename extension.
 /// Returns None for unknown extensions.
 pub fn guess_mime_type(filename: &str) -> Option<&'static str> {

@@ -1,0 +1,924 @@
+{
+  "description": "Move 3 — media previewability. Core's 90 renderable extensions, the 48 extensions where the web client's 78-entry list disagrees today (30 core-only, 18 web-only), the three shape cases (unknown, uppercase, empty), and the batch predicate that answers a whole list in one call without changing a single per-row answer.",
+  "source": "core beebeeb-core/src/media.rs is_previewable_by_extension (90 entries) vs web origin/main src/lib/preview.ts PREVIEWABLE_EXTENSIONS (78 entries, intersection 60) read on 2026-11-02; the consolidation map §4.2 case 3 records 49/77 from its earlier scan — web's task 1565 added `tsx`, which both lists now contain, so the live disagreement count is 48",
+  "cases": [
+    {
+      "id": "preview_ext_jpg",
+      "kind": "extension",
+      "name": "file.jpg",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_jpeg",
+      "kind": "extension",
+      "name": "file.jpeg",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_png",
+      "kind": "extension",
+      "name": "file.png",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_gif",
+      "kind": "extension",
+      "name": "file.gif",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_webp",
+      "kind": "extension",
+      "name": "file.webp",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_svg",
+      "kind": "extension",
+      "name": "file.svg",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_bmp",
+      "kind": "extension",
+      "name": "file.bmp",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_ico",
+      "kind": "extension",
+      "name": "file.ico",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_avif",
+      "kind": "extension",
+      "name": "file.avif",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_heic",
+      "kind": "extension",
+      "name": "file.heic",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_heif",
+      "kind": "extension",
+      "name": "file.heif",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_tiff",
+      "kind": "extension",
+      "name": "file.tiff",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_tif",
+      "kind": "extension",
+      "name": "file.tif",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_mp4",
+      "kind": "extension",
+      "name": "file.mp4",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_mov",
+      "kind": "extension",
+      "name": "file.mov",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_webm",
+      "kind": "extension",
+      "name": "file.webm",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_mkv",
+      "kind": "extension",
+      "name": "file.mkv",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_avi",
+      "kind": "extension",
+      "name": "file.avi",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_mp3",
+      "kind": "extension",
+      "name": "file.mp3",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_flac",
+      "kind": "extension",
+      "name": "file.flac",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_wav",
+      "kind": "extension",
+      "name": "file.wav",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_aac",
+      "kind": "extension",
+      "name": "file.aac",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_ogg",
+      "kind": "extension",
+      "name": "file.ogg",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_m4a",
+      "kind": "extension",
+      "name": "file.m4a",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_opus",
+      "kind": "extension",
+      "name": "file.opus",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_wma",
+      "kind": "extension",
+      "name": "file.wma",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_pdf",
+      "kind": "extension",
+      "name": "file.pdf",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_txt",
+      "kind": "extension",
+      "name": "file.txt",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_md",
+      "kind": "extension",
+      "name": "file.md",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_markdown",
+      "kind": "extension",
+      "name": "file.markdown",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_csv",
+      "kind": "extension",
+      "name": "file.csv",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_log",
+      "kind": "extension",
+      "name": "file.log",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_rtf",
+      "kind": "extension",
+      "name": "file.rtf",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_docx",
+      "kind": "extension",
+      "name": "file.docx",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_xlsx",
+      "kind": "extension",
+      "name": "file.xlsx",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_pptx",
+      "kind": "extension",
+      "name": "file.pptx",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_odt",
+      "kind": "extension",
+      "name": "file.odt",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_ods",
+      "kind": "extension",
+      "name": "file.ods",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_odp",
+      "kind": "extension",
+      "name": "file.odp",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_tar",
+      "kind": "extension",
+      "name": "file.tar",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_gz",
+      "kind": "extension",
+      "name": "file.gz",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_tgz",
+      "kind": "extension",
+      "name": "file.tgz",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_py",
+      "kind": "extension",
+      "name": "file.py",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_js",
+      "kind": "extension",
+      "name": "file.js",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_jsx",
+      "kind": "extension",
+      "name": "file.jsx",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_ts",
+      "kind": "extension",
+      "name": "file.ts",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_tsx",
+      "kind": "extension",
+      "name": "file.tsx",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_rs",
+      "kind": "extension",
+      "name": "file.rs",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_go",
+      "kind": "extension",
+      "name": "file.go",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_rb",
+      "kind": "extension",
+      "name": "file.rb",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_java",
+      "kind": "extension",
+      "name": "file.java",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_kt",
+      "kind": "extension",
+      "name": "file.kt",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_swift",
+      "kind": "extension",
+      "name": "file.swift",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_c",
+      "kind": "extension",
+      "name": "file.c",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_cpp",
+      "kind": "extension",
+      "name": "file.cpp",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_h",
+      "kind": "extension",
+      "name": "file.h",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_hpp",
+      "kind": "extension",
+      "name": "file.hpp",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_cs",
+      "kind": "extension",
+      "name": "file.cs",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_php",
+      "kind": "extension",
+      "name": "file.php",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_sh",
+      "kind": "extension",
+      "name": "file.sh",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_bash",
+      "kind": "extension",
+      "name": "file.bash",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_zsh",
+      "kind": "extension",
+      "name": "file.zsh",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_html",
+      "kind": "extension",
+      "name": "file.html",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_htm",
+      "kind": "extension",
+      "name": "file.htm",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_css",
+      "kind": "extension",
+      "name": "file.css",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_scss",
+      "kind": "extension",
+      "name": "file.scss",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_less",
+      "kind": "extension",
+      "name": "file.less",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_vue",
+      "kind": "extension",
+      "name": "file.vue",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_svelte",
+      "kind": "extension",
+      "name": "file.svelte",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_astro",
+      "kind": "extension",
+      "name": "file.astro",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_dart",
+      "kind": "extension",
+      "name": "file.dart",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_r",
+      "kind": "extension",
+      "name": "file.r",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_ex",
+      "kind": "extension",
+      "name": "file.ex",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_exs",
+      "kind": "extension",
+      "name": "file.exs",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_zig",
+      "kind": "extension",
+      "name": "file.zig",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_nim",
+      "kind": "extension",
+      "name": "file.nim",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_v",
+      "kind": "extension",
+      "name": "file.v",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_json",
+      "kind": "extension",
+      "name": "file.json",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_xml",
+      "kind": "extension",
+      "name": "file.xml",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_yaml",
+      "kind": "extension",
+      "name": "file.yaml",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_yml",
+      "kind": "extension",
+      "name": "file.yml",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_toml",
+      "kind": "extension",
+      "name": "file.toml",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_ini",
+      "kind": "extension",
+      "name": "file.ini",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_conf",
+      "kind": "extension",
+      "name": "file.conf",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_sql",
+      "kind": "extension",
+      "name": "file.sql",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_graphql",
+      "kind": "extension",
+      "name": "file.graphql",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_proto",
+      "kind": "extension",
+      "name": "file.proto",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_cmake",
+      "kind": "extension",
+      "name": "file.cmake",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_dockerfile",
+      "kind": "extension",
+      "name": "file.dockerfile",
+      "expected": true
+    },
+    {
+      "id": "preview_ext_makefile",
+      "kind": "extension",
+      "name": "file.makefile",
+      "expected": true
+    },
+    {
+      "id": "preview_web_astro",
+      "kind": "web-disagreement",
+      "name": "file.astro",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_avi",
+      "kind": "web-disagreement",
+      "name": "file.avi",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_bash",
+      "kind": "web-disagreement",
+      "name": "file.bash",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_cmake",
+      "kind": "web-disagreement",
+      "name": "file.cmake",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_conf",
+      "kind": "web-disagreement",
+      "name": "file.conf",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_dart",
+      "kind": "web-disagreement",
+      "name": "file.dart",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_ex",
+      "kind": "web-disagreement",
+      "name": "file.ex",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_exs",
+      "kind": "web-disagreement",
+      "name": "file.exs",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_graphql",
+      "kind": "web-disagreement",
+      "name": "file.graphql",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_gz",
+      "kind": "web-disagreement",
+      "name": "file.gz",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_hpp",
+      "kind": "web-disagreement",
+      "name": "file.hpp",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_htm",
+      "kind": "web-disagreement",
+      "name": "file.htm",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_less",
+      "kind": "web-disagreement",
+      "name": "file.less",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_makefile",
+      "kind": "web-disagreement",
+      "name": "file.makefile",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_markdown",
+      "kind": "web-disagreement",
+      "name": "file.markdown",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_nim",
+      "kind": "web-disagreement",
+      "name": "file.nim",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_ods",
+      "kind": "web-disagreement",
+      "name": "file.ods",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_odt",
+      "kind": "web-disagreement",
+      "name": "file.odt",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_proto",
+      "kind": "web-disagreement",
+      "name": "file.proto",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_r",
+      "kind": "web-disagreement",
+      "name": "file.r",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_rtf",
+      "kind": "web-disagreement",
+      "name": "file.rtf",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_scss",
+      "kind": "web-disagreement",
+      "name": "file.scss",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_svelte",
+      "kind": "web-disagreement",
+      "name": "file.svelte",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_tar",
+      "kind": "web-disagreement",
+      "name": "file.tar",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_tgz",
+      "kind": "web-disagreement",
+      "name": "file.tgz",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_v",
+      "kind": "web-disagreement",
+      "name": "file.v",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_vue",
+      "kind": "web-disagreement",
+      "name": "file.vue",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_yml",
+      "kind": "web-disagreement",
+      "name": "file.yml",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_zig",
+      "kind": "web-disagreement",
+      "name": "file.zig",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_zsh",
+      "kind": "web-disagreement",
+      "name": "file.zsh",
+      "web": false,
+      "expected": true
+    },
+    {
+      "id": "preview_web_aif",
+      "kind": "web-disagreement",
+      "name": "file.aif",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_aiff",
+      "kind": "web-disagreement",
+      "name": "file.aiff",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_alac",
+      "kind": "web-disagreement",
+      "name": "file.alac",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_arw",
+      "kind": "web-disagreement",
+      "name": "file.arw",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_cr2",
+      "kind": "web-disagreement",
+      "name": "file.cr2",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_cr3",
+      "kind": "web-disagreement",
+      "name": "file.cr3",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_dng",
+      "kind": "web-disagreement",
+      "name": "file.dng",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_hevc",
+      "kind": "web-disagreement",
+      "name": "file.hevc",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_key",
+      "kind": "web-disagreement",
+      "name": "file.key",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_nef",
+      "kind": "web-disagreement",
+      "name": "file.nef",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_oga",
+      "kind": "web-disagreement",
+      "name": "file.oga",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_orf",
+      "kind": "web-disagreement",
+      "name": "file.orf",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_ppt",
+      "kind": "web-disagreement",
+      "name": "file.ppt",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_raf",
+      "kind": "web-disagreement",
+      "name": "file.raf",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_rw2",
+      "kind": "web-disagreement",
+      "name": "file.rw2",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_tsv",
+      "kind": "web-disagreement",
+      "name": "file.tsv",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_xls",
+      "kind": "web-disagreement",
+      "name": "file.xls",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_web_zip",
+      "kind": "web-disagreement",
+      "name": "file.zip",
+      "web": true,
+      "expected": false
+    },
+    {
+      "id": "preview_unknown_extension",
+      "kind": "extension",
+      "name": "archive.xyz9",
+      "expected": false
+    },
+    {
+      "id": "preview_uppercase_extension",
+      "kind": "extension",
+      "name": "PHOTO.JPG",
+      "expected": true
+    },
+    {
+      "id": "preview_empty_name",
+      "kind": "extension",
+      "name": "",
+      "expected": false
+    },
+    {
+      "id": "preview_batch_order",
+      "kind": "batch",
+      "names": [
+        "photo.JPG",
+        "notes.txt",
+        "clip.mkv",
+        "archive.zip",
+        "report.xls",
+        "README",
+        "",
+        "song.mp3"
+      ],
+      "expected": [
+        true,
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        true
+      ]
+    }
+  ]
+}
