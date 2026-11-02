@@ -1,0 +1,121 @@
+{
+  "description": "Move 2 — the metadata envelope: every stored form clients hand core (base64 `{nonce,ciphertext}`, numeric arrays with an optional `cipher_suite`, Swift's short `n`/`c` keys) and the one canonical form core writes. The writer is unchanged: a decoded envelope re-encodes to core's base64 form byte for byte.",
+  "source": "core metadata_wire::serialize_encrypted_metadata (frozen) + web crypto.ts parseEncryptedBlob/serializeEncryptedBlob, cli crypto.rs WebAppBlob, mobile src/lib/encrypted-metadata.ts and CryptoBridge.swift parseNamePayload (map §5.2 case 2, §5.3 move 2)",
+  "cases": [
+    {
+      "id": "envelope_canonical_present",
+      "kind": "decode",
+      "payload": "{\"cipher_suite\":\"V1Aes256Gcm\",\"nonce\":[0,1,2,3,4,5,6,7,8,9,10,11],\"ciphertext\":[16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]}",
+      "expected": {
+        "cipher_suite": "V1Aes256Gcm",
+        "nonce_hex": "000102030405060708090a0b",
+        "ciphertext_hex": "101112131415161718191a1b1c1d1e1f"
+      }
+    },
+    {
+      "id": "envelope_absent_cipher_suite",
+      "kind": "decode",
+      "payload": "{\"nonce\":\"AAECAwQFBgcICQoL\",\"ciphertext\":\"EBESExQVFhcYGRobHB0eHw==\"}",
+      "expected": {
+        "cipher_suite": null,
+        "nonce_hex": "000102030405060708090a0b",
+        "ciphertext_hex": "101112131415161718191a1b1c1d1e1f"
+      }
+    },
+    {
+      "id": "envelope_null_cipher_suite",
+      "kind": "decode",
+      "payload": "{\"cipher_suite\":null,\"nonce\":\"AAECAwQFBgcICQoL\",\"ciphertext\":\"EBESExQVFhcYGRobHB0eHw==\"}",
+      "expected": {
+        "cipher_suite": null,
+        "nonce_hex": "000102030405060708090a0b",
+        "ciphertext_hex": "101112131415161718191a1b1c1d1e1f"
+      }
+    },
+    {
+      "id": "envelope_unknown_field",
+      "kind": "decode",
+      "payload": "{\"nonce\":\"AAECAwQFBgcICQoL\",\"ciphertext\":\"EBESExQVFhcYGRobHB0eHw==\",\"chunk_format\":2,\"future\":{\"nested\":true}}",
+      "expected": {
+        "cipher_suite": null,
+        "nonce_hex": "000102030405060708090a0b",
+        "ciphertext_hex": "101112131415161718191a1b1c1d1e1f"
+      }
+    },
+    {
+      "id": "envelope_empty_object",
+      "kind": "decode-error",
+      "payload": "{}",
+      "expected_error": "InvalidInput"
+    },
+    {
+      "id": "envelope_numeric_arrays",
+      "kind": "decode",
+      "payload": "{\"nonce\":[0,1,2,3,4,5,6,7,8,9,10,11],\"ciphertext\":[16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]}",
+      "expected": {
+        "cipher_suite": null,
+        "nonce_hex": "000102030405060708090a0b",
+        "ciphertext_hex": "101112131415161718191a1b1c1d1e1f"
+      }
+    },
+    {
+      "id": "envelope_short_keys",
+      "kind": "decode",
+      "payload": "{\"n\":\"AAECAwQFBgcICQoL\",\"c\":\"EBESExQVFhcYGRobHB0eHw==\"}",
+      "expected": {
+        "cipher_suite": null,
+        "nonce_hex": "000102030405060708090a0b",
+        "ciphertext_hex": "101112131415161718191a1b1c1d1e1f"
+      }
+    },
+    {
+      "id": "envelope_mixed_encodings",
+      "kind": "decode",
+      "payload": "{\"nonce\":\"AAECAwQFBgcICQoL\",\"ciphertext\":[16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]}",
+      "expected": {
+        "cipher_suite": null,
+        "nonce_hex": "000102030405060708090a0b",
+        "ciphertext_hex": "101112131415161718191a1b1c1d1e1f"
+      }
+    },
+    {
+      "id": "envelope_unknown_cipher_suite",
+      "kind": "decode-error",
+      "payload": "{\"cipher_suite\":\"V9Future\",\"nonce\":\"AAECAwQFBgcICQoL\",\"ciphertext\":\"EBESExQVFhcYGRobHB0eHw==\"}",
+      "expected_error": "InvalidInput"
+    },
+    {
+      "id": "envelope_null_nonce",
+      "kind": "decode-error",
+      "payload": "{\"nonce\":null,\"ciphertext\":\"EBESExQVFhcYGRobHB0eHw==\"}",
+      "expected_error": "InvalidInput"
+    },
+    {
+      "id": "envelope_non_byte_array",
+      "kind": "decode-error",
+      "payload": "{\"nonce\":[256],\"ciphertext\":[0]}",
+      "expected_error": "InvalidInput"
+    },
+    {
+      "id": "envelope_not_json",
+      "kind": "decode-error",
+      "payload": "not json at all",
+      "expected_error": "InvalidInput"
+    },
+    {
+      "id": "envelope_encode_canonical",
+      "kind": "encode",
+      "nonce_hex": "000102030405060708090a0b",
+      "ciphertext_hex": "101112131415161718191a1b1c1d1e1f",
+      "expected_canonical": "{\"ciphertext\":\"EBESExQVFhcYGRobHB0eHw==\",\"nonce\":\"AAECAwQFBgcICQoL\"}"
+    },
+    {
+      "id": "envelope_encode_keeps_writer",
+      "kind": "encode",
+      "cipher_suite": "V1Aes256Gcm",
+      "nonce_hex": "000102030405060708090a0b",
+      "ciphertext_hex": "101112131415161718191a1b1c1d1e1f",
+      "expected_canonical": "{\"ciphertext\":\"EBESExQVFhcYGRobHB0eHw==\",\"nonce\":\"AAECAwQFBgcICQoL\"}"
+    }
+  ]
+}

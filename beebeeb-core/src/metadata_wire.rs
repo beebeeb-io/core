@@ -8,6 +8,7 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
+use beebeeb_types::CipherSuite;
 
 use crate::CoreError;
 
@@ -59,6 +60,74 @@ fn parse_field(obj: &serde_json::Value, field: &str) -> Result<Vec<u8>, CoreErro
         _ => Err(CoreError::InvalidInput(format!(
             "field \"{field}\" must be a base64 string or numeric array"
         ))),
+    }
+}
+
+/// A decoded metadata envelope, with the wire policy explicit per field.
+///
+/// Readers accept every stored form (spec move 2, map §5.3): `nonce` and
+/// `ciphertext` as base64 strings or numeric arrays, independently; the mobile
+/// short keys `n` / `c` when the canonical key is absent; and `cipher_suite`
+/// absent, `null` or `"V1Aes256Gcm"`.
+///
+/// `cipher_suite: None` means the payload did not name one. The only suite is
+/// V1, so callers assume it exactly as [`parse_encrypted_metadata`] already
+/// does. Naming any other suite is an error, never a silent downgrade. Fields
+/// this type does not know are ignored.
+///
+/// [`MetadataEnvelope::encode`] writes the one canonical form — the frozen
+/// base64 writer — and never emits a `cipher_suite`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MetadataEnvelope {
+    /// The cipher suite the payload named, if it named one.
+    pub cipher_suite: Option<CipherSuite>,
+    /// The 12-byte AES-GCM nonce.
+    pub nonce: Vec<u8>,
+    /// The ciphertext (plaintext plus the 16-byte GCM tag).
+    pub ciphertext: Vec<u8>,
+}
+
+impl MetadataEnvelope {
+    /// Decode any accepted stored form.
+    pub fn decode(payload: &str) -> Result<Self, CoreError> {
+        let value: serde_json::Value =
+            serde_json::from_str(payload).map_err(|e| CoreError::InvalidInput(e.to_string()))?;
+        Ok(Self {
+            cipher_suite: parse_cipher_suite(&value)?,
+            nonce: parse_named_field(&value, "nonce", "n")?,
+            ciphertext: parse_named_field(&value, "ciphertext", "c")?,
+        })
+    }
+
+    /// Encode into the canonical wire format. Delegates to the frozen writer, so
+    /// the bytes are identical to [`serialize_encrypted_metadata`].
+    pub fn encode(&self) -> String {
+        serialize_encrypted_metadata(&self.nonce, &self.ciphertext)
+    }
+}
+
+/// `cipher_suite` is optional: absent or `null` means "the caller assumes V1".
+/// A named suite must be one this core version knows.
+fn parse_cipher_suite(value: &serde_json::Value) -> Result<Option<CipherSuite>, CoreError> {
+    match value.get("cipher_suite") {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(named) => serde_json::from_value(named.clone())
+            .map(Some)
+            .map_err(|e| CoreError::InvalidInput(format!("unsupported cipher_suite: {e}"))),
+    }
+}
+
+/// Read a field by its canonical name, falling back to the mobile short alias
+/// only when the canonical key is absent (so an explicit `null` still errors).
+fn parse_named_field(value: &serde_json::Value, canonical: &str, short: &str) -> Result<Vec<u8>, CoreError> {
+    if value.get(canonical).is_some() {
+        parse_field(value, canonical)
+    } else if value.get(short).is_some() {
+        parse_field(value, short)
+    } else {
+        Err(CoreError::InvalidInput(format!(
+            "missing field \"{canonical}\" in metadata payload"
+        )))
     }
 }
 
