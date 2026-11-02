@@ -14,9 +14,25 @@ use wasm_bindgen::prelude::*;
 /// Returns `{"ciphertext":"<base64>","nonce":"<base64>"}` — byte-identical to
 /// `beebeeb_core::metadata_wire::serialize_encrypted_metadata`. Never emits a
 /// `cipher_suite`: the writer is frozen.
+///
+/// Throws for a nonce that is not exactly 12 bytes (AES-GCM's nonce length).
+///
+/// # Names, thumbnails and notes are not this pair
+///
+/// The envelope is generic: no AAD, no field identity. Names, thumbnails and
+/// notes are whole envelopes sealed with their own AAD; encrypt and decrypt
+/// them with `decryptFileMetadata`, the `encryptName*` functions and
+/// `decryptNote`. Never use `decryptMetadata` for them: it checks no AAD and
+/// cannot tell which field a value was sealed for.
 #[wasm_bindgen(js_name = encodeMetadataEnvelope)]
-pub fn encode_metadata_envelope(nonce: &[u8], ciphertext: &[u8]) -> String {
-    beebeeb_core::metadata_wire::serialize_encrypted_metadata(nonce, ciphertext)
+pub fn encode_metadata_envelope(nonce: &[u8], ciphertext: &[u8]) -> Result<String, JsError> {
+    MetadataEnvelope {
+        cipher_suite: None,
+        nonce: nonce.to_vec(),
+        ciphertext: ciphertext.to_vec(),
+    }
+    .encode()
+    .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// The decoded envelope as JS sees it.

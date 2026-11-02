@@ -101,8 +101,28 @@ impl MetadataEnvelope {
 
     /// Encode into the canonical wire format. Delegates to the frozen writer, so
     /// the bytes are identical to [`serialize_encrypted_metadata`].
-    pub fn encode(&self) -> String {
-        serialize_encrypted_metadata(&self.nonce, &self.ciphertext)
+    ///
+    /// Refuses a nonce that is not exactly 12 bytes (AES-GCM's nonce length)
+    /// with [`CoreError::InvalidInput`]; anything else would produce a payload
+    /// no reader can open.
+    ///
+    /// # Names, thumbnails and notes are not this pair
+    ///
+    /// This is the generic envelope: it carries no AAD and no field identity.
+    /// Names, thumbnails and notes are sealed as whole envelopes with their
+    /// own AAD and must go through [`crate::encrypt::decrypt_file_metadata`],
+    /// [`crate::encrypt::encrypt_name`] (or the `encrypt_name_*` variants) and
+    /// [`crate::encrypt::decrypt_note`] — never through
+    /// [`crate::encrypt::decrypt_metadata`], which checks no AAD and cannot
+    /// tell which field a value was sealed for.
+    pub fn encode(&self) -> Result<String, CoreError> {
+        if self.nonce.len() != 12 {
+            return Err(CoreError::InvalidInput(format!(
+                "metadata nonce must be 12 bytes, got {}",
+                self.nonce.len()
+            )));
+        }
+        Ok(serialize_encrypted_metadata(&self.nonce, &self.ciphertext))
     }
 }
 

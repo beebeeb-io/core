@@ -56,7 +56,7 @@ fn envelope_cases_match_core() {
                 // The canonical writer is unchanged: re-encoding drops any suite
                 // and matches the frozen writer's bytes exactly.
                 assert_eq!(
-                    envelope.encode(),
+                    envelope.encode().expect("a decoded envelope has a 12-byte nonce"),
                     serialize_encrypted_metadata(&envelope.nonce, &envelope.ciphertext),
                     "{case_id}: the writer must stay byte-identical"
                 );
@@ -77,7 +77,7 @@ fn envelope_cases_match_core() {
                     nonce: hex_bytes(case, "nonce_hex"),
                     ciphertext: hex_bytes(case, "ciphertext_hex"),
                 };
-                let canonical = envelope.encode();
+                let canonical = envelope.encode().expect("a valid envelope encodes");
                 assert_eq!(
                     canonical,
                     case["expected_canonical"].as_str().expect("expected_canonical"),
@@ -98,6 +98,21 @@ fn envelope_cases_match_core() {
                     roundtrip.cipher_suite, None,
                     "{case_id}: the canonical form carries no suite"
                 );
+            }
+            "encode-error" => {
+                rejected += 1;
+                let envelope = MetadataEnvelope {
+                    cipher_suite: cipher_suite(case, case_id),
+                    nonce: hex_bytes(case, "nonce_hex"),
+                    ciphertext: hex_bytes(case, "ciphertext_hex"),
+                };
+                let err = envelope.encode().expect_err("this envelope must be refused");
+                let want = case["expect"].as_str().expect("expect");
+                assert!(
+                    matches!(err, CoreError::InvalidInput(_)),
+                    "{case_id}: expected InvalidInput, got {err:?}"
+                );
+                assert!(err.to_string().contains(want), "{case_id}: `{err}` must contain `{want}`");
             }
             other => panic!("{case_id}: unknown case kind `{other}`"),
         }

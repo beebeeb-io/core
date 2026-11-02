@@ -116,6 +116,13 @@
       "nonce_hex": "000102030405060708090a0b",
       "ciphertext_hex": "101112131415161718191a1b1c1d1e1f",
       "expected_canonical": "{\"ciphertext\":\"EBESExQVFhcYGRobHB0eHw==\",\"nonce\":\"AAECAwQFBgcICQoL\"}"
+    },
+    {
+      "id": "envelope_encode_rejects_short_nonce",
+      "kind": "encode-error",
+      "nonce_hex": "000102030405060708090a",
+      "ciphertext_hex": "101112131415161718191a1b1c1d1e1f",
+      "expect": "nonce must be 12 bytes"
     }
   ]
 }
