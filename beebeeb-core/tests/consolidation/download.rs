@@ -6,7 +6,7 @@
 
 use beebeeb_core::chunk_stream::{ChunkEncryptor, ExpectedChunkFormat};
 use beebeeb_core::download::{
-    DownloadFailure, chunk_offset, compute_chunk_boundaries, decrypt_chunks_to, decrypt_frames_to, frame_size,
+    DownloadFailure, checked_frame_size, chunk_offset, compute_chunk_boundaries, decrypt_chunks_to, decrypt_frames_to,
 };
 use beebeeb_core::kdf::FileKey;
 use serde_json::Value;
@@ -91,11 +91,12 @@ fn download_cases_match_core() {
             }
             "frame-size" => {
                 let chunk_size = case["chunk_size"].as_u64();
-                let got = frame_size(
+                let got = checked_frame_size(
                     u64_of(case, "total_len"),
                     u64_of(case, "chunk_count") as u32,
                     chunk_size,
-                );
+                )
+                .unwrap_or_else(|e| panic!("{id}: {e}"));
                 assert_eq!(got as u64, u64_of(case, "expected"), "{id}");
             }
             "roundtrip" | "roundtrip-chunks" | "roundtrip-error" => {

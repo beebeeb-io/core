@@ -157,20 +157,6 @@ pub fn chunk_offset(total_len: usize, chunk_count: u32, chunk_index: u32) -> Res
     Ok(base * chunk_index as usize)
 }
 
-/// Wire frame size for the streaming reader.
-///
-/// When the server sends `X-Chunk-Size` (v2 files) each frame is the uniform
-/// plaintext chunk size plus the GCM overhead, exact even when the file size is
-/// not a multiple of the chunk size. Only legacy v1 responses (no header) fall
-/// back to the `total / chunk_count` average. A single frame is the whole body.
-///
-/// Kept for callers that already compare against [`usize::MAX`]; new code
-/// should use [`checked_frame_size`], which reports an unusable header instead
-/// of returning the sentinel. On an unusable header this returns [`usize::MAX`].
-pub fn frame_size(total_len: u64, chunk_count: u32, chunk_size: Option<u64>) -> usize {
-    checked_frame_size(total_len, chunk_count, chunk_size).unwrap_or(usize::MAX)
-}
-
 /// Wire frame size for the streaming reader, with the server header checked.
 ///
 /// `chunk_size` and `chunk_count` come from the response, so they are
@@ -358,9 +344,6 @@ mod tests {
             matches!(failure, DownloadFailure::InvalidResponse(_)),
             "expected InvalidResponse, got {failure:?}"
         );
-        // The compatibility wrapper must not panic either; the sentinel is the
-        // documented "unusable" result for callers that still compare to it.
-        assert_eq!(frame_size(1024, 2, Some(u64::MAX - 27)), usize::MAX);
     }
 
     #[test]
