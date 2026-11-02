@@ -28,10 +28,14 @@ fn map_download_failure(failure: DownloadFailure) -> UploadError {
 
 /// The `{output}.tmp` file a download writes into before the atomic rename.
 ///
-/// `Drop` removes it unless [`Self::commit`] renamed it into place, so *every*
-/// error path — a `?` while reading the body, a decryption failure, a flush
-/// error, a failed rename, even a panic — leaves no decrypted frames behind.
-/// (The old explicit `remove_file` at each `return` missed the `?` exits.)
+/// `Drop` removes it unless [`Self::commit`] renamed it into place, so every
+/// error path in unwind builds — a `?` while reading the body, a decryption
+/// failure, a flush error, a failed rename — leaves no decrypted frames
+/// behind. (The old explicit `remove_file` at each `return` missed the `?`
+/// exits.) This holds only where unwinding runs `Drop`: the workspace sets
+/// `panic = "abort"` for release builds (`Cargo.toml`), so a panic does not
+/// unwind there and the temp file can remain. The guard is error cleanup, not
+/// a panic safety net.
 struct TempOutput {
     path: std::path::PathBuf,
     renamed: bool,
