@@ -133,21 +133,13 @@ pub fn monthly_cost_cents(plan: Plan, extra_tb: i64, extra_users: i64) -> i64 {
     base + (extra_tb * STORAGE_ADDON_CENTS_PER_TB) + (billable_users * USER_ADDON_CENTS)
 }
 
+/// The canonical storage form, kept at this path for every existing caller.
+///
+/// The implementation lives in [`crate::format::format_si`] (move 4 of the
+/// consolidation). This stays a function item — not a re-export — so the
+/// exported surface at this exact path does not lose its function.
 pub fn format_storage_si(bytes: i64) -> String {
-    if bytes < 1_000 {
-        return format!("{bytes} B");
-    }
-    if bytes < 1_000_000 {
-        return format!("{} KB", bytes / 1_000);
-    }
-    if bytes < 1_000_000_000 {
-        return format!("{} MB", bytes / 1_000_000);
-    }
-    if bytes < ONE_TB {
-        return format!("{} GB", bytes / 1_000_000_000);
-    }
-    let tb = bytes as f64 / ONE_TB as f64;
-    format!("{tb:.1} TB")
+    crate::format::format_si(bytes)
 }
 
 #[cfg(test)]
