@@ -137,6 +137,177 @@ impl ThumbnailConfig {
     }
 }
 
+/// Which thumbnail slot a policy describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThumbnailVariant {
+    Small,
+    Medium,
+    Large,
+}
+
+impl ThumbnailVariant {
+    /// The stable wire/name form (`small`/`medium`/`large`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Medium => "medium",
+            Self::Large => "large",
+        }
+    }
+}
+
+/// The platform a client runs on, as far as the format choice is concerned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Platform {
+    Ios,
+    MacOs,
+    Android,
+    Windows,
+    Linux,
+    Web,
+    Unknown,
+}
+
+/// The encoder output a policy asks for.
+///
+/// HEIC on Apple platforms (ImageIO on macOS, PhotoKit/vImage on iOS); WebP
+/// everywhere else (libwebp, or the browser's canvas). The policy chooses the
+/// format; the platform still owns the codec.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThumbnailFormat {
+    Heic,
+    Webp,
+}
+
+impl ThumbnailFormat {
+    /// The stable wire/name form (`heic`/`webp`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Heic => "heic",
+            Self::Webp => "webp",
+        }
+    }
+
+    /// The `/usr/bin/file`-style MIME type a client sets on the upload.
+    pub fn mime_type(self) -> &'static str {
+        match self {
+            Self::Heic => "image/heic",
+            Self::Webp => "image/webp",
+        }
+    }
+}
+
+/// Where a candidate output falls against a policy's two byte budgets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BudgetVerdict {
+    /// `<= target_bytes`: this is the answer, stop the ladder.
+    Target,
+    /// `<= max_bytes` but above target: keep as a fallback, keep trying.
+    Fallback,
+    /// Above `max_bytes`: unusable.
+    Rejected,
+}
+
+impl BudgetVerdict {
+    /// The stable wire/name form (`target`/`fallback`/`rejected`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Target => "target",
+            Self::Fallback => "fallback",
+            Self::Rejected => "rejected",
+        }
+    }
+}
+
+/// The shared thumbnail policy: a ladder, its byte budgets, the default target
+/// size, and the per-platform format choice.
+///
+/// The ladder and budgets are the frozen WebP cascade from
+/// [`ThumbnailConfig`]; the policy adds the variant name, the default longest
+/// side and the format rule (spec §16.3 answer 5: HEIC on iOS/macOS, WebP
+/// everywhere else). Encoders stay platform-native.
+#[derive(Debug, Clone)]
+pub struct ThumbnailPolicy {
+    pub variant: ThumbnailVariant,
+    pub config: ThumbnailConfig,
+    /// Default longest side for this variant, in pixels.
+    pub target_px: u32,
+}
+
+impl ThumbnailPolicy {
+    /// Build the policy for one variant. The ladder and budgets are the
+    /// existing instances; nothing is duplicated.
+    pub fn for_variant(variant: ThumbnailVariant) -> Self {
+        let config = match variant {
+            ThumbnailVariant::Small => ThumbnailConfig::small(),
+            ThumbnailVariant::Medium => ThumbnailConfig::medium(),
+            ThumbnailVariant::Large => ThumbnailConfig::large(),
+        };
+        let target_px = config.ladder.first().map(|step| step.max_dimension).unwrap_or(0);
+        Self {
+            variant,
+            config,
+            target_px,
+        }
+    }
+
+    /// The default (medium) policy.
+    pub fn medium() -> Self {
+        Self::for_variant(ThumbnailVariant::Medium)
+    }
+
+    /// The grid/list policy.
+    pub fn small() -> Self {
+        Self::for_variant(ThumbnailVariant::Small)
+    }
+
+    /// The full-screen preview policy.
+    pub fn large() -> Self {
+        Self::for_variant(ThumbnailVariant::Large)
+    }
+
+    /// The format this platform should encode to.
+    ///
+    /// HEIC where the OS owns a better HEIC encoder (ImageIO on macOS,
+    /// PhotoKit/vImage on iOS); WebP everywhere else.
+    pub fn format_for(&self, platform: Platform) -> ThumbnailFormat {
+        match platform {
+            Platform::Ios | Platform::MacOs => ThumbnailFormat::Heic,
+            Platform::Android | Platform::Windows | Platform::Linux | Platform::Web | Platform::Unknown => {
+                ThumbnailFormat::Webp
+            }
+        }
+    }
+
+    /// Where `bytes` falls against this policy's budgets.
+    pub fn classify_size(&self, bytes: usize) -> BudgetVerdict {
+        if bytes <= self.config.target_bytes {
+            BudgetVerdict::Target
+        } else if bytes <= self.config.max_bytes {
+            BudgetVerdict::Fallback
+        } else {
+            BudgetVerdict::Rejected
+        }
+    }
+
+    /// Refuse a source with a zero dimension. RGBA length is the encoder's
+    /// concern ([`generate_thumbnail`] checks it).
+    pub fn check_source(&self, width: u32, height: u32) -> Result<(), ThumbnailError> {
+        if width == 0 || height == 0 {
+            return Err(ThumbnailError::InvalidInput(
+                "source dimensions must be non-zero".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for ThumbnailPolicy {
+    fn default() -> Self {
+        Self::medium()
+    }
+}
+
 /// Result of thumbnail generation.
 #[derive(Debug)]
 pub struct ThumbnailOutput {
