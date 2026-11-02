@@ -12,7 +12,7 @@ const vectors = require(process.env.BB_VECTOR_PATH || path.join(__dirname, '../.
 const hex = (b) => Buffer.from(b).toString('hex');
 
 nodeTest('the envelope vector: every stored form decodes and the writer is unchanged', () => {
-  assert.equal(vectors.cases.length, 14, 'every case in envelope.json is exercised');
+  assert.equal(vectors.cases.length, 15, 'every case in envelope.json is exercised');
 
   for (const c of vectors.cases) {
     if (c.kind === 'decode') {
@@ -25,6 +25,17 @@ nodeTest('the envelope vector: every stored form decodes and the writer is uncha
         () => wasm.decodeMetadataEnvelope(c.payload),
         (e) => e.message.startsWith('invalid input:'),
         `${c.id}: refused as ${c.expected_error}`,
+      );
+    } else if (c.kind === 'encode-error') {
+      // A nonce that is not 12 bytes is refused before any bytes are written.
+      assert.throws(
+        () =>
+          wasm.encodeMetadataEnvelope(
+            Buffer.from(c.nonce_hex, 'hex'),
+            Buffer.from(c.ciphertext_hex, 'hex'),
+          ),
+        (e) => e.message.startsWith('invalid input:') && e.message.includes(c.expect),
+        `${c.id}: refused as ${c.expect}`,
       );
     } else if (c.kind === 'encode') {
       // The encode cases carry an optional `cipher_suite`; the writer ignores

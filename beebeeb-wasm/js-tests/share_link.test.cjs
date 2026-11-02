@@ -15,7 +15,7 @@ const vectors = require(process.env.BB_VECTOR_PATH || path.join(__dirname, '../.
 const hex = (bytes) => (bytes === null || bytes === undefined ? null : Buffer.from(bytes).toString('hex'));
 
 nodeTest('the share-link vector: build, parse, the error codes and key bytes agree with every case', () => {
-  assert.equal(vectors.cases.length, 24, 'every case in share_link.json is exercised');
+  assert.equal(vectors.cases.length, 29, 'every case in share_link.json is exercised');
 
   for (const c of vectors.cases) {
     if (c.kind === 'build') {
@@ -69,11 +69,11 @@ nodeTest('both live encodings survive one round trip: raw #key on /s/ and base64
   // Mobile's constraint: `/s/` links may carry a raw (unencoded) standard
   // base64 key, `/f/` links carry base64url. Parsing accepts both, and neither
   // is rewritten.
-  const raw = wasm.parseShareLink('https://app.beebeeb.io/s/T#key=+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/s=');
+  const raw = wasm.parseShareLink('https://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/s=');
   assert.equal(raw.key, '+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/s=');
   assert.equal(hex(wasm.shareKeyBytes(raw.key)), 'fb'.repeat(32));
 
-  const b64url = wasm.parseShareLink('https://app.beebeeb.io/f/T#key=-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s');
+  const b64url = wasm.parseShareLink('https://app.beebeeb.io/f/AAECAwQFBgcICQoLDA0ODxAREhM#key=-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s');
   assert.equal(b64url.key, '-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s');
   assert.equal(hex(wasm.shareKeyBytes(b64url.key)), 'fb'.repeat(32));
 });
