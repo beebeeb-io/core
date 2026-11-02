@@ -265,7 +265,7 @@ The full rules live in the workspace `CLAUDE.md` → "How we work". The repo-spe
 
 ## Graphify & keep shared docs in sync
 
-This repo has a knowledge graph at graphify-out/. Read `graphify-out/GRAPH_REPORT.md` before exploring code; run `graphify update .` after modifying code and commit; `graphify query "<question>"`; `graphify path "<A>" "<B>"`. When you add/change/remove endpoints, types, build commands, or dependencies: update the matching skill file in the workspace `.claude/skills/` directory (beebeeb-api.md, beebeeb-designs.md, beebeeb-stack.md, beebeeb-dev.md). Other agents depend on these being accurate.
+This repo has a knowledge graph at graphify-out/. Architecture question: `graphify query "<question>"` / `graphify explain <symbol>` / `graphify path "<A>" "<B>"`; for an overview read `graphify-out/GRAPH_SUMMARY.md` (≤ 3k tokens). Never read `GRAPH_REPORT.md` whole. Run `graphify update .` after modifying code and commit. When you add/change/remove endpoints, types, build commands, or dependencies: update the matching skill file in the workspace `.claude/skills/` directory (beebeeb-api.md, beebeeb-designs.md, beebeeb-stack.md, beebeeb-dev.md). Other agents depend on these being accurate.
 
 ## Task history
 
