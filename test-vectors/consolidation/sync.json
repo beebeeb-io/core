@@ -1,0 +1,256 @@
+{
+  "description": "Move 13 — the one conflict rule: a conflict is both sides moving off the last shared base in different directions; core never auto-picks. After 24 h the fallback materialises Keep Both with a per-device name. This is a NEW pure API beside core's CRDT sync and beebeeb-sync; nothing existing changes.",
+  "source": "desktop src-tauri/src/conflict.rs (is_conflict, auto_resolution_deadline) and engine_bridge.rs keep_both_name + sign_out/kept_names.rs with_suffix, ported into beebeeb_core::sync::conflict (plan Task C3-13); mobile's own rule is untouched",
+  "cases": [
+    {
+      "id": "sync_both_directions_diverge",
+      "kind": "conflict",
+      "local": {
+        "hash": "abc",
+        "modified_at": 1000
+      },
+      "remote": {
+        "hash": "xyz",
+        "modified_at": 1001
+      },
+      "base": {
+        "hash": "old",
+        "modified_at": 900
+      },
+      "expect": true
+    },
+    {
+      "id": "sync_only_local_changed",
+      "kind": "conflict",
+      "local": {
+        "hash": "abc",
+        "modified_at": 1000
+      },
+      "remote": {
+        "hash": "old",
+        "modified_at": 900
+      },
+      "base": {
+        "hash": "old",
+        "modified_at": 900
+      },
+      "expect": false
+    },
+    {
+      "id": "sync_only_remote_changed",
+      "kind": "conflict",
+      "local": {
+        "hash": "old",
+        "modified_at": 900
+      },
+      "remote": {
+        "hash": "xyz",
+        "modified_at": 1001
+      },
+      "base": {
+        "hash": "old",
+        "modified_at": 900
+      },
+      "expect": false
+    },
+    {
+      "id": "sync_same_edit_both_sides",
+      "kind": "conflict",
+      "local": {
+        "hash": "same",
+        "modified_at": 1000
+      },
+      "remote": {
+        "hash": "same",
+        "modified_at": 1001
+      },
+      "base": {
+        "hash": "old",
+        "modified_at": 900
+      },
+      "expect": false
+    },
+    {
+      "id": "sync_no_change",
+      "kind": "conflict",
+      "local": {
+        "hash": "old",
+        "modified_at": 900
+      },
+      "remote": {
+        "hash": "old",
+        "modified_at": 900
+      },
+      "base": {
+        "hash": "old",
+        "modified_at": 900
+      },
+      "expect": false
+    },
+    {
+      "id": "sync_missing_base_diverged",
+      "kind": "conflict",
+      "local": {
+        "hash": "abc",
+        "modified_at": 1000
+      },
+      "remote": {
+        "hash": "xyz",
+        "modified_at": 1001
+      },
+      "base": null,
+      "expect": true
+    },
+    {
+      "id": "sync_missing_base_same",
+      "kind": "conflict",
+      "local": {
+        "hash": "abc",
+        "modified_at": 1000
+      },
+      "remote": {
+        "hash": "abc",
+        "modified_at": 1001
+      },
+      "base": null,
+      "expect": false
+    },
+    {
+      "id": "sync_23h_not_due",
+      "kind": "deadline",
+      "detected_at": 1700000000,
+      "now": 1700082800,
+      "expect_deadline": 1700086400,
+      "expect_due": false
+    },
+    {
+      "id": "sync_24h_due",
+      "kind": "deadline",
+      "detected_at": 1700000000,
+      "now": 1700086400,
+      "expect_deadline": 1700086400,
+      "expect_due": true
+    },
+    {
+      "id": "sync_25h_due",
+      "kind": "deadline",
+      "detected_at": 1700000000,
+      "now": 1700090000,
+      "expect_deadline": 1700086400,
+      "expect_due": true
+    },
+    {
+      "id": "sync_clean_needs_nothing",
+      "kind": "outcome",
+      "local": {
+        "hash": "old",
+        "modified_at": 900
+      },
+      "remote": {
+        "hash": "old",
+        "modified_at": 900
+      },
+      "base": {
+        "hash": "old",
+        "modified_at": 900
+      },
+      "detected_at": 0,
+      "now": 90000,
+      "expect": "clean"
+    },
+    {
+      "id": "sync_conflict_waits_for_user",
+      "kind": "outcome",
+      "local": {
+        "hash": "abc",
+        "modified_at": 1000
+      },
+      "remote": {
+        "hash": "xyz",
+        "modified_at": 1001
+      },
+      "base": {
+        "hash": "old",
+        "modified_at": 900
+      },
+      "detected_at": 0,
+      "now": 86399,
+      "expect": "needs_user"
+    },
+    {
+      "id": "sync_conflict_auto_keep_both",
+      "kind": "outcome",
+      "local": {
+        "hash": "abc",
+        "modified_at": 1000
+      },
+      "remote": {
+        "hash": "xyz",
+        "modified_at": 1001
+      },
+      "base": {
+        "hash": "old",
+        "modified_at": 900
+      },
+      "detected_at": 0,
+      "now": 86400,
+      "expect": "auto_keep_both"
+    },
+    {
+      "id": "sync_keep_both_two_devices",
+      "kind": "keep-both",
+      "original": "notes.txt",
+      "device": "Mac",
+      "hhmm": "14.05",
+      "taken": [],
+      "expected": "notes (Mac, 14.05).txt"
+    },
+    {
+      "id": "sync_keep_both_other_device",
+      "kind": "keep-both",
+      "original": "notes.txt",
+      "device": "PC",
+      "hhmm": "14.05",
+      "taken": [],
+      "expected": "notes (PC, 14.05).txt"
+    },
+    {
+      "id": "sync_keep_both_counter",
+      "kind": "keep-both",
+      "original": "notes.txt",
+      "device": "Mac",
+      "hhmm": "14.05",
+      "taken": [
+        "notes (mac, 14.05).txt"
+      ],
+      "expected": "notes (Mac, 14.05) 2.txt"
+    },
+    {
+      "id": "sync_keep_both_no_extension",
+      "kind": "keep-both",
+      "original": "README",
+      "device": "Mac",
+      "hhmm": "14.05",
+      "taken": [],
+      "expected": "README (Mac, 14.05)"
+    },
+    {
+      "id": "sync_keep_both_leading_dot",
+      "kind": "keep-both",
+      "original": ".env",
+      "device": "Mac",
+      "hhmm": "14.05",
+      "taken": [],
+      "expected": ".env (Mac, 14.05)"
+    },
+    {
+      "id": "sync_keep_both_long_name",
+      "kind": "keep-both",
+      "original": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.txt",
+      "device": "Mac",
+      "hhmm": "14.05",
+      "taken": [],
+      "expected": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (Mac, 14.05).txt"
+    }
+  ]
+}

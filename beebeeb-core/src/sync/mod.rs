@@ -5,6 +5,7 @@
 //! The engine holds a full in-memory tree, applies remote ops streamed from the
 //! server, and provides optimistic local mutations with rollback on conflict.
 
+pub mod conflict;
 pub mod engine;
 pub mod events;
 pub mod hash;
