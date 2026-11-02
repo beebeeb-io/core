@@ -12,3 +12,4 @@
 
 pub mod format;
 pub mod metadata_wire;
+pub mod retry;
