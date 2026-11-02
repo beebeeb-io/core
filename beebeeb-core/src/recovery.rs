@@ -60,7 +60,11 @@ pub fn recover_from_phrase(phrase: &str) -> Result<MasterKey, CoreError> {
 /// The result is a recovery-phrase candidate, so it is wiped on drop like the
 /// entropy it will be parsed into.
 pub fn normalize_phrase(input: &str) -> Zeroizing<String> {
-    let mut normalized = String::with_capacity(input.len());
+    // Lowercasing can grow a char (U+0130 İ: 2 bytes -> 3 bytes), and a
+    // reallocation would free the old, unwiped copy of a secret phrase. Three
+    // bytes per input byte is the worst case for Unicode lowercase (1→1,
+    // 2→3, 3→3, 4→4), so this capacity can never be exceeded.
+    let mut normalized = String::with_capacity(input.len().saturating_mul(3));
     for ch in input.chars() {
         if ch.is_whitespace() {
             if !normalized.is_empty() && !normalized.ends_with(' ') {
@@ -198,6 +202,21 @@ mod tests {
     /// cannot be observed from safe Rust without reading freed memory; this test
     /// pins the round-trip so a future refactor of the wrapper can't silently
     /// break key derivation.)
+    #[test]
+    fn normalize_phrase_capacity_never_reallocates() {
+        // U+0130 (İ) is 2 UTF-8 bytes and lowercases to 3 bytes (`i` + U+0307).
+        // The buffer must reserve that growth up front: a reallocation would
+        // free the old, unwiped copy of a secret phrase.
+        let input = "İİİİİİİİİİİİ";
+        let normalized = normalize_phrase(input);
+        assert_eq!(normalized.len(), input.len() * 3 / 2, "each 2-byte İ becomes 3 bytes");
+        assert_eq!(
+            normalized.capacity(),
+            input.len() * 3,
+            "capacity reserved for the largest possible lowercase growth; no reallocation"
+        );
+    }
+
     #[test]
     fn entropy_zeroizing_preserves_roundtrip() {
         // Argon2id at 256 MiB is expensive in debug; a few iterations suffice to
