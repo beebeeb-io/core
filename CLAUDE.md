@@ -42,8 +42,6 @@ test-vectors/vectors.json + direct_*.json + tools/ (independent Python generator
 ## Traps
 
 - **`MasterKey` and `FileKey` are NOT Clone;** all intermediate key buffers are `Zeroizing`; no panics in crypto paths (everything returns `Result`). The recovery phrase IS the master secret.
-- **Generic `encrypt_chunk`/`decrypt_chunk` (no AAD) is NOT for file content, names, thumbnails or notes:** content goes through `chunk_stream`; names/thumbnails/notes
-  through their purpose subkeys (`encrypt_name*`, `encrypt_thumbnail[_for]`, `encrypt_note[_for]`). Never seal a name/thumbnail/note under the raw per-file key.
 - **A wire-format change is a coordinated migration, never a refactor.** A new derivation gets a new info string (`v2`); never change an existing one. Every HKDF info/AAD/salt label
   is listed in `label_table_tests.rs` and distinct. New vectors need an independent generator (Python) and the drift guards.
 - **Chunk format:** v1 frames have no AAD; v2 binds position (STREAM). New files are written as v1 during the rollout (`WRITE_FORMAT`, task 1908); every reader reads both.
@@ -51,13 +49,40 @@ test-vectors/vectors.json + direct_*.json + tools/ (independent Python generator
   metadata, never for a NEW file. `finish()` is the integrity guard: call it and DISCARD all plaintext on any `Err`. Adoption checklist: `docs/agent-notes.md` → "Chunk format v2".
 - **Resume:** `resume_policy(stored, writing)` continues a session ONLY for `(V1Legacy, V1Legacy)`; otherwise abandon and restart from chunk 0 in a new session, never PUT into the old one.
 - **`MAX_CHUNK_SIZE` = 256 MiB** rejects a hostile server-dictated size (client OOM guard). Legacy decrypt paths write a sibling `.tmp` and rename on full success only.
-- **Folder keys are random** (OS CSPRNG), never derived from the master key; a link passphrase KDF error propagates, clients never downgrade to an unprotected link.
-- **Raw key bytes never cross FFI** (UniFFI handles; single-consumer cursors). WASM returns typed `Serialize` structs, not `Map`s; `rusqlite` (`fp_cache`) is gated to non-wasm.
-- **Breach check:** the HTTP call stays in each client and goes to Beebeeb's own `/api/v1/auth/pwned-range/{prefix}`, never the HIBP API (no US systems, task 0995);
-  `MIN_LENGTH_FLOOR = 12` (a server may raise, never lower); clients call `wipe()`/`abandon()` on back, cancel and error exits.
-- **Direct transfer:** `X-Beebeeb-Capabilities` goes on grant/init requests ONLY; no event, error or `Debug` string may carry a URL (`redact`/`scrub`); each client keeps its own HTTP stack.
 - **Search index:** `DEFAULT_NUM_SHARDS = 64` (WASM accepts at most 64); the shard key label is `beebeeb-search-index-shard-v1`.
 - **Design files live in the workspace `../../design/hifi/`; never copy them into this public repo** (a snapshot once published a false external-audit claim; the Claims guard fails on those strings).
+
+## Never break
+
+The rules whose breakage costs data, a key, a credential or a user. One line each; the detail is in `docs/agent-notes.md`.
+
+- `UpperRepair` rows: Core never writes under it and never migrates a row; a file is READ-ONLY if its name or ANY version reports it (SF-0002).
+- Item ids: F ids are never derived (key from an L8 owner envelope or L7 child wrap); non-canonical id text is `InvalidInput`, never treated as an owner id.
+- `folder_key_id` is not secret and must NEVER be used as a key; a new derivation gets a new info string (`v2`), never a change to this one.
+- A client told to restart MUST first `POST /api/v1/files/{id}/upload/abandon`; never PUT into the old session again, never fall back to the old session.
+- v2 frames never use the raw file key (key separation); `version_id` is frame 0's random 96-bit nonce.
+- Writers record the format; never upgrade a file id with v1 history, never drop a recorded 2; unknown recorded values are errors, never fallback to detection.
+- Generic no-AAD `encrypt_chunk`/`decrypt_chunk` stays for key wrap, search shards, v1 content, never to SEAL a name/thumbnail/note under a per-file key.
+- Read the content pin with `decrypt_file_metadata[_with_key]` (never `decrypt_name_metadata`, never a server field) and pass `chunk_format` on.
+- Take the chunk format from the pin, never from a server value; prefer `version_id()` over re-reading chunk 0's first 12 bytes.
+- `V2` only from an EXISTING file's authenticated metadata; a NEW file never does (lead ruling 2026-10-17); each client tests its new-file path never passes `V2`.
+- Notes: write with `encrypt_note_for(file_key, text, pin)`, read with `decrypt_note`; never `encrypt_metadata`/`encryptFilename`/`encrypt_chunk` for a note.
+- UniFFI: raw key bytes never cross FFI. Single-consumer contract: a handle is an ordered cursor driven from ONE sequence.
+- Folder keys are random (`FileKeyHandle.generate`, OS CSPRNG), never derived from the master key; `key_id` is the one-way folder-key id, never the key itself.
+- Canonical ids are UTF-8. Never fall back to the legacy file-key custody opener after authentication fails (L6).
+- Owner file-key wraps (L8) use the same textual encoding as L6 custody, never the binary UUID encoding of L7.
+- `ClientMetaKey`: the derived key is never exported (a `FileKey` would also fit `encrypt_chunk`); `current_file`/`detail` are discarded from S1, never sealed.
+- A wire-format, info-string or point-encoding change is a coordinated cross-client migration, never a refactor.
+- `MIN_LENGTH_FLOOR = 12` is a floor applied inside `from_server` (the server may raise, never lower); no hard-coded fallback policy.
+- Breach check: the SHA-1 suffix never leaves the device. The HTTP call stays in each client, to Beebeeb's own endpoint, never the public HIBP API (task 0995).
+- `X-Beebeeb-Capabilities` goes on grant/init requests ONLY, never globally. A session's transport never changes after init, so there is no mid-session API chunk.
+- Direct transfer failures carry a code and never a URL; the planner is a handle (one sequence's cursor).
+- The presigned link is never a string past the binding: `WasmSignedUrl` and `DirectSignedUrl` print scheme and host only.
+- Never retry into a sink that returned `DirectFailedAfterWrite`; after `UseApi` or any `Err` use a FRESH sink.
+- Direct-transfer clients write `<path>.bbtmp` and rename, never stdout straight to the driver.
+- Passphrase NFC normalization never grows an unwiped secret buffer; core never seals a name its own opener refuses (`kdf::sanitize_actor_name`).
+- `kdf::open_legacy_child_key` refuses a 32-byte UTF-8 plaintext, so a name or label sealed under the same folder key can never be served as a child key.
+- Direct vectors: add rows in the generator, never in the JSON (`check-direct-vectors-generated.sh` fails on hand edits).
 
 ## How we work
 
