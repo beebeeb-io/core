@@ -24,6 +24,8 @@
 
 use std::fmt;
 
+use crate::invisible::is_display_invisible;
+
 /// Which rule set to apply; see the module docs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rules {
@@ -72,8 +74,8 @@ pub fn check_component_for(name: &str, portable: bool, windows: bool) -> Result<
     // Persian, Indic), but they render as nothing: a name made only of them
     // looks empty, and `.` plus marks looks like `.` or `..`. Judge emptiness
     // and the dot names on what a renderer shows, not on the raw bytes.
-    let visible: std::borrow::Cow<'_, str> = if name.chars().any(is_invisible) {
-        name.chars().filter(|c| !is_invisible(*c)).collect()
+    let visible: std::borrow::Cow<'_, str> = if name.chars().any(is_display_invisible) {
+        name.chars().filter(|c| !is_display_invisible(*c)).collect()
     } else {
         std::borrow::Cow::Borrowed(name)
     };
@@ -146,15 +148,6 @@ fn is_bidi_control(c: char) -> bool {
 /// neighbouring characters, so [`sanitize_component`] removes them.
 fn is_bidi_mark(c: char) -> bool {
     matches!(c, '\u{200e}' | '\u{200f}' | '\u{061c}')
-}
-
-/// Characters that render as nothing but are legal text: bidi marks plus the
-/// zero-width space/non-joiner/joiner, the word joiner and the BOM/zero-width
-/// no-break space. A name consisting only of these displays as empty, so the
-/// empty and dot-name checks in [`check_component_for`] run on the name with
-/// them removed.
-fn is_invisible(c: char) -> bool {
-    is_bidi_mark(c) || matches!(c, '\u{200b}' | '\u{200c}' | '\u{200d}' | '\u{2060}' | '\u{feff}')
 }
 
 /// One name as it may appear INSIDE AN ARCHIVE.

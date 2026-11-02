@@ -207,6 +207,132 @@
       "reason": "'.' and '..'"
     },
     {
+      "id": "path_reject_soft_hyphen_only",
+      "kind": "check",
+      "name": "\u00ad",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_soft_hyphen_dots",
+      "kind": "check",
+      "name": ".\u00ad.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_invisible_operator_only",
+      "kind": "check",
+      "name": "\u2062",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_invisible_operator_dots",
+      "kind": "check",
+      "name": ".\u2062.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_variation_selector_only",
+      "kind": "check",
+      "name": "\ufe0f",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_variation_selector_dots",
+      "kind": "check",
+      "name": ".\ufe0f.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_grapheme_joiner_only",
+      "kind": "check",
+      "name": "\u034f",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_grapheme_joiner_dots",
+      "kind": "check",
+      "name": ".\u034f.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_mongolian_vowel_separator_only",
+      "kind": "check",
+      "name": "\u180e",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_mongolian_vowel_separator_dots",
+      "kind": "check",
+      "name": ".\u180e.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_hangul_filler_only",
+      "kind": "check",
+      "name": "\u3164",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_hangul_filler_dots",
+      "kind": "check",
+      "name": ".\u3164.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_tag_char_only",
+      "kind": "check",
+      "name": "\udb40\udc41",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_tag_char_dots",
+      "kind": "check",
+      "name": ".\udb40\udc41.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
       "id": "path_accept_con_on_linux",
       "kind": "check",
       "name": "CON",
