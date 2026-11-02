@@ -6,6 +6,7 @@ pub mod cli_auth;
 pub mod client_meta;
 pub mod constellation;
 pub mod direct_transfer;
+pub mod download;
 pub mod encrypt;
 pub mod encrypt_batch;
 pub mod error;

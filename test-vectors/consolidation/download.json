@@ -1,0 +1,172 @@
+{
+  "description": "Move 10 — the download side: chunk boundary math (the offset rule mobile's VideoChunkMath depends on), the streaming frame size rule (header vs legacy average vs single frame), and the frame-to-plaintext loop with its truncation and integrity failures. Framing and offsets are unchanged from beebeeb-upload.",
+  "source": "beebeeb-upload/src/download.rs compute_chunk_boundaries + stream_decrypt_to_disk frame_size + decrypt_downloaded_bytes, promoted into beebeeb_core::download in move 10 (map §5.3 move 10); beebeeb-upload keeps its public functions and signatures as delegating wrappers",
+  "cases": [
+    {
+      "id": "download_chunk_boundary",
+      "kind": "boundaries",
+      "total_len": 1000,
+      "chunk_count": 4,
+      "expected": [
+        [
+          0,
+          250
+        ],
+        [
+          250,
+          500
+        ],
+        [
+          500,
+          750
+        ],
+        [
+          750,
+          1000
+        ]
+      ]
+    },
+    {
+      "id": "download_last_chunk_short",
+      "kind": "boundaries",
+      "total_len": 1000,
+      "chunk_count": 3,
+      "expected": [
+        [
+          0,
+          333
+        ],
+        [
+          333,
+          666
+        ],
+        [
+          666,
+          1000
+        ]
+      ]
+    },
+    {
+      "id": "download_single_chunk",
+      "kind": "boundaries",
+      "total_len": 40,
+      "chunk_count": 1,
+      "expected": [
+        [
+          0,
+          40
+        ]
+      ]
+    },
+    {
+      "id": "download_chunk_count_zero",
+      "kind": "boundary-error",
+      "total_len": 40,
+      "chunk_count": 0,
+      "expect": "chunk_count must be > 0"
+    },
+    {
+      "id": "download_zero_byte",
+      "kind": "boundary-error",
+      "total_len": 0,
+      "chunk_count": 1,
+      "expect": "encrypted payload is empty"
+    },
+    {
+      "id": "download_chunk_too_small",
+      "kind": "boundary-error",
+      "total_len": 20,
+      "chunk_count": 1,
+      "expect": "chunk too small: 20 bytes"
+    },
+    {
+      "id": "download_resume_offset",
+      "kind": "offset",
+      "total_len": 1000,
+      "chunk_count": 4,
+      "offsets": [
+        0,
+        250,
+        500,
+        750
+      ],
+      "out_of_range": 4
+    },
+    {
+      "id": "download_frame_size_header",
+      "kind": "frame-size",
+      "total_len": 1000028,
+      "chunk_count": 4,
+      "chunk_size": 250000,
+      "expected": 250028
+    },
+    {
+      "id": "download_frame_size_legacy_average",
+      "kind": "frame-size",
+      "total_len": 1000,
+      "chunk_count": 4,
+      "chunk_size": null,
+      "expected": 250
+    },
+    {
+      "id": "download_frame_size_single_frame",
+      "kind": "frame-size",
+      "total_len": 100,
+      "chunk_count": 1,
+      "chunk_size": null,
+      "expected": 18446744073709551615
+    },
+    {
+      "id": "download_roundtrip_two_frames",
+      "kind": "roundtrip-chunks",
+      "plaintext_size": 600,
+      "chunk_size": 300
+    },
+    {
+      "id": "download_roundtrip_last_short",
+      "kind": "roundtrip",
+      "plaintext_size": 650,
+      "chunk_size": 300
+    },
+    {
+      "id": "download_roundtrip_single_frame",
+      "kind": "roundtrip",
+      "plaintext_size": 100,
+      "chunk_size": 1000
+    },
+    {
+      "id": "download_tampered_frame",
+      "kind": "roundtrip-error",
+      "plaintext_size": 600,
+      "chunk_size": 300,
+      "tamper_frame": 1,
+      "expect": "chunk_decryption",
+      "chunk": 1
+    },
+    {
+      "id": "download_aborted_stream",
+      "kind": "roundtrip-error",
+      "plaintext_size": 650,
+      "chunk_size": 300,
+      "drop_frames": 1,
+      "expect": "invalid_response"
+    },
+    {
+      "id": "download_extra_frames",
+      "kind": "roundtrip-error",
+      "plaintext_size": 600,
+      "chunk_size": 300,
+      "chunk_count": 1,
+      "expect": "invalid_response"
+    },
+    {
+      "id": "download_wrong_key",
+      "kind": "roundtrip-error",
+      "plaintext_size": 600,
+      "chunk_size": 300,
+      "wrong_key": true,
+      "expect": "chunk_decryption",
+      "chunk": 0
+    }
+  ]
+}

@@ -8,15 +8,23 @@
 use std::io::{BufWriter, Write};
 
 use beebeeb_core::chunk_stream::{ChunkDecryptor, ExpectedChunkFormat};
+use beebeeb_core::download::DownloadFailure;
 
 use crate::error::UploadError;
 use crate::retry;
 
-const NONCE_LEN: usize = 12;
-/// AES-256-GCM tag length in bytes.
-const GCM_TAG_LEN: usize = 16;
 /// Per-chunk wire overhead: `nonce(12) + tag(16)`.
-const GCM_OVERHEAD: u64 = (NONCE_LEN + GCM_TAG_LEN) as u64;
+const GCM_OVERHEAD: u64 = beebeeb_core::chunk_stream::CHUNK_OVERHEAD;
+
+/// Map core's download failure onto this crate's error, keeping the variant a
+/// client already branches on and the message it already prints.
+fn map_download_failure(failure: DownloadFailure) -> UploadError {
+    match failure {
+        DownloadFailure::InvalidInput(message) => UploadError::InvalidInput(message),
+        DownloadFailure::Io(message) => UploadError::IoError(message),
+        other => UploadError::InvalidResponse(other.to_string()),
+    }
+}
 
 /// Read more body bytes (via `Response::chunk`) until `buf.len() >= want` or EOF.
 async fn fill_to(resp: &mut reqwest::Response, buf: &mut Vec<u8>, want: usize) -> Result<(), UploadError> {
@@ -222,13 +230,7 @@ impl DownloadClient {
         // when the file size is not a multiple of the chunk size. Only legacy V1
         // responses (no header) fall back to the `total / chunk_count` average,
         // which matches `compute_chunk_boundaries`.
-        let frame_size = if n <= 1 {
-            usize::MAX // single frame == whole body
-        } else if let Some(cs) = chunk_size {
-            (cs + GCM_OVERHEAD) as usize
-        } else {
-            (total / chunk_count as u64) as usize
-        };
+        let frame_size = beebeeb_core::download::frame_size(total, chunk_count, chunk_size);
 
         // Write to .tmp then atomic rename.
         let tmp_path = format!("{output_path}.tmp");
@@ -357,13 +359,6 @@ pub fn decrypt_downloaded_bytes(
         return Err(UploadError::InvalidInput("chunk_count must be > 0".into()));
     }
 
-    let total_len = encrypted_bytes.len();
-
-    // When there is only one chunk, the entire payload is that chunk.
-    // When there are multiple, compute the per-chunk size from the total.
-    // All chunks except the last are the same size; the last may be smaller.
-    let chunk_boundaries = compute_chunk_boundaries(total_len, chunk_count)?;
-
     // Write to .tmp then atomic rename
     let tmp_path = format!("{output_path}.tmp");
 
@@ -371,55 +366,34 @@ pub fn decrypt_downloaded_bytes(
     if let Some(parent) = std::path::Path::new(output_path).parent() {
         std::fs::create_dir_all(parent).map_err(|e| UploadError::IoError(format!("create output parent dir: {e}")))?;
     }
-
     let output_file =
         std::fs::File::create(&tmp_path).map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
     let mut writer = BufWriter::new(output_file);
 
-    let mut total_plaintext: u64 = 0;
-    let mut chunks_decrypted: u32 = 0;
-    // The decryptor owns its key; copy the borrowed one into a fresh
-    // zeroize-on-drop FileKey (from_bytes wipes its by-value input).
-    let mut decryptor = ChunkDecryptor::for_push_with_file_key(
-        beebeeb_core::kdf::FileKey::from_bytes(*file_key.as_bytes()),
+    // The loop itself is core's (move 10); this crate still owns the temp file,
+    // the progress callback and the atomic rename.
+    let summary = match beebeeb_core::download::decrypt_chunks_to(
+        file_key,
         file_id,
         expected,
-    );
-
-    for (i, (start, end)) in chunk_boundaries.iter().enumerate() {
-        let chunk_data = &encrypted_bytes[*start..*end];
-
-        let plaintext = match decryptor.push_frame(chunk_data) {
-            Ok(c) => c.data,
-            Err(e) => {
-                drop(writer);
-                let _ = std::fs::remove_file(&tmp_path);
-                return Err(UploadError::InvalidResponse(format!(
-                    "decryption failed for chunk {i}: {e}"
-                )));
+        chunk_count,
+        encrypted_bytes,
+        &mut writer,
+        |done, total| {
+            if let Some(callback) = callback {
+                callback.on_chunk_decrypted(done, total);
             }
-        };
-
-        writer
-            .write_all(&plaintext)
-            .map_err(|e| UploadError::IoError(format!("write output: {e}")))?;
-
-        total_plaintext += plaintext.len() as u64;
-        chunks_decrypted += 1;
-
-        if let Some(cb) = callback {
-            cb.on_chunk_decrypted(chunks_decrypted, chunk_count);
+        },
+    ) {
+        Ok(summary) => summary,
+        Err(failure) => {
+            drop(writer);
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(map_download_failure(failure));
         }
-    }
-
-    // End-of-stream check: a v2 payload must reach its last chunk.
-    if let Err(e) = decryptor.finish() {
-        drop(writer);
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(UploadError::InvalidResponse(format!(
-            "download incomplete after {chunks_decrypted} chunks: {e}"
-        )));
-    }
+    };
+    let total_plaintext = summary.plaintext_size;
+    let chunks_decrypted = summary.chunks_decrypted;
 
     writer
         .flush()
@@ -452,60 +426,7 @@ pub fn decrypt_downloaded_bytes(
 /// All chunks except the last have the same size. The last chunk gets the remainder.
 /// Each chunk must be at least `NONCE_LEN + GCM_TAG_LEN` bytes (28 bytes: 12 nonce + 16 tag).
 pub fn compute_chunk_boundaries(total_len: usize, chunk_count: u32) -> Result<Vec<(usize, usize)>, UploadError> {
-    if chunk_count == 0 {
-        return Err(UploadError::InvalidInput("chunk_count must be > 0".into()));
-    }
-
-    let n = chunk_count as usize;
-
-    if total_len == 0 {
-        return Err(UploadError::InvalidResponse("encrypted payload is empty".into()));
-    }
-
-    // For a single chunk, the entire payload is that chunk.
-    if n == 1 {
-        if total_len < NONCE_LEN + GCM_TAG_LEN {
-            return Err(UploadError::InvalidResponse(format!(
-                "chunk too small: {total_len} bytes (need at least {})",
-                NONCE_LEN + GCM_TAG_LEN
-            )));
-        }
-        return Ok(vec![(0, total_len)]);
-    }
-
-    // Multi-chunk: divide evenly, last chunk gets remainder.
-    let base_chunk_size = total_len / n;
-    let remainder = total_len % n;
-
-    // Validate minimum chunk size
-    let min_chunk = if remainder == 0 {
-        base_chunk_size
-    } else {
-        // Last chunk is base_chunk_size + remainder, others are base_chunk_size
-        base_chunk_size
-    };
-
-    if min_chunk < NONCE_LEN + GCM_TAG_LEN {
-        return Err(UploadError::InvalidResponse(format!(
-            "chunk too small: {min_chunk} bytes (need at least {})",
-            NONCE_LEN + GCM_TAG_LEN
-        )));
-    }
-
-    let mut boundaries = Vec::with_capacity(n);
-    let mut offset = 0;
-
-    for i in 0..n {
-        let size = if i == n - 1 {
-            total_len - offset // last chunk gets remainder
-        } else {
-            base_chunk_size
-        };
-        boundaries.push((offset, offset + size));
-        offset += size;
-    }
-
-    Ok(boundaries)
+    beebeeb_core::download::compute_chunk_boundaries(total_len, chunk_count).map_err(map_download_failure)
 }
 
 /// Synchronous blocking wrapper for `download_and_decrypt`.
