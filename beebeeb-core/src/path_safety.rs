@@ -68,10 +68,19 @@ pub fn check_component(name: &str, rules: Rules) -> Result<(), UnsafeName> {
 /// Testable core of [`check_component`]. `portable` = the strict cross-platform
 /// rules; `windows` = this host applies Windows path semantics.
 pub fn check_component_for(name: &str, portable: bool, windows: bool) -> Result<(), UnsafeName> {
-    if name.is_empty() {
+    // Bidi marks and zero-width characters are real text (Hebrew, Arabic,
+    // Persian, Indic), but they render as nothing: a name made only of them
+    // looks empty, and `.` plus marks looks like `.` or `..`. Judge emptiness
+    // and the dot names on what a renderer shows, not on the raw bytes.
+    let visible: std::borrow::Cow<'_, str> = if name.chars().any(is_invisible) {
+        name.chars().filter(|c| !is_invisible(*c)).collect()
+    } else {
+        std::borrow::Cow::Borrowed(name)
+    };
+    if visible.is_empty() {
         return Err(UnsafeName("empty name"));
     }
-    if name == "." || name == ".." {
+    if visible == "." || visible == ".." {
         return Err(UnsafeName("'.' and '..' are not file names"));
     }
     if name.len() > MAX_COMPONENT_BYTES {
@@ -139,6 +148,15 @@ fn is_bidi_mark(c: char) -> bool {
     matches!(c, '\u{200e}' | '\u{200f}' | '\u{061c}')
 }
 
+/// Characters that render as nothing but are legal text: bidi marks plus the
+/// zero-width space/non-joiner/joiner, the word joiner and the BOM/zero-width
+/// no-break space. A name consisting only of these displays as empty, so the
+/// empty and dot-name checks in [`check_component_for`] run on the name with
+/// them removed.
+fn is_invisible(c: char) -> bool {
+    is_bidi_mark(c) || matches!(c, '\u{200b}' | '\u{200c}' | '\u{200d}' | '\u{2060}' | '\u{feff}')
+}
+
 /// One name as it may appear INSIDE AN ARCHIVE.
 ///
 /// An archive is extracted somewhere else, often on Windows, so the host's own
@@ -157,9 +175,12 @@ fn is_bidi_mark(c: char) -> bool {
 /// The result always satisfies the strictest rule set, or the name is refused.
 pub fn sanitize_component(name: &str, rules: Rules) -> Result<String, UnsafeName> {
     // Strip bidi controls and marks BEFORE the check: they are a rendering
-    // hazard the archive rule rewrites, not traversal. Everything structural
-    // still sees the same name (filtering bidi cannot create a separator or a
-    // `..`).
+    // hazard the archive rule rewrites, not traversal. The structural checks
+    // still see the same name, except that stripping CAN neutralise a name made
+    // only of marks (it becomes empty) or `.` plus marks (it becomes `.`/`..`),
+    // so `check_component` runs its empty and dot-name checks on the stripped
+    // form as well and still refuses those rather than writing an invisible or
+    // dot name.
     let visible: String = name
         .chars()
         .filter(|c| !is_bidi_control(*c) && !is_bidi_mark(*c))

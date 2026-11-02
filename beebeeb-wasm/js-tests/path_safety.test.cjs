@@ -24,7 +24,7 @@ const NATIVE_ONLY = [
 ];
 
 nodeTest('the path-safety vector: check, sanitize and the archive rule agree with every case', () => {
-  assert.equal(vectors.cases.length, 48, 'every case in path_safety.json is accounted for');
+  assert.equal(vectors.cases.length, 52, 'every case in path_safety.json is accounted for');
 
   const skipped = [];
   for (const c of vectors.cases) {

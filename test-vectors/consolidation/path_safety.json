@@ -180,6 +180,33 @@
       "expect": "ok"
     },
     {
+      "id": "path_reject_marks_only",
+      "kind": "check",
+      "name": "\u200e\u200f\u061c",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_dot_plus_mark",
+      "kind": "check",
+      "name": ".\u200f",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_dot_mark_dot",
+      "kind": "check",
+      "name": ".\u200e.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
       "id": "path_accept_con_on_linux",
       "kind": "check",
       "name": "CON",
@@ -331,6 +358,13 @@
       "name": "a\u200eb",
       "expect": "ok",
       "expected": "ab"
+    },
+    {
+      "id": "path_sanitize_arabic_letter_mark",
+      "kind": "sanitize",
+      "name": "\u061creport.txt",
+      "expect": "ok",
+      "expected": "report.txt"
     },
     {
       "id": "path_sanitize_keeps_clean",
