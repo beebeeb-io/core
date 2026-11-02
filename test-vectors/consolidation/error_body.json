@@ -201,6 +201,46 @@
       "id": "error_body_non_json",
       "kind": "body",
       "status": 502,
+      "payload": "not json: see https://storage.example.com/b/k?X-Amz-Signature=deadbeef for details",
+      "expected": {
+        "code": null,
+        "message": "502: not json: see https://storage.example.com/<redacted> for details",
+        "status_is_error": true,
+        "session_gone_404": false,
+        "session_gone_strict": false,
+        "retry_after": null,
+        "is_trial_cap": false,
+        "limit_bytes": null,
+        "used_bytes": null,
+        "is_code": [],
+        "not_code": [],
+        "details_preserved": []
+      }
+    },
+    {
+      "id": "error_body_non_json_truncated",
+      "kind": "body",
+      "status": 502,
+      "payload": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected": {
+        "code": null,
+        "message": "502: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "status_is_error": true,
+        "session_gone_404": false,
+        "session_gone_strict": false,
+        "retry_after": null,
+        "is_trial_cap": false,
+        "limit_bytes": null,
+        "used_bytes": null,
+        "is_code": [],
+        "not_code": [],
+        "details_preserved": []
+      }
+    },
+    {
+      "id": "error_body_non_json_plain",
+      "kind": "body",
+      "status": 502,
       "payload": "not json",
       "expected": {
         "code": null,

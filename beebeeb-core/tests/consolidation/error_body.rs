@@ -74,7 +74,7 @@ fn error_body_cases_match_core() {
         }
     }
 
-    assert_eq!(bodies, 14, "the error-body cases");
+    assert_eq!(bodies, 16, "the error-body cases");
     for required in [
         "error_body_quota_exceeded",
         "error_body_unauthorized",
@@ -82,6 +82,8 @@ fn error_body_cases_match_core() {
         "error_body_account_lapsed",
         "error_body_missing_body",
         "error_body_non_json",
+        "error_body_non_json_truncated",
+        "error_body_non_json_plain",
         "error_body_200_with_error",
         "error_body_trial_cap_keeps_flag",
         "error_body_quota_keeps_limit_bytes",

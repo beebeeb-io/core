@@ -10,6 +10,12 @@
 //! The decoder mirrors the web client's `parseErrorBody`: prefer `message`,
 //! fall back to `error`, and unwrap the double-encoded variant where `error`
 //! is itself a JSON-stringified `{ error, message }` object.
+//!
+//! When the body carries no usable text, the raw body is shown instead — but
+//! only its first 512 bytes and only after [`crate::direct_transfer::scrub`],
+//! because that text is attacker-controlled: it may be a page of HTML or an
+//! error string containing a signed storage URL whose query must not be copied
+//! into a log, a report or the UI.
 
 use serde_json::{Map, Value};
 
@@ -20,12 +26,25 @@ pub struct ServerError {
     /// The body's `error` field, after unwrapping a double-encoded payload.
     /// `None` when the body was empty, not JSON, or carried no string `error`.
     pub code: Option<String>,
-    /// The body's `message`, else its `error`, else `"<status>: <body>"`.
+    /// The body's `message`, else its `error`, else `"<status>: <excerpt>"`
+    /// where the excerpt is the body cut to 512 bytes with storage URLs scrubbed.
     pub message: String,
     /// The HTTP status, or 0 for a failure that never got a response.
     pub status: u16,
     /// The parsed body object (empty when the body was empty or not an object).
     pub details: Map<String, Value>,
+}
+
+/// The raw-body fallback for [`ServerError::message`]: at most 512 BYTES of the
+/// body, cut on a UTF-8 boundary, with [`crate::direct_transfer::scrub`] applied
+/// so a signed storage URL (query signature, object key) is not copied onward.
+fn body_excerpt(body: &str) -> String {
+    const MAX_EXCERPT_BYTES: usize = 512;
+    let mut end = body.len().min(MAX_EXCERPT_BYTES);
+    while !body.is_char_boundary(end) {
+        end -= 1;
+    }
+    crate::direct_transfer::scrub(&body[..end])
 }
 
 impl ServerError {
@@ -61,7 +80,9 @@ impl ServerError {
 
         Self {
             code,
-            message: message.unwrap_or_else(|| format!("{status}: {body}")),
+            // No field to show: fall back to the raw body, which came from the
+            // network and may be arbitrarily long or carry a signed URL.
+            message: message.unwrap_or_else(|| format!("{status}: {}", body_excerpt(body))),
             status,
             details: object.cloned().unwrap_or_default(),
         }
