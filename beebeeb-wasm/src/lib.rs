@@ -11,6 +11,8 @@ mod zeroing_alloc;
 #[global_allocator]
 static GLOBAL_ALLOCATOR: zeroing_alloc::ZeroingAllocator = zeroing_alloc::ZeroingAllocator;
 
+mod exports;
+
 use beebeeb_core::client_meta as cm;
 use beebeeb_core::encrypt;
 use beebeeb_core::kdf;
