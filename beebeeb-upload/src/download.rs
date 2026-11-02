@@ -26,6 +26,47 @@ fn map_download_failure(failure: DownloadFailure) -> UploadError {
     }
 }
 
+/// The `{output}.tmp` file a download writes into before the atomic rename.
+///
+/// `Drop` removes it unless [`Self::commit`] renamed it into place, so *every*
+/// error path — a `?` while reading the body, a decryption failure, a flush
+/// error, a failed rename, even a panic — leaves no decrypted frames behind.
+/// (The old explicit `remove_file` at each `return` missed the `?` exits.)
+struct TempOutput {
+    path: std::path::PathBuf,
+    renamed: bool,
+}
+
+impl TempOutput {
+    /// Create the parent directory and the temp file; the guard removes the
+    /// file on drop until it is committed.
+    fn create(output_path: &str) -> Result<(Self, std::fs::File), UploadError> {
+        let path = std::path::PathBuf::from(format!("{output_path}.tmp"));
+        if let Some(parent) = std::path::Path::new(output_path).parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| UploadError::IoError(format!("create output parent dir: {e}")))?;
+        }
+        let file =
+            std::fs::File::create(&path).map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
+        Ok((Self { path, renamed: false }, file))
+    }
+
+    /// Rename the temp file into place and disarm the guard.
+    fn commit(mut self, output_path: &str) -> Result<(), UploadError> {
+        std::fs::rename(&self.path, output_path).map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
+        self.renamed = true;
+        Ok(())
+    }
+}
+
+impl Drop for TempOutput {
+    fn drop(&mut self) {
+        if !self.renamed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
 /// Read more body bytes (via `Response::chunk`) until `buf.len() >= want` or EOF.
 async fn fill_to(resp: &mut reqwest::Response, buf: &mut Vec<u8>, want: usize) -> Result<(), UploadError> {
     while buf.len() < want {
@@ -248,14 +289,9 @@ impl DownloadClient {
         let frame_size =
             beebeeb_core::download::checked_frame_size(total, chunk_count, chunk_size).map_err(map_download_failure)?;
 
-        // Write to .tmp then atomic rename.
-        let tmp_path = format!("{output_path}.tmp");
-        if let Some(parent) = std::path::Path::new(output_path).parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| UploadError::IoError(format!("create output parent dir: {e}")))?;
-        }
-        let output_file =
-            std::fs::File::create(&tmp_path).map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
+        // Write to .tmp then atomic rename; the guard deletes the temp file on
+        // every error path (including the `?` before the loop finishes).
+        let (tmp, output_file) = TempOutput::create(output_path)?;
         let mut writer = BufWriter::new(output_file);
 
         let mut decryptor = ChunkDecryptor::for_push(master_key, file_id, expected);
@@ -271,7 +307,6 @@ impl DownloadClient {
             } else {
                 fill_to(resp, &mut carry, frame_size).await?;
                 if carry.len() < frame_size {
-                    let _ = std::fs::remove_file(&tmp_path);
                     return Err(UploadError::InvalidResponse(format!(
                         "download truncated at chunk {i}/{n}: wanted {frame_size}, got {}",
                         carry.len()
@@ -283,7 +318,6 @@ impl DownloadClient {
             let dec = match decryptor.push_frame(&frame) {
                 Ok(d) => d,
                 Err(e) => {
-                    let _ = std::fs::remove_file(&tmp_path);
                     return Err(UploadError::InvalidResponse(format!(
                         "decryption failed for chunk {i}: {e}"
                     )));
@@ -291,7 +325,6 @@ impl DownloadClient {
             };
 
             if let Err(e) = writer.write_all(&dec.data) {
-                let _ = std::fs::remove_file(&tmp_path);
                 return Err(UploadError::IoError(format!("write output: {e}")));
             }
             total_plaintext += dec.data.len() as u64;
@@ -307,7 +340,6 @@ impl DownloadClient {
         // last chunk). Never rename a truncated plaintext into place.
         if let Err(e) = decryptor.finish() {
             drop(writer);
-            let _ = std::fs::remove_file(&tmp_path);
             return Err(UploadError::InvalidResponse(format!(
                 "download incomplete after {chunks_decrypted} chunks: {e}"
             )));
@@ -317,7 +349,7 @@ impl DownloadClient {
             .flush()
             .map_err(|e| UploadError::IoError(format!("flush output: {e}")))?;
         drop(writer);
-        std::fs::rename(&tmp_path, output_path).map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
+        tmp.commit(output_path)?;
 
         if let Some(cb) = callback {
             cb.on_complete(output_path);
@@ -375,15 +407,9 @@ pub fn decrypt_downloaded_bytes(
         return Err(UploadError::InvalidInput("chunk_count must be > 0".into()));
     }
 
-    // Write to .tmp then atomic rename
-    let tmp_path = format!("{output_path}.tmp");
-
-    // Ensure parent directory exists
-    if let Some(parent) = std::path::Path::new(output_path).parent() {
-        std::fs::create_dir_all(parent).map_err(|e| UploadError::IoError(format!("create output parent dir: {e}")))?;
-    }
-    let output_file =
-        std::fs::File::create(&tmp_path).map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
+    // Write to .tmp then atomic rename; the guard deletes the temp file on
+    // every error path (a chunk failure, a flush error and the `?` exits).
+    let (tmp, output_file) = TempOutput::create(output_path)?;
     let mut writer = BufWriter::new(output_file);
 
     // The loop itself is core's (move 10); this crate still owns the temp file,
@@ -404,7 +430,6 @@ pub fn decrypt_downloaded_bytes(
         Ok(summary) => summary,
         Err(failure) => {
             drop(writer);
-            let _ = std::fs::remove_file(&tmp_path);
             return Err(map_download_failure(failure));
         }
     };
@@ -417,7 +442,7 @@ pub fn decrypt_downloaded_bytes(
     drop(writer);
 
     // Atomic rename
-    std::fs::rename(&tmp_path, output_path).map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
+    tmp.commit(output_path)?;
 
     if let Some(cb) = callback {
         cb.on_complete(output_path);
@@ -827,5 +852,98 @@ mod tests {
         let client = DownloadClient::new("https://api.beebeeb.io///", "tok");
         // trim_end_matches removes all trailing slashes
         assert!(!client.api_url.ends_with('/'));
+    }
+
+    // -- .tmp cleanup on a failed download --
+
+    /// Serve one HTTP response whose body stops short of its `Content-Length`,
+    /// so the client sees a mid-body failure after the bytes that arrived.
+    fn serve_truncated_body(body: Vec<u8>, declared_length: usize, extra_headers: &str) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let addr = listener.local_addr().unwrap();
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {declared_length}\r\n{extra_headers}Connection: close\r\n\r\n"
+        );
+        let handle = std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().expect("accept");
+            let mut request = Vec::new();
+            let mut buf = [0u8; 1024];
+            loop {
+                let n = sock.read(&mut buf).expect("read request");
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+                if request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            sock.write_all(head.as_bytes()).expect("write head");
+            sock.write_all(&body).expect("write body");
+            sock.flush().expect("flush");
+            // Dropping the socket with `declared_length > body.len()` is a
+            // truncated response: the reader fails after the delivered frames.
+        });
+        (format!("http://{addr}"), handle)
+    }
+
+    struct CountingCallback(std::sync::atomic::AtomicU32);
+
+    impl DownloadProgressCallback for CountingCallback {
+        fn on_chunk_decrypted(&self, chunk_index: u32, _total_chunks: u32) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            assert_eq!(chunk_index, 1, "the first frame is the only one that decrypts");
+        }
+        fn on_complete(&self, _output_path: &str) {}
+        fn on_error(&self, _error: &str) {}
+    }
+
+    #[tokio::test]
+    async fn failed_download_leaves_no_tmp_file() {
+        use beebeeb_core::encrypt::encrypt_chunk_raw;
+        use beebeeb_core::kdf::{derive_file_key, derive_master_key};
+
+        let mk = derive_master_key("test-password", b"test-salt-16bytes").unwrap();
+        let chunk = vec![0x7Bu8; 64];
+        let frame = encrypt_chunk_raw(&derive_file_key(&mk, b"file-partial"), &chunk).unwrap();
+
+        // Two equal frames; the first arrives whole, the second is cut off by a
+        // connection closed before `Content-Length` bytes were delivered. That
+        // failure happens after frame 0 was decrypted and written to `{out}.tmp`.
+        let mut body = frame.clone();
+        body.extend_from_slice(&frame[..10]);
+        let (base, server) = serve_truncated_body(
+            body,
+            frame.len() * 2,
+            "X-Chunk-Count: 2\r\nX-Original-Size: 128\r\n",
+        );
+
+        let dir = std::env::temp_dir().join("beebeeb_download_partial");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let output = dir.join("output.bin");
+        let out = output.to_str().unwrap();
+
+        let callback = CountingCallback(std::sync::atomic::AtomicU32::new(0));
+        let client = DownloadClient::new(&base, "test-token");
+        let result = client
+            .download_and_decrypt(&mk, "file-partial", ExpectedChunkFormat::Unrecorded, out, Some(&callback))
+            .await;
+
+        assert!(result.is_err(), "a body shorter than Content-Length must fail the download");
+        assert_eq!(
+            callback.0.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the failure must come after the first good frame"
+        );
+        assert!(!output.exists(), "no truncated plaintext may be renamed into place");
+        assert!(
+            !dir.join("output.bin.tmp").exists(),
+            "a failed download must not leave decrypted frames in {out}.tmp"
+        );
+        server.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
