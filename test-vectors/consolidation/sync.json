@@ -251,6 +251,15 @@
       "hhmm": "14.05",
       "taken": [],
       "expected": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (Mac, 14.05).txt"
+    },
+    {
+      "id": "sync_keep_both_hostile_device",
+      "kind": "keep-both",
+      "original": "notes.txt",
+      "device": "a/b\u0001",
+      "hhmm": "14.05",
+      "taken": [],
+      "expected": "notes (device, 14.05).txt"
     }
   ]
 }

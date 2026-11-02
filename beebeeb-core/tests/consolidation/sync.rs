@@ -26,7 +26,7 @@ fn base_of(case: &Value) -> Option<VersionInfo> {
 #[test]
 fn sync_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 19, "every named sync case is present");
+    assert_eq!(cases.len(), 20, "every named sync case is present");
 
     let mut conflicts = 0;
     let mut deadlines = 0;
@@ -106,12 +106,13 @@ fn sync_cases_match_core() {
         }
     }
 
-    assert_eq!((conflicts, deadlines, outcomes, names), (7, 3, 3, 6));
+    assert_eq!((conflicts, deadlines, outcomes, names), (7, 3, 3, 7));
     for required in [
         "sync_both_directions_diverge",
         "sync_24h_due",
         "sync_conflict_auto_keep_both",
         "sync_keep_both_counter",
+        "sync_keep_both_hostile_device",
     ] {
         assert!(cases.iter().any(|case| case["id"] == required), "missing `{required}`");
     }

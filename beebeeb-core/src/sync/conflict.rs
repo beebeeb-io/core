@@ -186,6 +186,16 @@ pub fn with_suffix(name: &str, suffix: &str) -> String {
     format!("{}{suffix}{extension}", prefix_within(stem, room))
 }
 
+/// The device label as ONE safe path component: it can come from another
+/// client, so a separator, control character or reserved device name in it must
+/// not reach the file name. A value [`crate::path_safety::sanitize_component`]
+/// refuses outright falls back to the literal `device` rather than failing the
+/// Keep Both copy.
+fn safe_device(device: &str) -> String {
+    crate::path_safety::sanitize_component(device, crate::path_safety::Rules::Portable)
+        .unwrap_or_else(|_| "device".to_string())
+}
+
 /// The name of the "Keep Both" copy: `{stem} ({device}, HH.MM){ext}`, then
 /// `{stem} ({device}, HH.MM) 2{ext}`, ` 3`, ... until it is not in `taken`
 /// (the parent's names, lowercased).
@@ -194,7 +204,8 @@ pub fn with_suffix(name: &str, suffix: &str) -> String {
 /// Finder. The device is cut to [`KEEP_BOTH_DEVICE_MAX_BYTES`] first, so the
 /// suffix always leaves the stem room.
 pub fn keep_both_name(original: &str, device: &str, hhmm: &str, taken: &HashSet<String>) -> String {
-    let device = prefix_within(device, KEEP_BOTH_DEVICE_MAX_BYTES);
+    let device = safe_device(device);
+    let device = prefix_within(&device, KEEP_BOTH_DEVICE_MAX_BYTES);
     let mut counter = 1u32;
     loop {
         let suffix = if counter == 1 {
