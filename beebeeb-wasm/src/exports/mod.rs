@@ -10,4 +10,5 @@
 //! It is a separate tree on purpose: `lib.rs` is baseline-capped, so it only
 //! declares `mod exports;` and the new surface grows here.
 
+pub mod format;
 pub mod metadata_wire;
