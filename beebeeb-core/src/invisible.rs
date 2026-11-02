@@ -1,16 +1,19 @@
 //! The one table of characters that render as nothing (or blank space).
 //!
 //! Two rules judge what a name LOOKS like rather than what its bytes are, and
-//! they must agree:
+//! they share this table (and only this table):
 //!
-//! - [`crate::kdf::sanitize_actor_name`] strips display controls and refuses a
-//!   visibly blank guest name;
+//! - [`crate::kdf::sanitize_actor_name`] strips display controls, also strips
+//!   every `char::is_control` character, treats `char::is_whitespace` as blank,
+//!   and refuses a visibly blank guest name;
 //! - [`crate::path_safety::check_component_for`] refuses an empty name and the
-//!   dot names after removing everything that shows nothing (`.\u{00AD}.`
-//!   displays as `..`).
+//!   dot names after removing the characters in this table, and removes
+//!   neither control characters nor whitespace (`.\u{00AD}.` displays as `..`;
+//!   a single U+3000 or `" "` is a valid component).
 //!
-//! Both read this module, so the table exists once. Adding or dropping a
-//! character is a visible edit here.
+//! Both read this module, so the table exists once. Each rule adds its own
+//! extra beyond the table; adding or dropping a character here is a visible
+//! edit.
 
 /// L16b: the display-control characters [`crate::kdf::sanitize_actor_name`]
 /// removes, in addition to every `char::is_control` (Cc) character. The table
@@ -83,10 +86,13 @@ pub(crate) fn is_invisible_filler(c: char) -> bool {
     in_ranges(&ACTOR_NAME_INVISIBLE_FILLERS, c)
 }
 
-/// Every character in the two tables above: the complete set of characters a
-/// renderer shows as nothing (or blank space). A name made only of these looks
-/// empty, and dots plus these look like `.` or `..`. Both the actor-name rule
-/// and the path rules judge those cases on the name with these removed.
+/// Every character in the two tables above: the set of characters that render
+/// as nothing (or blank space). It is not the whole of either rule: the
+/// actor-name rule also strips every `char::is_control` and treats
+/// `char::is_whitespace` as blank, while the path rules remove only these
+/// characters (neither controls nor whitespace). A name made only of these
+/// looks empty, and dots plus these look like `.` or `..`; both rules judge
+/// those cases with these removed.
 pub(crate) fn is_display_invisible(c: char) -> bool {
     in_ranges(&ACTOR_NAME_STRIPPED, c) || in_ranges(&ACTOR_NAME_INVISIBLE_FILLERS, c)
 }
