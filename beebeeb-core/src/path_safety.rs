@@ -296,3 +296,75 @@ mod native {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{default_output_path, ensure_contained, safe_child, safe_rel_join};
+
+#[cfg(all(test, unix))]
+mod symlink_tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// A private scratch directory under the system temp dir, removed on drop.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(label: &str) -> Self {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock after 1970")
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "beebeeb-path-safety-{label}-{}-{nanos}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).expect("create scratch dir");
+            Self(dir)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A symlink AT the target must be refused: writing through it would land
+    /// wherever it points, not inside the root.
+    #[test]
+    fn a_symlink_as_the_final_target_is_refused() {
+        let scratch = Scratch::new("final-symlink");
+        let root = scratch.path().join("root");
+        std::fs::create_dir_all(&root).expect("create root");
+        let outside = scratch.path().join("outside.txt");
+        std::fs::write(&outside, b"do not touch").expect("write outside marker");
+        std::os::unix::fs::symlink(&outside, root.join("link.txt")).expect("create symlink");
+
+        let error = safe_child(&root, "link.txt", Rules::Portable)
+            .expect_err("a symlink as the target must be refused");
+        assert!(
+            error.contains("refusing to write through it"),
+            "unexpected error: {error}"
+        );
+    }
+
+    /// A symlinked INTERMEDIATE directory that resolves outside the root must be
+    /// refused: the final component need not be a symlink for the write to
+    /// escape.
+    #[test]
+    fn an_intermediate_directory_symlinked_outside_the_root_is_refused() {
+        let scratch = Scratch::new("intermediate-symlink");
+        let root = scratch.path().join("root");
+        let outside = scratch.path().join("outside");
+        std::fs::create_dir_all(&root).expect("create root");
+        std::fs::create_dir_all(&outside).expect("create outside dir");
+        std::fs::write(outside.join("file.bin"), b"do not touch").expect("write outside file");
+        std::os::unix::fs::symlink(&outside, root.join("dir")).expect("create dir symlink");
+
+        let error = safe_rel_join(&root, "dir/file.bin", Rules::Portable)
+            .expect_err("a path resolving outside the root must be refused");
+        assert!(error.contains("outside"), "unexpected error: {error}");
+    }
+}
