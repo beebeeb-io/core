@@ -12,5 +12,6 @@
 
 pub mod format;
 pub mod metadata_wire;
+pub mod path_safety;
 pub mod retry;
 pub mod share_link;
