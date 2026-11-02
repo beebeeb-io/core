@@ -31,6 +31,7 @@ pub mod recovery;
 pub mod retry;
 pub mod search_index;
 pub mod search_sync;
+pub mod share_link;
 pub mod share_token;
 pub mod sync;
 #[cfg(any(test, feature = "test-support"))]
