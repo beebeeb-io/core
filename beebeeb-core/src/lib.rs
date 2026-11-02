@@ -1,3 +1,4 @@
+pub mod api_error;
 pub mod archive;
 pub mod blob;
 pub mod chunk_stream;

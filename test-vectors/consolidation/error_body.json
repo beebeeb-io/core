@@ -1,0 +1,327 @@
+{
+  "description": "Move 7 \u2014 the server's two-field error contract ({\"error\": <stable code>, \"message\": <human text>}) decoded once, plus the predicates clients branch on. The typed error keeps the whole parsed body, so quota fields (is_trial_cap, limit_bytes, used_bytes) and any future additive field survive.",
+  "source": "server beebeeb-api/src/error.rs contract; web packages/shared/src/api/errors.ts parseErrorBody/readErrorResponse (double-encoded unwrap), cli src/api.rs parse_response_typed + is_code + upload_session_gone, desktop api_client.rs check_status (which discards the code today); mobile's quota branches on is_trial_cap/limit_bytes per the map \u00a75.3 move 7",
+  "cases": [
+    {
+      "id": "error_body_quota_exceeded",
+      "kind": "body",
+      "status": 413,
+      "payload": "{\"error\":\"quota_exceeded\",\"message\":\"Storage full\",\"limit_bytes\":1000,\"used_bytes\":900}",
+      "expected": {
+        "code": "quota_exceeded",
+        "message": "Storage full",
+        "status_is_error": true,
+        "session_gone_404": false,
+        "session_gone_strict": false,
+        "retry_after": null,
+        "is_trial_cap": false,
+        "limit_bytes": 1000,
+        "used_bytes": 900,
+        "is_code": [
+          "quota_exceeded"
+        ],
+        "not_code": [
+          "quota",
+          "QUOTA_EXCEEDED"
+        ],
+        "details_preserved": [
+          "limit_bytes",
+          "used_bytes"
+        ]
+      }
+    },
+    {
+      "id": "error_body_trial_cap_keeps_flag",
+      "kind": "body",
+      "status": 413,
+      "payload": "{\"error\":\"quota_exceeded\",\"message\":\"Trial storage full\",\"is_trial_cap\":true,\"limit_bytes\":2000,\"used_bytes\":2000}",
+      "expected": {
+        "code": "quota_exceeded",
+        "message": "Trial storage full",
+        "status_is_error": true,
+        "session_gone_404": false,
+        "session_gone_strict": false,
+        "retry_after": null,
+        "is_trial_cap": true,
+        "limit_bytes": 2000,
+        "used_bytes": 2000,
+        "is_code": [
+          "quota_exceeded"
+        ],
+        "not_code": [],
+        "details_preserved": [
+          "is_trial_cap"
+        ]
+      }
+    },
+    {
+      "id": "error_body_quota_keeps_limit_bytes",
+      "kind": "body",
+      "status": 413,
+      "payload": "{\"error\":\"quota_exceeded\",\"message\":\"m\",\"limit_bytes\":4096}",
+      "expected": {
+        "code": "quota_exceeded",
+        "message": "m",
+        "status_is_error": true,
+        "session_gone_404": false,
+        "session_gone_strict": false,
+        "retry_after": null,
+        "is_trial_cap": false,
+        "limit_bytes": 4096,
+        "used_bytes": null,
+        "is_code": [
+          "quota_exceeded"
+        ],
+        "not_code": [],
+        "details_preserved": [
+          "limit_bytes"
+        ]
+      }
+    },
+    {
+      "id": "error_body_unauthorized",
+      "kind": "body",
+      "status": 401,
+      "payload": "{\"error\":\"unauthorized\"}",
+      "expected": {
+        "code": "unauthorized",
+        "message": "unauthorized",
+        "status_is_error": true,
+        "session_gone_404": false,
+        "session_gone_strict": false,
+        "retry_after": null,
+        "is_trial_cap": false,
+        "limit_bytes": null,
+        "used_bytes": null,
+        "is_code": [
+          "unauthorized"
+        ],
+        "not_code": [
+          "Unauthorized",
+          "unauthorised"
+        ],
+        "details_preserved": []
+      }
+    },
+    {
+      "id": "error_body_plan_required",
+      "kind": "body",
+      "status": 403,
+      "payload": "{\"error\":\"plan_required\",\"message\":\"Plan required\"}",
+      "expected": {
+        "code": "plan_required",
+        "message": "Plan required",
+        "status_is_error": true,
+        "session_gone_404": false,
+        "session_gone_strict": false,
+        "retry_after": null,
+        "is_trial_cap": false,
+        "limit_bytes": null,
+        "used_bytes": null,
+        "is_code": [
+          "plan_required"
+        ],
+        "not_code": [
+          "plan"
+        ],
+        "details_preserved": []
+      }
+    },
+    {
+      "id": "error_body_account_lapsed",
+      "kind": "body",
+      "status": 403,
+      "payload": "{\"error\":\"account_lapsed\",\"message\":\"Account lapsed\"}",
+      "expected": {
+        "code": "account_lapsed",
+        "message": "Account lapsed",
+        "status_is_error": true,
+        "session_gone_404": false,
+        "session_gone_strict": false,
+        "retry_after": null,
+        "is_trial_cap": false,
+        "limit_bytes": null,
+        "used_bytes": null,
+        "is_code": [
+          "account_lapsed"
+        ],
+        "not_code": [
+          "account"
+        ],
+        "details_preserved": []
+      }
+    },
+    {
+      "id": "error_body_double_encoded",
+      "kind": "body",
+      "status": 409,
+      "payload": "{\"error\":\"{\\\"error\\\":\\\"trial_already_used\\\",\\\"message\\\":\\\"Already used\\\"}\"}",
+      "expected": {
+        "code": "trial_already_used",
+        "message": "Already used",
+        "status_is_error": true,
+        "session_gone_404": false,
+        "session_gone_strict": false,
+        "retry_after": null,
+        "is_trial_cap": false,
+        "limit_bytes": null,
+        "used_bytes": null,
+        "is_code": [
+          "trial_already_used"
+        ],
+        "not_code": [
+          "trial_already_used_"
+        ],
+        "details_preserved": [
+          "error"
+        ]
+      }
+    },
+    {
+      "id": "error_body_missing_body",
+      "kind": "body",
+      "status": 500,
+      "payload": "{\"detail\":\"oops\"}",
+      "expected": {
+        "code": null,
+        "message": "500: {\"detail\":\"oops\"}",
+        "status_is_error": true,
+        "session_gone_404": false,
+        "session_gone_strict": false,
+        "retry_after": null,
+        "is_trial_cap": false,
+        "limit_bytes": null,
+        "used_bytes": null,
+        "is_code": [],
+        "not_code": [],
+        "details_preserved": []
+      }
+    },
+    {
+      "id": "error_body_non_json",
+      "kind": "body",
+      "status": 502,
+      "payload": "not json",
+      "expected": {
+        "code": null,
+        "message": "502: not json",
+        "status_is_error": true,
+        "session_gone_404": false,
+        "session_gone_strict": false,
+        "retry_after": null,
+        "is_trial_cap": false,
+        "limit_bytes": null,
+        "used_bytes": null,
+        "is_code": [],
+        "not_code": [],
+        "details_preserved": []
+      }
+    },
+    {
+      "id": "error_body_200_with_error",
+      "kind": "body",
+      "status": 200,
+      "payload": "{\"error\":\"boom\",\"message\":\"m\"}",
+      "expected": {
+        "code": "boom",
+        "message": "m",
+        "status_is_error": false,
+        "session_gone_404": false,
+        "session_gone_strict": false,
+        "retry_after": null,
+        "is_trial_cap": false,
+        "limit_bytes": null,
+        "used_bytes": null,
+        "is_code": [
+          "boom"
+        ],
+        "not_code": [],
+        "details_preserved": []
+      }
+    },
+    {
+      "id": "error_body_session_gone_404",
+      "kind": "body",
+      "status": 404,
+      "payload": "{\"error\":\"not found\"}",
+      "expected": {
+        "code": "not found",
+        "message": "not found",
+        "status_is_error": true,
+        "session_gone_404": true,
+        "session_gone_strict": false,
+        "retry_after": null,
+        "is_trial_cap": false,
+        "limit_bytes": null,
+        "used_bytes": null,
+        "is_code": [],
+        "not_code": [],
+        "details_preserved": []
+      }
+    },
+    {
+      "id": "error_body_session_gone_400_expired",
+      "kind": "body",
+      "status": 400,
+      "payload": "{\"error\":\"upload session is not writable: expired\"}",
+      "expected": {
+        "code": "upload session is not writable: expired",
+        "message": "upload session is not writable: expired",
+        "status_is_error": true,
+        "session_gone_404": true,
+        "session_gone_strict": true,
+        "retry_after": null,
+        "is_trial_cap": false,
+        "limit_bytes": null,
+        "used_bytes": null,
+        "is_code": [],
+        "not_code": [],
+        "details_preserved": []
+      }
+    },
+    {
+      "id": "error_body_session_gone_409",
+      "kind": "body",
+      "status": 409,
+      "payload": "{\"error\":\"upload session is not writable: expired\"}",
+      "expected": {
+        "code": "upload session is not writable: expired",
+        "message": "upload session is not writable: expired",
+        "status_is_error": true,
+        "session_gone_404": false,
+        "session_gone_strict": false,
+        "retry_after": null,
+        "is_trial_cap": false,
+        "limit_bytes": null,
+        "used_bytes": null,
+        "is_code": [],
+        "not_code": [],
+        "details_preserved": []
+      }
+    },
+    {
+      "id": "error_body_retry_after_field",
+      "kind": "body",
+      "status": 429,
+      "payload": "{\"error\":\"rate_limited\",\"message\":\"Slow down\",\"retry_after\":7}",
+      "expected": {
+        "code": "rate_limited",
+        "message": "Slow down",
+        "status_is_error": true,
+        "session_gone_404": false,
+        "session_gone_strict": false,
+        "retry_after": 7,
+        "is_trial_cap": false,
+        "limit_bytes": null,
+        "used_bytes": null,
+        "is_code": [
+          "rate_limited"
+        ],
+        "not_code": [],
+        "details_preserved": [
+          "retry_after"
+        ]
+      }
+    }
+  ]
+}
