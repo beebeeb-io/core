@@ -536,6 +536,51 @@ impl RequestSeal {
     }
 }
 
+/// The name key a request row's rename must be sealed under (task 2275 §15):
+/// the key, its convention origin and the recorded chunk-format pin. There is
+/// no constructor outside core, so a caller cannot point a rename at a key or
+/// pin core did not resolve. An upper-repair name yields `None` (read-only).
+pub struct RenameTarget {
+    key: FileKey,
+    origin: KeyOrigin,
+    pin: ExpectedChunkFormat,
+}
+
+impl RenameTarget {
+    fn new(key: &FileKey, origin: KeyOrigin, pin: ExpectedChunkFormat) -> Self {
+        Self {
+            key: FileKey::from_bytes(*key.as_bytes()),
+            origin,
+            pin,
+        }
+    }
+
+    /// The key the renamed name envelope must be sealed under.
+    pub fn key(&self) -> &FileKey {
+        &self.key
+    }
+
+    /// Where the name key came from (`Derived`, `DerivedBinary`,
+    /// `RequestContent`); never `DerivedUpperRepair`.
+    pub fn origin(&self) -> KeyOrigin {
+        self.origin
+    }
+
+    /// The chunk-format pin the renamed name must keep.
+    pub fn pin(&self) -> ExpectedChunkFormat {
+        self.pin
+    }
+}
+
+impl std::fmt::Debug for RenameTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenameTarget")
+            .field("origin", &self.origin)
+            .field("pin", &self.pin)
+            .finish_non_exhaustive()
+    }
+}
+
 /// A 2236 request-upload row: the uploader sealed a content key `C` to the
 /// owner's request key, and the row is read-only content-wise.
 pub struct RequestRowKeys {
@@ -551,6 +596,9 @@ pub struct RequestRowKeys {
     /// Which seal opened the row: the row-bound seal or the shipped empty-id
     /// seal (§15).
     pub seal: RequestSeal,
+    /// The target a rename of this row must use, or `None` when the name is
+    /// upper-repair (read-only).
+    pub rename_target: Option<RenameTarget>,
 }
 
 /// Resolve a 2236 request row (task 2275, §4 and §15): content under `C`, name
@@ -618,6 +666,12 @@ pub fn resolve_request_row(
         RequestSeal::Bound => request_row_name_any(master, item_id, &content_key, name_encrypted)?,
         RequestSeal::Unbound => request_row_name_string_or_content(master, item_id, &content_key, name_encrypted)?,
     };
+    // Only upper-repair is read-only; every other origin records the key, its
+    // convention and the pin a rename must keep.
+    let rename_target = match name_origin {
+        KeyOrigin::DerivedUpperRepair => None,
+        _ => Some(RenameTarget::new(&name_key, name_origin, name.chunk_format)),
+    };
 
     Ok(RequestRowKeys {
         content_key,
@@ -625,6 +679,7 @@ pub fn resolve_request_row(
         name_origin,
         name,
         seal,
+        rename_target,
     })
 }
 

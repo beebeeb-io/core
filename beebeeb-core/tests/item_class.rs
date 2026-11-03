@@ -7,7 +7,9 @@ use aes_gcm::{
     aead::{Aead, Payload},
 };
 use beebeeb_core::chunk_stream::ExpectedChunkFormat;
-use beebeeb_core::encrypt::{decrypt_file_metadata_with_key, encrypt_chunk_raw, encrypt_name_for};
+use beebeeb_core::encrypt::{
+    decrypt_file_metadata_with_key, encrypt_chunk_raw, encrypt_name_for, encrypt_name_with_chunk_format,
+};
 use beebeeb_core::file_request::{seal_to_request, wrap_request_private};
 use beebeeb_core::item_id::{ItemClass, NewItemId, is_foreign_item_id, item_class};
 use beebeeb_core::kdf::{FileKey, MasterKey, derive_file_key};
@@ -531,6 +533,46 @@ fn request_row_class_and_name_checks_precede_any_open() {
         err.to_string().contains("encrypted envelope"),
         "a plaintext name must be refused before any open: {err}"
     );
+}
+
+#[test]
+fn request_row_carries_a_rename_target_unless_upper_repair() {
+    // A string-convention name keeps its recorded pin and its derived name key.
+    let fixture = request_fixture();
+    let name = encrypt_name_with_chunk_format(
+        &fixture.master,
+        &fixture.item_id,
+        "upload.bin",
+        None,
+        ExpectedChunkFormat::V2,
+    )
+    .unwrap();
+    let row = fixture.resolve(&name).unwrap();
+    let target = row
+        .rename_target
+        .expect("a string-convention row must have a rename target");
+    assert_eq!(target.origin(), KeyOrigin::Derived);
+    assert_eq!(target.pin(), ExpectedChunkFormat::V2);
+    assert_eq!(target.key().as_bytes(), row.name_key.as_bytes());
+    assert_eq!(
+        target.key().as_bytes(),
+        derive_file_key(&fixture.master, fixture.item_id.as_bytes()).as_bytes()
+    );
+
+    // An upper-repair name is READ-ONLY: no rename target.
+    let fixture = request_fixture_for(O_ID_2);
+    let upper = O_ID_2.to_ascii_uppercase();
+    let name = encrypt_name_with_chunk_format(
+        &fixture.master,
+        &upper,
+        "upload.bin",
+        None,
+        ExpectedChunkFormat::Unrecorded,
+    )
+    .unwrap();
+    let row = fixture.resolve(&name).unwrap();
+    assert_eq!(row.name_origin, KeyOrigin::DerivedUpperRepair);
+    assert!(row.rename_target.is_none(), "an upper-repair name is read-only");
 }
 
 #[test]
