@@ -6,8 +6,7 @@
 //! from the item id, never `C`.
 
 use beebeeb_uniffi::{
-    derive_master_key, derive_x25519_public, seal_to_request, wrap_request_private, FileKeyHandle,
-    MasterKeyHandle,
+    FileKeyHandle, MasterKeyHandle, derive_master_key, derive_x25519_public, seal_to_request, wrap_request_private,
 };
 
 const SALT: &[u8] = b"test-salt-16bytes";
