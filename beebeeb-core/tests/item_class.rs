@@ -446,6 +446,10 @@ fn request_fixture_for(item_id: &str) -> RequestFixture {
 /// request-private wrap and the per-upload seal both use the EMPTY id (the
 /// 2236 convention), and the name is sealed under the content key `C`.
 fn shipped_request_fixture() -> RequestFixture {
+    shipped_request_fixture_for(O_ID)
+}
+
+fn shipped_request_fixture_for(item_id: &str) -> RequestFixture {
     let master = master();
     let request_private = [0x11u8; 32];
     let request_public = derive_x25519_public(&request_private);
@@ -454,7 +458,7 @@ fn shipped_request_fixture() -> RequestFixture {
     let sealed = seal_to_request(&request_public, b"", &content_key).unwrap();
     RequestFixture {
         master,
-        item_id: O_ID.to_string(),
+        item_id: item_id.to_string(),
         request_id: Vec::new(),
         wrapped_private,
         wrap_nonce,
@@ -643,6 +647,38 @@ fn unbound_request_row_refuses_a_binary_convention_name() {
         .resolve(&name)
         .err()
         .expect("the unbound row must refuse a binary name");
+    assert!(
+        err.to_string().contains("string convention"),
+        "an unbound row's name resolves only under the string convention: {err}"
+    );
+}
+
+#[test]
+fn unbound_request_row_name_under_the_string_key_is_derived() {
+    // A shipped row (empty contexts) that an old client renamed: the new name
+    // is sealed under the string-convention key, so an unbound row must open
+    // it as Derived, not fall through to C (A9c).
+    let fixture = shipped_request_fixture();
+    let derived = derive_file_key(&fixture.master, fixture.item_id.as_bytes());
+    let name = encrypt_name_for(&derived, "renamed.bin", None, ExpectedChunkFormat::V2).unwrap();
+    let row = fixture
+        .resolve(&name)
+        .expect("an unbound row's string-convention name must open");
+    assert_eq!(row.seal, RequestSeal::Unbound);
+    assert_eq!(row.name_origin, KeyOrigin::Derived);
+    assert_eq!(row.name_key.as_bytes(), derived.as_bytes());
+}
+
+#[test]
+fn unbound_request_row_refuses_an_upper_repair_name() {
+    let fixture = shipped_request_fixture_for(O_ID_2);
+    let upper = fixture.item_id.to_ascii_uppercase();
+    let upper_key = derive_file_key(&fixture.master, upper.as_bytes());
+    let name = name_for(&upper_key, "upload.bin");
+    let err = fixture
+        .resolve(&name)
+        .err()
+        .expect("the unbound row must refuse an upper-repair name");
     assert!(
         err.to_string().contains("string convention"),
         "an unbound row's name resolves only under the string convention: {err}"
