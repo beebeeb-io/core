@@ -39,10 +39,35 @@ not a removal; the exported function/class names are unchanged.
 | uniffi `ResolvedRequestRow` | `content: ChunkDecryptorHandle` | `content: RequestContentReader` |
 | uniffi `RequestRenameTarget` | `{origin, pin, key: FileKeyHandle}` | `{origin, pin}`; seal with `MasterKeyHandle::seal_request_rename` |
 
-`RequestContentReader` (uniffi) / `WasmRequestContentReader` (WASM) has no key
-getter; the key is zeroized when the reader drops, it is bound to the row's
+`RequestContentReader` (uniffi) / `WasmRequestContentReader` (WASM) has no
+key getter; the key is zeroized when the reader drops, it is bound to the row's
 file id and chunk-format pin, `decryptor()` returns a fresh sequential
 decryptor per call, and `open_frame` / `openFrame` reads one frame by index.
+
+## UniFFI additions and generated-binding shape (2326, request content)
+
+The `cargo check` surface is not the whole story for UniFFI: the committed
+Kotlin/Swift bindings are generated from these annotations. This branch adds
+three items to the UniFFI surface (all additions; nothing removed):
+
+| uniffi item | Kind | What |
+| --- | --- | --- |
+| `RequestContentReader` | object | Request-row content reader: `file_id`, `chunk_format`, `decryptor()`, `open_frame(...)`; no key getter |
+| `MasterKeyHandle::seal_request_rename` | method | Seal a request-row rename under the §15 string-derived key |
+| `mint_guest_item_id` | function | Mint a guest (F) item id with no master key |
+
+The generated bindings must be regenerated for these three (`build-ios.sh` /
+`build-android.sh`); the in-tree Rust tests do not compile the Swift/Kotlin
+glue.
+
+One uniffi caller change (not an export change): the request-row readers used
+to be consumed as `content.push_frame(...)`; they are now
+`content.decryptor().push_frame(...)`, because every call returns a fresh
+sequential cursor. Callers that kept the old `ChunkDecryptorHandle`-shaped
+field still compile against the record but must follow the new call.
+
+The WASM counts above are unchanged by these docs: 145 base, 149 head,
+0 removed, 4 added.
 
 ## Reconciliation of the changed-shape count
 
