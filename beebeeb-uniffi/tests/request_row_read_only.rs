@@ -5,6 +5,8 @@
 //! Renames go through `seal_request_rename`, which derives the §15 string key
 //! from the item id, never `C`.
 
+use beebeeb_core::chunk_stream::{ChunkEncryptor, ExpectedChunkFormat};
+use beebeeb_core::kdf::FileKey;
 use beebeeb_uniffi::{
     FileKeyHandle, MasterKeyHandle, derive_master_key, derive_x25519_public, seal_to_request, wrap_request_private,
 };
@@ -59,6 +61,32 @@ fn request_row_results_never_hand_back_a_sealing_key() {
     assert_eq!(legacy.name_origin, "request_content");
     assert_eq!(legacy.chunk_format, 0);
 
+    // The reader actually reads: a v1 push under C opens through a fresh
+    // decryptor (the old assertion only checked a format that is None for any
+    // decryptor and never used `legacy.content`).
+    let plaintext: Vec<u8> = (0..96u8).collect();
+    let mut enc = ChunkEncryptor::for_push_with_file_key(
+        FileKey::from_bytes([0x22u8; 32]),
+        O_ID,
+        plaintext.len() as u64,
+        32,
+    )
+    .unwrap();
+    let frames: Vec<Vec<u8>> = plaintext
+        .chunks(32)
+        .map(|c| enc.push_chunk(c).unwrap().data)
+        .collect();
+    enc.finish().unwrap();
+    for reader in [&detailed.content, &legacy.content] {
+        let dec = reader.decryptor().unwrap();
+        let mut out = Vec::new();
+        for frame in &frames {
+            out.extend_from_slice(&dec.push_frame(frame.clone()).unwrap().data);
+        }
+        dec.finish().unwrap();
+        assert_eq!(out, plaintext);
+    }
+
     // D-P2: renaming goes through the core sealer. The sealed name opens under
     // the string-derived key and NOT under C, which the uploader holds.
     let renamed = owner
@@ -73,4 +101,76 @@ fn request_row_results_never_hand_back_a_sealing_key() {
         content_handle.decrypt_file_metadata(renamed).is_err(),
         "a rename sealed under C would hand the owner's name to the uploader"
     );
+}
+
+#[test]
+fn a_bound_request_row_reads_v2_content_through_both_readers() {
+    let mk = derive_master_key("owner".into(), SALT.to_vec()).unwrap();
+    let owner = MasterKeyHandle::from_keychain_bytes(mk.key.clone()).unwrap();
+    let r_priv = [0x11u8; 32];
+    let r_pub = derive_x25519_public(r_priv.to_vec()).unwrap();
+    let content_key = [0x22u8; 32];
+    let wrap = wrap_request_private(mk.key.clone(), Vec::new(), r_priv.to_vec()).unwrap();
+    // Bound: the content key is sealed to the row's O id.
+    let sealed = seal_to_request(r_pub, O_ID.as_bytes().to_vec(), content_key.to_vec()).unwrap();
+    // The name is under the string-derived key and records v2.
+    let derived = owner.derive_file_key(O_ID.as_bytes().to_vec()).unwrap();
+    let name = derived.encrypt_name_for("upload.bin".into(), None, 2).unwrap();
+
+    let detailed = owner
+        .resolve_request_row_detailed(
+            O_ID.to_string(),
+            Vec::new(),
+            wrap.wrapped.clone(),
+            wrap.nonce.clone(),
+            sealed.e_pub.clone(),
+            sealed.wrapped_key.clone(),
+            name.clone(),
+        )
+        .unwrap();
+    assert_eq!(detailed.seal, "bound");
+    assert_eq!(detailed.chunk_format, 2);
+    assert_eq!(detailed.content.chunk_format(), 2);
+    assert_eq!(detailed.content.file_id(), O_ID);
+
+    let legacy = owner
+        .resolve_request_row(
+            O_ID.to_string(),
+            Vec::new(),
+            wrap.wrapped,
+            wrap.nonce,
+            sealed.e_pub,
+            sealed.wrapped_key,
+            name,
+        )
+        .unwrap();
+    assert_eq!(legacy.chunk_format, 2);
+
+    // v2 frames under C, bound to the O id. A reader built from the name key
+    // (a mutant) or with a wrong file id cannot open them.
+    let plaintext: Vec<u8> = (0..96u8).collect();
+    let mut enc = ChunkEncryptor::for_push_with_file_key(
+        FileKey::from_bytes(content_key),
+        O_ID,
+        plaintext.len() as u64,
+        32,
+    )
+    .unwrap()
+    .with_recorded_pin(ExpectedChunkFormat::V2)
+    .unwrap();
+    let frames: Vec<Vec<u8>> = plaintext
+        .chunks(32)
+        .map(|c| enc.push_chunk(c).unwrap().data)
+        .collect();
+    enc.finish().unwrap();
+
+    for reader in [&detailed.content, &legacy.content] {
+        let dec = reader.decryptor().unwrap();
+        let mut out = Vec::new();
+        for frame in &frames {
+            out.extend_from_slice(&dec.push_frame(frame.clone()).unwrap().data);
+        }
+        dec.finish().unwrap();
+        assert_eq!(out, plaintext);
+    }
 }
