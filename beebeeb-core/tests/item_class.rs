@@ -558,8 +558,27 @@ fn request_row_class_and_name_checks_precede_any_open() {
     .err()
     .expect("a foreign id must be refused before any open");
     assert!(
-        err.to_string().contains("owner item id"),
+        err.to_string().contains("request row class check"),
         "a foreign id must be refused by class before any open: {err}"
+    );
+
+    // The crypto cannot even unwrap here. If the class check ran after the
+    // opens, this row would report a decryption failure instead.
+    let err = resolve_request_row(
+        &fixture.master,
+        F_ID,
+        &fixture.request_id,
+        &[0u8; 32],
+        &[0u8; 12],
+        &fixture.e_pub,
+        &fixture.wrapped_content_key,
+        &name,
+    )
+    .err()
+    .expect("a foreign id must be refused before the unwrap");
+    assert!(
+        err.to_string().contains("request row class check"),
+        "with crypto that cannot unwrap, the class check must still win: {err}"
     );
 
     // A plaintext name authenticates nothing and must be refused before any open.
@@ -568,7 +587,7 @@ fn request_row_class_and_name_checks_precede_any_open() {
         .err()
         .expect("a plaintext name must be refused");
     assert!(
-        err.to_string().contains("encrypted envelope"),
+        err.to_string().contains("request row name check"),
         "a plaintext name must be refused before any open: {err}"
     );
 }

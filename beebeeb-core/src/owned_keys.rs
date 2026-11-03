@@ -635,12 +635,13 @@ pub fn resolve_request_row(
     // plaintext name must never reach the unbound path, which binds no id.
     if crate::item_id::item_class(item_id)? != crate::item_id::ItemClass::Owner {
         return Err(CoreError::InvalidInput(
-            "a request row must have an owner item id; foreign items resolve only via L8 or L7".into(),
+            "request row class check: a request row must have an owner item id; foreign items resolve only via L8 or L7"
+                .into(),
         ));
     }
     if !name_encrypted.starts_with('{') {
         return Err(CoreError::InvalidInput(
-            "a request row's name must be an encrypted envelope".into(),
+            "request row name check: a request row's name must be an encrypted envelope".into(),
         ));
     }
 
