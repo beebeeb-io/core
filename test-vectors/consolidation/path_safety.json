@@ -1,0 +1,583 @@
+{
+  "description": "Move 11 — path and filename safety: the two rule sets (portable vs host), the Windows reserved/trailing/character rules, the length limits, the archive rewrite (never a silent drop), and containment through symlinks. No name is NFC-normalised: a path is bytes.",
+  "source": "cli src/safe_path.rs (task 1733) promoted into beebeeb_core::path_safety in move 11 (map §4.1 row 4); desktop known_folder.rs and web bulk-download.ts adopt the same rule",
+  "cases": [
+    {
+      "id": "path_reject_dotdot",
+      "kind": "check",
+      "name": "..",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_dot",
+      "kind": "check",
+      "name": ".",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_absolute",
+      "kind": "check",
+      "name": "/etc/cron.d/x",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "path separator"
+    },
+    {
+      "id": "path_reject_backslash_portable",
+      "kind": "check",
+      "name": "a\\b",
+      "portable": true,
+      "windows": false,
+      "expect": "reject",
+      "reason": "path separator"
+    },
+    {
+      "id": "path_host_allows_backslash",
+      "kind": "check",
+      "name": "a\\b",
+      "portable": false,
+      "windows": false,
+      "expect": "ok"
+    },
+    {
+      "id": "path_host_windows_rejects_backslash",
+      "kind": "check",
+      "name": "a\\b",
+      "portable": false,
+      "windows": true,
+      "expect": "reject",
+      "reason": "path separator"
+    },
+    {
+      "id": "path_reject_drive_letter",
+      "kind": "check",
+      "name": "C:x",
+      "portable": true,
+      "windows": false,
+      "expect": "reject",
+      "reason": "drive prefix"
+    },
+    {
+      "id": "path_accept_single_letter",
+      "kind": "check",
+      "name": "c",
+      "portable": true,
+      "windows": true,
+      "expect": "ok"
+    },
+    {
+      "id": "path_reject_reserved_con",
+      "kind": "check",
+      "name": "CON",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "reserved Windows device"
+    },
+    {
+      "id": "path_reject_reserved_nul_ext",
+      "kind": "check",
+      "name": "nul.txt",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "reserved Windows device"
+    },
+    {
+      "id": "path_reject_reserved_com1",
+      "kind": "check",
+      "name": "COM1.log",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "reserved Windows device"
+    },
+    {
+      "id": "path_reject_reserved_com0",
+      "kind": "check",
+      "name": "COM0",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "reserved Windows device"
+    },
+    {
+      "id": "path_reject_reserved_lpt0",
+      "kind": "check",
+      "name": "LPT0.txt",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "reserved Windows device"
+    },
+    {
+      "id": "path_reject_reserved_com_sup1",
+      "kind": "check",
+      "name": "COM¹",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "reserved Windows device"
+    },
+    {
+      "id": "path_reject_reserved_lpt_sup2",
+      "kind": "check",
+      "name": "LPT².log",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "reserved Windows device"
+    },
+    {
+      "id": "path_reject_reserved_conin",
+      "kind": "check",
+      "name": "CONIN$",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "reserved Windows device"
+    },
+    {
+      "id": "path_reject_reserved_conout",
+      "kind": "check",
+      "name": "CONOUT$",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "reserved Windows device"
+    },
+    {
+      "id": "path_reject_bidi_override",
+      "kind": "check",
+      "name": "evil‮fdp.exe",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "bidirection"
+    },
+    {
+      "id": "path_reject_bidi_isolate",
+      "kind": "check",
+      "name": "a⁦b⁩",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "bidirection"
+    },
+    {
+      "id": "path_accept_hebrew_with_rtl_mark",
+      "kind": "check",
+      "name": "\u05e2\u05d1\u05e8\u05d9\u05ea\u200f.txt",
+      "portable": true,
+      "windows": true,
+      "expect": "ok"
+    },
+    {
+      "id": "path_reject_marks_only",
+      "kind": "check",
+      "name": "\u200e\u200f\u061c",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_dot_plus_mark",
+      "kind": "check",
+      "name": ".\u200f",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_dot_mark_dot",
+      "kind": "check",
+      "name": ".\u200e.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_soft_hyphen_only",
+      "kind": "check",
+      "name": "\u00ad",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_soft_hyphen_dots",
+      "kind": "check",
+      "name": ".\u00ad.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_invisible_operator_only",
+      "kind": "check",
+      "name": "\u2062",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_invisible_operator_dots",
+      "kind": "check",
+      "name": ".\u2062.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_variation_selector_only",
+      "kind": "check",
+      "name": "\ufe0f",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_variation_selector_dots",
+      "kind": "check",
+      "name": ".\ufe0f.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_grapheme_joiner_only",
+      "kind": "check",
+      "name": "\u034f",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_grapheme_joiner_dots",
+      "kind": "check",
+      "name": ".\u034f.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_mongolian_vowel_separator_only",
+      "kind": "check",
+      "name": "\u180e",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_mongolian_vowel_separator_dots",
+      "kind": "check",
+      "name": ".\u180e.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_hangul_filler_only",
+      "kind": "check",
+      "name": "\u3164",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_hangul_filler_dots",
+      "kind": "check",
+      "name": ".\u3164.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_tag_char_only",
+      "kind": "check",
+      "name": "\udb40\udc41",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_tag_char_dots",
+      "kind": "check",
+      "name": ".\udb40\udc41.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_zero_width_space_only_host",
+      "kind": "check",
+      "name": "\u200b",
+      "portable": false,
+      "windows": false,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_dot_lrm_dot_host",
+      "kind": "check",
+      "name": ".\u200e.",
+      "portable": false,
+      "windows": false,
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_reject_soft_hyphen_only_host",
+      "kind": "check",
+      "name": "\u00ad",
+      "portable": false,
+      "windows": false,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_accept_con_on_linux",
+      "kind": "check",
+      "name": "CON",
+      "portable": false,
+      "windows": false,
+      "expect": "ok"
+    },
+    {
+      "id": "path_reject_trailing_dot",
+      "kind": "check",
+      "name": "report.",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "ends with a dot or space"
+    },
+    {
+      "id": "path_reject_trailing_space",
+      "kind": "check",
+      "name": "report ",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "ends with a dot or space"
+    },
+    {
+      "id": "path_reject_colon",
+      "kind": "check",
+      "name": "a:b",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "Windows drive prefix"
+    },
+    {
+      "id": "path_reject_windows_chars",
+      "kind": "check",
+      "name": "a<b>c",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "Windows does not allow"
+    },
+    {
+      "id": "path_reject_nul_byte",
+      "kind": "check",
+      "name": "a\u0000b",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "NUL byte"
+    },
+    {
+      "id": "path_reject_control",
+      "kind": "check",
+      "name": "line\nbreak",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "control character"
+    },
+    {
+      "id": "path_reject_empty",
+      "kind": "check",
+      "name": "",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_reject_long_name",
+      "kind": "check",
+      "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "portable": true,
+      "windows": true,
+      "expect": "reject",
+      "reason": "255 bytes"
+    },
+    {
+      "id": "path_accept_max_name",
+      "kind": "check",
+      "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "portable": true,
+      "windows": true,
+      "expect": "ok"
+    },
+    {
+      "id": "path_accept_unicode",
+      "kind": "check",
+      "name": "файл.txt",
+      "portable": true,
+      "windows": true,
+      "expect": "ok"
+    },
+    {
+      "id": "path_accept_nfd",
+      "kind": "check",
+      "name": "é.txt",
+      "portable": true,
+      "windows": true,
+      "expect": "ok"
+    },
+    {
+      "id": "path_sanitize_colon",
+      "kind": "sanitize",
+      "name": "ab:c",
+      "expect": "ok",
+      "expected": "ab_c"
+    },
+    {
+      "id": "path_sanitize_trailing_dot",
+      "kind": "sanitize",
+      "name": "report.",
+      "expect": "ok",
+      "expected": "report_"
+    },
+    {
+      "id": "path_sanitize_trailing_space",
+      "kind": "sanitize",
+      "name": "a ",
+      "expect": "ok",
+      "expected": "a_"
+    },
+    {
+      "id": "path_sanitize_reserved",
+      "kind": "sanitize",
+      "name": "CON",
+      "expect": "ok",
+      "expected": "_CON"
+    },
+    {
+      "id": "path_sanitize_reserved_ext",
+      "kind": "sanitize",
+      "name": "nul.txt",
+      "expect": "ok",
+      "expected": "_nul.txt"
+    },
+    {
+      "id": "path_sanitize_bidi",
+      "kind": "sanitize",
+      "name": "evil‮fdp.exe",
+      "expect": "ok",
+      "expected": "evilfdp.exe"
+    },
+    {
+      "id": "path_sanitize_bidi_marks",
+      "kind": "sanitize",
+      "name": "a\u200eb",
+      "expect": "ok",
+      "expected": "ab"
+    },
+    {
+      "id": "path_sanitize_arabic_letter_mark",
+      "kind": "sanitize",
+      "name": "\u061creport.txt",
+      "expect": "ok",
+      "expected": "report.txt"
+    },
+    {
+      "id": "path_sanitize_keeps_clean",
+      "kind": "sanitize",
+      "name": "photo.jpg",
+      "expect": "ok",
+      "expected": "photo.jpg"
+    },
+    {
+      "id": "path_sanitize_nfd_unchanged",
+      "kind": "sanitize",
+      "name": "é.txt",
+      "expect": "ok",
+      "expected": "é.txt"
+    },
+    {
+      "id": "path_sanitize_rejects_dotdot",
+      "kind": "sanitize",
+      "name": "..",
+      "expect": "reject"
+    },
+    {
+      "id": "path_rel_join_ok",
+      "kind": "rel-join",
+      "rel": "a/b/c.txt",
+      "expect": "ok"
+    },
+    {
+      "id": "path_rel_join_empty_segment",
+      "kind": "rel-join",
+      "rel": "a//b",
+      "expect": "reject",
+      "reason": "empty name"
+    },
+    {
+      "id": "path_rel_join_dotdot",
+      "kind": "rel-join",
+      "rel": "a/../b",
+      "expect": "reject",
+      "reason": "'.' and '..'"
+    },
+    {
+      "id": "path_rel_join_long",
+      "kind": "rel-join",
+      "rel": "a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/b.txt",
+      "expect": "reject",
+      "reason": "4096-byte limit"
+    },
+    {
+      "id": "path_ensure_contained_ok",
+      "kind": "contained",
+      "sub": "a/b.txt",
+      "expect": "ok"
+    },
+    {
+      "id": "path_ensure_contained_escape",
+      "kind": "contained",
+      "sub": "../escape.txt",
+      "expect": "reject",
+      "reason": "outside"
+    }
+  ]
+}

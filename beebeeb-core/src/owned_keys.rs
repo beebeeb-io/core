@@ -516,8 +516,85 @@ fn resolve_foreign_row(
     ))
 }
 
+/// Which seal opened a request row (task 2275 §15).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestSeal {
+    /// The 2236 seal: the per-upload HKDF info is the row's item id.
+    Bound,
+    /// The shipped convention: the per-upload HKDF info is the EMPTY id (what
+    /// `web upload-request.tsx` and `bb request send` write).
+    Unbound,
+}
+
+impl RequestSeal {
+    /// Stable name for bindings and logs.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bound => "bound",
+            Self::Unbound => "unbound",
+        }
+    }
+}
+
+/// The name key a request row's rename must be sealed under (task 2275 §15):
+/// always the §15 string-convention key derived from the row's item id, its
+/// origin (`Derived`) and the recorded chunk-format pin.
+///
+/// [`RequestRowKeys::new`] builds the key from `item_id` and the pin from the
+/// current name's `chunk_format`; it is never the resolved `name_key` (which
+/// can be `C`, the key the anonymous uploader holds) and never a binary or
+/// upper-repair key. `RenameTarget` has no public constructor, so a core
+/// caller cannot point a rename at a key or pin core did not resolve. Across
+/// the bindings the record has public fields but no key bytes, and the
+/// bindings export a sealer that re-derives the same string key from the row
+/// id ([`crate::rename::encrypt_name_for_request_rename`]). An upper-repair
+/// name yields `None` (read-only).
+pub struct RenameTarget {
+    key: FileKey,
+    origin: KeyOrigin,
+    pin: ExpectedChunkFormat,
+}
+
+impl RenameTarget {
+    fn new(key: &FileKey, origin: KeyOrigin, pin: ExpectedChunkFormat) -> Self {
+        Self {
+            key: FileKey::from_bytes(*key.as_bytes()),
+            origin,
+            pin,
+        }
+    }
+
+    /// The key the renamed name envelope must be sealed under.
+    pub fn key(&self) -> &FileKey {
+        &self.key
+    }
+
+    /// Always `Derived`: [`RequestRowKeys::new`] derives the target from the
+    /// item id, whichever convention authenticated the current name.
+    pub fn origin(&self) -> KeyOrigin {
+        self.origin
+    }
+
+    /// The chunk-format pin the renamed name must keep.
+    pub fn pin(&self) -> ExpectedChunkFormat {
+        self.pin
+    }
+}
+
+impl std::fmt::Debug for RenameTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenameTarget")
+            .field("origin", &self.origin)
+            .field("pin", &self.pin)
+            .finish_non_exhaustive()
+    }
+}
+
 /// A 2236 request-upload row: the uploader sealed a content key `C` to the
 /// owner's request key, and the row is read-only content-wise.
+///
+/// `#[non_exhaustive]`: a caller outside core builds it with [`RequestRowKeys::new`].
+#[non_exhaustive]
 pub struct RequestRowKeys {
     /// The upload's content key `C`.
     pub content_key: FileKey,
@@ -528,69 +605,212 @@ pub struct RequestRowKeys {
     pub name_origin: KeyOrigin,
     /// The authenticated name metadata.
     pub name: NameMetadata,
+    /// Which seal opened the row: the row-bound seal or the shipped empty-id
+    /// seal (§15).
+    pub seal: RequestSeal,
+    /// The target a rename of this row must use, or `None` when the name is
+    /// upper-repair (read-only).
+    pub rename_target: Option<RenameTarget>,
 }
 
-/// Resolve a 2236 request row (task 2275, §4): content under `C`, name under a
-/// derived owner convention or under `C`. Request rows are read-only and never
-/// carry a [`WriteTarget`].
+/// Resolve a 2236 request row (task 2275, §4 and §15): content under `C`, name
+/// under a derived owner convention or under `C`. Request rows are read-only and
+/// never carry a [`WriteTarget`].
+///
+/// The class and encrypted-name checks run FIRST and are final: a row refused
+/// for either reason is never offered to the unbound path. A row that passes
+/// them is tried with the row's item id as the seal's HKDF info (`Bound`), then
+/// with the empty id (`Unbound`).
+///
+/// An `Unbound` row keeps R5's rules: its name resolves only under the string
+/// owner convention (or under `C`, which is what the shipped uploader wrote); a
+/// binary or upper-repair name is refused, never re-interpreted.
+///
+/// `request_wrap_context` is the HKDF context the owner used when wrapping the
+/// request's X25519 private key: **empty for every request created so far**.
+/// The server mints the request id AFTER the wrap, so the web client
+/// (`FILE_REQUEST_EMPTY_ID`) and the CLI (`REQUEST_WRAP_CONTEXT`) both wrap
+/// under the empty context; a real request id here refuses a shipped row. The
+/// resolver never tries both contexts silently.
+///
+/// # R5 residual
+///
+/// The bound path accepts a Binary or upper-repair name convention. Anyone
+/// holding the request link (its public key) can therefore seal a row as
+/// `Bound`. The `Bound` mark proves only that the id-bound seal opened under
+/// this row's id; under collusion that is exactly R5. Uploaders send rows, so
+/// the mark is not evidence that the owner sent the row.
 #[allow(clippy::too_many_arguments)]
 pub fn resolve_request_row(
     master: &MasterKey,
     item_id: &str,
-    request_id: &[u8],
+    request_wrap_context: &[u8],
     wrapped_request_private: &[u8],
     wrap_nonce: &[u8],
     sender_ephemeral_pubkey: &[u8; 32],
     wrapped_content_key: &[u8],
     name_encrypted: &str,
 ) -> Result<RequestRowKeys, CoreError> {
-    if !name_encrypted.starts_with('{') {
-        return Err(CoreError::InvalidInput(
-            "a request row's name must be an encrypted envelope".into(),
-        ));
-    }
-    // Request rows are owner items. A foreign id resolves only through L8 or
-    // L7 (task 2275 L12), never through a request envelope.
+    // The class and name checks are final and run before ANY open: an F id or a
+    // plaintext name must never reach the unbound path, which binds no id.
     if crate::item_id::item_class(item_id)? != crate::item_id::ItemClass::Owner {
         return Err(CoreError::InvalidInput(
-            "a request row must have an owner item id; foreign items resolve only via L8 or L7".into(),
+            "request row class check: a request row must have an owner item id; foreign items resolve only via L8 or L7"
+                .into(),
         ));
     }
+    if !name_encrypted.starts_with('{') {
+        return Err(CoreError::InvalidInput(
+            "request row name check: a request row's name must be an encrypted envelope".into(),
+        ));
+    }
+
+    // A wrong/real-id context produces only a decryption failure. Say what to
+    // pass, rather than leaving a bare error.
     let request_private =
-        crate::file_request::unwrap_request_private(master, request_id, wrapped_request_private, wrap_nonce)?;
-    let content = crate::file_request::open_request_upload(
+        crate::file_request::unwrap_request_private(master, request_wrap_context, wrapped_request_private, wrap_nonce)
+            .map_err(|err| match err {
+                CoreError::Decryption => CoreError::InvalidInput(
+                    "the request private key does not unwrap under this request_wrap_context; every request \
+                     created so far wraps under the EMPTY context"
+                        .into(),
+                ),
+                other => other,
+            })?;
+
+    // Bound first. The empty-id (shipped) seal is tried only when the bound seal
+    // fails to authenticate; any other refusal is final.
+    let (content, seal) = match crate::file_request::open_request_upload(
         &request_private,
         sender_ephemeral_pubkey,
         item_id.as_bytes(),
         wrapped_content_key,
-    )?;
+    ) {
+        Ok(content) => (content, RequestSeal::Bound),
+        Err(CoreError::Decryption) => match crate::file_request::open_request_upload(
+            &request_private,
+            sender_ephemeral_pubkey,
+            b"",
+            wrapped_content_key,
+        ) {
+            Ok(content) => (content, RequestSeal::Unbound),
+            Err(err) => return Err(err),
+        },
+        Err(err) => return Err(err),
+    };
     let content_key = FileKey::from_bytes(*content);
 
-    if crate::item_id::item_class(item_id)? == crate::item_id::ItemClass::Owner {
-        let derived = resolve_owner_key_with(
-            master,
-            item_id,
-            |key| authenticated_name(key, name_encrypted),
-            "request row name does not authenticate",
-        );
-        if let Ok((key, convention, meta)) = derived {
-            return Ok(RequestRowKeys {
-                content_key,
-                name_key: key,
-                name_origin: KeyOrigin::from_convention(convention),
-                name: meta,
-            });
+    let (name_key, name_origin, name) = match seal {
+        RequestSeal::Bound => request_row_name_any(master, item_id, &content_key, name_encrypted)?,
+        RequestSeal::Unbound => request_row_name_string_or_content(master, item_id, &content_key, name_encrypted)?,
+    };
+    Ok(RequestRowKeys::new(
+        master,
+        item_id,
+        content_key,
+        name_key,
+        name_origin,
+        name,
+        seal,
+    ))
+}
+
+impl RequestRowKeys {
+    /// Build a request row from its resolved parts. The rename target follows
+    /// §15: always the string-convention key derived from `item_id`, keeping
+    /// the pin the current name records, and `None` for an upper-repair
+    /// (read-only) name. It is NEVER the resolved `name_key`: when that key is
+    /// `C` (`RequestContent`) the anonymous uploader holds it, so sealing the
+    /// owner's new name under C would hand the name to the uploader (A9).
+    ///
+    /// A CLI pinned to an older core must bump to a version that has this
+    /// constructor: `#[non_exhaustive]` makes a struct literal stop compiling.
+    pub fn new(
+        master: &MasterKey,
+        item_id: &str,
+        content_key: FileKey,
+        name_key: FileKey,
+        name_origin: KeyOrigin,
+        name: NameMetadata,
+        seal: RequestSeal,
+    ) -> Self {
+        let rename_target = match name_origin {
+            KeyOrigin::DerivedUpperRepair => None,
+            _ => Some(RenameTarget::new(
+                &derive_file_key(master, item_id.as_bytes()),
+                KeyOrigin::Derived,
+                name.chunk_format,
+            )),
+        };
+        Self {
+            content_key,
+            name_key,
+            name_origin,
+            name,
+            seal,
+            rename_target,
         }
     }
-    if let Some(meta) = authenticated_name(&content_key, name_encrypted) {
-        return Ok(RequestRowKeys {
-            content_key: FileKey::from_bytes(*content_key.as_bytes()),
-            name_key: content_key,
-            name_origin: KeyOrigin::RequestContent,
-            name: meta,
-        });
+}
+
+/// A bound request row's name: any owner convention (string, binary, then the
+/// read-only upper repair), else the content key `C`.
+fn request_row_name_any(
+    master: &MasterKey,
+    item_id: &str,
+    content_key: &FileKey,
+    name_encrypted: &str,
+) -> Result<(FileKey, KeyOrigin, NameMetadata), CoreError> {
+    if let Ok((key, convention, meta)) = resolve_owner_key_with(
+        master,
+        item_id,
+        |key| authenticated_name(key, name_encrypted),
+        "request row name does not authenticate under a derived owner convention",
+    ) {
+        return Ok((key, KeyOrigin::from_convention(convention), meta));
+    }
+    if let Some(meta) = authenticated_name(content_key, name_encrypted) {
+        return Ok((
+            FileKey::from_bytes(*content_key.as_bytes()),
+            KeyOrigin::RequestContent,
+            meta,
+        ));
     }
     Err(CoreError::InvalidInput(
         "request row name does not authenticate under a derived key or the content key".into(),
+    ))
+}
+
+/// An unbound request row's name: the string convention, else the content key
+/// `C`. A binary or upper-repair name is refused (R4-A: the empty-id envelope
+/// binds no id, so those conventions prove the row is not a request row).
+fn request_row_name_string_or_content(
+    master: &MasterKey,
+    item_id: &str,
+    content_key: &FileKey,
+    name_encrypted: &str,
+) -> Result<(FileKey, KeyOrigin, NameMetadata), CoreError> {
+    match crate::kdf::owner_file_key_for_name(master, item_id, name_encrypted) {
+        Ok((key, OwnerKeyConvention::String)) => {
+            let meta = authenticated_name(&key, name_encrypted).ok_or(CoreError::Decryption)?;
+            return Ok((key, KeyOrigin::Derived, meta));
+        }
+        Ok((_, OwnerKeyConvention::Binary | OwnerKeyConvention::UpperRepair)) => {
+            return Err(CoreError::InvalidInput(
+                "request row unbound convention refusal: an unbound request row's name resolves only under the string convention"
+                    .into(),
+            ));
+        }
+        Err(_) => {}
+    }
+    if let Some(meta) = authenticated_name(content_key, name_encrypted) {
+        return Ok((
+            FileKey::from_bytes(*content_key.as_bytes()),
+            KeyOrigin::RequestContent,
+            meta,
+        ));
+    }
+    Err(CoreError::InvalidInput(
+        "request row name does not authenticate under the string convention or the content key".into(),
     ))
 }

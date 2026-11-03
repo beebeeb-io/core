@@ -1,0 +1,132 @@
+{
+  "description": "Move 5 — the plan table clients read. One row per plan (base storage, add-on limits, seats, base price, capabilities), the strict slug lookup that answers None for an unknown slug while the lenient one keeps the historical Free fallback, the add-on quota maths (extra TB, bonus bytes, zero add-ons, the 99 TB cap) and the monthly cost with storage and user add-ons.",
+  "source": "core beebeeb-types/src/quota.rs constants and Plan accessors, now behind PlanTable; the five wasm exports plan_base_storage_bytes / plan_effective_quota / plan_max_extra_tb / plan_can_add_storage / plan_monthly_cost_cents (beebeeb-wasm/src/lib.rs:1693-1721) and the clients' copies in admin lib/user-quota.ts, web plan-pricing.ts/storage-totals.ts, measured in the consolidation map §4.2 case 5",
+  "cases": [
+    {
+      "id": "plan_free",
+      "kind": "table",
+      "slug": "free",
+      "expected": {
+        "base_storage_bytes": 5000000000,
+        "max_extra_tb": 0,
+        "max_extra_users": 0,
+        "monthly_base_cents": 0,
+        "can_add_storage": false,
+        "can_add_users": false
+      }
+    },
+    {
+      "id": "plan_starter",
+      "kind": "table",
+      "slug": "starter",
+      "expected": {
+        "base_storage_bytes": 100000000000,
+        "max_extra_tb": 0,
+        "max_extra_users": 0,
+        "monthly_base_cents": 199,
+        "can_add_storage": false,
+        "can_add_users": false
+      }
+    },
+    {
+      "id": "plan_basic",
+      "kind": "table",
+      "slug": "basic",
+      "expected": {
+        "base_storage_bytes": 200000000000,
+        "max_extra_tb": 0,
+        "max_extra_users": 0,
+        "monthly_base_cents": 399,
+        "can_add_storage": false,
+        "can_add_users": false
+      }
+    },
+    {
+      "id": "plan_pro",
+      "kind": "table",
+      "slug": "pro",
+      "expected": {
+        "base_storage_bytes": 1000000000000,
+        "max_extra_tb": 98,
+        "max_extra_users": 0,
+        "monthly_base_cents": 1099,
+        "can_add_storage": true,
+        "can_add_users": false
+      }
+    },
+    {
+      "id": "plan_business",
+      "kind": "table",
+      "slug": "business",
+      "expected": {
+        "base_storage_bytes": 5000000000000,
+        "max_extra_tb": 94,
+        "max_extra_users": 49,
+        "monthly_base_cents": 5495,
+        "can_add_storage": true,
+        "can_add_users": true
+      }
+    },
+    {
+      "id": "plan_unknown_slug",
+      "kind": "unknown-slug",
+      "slug": "enterprise"
+    },
+    {
+      "id": "quota_zero_addons",
+      "kind": "quota",
+      "slug": "free",
+      "extra_tb": 0,
+      "bonus_bytes": 0,
+      "expected": 5000000000
+    },
+    {
+      "id": "quota_pro_extra_tb",
+      "kind": "quota",
+      "slug": "pro",
+      "extra_tb": 3,
+      "bonus_bytes": 0,
+      "expected": 4000000000000
+    },
+    {
+      "id": "quota_pro_bonus_bytes",
+      "kind": "quota",
+      "slug": "pro",
+      "extra_tb": 0,
+      "bonus_bytes": 500000000,
+      "expected": 1000500000000
+    },
+    {
+      "id": "quota_free_ignores_extra_tb",
+      "kind": "quota",
+      "slug": "free",
+      "extra_tb": 5,
+      "bonus_bytes": 0,
+      "expected": 5000000000
+    },
+    {
+      "id": "quota_over_quota",
+      "kind": "quota",
+      "slug": "business",
+      "extra_tb": 99,
+      "bonus_bytes": 0,
+      "expected": 99000000000000
+    },
+    {
+      "id": "cost_business_extra_users",
+      "kind": "cost",
+      "slug": "business",
+      "extra_tb": 1,
+      "extra_users": 3,
+      "expected": 8091
+    },
+    {
+      "id": "cost_pro_ignores_extra_users",
+      "kind": "cost",
+      "slug": "pro",
+      "extra_tb": 0,
+      "extra_users": 5,
+      "expected": 1099
+    }
+  ]
+}

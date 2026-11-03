@@ -1,3 +1,4 @@
+pub mod api_error;
 pub mod archive;
 pub mod blob;
 pub mod chunk_stream;
@@ -5,7 +6,9 @@ pub mod cli_auth;
 pub mod client_meta;
 pub mod constellation;
 pub mod direct_transfer;
+pub mod download;
 pub mod encrypt;
+pub mod encrypt_batch;
 pub mod error;
 pub mod file_encrypt;
 pub mod file_request;
@@ -14,6 +17,7 @@ pub mod folder_key;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod fp_cache;
 pub mod hash;
+mod invisible;
 pub mod item_id;
 pub mod kdf;
 #[cfg(test)]
@@ -24,10 +28,15 @@ pub mod onboarding;
 pub mod opaque;
 pub mod opaque_protocol;
 pub mod owned_keys;
+pub mod path_safety;
 pub mod pdf;
 pub mod recovery;
+pub mod rename;
+pub mod request_content;
+pub mod retry;
 pub mod search_index;
 pub mod search_sync;
+pub mod share_link;
 pub mod share_token;
 pub mod sync;
 #[cfg(any(test, feature = "test-support"))]

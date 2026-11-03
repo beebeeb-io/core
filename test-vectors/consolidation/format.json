@@ -1,0 +1,157 @@
+{
+  "description": "Move 4 — one byte formatter. The canonical SI form (byte-identical to quota::format_storage_si), the binary/IEC form, and the explicit-decimals compact form used by dense tables; boundaries at 1000/1024, 1 MiB/GiB/TiB, the TB decimal, negatives and i64::MAX.",
+  "source": "core beebeeb-types/src/quota.rs format_storage_si (frozen bytes, moved to beebeeb-types/src/format.rs format_si) plus web src/lib/format.ts, admin src/lib/format.ts and admin src/lib/infra.ts formatBytes (explicit decimals), measured in the consolidation map §4.2 case 11",
+  "cases": [
+    {
+      "id": "format_si_zero",
+      "kind": "si",
+      "bytes": 0,
+      "expected": "0 B"
+    },
+    {
+      "id": "format_si_one",
+      "kind": "si",
+      "bytes": 1,
+      "expected": "1 B"
+    },
+    {
+      "id": "format_si_999",
+      "kind": "si",
+      "bytes": 999,
+      "expected": "999 B"
+    },
+    {
+      "id": "format_si_1000",
+      "kind": "si",
+      "bytes": 1000,
+      "expected": "1 KB"
+    },
+    {
+      "id": "format_si_1024",
+      "kind": "si",
+      "bytes": 1024,
+      "expected": "1 KB"
+    },
+    {
+      "id": "format_si_1_mib",
+      "kind": "si",
+      "bytes": 1048576,
+      "expected": "1 MB"
+    },
+    {
+      "id": "format_si_1_gib",
+      "kind": "si",
+      "bytes": 1073741824,
+      "expected": "1 GB"
+    },
+    {
+      "id": "format_si_1_tib",
+      "kind": "si",
+      "bytes": 1099511627776,
+      "expected": "1.1 TB"
+    },
+    {
+      "id": "format_si_one_tb",
+      "kind": "si",
+      "bytes": 1000000000000,
+      "expected": "1.0 TB"
+    },
+    {
+      "id": "format_si_negative",
+      "kind": "si",
+      "bytes": -5,
+      "expected": "-5 B"
+    },
+    {
+      "id": "format_si_negative_large",
+      "kind": "si",
+      "bytes": -1500,
+      "expected": "-1500 B"
+    },
+    {
+      "id": "format_si_i64_max",
+      "kind": "si",
+      "bytes": 9223372036854775807,
+      "expected": "9223372.0 TB"
+    },
+    {
+      "id": "format_binary_1000",
+      "kind": "binary",
+      "bytes": 1000,
+      "expected": "1000 B"
+    },
+    {
+      "id": "format_binary_1024",
+      "kind": "binary",
+      "bytes": 1024,
+      "expected": "1 KiB"
+    },
+    {
+      "id": "format_binary_1_mib",
+      "kind": "binary",
+      "bytes": 1048576,
+      "expected": "1 MiB"
+    },
+    {
+      "id": "format_binary_1_gib",
+      "kind": "binary",
+      "bytes": 1073741824,
+      "expected": "1 GiB"
+    },
+    {
+      "id": "format_binary_1_tib",
+      "kind": "binary",
+      "bytes": 1099511627776,
+      "expected": "1.0 TiB"
+    },
+    {
+      "id": "format_compact_zero_decimals",
+      "kind": "compact",
+      "bytes": 1600,
+      "decimals": 0,
+      "expected": "2 KB"
+    },
+    {
+      "id": "format_compact_one_decimal",
+      "kind": "compact",
+      "bytes": 1600,
+      "decimals": 1,
+      "expected": "1.6 KB"
+    },
+    {
+      "id": "format_compact_two_decimals",
+      "kind": "compact",
+      "bytes": 1234567,
+      "decimals": 2,
+      "expected": "1.23 MB"
+    },
+    {
+      "id": "format_compact_carry_one_decimal",
+      "kind": "compact",
+      "bytes": 999960,
+      "decimals": 1,
+      "expected": "1.0 MB"
+    },
+    {
+      "id": "format_compact_carry_zero_decimals",
+      "kind": "compact",
+      "bytes": 999600,
+      "decimals": 0,
+      "expected": "1 MB"
+    },
+    {
+      "id": "format_compact_negative",
+      "kind": "compact",
+      "bytes": -5,
+      "decimals": 2,
+      "expected": "-5 B"
+    },
+    {
+      "id": "format_compact_zero",
+      "kind": "compact",
+      "bytes": 0,
+      "decimals": 1,
+      "expected": "0 B"
+    }
+  ]
+}

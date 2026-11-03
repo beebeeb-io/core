@@ -1,0 +1,252 @@
+{
+  "description": "Move 9 — one share-link grammar: build percent-encodes the #key fragment exactly as the clients do today, parse accepts /s/ and /f/ on any host, and key_bytes accepts standard base64 (legacy links) and base64url (current links) with or without padding.",
+  "source": "cli src/commands/share.rs grammar comment L624 and share_link(), web src/lib/share-full-link.ts buildFullShareLink (encodeURIComponent) + src/lib/share-link.ts, mobile src/lib/share-file-name.ts fragmentKeyToBytes (accepts both alphabets) and share-full-link; the compatibility rule is map §5.3 move 9",
+  "cases": [
+    {
+      "id": "share_build_canonical",
+      "kind": "build",
+      "app_url": "https://app.beebeeb.io",
+      "token": "AAECAwQFBgcICQoLDA0ODxAREhM",
+      "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "route": "s",
+      "expected": "https://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "id": "share_build_trailing_slashes",
+      "kind": "build",
+      "app_url": "https://app.beebeeb.io///",
+      "token": "AAECAwQFBgcICQoLDA0ODxAREhM",
+      "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "route": "s",
+      "expected": "https://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "id": "share_build_percent_encodes",
+      "kind": "build",
+      "app_url": "https://app.beebeeb.io",
+      "token": "AAECAwQFBgcICQoLDA0ODxAREhM",
+      "key": "+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/s=",
+      "route": "s",
+      "expected": "https://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=%2B%2Fv7%2B%2Fv7%2B%2Fv7%2B%2Fv7%2B%2Fv7%2B%2Fv7%2B%2Fv7%2B%2Fv7%2B%2Fv7%2B%2Fv7%2B%2Fs%3D"
+    },
+    {
+      "id": "share_build_folder_keeps_encoding",
+      "kind": "build",
+      "app_url": "https://app.beebeeb.io",
+      "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "key": "-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s",
+      "route": "f",
+      "expected": "https://app.beebeeb.io/f/AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8#key=-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s"
+    },
+    {
+      "id": "share_build_unicode_key",
+      "kind": "build",
+      "app_url": "https://app.beebeeb.io",
+      "token": "AAECAwQFBgcICQoLDA0ODxAREhM",
+      "key": "✓ k/ä",
+      "route": "s",
+      "expected": "https://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=%E2%9C%93%20k%2F%C3%A4"
+    },
+    {
+      "id": "share_parse_canonical",
+      "kind": "parse",
+      "url": "https://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": {
+        "base_url": "https://app.beebeeb.io",
+        "route": "s",
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhM",
+        "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+      }
+    },
+    {
+      "id": "share_parse_legacy_host",
+      "kind": "parse",
+      "url": "https://beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": {
+        "base_url": "https://beebeeb.io",
+        "route": "s",
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhM",
+        "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+      }
+    },
+    {
+      "id": "share_parse_raw_s",
+      "kind": "parse",
+      "url": "https://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/s=",
+      "expected": {
+        "base_url": "https://app.beebeeb.io",
+        "route": "s",
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhM",
+        "key": "+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/s=",
+        "key_hex": "fbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfb"
+      }
+    },
+    {
+      "id": "share_parse_b64url_f",
+      "kind": "parse",
+      "url": "https://app.beebeeb.io/f/AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8#key=-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s",
+      "expected": {
+        "base_url": "https://app.beebeeb.io",
+        "route": "f",
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "key": "-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s",
+        "key_hex": "fbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfb"
+      }
+    },
+    {
+      "id": "share_parse_reject_s_token_on_f",
+      "kind": "parse-error",
+      "url": "https://app.beebeeb.io/f/AAECAwQFBgcICQoLDA0ODxAREhM#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": "not_a_share_link"
+    },
+    {
+      "id": "share_parse_reject_f_token_on_s",
+      "kind": "parse-error",
+      "url": "https://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": "not_a_share_link"
+    },
+    {
+      "id": "share_parse_extra_query",
+      "kind": "parse",
+      "url": "https://files.example.com/bb/s/AAECAwQFBgcICQoLDA0ODxAREhM?utm=share&v=2#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": {
+        "base_url": "https://files.example.com/bb",
+        "route": "s",
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhM",
+        "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+      }
+    },
+    {
+      "id": "share_parse_percent_encoded",
+      "kind": "parse",
+      "url": "https://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=%2B%2Fv7%2B%2Fv7%2B%2Fv7%2B%2Fv7%2B%2Fv7%2B%2Fv7%2B%2Fv7%2B%2Fv7%2B%2Fv7%2B%2Fv7%2B%2Fs%3D",
+      "expected": {
+        "base_url": "https://app.beebeeb.io",
+        "route": "s",
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhM",
+        "key": "+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/s=",
+        "key_hex": "fbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfb"
+      }
+    },
+    {
+      "id": "share_parse_unicode_key",
+      "kind": "parse",
+      "url": "https://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=%E2%9C%93%20k%2F%C3%A4",
+      "expected": {
+        "base_url": "https://app.beebeeb.io",
+        "route": "s",
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhM",
+        "key": "✓ k/ä"
+      }
+    },
+    {
+      "id": "share_parse_missing_fragment",
+      "kind": "parse-error",
+      "url": "https://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM",
+      "expected": "missing_fragment"
+    },
+    {
+      "id": "share_parse_empty_fragment",
+      "kind": "parse-error",
+      "url": "https://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#",
+      "expected": "missing_key"
+    },
+    {
+      "id": "share_parse_missing_key",
+      "kind": "parse-error",
+      "url": "https://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#foo=bar",
+      "expected": "missing_key"
+    },
+    {
+      "id": "share_parse_empty_key",
+      "kind": "parse-error",
+      "url": "https://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=",
+      "expected": "missing_key"
+    },
+    {
+      "id": "share_parse_missing_token",
+      "kind": "parse-error",
+      "url": "https://app.beebeeb.io/s/#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": "missing_token"
+    },
+    {
+      "id": "share_parse_wrong_route",
+      "kind": "parse-error",
+      "url": "https://app.beebeeb.io/x/AAECAwQFBgcICQoLDA0ODxAREhM#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": "not_a_share_link"
+    },
+    {
+      "id": "share_parse_not_a_url",
+      "kind": "parse-error",
+      "url": "nonsense",
+      "expected": "not_a_share_link"
+    },
+    {
+      "id": "share_parse_reject_javascript",
+      "kind": "parse-error",
+      "url": "javascript://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": "not_a_share_link"
+    },
+    {
+      "id": "share_parse_reject_userinfo_backslash",
+      "kind": "parse-error",
+      "url": "https://evil.com\\@app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": "not_a_share_link"
+    },
+    {
+      "id": "share_parse_reject_dotdot_token",
+      "kind": "parse-error",
+      "url": "https://app.beebeeb.io/s/..#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": "not_a_share_link"
+    },
+    {
+      "id": "share_parse_reject_http_public_host",
+      "kind": "parse-error",
+      "url": "http://app.beebeeb.io/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": "not_a_share_link"
+    },
+    {
+      "id": "share_parse_http_loopback",
+      "kind": "parse",
+      "url": "http://localhost:3000/s/AAECAwQFBgcICQoLDA0ODxAREhM#key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": {
+        "base_url": "http://localhost:3000",
+        "route": "s",
+        "token": "AAECAwQFBgcICQoLDA0ODxAREhM",
+        "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+      }
+    },
+    {
+      "id": "share_key_bytes_standard_padded",
+      "kind": "key-bytes",
+      "key": "+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/s=",
+      "expected": "fbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfb"
+    },
+    {
+      "id": "share_key_bytes_standard_unpadded",
+      "kind": "key-bytes",
+      "key": "+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/s",
+      "expected": "fbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfb"
+    },
+    {
+      "id": "share_key_bytes_b64url_unpadded",
+      "kind": "key-bytes",
+      "key": "-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s",
+      "expected": "fbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfb"
+    },
+    {
+      "id": "share_key_bytes_b64url_padded",
+      "kind": "key-bytes",
+      "key": "-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s=",
+      "expected": "fbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfb"
+    },
+    {
+      "id": "share_key_bytes_rejects_garbage",
+      "kind": "key-bytes",
+      "key": "not base64!",
+      "expected": null
+    }
+  ]
+}

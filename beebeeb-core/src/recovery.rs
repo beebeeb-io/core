@@ -48,6 +48,85 @@ pub fn recover_from_phrase(phrase: &str) -> Result<MasterKey, CoreError> {
     derive_key_from_entropy(&entropy)
 }
 
+/// Normalize a recovery phrase the way the clients do: trim, lowercase, and
+/// collapse every run of Unicode whitespace — spaces, tabs, newlines, and the
+/// non-breaking (U+00A0) / ideographic (U+3000) spaces an iPad IME can insert
+/// — to a single ASCII space.
+///
+/// This is the one split rule behind the paste and counter UIs. It validates
+/// neither the words nor the checksum, and it does not change
+/// [`recover_from_phrase`].
+///
+/// The result is a recovery-phrase candidate, so it is wiped on drop like the
+/// entropy it will be parsed into.
+pub fn normalize_phrase(input: &str) -> Zeroizing<String> {
+    // Lowercasing can grow a char (U+0130 İ: 2 bytes -> 3 bytes), and a
+    // reallocation would free the old, unwiped copy of a secret phrase. Three
+    // bytes per input byte is the worst case for Unicode lowercase (1→1,
+    // 2→3, 3→3, 4→4), so this capacity can never be exceeded.
+    let mut normalized = String::with_capacity(input.len().saturating_mul(3));
+    for ch in input.chars() {
+        if ch.is_whitespace() {
+            if !normalized.is_empty() && !normalized.ends_with(' ') {
+                normalized.push(' ');
+            }
+        } else {
+            normalized.extend(ch.to_lowercase());
+        }
+    }
+    if normalized.ends_with(' ') {
+        normalized.pop();
+    }
+    Zeroizing::new(normalized)
+}
+
+/// The individual words of a (possibly messy) phrase, after
+/// [`normalize_phrase`]. Empty input yields an empty list, never `[""]`.
+///
+/// Each word is wiped on drop: partial phrases are just as sensitive as the
+/// complete one.
+pub fn split_phrase(input: &str) -> Vec<Zeroizing<String>> {
+    let normalized = normalize_phrase(input);
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+    normalized
+        .split(' ')
+        .map(|word| Zeroizing::new(word.to_string()))
+        .collect()
+}
+
+/// Count the whitespace-separated runs directly, without materialising the
+/// normalised phrase (lowercasing and collapsing never changes word counts).
+fn count_words(input: &str) -> usize {
+    let mut words = 0;
+    let mut in_word = false;
+    for ch in input.chars() {
+        if ch.is_whitespace() {
+            in_word = false;
+        } else if !in_word {
+            words += 1;
+            in_word = true;
+        }
+    }
+    words
+}
+
+/// How many words the phrase has after normalisation (0 for empty input).
+pub fn phrase_word_count(input: &str) -> usize {
+    count_words(input)
+}
+
+/// Whether the phrase has exactly [`RECOVERY_WORD_COUNT`] words.
+pub fn phrase_is_complete(input: &str) -> bool {
+    phrase_word_count(input) == RECOVERY_WORD_COUNT
+}
+
+/// Progress for the UI: `(words entered, words required)`.
+pub fn phrase_progress(input: &str) -> (usize, usize) {
+    (phrase_word_count(input), RECOVERY_WORD_COUNT)
+}
+
 fn derive_key_from_entropy(entropy: &[u8]) -> Result<MasterKey, CoreError> {
     use argon2::{Algorithm, Argon2, Params, Version};
 
@@ -123,6 +202,21 @@ mod tests {
     /// cannot be observed from safe Rust without reading freed memory; this test
     /// pins the round-trip so a future refactor of the wrapper can't silently
     /// break key derivation.)
+    #[test]
+    fn normalize_phrase_capacity_never_reallocates() {
+        // U+0130 (İ) is 2 UTF-8 bytes and lowercases to 3 bytes (`i` + U+0307).
+        // The buffer must reserve that growth up front: a reallocation would
+        // free the old, unwiped copy of a secret phrase.
+        let input = "İİİİİİİİİİİİ";
+        let normalized = normalize_phrase(input);
+        assert_eq!(normalized.len(), input.len() * 3 / 2, "each 2-byte İ becomes 3 bytes");
+        assert_eq!(
+            normalized.capacity(),
+            input.len() * 3,
+            "capacity reserved for the largest possible lowercase growth; no reallocation"
+        );
+    }
+
     #[test]
     fn entropy_zeroizing_preserves_roundtrip() {
         // Argon2id at 256 MiB is expensive in debug; a few iterations suffice to

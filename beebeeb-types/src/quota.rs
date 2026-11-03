@@ -111,43 +111,131 @@ impl Plan {
     }
 }
 
-pub fn effective_quota(plan: Plan, extra_tb: i64, bonus_bytes: i64) -> i64 {
-    if !plan.can_add_storage() && extra_tb > 0 {
-        return (plan.base_storage_bytes() + bonus_bytes).min(MAX_TOTAL_STORAGE);
+/// One plan's row in the table every client reads.
+///
+/// The values are the same ones [`Plan`]'s accessors return; this type exists
+/// so a client can hold a whole row (storage, add-on limits, prices) and call
+/// the add-on maths without repeating the match on the plan slug. The free
+/// functions below are thin wrappers over it, so `effective_quota` and
+/// `monthly_cost_cents` still answer exactly as they always have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlanTable {
+    /// The plan this row describes.
+    pub plan: Plan,
+    /// The slug the row was looked up by, canonical form.
+    pub slug: &'static str,
+    /// Storage included in the base price, in bytes.
+    pub base_storage_bytes: i64,
+    /// Most extra terabytes this plan may buy (0 when it cannot).
+    pub max_extra_tb: i64,
+    /// Whether extra storage can be bought at all.
+    pub can_add_storage: bool,
+    /// Whether extra users can be bought at all.
+    pub can_add_users: bool,
+    /// Most extra users self-service allows (0 when it cannot).
+    pub max_extra_users: i64,
+    /// Base monthly price in cents (0 for Free).
+    pub monthly_base_cents: i64,
+    /// Price of one extra terabyte per month, in cents.
+    pub storage_addon_cents_per_tb: i64,
+    /// Price of one extra user per month, in cents.
+    pub user_addon_cents: i64,
+}
+
+impl PlanTable {
+    /// The row for a known plan.
+    pub fn for_plan(plan: Plan) -> Self {
+        let monthly_base_cents = match plan {
+            Plan::Free => 0,
+            Plan::Starter => STARTER_PRICE_CENTS,
+            Plan::Basic => BASIC_PRICE_CENTS,
+            Plan::Pro => PRO_PRICE_CENTS,
+            Plan::Business => BUSINESS_PRICE_CENTS,
+        };
+        Self {
+            plan,
+            slug: plan.slug(),
+            base_storage_bytes: plan.base_storage_bytes(),
+            max_extra_tb: plan.max_extra_tb(),
+            can_add_storage: plan.can_add_storage(),
+            can_add_users: plan.can_add_users(),
+            max_extra_users: plan.max_extra_users(),
+            monthly_base_cents,
+            storage_addon_cents_per_tb: STORAGE_ADDON_CENTS_PER_TB,
+            user_addon_cents: USER_ADDON_CENTS,
+        }
     }
-    let total = plan.base_storage_bytes() + (extra_tb * ONE_TB) + bonus_bytes;
-    total.min(MAX_TOTAL_STORAGE)
+
+    /// Every row, in slug order (free, starter, basic, pro, business).
+    pub fn all() -> [Self; 5] {
+        [
+            Self::for_plan(Plan::Free),
+            Self::for_plan(Plan::Starter),
+            Self::for_plan(Plan::Basic),
+            Self::for_plan(Plan::Pro),
+            Self::for_plan(Plan::Business),
+        ]
+    }
+
+    /// Strict lookup: `None` for a slug no plan owns.
+    ///
+    /// Use this where a typo must be visible. [`Self::for_slug`] keeps the
+    /// historical lenient behaviour for the existing callers.
+    pub fn from_slug(slug: &str) -> Option<Self> {
+        match slug {
+            "free" => Some(Self::for_plan(Plan::Free)),
+            "starter" => Some(Self::for_plan(Plan::Starter)),
+            "basic" | "personal" => Some(Self::for_plan(Plan::Basic)),
+            "pro" => Some(Self::for_plan(Plan::Pro)),
+            "business" | "data_hoarder" => Some(Self::for_plan(Plan::Business)),
+            _ => None,
+        }
+    }
+
+    /// Lenient lookup, exactly [`Plan::from_slug`]: an unknown slug is Free.
+    pub fn for_slug(slug: &str) -> Self {
+        Self::for_plan(Plan::from_slug(slug))
+    }
+
+    /// `base + extra_tb * 1 TB + bonus`, capped at [`MAX_TOTAL_STORAGE`].
+    ///
+    /// A plan that cannot buy storage ignores a positive `extra_tb` (the old
+    /// rule); `bonus_bytes` still applies.
+    pub fn effective_quota(&self, extra_tb: i64, bonus_bytes: i64) -> i64 {
+        if !self.can_add_storage && extra_tb > 0 {
+            return (self.base_storage_bytes + bonus_bytes).min(MAX_TOTAL_STORAGE);
+        }
+        let total = self.base_storage_bytes + (extra_tb * ONE_TB) + bonus_bytes;
+        total.min(MAX_TOTAL_STORAGE)
+    }
+
+    /// Base price plus storage and user add-ons, in cents.
+    ///
+    /// Only plans that can add users are billed for them, so passing
+    /// `extra_users` to any other plan adds nothing.
+    pub fn monthly_cost_cents(&self, extra_tb: i64, extra_users: i64) -> i64 {
+        let billable_users = if self.can_add_users { extra_users } else { 0 };
+        self.monthly_base_cents
+            + (extra_tb * self.storage_addon_cents_per_tb)
+            + (billable_users * self.user_addon_cents)
+    }
+}
+
+pub fn effective_quota(plan: Plan, extra_tb: i64, bonus_bytes: i64) -> i64 {
+    PlanTable::for_plan(plan).effective_quota(extra_tb, bonus_bytes)
 }
 
 pub fn monthly_cost_cents(plan: Plan, extra_tb: i64, extra_users: i64) -> i64 {
-    let base = match plan {
-        Plan::Free => 0,
-        Plan::Starter => STARTER_PRICE_CENTS,
-        Plan::Basic => BASIC_PRICE_CENTS,
-        Plan::Pro => PRO_PRICE_CENTS,
-        Plan::Business => BUSINESS_PRICE_CENTS,
-    };
-    // Only Business plans support extra users; clamp to 0 for all other plans
-    // so callers passing a non-zero extra_users value don't accidentally inflate the cost.
-    let billable_users = if plan.can_add_users() { extra_users } else { 0 };
-    base + (extra_tb * STORAGE_ADDON_CENTS_PER_TB) + (billable_users * USER_ADDON_CENTS)
+    PlanTable::for_plan(plan).monthly_cost_cents(extra_tb, extra_users)
 }
 
+/// The canonical storage form, kept at this path for every existing caller.
+///
+/// The implementation lives in [`crate::format::format_si`] (move 4 of the
+/// consolidation). This stays a function item — not a re-export — so the
+/// exported surface at this exact path does not lose its function.
 pub fn format_storage_si(bytes: i64) -> String {
-    if bytes < 1_000 {
-        return format!("{bytes} B");
-    }
-    if bytes < 1_000_000 {
-        return format!("{} KB", bytes / 1_000);
-    }
-    if bytes < 1_000_000_000 {
-        return format!("{} MB", bytes / 1_000_000);
-    }
-    if bytes < ONE_TB {
-        return format!("{} GB", bytes / 1_000_000_000);
-    }
-    let tb = bytes as f64 / ONE_TB as f64;
-    format!("{tb:.1} TB")
+    crate::format::format_si(bytes)
 }
 
 #[cfg(test)]

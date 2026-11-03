@@ -8,15 +8,68 @@
 use std::io::{BufWriter, Write};
 
 use beebeeb_core::chunk_stream::{ChunkDecryptor, ExpectedChunkFormat};
+use beebeeb_core::download::DownloadFailure;
 
 use crate::error::UploadError;
 use crate::retry;
 
-const NONCE_LEN: usize = 12;
-/// AES-256-GCM tag length in bytes.
-const GCM_TAG_LEN: usize = 16;
 /// Per-chunk wire overhead: `nonce(12) + tag(16)`.
-const GCM_OVERHEAD: u64 = (NONCE_LEN + GCM_TAG_LEN) as u64;
+const GCM_OVERHEAD: u64 = beebeeb_core::chunk_stream::CHUNK_OVERHEAD;
+
+/// Map core's download failure onto this crate's error, keeping the variant a
+/// client already branches on and the message it already prints.
+fn map_download_failure(failure: DownloadFailure) -> UploadError {
+    match failure {
+        DownloadFailure::InvalidInput(message) => UploadError::InvalidInput(message),
+        DownloadFailure::Io(message) => UploadError::IoError(message),
+        other => UploadError::InvalidResponse(other.to_string()),
+    }
+}
+
+/// The `{output}.tmp` file a download writes into before the atomic rename.
+///
+/// `Drop` removes it unless [`Self::commit`] renamed it into place, so every
+/// error path in unwind builds — a `?` while reading the body, a decryption
+/// failure, a flush error, a failed rename — leaves no decrypted frames
+/// behind. (The old explicit `remove_file` at each `return` missed the `?`
+/// exits.) This holds only where unwinding runs `Drop`: the workspace sets
+/// `panic = "abort"` for release builds (`Cargo.toml`), so a panic does not
+/// unwind there and the temp file can remain. The guard is error cleanup, not
+/// a panic safety net.
+struct TempOutput {
+    path: std::path::PathBuf,
+    renamed: bool,
+}
+
+impl TempOutput {
+    /// Create the parent directory and the temp file; the guard removes the
+    /// file on drop until it is committed.
+    fn create(output_path: &str) -> Result<(Self, std::fs::File), UploadError> {
+        let path = std::path::PathBuf::from(format!("{output_path}.tmp"));
+        if let Some(parent) = std::path::Path::new(output_path).parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| UploadError::IoError(format!("create output parent dir: {e}")))?;
+        }
+        let file =
+            std::fs::File::create(&path).map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
+        Ok((Self { path, renamed: false }, file))
+    }
+
+    /// Rename the temp file into place and disarm the guard.
+    fn commit(mut self, output_path: &str) -> Result<(), UploadError> {
+        std::fs::rename(&self.path, output_path).map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
+        self.renamed = true;
+        Ok(())
+    }
+}
+
+impl Drop for TempOutput {
+    fn drop(&mut self) {
+        if !self.renamed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
 
 /// Read more body bytes (via `Response::chunk`) until `buf.len() >= want` or EOF.
 async fn fill_to(resp: &mut reqwest::Response, buf: &mut Vec<u8>, want: usize) -> Result<(), UploadError> {
@@ -33,14 +86,29 @@ async fn fill_to(resp: &mut reqwest::Response, buf: &mut Vec<u8>, want: usize) -
     Ok(())
 }
 
-/// Drain the rest of the response body into `buf`.
+/// Append one body read to `buf`, refusing a frame over `limit` BEFORE the
+/// bytes are buffered. `limit` is a parameter so the boundary is testable
+/// without allocating a maximum-size frame.
+fn push_frame_bytes(buf: &mut Vec<u8>, bytes: &[u8], limit: usize) -> Result<(), UploadError> {
+    if buf.len().saturating_add(bytes.len()) > limit {
+        return Err(UploadError::InvalidResponse(format!(
+            "frame exceeds the maximum {limit} bytes"
+        )));
+    }
+    buf.extend_from_slice(bytes);
+    Ok(())
+}
+
+/// Drain the rest of the response body into `buf`, capped at one maximum wire
+/// frame. The last frame (and the single-frame `usize::MAX` case) has no size
+/// header to trust, so the cap is enforced here while reading.
 async fn drain_rest(resp: &mut reqwest::Response, buf: &mut Vec<u8>) -> Result<(), UploadError> {
     while let Some(b) = resp
         .chunk()
         .await
         .map_err(|e| UploadError::Network(format!("reading response body: {e}")))?
     {
-        buf.extend_from_slice(&b);
+        push_frame_bytes(buf, &b, beebeeb_core::download::MAX_FRAME_SIZE)?;
     }
     Ok(())
 }
@@ -222,22 +290,12 @@ impl DownloadClient {
         // when the file size is not a multiple of the chunk size. Only legacy V1
         // responses (no header) fall back to the `total / chunk_count` average,
         // which matches `compute_chunk_boundaries`.
-        let frame_size = if n <= 1 {
-            usize::MAX // single frame == whole body
-        } else if let Some(cs) = chunk_size {
-            (cs + GCM_OVERHEAD) as usize
-        } else {
-            (total / chunk_count as u64) as usize
-        };
+        let frame_size =
+            beebeeb_core::download::checked_frame_size(total, chunk_count, chunk_size).map_err(map_download_failure)?;
 
-        // Write to .tmp then atomic rename.
-        let tmp_path = format!("{output_path}.tmp");
-        if let Some(parent) = std::path::Path::new(output_path).parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| UploadError::IoError(format!("create output parent dir: {e}")))?;
-        }
-        let output_file =
-            std::fs::File::create(&tmp_path).map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
+        // Write to .tmp then atomic rename; the guard deletes the temp file on
+        // every error path (including the `?` before the loop finishes).
+        let (tmp, output_file) = TempOutput::create(output_path)?;
         let mut writer = BufWriter::new(output_file);
 
         let mut decryptor = ChunkDecryptor::for_push(master_key, file_id, expected);
@@ -253,7 +311,6 @@ impl DownloadClient {
             } else {
                 fill_to(resp, &mut carry, frame_size).await?;
                 if carry.len() < frame_size {
-                    let _ = std::fs::remove_file(&tmp_path);
                     return Err(UploadError::InvalidResponse(format!(
                         "download truncated at chunk {i}/{n}: wanted {frame_size}, got {}",
                         carry.len()
@@ -265,7 +322,6 @@ impl DownloadClient {
             let dec = match decryptor.push_frame(&frame) {
                 Ok(d) => d,
                 Err(e) => {
-                    let _ = std::fs::remove_file(&tmp_path);
                     return Err(UploadError::InvalidResponse(format!(
                         "decryption failed for chunk {i}: {e}"
                     )));
@@ -273,7 +329,6 @@ impl DownloadClient {
             };
 
             if let Err(e) = writer.write_all(&dec.data) {
-                let _ = std::fs::remove_file(&tmp_path);
                 return Err(UploadError::IoError(format!("write output: {e}")));
             }
             total_plaintext += dec.data.len() as u64;
@@ -289,7 +344,6 @@ impl DownloadClient {
         // last chunk). Never rename a truncated plaintext into place.
         if let Err(e) = decryptor.finish() {
             drop(writer);
-            let _ = std::fs::remove_file(&tmp_path);
             return Err(UploadError::InvalidResponse(format!(
                 "download incomplete after {chunks_decrypted} chunks: {e}"
             )));
@@ -299,7 +353,7 @@ impl DownloadClient {
             .flush()
             .map_err(|e| UploadError::IoError(format!("flush output: {e}")))?;
         drop(writer);
-        std::fs::rename(&tmp_path, output_path).map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
+        tmp.commit(output_path)?;
 
         if let Some(cb) = callback {
             cb.on_complete(output_path);
@@ -357,69 +411,34 @@ pub fn decrypt_downloaded_bytes(
         return Err(UploadError::InvalidInput("chunk_count must be > 0".into()));
     }
 
-    let total_len = encrypted_bytes.len();
-
-    // When there is only one chunk, the entire payload is that chunk.
-    // When there are multiple, compute the per-chunk size from the total.
-    // All chunks except the last are the same size; the last may be smaller.
-    let chunk_boundaries = compute_chunk_boundaries(total_len, chunk_count)?;
-
-    // Write to .tmp then atomic rename
-    let tmp_path = format!("{output_path}.tmp");
-
-    // Ensure parent directory exists
-    if let Some(parent) = std::path::Path::new(output_path).parent() {
-        std::fs::create_dir_all(parent).map_err(|e| UploadError::IoError(format!("create output parent dir: {e}")))?;
-    }
-
-    let output_file =
-        std::fs::File::create(&tmp_path).map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
+    // Write to .tmp then atomic rename; the guard deletes the temp file on
+    // every error path (a chunk failure, a flush error and the `?` exits).
+    let (tmp, output_file) = TempOutput::create(output_path)?;
     let mut writer = BufWriter::new(output_file);
 
-    let mut total_plaintext: u64 = 0;
-    let mut chunks_decrypted: u32 = 0;
-    // The decryptor owns its key; copy the borrowed one into a fresh
-    // zeroize-on-drop FileKey (from_bytes wipes its by-value input).
-    let mut decryptor = ChunkDecryptor::for_push_with_file_key(
-        beebeeb_core::kdf::FileKey::from_bytes(*file_key.as_bytes()),
+    // The loop itself is core's (move 10); this crate still owns the temp file,
+    // the progress callback and the atomic rename.
+    let summary = match beebeeb_core::download::decrypt_chunks_to(
+        file_key,
         file_id,
         expected,
-    );
-
-    for (i, (start, end)) in chunk_boundaries.iter().enumerate() {
-        let chunk_data = &encrypted_bytes[*start..*end];
-
-        let plaintext = match decryptor.push_frame(chunk_data) {
-            Ok(c) => c.data,
-            Err(e) => {
-                drop(writer);
-                let _ = std::fs::remove_file(&tmp_path);
-                return Err(UploadError::InvalidResponse(format!(
-                    "decryption failed for chunk {i}: {e}"
-                )));
+        chunk_count,
+        encrypted_bytes,
+        &mut writer,
+        |done, total| {
+            if let Some(callback) = callback {
+                callback.on_chunk_decrypted(done, total);
             }
-        };
-
-        writer
-            .write_all(&plaintext)
-            .map_err(|e| UploadError::IoError(format!("write output: {e}")))?;
-
-        total_plaintext += plaintext.len() as u64;
-        chunks_decrypted += 1;
-
-        if let Some(cb) = callback {
-            cb.on_chunk_decrypted(chunks_decrypted, chunk_count);
+        },
+    ) {
+        Ok(summary) => summary,
+        Err(failure) => {
+            drop(writer);
+            return Err(map_download_failure(failure));
         }
-    }
-
-    // End-of-stream check: a v2 payload must reach its last chunk.
-    if let Err(e) = decryptor.finish() {
-        drop(writer);
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(UploadError::InvalidResponse(format!(
-            "download incomplete after {chunks_decrypted} chunks: {e}"
-        )));
-    }
+    };
+    let total_plaintext = summary.plaintext_size;
+    let chunks_decrypted = summary.chunks_decrypted;
 
     writer
         .flush()
@@ -427,7 +446,7 @@ pub fn decrypt_downloaded_bytes(
     drop(writer);
 
     // Atomic rename
-    std::fs::rename(&tmp_path, output_path).map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
+    tmp.commit(output_path)?;
 
     if let Some(cb) = callback {
         cb.on_complete(output_path);
@@ -452,60 +471,7 @@ pub fn decrypt_downloaded_bytes(
 /// All chunks except the last have the same size. The last chunk gets the remainder.
 /// Each chunk must be at least `NONCE_LEN + GCM_TAG_LEN` bytes (28 bytes: 12 nonce + 16 tag).
 pub fn compute_chunk_boundaries(total_len: usize, chunk_count: u32) -> Result<Vec<(usize, usize)>, UploadError> {
-    if chunk_count == 0 {
-        return Err(UploadError::InvalidInput("chunk_count must be > 0".into()));
-    }
-
-    let n = chunk_count as usize;
-
-    if total_len == 0 {
-        return Err(UploadError::InvalidResponse("encrypted payload is empty".into()));
-    }
-
-    // For a single chunk, the entire payload is that chunk.
-    if n == 1 {
-        if total_len < NONCE_LEN + GCM_TAG_LEN {
-            return Err(UploadError::InvalidResponse(format!(
-                "chunk too small: {total_len} bytes (need at least {})",
-                NONCE_LEN + GCM_TAG_LEN
-            )));
-        }
-        return Ok(vec![(0, total_len)]);
-    }
-
-    // Multi-chunk: divide evenly, last chunk gets remainder.
-    let base_chunk_size = total_len / n;
-    let remainder = total_len % n;
-
-    // Validate minimum chunk size
-    let min_chunk = if remainder == 0 {
-        base_chunk_size
-    } else {
-        // Last chunk is base_chunk_size + remainder, others are base_chunk_size
-        base_chunk_size
-    };
-
-    if min_chunk < NONCE_LEN + GCM_TAG_LEN {
-        return Err(UploadError::InvalidResponse(format!(
-            "chunk too small: {min_chunk} bytes (need at least {})",
-            NONCE_LEN + GCM_TAG_LEN
-        )));
-    }
-
-    let mut boundaries = Vec::with_capacity(n);
-    let mut offset = 0;
-
-    for i in 0..n {
-        let size = if i == n - 1 {
-            total_len - offset // last chunk gets remainder
-        } else {
-            base_chunk_size
-        };
-        boundaries.push((offset, offset + size));
-        offset += size;
-    }
-
-    Ok(boundaries)
+    beebeeb_core::download::compute_chunk_boundaries(total_len, chunk_count).map_err(map_download_failure)
 }
 
 /// Synchronous blocking wrapper for `download_and_decrypt`.
@@ -859,6 +825,26 @@ mod tests {
     }
 
     #[test]
+    fn oversized_last_frame_is_refused_without_buffering() {
+        // A no-header last frame is drained, not sized; the cap lives in
+        // `push_frame_bytes` so the extra bytes never reach the buffer.
+        let mut buf = vec![0u8; 8];
+        let err = push_frame_bytes(&mut buf, &[1], 8).expect_err("a frame over the limit must be refused");
+        assert!(matches!(err, UploadError::InvalidResponse(_)), "got {err:?}");
+        assert_eq!(buf.len(), 8, "the refused byte is not buffered");
+
+        // The production limit is one maximum chunk plus the GCM overhead.
+        assert_eq!(
+            beebeeb_core::download::MAX_FRAME_SIZE,
+            256 * 1024 * 1024 + 28,
+            "MAX_CHUNK_SIZE + nonce(12) + tag(16)"
+        );
+        let mut ok = Vec::new();
+        push_frame_bytes(&mut ok, &[1, 2, 3], 3).expect("a frame at the limit is accepted");
+        assert_eq!(ok.len(), 3);
+    }
+
+    #[test]
     fn download_client_constructor() {
         let client = DownloadClient::new("https://api.beebeeb.io/", "test-token");
         assert_eq!(client.api_url, "https://api.beebeeb.io");
@@ -870,5 +856,107 @@ mod tests {
         let client = DownloadClient::new("https://api.beebeeb.io///", "tok");
         // trim_end_matches removes all trailing slashes
         assert!(!client.api_url.ends_with('/'));
+    }
+
+    // -- .tmp cleanup on a failed download --
+
+    /// Serve one HTTP response whose body stops short of its `Content-Length`,
+    /// so the client sees a mid-body failure after the bytes that arrived.
+    fn serve_truncated_body(
+        body: Vec<u8>,
+        declared_length: usize,
+        extra_headers: &str,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let addr = listener.local_addr().unwrap();
+        let head =
+            format!("HTTP/1.1 200 OK\r\nContent-Length: {declared_length}\r\n{extra_headers}Connection: close\r\n\r\n");
+        let handle = std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().expect("accept");
+            let mut request = Vec::new();
+            let mut buf = [0u8; 1024];
+            loop {
+                let n = sock.read(&mut buf).expect("read request");
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+                if request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            sock.write_all(head.as_bytes()).expect("write head");
+            sock.write_all(&body).expect("write body");
+            sock.flush().expect("flush");
+            // Dropping the socket with `declared_length > body.len()` is a
+            // truncated response: the reader fails after the delivered frames.
+        });
+        (format!("http://{addr}"), handle)
+    }
+
+    struct CountingCallback(std::sync::atomic::AtomicU32);
+
+    impl DownloadProgressCallback for CountingCallback {
+        fn on_chunk_decrypted(&self, chunk_index: u32, _total_chunks: u32) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            assert_eq!(chunk_index, 1, "the first frame is the only one that decrypts");
+        }
+        fn on_complete(&self, _output_path: &str) {}
+        fn on_error(&self, _error: &str) {}
+    }
+
+    #[tokio::test]
+    async fn failed_download_leaves_no_tmp_file() {
+        use beebeeb_core::encrypt::encrypt_chunk_raw;
+        use beebeeb_core::kdf::{derive_file_key, derive_master_key};
+
+        let mk = derive_master_key("test-password", b"test-salt-16bytes").unwrap();
+        let chunk = vec![0x7Bu8; 64];
+        let frame = encrypt_chunk_raw(&derive_file_key(&mk, b"file-partial"), &chunk).unwrap();
+
+        // Two equal frames; the first arrives whole, the second is cut off by a
+        // connection closed before `Content-Length` bytes were delivered. That
+        // failure happens after frame 0 was decrypted and written to `{out}.tmp`.
+        let mut body = frame.clone();
+        body.extend_from_slice(&frame[..10]);
+        let (base, server) =
+            serve_truncated_body(body, frame.len() * 2, "X-Chunk-Count: 2\r\nX-Original-Size: 128\r\n");
+
+        let dir = std::env::temp_dir().join("beebeeb_download_partial");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let output = dir.join("output.bin");
+        let out = output.to_str().unwrap();
+
+        let callback = CountingCallback(std::sync::atomic::AtomicU32::new(0));
+        let client = DownloadClient::new(&base, "test-token");
+        let result = client
+            .download_and_decrypt(
+                &mk,
+                "file-partial",
+                ExpectedChunkFormat::Unrecorded,
+                out,
+                Some(&callback),
+            )
+            .await;
+
+        assert!(
+            result.is_err(),
+            "a body shorter than Content-Length must fail the download"
+        );
+        assert_eq!(
+            callback.0.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the failure must come after the first good frame"
+        );
+        assert!(!output.exists(), "no truncated plaintext may be renamed into place");
+        assert!(
+            !dir.join("output.bin.tmp").exists(),
+            "a failed download must not leave decrypted frames in {out}.tmp"
+        );
+        server.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

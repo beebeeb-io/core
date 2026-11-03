@@ -1,0 +1,1539 @@
+{
+  "description": "Move 3 addendum - which client can render a preview in-app. One row per extension of the three-way union (123): web's PREVIEWABLE_EXTENSIONS before the consolidation switch (78), the desktop tray's getFileType sets (88) and core's existing is_previewable_by_extension list (90, the mobile column). Every one of the 18 web-only types is restored to Web=true, and every row proves the unchanged existing predicate still answers the Mobile column.",
+  "source": "web: git -C oc-split-web show aee93c8e^:src/lib/preview.ts PREVIEWABLE_EXTENSIONS (78, read 2026-11-03); desktop: desktop/src/WindowsTray.tsx getFileType (88 extensions across image/video/audio/code/archive + pdf, read 2026-11-03); mobile: beebeeb-core/src/media.rs is_previewable_by_extension at head 2f5cd8a (90). No Rust side feeds the desktop tray list (grep: 0 matches in desktop/src-tauri).",
+  "web_only_restored": [
+    "aif",
+    "aiff",
+    "alac",
+    "arw",
+    "cr2",
+    "cr3",
+    "dng",
+    "hevc",
+    "key",
+    "nef",
+    "oga",
+    "orf",
+    "ppt",
+    "raf",
+    "rw2",
+    "tsv",
+    "xls",
+    "zip"
+  ],
+  "counts": {
+    "web": 78,
+    "desktop": 88,
+    "mobile": 90,
+    "union": 123
+  },
+  "cases": [
+    {
+      "id": "preview_platform_7z",
+      "kind": "extension",
+      "name": "file.7z",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "7z"
+    },
+    {
+      "id": "preview_platform_aac",
+      "kind": "extension",
+      "name": "file.aac",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "aac"
+    },
+    {
+      "id": "preview_platform_aif",
+      "kind": "extension",
+      "name": "file.aif",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": false
+      },
+      "extension": "aif"
+    },
+    {
+      "id": "preview_platform_aiff",
+      "kind": "extension",
+      "name": "file.aiff",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "aiff"
+    },
+    {
+      "id": "preview_platform_alac",
+      "kind": "extension",
+      "name": "file.alac",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": false
+      },
+      "extension": "alac"
+    },
+    {
+      "id": "preview_platform_arw",
+      "kind": "extension",
+      "name": "file.arw",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "arw"
+    },
+    {
+      "id": "preview_platform_asm",
+      "kind": "extension",
+      "name": "file.asm",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "asm"
+    },
+    {
+      "id": "preview_platform_astro",
+      "kind": "extension",
+      "name": "file.astro",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "astro"
+    },
+    {
+      "id": "preview_platform_avi",
+      "kind": "extension",
+      "name": "file.avi",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "avi"
+    },
+    {
+      "id": "preview_platform_avif",
+      "kind": "extension",
+      "name": "file.avif",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "avif"
+    },
+    {
+      "id": "preview_platform_bash",
+      "kind": "extension",
+      "name": "file.bash",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "bash"
+    },
+    {
+      "id": "preview_platform_bmp",
+      "kind": "extension",
+      "name": "file.bmp",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "bmp"
+    },
+    {
+      "id": "preview_platform_bz2",
+      "kind": "extension",
+      "name": "file.bz2",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "bz2"
+    },
+    {
+      "id": "preview_platform_c",
+      "kind": "extension",
+      "name": "file.c",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "c"
+    },
+    {
+      "id": "preview_platform_cmake",
+      "kind": "extension",
+      "name": "file.cmake",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "cmake"
+    },
+    {
+      "id": "preview_platform_conf",
+      "kind": "extension",
+      "name": "file.conf",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "conf"
+    },
+    {
+      "id": "preview_platform_cpp",
+      "kind": "extension",
+      "name": "file.cpp",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "cpp"
+    },
+    {
+      "id": "preview_platform_cr2",
+      "kind": "extension",
+      "name": "file.cr2",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "cr2"
+    },
+    {
+      "id": "preview_platform_cr3",
+      "kind": "extension",
+      "name": "file.cr3",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "cr3"
+    },
+    {
+      "id": "preview_platform_cs",
+      "kind": "extension",
+      "name": "file.cs",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "cs"
+    },
+    {
+      "id": "preview_platform_css",
+      "kind": "extension",
+      "name": "file.css",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "css"
+    },
+    {
+      "id": "preview_platform_csv",
+      "kind": "extension",
+      "name": "file.csv",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "csv"
+    },
+    {
+      "id": "preview_platform_dart",
+      "kind": "extension",
+      "name": "file.dart",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "dart"
+    },
+    {
+      "id": "preview_platform_dmg",
+      "kind": "extension",
+      "name": "file.dmg",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "dmg"
+    },
+    {
+      "id": "preview_platform_dng",
+      "kind": "extension",
+      "name": "file.dng",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "dng"
+    },
+    {
+      "id": "preview_platform_dockerfile",
+      "kind": "extension",
+      "name": "file.dockerfile",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "dockerfile"
+    },
+    {
+      "id": "preview_platform_docx",
+      "kind": "extension",
+      "name": "file.docx",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "docx"
+    },
+    {
+      "id": "preview_platform_ex",
+      "kind": "extension",
+      "name": "file.ex",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "ex"
+    },
+    {
+      "id": "preview_platform_exs",
+      "kind": "extension",
+      "name": "file.exs",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "exs"
+    },
+    {
+      "id": "preview_platform_flac",
+      "kind": "extension",
+      "name": "file.flac",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "flac"
+    },
+    {
+      "id": "preview_platform_flv",
+      "kind": "extension",
+      "name": "file.flv",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "flv"
+    },
+    {
+      "id": "preview_platform_gif",
+      "kind": "extension",
+      "name": "file.gif",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "gif"
+    },
+    {
+      "id": "preview_platform_go",
+      "kind": "extension",
+      "name": "file.go",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "go"
+    },
+    {
+      "id": "preview_platform_graphql",
+      "kind": "extension",
+      "name": "file.graphql",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "graphql"
+    },
+    {
+      "id": "preview_platform_gz",
+      "kind": "extension",
+      "name": "file.gz",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "gz"
+    },
+    {
+      "id": "preview_platform_h",
+      "kind": "extension",
+      "name": "file.h",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "h"
+    },
+    {
+      "id": "preview_platform_heic",
+      "kind": "extension",
+      "name": "file.heic",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "heic"
+    },
+    {
+      "id": "preview_platform_heif",
+      "kind": "extension",
+      "name": "file.heif",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "heif"
+    },
+    {
+      "id": "preview_platform_hevc",
+      "kind": "extension",
+      "name": "file.hevc",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "hevc"
+    },
+    {
+      "id": "preview_platform_hpp",
+      "kind": "extension",
+      "name": "file.hpp",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "hpp"
+    },
+    {
+      "id": "preview_platform_htm",
+      "kind": "extension",
+      "name": "file.htm",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "htm"
+    },
+    {
+      "id": "preview_platform_html",
+      "kind": "extension",
+      "name": "file.html",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "html"
+    },
+    {
+      "id": "preview_platform_ico",
+      "kind": "extension",
+      "name": "file.ico",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "ico"
+    },
+    {
+      "id": "preview_platform_ini",
+      "kind": "extension",
+      "name": "file.ini",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "ini"
+    },
+    {
+      "id": "preview_platform_iso",
+      "kind": "extension",
+      "name": "file.iso",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "iso"
+    },
+    {
+      "id": "preview_platform_java",
+      "kind": "extension",
+      "name": "file.java",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "java"
+    },
+    {
+      "id": "preview_platform_jpeg",
+      "kind": "extension",
+      "name": "file.jpeg",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "jpeg"
+    },
+    {
+      "id": "preview_platform_jpg",
+      "kind": "extension",
+      "name": "file.jpg",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "jpg"
+    },
+    {
+      "id": "preview_platform_js",
+      "kind": "extension",
+      "name": "file.js",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "js"
+    },
+    {
+      "id": "preview_platform_json",
+      "kind": "extension",
+      "name": "file.json",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "json"
+    },
+    {
+      "id": "preview_platform_jsx",
+      "kind": "extension",
+      "name": "file.jsx",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "jsx"
+    },
+    {
+      "id": "preview_platform_key",
+      "kind": "extension",
+      "name": "file.key",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": false
+      },
+      "extension": "key"
+    },
+    {
+      "id": "preview_platform_kt",
+      "kind": "extension",
+      "name": "file.kt",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "kt"
+    },
+    {
+      "id": "preview_platform_less",
+      "kind": "extension",
+      "name": "file.less",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "less"
+    },
+    {
+      "id": "preview_platform_log",
+      "kind": "extension",
+      "name": "file.log",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "log"
+    },
+    {
+      "id": "preview_platform_lua",
+      "kind": "extension",
+      "name": "file.lua",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "lua"
+    },
+    {
+      "id": "preview_platform_lz",
+      "kind": "extension",
+      "name": "file.lz",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "lz"
+    },
+    {
+      "id": "preview_platform_m4a",
+      "kind": "extension",
+      "name": "file.m4a",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "m4a"
+    },
+    {
+      "id": "preview_platform_m4v",
+      "kind": "extension",
+      "name": "file.m4v",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "m4v"
+    },
+    {
+      "id": "preview_platform_makefile",
+      "kind": "extension",
+      "name": "file.makefile",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "makefile"
+    },
+    {
+      "id": "preview_platform_markdown",
+      "kind": "extension",
+      "name": "file.markdown",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "markdown"
+    },
+    {
+      "id": "preview_platform_md",
+      "kind": "extension",
+      "name": "file.md",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "md"
+    },
+    {
+      "id": "preview_platform_mkv",
+      "kind": "extension",
+      "name": "file.mkv",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "mkv"
+    },
+    {
+      "id": "preview_platform_mov",
+      "kind": "extension",
+      "name": "file.mov",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "mov"
+    },
+    {
+      "id": "preview_platform_mp3",
+      "kind": "extension",
+      "name": "file.mp3",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "mp3"
+    },
+    {
+      "id": "preview_platform_mp4",
+      "kind": "extension",
+      "name": "file.mp4",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "mp4"
+    },
+    {
+      "id": "preview_platform_nef",
+      "kind": "extension",
+      "name": "file.nef",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "nef"
+    },
+    {
+      "id": "preview_platform_nim",
+      "kind": "extension",
+      "name": "file.nim",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "nim"
+    },
+    {
+      "id": "preview_platform_odp",
+      "kind": "extension",
+      "name": "file.odp",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "odp"
+    },
+    {
+      "id": "preview_platform_ods",
+      "kind": "extension",
+      "name": "file.ods",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "ods"
+    },
+    {
+      "id": "preview_platform_odt",
+      "kind": "extension",
+      "name": "file.odt",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "odt"
+    },
+    {
+      "id": "preview_platform_oga",
+      "kind": "extension",
+      "name": "file.oga",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": false
+      },
+      "extension": "oga"
+    },
+    {
+      "id": "preview_platform_ogg",
+      "kind": "extension",
+      "name": "file.ogg",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "ogg"
+    },
+    {
+      "id": "preview_platform_opus",
+      "kind": "extension",
+      "name": "file.opus",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "opus"
+    },
+    {
+      "id": "preview_platform_orf",
+      "kind": "extension",
+      "name": "file.orf",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "orf"
+    },
+    {
+      "id": "preview_platform_pdf",
+      "kind": "extension",
+      "name": "file.pdf",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "pdf"
+    },
+    {
+      "id": "preview_platform_php",
+      "kind": "extension",
+      "name": "file.php",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "php"
+    },
+    {
+      "id": "preview_platform_png",
+      "kind": "extension",
+      "name": "file.png",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "png"
+    },
+    {
+      "id": "preview_platform_ppt",
+      "kind": "extension",
+      "name": "file.ppt",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": false
+      },
+      "extension": "ppt"
+    },
+    {
+      "id": "preview_platform_pptx",
+      "kind": "extension",
+      "name": "file.pptx",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "pptx"
+    },
+    {
+      "id": "preview_platform_proto",
+      "kind": "extension",
+      "name": "file.proto",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "proto"
+    },
+    {
+      "id": "preview_platform_py",
+      "kind": "extension",
+      "name": "file.py",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "py"
+    },
+    {
+      "id": "preview_platform_r",
+      "kind": "extension",
+      "name": "file.r",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "r"
+    },
+    {
+      "id": "preview_platform_raf",
+      "kind": "extension",
+      "name": "file.raf",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "raf"
+    },
+    {
+      "id": "preview_platform_rar",
+      "kind": "extension",
+      "name": "file.rar",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "rar"
+    },
+    {
+      "id": "preview_platform_rb",
+      "kind": "extension",
+      "name": "file.rb",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "rb"
+    },
+    {
+      "id": "preview_platform_rs",
+      "kind": "extension",
+      "name": "file.rs",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "rs"
+    },
+    {
+      "id": "preview_platform_rtf",
+      "kind": "extension",
+      "name": "file.rtf",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "rtf"
+    },
+    {
+      "id": "preview_platform_rw2",
+      "kind": "extension",
+      "name": "file.rw2",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "rw2"
+    },
+    {
+      "id": "preview_platform_sass",
+      "kind": "extension",
+      "name": "file.sass",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "sass"
+    },
+    {
+      "id": "preview_platform_scala",
+      "kind": "extension",
+      "name": "file.scala",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "scala"
+    },
+    {
+      "id": "preview_platform_scss",
+      "kind": "extension",
+      "name": "file.scss",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "scss"
+    },
+    {
+      "id": "preview_platform_sh",
+      "kind": "extension",
+      "name": "file.sh",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "sh"
+    },
+    {
+      "id": "preview_platform_sql",
+      "kind": "extension",
+      "name": "file.sql",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "sql"
+    },
+    {
+      "id": "preview_platform_svelte",
+      "kind": "extension",
+      "name": "file.svelte",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "svelte"
+    },
+    {
+      "id": "preview_platform_svg",
+      "kind": "extension",
+      "name": "file.svg",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "svg"
+    },
+    {
+      "id": "preview_platform_swift",
+      "kind": "extension",
+      "name": "file.swift",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "swift"
+    },
+    {
+      "id": "preview_platform_tar",
+      "kind": "extension",
+      "name": "file.tar",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "tar"
+    },
+    {
+      "id": "preview_platform_tgz",
+      "kind": "extension",
+      "name": "file.tgz",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "tgz"
+    },
+    {
+      "id": "preview_platform_tif",
+      "kind": "extension",
+      "name": "file.tif",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "tif"
+    },
+    {
+      "id": "preview_platform_tiff",
+      "kind": "extension",
+      "name": "file.tiff",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "tiff"
+    },
+    {
+      "id": "preview_platform_toml",
+      "kind": "extension",
+      "name": "file.toml",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "toml"
+    },
+    {
+      "id": "preview_platform_ts",
+      "kind": "extension",
+      "name": "file.ts",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "ts"
+    },
+    {
+      "id": "preview_platform_tsv",
+      "kind": "extension",
+      "name": "file.tsv",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": false
+      },
+      "extension": "tsv"
+    },
+    {
+      "id": "preview_platform_tsx",
+      "kind": "extension",
+      "name": "file.tsx",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "tsx"
+    },
+    {
+      "id": "preview_platform_txt",
+      "kind": "extension",
+      "name": "file.txt",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "txt"
+    },
+    {
+      "id": "preview_platform_v",
+      "kind": "extension",
+      "name": "file.v",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "v"
+    },
+    {
+      "id": "preview_platform_vue",
+      "kind": "extension",
+      "name": "file.vue",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "vue"
+    },
+    {
+      "id": "preview_platform_wav",
+      "kind": "extension",
+      "name": "file.wav",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "wav"
+    },
+    {
+      "id": "preview_platform_webm",
+      "kind": "extension",
+      "name": "file.webm",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "webm"
+    },
+    {
+      "id": "preview_platform_webp",
+      "kind": "extension",
+      "name": "file.webp",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "webp"
+    },
+    {
+      "id": "preview_platform_wma",
+      "kind": "extension",
+      "name": "file.wma",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "wma"
+    },
+    {
+      "id": "preview_platform_wmv",
+      "kind": "extension",
+      "name": "file.wmv",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "wmv"
+    },
+    {
+      "id": "preview_platform_xls",
+      "kind": "extension",
+      "name": "file.xls",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": false
+      },
+      "extension": "xls"
+    },
+    {
+      "id": "preview_platform_xlsx",
+      "kind": "extension",
+      "name": "file.xlsx",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "xlsx"
+    },
+    {
+      "id": "preview_platform_xml",
+      "kind": "extension",
+      "name": "file.xml",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "xml"
+    },
+    {
+      "id": "preview_platform_xz",
+      "kind": "extension",
+      "name": "file.xz",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "xz"
+    },
+    {
+      "id": "preview_platform_yaml",
+      "kind": "extension",
+      "name": "file.yaml",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "yaml"
+    },
+    {
+      "id": "preview_platform_yml",
+      "kind": "extension",
+      "name": "file.yml",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": true
+      },
+      "extension": "yml"
+    },
+    {
+      "id": "preview_platform_zig",
+      "kind": "extension",
+      "name": "file.zig",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "zig"
+    },
+    {
+      "id": "preview_platform_zip",
+      "kind": "extension",
+      "name": "file.zip",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "zip"
+    },
+    {
+      "id": "preview_platform_zsh",
+      "kind": "extension",
+      "name": "file.zsh",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": true
+      },
+      "extension": "zsh"
+    },
+    {
+      "id": "preview_platform_zst",
+      "kind": "extension",
+      "name": "file.zst",
+      "expected": {
+        "web": false,
+        "desktop": true,
+        "mobile": false
+      },
+      "extension": "zst"
+    },
+    {
+      "id": "preview_platform_uppercase",
+      "kind": "extension",
+      "name": "PHOTO.JPG",
+      "expected": {
+        "web": true,
+        "desktop": true,
+        "mobile": true
+      }
+    },
+    {
+      "id": "preview_platform_dotless_dockerfile",
+      "kind": "extension",
+      "name": "Dockerfile",
+      "expected": {
+        "web": true,
+        "desktop": false,
+        "mobile": true
+      }
+    },
+    {
+      "id": "preview_platform_no_extension",
+      "kind": "extension",
+      "name": "README",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": false
+      }
+    },
+    {
+      "id": "preview_platform_empty_name",
+      "kind": "extension",
+      "name": "",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": false
+      }
+    },
+    {
+      "id": "preview_platform_unknown_extension",
+      "kind": "extension",
+      "name": "archive.xyz9",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": false
+      }
+    },
+    {
+      "id": "preview_platform_trailing_dot",
+      "kind": "extension",
+      "name": "file.",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": false
+      }
+    },
+    {
+      "id": "preview_platform_dot_only",
+      "kind": "extension",
+      "name": ".",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": false
+      }
+    },
+    {
+      "id": "preview_platform_hidden_file",
+      "kind": "extension",
+      "name": ".gitignore",
+      "expected": {
+        "web": false,
+        "desktop": false,
+        "mobile": false
+      }
+    }
+  ],
+  "batches": [
+    {
+      "id": "preview_platform_batch_web",
+      "platform": "web",
+      "names": [
+        "photo.JPG",
+        "notes.txt",
+        "clip.mkv",
+        "archive.zip",
+        "scan.dng",
+        "song.mp3",
+        "README",
+        ""
+      ],
+      "expected": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "id": "preview_platform_batch_desktop",
+      "platform": "desktop",
+      "names": [
+        "photo.JPG",
+        "notes.txt",
+        "clip.mkv",
+        "archive.zip",
+        "track.aiff",
+        "Dockerfile",
+        "README",
+        ""
+      ],
+      "expected": [
+        true,
+        false,
+        true,
+        true,
+        true,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "id": "preview_platform_batch_mobile",
+      "platform": "mobile",
+      "names": [
+        "photo.JPG",
+        "notes.txt",
+        "clip.mkv",
+        "archive.zip",
+        "scan.dng",
+        "Dockerfile",
+        "README",
+        ""
+      ],
+      "expected": [
+        true,
+        true,
+        true,
+        false,
+        false,
+        true,
+        false,
+        false
+      ]
+    }
+  ]
+}

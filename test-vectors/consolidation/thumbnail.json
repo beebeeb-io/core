@@ -1,0 +1,259 @@
+{
+  "description": "Move 12 — the thumbnail policy: one ladder and budget per variant (small/medium/large), the per-platform format rule (HEIC on iOS/macOS, WebP elsewhere), the budget boundary in bytes, and the resize rule for sources smaller than a step. Encoders stay platform-native.",
+  "source": "beebeeb-core/src/thumbnail.rs ThumbnailConfig::{small,medium,large} kept as policy instances (map §4.1 row 12, spec §16.3 answer 5 / §16.8 Q1); the ladder values are byte-identical to today's",
+  "cases": [
+    {
+      "id": "thumb_ladder_small",
+      "kind": "ladder",
+      "variant": "small",
+      "steps": [
+        {
+          "max_dimension": 384,
+          "quality": 78.0
+        },
+        {
+          "max_dimension": 384,
+          "quality": 66.0
+        },
+        {
+          "max_dimension": 384,
+          "quality": 54.0
+        },
+        {
+          "max_dimension": 320,
+          "quality": 50.0
+        },
+        {
+          "max_dimension": 256,
+          "quality": 48.0
+        }
+      ],
+      "target_bytes": 24576,
+      "max_bytes": 32740,
+      "target_px": 384
+    },
+    {
+      "id": "thumb_ladder_medium",
+      "kind": "ladder",
+      "variant": "medium",
+      "steps": [
+        {
+          "max_dimension": 768,
+          "quality": 82.0
+        },
+        {
+          "max_dimension": 768,
+          "quality": 74.0
+        },
+        {
+          "max_dimension": 768,
+          "quality": 66.0
+        },
+        {
+          "max_dimension": 768,
+          "quality": 58.0
+        },
+        {
+          "max_dimension": 768,
+          "quality": 50.0
+        },
+        {
+          "max_dimension": 640,
+          "quality": 58.0
+        },
+        {
+          "max_dimension": 512,
+          "quality": 56.0
+        },
+        {
+          "max_dimension": 384,
+          "quality": 54.0
+        }
+      ],
+      "target_bytes": 102400,
+      "max_bytes": 131044,
+      "target_px": 768
+    },
+    {
+      "id": "thumb_ladder_large",
+      "kind": "ladder",
+      "variant": "large",
+      "steps": [
+        {
+          "max_dimension": 1600,
+          "quality": 90.0
+        },
+        {
+          "max_dimension": 1600,
+          "quality": 82.0
+        },
+        {
+          "max_dimension": 1600,
+          "quality": 74.0
+        },
+        {
+          "max_dimension": 1600,
+          "quality": 66.0
+        },
+        {
+          "max_dimension": 1600,
+          "quality": 58.0
+        },
+        {
+          "max_dimension": 1600,
+          "quality": 50.0
+        }
+      ],
+      "target_bytes": 409600,
+      "max_bytes": 491520,
+      "target_px": 1600
+    },
+    {
+      "id": "thumb_format_ios",
+      "kind": "format",
+      "variant": "medium",
+      "platform": "ios",
+      "expected": "heic"
+    },
+    {
+      "id": "thumb_format_macos",
+      "kind": "format",
+      "variant": "medium",
+      "platform": "macos",
+      "expected": "heic"
+    },
+    {
+      "id": "thumb_format_android",
+      "kind": "format",
+      "variant": "medium",
+      "platform": "android",
+      "expected": "webp"
+    },
+    {
+      "id": "thumb_format_windows",
+      "kind": "format",
+      "variant": "medium",
+      "platform": "windows",
+      "expected": "webp"
+    },
+    {
+      "id": "thumb_format_linux",
+      "kind": "format",
+      "variant": "medium",
+      "platform": "linux",
+      "expected": "webp"
+    },
+    {
+      "id": "thumb_format_web",
+      "kind": "format",
+      "variant": "medium",
+      "platform": "web",
+      "expected": "webp"
+    },
+    {
+      "id": "thumb_format_unknown",
+      "kind": "format",
+      "variant": "medium",
+      "platform": "unknown",
+      "expected": "webp"
+    },
+    {
+      "id": "thumb_budget_0",
+      "kind": "budget",
+      "variant": "small",
+      "bytes": 24575,
+      "expected": "target"
+    },
+    {
+      "id": "thumb_budget_1",
+      "kind": "budget",
+      "variant": "small",
+      "bytes": 24576,
+      "expected": "target"
+    },
+    {
+      "id": "thumb_budget_2",
+      "kind": "budget",
+      "variant": "small",
+      "bytes": 24577,
+      "expected": "fallback"
+    },
+    {
+      "id": "thumb_budget_3",
+      "kind": "budget",
+      "variant": "small",
+      "bytes": 32740,
+      "expected": "fallback"
+    },
+    {
+      "id": "thumb_budget_4",
+      "kind": "budget",
+      "variant": "small",
+      "bytes": 32741,
+      "expected": "rejected"
+    },
+    {
+      "id": "thumb_budget_5",
+      "kind": "budget",
+      "variant": "medium",
+      "bytes": 102400,
+      "expected": "target"
+    },
+    {
+      "id": "thumb_budget_6",
+      "kind": "budget",
+      "variant": "medium",
+      "bytes": 102401,
+      "expected": "fallback"
+    },
+    {
+      "id": "thumb_budget_7",
+      "kind": "budget",
+      "variant": "large",
+      "bytes": 409600,
+      "expected": "target"
+    },
+    {
+      "id": "thumb_budget_8",
+      "kind": "budget",
+      "variant": "large",
+      "bytes": 491521,
+      "expected": "rejected"
+    },
+    {
+      "id": "thumb_resize_source_smaller",
+      "kind": "resize",
+      "width": 100,
+      "height": 50,
+      "max_dimension": 768,
+      "expected_width": 100,
+      "expected_height": 50
+    },
+    {
+      "id": "thumb_resize_landscape",
+      "kind": "resize",
+      "width": 1536,
+      "height": 768,
+      "max_dimension": 768,
+      "expected_width": 768,
+      "expected_height": 384
+    },
+    {
+      "id": "thumb_zero_dimension",
+      "kind": "resize",
+      "width": 0,
+      "height": 0,
+      "max_dimension": 768,
+      "expect": "reject"
+    },
+    {
+      "id": "thumb_resize_tiny_target",
+      "kind": "resize",
+      "width": 1600,
+      "height": 100,
+      "max_dimension": 1,
+      "expected_width": 1,
+      "expected_height": 1
+    }
+  ]
+}

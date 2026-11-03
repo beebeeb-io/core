@@ -304,3 +304,5 @@ fn plan_chunks_mobile_capped() {
     let plan = beebeeb_types::plan_chunks(200 * 1024 * 1024 * 1024, beebeeb_types::ChunkProfile::Mobile);
     assert_eq!(plan.chunk_size_bytes, 32 * 1024 * 1024);
 }
+
+mod consolidation;
