@@ -705,6 +705,56 @@ fn unbound_request_row_refuses_an_upper_repair_name() {
 }
 
 #[test]
+fn request_rename_seals_under_the_target_key_and_keeps_its_pin() {
+    let fixture = request_fixture();
+    let name = encrypt_name_with_chunk_format(
+        &fixture.master,
+        &fixture.item_id,
+        "upload.bin",
+        None,
+        ExpectedChunkFormat::V2,
+    )
+    .unwrap();
+    let row = fixture.resolve(&name).unwrap();
+    let target = row
+        .rename_target
+        .as_ref()
+        .expect("a string-convention row must carry a rename target");
+    let sealed = beebeeb_core::rename::encrypt_name_for_rename_target(target, "renamed.bin", Some("text/plain"))
+        .expect("sealing through the target must work");
+    let meta = decrypt_file_metadata_with_key(target.key(), &sealed).unwrap();
+    assert_eq!(meta.name, "renamed.bin");
+    assert_eq!(meta.mime_type.as_deref(), Some("text/plain"));
+    assert_eq!(meta.chunk_format, target.pin());
+    assert_eq!(target.pin(), ExpectedChunkFormat::V2);
+}
+
+#[test]
+fn request_rename_bindings_sealer_derives_the_string_key() {
+    // The bindings cannot construct a RenameTarget, so the exported sealer
+    // derives the §15 string key from the row id and keeps the row's pin.
+    let fixture = shipped_request_fixture();
+    let content = FileKey::from_bytes(fixture.content_key);
+    let name = name_for(&content, "upload.bin");
+    let row = fixture.resolve(&name).unwrap();
+    let target = row
+        .rename_target
+        .as_ref()
+        .expect("the row is writable, so it must carry a rename target");
+    let sealed = beebeeb_core::rename::encrypt_name_for_request_rename(
+        &fixture.master,
+        &fixture.item_id,
+        target.pin(),
+        "renamed.bin",
+        None,
+    )
+    .expect("the bindings sealer must work");
+    let meta = decrypt_file_metadata_with_key(target.key(), &sealed).unwrap();
+    assert_eq!(meta.name, "renamed.bin");
+    assert_eq!(meta.chunk_format, target.pin());
+}
+
+#[test]
 fn request_row_content_is_under_c() {
     let fixture = request_fixture();
     let derived = derive_file_key(&fixture.master, O_ID.as_bytes());

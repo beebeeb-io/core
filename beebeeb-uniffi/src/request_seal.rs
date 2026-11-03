@@ -88,3 +88,25 @@ impl MasterKeyHandle {
         })
     }
 }
+
+#[uniffi::export]
+impl MasterKeyHandle {
+    /// Seal a request-row rename under the section 15 string-convention key
+    /// derived from `item_id`, keeping the row's recorded pin (`chunk_format`
+    /// from `resolve_request_row_detailed`). Prefer this to sealing with
+    /// `RequestRenameTarget.key` bytes: those are exposed for compatibility,
+    /// but this sealer is what keeps the rename on the key section 15 requires.
+    pub fn seal_request_rename(
+        &self,
+        item_id: String,
+        pin: u8,
+        filename: String,
+        mime_type: Option<String>,
+    ) -> Result<String, CryptoError> {
+        let pin = ExpectedChunkFormat::from_u8(pin)?;
+        self.with_key(|mk| {
+            beebeeb_core::rename::encrypt_name_for_request_rename(mk, &item_id, pin, &filename, mime_type.as_deref())
+        })?
+        .map_err(CryptoError::from)
+    }
+}

@@ -537,9 +537,15 @@ impl RequestSeal {
 }
 
 /// The name key a request row's rename must be sealed under (task 2275 §15):
-/// the key, its convention origin and the recorded chunk-format pin. There is
-/// no constructor outside core, so a caller cannot point a rename at a key or
-/// pin core did not resolve. An upper-repair name yields `None` (read-only).
+/// the key, its convention origin and the recorded chunk-format pin.
+///
+/// `RenameTarget` has no public constructor, so a core caller cannot point a
+/// rename at a key or pin core did not resolve. Across the bindings the record
+/// has public fields (uniffi `RequestRenameTarget`) and wasm also returns the
+/// key bytes, so the bindings export a sealer that re-derives the §15 string
+/// key from the row id ([`crate::rename::encrypt_name_for_request_rename`]);
+/// callers should seal through that, never with the raw bytes. An upper-repair
+/// name yields `None` (read-only).
 pub struct RenameTarget {
     key: FileKey,
     origin: KeyOrigin,

@@ -92,3 +92,23 @@ pub fn resolve_request_row(
     set(&obj, "renameTarget", rename_target)?;
     Ok(obj.into())
 }
+
+/// Seal a request-row rename under the section 15 string-convention key derived
+/// from `item_id`, keeping the row's recorded `pin` (`chunkFormat` from
+/// `resolveRequestRow`). Prefer this to sealing with `renameTarget.key` bytes:
+/// those bytes are exposed for compatibility, but this sealer is what keeps
+/// the rename on the key section 15 requires.
+#[wasm_bindgen(js_name = sealRequestRename)]
+pub fn seal_request_rename(
+    master_key: &[u8],
+    item_id: &str,
+    pin: u8,
+    filename: &str,
+    mime_type: Option<String>,
+) -> Result<String, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let pin =
+        beebeeb_core::chunk_stream::ExpectedChunkFormat::from_u8(pin).map_err(|e| JsError::new(&e.to_string()))?;
+    beebeeb_core::rename::encrypt_name_for_request_rename(&master, item_id, pin, filename, mime_type.as_deref())
+        .map_err(|e| JsError::new(&e.to_string()))
+}
