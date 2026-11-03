@@ -537,14 +537,17 @@ impl RequestSeal {
 }
 
 /// The name key a request row's rename must be sealed under (task 2275 §15):
-/// the key, its convention origin and the recorded chunk-format pin.
+/// always the §15 string-convention key derived from the row's item id, its
+/// origin (`Derived`) and the recorded chunk-format pin.
 ///
-/// `RenameTarget` has no public constructor, so a core caller cannot point a
-/// rename at a key or pin core did not resolve. Across the bindings the record
-/// has public fields (uniffi `RequestRenameTarget`) and wasm also returns the
-/// key bytes, so the bindings export a sealer that re-derives the §15 string
-/// key from the row id ([`crate::rename::encrypt_name_for_request_rename`]);
-/// callers should seal through that, never with the raw bytes. An upper-repair
+/// [`RequestRowKeys::new`] builds the key from `item_id` and the pin from the
+/// current name's `chunk_format`; it is never the resolved `name_key` (which
+/// can be `C`, the key the anonymous uploader holds) and never a binary or
+/// upper-repair key. `RenameTarget` has no public constructor, so a core
+/// caller cannot point a rename at a key or pin core did not resolve. Across
+/// the bindings the record has public fields but no key bytes, and the
+/// bindings export a sealer that re-derives the same string key from the row
+/// id ([`crate::rename::encrypt_name_for_request_rename`]). An upper-repair
 /// name yields `None` (read-only).
 pub struct RenameTarget {
     key: FileKey,
@@ -566,8 +569,8 @@ impl RenameTarget {
         &self.key
     }
 
-    /// Where the name key came from (`Derived`, `DerivedBinary`,
-    /// `RequestContent`); never `DerivedUpperRepair`.
+    /// Always `Derived`: [`RequestRowKeys::new`] derives the target from the
+    /// item id, whichever convention authenticated the current name.
     pub fn origin(&self) -> KeyOrigin {
         self.origin
     }
