@@ -39,8 +39,8 @@ not a removal; the exported function/class names are unchanged.
 | uniffi `ResolvedRequestRow` | `content: ChunkDecryptorHandle` | `content: RequestContentReader` |
 | uniffi `RequestRenameTarget` | `{origin, pin, key: FileKeyHandle}` | `{origin, pin}`; seal with `MasterKeyHandle::seal_request_rename` |
 
-`RequestContentReader` (uniffi) / `WasmRequestContentReader` (WASM) has no
-key getter; the key is zeroized when the reader drops, it is bound to the row's
+`RequestContentReader` (uniffi) / `WasmRequestContentReader` (WASM) has no key
+getter; the key is zeroized when the reader drops, it is bound to the row's
 file id and chunk-format pin, `decryptor()` returns a fresh sequential
 decryptor per call, and `open_frame` / `openFrame` reads one frame by index.
 
