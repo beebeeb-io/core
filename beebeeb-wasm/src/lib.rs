@@ -627,7 +627,14 @@ pub fn seal_to_request(r_pub: &[u8], file_id: &[u8], content_key: &[u8]) -> Resu
 }
 
 /// Open a sealed request upload (owner decrypt path). Recovers the content key.
-/// `r_priv` and `e_pub` are 32 bytes; `file_id` is arbitrary bytes. Returns 32-byte `Uint8Array`.
+/// `r_priv` and `e_pub` are 32 bytes; `file_id` is arbitrary bytes. Returns
+/// 32-byte `Uint8Array`.
+///
+/// **DECRYPT-ONLY.** This is a request row's content key `C`, and the
+/// anonymous uploader holds it. Use it to read the row's content; never seal a
+/// name, note or thumbnail under this key. For a request row the owner's rename
+/// goes through `seal_request_rename` / `sealRequestRename` (the §15
+/// string-derived key), never `C`.
 #[wasm_bindgen]
 pub fn open_request_upload(
     r_priv: &[u8],

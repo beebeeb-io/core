@@ -16,9 +16,9 @@ pub fn mint_guest_item_id() -> Result<String, JsError> {
 /// Resolve a 2236 request row: `{content, nameOrigin, name, mimeType,
 /// chunkFormat, seal, renameTarget}`. `content` is a decrypt-only
 /// `WasmChunkDecryptor` for the row's content key; no raw key reaches JS, so a
-/// caller cannot seal a name with it. The seal is `"bound"` or `"unbound"`
-/// (§15), and `renameTarget` is `{origin, pin}` or null when the name is
-/// upper-repair (read-only). Renames go through `sealRequestRename`.
+/// request-row result offers no sealing path. The seal is `"bound"` or
+/// `"unbound"` (§15), and `renameTarget` is `{origin, pin}` or null when the
+/// name is upper-repair (read-only). Renames go through `sealRequestRename`.
 ///
 /// `request_wrap_context` is the context the owner wrapped the request private
 /// key under: empty for every request created so far (the server mints the
@@ -89,9 +89,9 @@ pub fn resolve_request_row(
 
 /// Seal a request-row rename under the section 15 string-convention key derived
 /// from `item_id`, keeping the row's recorded `pin` (`chunkFormat` from
-/// `resolveRequestRow`). This is the only sealing path: `resolveRequestRow`
-/// hands back no key, so a rename cannot be sealed under the content key `C`
-/// that the anonymous uploader holds (A9).
+/// `resolveRequestRow`). This is the only sealing path a request-row result
+/// offers: `resolveRequestRow` hands back no key, so a rename cannot be sealed
+/// under the content key `C` that the anonymous uploader holds (A9).
 #[wasm_bindgen(js_name = sealRequestRename)]
 pub fn seal_request_rename(
     master_key: &[u8],

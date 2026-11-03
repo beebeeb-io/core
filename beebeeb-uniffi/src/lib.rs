@@ -1161,7 +1161,14 @@ pub fn seal_to_request(
     })
 }
 
-/// Open a sealed request upload (owner decrypt path). Returns the 32-byte content key.
+/// Open a sealed request upload (owner decrypt path). Returns the 32-byte
+/// content key.
+///
+/// **DECRYPT-ONLY.** This is a request row's content key `C`, and the
+/// anonymous uploader holds it. Use it to read the row's content; never seal a
+/// name, note or thumbnail under this key. For a request row the owner's rename
+/// goes through `seal_request_rename` / `sealRequestRename` (the §15
+/// string-derived key), never `C`.
 #[uniffi::export]
 pub fn open_request_upload(
     r_priv: Vec<u8>,
@@ -1922,15 +1929,16 @@ impl FileKeyHandle {
 #[uniffi::export]
 impl FileKeyHandle {
     /// A handle for a per-file key the app holds as raw bytes and that is NOT
-    /// derived from the account's master key: a file-request upload's content
-    /// key (`open_request_upload`), a shared file's key. Task 1958 round 4: the
-    /// with-key name, note and thumbnail functions of this handle
-    /// (`encrypt_name_for`, `decrypt_file_metadata`, `encrypt_note_for`, ...)
-    /// were reachable only through `MasterKeyHandle::derive_file_key`, so not
-    /// for these keys. The WASM side takes the same bytes (`fileKey`).
+    /// derived from the account's master key: a shared file's key, a folder
+    /// link key. Exactly 32 bytes, anything else is an `InvalidInput` error.
+    /// The input is zeroized once copied into the key.
     ///
-    /// Exactly 32 bytes, anything else is an `InvalidInput` error. The input is
-    /// zeroized once copied into the key.
+    /// **DECRYPT-ONLY for a request row.** An `open_request_upload` content key
+    /// is the anonymous uploader's `C`. Use this handle to READ that row's
+    /// content (`decrypt_file_metadata`, `decrypt_note`, the chunk readers);
+    /// never seal a name, note or thumbnail under it. The owner's rename of a
+    /// request row goes through `seal_request_rename` (the §15 string-derived
+    /// key), never `C`.
     #[uniffi::constructor]
     pub fn from_key_bytes(key: Vec<u8>) -> Result<Arc<Self>, CryptoError> {
         let key = Zeroizing::new(key);

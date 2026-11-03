@@ -164,9 +164,10 @@ impl MasterKeyHandle {
 impl MasterKeyHandle {
     /// Seal a request-row rename under the section 15 string-convention key
     /// derived from `item_id`, keeping the row's recorded pin (`chunk_format`
-    /// from `resolve_request_row_detailed`). This is the only sealing path:
-    /// the resolvers hand back no key, so a rename cannot be sealed under the
-    /// content key `C` that the anonymous uploader holds (A9).
+    /// from `resolve_request_row_detailed`). This is the only sealing path a
+    /// request-row result offers: the resolvers hand back no key, so a rename
+    /// cannot be sealed under the content key `C` that the anonymous uploader
+    /// holds (A9).
     pub fn seal_request_rename(
         &self,
         item_id: String,

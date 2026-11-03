@@ -67,6 +67,7 @@ The rules whose breakage costs data, a key, a credential or a user. One line eac
 - Take the chunk format from the pin, never from a server value; prefer `version_id()` over re-reading chunk 0's first 12 bytes.
 - `V2` only from an EXISTING file's authenticated metadata; a NEW file never does (lead ruling 2026-10-17); each client tests its new-file path never passes `V2`.
 - Notes: write with `encrypt_note_for(file_key, text, pin)`, read with `decrypt_note`; never `encrypt_metadata`/`encryptFilename`/`encrypt_chunk` for a note.
+- A request row's `C` (`open_request_upload`) is decrypt-only: never seal a name, note or thumbnail under it; a rename/note seals under the string-derived key via the core sealers (`seal_request_rename` / `sealRequestRename`).
 - UniFFI: raw key bytes never cross FFI. Single-consumer contract: a handle is an ordered cursor driven from ONE sequence.
 - Folder keys are random (`FileKeyHandle.generate`, OS CSPRNG), never derived from the master key; `key_id` is the one-way folder-key id, never the key itself.
 - Canonical ids are UTF-8. Never fall back to the legacy file-key custody opener after authentication fails (L6).
