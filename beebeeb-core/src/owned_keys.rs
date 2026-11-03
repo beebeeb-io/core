@@ -637,8 +637,9 @@ pub struct RequestRowKeys {
 ///
 /// The bound path accepts a Binary or upper-repair name convention. Anyone
 /// holding the request link (its public key) can therefore seal a row as
-/// `Bound`: the `Bound` mark proves that the id-bound seal opened under this
-/// row's id, NOT that the owner sent the row.
+/// `Bound`. The `Bound` mark proves only that the id-bound seal opened under
+/// this row's id; under collusion that is exactly R5. Uploaders send rows, so
+/// the mark is not evidence that the owner sent the row.
 #[allow(clippy::too_many_arguments)]
 pub fn resolve_request_row(
     master: &MasterKey,
