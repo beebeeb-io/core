@@ -12,7 +12,7 @@ use beebeeb_core::recovery;
 use beebeeb_types::{CipherSuite, EncryptedBlob};
 
 uniffi::setup_scaffolding!();
-
+mod request_seal;
 #[cfg(test)]
 mod folder_link_2237c {
     use super::*;

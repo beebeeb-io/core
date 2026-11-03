@@ -138,3 +138,67 @@ test('childWrapMatches accepts only the honest wrap', () => {
   assert.equal(wasm.childWrapMatches(folder, root, F_ID, 2, wrap, KEY), false);
   assert.equal(wasm.childWrapMatches(folder, root, F_ID, 1, wrap, bytes('00'.repeat(32))), false);
 });
+
+test('a row sealed like the shipped uploader opens as Unbound and names under C', () => {
+  // web upload-request.tsx and the CLI send path: empty request-wrap and seal
+  // ids, name sealed under the content key C.
+  const rPriv = bytes('11'.repeat(32));
+  const rPub = wasm.derive_x25519_public(rPriv);
+  const contentKey = bytes('22'.repeat(32));
+  const wrap = wasm.wrap_request_private(master(), new Uint8Array(0), rPriv);
+  const sealed = wasm.seal_to_request(rPub, new Uint8Array(0), contentKey);
+  const name = wasm.encrypt_name_for(contentKey, 'upload.bin', null, 0);
+
+  const row = wasm.resolveRequestRow(
+    master(),
+    O_ID,
+    new Uint8Array(0),
+    wrap.wrapped,
+    wrap.nonce,
+    sealed.e_pub,
+    sealed.wrapped_key,
+    name,
+  );
+  assert.equal(row.seal, 'unbound');
+  assert.equal(row.nameOrigin, 'request_content');
+  assert.equal(hex(row.contentKey), hex(contentKey));
+  assert.equal(hex(row.nameKey), hex(contentKey));
+  assert.equal(row.name, 'upload.bin');
+  assert.equal(row.renameTarget.origin, 'request_content');
+  assert.equal(row.renameTarget.pin, 0);
+  assert.equal(hex(row.renameTarget.key), hex(contentKey));
+});
+
+test('a bound request row opens as Bound with a derived rename target', () => {
+  const rPriv = bytes('11'.repeat(32));
+  const rPub = wasm.derive_x25519_public(rPriv);
+  const contentKey = bytes('22'.repeat(32));
+  const wrap = wasm.wrap_request_private(master(), new Uint8Array(0), rPriv);
+  const sealed = wasm.seal_to_request(rPub, new TextEncoder().encode(O_ID), contentKey);
+  const name = wasm.encrypt_name_with_chunk_format(master(), O_ID, 'upload.bin', null, 2);
+
+  const row = wasm.resolveRequestRow(
+    master(),
+    O_ID,
+    new Uint8Array(0),
+    wrap.wrapped,
+    wrap.nonce,
+    sealed.e_pub,
+    sealed.wrapped_key,
+    name,
+  );
+  assert.equal(row.seal, 'bound');
+  assert.equal(row.nameOrigin, 'derived');
+  assert.equal(hex(row.contentKey), hex(contentKey));
+  assert.notEqual(hex(row.nameKey), hex(contentKey));
+  assert.equal(row.renameTarget.origin, 'derived');
+  assert.equal(row.renameTarget.pin, 2);
+  assert.equal(hex(row.renameTarget.key), hex(row.nameKey));
+});
+
+test('mintGuestItemId needs no master key and always mints an F id', () => {
+  for (let i = 0; i < 64; i++) {
+    const id = wasm.mintGuestItemId();
+    assert.equal(wasm.isForeignItemId(id), true, id);
+  }
+});
