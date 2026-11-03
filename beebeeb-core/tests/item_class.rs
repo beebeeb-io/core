@@ -667,8 +667,8 @@ fn unbound_request_row_refuses_a_binary_convention_name() {
         .err()
         .expect("the unbound row must refuse a binary name");
     assert!(
-        err.to_string().contains("string convention"),
-        "an unbound row's name resolves only under the string convention: {err}"
+        err.to_string().contains("request row unbound convention refusal"),
+        "the binary-convention branch itself must refuse, not the generic fallback: {err}"
     );
 }
 
@@ -699,8 +699,8 @@ fn unbound_request_row_refuses_an_upper_repair_name() {
         .err()
         .expect("the unbound row must refuse an upper-repair name");
     assert!(
-        err.to_string().contains("string convention"),
-        "an unbound row's name resolves only under the string convention: {err}"
+        err.to_string().contains("request row unbound convention refusal"),
+        "the upper-repair branch itself must refuse, not the generic fallback: {err}"
     );
 }
 

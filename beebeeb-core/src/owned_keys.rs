@@ -796,7 +796,8 @@ fn request_row_name_string_or_content(
         }
         Ok((_, OwnerKeyConvention::Binary | OwnerKeyConvention::UpperRepair)) => {
             return Err(CoreError::InvalidInput(
-                "an unbound request row's name resolves only under the string convention".into(),
+                "request row unbound convention refusal: an unbound request row's name resolves only under the string convention"
+                    .into(),
             ));
         }
         Err(_) => {}
