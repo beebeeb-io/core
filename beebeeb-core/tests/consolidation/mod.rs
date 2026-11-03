@@ -20,6 +20,7 @@ pub mod name;
 pub mod path_safety;
 pub mod plan;
 pub mod preview;
+pub mod preview_platforms;
 pub mod recovery;
 pub mod retry;
 pub mod share_link;
