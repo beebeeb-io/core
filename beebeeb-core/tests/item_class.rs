@@ -493,6 +493,37 @@ fn shipped_unbound_request_row_opens_and_is_marked_unbound() {
 }
 
 #[test]
+fn shipped_request_wrap_requires_the_empty_context() {
+    // Every shipped request wraps its private key under the EMPTY context (the
+    // server mints the request id after the wrap). Passing the real id must
+    // refuse with a clear error, never retry the empty context silently.
+    let fixture = shipped_request_fixture();
+    let content = FileKey::from_bytes(fixture.content_key);
+    let name = name_for(&content, "upload.bin");
+    let real_request_id = [0x01u8; 16];
+    let err = resolve_request_row(
+        &fixture.master,
+        &fixture.item_id,
+        &real_request_id,
+        &fixture.wrapped_private,
+        &fixture.wrap_nonce,
+        &fixture.e_pub,
+        &fixture.wrapped_content_key,
+        &name,
+    )
+    .err()
+    .expect("a shipped row must not unwrap under a real request id");
+    assert!(
+        err.to_string().contains("request_wrap_context"),
+        "the refusal must name the context to pass: {err}"
+    );
+
+    // The empty context (what every shipped request uses) opens.
+    let row = fixture.resolve(&name).unwrap();
+    assert_eq!(row.seal, RequestSeal::Unbound);
+}
+
+#[test]
 fn bound_request_row_is_marked_bound() {
     let fixture = request_fixture();
     let derived = derive_file_key(&fixture.master, fixture.item_id.as_bytes());

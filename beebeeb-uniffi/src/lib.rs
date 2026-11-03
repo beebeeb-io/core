@@ -1426,12 +1426,12 @@ impl MasterKeyHandle {
     }
 
     /// Task 2275: resolve a 2236 request row. Content under `C`; the name key is
-    /// a derived owner key when it authenticates the name, else `C`. Read-only.
+    /// a derived owner key when it authenticates the name, else `C`. Read-only; `request_wrap_context` empty.
     #[allow(clippy::too_many_arguments)]
     pub fn resolve_request_row(
         &self,
         item_id: String,
-        request_id: Vec<u8>,
+        request_wrap_context: Vec<u8>,
         wrapped_request_private: Vec<u8>,
         wrap_nonce: Vec<u8>,
         sender_ephemeral_pubkey: Vec<u8>,
@@ -1447,7 +1447,7 @@ impl MasterKeyHandle {
             beebeeb_core::owned_keys::resolve_request_row(
                 mk,
                 &item_id,
-                &request_id,
+                &request_wrap_context,
                 &wrapped_request_private,
                 &wrap_nonce,
                 &e_pub,

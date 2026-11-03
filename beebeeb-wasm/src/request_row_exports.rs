@@ -16,12 +16,17 @@ pub fn mint_guest_item_id() -> Result<String, JsError> {
 /// mimeType, chunkFormat, seal, renameTarget}`. Read-only content; the seal is
 /// `"bound"` or `"unbound"` (§15), and `renameTarget` is
 /// `{key, origin, pin}` or null when the name is upper-repair (read-only).
+///
+/// `request_wrap_context` is the context the owner wrapped the request private
+/// key under: empty for every request created so far (the server mints the
+/// request id after the wrap). A real request id refuses a shipped row; this
+/// function never tries both contexts.
 #[wasm_bindgen(js_name = resolveRequestRow)]
 #[allow(clippy::too_many_arguments)]
 pub fn resolve_request_row(
     master_key: &[u8],
     item_id: &str,
-    request_id: &[u8],
+    request_wrap_context: &[u8],
     wrapped_request_private: &[u8],
     wrap_nonce: &[u8],
     sender_ephemeral_pubkey: &[u8],
@@ -35,7 +40,7 @@ pub fn resolve_request_row(
     let row = beebeeb_core::owned_keys::resolve_request_row(
         &master,
         item_id,
-        request_id,
+        request_wrap_context,
         wrapped_request_private,
         wrap_nonce,
         &e_pub,

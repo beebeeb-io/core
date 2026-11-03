@@ -613,11 +613,18 @@ pub struct RequestRowKeys {
 /// An `Unbound` row keeps R5's rules: its name resolves only under the string
 /// owner convention (or under `C`, which is what the shipped uploader wrote); a
 /// binary or upper-repair name is refused, never re-interpreted.
+///
+/// `request_wrap_context` is the HKDF context the owner used when wrapping the
+/// request's X25519 private key: **empty for every request created so far**.
+/// The server mints the request id AFTER the wrap, so the web client
+/// (`FILE_REQUEST_EMPTY_ID`) and the CLI (`REQUEST_WRAP_CONTEXT`) both wrap
+/// under the empty context; a real request id here refuses a shipped row. The
+/// resolver never tries both contexts silently.
 #[allow(clippy::too_many_arguments)]
 pub fn resolve_request_row(
     master: &MasterKey,
     item_id: &str,
-    request_id: &[u8],
+    request_wrap_context: &[u8],
     wrapped_request_private: &[u8],
     wrap_nonce: &[u8],
     sender_ephemeral_pubkey: &[u8; 32],
@@ -637,8 +644,18 @@ pub fn resolve_request_row(
         ));
     }
 
+    // A wrong/real-id context produces only a decryption failure. Say what to
+    // pass, rather than leaving a bare error.
     let request_private =
-        crate::file_request::unwrap_request_private(master, request_id, wrapped_request_private, wrap_nonce)?;
+        crate::file_request::unwrap_request_private(master, request_wrap_context, wrapped_request_private, wrap_nonce)
+            .map_err(|err| match err {
+                CoreError::Decryption => CoreError::InvalidInput(
+                    "the request private key does not unwrap under this request_wrap_context; every request \
+                     created so far wraps under the EMPTY context"
+                        .into(),
+                ),
+                other => other,
+            })?;
 
     // Bound first. The empty-id (shipped) seal is tried only when the bound seal
     // fails to authenticate; any other refusal is final.
