@@ -13,10 +13,65 @@ pub fn mint_guest_item_id() -> Result<String, JsError> {
     beebeeb_core::item_id::mint_guest_item_id().map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// A request row's decrypt-only content reader (task 2275 §15; 2326 delta2
+/// P2-2). It owns a copy of the row's content key `C`, bound to the row's file
+/// id and recorded chunk-format pin; the key is zeroized when the reader drops
+/// and no getter exposes it.
+///
+/// `decryptor()` returns a FRESH sequential [`WasmChunkDecryptor`] at chunk 0
+/// on every call (retry after a mid-stream error); `openFrame(...)` opens ONE
+/// frame by index for a seek / range read.
+#[wasm_bindgen]
+pub struct WasmRequestContentReader {
+    inner: beebeeb_core::request_content::RequestContentReader,
+}
+
+#[wasm_bindgen]
+impl WasmRequestContentReader {
+    /// The file id every frame of this row must be bound to.
+    #[wasm_bindgen(getter, js_name = fileId)]
+    pub fn file_id(&self) -> String {
+        self.inner.file_id().to_string()
+    }
+
+    /// The row's recorded chunk-format pin: 0 = unrecorded, 2 = v2.
+    #[wasm_bindgen(getter, js_name = chunkFormat)]
+    pub fn chunk_format(&self) -> u8 {
+        self.inner.pin().as_u8()
+    }
+
+    /// A FRESH sequential decryptor at chunk 0. Call again after any error.
+    pub fn decryptor(&self) -> WasmChunkDecryptor {
+        WasmChunkDecryptor {
+            inner: self.inner.decryptor(),
+        }
+    }
+
+    /// Open ONE content frame at `index` without the frames before it (seek /
+    /// range read). `isLast = index == chunkCount - 1`. `format` (1 = v1,
+    /// 2 = v2) and `versionId` (12 bytes, v2 only) must come from authenticated
+    /// data. When the row is pinned to v2, `format: 1` is refused.
+    #[wasm_bindgen(js_name = openFrame)]
+    pub fn open_frame(
+        &self,
+        version_id: &[u8],
+        index: u32,
+        is_last: bool,
+        format: u8,
+        frame: &[u8],
+    ) -> Result<Vec<u8>, JsError> {
+        let format = beebeeb_core::chunk_stream::ChunkFormat::from_u8(format)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        self.inner
+            .open_frame(version_id, index, is_last, format, frame)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+}
+
 /// Resolve a 2236 request row: `{content, nameOrigin, name, mimeType,
 /// chunkFormat, seal, renameTarget}`. `content` is a decrypt-only
-/// `WasmChunkDecryptor` for the row's content key; no raw key reaches JS, so a
-/// request-row result offers no sealing path. The seal is `"bound"` or
+/// `WasmRequestContentReader` for the row's content key; no raw key reaches JS,
+/// so a request-row result offers no sealing path. The seal is `"bound"` or
 /// `"unbound"` (§15), and `renameTarget` is `{origin, pin}` or null when the
 /// name is upper-repair (read-only). Renames go through `sealRequestRename`.
 ///
@@ -51,11 +106,13 @@ pub fn resolve_request_row(
         name_encrypted,
     )
     .map_err(|e| JsError::new(&e.to_string()))?;
-    let content = WasmChunkDecryptor::from_file_key(
-        row.content_key.as_bytes(),
-        item_id.to_string(),
-        row.name.chunk_format.as_u8(),
-    )?;
+    let content = WasmRequestContentReader {
+        inner: beebeeb_core::request_content::RequestContentReader::new(
+            row.content_key,
+            item_id.to_string(),
+            row.name.chunk_format,
+        ),
+    };
     let obj = js_sys::Object::new();
     set(&obj, "content", JsValue::from(content))?;
     set(&obj, "nameOrigin", JsValue::from_str(row.name_origin.as_str()))?;

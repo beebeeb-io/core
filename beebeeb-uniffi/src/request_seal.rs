@@ -12,6 +12,58 @@ pub fn mint_guest_item_id() -> Result<String, CryptoError> {
     Ok(beebeeb_core::item_id::mint_guest_item_id()?)
 }
 
+/// A request row's decrypt-only content reader (task 2275 §15; 2326 delta2
+/// P2-2). It owns a copy of the row's content key `C`, bound to the row's file
+/// id and recorded chunk-format pin; the key is zeroized when the reader drops
+/// and no getter exposes it.
+///
+/// `decryptor()` returns a FRESH sequential [`ChunkDecryptorHandle`] at chunk 0
+/// on every call (retry after a mid-stream error); `open_frame(...)` opens ONE
+/// frame by index for a seek / range read.
+#[derive(uniffi::Object)]
+pub struct RequestContentReader {
+    inner: beebeeb_core::request_content::RequestContentReader,
+}
+
+#[uniffi::export]
+impl RequestContentReader {
+    /// The file id every frame of this row must be bound to.
+    pub fn file_id(&self) -> String {
+        self.inner.file_id().to_string()
+    }
+
+    /// The row's recorded chunk-format pin: 0 = unrecorded, 2 = v2.
+    pub fn chunk_format(&self) -> u8 {
+        self.inner.pin().as_u8()
+    }
+
+    /// A FRESH sequential decryptor at chunk 0. Call again after any error.
+    pub fn decryptor(&self) -> Result<Arc<ChunkDecryptorHandle>, CryptoError> {
+        Ok(Arc::new(ChunkDecryptorHandle {
+            inner: Mutex::new(Some(self.inner.decryptor())),
+        }))
+    }
+
+    /// Open ONE content frame at `index` without the frames before it (seek /
+    /// range read). `is_last = index == chunk_count - 1`. `format` (1 = v1,
+    /// 2 = v2) and `version_id` (12 bytes, v2 only) must come from
+    /// authenticated data. When the row is pinned to v2, `format: 1` is
+    /// refused.
+    pub fn open_frame(
+        &self,
+        version_id: Vec<u8>,
+        index: u32,
+        is_last: bool,
+        format: u8,
+        frame: Vec<u8>,
+    ) -> Result<Vec<u8>, CryptoError> {
+        let format = ChunkFormat::from_u8(format)?;
+        self.inner
+            .open_frame(&version_id, index, is_last, format, &frame)
+            .map_err(Into::into)
+    }
+}
+
 /// The origin and pin a request-row rename must use (task 2275 §15). There is
 /// no key here: the sealer re-derives it in core from the item id.
 #[derive(uniffi::Record)]
@@ -24,8 +76,8 @@ pub struct RequestRenameTarget {
 /// decrypt-only content handle and the opened name, never a raw key.
 #[derive(uniffi::Record)]
 pub struct ResolvedRequestRow {
-    /// Decrypt-only handle for the row's content; no key getter.
-    pub content: Arc<ChunkDecryptorHandle>,
+    /// Decrypt-only reader for the row's content; no key getter.
+    pub content: Arc<RequestContentReader>,
     pub name_origin: String,
     pub name: String,
     pub mime_type: Option<String>,
@@ -42,7 +94,7 @@ pub struct ResolvedRequestRow {
 /// [`MasterKeyHandle::seal_request_rename`].
 #[derive(uniffi::Record)]
 pub struct RequestRowKeys {
-    pub content: Arc<ChunkDecryptorHandle>,
+    pub content: Arc<RequestContentReader>,
     pub name_origin: String,
     pub name: String,
     pub mime_type: Option<String>,
@@ -88,11 +140,13 @@ impl MasterKeyHandle {
             )
         })??;
         let chunk_format = row.name.chunk_format.as_u8();
-        let content = ChunkDecryptorHandle::for_push_with_file_key_handle(
-            &FileKeyHandle::new(row.content_key),
-            item_id.clone(),
-            chunk_format,
-        )?;
+        let content = Arc::new(RequestContentReader {
+            inner: beebeeb_core::request_content::RequestContentReader::new(
+                row.content_key,
+                item_id.clone(),
+                row.name.chunk_format,
+            ),
+        });
         Ok(ResolvedRequestRow {
             content,
             name_origin: row.name_origin.as_str().to_string(),
@@ -145,11 +199,13 @@ impl MasterKeyHandle {
             )
         })??;
         let chunk_format = row.name.chunk_format.as_u8();
-        let content = ChunkDecryptorHandle::for_push_with_file_key_handle(
-            &FileKeyHandle::new(row.content_key),
-            item_id.clone(),
-            chunk_format,
-        )?;
+        let content = Arc::new(RequestContentReader {
+            inner: beebeeb_core::request_content::RequestContentReader::new(
+                row.content_key,
+                item_id.clone(),
+                row.name.chunk_format,
+            ),
+        });
         Ok(RequestRowKeys {
             content,
             name_origin: row.name_origin.as_str().to_string(),

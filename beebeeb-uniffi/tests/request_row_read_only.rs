@@ -39,8 +39,8 @@ fn request_row_results_never_hand_back_a_sealing_key() {
     assert_eq!(detailed.name_origin, "request_content");
     assert_eq!(detailed.name, "upload.bin");
     assert_eq!(detailed.rename_target.as_ref().unwrap().pin, 0);
-    // The content handle is read-only and has no key getter.
-    assert_eq!(detailed.content.chunk_format().unwrap(), None);
+    // The content reader is pinned to the row's recorded format and has no key.
+    assert_eq!(detailed.content.chunk_format(), 0);
 
     // The legacy view is read-only too: it still opens the row and carries a
     // content handle, never a key that could seal a name.
