@@ -59,6 +59,12 @@ impl RequestContentReader {
     /// A FRESH sequential decryptor over this row's content, at chunk 0. Every
     /// call returns a new cursor, so a caller may retry after a mid-stream
     /// error without rebuilding the reader.
+    ///
+    /// Retry contract: discard EVERYTHING the failed attempt produced; never
+    /// splice attempt 1's prefix with attempt 2's suffix (after a replace that
+    /// splices two uploads of one id). The failed cursor is not poisoned
+    /// (`open_next` does not advance `next_index` on an error), but the output
+    /// must still be rebuilt from frame 0.
     pub fn decryptor(&self) -> ChunkDecryptor {
         ChunkDecryptor::for_push_with_file_key(self.copy_key(), &self.file_id, self.pin)
     }

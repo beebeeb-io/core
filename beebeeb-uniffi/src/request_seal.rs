@@ -38,6 +38,12 @@ impl RequestContentReader {
     }
 
     /// A FRESH sequential decryptor at chunk 0. Call again after any error.
+    ///
+    /// Retry contract: discard EVERYTHING the failed attempt produced; never
+    /// splice attempt 1's prefix with attempt 2's suffix (after a replace that
+    /// splices two uploads of one id). The failed cursor is not poisoned
+    /// (`open_next` does not advance `next_index` on an error), but the output
+    /// must still be rebuilt from frame 0.
     pub fn decryptor(&self) -> Result<Arc<ChunkDecryptorHandle>, CryptoError> {
         Ok(Arc::new(ChunkDecryptorHandle {
             inner: Mutex::new(Some(self.inner.decryptor())),
