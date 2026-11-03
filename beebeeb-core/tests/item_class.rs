@@ -528,7 +528,10 @@ fn request_row_class_and_name_checks_precede_any_open() {
     );
 
     // A plaintext name authenticates nothing and must be refused before any open.
-    let err = fixture.resolve("upload.bin").err().expect("a plaintext name must be refused");
+    let err = fixture
+        .resolve("upload.bin")
+        .err()
+        .expect("a plaintext name must be refused");
     assert!(
         err.to_string().contains("encrypted envelope"),
         "a plaintext name must be refused before any open: {err}"
@@ -581,7 +584,10 @@ fn unbound_request_row_refuses_a_binary_convention_name() {
     let binary = uuid::Uuid::parse_str(O_ID).unwrap();
     let binary_key = derive_file_key(&fixture.master, binary.as_bytes());
     let name = name_for(&binary_key, "upload.bin");
-    let err = fixture.resolve(&name).err().expect("the unbound row must refuse a binary name");
+    let err = fixture
+        .resolve(&name)
+        .err()
+        .expect("the unbound row must refuse a binary name");
     assert!(
         err.to_string().contains("string convention"),
         "an unbound row's name resolves only under the string convention: {err}"
