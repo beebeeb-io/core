@@ -629,6 +629,13 @@ pub struct RequestRowKeys {
 /// (`FILE_REQUEST_EMPTY_ID`) and the CLI (`REQUEST_WRAP_CONTEXT`) both wrap
 /// under the empty context; a real request id here refuses a shipped row. The
 /// resolver never tries both contexts silently.
+///
+/// # R5 residual
+///
+/// The bound path accepts a Binary or upper-repair name convention. Anyone
+/// holding the request link (its public key) can therefore seal a row as
+/// `Bound`: the `Bound` mark proves that the id-bound seal opened under this
+/// row's id, NOT that the owner sent the row.
 #[allow(clippy::too_many_arguments)]
 pub fn resolve_request_row(
     master: &MasterKey,
