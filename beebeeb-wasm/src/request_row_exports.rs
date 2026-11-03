@@ -6,7 +6,8 @@ use super::*;
 
 /// Mint a guest (F) item id with NO master key (task 2275 §15). The anonymous
 /// uploader path uses this; the id is a canonical RFC 9562 UUID v8 and core's
-/// class check (and the server's T2 check) classifies it as foreign.
+/// class check classifies it as foreign. The server has no T2 F-class check
+/// yet (future server work), so only the core check protects this id today.
 #[wasm_bindgen(js_name = mintGuestItemId)]
 pub fn mint_guest_item_id() -> Result<String, JsError> {
     beebeeb_core::item_id::mint_guest_item_id().map_err(|e| JsError::new(&e.to_string()))
