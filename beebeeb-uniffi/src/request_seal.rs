@@ -226,9 +226,12 @@ impl MasterKeyHandle {
     /// holds (A9).
     ///
     /// An F id is refused by the same owner-class check the resolver runs.
-    /// `pin` must be the row's recorded `chunk_format`, never a server field:
-    /// a pin of 2 on a v1 row makes the file unreadable until it is renamed
-    /// again with the correct pin.
+    /// `pin` is the pin from the resolver's `RenameTarget` (`chunk_format`),
+    /// never a server field. Pin risk, both directions: a pin of 2 on a v1 row
+    /// makes the file unreadable until it is renamed again with the correct
+    /// pin; a pin of 0 on a v2 row drops the recorded 2 and turns frame-0
+    /// detection back on, so a server can serve the uploader's old no-AAD name
+    /// blob under `C` as a one-frame v1 file.
     pub fn seal_request_rename(
         &self,
         item_id: String,

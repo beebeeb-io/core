@@ -12,9 +12,13 @@
 //!   non-owner (F) id. It performs NO name or seal check, so the caller must
 //!   pass the pin the row's authenticated name recorded.
 //!
-//! Pin risk: a pin of 2 on a v1 row makes the file unreadable until it is
-//! renamed again with the correct pin. Read the pin with the row's name
-//! metadata (`chunk_format`), never from a server field.
+//! Pin risk, both directions. Callers pass the pin from the resolver's
+//! [`RenameTarget`], never from a server field:
+//! - pin 2 on a v1 row: the row is unreadable until it is renamed again with
+//!   the correct pin;
+//! - pin 0 on a v2 row: the recorded 2 is dropped, frame-0 detection is back
+//!   on, and a server can serve the uploader's old no-AAD name blob under `C`
+//!   as a one-frame v1 file.
 
 use crate::CoreError;
 use crate::chunk_stream::ExpectedChunkFormat;
@@ -39,11 +43,14 @@ pub fn encrypt_name_for_rename_target(
 /// format.
 ///
 /// It refuses a non-owner (F) id with the same class check the resolver runs.
-/// It performs NO name or seal check: the caller must pass the pin the row's
-/// authenticated name recorded. A pin of 2 on a v1 row makes the file
-/// unreadable until it is renamed again with the correct pin. That gives no
-/// new secret: the derivation needs only the master key and the public item id
-/// (both already the caller's), and the result is the §15 string key, never
+/// It performs NO name or seal check: the caller must pass the pin from the
+/// resolver's [`RenameTarget`], never a server field. Pin risk, both
+/// directions: a pin of 2 on a v1 row makes the file unreadable until it is
+/// renamed again with the correct pin; a pin of 0 on a v2 row drops the
+/// recorded 2 and turns frame-0 detection back on, so a server can serve the
+/// uploader's old no-AAD name blob under `C` as a one-frame v1 file. That gives
+/// no new secret: the derivation needs only the master key and the public item
+/// id (both already the caller's), and the result is the §15 string key, never
 /// the content key `C` that the anonymous uploader holds.
 pub fn encrypt_name_for_request_rename(
     master_key: &MasterKey,

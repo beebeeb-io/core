@@ -150,10 +150,14 @@ pub fn resolve_request_row(
 /// offers: `resolveRequestRow` hands back no key, so a rename cannot be sealed
 /// under the content key `C` that the anonymous uploader holds (A9).
 ///
-/// An F id is refused by the same owner-class check the resolver runs. `pin`
-/// must be the row's recorded `chunkFormat`, never a server field: a pin of 2
-/// on a v1 row makes the file unreadable until it is renamed again with the
-/// correct pin.
+/// An F id is refused by the same owner-class check the resolver runs. `pin` is
+/// the `renameTarget.pin` the resolver returned (the row's recorded format),
+/// never a field from the wire. Pin direction matters both ways:
+/// - a pin of 2 on a v1 row makes the file unreadable until it is renamed again
+///   with the correct pin;
+/// - a pin of 0 on a v2 row drops the recorded 2, turns frame-0 detection back
+///   on, and lets a server serve the uploader's old no-AAD name blob under `C`
+///   as a one-frame v1 file.
 #[wasm_bindgen(js_name = sealRequestRename)]
 pub fn seal_request_rename(
     master_key: &[u8],
