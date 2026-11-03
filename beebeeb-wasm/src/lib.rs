@@ -12,6 +12,7 @@ mod zeroing_alloc;
 static GLOBAL_ALLOCATOR: zeroing_alloc::ZeroingAllocator = zeroing_alloc::ZeroingAllocator;
 
 mod exports;
+mod request_row_exports;
 
 use beebeeb_core::client_meta as cm;
 use beebeeb_core::encrypt;
@@ -626,7 +627,14 @@ pub fn seal_to_request(r_pub: &[u8], file_id: &[u8], content_key: &[u8]) -> Resu
 }
 
 /// Open a sealed request upload (owner decrypt path). Recovers the content key.
-/// `r_priv` and `e_pub` are 32 bytes; `file_id` is arbitrary bytes. Returns 32-byte `Uint8Array`.
+/// `r_priv` and `e_pub` are 32 bytes; `file_id` is arbitrary bytes. Returns
+/// 32-byte `Uint8Array`.
+///
+/// **DECRYPT-ONLY.** This is a request row's content key `C`, and the
+/// anonymous uploader holds it. Use it to read the row's content; never seal a
+/// name, note or thumbnail under this key. For a request row the owner's rename
+/// goes through `seal_request_rename` / `sealRequestRename` (the §15
+/// string-derived key), never `C`.
 #[wasm_bindgen]
 pub fn open_request_upload(
     r_priv: &[u8],
@@ -5304,64 +5312,6 @@ pub fn encrypt_thumbnail_for_new_item(item_id: &WasmNewItemId, plaintext: &[u8],
 #[wasm_bindgen(js_name = encryptThumbnailForTarget)]
 pub fn encrypt_thumbnail_for_target(target: &WasmWriteTarget, plaintext: &[u8]) -> Result<Vec<u8>, JsError> {
     encrypt::encrypt_thumbnail_for_target(&target.inner, plaintext).map_err(|e| JsError::new(&e.to_string()))
-}
-
-/// Resolve a 2236 request row: `{contentKey, nameKey, nameOrigin, name,
-/// mimeType, chunkFormat}`. Read-only; no write target.
-#[wasm_bindgen(js_name = resolveRequestRow)]
-#[allow(clippy::too_many_arguments)]
-pub fn resolve_request_row(
-    master_key: &[u8],
-    item_id: &str,
-    request_id: &[u8],
-    wrapped_request_private: &[u8],
-    wrap_nonce: &[u8],
-    sender_ephemeral_pubkey: &[u8],
-    wrapped_content_key: &[u8],
-    name_encrypted: &str,
-) -> Result<JsValue, JsError> {
-    let master = master_key_from_slice(master_key)?;
-    let e_pub: [u8; 32] = sender_ephemeral_pubkey
-        .try_into()
-        .map_err(|_| JsError::new("sender_ephemeral_pubkey must be exactly 32 bytes"))?;
-    let row = beebeeb_core::owned_keys::resolve_request_row(
-        &master,
-        item_id,
-        request_id,
-        wrapped_request_private,
-        wrap_nonce,
-        &e_pub,
-        wrapped_content_key,
-        name_encrypted,
-    )
-    .map_err(|e| JsError::new(&e.to_string()))?;
-    let obj = js_sys::Object::new();
-    set(
-        &obj,
-        "contentKey",
-        js_sys::Uint8Array::from(row.content_key.as_bytes().as_slice()).into(),
-    )?;
-    set(
-        &obj,
-        "nameKey",
-        js_sys::Uint8Array::from(row.name_key.as_bytes().as_slice()).into(),
-    )?;
-    set(&obj, "nameOrigin", JsValue::from_str(row.name_origin.as_str()))?;
-    set(&obj, "name", JsValue::from_str(&row.name.name))?;
-    set(
-        &obj,
-        "mimeType",
-        match &row.name.mime_type {
-            Some(mime) => JsValue::from_str(mime),
-            None => JsValue::NULL,
-        },
-    )?;
-    set(
-        &obj,
-        "chunkFormat",
-        JsValue::from_f64(row.name.chunk_format.as_u8() as f64),
-    )?;
-    Ok(obj.into())
 }
 
 /// L14: does this row's L7 wrap open to exactly `expectedKey`?

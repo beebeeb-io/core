@@ -67,7 +67,8 @@ The rules whose breakage costs data, a key, a credential or a user. One line eac
 - Take the chunk format from the pin, never from a server value; prefer `version_id()` over re-reading chunk 0's first 12 bytes.
 - `V2` only from an EXISTING file's authenticated metadata; a NEW file never does (lead ruling 2026-10-17); each client tests its new-file path never passes `V2`.
 - Notes: write with `encrypt_note_for(file_key, text, pin)`, read with `decrypt_note`; never `encrypt_metadata`/`encryptFilename`/`encrypt_chunk` for a note.
-- UniFFI: raw key bytes never cross FFI. Single-consumer contract: a handle is an ordered cursor driven from ONE sequence.
+- A request row's `C` (`open_request_upload`) is decrypt-only: never seal a name, note or thumbnail under it. A rename seals via `seal_request_rename` / `sealRequestRename` (the §15 string-derived key); a request row has NO note sealer (notes are not writable on a request row).
+- UniFFI: a request-row result never carries a raw key, but raw key bytes still cross FFI in `open_request_upload` (the request content key `C`), `derive_master_key` (`MasterKeyResult.key`), `derive_file_key`, `derive_request_wrap_key`, `recover_from_phrase`, `derive_share_key`, `derive_x25519_private`, `x25519_shared_secret`, `transfer_derive_key` and `MasterKeyHandle::export_for_keychain`. For a request row these are DECRYPT-ONLY: never seal a name, note or thumbnail under `C`. Single-consumer contract: a handle is an ordered cursor driven from ONE sequence.
 - Folder keys are random (`FileKeyHandle.generate`, OS CSPRNG), never derived from the master key; `key_id` is the one-way folder-key id, never the key itself.
 - Canonical ids are UTF-8. Never fall back to the legacy file-key custody opener after authentication fails (L6).
 - Owner file-key wraps (L8) use the same textual encoding as L6 custody, never the binary UUID encoding of L7.

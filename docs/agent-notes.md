@@ -66,6 +66,15 @@ AAD = "beebeeb/chunk/v2"         16 bytes: domain tag + version
 
 **Rollout (read-only phase now):** `WRITE_FORMAT = ChunkFormat::V1Legacy`; the v2-write switch is a separate gated core release once every client's read path is live. Switch gate (server): reject replace inits, `PATCH name_encrypted` and `PATCH note_encrypted` from clients older than 1908 round 4/round 5.
 
+## Request-row content reader (`request_content.rs`) — task 2275 §15, 2326
+
+`RequestContentReader` owns the request row's content key `C` (a `FileKey`, zeroized on drop), bound to the row's file id and to the chunk-format pin its name authenticated. `owned_keys::resolve_request_row[_detailed]` builds it; the bindings expose it as `WasmRequestContentReader` / `RequestContentReader` and hand out no key. `C` is decrypt-only — the anonymous uploader holds it, so nothing is ever sealed under it. The owner's rename goes through `seal_request_rename` / `sealRequestRename` (the §15 string key derived from the item id), and a request row has NO note sealer because notes are not writable on it.
+
+- `decryptor()` returns a FRESH sequential `ChunkDecryptor` at chunk 0 on every call. Retry contract: discard EVERYTHING the failed attempt produced; never splice attempt 1's prefix with attempt 2's suffix (after a replace that splices two uploads of one id). The failed cursor is not poisoned (`open_next` does not advance `next_index` on an error), but the output must still be rebuilt from frame 0.
+- `openFrame` / `open_frame` is the random-access path: one frame by index, no earlier frames (reorder within a file is caught by the AAD). Its `format` and `version_id`/`versionId` must come from the resolved row and the frame, never from a server field. A V2-pinned reader refuses a v1 `format` as an invalid input (`CoreError::InvalidInput` / `CryptoError::InvalidInput` / a JS exception) before touching the frame; an Unrecorded reader opens the same frame, so the pin is what refuses it, not the key.
+- Pin risk is two-sided (see `rename.rs`): pin 2 on a v1 row makes it unreadable until it is renamed again with the correct pin; pin 0 on a v2 row drops the recorded 2 and turns frame-0 detection back on, so a server can serve the uploader's old no-AAD name blob under `C` as a one-frame v1 file. Callers always pass the pin from the resolver's `RenameTarget`.
+- The reader's `Debug` prints the file id and pin only; the key has no accessor, and a `compile_fail` doctest pins that.
+
 ## WASM target gating
 
 `beebeeb-core` builds for `wasm32-unknown-unknown`; `rusqlite` (fp_cache only) is gated to non-wasm (`[target.'cfg(not(target_arch = "wasm32"))'.dependencies]` + `#[cfg(not(target_arch = "wasm32"))]` on `pub mod fp_cache;`). WASM JsValue returns serialize via typed `#[derive(Serialize)]` structs, not `Map`s.

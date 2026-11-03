@@ -31,6 +31,8 @@ pub mod owned_keys;
 pub mod path_safety;
 pub mod pdf;
 pub mod recovery;
+pub mod rename;
+pub mod request_content;
 pub mod retry;
 pub mod search_index;
 pub mod search_sync;

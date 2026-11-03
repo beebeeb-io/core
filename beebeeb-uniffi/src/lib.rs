@@ -12,7 +12,7 @@ use beebeeb_core::recovery;
 use beebeeb_types::{CipherSuite, EncryptedBlob};
 
 uniffi::setup_scaffolding!();
-
+mod request_seal;
 #[cfg(test)]
 mod folder_link_2237c {
     use super::*;
@@ -1161,7 +1161,14 @@ pub fn seal_to_request(
     })
 }
 
-/// Open a sealed request upload (owner decrypt path). Returns the 32-byte content key.
+/// Open a sealed request upload (owner decrypt path). Returns the 32-byte
+/// content key.
+///
+/// **DECRYPT-ONLY.** This is a request row's content key `C`, and the
+/// anonymous uploader holds it. Use it to read the row's content; never seal a
+/// name, note or thumbnail under this key. For a request row the owner's rename
+/// goes through `seal_request_rename` / `sealRequestRename` (the §15
+/// string-derived key), never `C`.
 #[uniffi::export]
 pub fn open_request_upload(
     r_priv: Vec<u8>,
@@ -1422,46 +1429,6 @@ impl MasterKeyHandle {
             chunk_format,
             plaintext_name,
             write_target: resolved.write_target.map(|inner| Arc::new(WriteTargetHandle { inner })),
-        })
-    }
-
-    /// Task 2275: resolve a 2236 request row. Content under `C`; the name key is
-    /// a derived owner key when it authenticates the name, else `C`. Read-only.
-    #[allow(clippy::too_many_arguments)]
-    pub fn resolve_request_row(
-        &self,
-        item_id: String,
-        request_id: Vec<u8>,
-        wrapped_request_private: Vec<u8>,
-        wrap_nonce: Vec<u8>,
-        sender_ephemeral_pubkey: Vec<u8>,
-        wrapped_content_key: Vec<u8>,
-        name_encrypted: String,
-    ) -> Result<RequestRowKeys, CryptoError> {
-        let e_pub: [u8; 32] = sender_ephemeral_pubkey
-            .try_into()
-            .map_err(|_| CryptoError::InvalidInput {
-                detail: "sender_ephemeral_pubkey must be exactly 32 bytes".into(),
-            })?;
-        let row = self.with_key(|mk| {
-            beebeeb_core::owned_keys::resolve_request_row(
-                mk,
-                &item_id,
-                &request_id,
-                &wrapped_request_private,
-                &wrap_nonce,
-                &e_pub,
-                &wrapped_content_key,
-                &name_encrypted,
-            )
-        })??;
-        Ok(RequestRowKeys {
-            content_key: FileKeyHandle::new(row.content_key),
-            name_key: FileKeyHandle::new(row.name_key),
-            name_origin: row.name_origin.as_str().to_string(),
-            name: row.name.name,
-            mime_type: row.name.mime_type,
-            chunk_format: row.name.chunk_format.as_u8(),
         })
     }
 
@@ -1962,15 +1929,16 @@ impl FileKeyHandle {
 #[uniffi::export]
 impl FileKeyHandle {
     /// A handle for a per-file key the app holds as raw bytes and that is NOT
-    /// derived from the account's master key: a file-request upload's content
-    /// key (`open_request_upload`), a shared file's key. Task 1958 round 4: the
-    /// with-key name, note and thumbnail functions of this handle
-    /// (`encrypt_name_for`, `decrypt_file_metadata`, `encrypt_note_for`, ...)
-    /// were reachable only through `MasterKeyHandle::derive_file_key`, so not
-    /// for these keys. The WASM side takes the same bytes (`fileKey`).
+    /// derived from the account's master key: a shared file's key, a folder
+    /// link key. Exactly 32 bytes, anything else is an `InvalidInput` error.
+    /// The input is zeroized once copied into the key.
     ///
-    /// Exactly 32 bytes, anything else is an `InvalidInput` error. The input is
-    /// zeroized once copied into the key.
+    /// **DECRYPT-ONLY for a request row.** An `open_request_upload` content key
+    /// is the anonymous uploader's `C`. Use this handle to READ that row's
+    /// content (`decrypt_file_metadata`, `decrypt_note`, the chunk readers);
+    /// never seal a name, note or thumbnail under it. The owner's rename of a
+    /// request row goes through `seal_request_rename` (the §15 string-derived
+    /// key), never `C`.
     #[uniffi::constructor]
     pub fn from_key_bytes(key: Vec<u8>) -> Result<Arc<Self>, CryptoError> {
         let key = Zeroizing::new(key);
@@ -2526,18 +2494,6 @@ pub struct ResolvedItemKey {
     pub chunk_format: u8,
     pub plaintext_name: bool,
     pub write_target: Option<Arc<WriteTargetHandle>>,
-}
-
-/// A 2236 request row (task 2275): content under `content_key`, name under
-/// `name_key` (`name_origin` says which).
-#[derive(uniffi::Record)]
-pub struct RequestRowKeys {
-    pub content_key: Arc<FileKeyHandle>,
-    pub name_key: Arc<FileKeyHandle>,
-    pub name_origin: String,
-    pub name: String,
-    pub mime_type: Option<String>,
-    pub chunk_format: u8,
 }
 
 impl From<encrypt::NameMetadata> for NameMetadataDto {

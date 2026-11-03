@@ -7,13 +7,15 @@ use aes_gcm::{
     aead::{Aead, Payload},
 };
 use beebeeb_core::chunk_stream::ExpectedChunkFormat;
-use beebeeb_core::encrypt::{decrypt_file_metadata_with_key, encrypt_chunk_raw, encrypt_name_for};
+use beebeeb_core::encrypt::{
+    decrypt_file_metadata_with_key, encrypt_chunk_raw, encrypt_name_for, encrypt_name_with_chunk_format,
+};
 use beebeeb_core::file_request::{seal_to_request, wrap_request_private};
 use beebeeb_core::item_id::{ItemClass, NewItemId, is_foreign_item_id, item_class};
 use beebeeb_core::kdf::{FileKey, MasterKey, derive_file_key};
 use beebeeb_core::opaque::derive_x25519_public;
 use beebeeb_core::owned_keys::{
-    FirstChunk, FolderWrap, ItemKind, KeyOrigin, ResolvedName, child_wrap_matches, resolve_owned_key,
+    FirstChunk, FolderWrap, ItemKind, KeyOrigin, RequestSeal, ResolvedName, child_wrap_matches, resolve_owned_key,
     resolve_request_row, unwrap_child_key, wrap_child_key, wrap_owner_file_key,
 };
 use hkdf::Hkdf;
@@ -407,7 +409,8 @@ fn new_item_and_target_sealers_use_the_derived_key() {
 
 struct RequestFixture {
     master: MasterKey,
-    request_id: [u8; 16],
+    item_id: String,
+    request_id: Vec<u8>,
     wrapped_private: Vec<u8>,
     wrap_nonce: Vec<u8>,
     e_pub: [u8; 32],
@@ -416,16 +419,47 @@ struct RequestFixture {
 }
 
 fn request_fixture() -> RequestFixture {
+    request_fixture_for(O_ID)
+}
+
+fn request_fixture_for(item_id: &str) -> RequestFixture {
     let master = master();
-    let request_id = [0x01; 16];
+    let request_id = vec![0x01; 16];
     let request_private = [0x11u8; 32];
     let request_public = derive_x25519_public(&request_private);
     let content_key = [0x22u8; 32];
     let (wrapped_private, wrap_nonce) = wrap_request_private(&master, &request_id, &request_private).unwrap();
-    let sealed = seal_to_request(&request_public, O_ID.as_bytes(), &content_key).unwrap();
+    let sealed = seal_to_request(&request_public, item_id.as_bytes(), &content_key).unwrap();
     RequestFixture {
         master,
+        item_id: item_id.to_string(),
         request_id,
+        wrapped_private,
+        wrap_nonce,
+        e_pub: sealed.e_pub,
+        wrapped_content_key: sealed.wrapped_key,
+        content_key,
+    }
+}
+
+/// What `web/src/pages/upload-request.tsx` and `bb request send` write: the
+/// request-private wrap and the per-upload seal both use the EMPTY id (the
+/// 2236 convention), and the name is sealed under the content key `C`.
+fn shipped_request_fixture() -> RequestFixture {
+    shipped_request_fixture_for(O_ID)
+}
+
+fn shipped_request_fixture_for(item_id: &str) -> RequestFixture {
+    let master = master();
+    let request_private = [0x11u8; 32];
+    let request_public = derive_x25519_public(&request_private);
+    let content_key = [0x22u8; 32];
+    let (wrapped_private, wrap_nonce) = wrap_request_private(&master, b"", &request_private).unwrap();
+    let sealed = seal_to_request(&request_public, b"", &content_key).unwrap();
+    RequestFixture {
+        master,
+        item_id: item_id.to_string(),
+        request_id: Vec::new(),
         wrapped_private,
         wrap_nonce,
         e_pub: sealed.e_pub,
@@ -438,7 +472,7 @@ impl RequestFixture {
     fn resolve(&self, name: &str) -> Result<beebeeb_core::owned_keys::RequestRowKeys, beebeeb_core::CoreError> {
         resolve_request_row(
             &self.master,
-            O_ID,
+            &self.item_id,
             &self.request_id,
             &self.wrapped_private,
             &self.wrap_nonce,
@@ -447,6 +481,320 @@ impl RequestFixture {
             name,
         )
     }
+}
+
+#[test]
+fn shipped_unbound_request_row_opens_and_is_marked_unbound() {
+    let fixture = shipped_request_fixture();
+    let content = FileKey::from_bytes(fixture.content_key);
+    let name = name_for(&content, "upload.bin");
+    let row = fixture
+        .resolve(&name)
+        .expect("a row sealed exactly as the web/CLI uploader writes it must open");
+    assert_eq!(row.content_key.as_bytes(), &fixture.content_key);
+    assert_eq!(row.name_origin, KeyOrigin::RequestContent);
+    assert_eq!(row.seal, RequestSeal::Unbound);
+}
+
+#[test]
+fn shipped_request_wrap_requires_the_empty_context() {
+    // Every shipped request wraps its private key under the EMPTY context (the
+    // server mints the request id after the wrap). Passing the real id must
+    // refuse with a clear error, never retry the empty context silently.
+    let fixture = shipped_request_fixture();
+    let content = FileKey::from_bytes(fixture.content_key);
+    let name = name_for(&content, "upload.bin");
+    let real_request_id = [0x01u8; 16];
+    let err = resolve_request_row(
+        &fixture.master,
+        &fixture.item_id,
+        &real_request_id,
+        &fixture.wrapped_private,
+        &fixture.wrap_nonce,
+        &fixture.e_pub,
+        &fixture.wrapped_content_key,
+        &name,
+    )
+    .err()
+    .expect("a shipped row must not unwrap under a real request id");
+    assert!(
+        err.to_string().contains("request_wrap_context"),
+        "the refusal must name the context to pass: {err}"
+    );
+
+    // The empty context (what every shipped request uses) opens.
+    let row = fixture.resolve(&name).unwrap();
+    assert_eq!(row.seal, RequestSeal::Unbound);
+}
+
+#[test]
+fn bound_request_row_is_marked_bound() {
+    let fixture = request_fixture();
+    let derived = derive_file_key(&fixture.master, fixture.item_id.as_bytes());
+    let name = name_for(&derived, "upload.bin");
+    let row = fixture.resolve(&name).unwrap();
+    assert_eq!(row.content_key.as_bytes(), &fixture.content_key);
+    assert_eq!(row.name_origin, KeyOrigin::Derived);
+    assert_eq!(row.seal, RequestSeal::Bound);
+}
+
+#[test]
+fn request_row_class_and_name_checks_precede_any_open() {
+    let fixture = shipped_request_fixture();
+    let content = FileKey::from_bytes(fixture.content_key);
+    let name = name_for(&content, "upload.bin");
+
+    // The envelope would open unbound, so only the class check can refuse it.
+    let err = resolve_request_row(
+        &fixture.master,
+        F_ID,
+        &fixture.request_id,
+        &fixture.wrapped_private,
+        &fixture.wrap_nonce,
+        &fixture.e_pub,
+        &fixture.wrapped_content_key,
+        &name,
+    )
+    .err()
+    .expect("a foreign id must be refused before any open");
+    assert!(
+        err.to_string().contains("request row class check"),
+        "a foreign id must be refused by class before any open: {err}"
+    );
+
+    // The crypto cannot even unwrap here. If the class check ran after the
+    // opens, this row would report a decryption failure instead.
+    let err = resolve_request_row(
+        &fixture.master,
+        F_ID,
+        &fixture.request_id,
+        &[0u8; 32],
+        &[0u8; 12],
+        &fixture.e_pub,
+        &fixture.wrapped_content_key,
+        &name,
+    )
+    .err()
+    .expect("a foreign id must be refused before the unwrap");
+    assert!(
+        err.to_string().contains("request row class check"),
+        "with crypto that cannot unwrap, the class check must still win: {err}"
+    );
+
+    // A plaintext name authenticates nothing and must be refused before any open.
+    let err = fixture
+        .resolve("upload.bin")
+        .err()
+        .expect("a plaintext name must be refused");
+    assert!(
+        err.to_string().contains("request row name check"),
+        "a plaintext name must be refused before any open: {err}"
+    );
+}
+
+#[test]
+fn request_row_carries_a_rename_target_unless_upper_repair() {
+    // A string-convention name keeps its recorded pin and its derived name key.
+    let fixture = request_fixture();
+    let name = encrypt_name_with_chunk_format(
+        &fixture.master,
+        &fixture.item_id,
+        "upload.bin",
+        None,
+        ExpectedChunkFormat::V2,
+    )
+    .unwrap();
+    let row = fixture.resolve(&name).unwrap();
+    let target = row
+        .rename_target
+        .expect("a string-convention row must have a rename target");
+    assert_eq!(target.origin(), KeyOrigin::Derived);
+    assert_eq!(target.pin(), ExpectedChunkFormat::V2);
+    assert_eq!(target.key().as_bytes(), row.name_key.as_bytes());
+    assert_eq!(
+        target.key().as_bytes(),
+        derive_file_key(&fixture.master, fixture.item_id.as_bytes()).as_bytes()
+    );
+
+    // An upper-repair name is READ-ONLY: no rename target.
+    let fixture = request_fixture_for(O_ID_2);
+    let upper = O_ID_2.to_ascii_uppercase();
+    let name = encrypt_name_with_chunk_format(
+        &fixture.master,
+        &upper,
+        "upload.bin",
+        None,
+        ExpectedChunkFormat::Unrecorded,
+    )
+    .unwrap();
+    let row = fixture.resolve(&name).unwrap();
+    assert_eq!(row.name_origin, KeyOrigin::DerivedUpperRepair);
+    assert!(row.rename_target.is_none(), "an upper-repair name is read-only");
+}
+
+#[test]
+fn request_row_rename_target_is_never_the_content_key() {
+    // A row whose name is under C (the shipped uploader's name): the uploader
+    // holds C, so a rename sealed under C would hand the owner's new name to
+    // the uploader. §15: the target is ALWAYS the string-convention key.
+    let fixture = shipped_request_fixture();
+    let content = FileKey::from_bytes(fixture.content_key);
+    let name = encrypt_name_for(&content, "upload.bin", None, ExpectedChunkFormat::V2).unwrap();
+    let row = fixture.resolve(&name).unwrap();
+    assert_eq!(row.name_origin, KeyOrigin::RequestContent);
+    let target = row
+        .rename_target
+        .expect("the row is writable, so it must carry a rename target");
+    let derived = derive_file_key(&fixture.master, fixture.item_id.as_bytes());
+    assert_eq!(target.origin(), KeyOrigin::Derived);
+    assert_eq!(target.pin(), ExpectedChunkFormat::V2);
+    assert_eq!(target.key().as_bytes(), derived.as_bytes());
+    assert_ne!(
+        target.key().as_bytes(),
+        &fixture.content_key,
+        "the rename target must never be the content key C"
+    );
+}
+
+#[test]
+fn unbound_request_row_refuses_a_binary_convention_name() {
+    let fixture = shipped_request_fixture();
+    let binary = uuid::Uuid::parse_str(O_ID).unwrap();
+    let binary_key = derive_file_key(&fixture.master, binary.as_bytes());
+    let name = name_for(&binary_key, "upload.bin");
+    let err = fixture
+        .resolve(&name)
+        .err()
+        .expect("the unbound row must refuse a binary name");
+    assert!(
+        err.to_string().contains("request row unbound convention refusal"),
+        "the binary-convention branch itself must refuse, not the generic fallback: {err}"
+    );
+}
+
+#[test]
+fn unbound_request_row_name_under_the_string_key_is_derived() {
+    // A shipped row (empty contexts) that an old client renamed: the new name
+    // is sealed under the string-convention key, so an unbound row must open
+    // it as Derived, not fall through to C (A9c).
+    let fixture = shipped_request_fixture();
+    let derived = derive_file_key(&fixture.master, fixture.item_id.as_bytes());
+    let name = encrypt_name_for(&derived, "renamed.bin", None, ExpectedChunkFormat::V2).unwrap();
+    let row = fixture
+        .resolve(&name)
+        .expect("an unbound row's string-convention name must open");
+    assert_eq!(row.seal, RequestSeal::Unbound);
+    assert_eq!(row.name_origin, KeyOrigin::Derived);
+    assert_eq!(row.name_key.as_bytes(), derived.as_bytes());
+}
+
+#[test]
+fn unbound_request_row_refuses_an_upper_repair_name() {
+    let fixture = shipped_request_fixture_for(O_ID_2);
+    let upper = fixture.item_id.to_ascii_uppercase();
+    let upper_key = derive_file_key(&fixture.master, upper.as_bytes());
+    let name = name_for(&upper_key, "upload.bin");
+    let err = fixture
+        .resolve(&name)
+        .err()
+        .expect("the unbound row must refuse an upper-repair name");
+    assert!(
+        err.to_string().contains("request row unbound convention refusal"),
+        "the upper-repair branch itself must refuse, not the generic fallback: {err}"
+    );
+}
+
+#[test]
+fn request_row_keys_new_derives_the_string_rename_target() {
+    let master = master();
+    let content = FileKey::from_bytes([0x22u8; 32]);
+    let derived = derive_file_key(&master, O_ID.as_bytes());
+    let expected = *derived.as_bytes();
+    let name = name_for(&derived, "upload.bin");
+    let meta = decrypt_file_metadata_with_key(&derived, &name).unwrap();
+    let row = beebeeb_core::owned_keys::RequestRowKeys::new(
+        &master,
+        O_ID,
+        content,
+        derived,
+        KeyOrigin::Derived,
+        meta,
+        RequestSeal::Unbound,
+    );
+    let target = row
+        .rename_target
+        .as_ref()
+        .expect("a new row must carry a rename target");
+    assert_eq!(target.origin(), KeyOrigin::Derived);
+    assert_eq!(target.key().as_bytes(), &expected);
+    assert_eq!(target.pin(), row.name.chunk_format);
+}
+
+#[test]
+fn request_rename_seals_under_the_target_key_and_keeps_its_pin() {
+    let fixture = request_fixture();
+    let name = encrypt_name_with_chunk_format(
+        &fixture.master,
+        &fixture.item_id,
+        "upload.bin",
+        None,
+        ExpectedChunkFormat::V2,
+    )
+    .unwrap();
+    let row = fixture.resolve(&name).unwrap();
+    let target = row
+        .rename_target
+        .as_ref()
+        .expect("a string-convention row must carry a rename target");
+    let sealed = beebeeb_core::rename::encrypt_name_for_rename_target(target, "renamed.bin", Some("text/plain"))
+        .expect("sealing through the target must work");
+    let meta = decrypt_file_metadata_with_key(target.key(), &sealed).unwrap();
+    assert_eq!(meta.name, "renamed.bin");
+    assert_eq!(meta.mime_type.as_deref(), Some("text/plain"));
+    assert_eq!(meta.chunk_format, target.pin());
+    assert_eq!(target.pin(), ExpectedChunkFormat::V2);
+}
+
+#[test]
+fn request_rename_bindings_sealer_derives_the_string_key() {
+    // The bindings cannot construct a RenameTarget, so the exported sealer
+    // derives the §15 string key from the row id and keeps the row's pin.
+    let fixture = shipped_request_fixture();
+    let content = FileKey::from_bytes(fixture.content_key);
+    let name = name_for(&content, "upload.bin");
+    let row = fixture.resolve(&name).unwrap();
+    let target = row
+        .rename_target
+        .as_ref()
+        .expect("the row is writable, so it must carry a rename target");
+    let sealed = beebeeb_core::rename::encrypt_name_for_request_rename(
+        &fixture.master,
+        &fixture.item_id,
+        target.pin(),
+        "renamed.bin",
+        None,
+    )
+    .expect("the bindings sealer must work");
+    let meta = decrypt_file_metadata_with_key(target.key(), &sealed).unwrap();
+    assert_eq!(meta.name, "renamed.bin");
+    assert_eq!(meta.chunk_format, target.pin());
+}
+
+#[test]
+fn request_rename_refuses_a_foreign_item_id() {
+    let fixture = shipped_request_fixture();
+    let err = beebeeb_core::rename::encrypt_name_for_request_rename(
+        &fixture.master,
+        F_ID,
+        ExpectedChunkFormat::Unrecorded,
+        "renamed.bin",
+        None,
+    )
+    .expect_err("an F id is not a request row");
+    assert!(
+        err.to_string().contains("request row class check"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
