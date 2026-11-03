@@ -103,7 +103,7 @@ fn a_second_decryptor_opens_after_the_first_failed_mid_stream() {
 }
 
 #[test]
-fn the_reader_exposes_no_key_bytes() {
+fn the_readers_byte_output_is_plaintext_not_a_key() {
     // The reader's whole API is file_id(), pin(), decryptor() and open_frame().
     // None of them returns the key: the only byte-returning call is open_frame,
     // whose output is plaintext. A 32-byte plaintext is used here so the result
@@ -122,6 +122,23 @@ fn the_reader_exposes_no_key_bytes() {
     assert!(
         wrong.push_frame(&frames[0]).is_err(),
         "the reader's output must not be a key that opens the row's frame"
+    );
+}
+
+#[test]
+fn the_readers_debug_output_omits_the_key() {
+    let reader = RequestContentReader::new(FileKey::from_bytes(KEY), ID, ExpectedChunkFormat::V2);
+    let shown = format!("{reader:?}");
+    assert!(shown.contains("RequestContentReader"), "{shown}");
+    assert!(shown.contains(ID), "{shown}");
+    assert!(!shown.contains("file_key"), "Debug names the key field: {shown}");
+    assert!(
+        !shown.contains(&"22".repeat(32)),
+        "Debug printed the key as hex: {shown}"
+    );
+    assert!(
+        !shown.contains(&format!("{KEY:?}")),
+        "Debug printed the key's bytes: {shown}"
     );
 }
 

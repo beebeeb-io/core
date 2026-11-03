@@ -17,6 +17,17 @@ use crate::chunk_stream::{ChunkDecryptor, ChunkFormat, ExpectedChunkFormat, open
 use crate::kdf::FileKey;
 
 /// A request row's decrypt-only content reader. One key, one row.
+///
+/// The key is a private field with no accessor: reading it from outside this
+/// module does not compile.
+///
+/// ```compile_fail
+/// # use beebeeb_core::chunk_stream::ExpectedChunkFormat;
+/// # use beebeeb_core::kdf::FileKey;
+/// # use beebeeb_core::request_content::RequestContentReader;
+/// let reader = RequestContentReader::new(FileKey::from_bytes([7; 32]), "id", ExpectedChunkFormat::V2);
+/// let _key_bytes = reader.file_key; // private: the reader has no key getter
+/// ```
 pub struct RequestContentReader {
     file_key: FileKey,
     file_id: String,

@@ -321,6 +321,23 @@ test('a request-row content reader range-reads, retries and exposes no key', () 
   assert.equal(second.finish().chunk_count, 3);
 });
 
+test('the request content reader exposes exactly its documented JS surface', () => {
+  // No key getter and no extra helper: a new member on the prototype is a
+  // new way for JS to reach the reader's key, so the list is exact.
+  assert.deepEqual(
+    Object.getOwnPropertyNames(wasm.WasmRequestContentReader.prototype).sort(),
+    [
+      '__destroy_into_raw',
+      'chunkFormat',
+      'constructor',
+      'decryptor',
+      'fileId',
+      'free',
+      'openFrame',
+    ],
+  );
+});
+
 test('mintGuestItemId needs no master key and always mints an F id', () => {
   for (let i = 0; i < 64; i++) {
     const id = wasm.mintGuestItemId();
