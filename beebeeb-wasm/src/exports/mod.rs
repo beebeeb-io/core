@@ -11,6 +11,7 @@
 //! declares `mod exports;` and the new surface grows here.
 
 pub mod format;
+pub mod media;
 pub mod metadata_wire;
 pub mod path_safety;
 pub mod retry;
