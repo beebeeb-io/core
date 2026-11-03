@@ -149,6 +149,11 @@ pub fn resolve_request_row(
 /// `resolveRequestRow`). This is the only sealing path a request-row result
 /// offers: `resolveRequestRow` hands back no key, so a rename cannot be sealed
 /// under the content key `C` that the anonymous uploader holds (A9).
+///
+/// An F id is refused by the same owner-class check the resolver runs. `pin`
+/// must be the row's recorded `chunkFormat`, never a server field: a pin of 2
+/// on a v1 row makes the file unreadable until it is renamed again with the
+/// correct pin.
 #[wasm_bindgen(js_name = sealRequestRename)]
 pub fn seal_request_rename(
     master_key: &[u8],

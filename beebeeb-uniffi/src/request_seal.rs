@@ -224,6 +224,11 @@ impl MasterKeyHandle {
     /// request-row result offers: the resolvers hand back no key, so a rename
     /// cannot be sealed under the content key `C` that the anonymous uploader
     /// holds (A9).
+    ///
+    /// An F id is refused by the same owner-class check the resolver runs.
+    /// `pin` must be the row's recorded `chunk_format`, never a server field:
+    /// a pin of 2 on a v1 row makes the file unreadable until it is renamed
+    /// again with the correct pin.
     pub fn seal_request_rename(
         &self,
         item_id: String,

@@ -1,11 +1,20 @@
 //! Request-row rename sealers (task 2275 §15).
 //!
-//! Split out of `encrypt.rs`, which is already over the file-size ratchet. The
-//! core entry point takes the resolved [`RenameTarget`], so a caller cannot
-//! point the owner's new name at the anonymous uploader's `C` or at a guessed
-//! pin. The bindings cannot construct a core `RenameTarget` and hold no
-//! sealing key, so they expose [`encrypt_name_for_request_rename`], which
-//! re-derives the §15 string-convention key from the row id.
+//! Split out of `encrypt.rs`, which is already over the file-size ratchet.
+//!
+//! Which entry point guarantees what:
+//! - [`encrypt_name_for_rename_target`] seals under the key and pin of a
+//!   resolved [`RenameTarget`]. It cannot point the owner's new name at the
+//!   anonymous uploader's `C` or at a guessed pin.
+//! - [`encrypt_name_for_request_rename`] is the bindings' entry point (they
+//!   cannot construct a core `RenameTarget` and hold no sealing key). It
+//!   re-derives the §15 string-convention key from the row id and refuses a
+//!   non-owner (F) id. It performs NO name or seal check, so the caller must
+//!   pass the pin the row's authenticated name recorded.
+//!
+//! Pin risk: a pin of 2 on a v1 row makes the file unreadable until it is
+//! renamed again with the correct pin. Read the pin with the row's name
+//! metadata (`chunk_format`), never from a server field.
 
 use crate::CoreError;
 use crate::chunk_stream::ExpectedChunkFormat;
@@ -29,8 +38,10 @@ pub fn encrypt_name_for_rename_target(
 /// string-convention key from the item id. `pin` is the row's recorded chunk
 /// format.
 ///
-/// It performs NO class, name or seal checks: any `item_id` and `pin` are
-/// accepted, as [`crate::encrypt::encrypt_name_for`] itself does. That gives no
+/// It refuses a non-owner (F) id with the same class check the resolver runs.
+/// It performs NO name or seal check: the caller must pass the pin the row's
+/// authenticated name recorded. A pin of 2 on a v1 row makes the file
+/// unreadable until it is renamed again with the correct pin. That gives no
 /// new secret: the derivation needs only the master key and the public item id
 /// (both already the caller's), and the result is the §15 string key, never
 /// the content key `C` that the anonymous uploader holds.
@@ -41,6 +52,12 @@ pub fn encrypt_name_for_request_rename(
     filename: &str,
     mime_type: Option<&str>,
 ) -> Result<String, CoreError> {
+    if crate::item_id::item_class(item_id)? != crate::item_id::ItemClass::Owner {
+        return Err(CoreError::InvalidInput(
+            "request row class check: a request row must have an owner item id; foreign items resolve only via L8 or L7"
+                .into(),
+        ));
+    }
     let key = derive_file_key(master_key, item_id.as_bytes());
     crate::encrypt::encrypt_name_for(&key, filename, mime_type, pin)
 }

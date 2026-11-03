@@ -781,6 +781,23 @@ fn request_rename_bindings_sealer_derives_the_string_key() {
 }
 
 #[test]
+fn request_rename_refuses_a_foreign_item_id() {
+    let fixture = shipped_request_fixture();
+    let err = beebeeb_core::rename::encrypt_name_for_request_rename(
+        &fixture.master,
+        F_ID,
+        ExpectedChunkFormat::Unrecorded,
+        "renamed.bin",
+        None,
+    )
+    .expect_err("an F id is not a request row");
+    assert!(
+        err.to_string().contains("request row class check"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn request_row_content_is_under_c() {
     let fixture = request_fixture();
     let derived = derive_file_key(&fixture.master, O_ID.as_bytes());
