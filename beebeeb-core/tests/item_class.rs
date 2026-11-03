@@ -13,7 +13,7 @@ use beebeeb_core::item_id::{ItemClass, NewItemId, is_foreign_item_id, item_class
 use beebeeb_core::kdf::{FileKey, MasterKey, derive_file_key};
 use beebeeb_core::opaque::derive_x25519_public;
 use beebeeb_core::owned_keys::{
-    FirstChunk, FolderWrap, ItemKind, KeyOrigin, ResolvedName, child_wrap_matches, resolve_owned_key,
+    FirstChunk, FolderWrap, ItemKind, KeyOrigin, RequestSeal, ResolvedName, child_wrap_matches, resolve_owned_key,
     resolve_request_row, unwrap_child_key, wrap_child_key, wrap_owner_file_key,
 };
 use hkdf::Hkdf;
@@ -407,7 +407,8 @@ fn new_item_and_target_sealers_use_the_derived_key() {
 
 struct RequestFixture {
     master: MasterKey,
-    request_id: [u8; 16],
+    item_id: String,
+    request_id: Vec<u8>,
     wrapped_private: Vec<u8>,
     wrap_nonce: Vec<u8>,
     e_pub: [u8; 32],
@@ -416,16 +417,43 @@ struct RequestFixture {
 }
 
 fn request_fixture() -> RequestFixture {
+    request_fixture_for(O_ID)
+}
+
+fn request_fixture_for(item_id: &str) -> RequestFixture {
     let master = master();
-    let request_id = [0x01; 16];
+    let request_id = vec![0x01; 16];
     let request_private = [0x11u8; 32];
     let request_public = derive_x25519_public(&request_private);
     let content_key = [0x22u8; 32];
     let (wrapped_private, wrap_nonce) = wrap_request_private(&master, &request_id, &request_private).unwrap();
-    let sealed = seal_to_request(&request_public, O_ID.as_bytes(), &content_key).unwrap();
+    let sealed = seal_to_request(&request_public, item_id.as_bytes(), &content_key).unwrap();
     RequestFixture {
         master,
+        item_id: item_id.to_string(),
         request_id,
+        wrapped_private,
+        wrap_nonce,
+        e_pub: sealed.e_pub,
+        wrapped_content_key: sealed.wrapped_key,
+        content_key,
+    }
+}
+
+/// What `web/src/pages/upload-request.tsx` and `bb request send` write: the
+/// request-private wrap and the per-upload seal both use the EMPTY id (the
+/// 2236 convention), and the name is sealed under the content key `C`.
+fn shipped_request_fixture() -> RequestFixture {
+    let master = master();
+    let request_private = [0x11u8; 32];
+    let request_public = derive_x25519_public(&request_private);
+    let content_key = [0x22u8; 32];
+    let (wrapped_private, wrap_nonce) = wrap_request_private(&master, b"", &request_private).unwrap();
+    let sealed = seal_to_request(&request_public, b"", &content_key).unwrap();
+    RequestFixture {
+        master,
+        item_id: O_ID.to_string(),
+        request_id: Vec::new(),
         wrapped_private,
         wrap_nonce,
         e_pub: sealed.e_pub,
@@ -438,7 +466,7 @@ impl RequestFixture {
     fn resolve(&self, name: &str) -> Result<beebeeb_core::owned_keys::RequestRowKeys, beebeeb_core::CoreError> {
         resolve_request_row(
             &self.master,
-            O_ID,
+            &self.item_id,
             &self.request_id,
             &self.wrapped_private,
             &self.wrap_nonce,
@@ -447,6 +475,75 @@ impl RequestFixture {
             name,
         )
     }
+}
+
+#[test]
+fn shipped_unbound_request_row_opens_and_is_marked_unbound() {
+    let fixture = shipped_request_fixture();
+    let content = FileKey::from_bytes(fixture.content_key);
+    let name = name_for(&content, "upload.bin");
+    let row = fixture
+        .resolve(&name)
+        .expect("a row sealed exactly as the web/CLI uploader writes it must open");
+    assert_eq!(row.content_key.as_bytes(), &fixture.content_key);
+    assert_eq!(row.name_origin, KeyOrigin::RequestContent);
+    assert_eq!(row.seal, RequestSeal::Unbound);
+}
+
+#[test]
+fn bound_request_row_is_marked_bound() {
+    let fixture = request_fixture();
+    let derived = derive_file_key(&fixture.master, fixture.item_id.as_bytes());
+    let name = name_for(&derived, "upload.bin");
+    let row = fixture.resolve(&name).unwrap();
+    assert_eq!(row.content_key.as_bytes(), &fixture.content_key);
+    assert_eq!(row.name_origin, KeyOrigin::Derived);
+    assert_eq!(row.seal, RequestSeal::Bound);
+}
+
+#[test]
+fn request_row_class_and_name_checks_precede_any_open() {
+    let fixture = shipped_request_fixture();
+    let content = FileKey::from_bytes(fixture.content_key);
+    let name = name_for(&content, "upload.bin");
+
+    // The envelope would open unbound, so only the class check can refuse it.
+    let err = resolve_request_row(
+        &fixture.master,
+        F_ID,
+        &fixture.request_id,
+        &fixture.wrapped_private,
+        &fixture.wrap_nonce,
+        &fixture.e_pub,
+        &fixture.wrapped_content_key,
+        &name,
+    )
+    .err()
+    .expect("a foreign id must be refused before any open");
+    assert!(
+        err.to_string().contains("owner item id"),
+        "a foreign id must be refused by class before any open: {err}"
+    );
+
+    // A plaintext name authenticates nothing and must be refused before any open.
+    let err = fixture.resolve("upload.bin").err().expect("a plaintext name must be refused");
+    assert!(
+        err.to_string().contains("encrypted envelope"),
+        "a plaintext name must be refused before any open: {err}"
+    );
+}
+
+#[test]
+fn unbound_request_row_refuses_a_binary_convention_name() {
+    let fixture = shipped_request_fixture();
+    let binary = uuid::Uuid::parse_str(O_ID).unwrap();
+    let binary_key = derive_file_key(&fixture.master, binary.as_bytes());
+    let name = name_for(&binary_key, "upload.bin");
+    let err = fixture.resolve(&name).err().expect("the unbound row must refuse a binary name");
+    assert!(
+        err.to_string().contains("string convention"),
+        "an unbound row's name resolves only under the string convention: {err}"
+    );
 }
 
 #[test]
