@@ -589,6 +589,9 @@ impl std::fmt::Debug for RenameTarget {
 
 /// A 2236 request-upload row: the uploader sealed a content key `C` to the
 /// owner's request key, and the row is read-only content-wise.
+///
+/// `#[non_exhaustive]`: a caller outside core builds it with [`RequestRowKeys::new`].
+#[non_exhaustive]
 pub struct RequestRowKeys {
     /// The upload's content key `C`.
     pub content_key: FileKey,
@@ -690,28 +693,53 @@ pub fn resolve_request_row(
         RequestSeal::Bound => request_row_name_any(master, item_id, &content_key, name_encrypted)?,
         RequestSeal::Unbound => request_row_name_string_or_content(master, item_id, &content_key, name_encrypted)?,
     };
-    // Only upper-repair is read-only. Every other row renames under the
-    // string-convention key derived from its id, keeping the pin the current
-    // name records — NEVER under the name key as resolved: when that key is C
-    // (`RequestContent`), the anonymous uploader holds it, so sealing the
-    // owner's new name under C would hand the name to the uploader (§15, A9).
-    let rename_target = match name_origin {
-        KeyOrigin::DerivedUpperRepair => None,
-        _ => Some(RenameTarget::new(
-            &derive_file_key(master, item_id.as_bytes()),
-            KeyOrigin::Derived,
-            name.chunk_format,
-        )),
-    };
-
-    Ok(RequestRowKeys {
+    Ok(RequestRowKeys::new(
+        master,
+        item_id,
         content_key,
         name_key,
         name_origin,
         name,
         seal,
-        rename_target,
-    })
+    ))
+}
+
+impl RequestRowKeys {
+    /// Build a request row from its resolved parts. The rename target follows
+    /// §15: always the string-convention key derived from `item_id`, keeping
+    /// the pin the current name records, and `None` for an upper-repair
+    /// (read-only) name. It is NEVER the resolved `name_key`: when that key is
+    /// `C` (`RequestContent`) the anonymous uploader holds it, so sealing the
+    /// owner's new name under C would hand the name to the uploader (A9).
+    ///
+    /// A CLI pinned to an older core must bump to a version that has this
+    /// constructor: `#[non_exhaustive]` makes a struct literal stop compiling.
+    pub fn new(
+        master: &MasterKey,
+        item_id: &str,
+        content_key: FileKey,
+        name_key: FileKey,
+        name_origin: KeyOrigin,
+        name: NameMetadata,
+        seal: RequestSeal,
+    ) -> Self {
+        let rename_target = match name_origin {
+            KeyOrigin::DerivedUpperRepair => None,
+            _ => Some(RenameTarget::new(
+                &derive_file_key(master, item_id.as_bytes()),
+                KeyOrigin::Derived,
+                name.chunk_format,
+            )),
+        };
+        Self {
+            content_key,
+            name_key,
+            name_origin,
+            name,
+            seal,
+            rename_target,
+        }
+    }
 }
 
 /// A bound request row's name: any owner convention (string, binary, then the

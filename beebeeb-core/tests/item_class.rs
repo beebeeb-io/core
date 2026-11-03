@@ -705,6 +705,32 @@ fn unbound_request_row_refuses_an_upper_repair_name() {
 }
 
 #[test]
+fn request_row_keys_new_derives_the_string_rename_target() {
+    let master = master();
+    let content = FileKey::from_bytes([0x22u8; 32]);
+    let derived = derive_file_key(&master, O_ID.as_bytes());
+    let expected = *derived.as_bytes();
+    let name = name_for(&derived, "upload.bin");
+    let meta = decrypt_file_metadata_with_key(&derived, &name).unwrap();
+    let row = beebeeb_core::owned_keys::RequestRowKeys::new(
+        &master,
+        O_ID,
+        content,
+        derived,
+        KeyOrigin::Derived,
+        meta,
+        RequestSeal::Unbound,
+    );
+    let target = row
+        .rename_target
+        .as_ref()
+        .expect("a new row must carry a rename target");
+    assert_eq!(target.origin(), KeyOrigin::Derived);
+    assert_eq!(target.key().as_bytes(), &expected);
+    assert_eq!(target.pin(), row.name.chunk_format);
+}
+
+#[test]
 fn request_rename_seals_under_the_target_key_and_keeps_its_pin() {
     let fixture = request_fixture();
     let name = encrypt_name_with_chunk_format(
