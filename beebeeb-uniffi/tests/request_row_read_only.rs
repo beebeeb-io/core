@@ -80,6 +80,15 @@ fn request_row_results_never_hand_back_a_sealing_key() {
         assert_eq!(out, plaintext);
     }
 
+    // The same v1 frame opens through open_frame on this unrecorded reader.
+    let v1 = beebeeb_core::encrypt::encrypt_chunk(&FileKey::from_bytes([0x22u8; 32]), b"the request upload").unwrap();
+    let mut v1_frame = v1.nonce.clone();
+    v1_frame.extend_from_slice(&v1.ciphertext);
+    assert_eq!(
+        detailed.content.open_frame(Vec::new(), 0, true, 1, v1_frame).unwrap(),
+        b"the request upload"
+    );
+
     // D-P2: renaming goes through the core sealer. The sealed name opens under
     // the string-derived key and NOT under C, which the uploader holds.
     let renamed = owner
@@ -159,4 +168,16 @@ fn a_bound_request_row_reads_v2_content_through_both_readers() {
         dec.finish().unwrap();
         assert_eq!(out, plaintext);
     }
+
+    // open_frame is the guard's other entry point: a v1 frame under the same C
+    // is refused by these V2-pinned readers (the core test shows an Unrecorded
+    // reader opens the same frame, so the pin refuses it, not the key).
+    let v1 = beebeeb_core::encrypt::encrypt_chunk(&FileKey::from_bytes(content_key), b"bound upload").unwrap();
+    let mut v1_frame = v1.nonce.clone();
+    v1_frame.extend_from_slice(&v1.ciphertext);
+    let err = detailed
+        .content
+        .open_frame(Vec::new(), 0, true, 1, v1_frame)
+        .expect_err("a reader pinned to v2 must refuse format 1");
+    assert!(err.to_string().contains("records chunk format 2"), "{err}");
 }

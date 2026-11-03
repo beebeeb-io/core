@@ -5,12 +5,21 @@
 //! row's file id and recorded chunk-format pin. It has no key getter, hands out
 //! a fresh sequential decryptor per call, and opens one frame by index.
 
+use beebeeb_core::CoreError;
 use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor, ChunkFormat, ExpectedChunkFormat};
 use beebeeb_core::kdf::FileKey;
 use beebeeb_core::request_content::RequestContentReader;
 
 const ID: &str = "66666666-6666-4666-8666-666666666666";
 const KEY: [u8; 32] = [0x22; 32];
+
+/// One v1 frame under `KEY`: `nonce || ciphertext || tag`, no AAD.
+fn v1_frame(plaintext: &[u8]) -> Vec<u8> {
+    let blob = beebeeb_core::encrypt::encrypt_chunk(&FileKey::from_bytes(KEY), plaintext).unwrap();
+    let mut frame = blob.nonce.clone();
+    frame.extend_from_slice(&blob.ciphertext);
+    frame
+}
 
 /// One v2 upload of `plaintext` under `KEY`, bound to `ID`.
 fn v2_frames(plaintext: &[u8], chunk_size: u64) -> (Vec<Vec<u8>>, [u8; 12]) {
@@ -26,6 +35,32 @@ fn v2_frames(plaintext: &[u8], chunk_size: u64) -> (Vec<Vec<u8>>, [u8; 12]) {
     enc.finish().unwrap();
     let version: [u8; 12] = frames[0][..12].try_into().unwrap();
     (frames, version)
+}
+
+#[test]
+fn a_v2_pinned_reader_refuses_a_v1_frame_that_an_unrecorded_reader_opens() {
+    let plaintext = b"the request upload";
+    let frame = v1_frame(plaintext);
+
+    // The row's name authenticated v2, so its reader refuses a v1 frame under C.
+    let pinned = RequestContentReader::new(FileKey::from_bytes(KEY), ID, ExpectedChunkFormat::V2);
+    let err = pinned
+        .open_frame(&[], 0, true, ChunkFormat::V1Legacy, &frame)
+        .expect_err("a reader pinned to v2 must refuse a v1 frame under the same C");
+    assert!(
+        matches!(err, CoreError::InvalidInput(_)),
+        "the pin must refuse with InvalidInput, got {err:?}"
+    );
+
+    // The SAME frame opens on an Unrecorded reader under the same key C: the
+    // pin refused it, not the key.
+    let unrecorded = RequestContentReader::new(FileKey::from_bytes(KEY), ID, ExpectedChunkFormat::Unrecorded);
+    assert_eq!(
+        unrecorded
+            .open_frame(&[], 0, true, ChunkFormat::V1Legacy, &frame)
+            .unwrap(),
+        plaintext
+    );
 }
 
 #[test]

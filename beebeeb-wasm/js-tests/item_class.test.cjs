@@ -191,6 +191,12 @@ test('a row sealed like the shipped uploader opens as Unbound and names under C'
   assert.equal(dec.chunksDecrypted, 1);
   assert.equal(dec.finish().chunk_count, 1);
 
+  // The same v1 frame opens through openFrame on this unrecorded (pin 0) reader.
+  assert.equal(
+    hex(row.content.openFrame(new Uint8Array(0), 0, true, 1, frame)),
+    hex(plaintext),
+  );
+
   // §15/A9: a rename is ALWAYS sealed under the string-convention key derived
   // from the item id, never under C (which the anonymous uploader holds). The
   // sealer is the only path: the resolver exposed no sealing key.
@@ -233,7 +239,15 @@ test('a bound request row opens as Bound with a derived rename target', () => {
   assert.equal(row.content instanceof wasm.WasmRequestContentReader, true);
   const plaintext = new TextEncoder().encode('bound upload');
   const v1 = wasm.encrypt_chunk(contentKey, plaintext);
-  assert.throws(() => row.content.decryptor().pushFrame(new Uint8Array([...v1.nonce, ...v1.ciphertext])));
+  const v1Frame = new Uint8Array([...v1.nonce, ...v1.ciphertext]);
+  assert.throws(() => row.content.decryptor().pushFrame(v1Frame));
+
+  // openFrame is the guard's other entry point: a v1 frame under the same C is
+  // refused by this V2-pinned reader, with the error that names the pin.
+  assert.throws(
+    () => row.content.openFrame(new Uint8Array(0), 0, true, 1, v1Frame),
+    /records chunk format 2/,
+  );
 });
 
 test('a request-row content reader range-reads, retries and exposes no key', () => {
