@@ -1,6 +1,7 @@
 //! Request-row seal and rename-target exports (task 2275 §15). Split out of
-//! `lib.rs`, which is already over the file-size ratchet; the existing
-//! `resolve_request_row`/`RequestRowKeys` surface stays unchanged.
+//! `lib.rs`, which is already over the file-size ratchet. Request-row results
+//! carry a decrypt-only content handle and the opened name, never a raw key:
+//! renames go through the core sealer.
 
 use super::*;
 
@@ -11,20 +12,20 @@ pub fn mint_guest_item_id() -> Result<String, CryptoError> {
     Ok(beebeeb_core::item_id::mint_guest_item_id()?)
 }
 
-/// The name key, origin and pin a request-row rename must use (task 2275 §15).
+/// The origin and pin a request-row rename must use (task 2275 §15). There is
+/// no key here: the sealer re-derives it in core from the item id.
 #[derive(uniffi::Record)]
 pub struct RequestRenameTarget {
-    pub key: Arc<FileKeyHandle>,
     pub origin: String,
     pub pin: u8,
 }
 
-/// A request row with its seal and rename target (task 2275 §15). Additive
-/// alongside [`RequestRowKeys`]: the older record is unchanged.
+/// A request row with its seal and rename target (task 2275 §15). Carries a
+/// decrypt-only content handle and the opened name, never a raw key.
 #[derive(uniffi::Record)]
 pub struct ResolvedRequestRow {
-    pub content_key: Arc<FileKeyHandle>,
-    pub name_key: Arc<FileKeyHandle>,
+    /// Decrypt-only handle for the row's content; no key getter.
+    pub content: Arc<ChunkDecryptorHandle>,
     pub name_origin: String,
     pub name: String,
     pub mime_type: Option<String>,
@@ -35,11 +36,25 @@ pub struct ResolvedRequestRow {
     pub rename_target: Option<RequestRenameTarget>,
 }
 
+/// A 2236 request row (task 2275): a decrypt-only content handle and the
+/// opened name. **Legacy**: `resolve_request_row` keeps this for read-only
+/// callers; it carries no raw key, so a rename must go through
+/// [`MasterKeyHandle::seal_request_rename`].
+#[derive(uniffi::Record)]
+pub struct RequestRowKeys {
+    pub content: Arc<ChunkDecryptorHandle>,
+    pub name_origin: String,
+    pub name: String,
+    pub mime_type: Option<String>,
+    pub chunk_format: u8,
+}
+
 #[uniffi::export]
 impl MasterKeyHandle {
     /// Task 2275 §15: like `resolve_request_row`, but also reports which seal
     /// opened the row (`"bound"`/`"unbound"`) and the rename target (or `None`
-    /// for an upper-repair name). Additive: the older method is unchanged.
+    /// for an upper-repair name). The older method remains as a legacy
+    /// read-only view.
     ///
     /// `request_wrap_context` is the context the owner wrapped the request
     /// private key under: empty for every request created so far. A real
@@ -72,16 +87,20 @@ impl MasterKeyHandle {
                 &name_encrypted,
             )
         })??;
+        let chunk_format = row.name.chunk_format.as_u8();
+        let content = ChunkDecryptorHandle::for_push_with_file_key_handle(
+            &FileKeyHandle::new(row.content_key),
+            item_id.clone(),
+            chunk_format,
+        )?;
         Ok(ResolvedRequestRow {
-            content_key: FileKeyHandle::new(row.content_key),
-            name_key: FileKeyHandle::new(row.name_key),
+            content,
             name_origin: row.name_origin.as_str().to_string(),
             name: row.name.name,
             mime_type: row.name.mime_type,
-            chunk_format: row.name.chunk_format.as_u8(),
+            chunk_format,
             seal: row.seal.as_str().to_string(),
             rename_target: row.rename_target.map(|target| RequestRenameTarget {
-                key: FileKeyHandle::new(kdf::FileKey::from_bytes(*target.key().as_bytes())),
                 origin: target.origin().as_str().to_string(),
                 pin: target.pin().as_u8(),
             }),
@@ -91,11 +110,63 @@ impl MasterKeyHandle {
 
 #[uniffi::export]
 impl MasterKeyHandle {
+    /// **Legacy**: resolve a 2236 request row for reading. Returns a
+    /// decrypt-only content handle and the opened name; it never hands back a
+    /// content or name key, so a caller cannot seal a name with it. Renames go
+    /// through [`MasterKeyHandle::seal_request_rename`] (or
+    /// `resolve_request_row_detailed` for the seal and rename target).
+    /// `request_wrap_context` is empty for every request created so far.
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_request_row(
+        &self,
+        item_id: String,
+        request_wrap_context: Vec<u8>,
+        wrapped_request_private: Vec<u8>,
+        wrap_nonce: Vec<u8>,
+        sender_ephemeral_pubkey: Vec<u8>,
+        wrapped_content_key: Vec<u8>,
+        name_encrypted: String,
+    ) -> Result<RequestRowKeys, CryptoError> {
+        let e_pub: [u8; 32] = sender_ephemeral_pubkey
+            .try_into()
+            .map_err(|_| CryptoError::InvalidInput {
+                detail: "sender_ephemeral_pubkey must be exactly 32 bytes".into(),
+            })?;
+        let row = self.with_key(|mk| {
+            beebeeb_core::owned_keys::resolve_request_row(
+                mk,
+                &item_id,
+                &request_wrap_context,
+                &wrapped_request_private,
+                &wrap_nonce,
+                &e_pub,
+                &wrapped_content_key,
+                &name_encrypted,
+            )
+        })??;
+        let chunk_format = row.name.chunk_format.as_u8();
+        let content = ChunkDecryptorHandle::for_push_with_file_key_handle(
+            &FileKeyHandle::new(row.content_key),
+            item_id.clone(),
+            chunk_format,
+        )?;
+        Ok(RequestRowKeys {
+            content,
+            name_origin: row.name_origin.as_str().to_string(),
+            name: row.name.name,
+            mime_type: row.name.mime_type,
+            chunk_format,
+        })
+    }
+}
+
+#[uniffi::export]
+impl MasterKeyHandle {
     /// Seal a request-row rename under the section 15 string-convention key
     /// derived from `item_id`, keeping the row's recorded pin (`chunk_format`
-    /// from `resolve_request_row_detailed`). Prefer this to sealing with
-    /// `RequestRenameTarget.key` bytes: those are exposed for compatibility,
-    /// but this sealer is what keeps the rename on the key section 15 requires.
+    /// from `resolve_request_row_detailed`). This is the only sealing path:
+    /// the resolvers hand back no key, so a rename cannot be sealed under the
+    /// content key `C` that the anonymous uploader holds (A9).
     pub fn seal_request_rename(
         &self,
         item_id: String,

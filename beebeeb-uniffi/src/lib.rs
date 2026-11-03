@@ -1425,46 +1425,6 @@ impl MasterKeyHandle {
         })
     }
 
-    /// Task 2275: resolve a 2236 request row. Content under `C`; the name key is
-    /// a derived owner key when it authenticates the name, else `C`. Read-only; `request_wrap_context` empty.
-    #[allow(clippy::too_many_arguments)]
-    pub fn resolve_request_row(
-        &self,
-        item_id: String,
-        request_wrap_context: Vec<u8>,
-        wrapped_request_private: Vec<u8>,
-        wrap_nonce: Vec<u8>,
-        sender_ephemeral_pubkey: Vec<u8>,
-        wrapped_content_key: Vec<u8>,
-        name_encrypted: String,
-    ) -> Result<RequestRowKeys, CryptoError> {
-        let e_pub: [u8; 32] = sender_ephemeral_pubkey
-            .try_into()
-            .map_err(|_| CryptoError::InvalidInput {
-                detail: "sender_ephemeral_pubkey must be exactly 32 bytes".into(),
-            })?;
-        let row = self.with_key(|mk| {
-            beebeeb_core::owned_keys::resolve_request_row(
-                mk,
-                &item_id,
-                &request_wrap_context,
-                &wrapped_request_private,
-                &wrap_nonce,
-                &e_pub,
-                &wrapped_content_key,
-                &name_encrypted,
-            )
-        })??;
-        Ok(RequestRowKeys {
-            content_key: FileKeyHandle::new(row.content_key),
-            name_key: FileKeyHandle::new(row.name_key),
-            name_origin: row.name_origin.as_str().to_string(),
-            name: row.name.name,
-            mime_type: row.name.mime_type,
-            chunk_format: row.name.chunk_format.as_u8(),
-        })
-    }
-
     /// L9 (task 2255): open a LEGACY invite owner copy; `Some` only when core
     /// proves it over the folder's `rows` (at most 64 distinct ids, one call).
     /// The unproven candidate never leaves core. Attack B is a named residual.
@@ -2526,18 +2486,6 @@ pub struct ResolvedItemKey {
     pub chunk_format: u8,
     pub plaintext_name: bool,
     pub write_target: Option<Arc<WriteTargetHandle>>,
-}
-
-/// A 2236 request row (task 2275): content under `content_key`, name under
-/// `name_key` (`name_origin` says which).
-#[derive(uniffi::Record)]
-pub struct RequestRowKeys {
-    pub content_key: Arc<FileKeyHandle>,
-    pub name_key: Arc<FileKeyHandle>,
-    pub name_origin: String,
-    pub name: String,
-    pub mime_type: Option<String>,
-    pub chunk_format: u8,
 }
 
 impl From<encrypt::NameMetadata> for NameMetadataDto {

@@ -12,10 +12,12 @@ pub fn mint_guest_item_id() -> Result<String, JsError> {
     beebeeb_core::item_id::mint_guest_item_id().map_err(|e| JsError::new(&e.to_string()))
 }
 
-/// Resolve a 2236 request row: `{contentKey, nameKey, nameOrigin, name,
-/// mimeType, chunkFormat, seal, renameTarget}`. Read-only content; the seal is
-/// `"bound"` or `"unbound"` (§15), and `renameTarget` is
-/// `{key, origin, pin}` or null when the name is upper-repair (read-only).
+/// Resolve a 2236 request row: `{content, nameOrigin, name, mimeType,
+/// chunkFormat, seal, renameTarget}`. `content` is a decrypt-only
+/// `WasmChunkDecryptor` for the row's content key; no raw key reaches JS, so a
+/// caller cannot seal a name with it. The seal is `"bound"` or `"unbound"`
+/// (§15), and `renameTarget` is `{origin, pin}` or null when the name is
+/// upper-repair (read-only). Renames go through `sealRequestRename`.
 ///
 /// `request_wrap_context` is the context the owner wrapped the request private
 /// key under: empty for every request created so far (the server mints the
@@ -48,17 +50,13 @@ pub fn resolve_request_row(
         name_encrypted,
     )
     .map_err(|e| JsError::new(&e.to_string()))?;
+    let content = WasmChunkDecryptor::from_file_key(
+        row.content_key.as_bytes(),
+        item_id.to_string(),
+        row.name.chunk_format.as_u8(),
+    )?;
     let obj = js_sys::Object::new();
-    set(
-        &obj,
-        "contentKey",
-        js_sys::Uint8Array::from(row.content_key.as_bytes().as_slice()).into(),
-    )?;
-    set(
-        &obj,
-        "nameKey",
-        js_sys::Uint8Array::from(row.name_key.as_bytes().as_slice()).into(),
-    )?;
+    set(&obj, "content", JsValue::from(content))?;
     set(&obj, "nameOrigin", JsValue::from_str(row.name_origin.as_str()))?;
     set(&obj, "name", JsValue::from_str(&row.name.name))?;
     set(
@@ -78,11 +76,6 @@ pub fn resolve_request_row(
     let rename_target = match &row.rename_target {
         Some(target) => {
             let rt = js_sys::Object::new();
-            set(
-                &rt,
-                "key",
-                js_sys::Uint8Array::from(target.key().as_bytes().as_slice()).into(),
-            )?;
             set(&rt, "origin", JsValue::from_str(target.origin().as_str()))?;
             set(&rt, "pin", JsValue::from_f64(target.pin().as_u8() as f64))?;
             rt.into()
@@ -95,9 +88,9 @@ pub fn resolve_request_row(
 
 /// Seal a request-row rename under the section 15 string-convention key derived
 /// from `item_id`, keeping the row's recorded `pin` (`chunkFormat` from
-/// `resolveRequestRow`). Prefer this to sealing with `renameTarget.key` bytes:
-/// those bytes are exposed for compatibility, but this sealer is what keeps
-/// the rename on the key section 15 requires.
+/// `resolveRequestRow`). This is the only sealing path: `resolveRequestRow`
+/// hands back no key, so a rename cannot be sealed under the content key `C`
+/// that the anonymous uploader holds (A9).
 #[wasm_bindgen(js_name = sealRequestRename)]
 pub fn seal_request_rename(
     master_key: &[u8],

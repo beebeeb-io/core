@@ -161,16 +161,31 @@ test('a row sealed like the shipped uploader opens as Unbound and names under C'
   );
   assert.equal(row.seal, 'unbound');
   assert.equal(row.nameOrigin, 'request_content');
-  assert.equal(hex(row.contentKey), hex(contentKey));
-  assert.equal(hex(row.nameKey), hex(contentKey));
   assert.equal(row.name, 'upload.bin');
-  // §15/A9: a rename is ALWAYS sealed under the string-convention key derived
-  // from the item id, never under C (which the anonymous uploader holds).
-  const stringKey = wasm.derive_file_key(master(), new TextEncoder().encode(O_ID));
+  // D-P2: the result carries a decrypt-only content handle, never the raw
+  // content key C or the name key (which IS C for this row).
+  assert.equal(row.contentKey, undefined);
+  assert.equal(row.nameKey, undefined);
   assert.equal(row.renameTarget.origin, 'derived');
   assert.equal(row.renameTarget.pin, 0);
-  assert.equal(hex(row.renameTarget.key), hex(stringKey));
-  assert.notEqual(hex(row.renameTarget.key), hex(contentKey));
+  assert.equal(row.renameTarget.key, undefined);
+
+  // Reading still works: a v1 frame under C opens through the handle.
+  const plaintext = new TextEncoder().encode('the request upload');
+  const blob = wasm.encrypt_chunk(contentKey, plaintext);
+  const frame = new Uint8Array([...blob.nonce, ...blob.ciphertext]);
+  assert.equal(hex(row.content.pushFrame(frame)), hex(plaintext));
+  assert.equal(row.content.chunksDecrypted, 1);
+  assert.equal(row.content.finish().chunk_count, 1);
+
+  // §15/A9: a rename is ALWAYS sealed under the string-convention key derived
+  // from the item id, never under C (which the anonymous uploader holds). The
+  // sealer is the only path: the resolver exposed no sealing key.
+  const renamed = wasm.sealRequestRename(master(), O_ID, 0, 'renamed.bin', null);
+  const stringKey = wasm.derive_file_key(master(), new TextEncoder().encode(O_ID));
+  assert.equal(wasm.decrypt_file_metadata_with_key(stringKey, renamed).name, 'renamed.bin');
+  assert.throws(() => wasm.decrypt_file_metadata_with_key(contentKey, renamed));
+  assert.notEqual(hex(stringKey), hex(contentKey));
 });
 
 test('a bound request row opens as Bound with a derived rename target', () => {
@@ -193,11 +208,19 @@ test('a bound request row opens as Bound with a derived rename target', () => {
   );
   assert.equal(row.seal, 'bound');
   assert.equal(row.nameOrigin, 'derived');
-  assert.equal(hex(row.contentKey), hex(contentKey));
-  assert.notEqual(hex(row.nameKey), hex(contentKey));
+  assert.equal(row.name, 'upload.bin');
+  assert.equal(row.contentKey, undefined);
+  assert.equal(row.nameKey, undefined);
   assert.equal(row.renameTarget.origin, 'derived');
   assert.equal(row.renameTarget.pin, 2);
-  assert.equal(hex(row.renameTarget.key), hex(row.nameKey));
+  assert.equal(row.renameTarget.key, undefined);
+
+  // The row records chunkFormat 2, so its decryptor is pinned to v2: a v1
+  // frame under C is refused. (The unbound test above shows the open path.)
+  assert.equal(row.content instanceof wasm.WasmChunkDecryptor, true);
+  const plaintext = new TextEncoder().encode('bound upload');
+  const v1 = wasm.encrypt_chunk(contentKey, plaintext);
+  assert.throws(() => row.content.pushFrame(new Uint8Array([...v1.nonce, ...v1.ciphertext])));
 });
 
 test('mintGuestItemId needs no master key and always mints an F id', () => {
