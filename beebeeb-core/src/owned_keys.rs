@@ -666,11 +666,18 @@ pub fn resolve_request_row(
         RequestSeal::Bound => request_row_name_any(master, item_id, &content_key, name_encrypted)?,
         RequestSeal::Unbound => request_row_name_string_or_content(master, item_id, &content_key, name_encrypted)?,
     };
-    // Only upper-repair is read-only; every other origin records the key, its
-    // convention and the pin a rename must keep.
+    // Only upper-repair is read-only. Every other row renames under the
+    // string-convention key derived from its id, keeping the pin the current
+    // name records — NEVER under the name key as resolved: when that key is C
+    // (`RequestContent`), the anonymous uploader holds it, so sealing the
+    // owner's new name under C would hand the name to the uploader (§15, A9).
     let rename_target = match name_origin {
         KeyOrigin::DerivedUpperRepair => None,
-        _ => Some(RenameTarget::new(&name_key, name_origin, name.chunk_format)),
+        _ => Some(RenameTarget::new(
+            &derive_file_key(master, item_id.as_bytes()),
+            KeyOrigin::Derived,
+            name.chunk_format,
+        )),
     };
 
     Ok(RequestRowKeys {

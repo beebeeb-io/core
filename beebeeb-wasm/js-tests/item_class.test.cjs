@@ -164,9 +164,13 @@ test('a row sealed like the shipped uploader opens as Unbound and names under C'
   assert.equal(hex(row.contentKey), hex(contentKey));
   assert.equal(hex(row.nameKey), hex(contentKey));
   assert.equal(row.name, 'upload.bin');
-  assert.equal(row.renameTarget.origin, 'request_content');
+  // §15/A9: a rename is ALWAYS sealed under the string-convention key derived
+  // from the item id, never under C (which the anonymous uploader holds).
+  const stringKey = wasm.derive_file_key(master(), new TextEncoder().encode(O_ID));
+  assert.equal(row.renameTarget.origin, 'derived');
   assert.equal(row.renameTarget.pin, 0);
-  assert.equal(hex(row.renameTarget.key), hex(contentKey));
+  assert.equal(hex(row.renameTarget.key), hex(stringKey));
+  assert.notEqual(hex(row.renameTarget.key), hex(contentKey));
 });
 
 test('a bound request row opens as Bound with a derived rename target', () => {

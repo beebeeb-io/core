@@ -579,6 +579,30 @@ fn request_row_carries_a_rename_target_unless_upper_repair() {
 }
 
 #[test]
+fn request_row_rename_target_is_never_the_content_key() {
+    // A row whose name is under C (the shipped uploader's name): the uploader
+    // holds C, so a rename sealed under C would hand the owner's new name to
+    // the uploader. §15: the target is ALWAYS the string-convention key.
+    let fixture = shipped_request_fixture();
+    let content = FileKey::from_bytes(fixture.content_key);
+    let name = encrypt_name_for(&content, "upload.bin", None, ExpectedChunkFormat::V2).unwrap();
+    let row = fixture.resolve(&name).unwrap();
+    assert_eq!(row.name_origin, KeyOrigin::RequestContent);
+    let target = row
+        .rename_target
+        .expect("the row is writable, so it must carry a rename target");
+    let derived = derive_file_key(&fixture.master, fixture.item_id.as_bytes());
+    assert_eq!(target.origin(), KeyOrigin::Derived);
+    assert_eq!(target.pin(), ExpectedChunkFormat::V2);
+    assert_eq!(target.key().as_bytes(), derived.as_bytes());
+    assert_ne!(
+        target.key().as_bytes(),
+        &fixture.content_key,
+        "the rename target must never be the content key C"
+    );
+}
+
+#[test]
 fn unbound_request_row_refuses_a_binary_convention_name() {
     let fixture = shipped_request_fixture();
     let binary = uuid::Uuid::parse_str(O_ID).unwrap();
