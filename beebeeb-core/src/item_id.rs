@@ -76,9 +76,13 @@ pub fn new_foreign_item_id() -> Result<String, CoreError> {
 /// A guest holding no keys cannot use this to mint an owner (`O`) id: the
 /// version nibble is always `8`, the caller supplies no bytes and no master
 /// key, and the only owner mint path ([`NewItemId::owner`]) is keyed and emits
-/// version 4. The server's T2 check (guest writes carry F ids) needs no keys
-/// either: parse the canonical 36-char text, require byte 14 == `'8'` and
-/// `bytes[8] & 0xc0 == 0x80` — exactly [`is_foreign_item_id`]'s rule.
+/// version 4. In the parsed 16-byte form that is byte 6's high nibble `8` and
+/// `bytes[8] & 0xc0 == 0x80`; in the canonical 36-character text it is
+/// character 14 == `'8'` and character 19 in `[89ab]` (RFC 4122 variant).
+///
+/// The server's T2 check (guest writes carry F ids) would need no keys either:
+/// parse the canonical text and apply exactly [`is_foreign_item_id`]'s rule.
+/// Server main has no F-class check yet; T2 is future server work.
 pub fn mint_guest_item_id() -> Result<String, CoreError> {
     new_foreign_item_id()
 }
