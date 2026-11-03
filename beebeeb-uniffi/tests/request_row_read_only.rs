@@ -65,17 +65,10 @@ fn request_row_results_never_hand_back_a_sealing_key() {
     // decryptor (the old assertion only checked a format that is None for any
     // decryptor and never used `legacy.content`).
     let plaintext: Vec<u8> = (0..96u8).collect();
-    let mut enc = ChunkEncryptor::for_push_with_file_key(
-        FileKey::from_bytes([0x22u8; 32]),
-        O_ID,
-        plaintext.len() as u64,
-        32,
-    )
-    .unwrap();
-    let frames: Vec<Vec<u8>> = plaintext
-        .chunks(32)
-        .map(|c| enc.push_chunk(c).unwrap().data)
-        .collect();
+    let mut enc =
+        ChunkEncryptor::for_push_with_file_key(FileKey::from_bytes([0x22u8; 32]), O_ID, plaintext.len() as u64, 32)
+            .unwrap();
+    let frames: Vec<Vec<u8>> = plaintext.chunks(32).map(|c| enc.push_chunk(c).unwrap().data).collect();
     enc.finish().unwrap();
     for reader in [&detailed.content, &legacy.content] {
         let dec = reader.decryptor().unwrap();
@@ -149,19 +142,12 @@ fn a_bound_request_row_reads_v2_content_through_both_readers() {
     // v2 frames under C, bound to the O id. A reader built from the name key
     // (a mutant) or with a wrong file id cannot open them.
     let plaintext: Vec<u8> = (0..96u8).collect();
-    let mut enc = ChunkEncryptor::for_push_with_file_key(
-        FileKey::from_bytes(content_key),
-        O_ID,
-        plaintext.len() as u64,
-        32,
-    )
-    .unwrap()
-    .with_recorded_pin(ExpectedChunkFormat::V2)
-    .unwrap();
-    let frames: Vec<Vec<u8>> = plaintext
-        .chunks(32)
-        .map(|c| enc.push_chunk(c).unwrap().data)
-        .collect();
+    let mut enc =
+        ChunkEncryptor::for_push_with_file_key(FileKey::from_bytes(content_key), O_ID, plaintext.len() as u64, 32)
+            .unwrap()
+            .with_recorded_pin(ExpectedChunkFormat::V2)
+            .unwrap();
+    let frames: Vec<Vec<u8>> = plaintext.chunks(32).map(|c| enc.push_chunk(c).unwrap().data).collect();
     enc.finish().unwrap();
 
     for reader in [&detailed.content, &legacy.content] {

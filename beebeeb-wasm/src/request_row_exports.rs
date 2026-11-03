@@ -60,8 +60,8 @@ impl WasmRequestContentReader {
         format: u8,
         frame: &[u8],
     ) -> Result<Vec<u8>, JsError> {
-        let format = beebeeb_core::chunk_stream::ChunkFormat::from_u8(format)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        let format =
+            beebeeb_core::chunk_stream::ChunkFormat::from_u8(format).map_err(|e| JsError::new(&e.to_string()))?;
         self.inner
             .open_frame(version_id, index, is_last, format, frame)
             .map_err(|e| JsError::new(&e.to_string()))

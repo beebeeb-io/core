@@ -12,9 +12,9 @@
 //! - [`RequestContentReader::open_frame`] is the random-access (seek / range)
 //!   path: one frame by index, without the frames before it.
 
-use crate::chunk_stream::{open_chunk, ChunkDecryptor, ChunkFormat, ExpectedChunkFormat};
-use crate::kdf::FileKey;
 use crate::CoreError;
+use crate::chunk_stream::{ChunkDecryptor, ChunkFormat, ExpectedChunkFormat, open_chunk};
+use crate::kdf::FileKey;
 
 /// A request row's decrypt-only content reader. One key, one row.
 pub struct RequestContentReader {

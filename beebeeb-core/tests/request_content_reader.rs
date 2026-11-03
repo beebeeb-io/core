@@ -14,15 +14,11 @@ const KEY: [u8; 32] = [0x22; 32];
 
 /// One v2 upload of `plaintext` under `KEY`, bound to `ID`.
 fn v2_frames(plaintext: &[u8], chunk_size: u64) -> (Vec<Vec<u8>>, [u8; 12]) {
-    let mut enc = ChunkEncryptor::for_push_with_file_key(
-        FileKey::from_bytes(KEY),
-        ID,
-        plaintext.len() as u64,
-        chunk_size,
-    )
-    .unwrap()
-    .with_recorded_pin(ExpectedChunkFormat::V2)
-    .unwrap();
+    let mut enc =
+        ChunkEncryptor::for_push_with_file_key(FileKey::from_bytes(KEY), ID, plaintext.len() as u64, chunk_size)
+            .unwrap()
+            .with_recorded_pin(ExpectedChunkFormat::V2)
+            .unwrap();
     let frames: Vec<Vec<u8>> = plaintext
         .chunks(chunk_size as usize)
         .map(|c| enc.push_chunk(c).unwrap().data)
@@ -53,10 +49,7 @@ fn a_second_decryptor_opens_after_the_first_failed_mid_stream() {
 
     let mut first = reader.decryptor();
     first.push_frame(&frames[0]).unwrap();
-    assert!(
-        first.push_frame(&frames[2]).is_err(),
-        "frame 2 must fail at index 1"
-    );
+    assert!(first.push_frame(&frames[2]).is_err(), "frame 2 must fail at index 1");
 
     // A fresh decryptor starts again at index 0; the failed cursor is not reused.
     let mut second = reader.decryptor();
@@ -84,11 +77,7 @@ fn the_reader_exposes_no_key_bytes() {
     assert_eq!(out, plaintext);
 
     let candidate: [u8; 32] = out.as_slice().try_into().unwrap();
-    let mut wrong = ChunkDecryptor::for_push_with_file_key(
-        FileKey::from_bytes(candidate),
-        ID,
-        ExpectedChunkFormat::V2,
-    );
+    let mut wrong = ChunkDecryptor::for_push_with_file_key(FileKey::from_bytes(candidate), ID, ExpectedChunkFormat::V2);
     assert!(
         wrong.push_frame(&frames[0]).is_err(),
         "the reader's output must not be a key that opens the row's frame"
