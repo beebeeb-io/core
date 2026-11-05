@@ -4,8 +4,10 @@
 //! The rules are core's (`beebeeb_core::direct_transfer`): this module makes
 //! the calls the planner asks for, feeds every answer back, decrypts the
 //! chunks strictly in order through core's [`ChunkDecryptor`], and writes
-//! plaintext to the caller's sink. It publishes nothing: after `Done` the
-//! caller owns a complete, authenticated plaintext and may publish it.
+//! plaintext to the caller's sink. The whole-file `download` publishes nothing
+//! before `finish()`: after `Done` the caller owns a complete, authenticated
+//! plaintext and may publish it. `RangeSession` (`crate::range`) releases
+//! authenticated frames per core `docs/agent-notes.md` (range reads, I1–I9).
 //!
 //! Nothing that leaves this module carries a URL: storage links travel only as
 //! [`SignedUrl`], and events and errors carry numbers and enum values only.
@@ -744,7 +746,7 @@ async fn next_event<'a, I: DirectIo>(
 }
 
 /// Why discovery did not produce a usable answer.
-enum DiscoveryFailure {
+pub(crate) enum DiscoveryFailure {
     NotSupported,
     Unavailable,
     Unauthorized,
@@ -753,7 +755,7 @@ enum DiscoveryFailure {
 
 /// One discovery answer, from the shared cache, the one in-flight flight, or
 /// this caller's own request.
-async fn discovery<I: DirectIo>(
+pub(crate) async fn discovery<I: DirectIo>(
     io: &I,
     shared: &DirectShared,
     observer: &dyn Observer,
@@ -832,7 +834,7 @@ enum Event {
     },
 }
 
-enum Pinned {
+pub(crate) enum Pinned {
     Ok(Vec<u8>),
     Terminal(u16),
     Restart,
@@ -842,7 +844,7 @@ enum Pinned {
 type Task<'a> = Pin<Box<dyn Future<Output = Event> + Send + 'a>>;
 
 /// One chunk through the pinned API route, with core's retry policy.
-async fn pinned_fetch<I: DirectIo>(io: &I, path: String, expected_len: u64) -> Pinned {
+pub(crate) async fn pinned_fetch<I: DirectIo>(io: &I, path: String, expected_len: u64) -> Pinned {
     let retry = PinnedRetry::default();
     let mut waited = Duration::ZERO;
     let mut attempt = 1u32;
