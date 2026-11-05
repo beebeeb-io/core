@@ -17,6 +17,7 @@
 //! | [`authority`] | [`check_storage_url`] (may this link be followed), [`redact`] / [`scrub`] (how a link may be shown) |
 //! | [`classify`] | [`classify()`]: what an API answer on a discovery or grant call means (R1.6) |
 //! | [`window`] | [`DownloadPlanner`]: windows, in-flight cap, renewals, per-chunk fallback |
+//! | [`range`] | [`range::RangePlanner`]: range reads at any offset for ONE recorded version (LD-0105); the 4 KiB piece cutter, the in-flight split and the process byte budget |
 //! | [`health`] | [`DirectHealth`]: after a transfer gave up direct, no new one of that direction starts for one trust period |
 //! | [`resume`] | [`resume_transport()`]: what to do with an unfinished upload (a recorded direct session is given up only on a definite no) |
 //! | [`timeouts`] | the time bounds every client applies: connect, idle, API calls, and the storage totals (`60 s + len / 1 Mbit/s`) kept under the server's late-write fence |
@@ -39,7 +40,11 @@
 //!   [`check_storage_body()`]), and
 //!   decrypt with [`crate::chunk_stream`] (frame and AAD position checks), never
 //!   by trusting the manifest.
-//! * Publish plaintext only after every chunk has authenticated.
+//! * Publish plaintext only after every chunk has authenticated. The one exception is a range
+//!   session (`beebeeb-transfer`'s `range_session`, over [`crate::chunk_stream::RangeOpener`]):
+//!   it releases each frame once it authenticated at the requested index, into a sink that holds
+//!   one recorded version, and nothing is "whole" before `RangeOpener::finish()` (core
+//!   `docs/agent-notes.md`, range reads I1–I9).
 //!
 //! # Exporting to the bindings
 //!
@@ -52,8 +57,10 @@
 pub mod authority;
 pub mod classify;
 pub mod context;
+mod grant_check;
 pub mod health;
 pub mod pacing;
+pub mod range;
 pub mod resume;
 pub mod storage;
 pub mod timeouts;

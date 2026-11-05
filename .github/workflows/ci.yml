@@ -53,6 +53,15 @@ jobs:
         if: always()
         run: bash test-vectors/tools/check-direct-vectors-generated.sh --self-test
 
+      # The range-read vectors (LD-0105) follow the same rule, with their own generator and gate.
+      - name: range vectors match their generator
+        if: always()
+        run: bash test-vectors/tools/check-direct-range-vectors-generated.sh
+
+      - name: range vector check can go red
+        if: always()
+        run: bash test-vectors/tools/check-direct-range-vectors-generated.sh --self-test
+
   test:
     name: Tests
     runs-on: ubuntu-latest

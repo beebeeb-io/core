@@ -95,7 +95,7 @@ pub const CHUNK_OVERHEAD: u64 = (NONCE_LEN + TAG_LEN) as u64;
 /// drive a multi-GB allocation → client OOM (WASM tab kill / mobile crash)
 /// before a single byte is processed. Reject above the cap instead.
 pub const MAX_CHUNK_SIZE: u64 = 256 * 1024 * 1024;
-
+mod range;
 // ─── Chunk format v2: position binding (task 1908) ──────────────────────────
 //
 // v1 frames are AES-256-GCM with NO associated data: every frame of a file is
@@ -133,7 +133,7 @@ pub const MAX_CHUNK_SIZE: u64 = 256 * 1024 * 1024;
 // knows (the file id it asked for, frame 0's nonce, the index it expects next).
 // So it cannot be "stripped": opening a v2 frame with the empty v1 AAD (or
 // under the raw file key) fails the tag.
-
+pub use range::RangeOpener;
 /// Domain-separation tag (and format version) at the start of every v2 AAD.
 pub const CHUNK_AAD_DOMAIN_V2: &[u8; 16] = b"beebeeb/chunk/v2";
 

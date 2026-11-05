@@ -50,13 +50,15 @@
 
 use std::collections::BTreeMap;
 
+#[cfg(test)]
 use chrono::DateTime;
 
-use super::authority::{Refusal, check_storage_url};
+use super::authority::Refusal;
 use super::classify::{Outcome, Terminal};
-use super::wire::{
-    CAP_OBJECT_DOWNLOAD_V1, CHUNK_OVERHEAD, ChunkGrant, Discovery, DownloadGrantRequest, DownloadGrantResponse,
-};
+use super::grant_check::{Attempts, Rejected, WindowCheck, check_window, rate_limit_spent};
+#[cfg(test)]
+use super::wire::CAP_OBJECT_DOWNLOAD_V1;
+use super::wire::{CHUNK_OVERHEAD, ChunkGrant, Discovery, DownloadGrantRequest, DownloadGrantResponse};
 use crate::chunk_stream::MAX_CHUNK_SIZE;
 
 /// Storage/API chunk requests outstanding at once, and the reorder window.
@@ -160,7 +162,7 @@ impl Geometry {
     /// Could a real version have these numbers? (`encrypted = original + 28 *
     /// chunks`; every chunk but the last a full stride; the last 0..=stride
     /// plaintext bytes.) The server checks the same before it signs.
-    fn is_consistent(&self) -> bool {
+    pub(crate) fn is_consistent(&self) -> bool {
         if self.chunk_count == 0 || self.chunk_size > MAX_CHUNK_SIZE {
             return false;
         }
@@ -270,39 +272,6 @@ impl Violation {
     }
 }
 
-/// Why [`DownloadPlanner`] refuses the content of a window answer: [`Violation`] without `Unexpected`, which
-/// is a caller's bug (an answer nobody asked for) and never a property of an answer's content. A separate
-/// type makes the compiler prove that checking an answer cannot produce it, so `window_answered` has no
-/// arm for it that could quietly come to be relied on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Rejected {
-    Transport,
-    FileMismatch,
-    VersionChanged,
-    Geometry,
-    Grants,
-    Length,
-    Method,
-    Authority(Refusal),
-    Expiry,
-}
-
-impl From<Rejected> for Violation {
-    fn from(rejected: Rejected) -> Self {
-        match rejected {
-            Rejected::Transport => Violation::Transport,
-            Rejected::FileMismatch => Violation::FileMismatch,
-            Rejected::VersionChanged => Violation::VersionChanged,
-            Rejected::Geometry => Violation::Geometry,
-            Rejected::Grants => Violation::Grants,
-            Rejected::Length => Violation::Length,
-            Rejected::Method => Violation::Method,
-            Rejected::Authority(refusal) => Violation::Authority(refusal),
-            Rejected::Expiry => Violation::Expiry,
-        }
-    }
-}
-
 /// What became of the body of a window answer ([`DownloadPlanner::window_answered_bytes`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowAnswer {
@@ -353,7 +322,7 @@ impl Verdict {
 
     /// How firmly a verdict ends the file: `Corrupt` > `Terminal` > `Restart` > `ApiForFile`. A file
     /// that comes to two verdicts keeps the stronger ([`DownloadPlanner::set_verdict`]).
-    fn strength(&self) -> u8 {
+    pub(super) fn strength(&self) -> u8 {
         match self {
             Verdict::ApiForFile => 0,
             Verdict::Restart => 1,
@@ -390,12 +359,6 @@ pub enum PlanError {
     ApiRouteFailure(u32),
     #[error("an identifier is not a UUID in the hyphenated form")]
     BadIdentifier,
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-struct Attempts {
-    renewals: u8,
-    auth_failures: u8,
 }
 
 #[derive(Debug)]
@@ -651,8 +614,7 @@ impl DownloadPlanner {
                 continue;
             }
             let mut attempts = *attempts;
-            attempts.renewals = attempts.renewals.saturating_add(1);
-            *slot = if attempts.renewals > max || api_only {
+            *slot = if attempts.spend_renewal(max) || api_only {
                 Slot::ApiPending { attempts }
             } else {
                 Slot::NeedsGrant {
@@ -873,64 +835,22 @@ impl DownloadPlanner {
         response: DownloadGrantResponse,
         now_ms: i64,
     ) -> Result<(), Rejected> {
-        if response.transport != CAP_OBJECT_DOWNLOAD_V1 {
-            return Err(Rejected::Transport);
-        }
-        if !response.file_id.eq_ignore_ascii_case(&self.file_id) {
-            return Err(Rejected::FileMismatch);
-        }
-        if response.object_version_id.is_empty() {
-            return Err(Rejected::Geometry);
-        }
-        if let Some(pin) = request.object_version_id.as_ref().or(self.pinned.as_ref())
-            && !response.object_version_id.eq_ignore_ascii_case(pin)
-        {
-            return Err(Rejected::VersionChanged);
-        }
-        let geometry = Geometry {
-            chunk_count: response.chunk_count,
-            chunk_size: response.chunk_size,
-            encrypted_size: response.encrypted_size,
-            original_size: response.original_size,
+        let check = WindowCheck {
+            file_id: &self.file_id,
+            discovery: &self.discovery,
+            api_base: &self.api_base,
+            pinned: self.pinned.as_deref(),
+            known: self.geometry,
+            url_ttl_ms: self.cfg.url_ttl_ms,
+            renew_skew_ms: self.cfg.renew_skew_ms,
         };
-        if !geometry.is_consistent() || self.geometry.is_some_and(|known| known != geometry) {
-            return Err(Rejected::Geometry);
-        }
-
-        let start = request.start_index;
-        if start >= geometry.chunk_count {
-            return Err(Rejected::Grants);
-        }
-        let end = (u64::from(start) + u64::from(request.count)).min(u64::from(geometry.chunk_count)) as u32;
-        if response.grants.len() != (end - start) as usize {
-            return Err(Rejected::Grants);
-        }
-        if response.next_index != (end < geometry.chunk_count).then_some(end) {
-            return Err(Rejected::Grants);
-        }
-
-        let mut accepted = Vec::with_capacity(response.grants.len());
-        for (offset, grant) in response.grants.into_iter().enumerate() {
-            if grant.index != start + offset as u32 {
-                return Err(Rejected::Grants);
-            }
-            if grant.method != "GET" {
-                return Err(Rejected::Method);
-            }
-            if Some(grant.length) != geometry.chunk_length(grant.index) {
-                return Err(Rejected::Length);
-            }
-            check_storage_url(&grant.url, &self.discovery, &self.api_base).map_err(Rejected::Authority)?;
-            let usable_until_ms = self.usable_until(&grant.expires_at, now_ms)?;
-            accepted.push((grant, usable_until_ms));
-        }
-
+        let checked = check_window(&check, request, response, now_ms)?;
         // Everything checked: commit.
         if self.geometry.is_none() {
-            self.geometry = Some(geometry);
-            self.pinned = Some(response.object_version_id);
+            self.geometry = Some(checked.geometry);
+            self.pinned = Some(checked.object_version_id);
         }
-        for (grant, usable_until_ms) in accepted {
+        for (grant, usable_until_ms) in checked.grants {
             let index = grant.index;
             if index < self.consumed {
                 continue;
@@ -953,31 +873,8 @@ impl DownloadPlanner {
             };
             self.slots.insert(index, slot);
         }
-        self.frontier = self.frontier.max(end);
+        self.frontier = self.frontier.max(checked.end);
         Ok(())
-    }
-
-    /// When a grant that arrived at `now_ms` stops being usable, on the client clock.
-    fn usable_until(&self, expires_at: &str, now_ms: i64) -> Result<i64, Rejected> {
-        let expires_ms = DateTime::parse_from_rfc3339(expires_at)
-            .map_err(|_| Rejected::Expiry)?
-            .timestamp_millis();
-        let ttl = self.cfg.url_ttl_ms;
-        let skew = self.cfg.renew_skew_ms;
-        let stated = expires_ms.saturating_sub(now_ms);
-        // A link never lives longer than the TTL, and no server issues links
-        // shorter than a minute: a stated lifetime under that is this clock
-        // running ahead, so the lifetime counts from the arrival instead.
-        let lifetime = if stated >= MIN_STATED_LIFETIME_MS.min(ttl) {
-            stated.min(ttl)
-        } else {
-            ttl
-        };
-        let usable_until = now_ms.saturating_add(lifetime).saturating_sub(skew);
-        if usable_until <= now_ms {
-            return Err(Rejected::Expiry);
-        }
-        Ok(usable_until)
     }
 
     /// The outstanding window request failed; `outcome` is what
@@ -986,8 +883,7 @@ impl DownloadPlanner {
         self.window = None;
         match outcome {
             Outcome::Backoff(wait) => {
-                self.rate_limits = self.rate_limits.saturating_add(1);
-                if self.rate_limits > self.cfg.max_rate_limits {
+                if rate_limit_spent(&mut self.rate_limits, self.cfg.max_rate_limits) {
                     self.window_unusable();
                 } else {
                     let wait_ms = i64::try_from(wait.as_millis()).unwrap_or(i64::MAX).min(MAX_WAIT_MS);
@@ -1031,8 +927,7 @@ impl DownloadPlanner {
         if via_api {
             return Err(PlanError::ApiRouteFailure(index));
         }
-        attempts.renewals = attempts.renewals.saturating_add(1);
-        let exhausted = attempts.renewals > self.cfg.max_renewals;
+        let exhausted = attempts.spend_renewal(self.cfg.max_renewals);
         if exhausted || self.api_only {
             self.slots.insert(index, Slot::ApiPending { attempts });
             // The first chunk to use up its renewals with no byte ever received from storage: storage is
@@ -1123,13 +1018,12 @@ impl DownloadPlanner {
 
     /// Equal jitter: half the exponential delay plus a random share of the other half.
     fn backoff_ms(&mut self, attempt: u8) -> i64 {
-        let shift = u32::from(attempt.saturating_sub(1)).min(20);
-        let exp = self
-            .cfg
-            .backoff_base_ms
-            .saturating_mul(1u64 << shift)
-            .min(self.cfg.backoff_cap_ms);
-        i64::try_from(equal_jitter(&mut self.rng, exp)).unwrap_or(i64::MAX)
+        super::grant_check::backoff_delay(
+            &mut self.rng,
+            self.cfg.backoff_base_ms,
+            self.cfg.backoff_cap_ms,
+            attempt,
+        )
     }
 }
 
