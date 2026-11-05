@@ -28,7 +28,7 @@ bip39 = { version = "2", features = ["rand", "zeroize"] }
 aes = { version = "0.8", features = ["zeroize"] }
 thiserror = { workspace = true }
 opaque-ke = { version = "4.0.1", features = ["ristretto255", "argon2"] }
-x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
+x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }
 # P-256 ECDH for the CLI device-authorization handshake (cli_auth.rs). Matches the
 # CLI's prior `p256` dep and the web client's WebCrypto P-256 ECDH so the wire format
 # is identical across clients.
