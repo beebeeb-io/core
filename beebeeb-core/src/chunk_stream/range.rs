@@ -13,10 +13,13 @@
 //! What it does NOT give v1 (every file written today, `WRITE_FORMAT = V1Legacy`): v1 frames carry
 //! no position, version or truncation binding, so equal-length frames of one file key can be
 //! reordered, duplicated or spliced from another version, and the file truncated at a chunk
-//! boundary. That is the same gap the whole-file read has (I9; test T5 pins it).
+//! boundary. That is the same gap the whole-file read has (I9; test T5 pins it). And under an
+//! `Unrecorded` pin, a no-AAD blob sealed under the raw file key (an old name or thumbnail
+//! envelope) can be served as frame 0 and opens as v1: the same detection `ChunkDecryptor` does.
 //!
-//! [`RangeOpener::finish`] is the only "whole" verdict: every index `0..n` was opened in this
-//! attempt (for v2 that includes the last frame, which only opens as last). A caller that
+//! [`RangeOpener::finish`] means every index `0..n` was opened in this attempt (for v2 that
+//! includes the last frame, which only opens as last). "Whole" is the session's verdict on top of
+//! it (`beebeeb_transfer::RangeOutcome::Whole`: every byte also reached the sink). A caller that
 //! released frames and then gets `Err` anywhere must treat its sink as poisoned (I4, I5).
 
 use zeroize::Zeroizing;

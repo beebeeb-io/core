@@ -34,19 +34,23 @@ struct Fx {
 
 impl Fx {
     fn new(len: usize, format: ChunkFormat) -> Fx {
+        Fx::with_stride(len, format, STRIDE)
+    }
+
+    fn with_stride(len: usize, format: ChunkFormat, stride: u64) -> Fx {
         let plain: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
-        let mut enc = ChunkEncryptor::for_push_with_file_key(FileKey::from_bytes(KEY), FILE_ID, len as u64, STRIDE)
+        let mut enc = ChunkEncryptor::for_push_with_file_key(FileKey::from_bytes(KEY), FILE_ID, len as u64, stride)
             .unwrap()
             .with_format(format)
             .unwrap();
         let frames: Vec<Vec<u8>> = plain
-            .chunks(STRIDE as usize)
+            .chunks(stride as usize)
             .map(|p| enc.push_chunk(p).unwrap().data)
             .collect();
         let s = enc.finish().unwrap();
         let geometry = Geometry {
             chunk_count: frames.len() as u32,
-            chunk_size: STRIDE,
+            chunk_size: stride,
             encrypted_size: s.total_ciphertext,
             original_size: s.total_plaintext,
         };
@@ -142,6 +146,7 @@ struct Placeholder {
     identity: Option<RangeIdentity>,
     transfers_before_identity: usize,
     transfers: usize,
+    offsets: Vec<u64>,
     met: Vec<u64>,
     failed: Vec<u64>,
     close_when_met: Option<RangeControl>,
@@ -178,6 +183,7 @@ impl RangeSink for Placeholder {
         self.buf[offset as usize..offset as usize + plain.len()].copy_from_slice(plain);
         self.have.insert(offset, offset + plain.len() as u64);
         self.transfers += 1;
+        self.offsets.push(offset);
         Ok(())
     }
 
@@ -439,6 +445,68 @@ async fn t8_an_identity_mismatch_transfers_nothing_and_a_match_resumes() {
             assert_eq!(sink.failed, vec![1]);
         }
     }
+}
+
+/// T8, the v2 half (crypto review P2-1): a v2 placeholder recorded for another upload of the same
+/// object version (another frame-0 version id) gets nothing; one recorded for this upload resumes.
+/// Mutant: the version-id comparison dropped from the frame-0 identity check.
+#[tokio::test]
+async fn t8_a_v2_placeholder_recorded_for_another_upload_gets_nothing() {
+    let fx = Arc::new(Fx::new(3 * STRIDE as usize, ChunkFormat::V2));
+    let other = Fx::new(3 * STRIDE as usize, ChunkFormat::V2);
+    let vid = |f: &Fx| -> [u8; 12] { f.frames[0][..12].try_into().unwrap() };
+    assert_ne!(vid(&fx), vid(&other), "two uploads, two version ids");
+    let g = fx.geometry;
+    for (recorded_vid, resumes) in [(vid(&other), false), (vid(&fx), true)] {
+        let io = ScriptedIo::new(handler(fx.clone(), g, fx.frames.clone(), |_| 200));
+        let control = RangeControl::new();
+        control.demand(1, 0, g.original_size);
+        let mut sink = Placeholder::sized(g.original_size);
+        let mut req = request(g.original_size);
+        req.pin = ExpectedChunkFormat::V2;
+        req.recorded = Some(RangeIdentity {
+            object_version_id: VERSION.into(),
+            format: ChunkFormat::V2,
+            version_id: Some(recorded_vid),
+        });
+        req.on_disk_bytes = 10;
+        let (out, _) = run(&io, &RangeLessor::new(BIG), req, &control, &mut sink).await;
+        if resumes {
+            assert!(matches!(out, Ok(RangeOutcome::Whole(_))), "{out:?}");
+        } else {
+            assert!(matches!(out, Err(RangeSessionError::IdentityMismatch)), "{out:?}");
+            assert_eq!(
+                sink.transfers, 0,
+                "nothing of this upload reaches the other's placeholder"
+            );
+        }
+    }
+}
+
+/// I6 (crypto review P2-2): a stride that is not a multiple of 4 KiB, released out of order, so
+/// heads and tails are carried between chunks. Whole only when every byte reached the sink.
+/// Mutant: the piece cutter skips the tail flush.
+#[tokio::test]
+async fn a_stride_not_a_multiple_of_4_kib_is_carried_and_whole_only_when_every_byte_is_out() {
+    let stride = 5000u64;
+    let fx = Arc::new(Fx::with_stride(27_000, ChunkFormat::V1Legacy, stride));
+    let g = fx.geometry;
+    assert_eq!(g.chunk_count, 6);
+    let io = ScriptedIo::new(handler(fx.clone(), g, fx.frames.clone(), |_| 200));
+    let control = RangeControl::new();
+    control.demand(1, 3 * stride + 10, 100);
+    let mut sink = Placeholder::sized(g.original_size);
+    // One chunk of budget: released strictly in the planner's order 0, 2, 3, 5, 4, 1.
+    let lessor = RangeLessor::new(stride + 28);
+    let (out, _) = run(&io, &lessor, request(g.original_size), &control, &mut sink).await;
+    assert!(matches!(out, Ok(RangeOutcome::Whole(_))), "got {out:?}");
+    assert_eq!(sink.buf, fx.plain);
+    assert!(sink.have.covers(0, g.original_size));
+    assert!(
+        sink.offsets.windows(2).any(|w| w[1] < w[0]),
+        "released out of order: {:?}",
+        sink.offsets
+    );
 }
 
 /// S10: a window the server cannot serve, before any write, moves the session to pinned

@@ -138,12 +138,19 @@ impl RunSet {
 }
 
 /// One piece of plaintext ready for the OS, in file order within one [`PieceCutter::cut`].
-#[derive(Debug, PartialEq, Eq)]
+/// `Debug` prints offset and length only, never the bytes (I8).
+#[derive(PartialEq, Eq)]
 pub enum Piece {
     /// `plain[start..end]` of the chunk just cut, at file offset `offset`.
     Slice { offset: u64, start: usize, end: usize },
     /// A 4 KiB piece (or the file's last, shorter one) assembled from two neighbouring chunks.
     Block { offset: u64, data: Zeroizing<Vec<u8>> },
+}
+
+impl std::fmt::Debug for Piece {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Piece {{ offset: {}, len: {} }}", self.offset(), self.len())
+    }
 }
 
 impl Piece {
@@ -182,7 +189,6 @@ pub enum CutError {
     Overlap,
 }
 
-#[derive(Debug)]
 struct Block {
     data: Zeroizing<Vec<u8>>,
     filled: RunSet,
@@ -193,11 +199,20 @@ struct Block {
 /// unaligned head or tail of a chunk is carried in a 4 KiB block until the neighbouring chunk
 /// fills it, so this works for any chunk size, including 1 MiB and sizes that are not a
 /// multiple of 4 KiB, and for chunks released in any order. What it holds is at most two partial
-/// blocks per gap, in `Zeroizing` buffers.
-#[derive(Debug)]
+/// blocks per gap, in `Zeroizing` buffers. `Debug` never prints them (I8).
 pub struct PieceCutter {
     file_size: u64,
     blocks: BTreeMap<u64, Block>,
+}
+
+impl std::fmt::Debug for PieceCutter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PieceCutter")
+            .field("file_size", &self.file_size)
+            .field("partial_blocks", &self.blocks.len())
+            .field("held_bytes", &self.held_bytes())
+            .finish()
+    }
 }
 
 impl PieceCutter {

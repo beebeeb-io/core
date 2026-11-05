@@ -79,7 +79,8 @@ pub struct RangeRequest {
     pub jitter_seed: u64,
 }
 
-/// Where authenticated plaintext goes. Every call is made from the session's own task.
+/// Where authenticated plaintext goes. Every call is made from the session's own task. A sink's
+/// errors must not carry a file name or path; the session shows only their kind anyway.
 pub trait RangeSink: Send {
     /// Record `identity` durably. Called once, before the first [`RangeSink::transfer`]; an
     /// `Err` ends the session with nothing transferred.
@@ -131,6 +132,9 @@ pub enum RangeSessionError {
     SizeMismatch,
     /// The sink refused before anything was transferred.
     Sink(std::io::Error),
+    /// Every chunk opened, but the sink did not get every byte (or the piece cutter still holds
+    /// some): never whole (I6).
+    Incomplete,
     /// Only the API path could go on (a cause inside `DirectFailedAfterWrite`: after a write the
     /// session never falls back into the same sink).
     ApiNeeded(UseApiReason),
@@ -151,7 +155,8 @@ impl std::fmt::Display for RangeSessionError {
             RangeSessionError::Unauthentic { index } => write!(f, "chunk {index} did not authenticate"),
             RangeSessionError::IdentityMismatch => f.write_str("the placeholder holds another version's bytes"),
             RangeSessionError::SizeMismatch => f.write_str("the file's size is not the size it is known to have"),
-            RangeSessionError::Sink(e) => write!(f, "handing bytes to the system failed: {e}"),
+            RangeSessionError::Sink(e) => write!(f, "handing bytes to the system failed ({:?})", e.kind()),
+            RangeSessionError::Incomplete => f.write_str("every chunk opened, but not every byte reached the system"),
             RangeSessionError::ApiNeeded(_) => f.write_str("only the API path could go on"),
             RangeSessionError::DirectFailedAfterWrite {
                 transferred_bytes,
@@ -428,6 +433,22 @@ impl State<'_> {
     }
 }
 
+/// The one "whole" verdict (I6): every index opened in this attempt (`RangeOpener::finish`), every
+/// byte of the file handed to the sink, and nothing left in the piece cutter.
+fn whole(
+    st: &mut State<'_>,
+    opener: Option<&RangeOpener>,
+    cutter: &PieceCutter,
+    file_size: u64,
+) -> Result<RangeOutcome, RangeSessionError> {
+    let opened = opener.is_some_and(|o| o.finish().is_ok());
+    if opened && st.transferred.covers(0, file_size) && cutter.held_bytes() == 0 {
+        Ok(RangeOutcome::Whole(st.stats))
+    } else {
+        st.fail(RangeSessionError::Incomplete)
+    }
+}
+
 /// Serve one placeholder until it is whole, the caller closes it, or it fails. `file_key` is the
 /// file's key; `control` carries the reads. See the module docs for what the sink is promised.
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
@@ -457,6 +478,11 @@ pub async fn range_session<I: DirectIo>(
         if let Command::Demand { id, offset, len } = command {
             st.demands.insert(*id, (*offset, *len));
         }
+    }
+    // Spec S3: with ONDISK = 0 there is nothing to trust, whatever an old record says.
+    let mut req = req;
+    if req.on_disk_bytes == 0 {
+        req.recorded = None;
     }
     // I4: the placeholder must hold nothing, or bytes of exactly this version.
     let identity_ok = match &req.recorded {
@@ -550,9 +576,7 @@ pub async fn range_session<I: DirectIo>(
         st.settle(&mut planner, req.file_size);
 
         // A lease while there is work; none while idle, so an idle session never blocks a fifth.
-        // Read-ahead alone keeps the lease only while it has requests out: a paused session
-        // (every demand met, read-ahead stalled) gives it back.
-        let busy = planner.demands() > 0 || !tasks.is_empty() || !ready.is_empty();
+        let busy = planner.demands() > 0 || planner.reading_ahead() || !tasks.is_empty() || !ready.is_empty();
         if busy && !guard.leased {
             guard.leased = lessor.lease(session, &mailbox);
         } else if !busy && guard.leased && booked.is_empty() {
@@ -643,15 +667,7 @@ pub async fn range_session<I: DirectIo>(
                         break;
                     }
                     RangePoll::Idle => break,
-                    RangePoll::Done => {
-                        let whole = opener.as_ref().is_some_and(|o| o.finish().is_ok());
-                        if !whole {
-                            return st.fail(RangeSessionError::Unauthentic {
-                                index: last_unauthentic,
-                            });
-                        }
-                        return Ok(RangeOutcome::Whole(st.stats));
-                    }
+                    RangePoll::Done => return whole(&mut st, opener.as_ref(), &cutter, req.file_size),
                     RangePoll::Stop(verdict) => {
                         return match verdict {
                             Verdict::ApiForFile => st.use_api(UseApiReason::ApiForFile),
@@ -666,6 +682,14 @@ pub async fn range_session<I: DirectIo>(
                     }
                 }
             }
+        }
+
+        // A paused session (no demand, nothing out, nothing scheduled: read-ahead stalled at aged-out
+        // grants or on budget) gives its lease back, so it never blocks a fifth session. A new
+        // demand takes one again.
+        if guard.leased && planner.demands() == 0 && tasks.is_empty() && ready.is_empty() && nap.is_none() {
+            lessor.give_back(session, 0, true);
+            guard.leased = false;
         }
 
         // Wait for a reply, a command, a lessor kick or the planner's own deadline.
@@ -838,12 +862,7 @@ pub async fn range_session<I: DirectIo>(
             .geometry()
             .is_some_and(|g| planner.released_count() == u64::from(g.chunk_count))
         {
-            if opener.as_ref().is_some_and(|o| o.finish().is_ok()) {
-                return Ok(RangeOutcome::Whole(st.stats));
-            }
-            return st.fail(RangeSessionError::Unauthentic {
-                index: last_unauthentic,
-            });
+            return whole(&mut st, opener.as_ref(), &cutter, req.file_size);
         }
         // Demands that ask for nothing inside the file are met at once.
         if let Some(g) = planner.geometry() {

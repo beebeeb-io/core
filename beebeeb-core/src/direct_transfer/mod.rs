@@ -43,7 +43,8 @@
 //! * Publish plaintext only after every chunk has authenticated. The one exception is a range
 //!   session (`beebeeb-transfer`'s `range_session`, over [`crate::chunk_stream::RangeOpener`]):
 //!   it releases each frame once it authenticated at the requested index, into a sink that holds
-//!   one recorded version, and nothing is "whole" before `RangeOpener::finish()` (core
+//!   one recorded version, and nothing is "whole" before the session's own verdict (every index
+//!   opened, `RangeOpener::finish()`, and every byte handed over; core
 //!   `docs/agent-notes.md`, range reads I1–I9).
 //!
 //! # Exporting to the bindings
