@@ -69,17 +69,17 @@
 //! are `Send`, so a caller can move one into a blocking thread (e.g. the CLI's
 //! `spawn_blocking`) and keep AES off the async reactor.
 
-use std::io::Read;
-
-use zeroize::Zeroizing;
-
 use beebeeb_types::{ChunkPlan, ChunkProfile, ChunkStrategy, STORAGE_FORMAT_VERSION_V2, plan_chunks};
+use std::io::Read;
+use zeroize::Zeroizing;
 
 use crate::CoreError;
 use crate::encrypt::{NONCE_LEN, TAG_LEN, open_raw_with_aad, random_nonce, seal_raw_with_aad, seal_raw_with_nonce};
 use crate::item_id::NewItemId;
 use crate::kdf::{FileKey, MasterKey, derive_file_key};
 use crate::owned_keys::WriteTarget;
+mod range;
+pub use range::RangeOpener;
 
 /// Per-chunk AEAD overhead on the wire: `nonce(12) + tag(16)` = 28 bytes. The ONE
 /// definition: `direct_transfer` sizes chunk lengths from it.
@@ -95,7 +95,7 @@ pub const CHUNK_OVERHEAD: u64 = (NONCE_LEN + TAG_LEN) as u64;
 /// drive a multi-GB allocation → client OOM (WASM tab kill / mobile crash)
 /// before a single byte is processed. Reject above the cap instead.
 pub const MAX_CHUNK_SIZE: u64 = 256 * 1024 * 1024;
-mod range;
+
 // ─── Chunk format v2: position binding (task 1908) ──────────────────────────
 //
 // v1 frames are AES-256-GCM with NO associated data: every frame of a file is
@@ -133,7 +133,7 @@ mod range;
 // knows (the file id it asked for, frame 0's nonce, the index it expects next).
 // So it cannot be "stripped": opening a v2 frame with the empty v1 AAD (or
 // under the raw file key) fails the tag.
-pub use range::RangeOpener;
+
 /// Domain-separation tag (and format version) at the start of every v2 AAD.
 pub const CHUNK_AAD_DOMAIN_V2: &[u8; 16] = b"beebeeb/chunk/v2";
 

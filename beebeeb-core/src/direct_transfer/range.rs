@@ -599,7 +599,11 @@ impl RangePlanner {
         let renewal = !matches!(need, Need::Fresh);
         // A fresh window only when few unused grants are left (no renewal storms); a renewal or a
         // re-grant is for a chunk that is wanted now.
-        if !renewal && self.unused_grants() > self.cfg.refill_at {
+        let unused = candidates
+            .iter()
+            .filter(|(i, _)| matches!(self.slots.get(i), Some(Slot::Granted { .. })))
+            .count();
+        if !renewal && unused > self.cfg.refill_at {
             return None;
         }
         let start = candidates[pos].0;
@@ -613,9 +617,6 @@ impl RangePlanner {
             };
             if matches!(this, Need::Fresh) == renewal {
                 break;
-            }
-            if let (Need::Regrant(d), Some(Slot::Idle { regranted_for, .. })) = (this, self.slots.get_mut(&index)) {
-                *regranted_for = Some(d);
             }
             count += 1;
         }
@@ -638,10 +639,23 @@ impl RangePlanner {
             }
         }
         let api_room = self.api_in_flight() < self.cfg.api_in_flight;
-        let index = candidates.iter().map(|&(i, _)| i).find(|i| match self.slots.get(i) {
-            Some(Slot::Granted { .. }) => true,
-            Some(Slot::ApiPending { .. }) => api_room,
-            _ => false,
+        // Until chunk 0 is released, one slot stays free for it: the chunks after it cannot be
+        // released before it (I3), so letting them fill every slot would starve a chunk 0 that
+        // has to be fetched again.
+        let zero_open = !self.released.contains(0);
+        let held_after_zero = self
+            .slots
+            .iter()
+            .filter(|(i, s)| **i != 0 && matches!(s, Slot::Fetching { .. } | Slot::Fetched { .. }))
+            .count();
+        let room_after_zero = !zero_open || held_after_zero + 2 <= self.slots() as usize;
+        let index = candidates.iter().map(|&(i, _)| i).find(|i| {
+            (*i == 0 || room_after_zero)
+                && match self.slots.get(i) {
+                    Some(Slot::Granted { .. }) => true,
+                    Some(Slot::ApiPending { .. }) => api_room,
+                    _ => false,
+                }
         })?;
         let slot = self.slots.get_mut(&index)?;
         match std::mem::replace(
@@ -825,6 +839,7 @@ impl RangePlanner {
             if self.released.contains(u64::from(index)) {
                 continue;
             }
+            let idle = matches!(self.slots.get(&index), Some(Slot::Idle { .. }));
             let (attempts, regranted_for) = match self.slots.get(&index) {
                 None => (Attempts::default(), None),
                 Some(
@@ -844,6 +859,13 @@ impl RangePlanner {
                     },
                 ) => (*attempts, *regranted_for),
                 Some(_) => continue,
+            };
+            // An idle chunk granted again is that demand's one re-grant: marked only now, when the
+            // grant is in hand, so a window that failed never uses the allowance up.
+            let regranted_for = if idle {
+                self.geometry.and_then(|g| self.demand_for(&g, index)).or(regranted_for)
+            } else {
+                regranted_for
             };
             let slot = if self.storage_given_up {
                 Slot::ApiPending { attempts }

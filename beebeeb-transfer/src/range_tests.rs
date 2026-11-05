@@ -565,3 +565,35 @@ async fn five_sessions_share_the_budget_and_a_fifth_waits_for_a_lease() {
         assert_eq!(sink.buf, fx.plain);
     }
 }
+
+/// Review finding 5: a placeholder that already holds bytes (a matching record) is a written sink
+/// from the start: no early failure may hand it back as empty (`UseApi`).
+#[tokio::test]
+async fn a_resume_over_bytes_on_disk_never_reports_use_api() {
+    let io = ScriptedIo::new(|req, _, _| match req {
+        Request::Api(call) if call.path == DISCOVERY_PATH => json(404, serde_json::json!({"error": "not_found"})),
+        other => panic!("unexpected request {other:?}"),
+    });
+    let control = RangeControl::new();
+    control.demand(1, 0, 10);
+    let mut sink = Placeholder::sized(3 * STRIDE);
+    let mut req = request(3 * STRIDE);
+    req.recorded = Some(RangeIdentity {
+        object_version_id: VERSION.into(),
+        format: ChunkFormat::V1Legacy,
+        version_id: None,
+    });
+    req.on_disk_bytes = STRIDE;
+    let (out, _) = run(&io, &RangeLessor::new(BIG), req, &control, &mut sink).await;
+    assert!(
+        matches!(
+            &out,
+            Err(RangeSessionError::DirectFailedAfterWrite {
+                transferred_bytes: 0,
+                ..
+            })
+        ),
+        "{out:?}"
+    );
+    assert_eq!(sink.failed, vec![1]);
+}

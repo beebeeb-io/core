@@ -390,7 +390,9 @@ impl State<'_> {
         for id in std::mem::take(&mut self.demands).into_keys() {
             self.sink.demand_failed(id);
         }
-        if self.wrote {
+        // A mismatch is always reported as itself: it is checked before this session's first
+        // transfer, and the caller's answer (poison, then empty) is the same either way.
+        if self.wrote && !matches!(cause, RangeSessionError::IdentityMismatch) {
             Err(RangeSessionError::DirectFailedAfterWrite {
                 transferred_bytes: self.transferred.len(),
                 cause: Box::new(cause),
@@ -444,7 +446,8 @@ pub async fn range_session<I: DirectIo>(
         observer,
         demands: BTreeMap::new(),
         transferred: RunSet::new(),
-        wrote: false,
+        // A sink that already holds bytes is written: no failure may hand it back as empty (I4).
+        wrote: req.on_disk_bytes > 0,
         stats: RangeStats::default(),
     };
     // Demands posted before the session started are pending demands too: every early exit
@@ -521,11 +524,9 @@ pub async fn range_session<I: DirectIo>(
         for command in commands {
             match command {
                 Command::Demand { id, offset, len } => {
+                    // A repeated id is the demand already pending: it gets one answer.
                     if planner.demand(id, offset, len).is_ok() {
                         st.demands.insert(id, (offset, len));
-                    } else {
-                        st.demands.remove(&id);
-                        st.sink.demand_failed(id);
                     }
                 }
                 Command::Cancel(id) => {
@@ -549,7 +550,9 @@ pub async fn range_session<I: DirectIo>(
         st.settle(&mut planner, req.file_size);
 
         // A lease while there is work; none while idle, so an idle session never blocks a fifth.
-        let busy = planner.demands() > 0 || planner.reading_ahead() || !tasks.is_empty() || !ready.is_empty();
+        // Read-ahead alone keeps the lease only while it has requests out: a paused session
+        // (every demand met, read-ahead stalled) gives it back.
+        let busy = planner.demands() > 0 || !tasks.is_empty() || !ready.is_empty();
         if busy && !guard.leased {
             guard.leased = lessor.lease(session, &mailbox);
         } else if !busy && guard.leased && booked.is_empty() {
@@ -797,7 +800,12 @@ pub async fn range_session<I: DirectIo>(
                     format,
                     version_id: o.version_id(),
                 };
-                if req.recorded.as_ref().is_some_and(|r| *r != identity) {
+                let same = |r: &RangeIdentity| {
+                    r.object_version_id.eq_ignore_ascii_case(&identity.object_version_id)
+                        && r.format == identity.format
+                        && r.version_id == identity.version_id
+                };
+                if req.recorded.as_ref().is_some_and(|r| !same(r)) {
                     return st.fail(RangeSessionError::IdentityMismatch);
                 }
                 if let Err(e) = st.sink.record_identity(&identity) {
@@ -826,6 +834,17 @@ pub async fn range_session<I: DirectIo>(
             }
         }
         st.settle(&mut planner, req.file_size);
+        if planner
+            .geometry()
+            .is_some_and(|g| planner.released_count() == u64::from(g.chunk_count))
+        {
+            if opener.as_ref().is_some_and(|o| o.finish().is_ok()) {
+                return Ok(RangeOutcome::Whole(st.stats));
+            }
+            return st.fail(RangeSessionError::Unauthentic {
+                index: last_unauthentic,
+            });
+        }
         // Demands that ask for nothing inside the file are met at once.
         if let Some(g) = planner.geometry() {
             let empty: Vec<u64> = st

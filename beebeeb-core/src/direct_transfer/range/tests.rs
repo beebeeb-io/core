@@ -427,3 +427,48 @@ fn parity_the_authority_rows_are_judged_the_same_way() {
     }
     assert_eq!(rows, 59, "every authority row ran");
 }
+
+/// Review finding 1: chunks after chunk 0 cannot be released before it, so they must never take
+/// the last slot while chunk 0 still has to be fetched (again).
+#[test]
+fn a_failed_chunk_0_always_keeps_a_slot() {
+    let (mut p, g) = started(2 * (STRIDE + CHUNK_OVERHEAD), CHUNKS, (0, u64::MAX));
+    let w = window(&mut p, T0, true);
+    assert_eq!(fetch(&mut p, T0), 0);
+    answer(&mut p, g, &w, T0);
+    assert_eq!(fetch(&mut p, T0), 1);
+    p.fetch_ok(1).unwrap();
+    p.fetch_failed(0, T0).unwrap();
+    // From the moment of the failure: chunk 0 waits out its backoff while chunk 2 is granted.
+    let mut now = T0;
+    for _ in 0..20 {
+        let polled = p.poll(now);
+        now += 10_000;
+        match polled {
+            RangePoll::RequestWindow(r) => answer(&mut p, g, &r, now),
+            RangePoll::Fetch { index, .. } => {
+                assert_eq!(index, 0, "chunk 0 first; chunk {index} would starve it");
+                return;
+            }
+            RangePoll::Wait { .. } => {}
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    panic!("chunk 0 was never fetched again");
+}
+
+/// Review finding 2: a re-grant window that fails does not use up the demand's re-grant.
+#[test]
+fn a_regrant_window_that_fails_is_asked_again() {
+    let (mut p, g) = started(SHARE, CHUNKS, (5 * STRIDE, 10));
+    let w = window(&mut p, T0, false);
+    answer(&mut p, g, &w, T0);
+    let later = T0 + 300_000;
+    assert_eq!(window(&mut p, later, false), req(0, 1, true));
+    p.window_failed(Outcome::Backoff(std::time::Duration::from_secs(1)), later);
+    assert_eq!(
+        window(&mut p, later + 2_000, false),
+        req(0, 1, true),
+        "the same re-grant, asked again"
+    );
+}
