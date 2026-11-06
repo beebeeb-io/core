@@ -27,17 +27,22 @@ filesystem pass (`beebeeb-backup`). No v0.2.0 API changes. LD-0113, spec
     `Unreadable` and `Excluded`);
   - device folders: `device_folder_name`, `device_id_from_machine_id` (label
     `beebeeb/backup-device-id/v1`), `find_device_folder` (by manifest id, legacy desktop adoption,
-    create);
+    create; an unreadable manifest is not mine and not adoptable). A device id is a string identity:
+    a UUID or an iOS legacy id carried forward verbatim;
   - the manifest: `DeviceManifest`, `parse_manifest`, `serialize_manifest` (a real iOS manifest
     round-trips; unknown fields are kept; a known field always wins over kept text of its name);
   - the root: `resolve_root` (use the flagged root, claim the oldest live `Backups`, or create) and
     `plan_merge` (legacy duplicate roots, depth unbounded, keep-both on a clash);
-  - the pass planner: `plan_pass(entries, records, live_remote, live_remote_complete, unseen,
+  - the pass planner: `plan_pass(entries, records, live_remote, live_remote_complete, unseen, held,
     budget)` (new, changed, unchanged, gone, unique moves, the budget, removed elsewhere only from a
-    complete listing, a changed file whose remote copy is not live uploads as new, a record whose
-    copy is live again is held again, raw unseen keys), `folder_presence`, `records_from_remote`
-    (exact key first, then the normalised key when unique), `normalize_key`, and the key helpers
-    `file_name`, `parents` and `fold_name`.
+    complete listing, a record missing from an incomplete listing is unknown and its work waits,
+    a changed file whose remote copy is gone uploads as new, a record whose copy is live again is
+    held again, raw unseen keys, held keys skipped and not charged; each upload carries the paired
+    `record_key` and, for a change, the `remote_id` it versions), `folder_presence`,
+    `records_from_remote` (exact key first, then the normalised key when unique), `normalize_key`,
+    and the key helpers `file_name`, `parents` and `fold_name`;
+  - custom folders: `custom_category_name` (safe like a device folder, never equal to a fixed
+    category or another custom folder: ` (2)`, ` (3)`) and `category_folder_name`.
 - **`beebeeb-backup`** (new crate, for desktop and the CLI): `walk_source(root, exclude)` (never
   opens a file, never follows a link, never descends into what is not local or into an excluded
   path such as the client's own sync root; attributes from the directory listing only; a folder is
@@ -46,8 +51,8 @@ filesystem pass (`beebeeb-backup`). No v0.2.0 API changes. LD-0113, spec
   implements.
 - **Bindings**: uniffi `backup_*` (9 functions; every unknown string is `InvalidInput`) and wasm
   `backupCheckMutation`, `backupProtectionMany`, `backupParseManifest`.
-- **Vectors**: `test-vectors/consolidation/backup_{protect,device,root,plan}.json` (50, 45, 21 and
-  60 cases), run by `cross_client_vectors`, with independent Python generators in
+- **Vectors**: `test-vectors/consolidation/backup_{protect,device,root,plan}.json` (60, 49, 21 and
+  66 cases; `check-backup-vectors-generated.sh` guards them in CI), run by `cross_client_vectors`, with independent Python generators in
   `test-vectors/tools/make_backup_*_vectors.py`.
 
 ## [0.2.0] - 2026-11-06
