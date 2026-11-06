@@ -2,114 +2,74 @@
   <a href="https://beebeeb.io"><img src="https://beebeeb.io/assets/beebeeb-icon.png" alt="beebeeb" width="72" height="72" /></a>
 </p>
 <h1 align="center">beebeeb core</h1>
-<p align="center">The cryptography engine behind beebeeb. Files are sealed on your device — the server only ever sees ciphertext.</p>
-<p align="center"><strong>We can't recover your data. Not even if we wanted to.</strong> That's the point.</p>
-<p align="center">
-  <a href="https://github.com/beebeeb-io/core/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/beebeeb-io/core/ci.yml?branch=main&label=CI" alt="CI" /></a> &nbsp;
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-555.svg" alt="License: AGPL-3.0" /></a> &nbsp;
-  <img src="https://img.shields.io/badge/rust-2024-555.svg" alt="Rust 2024" /> &nbsp;
-  <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-policy-555.svg" alt="Security policy" /></a>
-</p>
-<p align="center"><a href="https://beebeeb.io">Website</a> &nbsp;·&nbsp; <a href="https://beebeeb.io/security">How it works</a> &nbsp;·&nbsp; <a href="SECURITY.md">Report a vulnerability</a></p>
-<p align="center"><sub>End-to-end encrypted cloud storage, built in Europe. Operated by Initlabs B.V., Wijchen, Netherlands.</sub></p>
+<p align="center">Shared cryptography, protocol rules, storage, and bindings for Beebeeb clients.</p>
 
----
+## Status
 
-## Why this exists
+The workspace version is `0.2.2`. This is a breaking pre-1.0 release: consumers must read
+[EXPORTS.md](EXPORTS.md), regenerate bindings where applicable, and update their core pin together.
 
-`core` is the one place beebeeb's cryptography lives. Every client depends on it, and none of them re-implement the crypto themselves: the web app consumes it as WebAssembly, the mobile apps through UniFFI bindings, and the CLI, server, and desktop sync engine as a native Rust git dependency. Writing key derivation and chunk encryption once — in one open, auditable Rust core — means a fix or a hardening lands in every client at once, and there's no second implementation to drift, disagree, or get a corner wrong.
+Core protects file contents before upload. That does not make every client or protocol immune to a
+malicious service: browser code can be replaced at delivery time, old formats have weaker integrity,
+and some trust decisions are first-use. The current boundaries are documented in
+[SECURITY.md](SECURITY.md).
 
-## Usage
+## Workspace crates
 
-The flow is the same everywhere: derive a `MasterKey` from the recovery phrase, derive a per-file `FileKey` from it, then encrypt or decrypt chunks under that file key. The password is not where the master key comes from: it signs in through OPAQUE (the server never learns it) and wraps the master key on the device. Raw key bytes never leave the device. (`kdf::derive_master_key(password, salt)` still exists for a legacy password-derived unlock path; signup does not use it.)
-
-```rust
-use beebeeb_core::recovery::{generate_recovery_phrase, recover_from_phrase};
-use beebeeb_core::kdf::derive_file_key;
-use beebeeb_core::encrypt::{encrypt_chunk, decrypt_chunk};
-
-// 1. Master key from the recovery phrase: its 128-bit BIP39 entropy goes through
-//    Argon2id. At signup, generate both; on a new device, re-derive from the phrase.
-let (phrase, master) = generate_recovery_phrase()?;   // show `phrase` to the user once
-let master = recover_from_phrase(&phrase)?;           // same key, from the 12 words
-
-// 2. Per-file key from the master key (HKDF-SHA256), scoped to one file_id.
-let file_key = derive_file_key(&master, file_id);
-
-// 3. Seal a chunk (AES-256-GCM, fresh random nonce) and open it again.
-let sealed = encrypt_chunk(&file_key, plaintext)?;   // -> EncryptedBlob
-let opened = decrypt_chunk(&file_key, &sealed)?;      // -> Vec<u8>
-assert_eq!(opened, plaintext);
-```
-
-For streaming whole files chunk-by-chunk (one shared encrypt loop across every client, peak memory ≈ one chunk) see `chunk_stream::ChunkEncryptor` / `ChunkDecryptor`.
-
-## Consumed by
-
-| Client | How it links `core` |
+| Crate | Purpose |
 | --- | --- |
-| web | WebAssembly — the `beebeeb-wasm` crate, built with `wasm-pack` |
-| mobile | UniFFI — Swift + Kotlin bindings from `beebeeb-uniffi` |
-| cli | native Rust git dependency |
-| server | native Rust git dependency (shared types + protocol helpers) |
-| desktop | native Rust git dependency (`beebeeb-sync` sync engine) |
+| `beebeeb-core` | Cryptography, key types, file formats, and pure protocol rules |
+| `beebeeb-types` | Shared wire and domain types |
+| `beebeeb-api` | I/O-free typed API requests, answers, and account flows |
+| `beebeeb-client` | Native transport, sessions, and purpose-specific product services |
+| `beebeeb-store` | Native SQLite account state, durable queues, and cache metadata |
+| `beebeeb-transfer` | Transport-independent upload and download drivers |
+| `beebeeb-wasm` | WebAssembly bindings |
+| `beebeeb-uniffi` | Swift and Kotlin bindings |
+| `beebeeb-upload` | Legacy upload client, retained for compatibility |
+| `beebeeb-sync` | Legacy desktop sync prototype; not for product use |
 
-## Cryptographic primitives
+Clients must follow [docs/client-rules.md](docs/client-rules.md). In particular, file content uses the
+streaming APIs and authenticated metadata pins; the generic no-AAD helpers are not file-content APIs.
+New file versions are written in chunk format v2. Compatibility readers are listed in
+[docs/legacy-formats.md](docs/legacy-formats.md).
 
-| Primitive | Use |
-| --- | --- |
-| AES-256-GCM | File, chunk, metadata, and local wrapping encryption. |
-| X25519 | Key exchange for sharing and client-side key agreement. |
-| Argon2id | Password-based key derivation. |
-| HKDF-SHA256 | Per-file key derivation from the master key and file identifiers. |
-| BIP39 | Recovery phrase generation and recovery. |
-| OPAQUE | Password-authenticated key exchange where the server never learns the password. |
+Native products start with `beebeeb-client` (or `NativeClientHandle` in Swift/Kotlin), not raw API or
+key functions. Its services cover authentication and devices, files and sync, transfers and
+thumbnails, sharing, contacts, search, settings, backup, File Provider, and ordered sign-out. A
+password and any configured authenticator produce a locked session. A new device then uses either
+device approval, a passkey plus an email code, or a recovery key plus an email code; installation
+finishes with account-key proof. Account creation is web-only.
+
+## Cryptography
+
+Core uses established implementations of AES-256-GCM, HKDF-SHA256, Argon2id, X25519, BIP39, OPAQUE,
+and SPAKE2. `MasterKey` and `FileKey` are non-`Clone` types that wipe their owned key material on drop.
+Public functions generally return `Result`; this is not a claim that every process or dependency can
+never panic.
 
 ## Build
 
-```sh
-cargo test --workspace          # full test suite
-cargo build --workspace --release
+The pinned Rust toolchain is in `rust-toolchain.toml`.
 
-wasm-pack build beebeeb-wasm --target web   # web (WASM) package -> beebeeb-wasm/pkg
-./build-ios.sh                              # iOS xcframework + Swift bindings
-./build-android.sh                          # Android .so + Kotlin bindings
+```sh
+cargo test --workspace --locked
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+
+wasm-pack build beebeeb-wasm --target web
+./build-ios.sh
+./build-android.sh
 ```
 
-Deeper build, binding-regeneration, and environment detail lives in [BUILDING.md](BUILDING.md).
-
-## Security invariants
-
-- `MasterKey` and `FileKey` are 32 bytes, **not** `Clone`, and zeroized on drop — no accidental key copies in memory.
-- Every file gets its own key via `HKDF(master_key, file_id)` — one compromised file key can't open another.
-- The recovery phrase **is** the master secret; the password wraps access to it, it doesn't replace it.
-- Crypto paths return `Result` and never panic.
-- Don't reimplement any of this per-client. If a client needs a crypto operation, it goes here.
+See [BUILDING.md](BUILDING.md) for binding and platform details, and
+[CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change.
 
 ## Security
 
-Found a vulnerability? Email **security@beebeeb.io** — see [SECURITY.md](SECURITY.md).
-
-### Audit status
-
-`core` has not had an independent security audit yet. It is open source, as are the web, desktop, iOS and
-CLI apps built on it, so you can review the code yourself: the primitives are standard (AES-256-GCM,
-Argon2id, HKDF, X25519) and the cross-platform test vectors are in this repository. The server is closed
-source. Beebeeb has no investors and is paid for from our own savings and income, and so far that money
-has gone into building Beebeeb, not into an audit. We understand if you want an audit before you trust us.
-
-### How this is built
-
-We are two founders, and we build Beebeeb with AI coding agents. The agents write most of the code; we
-specify the work, review every diff, run the tests and decide what ships. Every commit in this repository
-is merged by one of us, and the agents' `Co-Authored-By` trailers stay in the history, which is why it
-shows one author and some very large days.
-
-## Part of beebeeb
-
-End-to-end encrypted, zero-knowledge cloud storage — made in Europe.
-[core](https://github.com/beebeeb-io/core) · [cli](https://github.com/beebeeb-io/cli) · [web](https://github.com/beebeeb-io/web) · [mobile](https://github.com/beebeeb-io/mobile) · [desktop](https://github.com/beebeeb-io/desktop) · [website](https://beebeeb.io)
+Report vulnerabilities to **security@beebeeb.io** as described in [SECURITY.md](SECURITY.md).
+Core has not had an independent security review.
 
 ## License
 
-[AGPL-3.0-or-later](LICENSE) — © Initlabs B.V. (KvK 95157565), Wijchen, Netherlands.
+[AGPL-3.0-or-later](LICENSE) — © Initlabs B.V., Wijchen, Netherlands.

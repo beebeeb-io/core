@@ -298,6 +298,7 @@ pub fn backup_plan_merge(
     let survivor = merge_tree(survivor)?;
     let duplicates = duplicates.into_iter().map(merge_tree).collect::<Result<Vec<_>, _>>()?;
     Ok(rules::plan_merge(&survivor, &duplicates, &clash_label, &hhmm)
+        .map_err(|error| invalid(error.to_string()))?
         .into_iter()
         .map(|step| match step {
             rules::MergeStep::Move { id, new_parent } => BackupMergeStep::Move {

@@ -243,27 +243,6 @@ typedef void (*UniffiForeignFutureCompleteVoid)(uint64_t, UniffiForeignFutureRes
     );
 
 #endif
-#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_DOWNLOAD_PROGRESS_CALLBACK_METHOD0
-#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_DOWNLOAD_PROGRESS_CALLBACK_METHOD0
-typedef void (*UniffiCallbackInterfaceDownloadProgressCallbackMethod0)(uint64_t, uint32_t, uint32_t, void* _Nonnull, 
-        RustCallStatus *_Nonnull uniffiCallStatus
-    );
-
-#endif
-#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_DOWNLOAD_PROGRESS_CALLBACK_METHOD1
-#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_DOWNLOAD_PROGRESS_CALLBACK_METHOD1
-typedef void (*UniffiCallbackInterfaceDownloadProgressCallbackMethod1)(uint64_t, RustBuffer, void* _Nonnull, 
-        RustCallStatus *_Nonnull uniffiCallStatus
-    );
-
-#endif
-#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_DOWNLOAD_PROGRESS_CALLBACK_METHOD2
-#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_DOWNLOAD_PROGRESS_CALLBACK_METHOD2
-typedef void (*UniffiCallbackInterfaceDownloadProgressCallbackMethod2)(uint64_t, RustBuffer, void* _Nonnull, 
-        RustCallStatus *_Nonnull uniffiCallStatus
-    );
-
-#endif
 #ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_FILE_PROGRESS_CALLBACK_METHOD0
 #define UNIFFI_FFIDEF_CALLBACK_INTERFACE_FILE_PROGRESS_CALLBACK_METHOD0
 typedef void (*UniffiCallbackInterfaceFileProgressCallbackMethod0)(uint64_t, uint32_t, uint32_t, void* _Nonnull, 
@@ -271,36 +250,109 @@ typedef void (*UniffiCallbackInterfaceFileProgressCallbackMethod0)(uint64_t, uin
     );
 
 #endif
-#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_UPLOAD_PROGRESS_CALLBACK_METHOD0
-#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_UPLOAD_PROGRESS_CALLBACK_METHOD0
-typedef void (*UniffiCallbackInterfaceUploadProgressCallbackMethod0)(uint64_t, uint32_t, uint32_t, void* _Nonnull, 
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_ACCOUNT_DATA_PURGER_CALLBACK_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_ACCOUNT_DATA_PURGER_CALLBACK_METHOD0
+typedef void (*UniffiCallbackInterfaceAccountDataPurgerCallbackMethod0)(uint64_t, int8_t* _Nonnull, 
         RustCallStatus *_Nonnull uniffiCallStatus
     );
 
 #endif
-#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_UPLOAD_PROGRESS_CALLBACK_METHOD1
-#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_UPLOAD_PROGRESS_CALLBACK_METHOD1
-typedef void (*UniffiCallbackInterfaceUploadProgressCallbackMethod1)(uint64_t, RustBuffer, void* _Nonnull, 
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_ASSET_SOURCE_CALLBACK_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_ASSET_SOURCE_CALLBACK_METHOD0
+typedef void (*UniffiCallbackInterfaceAssetSourceCallbackMethod0)(uint64_t, RustBuffer, RustBuffer, uint64_t, RustBuffer* _Nonnull, 
         RustCallStatus *_Nonnull uniffiCallStatus
     );
 
 #endif
-#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_UPLOAD_PROGRESS_CALLBACK_METHOD2
-#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_UPLOAD_PROGRESS_CALLBACK_METHOD2
-typedef void (*UniffiCallbackInterfaceUploadProgressCallbackMethod2)(uint64_t, RustBuffer, void* _Nonnull, 
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_ASSET_SOURCE_CALLBACK_METHOD1
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_ASSET_SOURCE_CALLBACK_METHOD1
+typedef void (*UniffiCallbackInterfaceAssetSourceCallbackMethod1)(uint64_t, RustBuffer, RustBuffer, RustBuffer* _Nonnull, 
         RustCallStatus *_Nonnull uniffiCallStatus
     );
 
 #endif
-#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_DOWNLOAD_PROGRESS_CALLBACK
-#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_DOWNLOAD_PROGRESS_CALLBACK
-typedef struct UniffiVTableCallbackInterfaceDownloadProgressCallback {
-    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
-    UniffiCallbackInterfaceClone _Nonnull uniffiClone;
-    UniffiCallbackInterfaceDownloadProgressCallbackMethod0 _Nonnull onChunkDecrypted;
-    UniffiCallbackInterfaceDownloadProgressCallbackMethod1 _Nonnull onComplete;
-    UniffiCallbackInterfaceDownloadProgressCallbackMethod2 _Nonnull onError;
-} UniffiVTableCallbackInterfaceDownloadProgressCallback;
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_BACKUP_MANIFEST_STORE_CALLBACK_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_BACKUP_MANIFEST_STORE_CALLBACK_METHOD0
+typedef void (*UniffiCallbackInterfaceBackupManifestStoreCallbackMethod0)(uint64_t, RustBuffer* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_BACKUP_MANIFEST_STORE_CALLBACK_METHOD1
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_BACKUP_MANIFEST_STORE_CALLBACK_METHOD1
+typedef void (*UniffiCallbackInterfaceBackupManifestStoreCallbackMethod1)(uint64_t, RustBuffer, int8_t* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_BACKUP_MANIFEST_STORE_CALLBACK_METHOD2
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_BACKUP_MANIFEST_STORE_CALLBACK_METHOD2
+typedef void (*UniffiCallbackInterfaceBackupManifestStoreCallbackMethod2)(uint64_t, int8_t* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_DOMAIN_NOTIFIER_CALLBACK_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_DOMAIN_NOTIFIER_CALLBACK_METHOD0
+typedef void (*UniffiCallbackInterfaceDomainNotifierCallbackMethod0)(uint64_t, int8_t* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_PLATFORM_TRANSFER_CANCELLER_CALLBACK_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_PLATFORM_TRANSFER_CANCELLER_CALLBACK_METHOD0
+typedef void (*UniffiCallbackInterfacePlatformTransferCancellerCallbackMethod0)(uint64_t, RustBuffer, int8_t* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_CHUNK_TRANSPORT_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_CHUNK_TRANSPORT_METHOD0
+typedef void (*UniffiCallbackInterfaceChunkTransportMethod0)(uint64_t, RustBuffer, RustBuffer, RustBuffer, uint16_t* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_CHUNK_TRANSPORT_METHOD1
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_CHUNK_TRANSPORT_METHOD1
+typedef void (*UniffiCallbackInterfaceChunkTransportMethod1)(uint64_t, RustBuffer, RustBuffer, RustBuffer, uint64_t, RustBuffer* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_CHUNK_TRANSPORT_METHOD2
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_CHUNK_TRANSPORT_METHOD2
+typedef void (*UniffiCallbackInterfaceChunkTransportMethod2)(uint64_t, RustBuffer, int8_t* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_IMAGE_CODEC_CALLBACK_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_IMAGE_CODEC_CALLBACK_METHOD0
+typedef void (*UniffiCallbackInterfaceImageCodecCallbackMethod0)(uint64_t, RustBuffer, uint32_t, float, RustBuffer, RustBuffer* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_PASSKEY_PROMPT_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_PASSKEY_PROMPT_METHOD0
+typedef void (*UniffiCallbackInterfacePasskeyPromptMethod0)(uint64_t, RustBuffer, RustBuffer* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_PASSKEY_PROMPT_METHOD1
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_PASSKEY_PROMPT_METHOD1
+typedef void (*UniffiCallbackInterfacePasskeyPromptMethod1)(uint64_t, RustBuffer, RustBuffer* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_SECRET_STORE_CALLBACK_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_SECRET_STORE_CALLBACK_METHOD0
+typedef void (*UniffiCallbackInterfaceSecretStoreCallbackMethod0)(uint64_t, RustBuffer, int8_t* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
 
 #endif
 #ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_FILE_PROGRESS_CALLBACK
@@ -312,15 +364,91 @@ typedef struct UniffiVTableCallbackInterfaceFileProgressCallback {
 } UniffiVTableCallbackInterfaceFileProgressCallback;
 
 #endif
-#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_UPLOAD_PROGRESS_CALLBACK
-#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_UPLOAD_PROGRESS_CALLBACK
-typedef struct UniffiVTableCallbackInterfaceUploadProgressCallback {
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_ACCOUNT_DATA_PURGER_CALLBACK
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_ACCOUNT_DATA_PURGER_CALLBACK
+typedef struct UniffiVTableCallbackInterfaceAccountDataPurgerCallback {
     UniffiCallbackInterfaceFree _Nonnull uniffiFree;
     UniffiCallbackInterfaceClone _Nonnull uniffiClone;
-    UniffiCallbackInterfaceUploadProgressCallbackMethod0 _Nonnull onChunkUploaded;
-    UniffiCallbackInterfaceUploadProgressCallbackMethod1 _Nonnull onComplete;
-    UniffiCallbackInterfaceUploadProgressCallbackMethod2 _Nonnull onError;
-} UniffiVTableCallbackInterfaceUploadProgressCallback;
+    UniffiCallbackInterfaceAccountDataPurgerCallbackMethod0 _Nonnull purgeAccountData;
+} UniffiVTableCallbackInterfaceAccountDataPurgerCallback;
+
+#endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_ASSET_SOURCE_CALLBACK
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_ASSET_SOURCE_CALLBACK
+typedef struct UniffiVTableCallbackInterfaceAssetSourceCallback {
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+    UniffiCallbackInterfaceClone _Nonnull uniffiClone;
+    UniffiCallbackInterfaceAssetSourceCallbackMethod0 _Nonnull snapshot;
+    UniffiCallbackInterfaceAssetSourceCallbackMethod1 _Nonnull export;
+} UniffiVTableCallbackInterfaceAssetSourceCallback;
+
+#endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_BACKUP_MANIFEST_STORE_CALLBACK
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_BACKUP_MANIFEST_STORE_CALLBACK
+typedef struct UniffiVTableCallbackInterfaceBackupManifestStoreCallback {
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+    UniffiCallbackInterfaceClone _Nonnull uniffiClone;
+    UniffiCallbackInterfaceBackupManifestStoreCallbackMethod0 _Nonnull load;
+    UniffiCallbackInterfaceBackupManifestStoreCallbackMethod1 _Nonnull replace;
+    UniffiCallbackInterfaceBackupManifestStoreCallbackMethod2 _Nonnull clear;
+} UniffiVTableCallbackInterfaceBackupManifestStoreCallback;
+
+#endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_DOMAIN_NOTIFIER_CALLBACK
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_DOMAIN_NOTIFIER_CALLBACK
+typedef struct UniffiVTableCallbackInterfaceDomainNotifierCallback {
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+    UniffiCallbackInterfaceClone _Nonnull uniffiClone;
+    UniffiCallbackInterfaceDomainNotifierCallbackMethod0 _Nonnull signalWorkingSet;
+} UniffiVTableCallbackInterfaceDomainNotifierCallback;
+
+#endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_PLATFORM_TRANSFER_CANCELLER_CALLBACK
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_PLATFORM_TRANSFER_CANCELLER_CALLBACK
+typedef struct UniffiVTableCallbackInterfacePlatformTransferCancellerCallback {
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+    UniffiCallbackInterfaceClone _Nonnull uniffiClone;
+    UniffiCallbackInterfacePlatformTransferCancellerCallbackMethod0 _Nonnull cancel;
+} UniffiVTableCallbackInterfacePlatformTransferCancellerCallback;
+
+#endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_CHUNK_TRANSPORT
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_CHUNK_TRANSPORT
+typedef struct UniffiVTableCallbackInterfaceChunkTransport {
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+    UniffiCallbackInterfaceClone _Nonnull uniffiClone;
+    UniffiCallbackInterfaceChunkTransportMethod0 _Nonnull uploadFile;
+    UniffiCallbackInterfaceChunkTransportMethod1 _Nonnull downloadRange;
+    UniffiCallbackInterfaceChunkTransportMethod2 _Nonnull cancelBackground;
+} UniffiVTableCallbackInterfaceChunkTransport;
+
+#endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_IMAGE_CODEC_CALLBACK
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_IMAGE_CODEC_CALLBACK
+typedef struct UniffiVTableCallbackInterfaceImageCodecCallback {
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+    UniffiCallbackInterfaceClone _Nonnull uniffiClone;
+    UniffiCallbackInterfaceImageCodecCallbackMethod0 _Nonnull encode;
+} UniffiVTableCallbackInterfaceImageCodecCallback;
+
+#endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_PASSKEY_PROMPT
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_PASSKEY_PROMPT
+typedef struct UniffiVTableCallbackInterfacePasskeyPrompt {
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+    UniffiCallbackInterfaceClone _Nonnull uniffiClone;
+    UniffiCallbackInterfacePasskeyPromptMethod0 _Nonnull create;
+    UniffiCallbackInterfacePasskeyPromptMethod1 _Nonnull authenticate;
+} UniffiVTableCallbackInterfacePasskeyPrompt;
+
+#endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_SECRET_STORE_CALLBACK
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_SECRET_STORE_CALLBACK
+typedef struct UniffiVTableCallbackInterfaceSecretStoreCallback {
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+    UniffiCallbackInterfaceClone _Nonnull uniffiClone;
+    UniffiCallbackInterfaceSecretStoreCallbackMethod0 _Nonnull authorizeAccess;
+} UniffiVTableCallbackInterfaceSecretStoreCallback;
 
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_BREACHCHECKHANDLE
@@ -363,14 +491,14 @@ void uniffi_beebeeb_uniffi_fn_free_chunkdecryptorhandle(uint64_t handle, RustCal
 uint64_t uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_push(uint64_t master_key, RustBuffer file_id, uint8_t expected_chunk_format, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_CHUNKDECRYPTORHANDLE_FOR_PUSH_WITH_FILE_KEY
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_CHUNKDECRYPTORHANDLE_FOR_PUSH_WITH_FILE_KEY
-uint64_t uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_push_with_file_key(RustBuffer file_key, RustBuffer file_id, uint8_t expected_chunk_format, RustCallStatus *_Nonnull out_status
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_CHUNKDECRYPTORHANDLE_FOR_PUSH_WITH_FILE_KEY_HANDLE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_CHUNKDECRYPTORHANDLE_FOR_PUSH_WITH_FILE_KEY_HANDLE
 uint64_t uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_push_with_file_key_handle(uint64_t file_key, RustBuffer file_id, uint8_t expected_chunk_format, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_CHUNKDECRYPTORHANDLE_FOR_VERSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_CHUNKDECRYPTORHANDLE_FOR_VERSION
+uint64_t uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_version(uint64_t master_key, RustBuffer file_id, uint8_t expected_chunk_format, RustBuffer version_id, RustBuffer version_counter, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_CHUNKDECRYPTORHANDLE_FROM_FILE
@@ -416,6 +544,16 @@ void uniffi_beebeeb_uniffi_fn_free_chunkencryptorhandle(uint64_t handle, RustCal
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_CHUNKENCRYPTORHANDLE_FOR_PUSH
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_CHUNKENCRYPTORHANDLE_FOR_PUSH
 uint64_t uniffi_beebeeb_uniffi_fn_constructor_chunkencryptorhandle_for_push(uint64_t master_key, RustBuffer file_id, uint64_t file_size, RustBuffer profile, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_CHUNKENCRYPTORHANDLE_FOR_PUSH_FOR_NEW_ITEM
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_CHUNKENCRYPTORHANDLE_FOR_PUSH_FOR_NEW_ITEM
+uint64_t uniffi_beebeeb_uniffi_fn_constructor_chunkencryptorhandle_for_push_for_new_item(uint64_t item_id, uint64_t file_size, RustBuffer profile, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_CHUNKENCRYPTORHANDLE_FOR_PUSH_FOR_TARGET
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_CHUNKENCRYPTORHANDLE_FOR_PUSH_FOR_TARGET
+uint64_t uniffi_beebeeb_uniffi_fn_constructor_chunkencryptorhandle_for_push_for_target(uint64_t target, uint64_t file_size, RustBuffer profile, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_CHUNKENCRYPTORHANDLE_FROM_FILE
@@ -466,6 +604,11 @@ RustBuffer uniffi_beebeeb_uniffi_fn_method_chunkencryptorhandle_push_chunk(uint6
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_CHUNKENCRYPTORHANDLE_RESUME_POLICY
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_CHUNKENCRYPTORHANDLE_RESUME_POLICY
 RustBuffer uniffi_beebeeb_uniffi_fn_method_chunkencryptorhandle_resume_policy(uint64_t ptr, RustBuffer stored_format, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_CHUNKENCRYPTORHANDLE_VERSION_COMMITMENT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_CHUNKENCRYPTORHANDLE_VERSION_COMMITMENT
+RustBuffer uniffi_beebeeb_uniffi_fn_method_chunkencryptorhandle_version_commitment(uint64_t ptr, RustBuffer previous_counter, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_CONSTELLATIONDECODERHANDLE
@@ -751,15 +894,15 @@ uint64_t uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_from_folder_link(Rus
 uint64_t uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_from_folder_link_passphrase(RustBuffer k_c, RustBuffer passphrase, RustBuffer token, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_FILEKEYHANDLE_FROM_KEY_BYTES
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_FILEKEYHANDLE_FROM_KEY_BYTES
-uint64_t uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_from_key_bytes(RustBuffer key, RustCallStatus *_Nonnull out_status
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_FILEKEYHANDLE_GENERATE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_FILEKEYHANDLE_GENERATE
 uint64_t uniffi_beebeeb_uniffi_fn_constructor_filekeyhandle_generate(RustCallStatus *_Nonnull out_status
     
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEKEYHANDLE_CHILD_WRAP_MATCHES
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEKEYHANDLE_CHILD_WRAP_MATCHES
+int8_t uniffi_beebeeb_uniffi_fn_method_filekeyhandle_child_wrap_matches(uint64_t ptr, RustBuffer shared_folder_id, RustBuffer item_id, uint8_t kind, RustBuffer wrapped, uint64_t expected, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEKEYHANDLE_DECRYPT_CHUNK
@@ -837,6 +980,21 @@ RustBuffer uniffi_beebeeb_uniffi_fn_method_filekeyhandle_encrypt_thumbnail_for(u
 RustBuffer uniffi_beebeeb_uniffi_fn_method_filekeyhandle_key_id(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEKEYHANDLE_OPEN_FOLDER_ACTOR_NAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEKEYHANDLE_OPEN_FOLDER_ACTOR_NAME
+RustBuffer uniffi_beebeeb_uniffi_fn_method_filekeyhandle_open_folder_actor_name(uint64_t ptr, RustBuffer shared_folder_id, RustBuffer envelope, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEKEYHANDLE_OPEN_LEGACY_CHILD_KEY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEKEYHANDLE_OPEN_LEGACY_CHILD_KEY
+RustBuffer uniffi_beebeeb_uniffi_fn_method_filekeyhandle_open_legacy_child_key(uint64_t ptr, RustBuffer frame, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEKEYHANDLE_SEAL_FOLDER_ACTOR_NAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEKEYHANDLE_SEAL_FOLDER_ACTOR_NAME
+RustBuffer uniffi_beebeeb_uniffi_fn_method_filekeyhandle_seal_folder_actor_name(uint64_t ptr, RustBuffer shared_folder_id, RustBuffer name, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEKEYHANDLE_UNWRAP_FOLDER_CHILD
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEKEYHANDLE_UNWRAP_FOLDER_CHILD
 uint64_t uniffi_beebeeb_uniffi_fn_method_filekeyhandle_unwrap_folder_child(uint64_t ptr, RustBuffer shared_folder_id, RustBuffer item_id, uint8_t kind, RustBuffer nonce, RustBuffer ciphertext, RustCallStatus *_Nonnull out_status
@@ -912,11 +1070,6 @@ uint64_t uniffi_beebeeb_uniffi_fn_clone_masterkeyhandle(uint64_t handle, RustCal
 void uniffi_beebeeb_uniffi_fn_free_masterkeyhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_MASTERKEYHANDLE_FROM_KEYCHAIN_BYTES
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_MASTERKEYHANDLE_FROM_KEYCHAIN_BYTES
-uint64_t uniffi_beebeeb_uniffi_fn_constructor_masterkeyhandle_from_keychain_bytes(RustBuffer bytes, RustCallStatus *_Nonnull out_status
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_MASTERKEYHANDLE_FROM_RECOVERY_PHRASE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_MASTERKEYHANDLE_FROM_RECOVERY_PHRASE
 uint64_t uniffi_beebeeb_uniffi_fn_constructor_masterkeyhandle_from_recovery_phrase(RustBuffer phrase, RustCallStatus *_Nonnull out_status
@@ -962,11 +1115,6 @@ RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_decrypt_names(uint64_
 uint64_t uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_derive_file_key(uint64_t ptr, RustBuffer file_id, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_DERIVE_X25519_PRIVATE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_DERIVE_X25519_PRIVATE
-RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_derive_x25519_private(uint64_t ptr, RustCallStatus *_Nonnull out_status
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_ENCRYPT_FILE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_ENCRYPT_FILE
 RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_encrypt_file(uint64_t ptr, RustBuffer file_id, RustBuffer input_path, RustBuffer output_dir, RustBuffer profile, RustBuffer callback, RustCallStatus *_Nonnull out_status
@@ -982,14 +1130,59 @@ RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_encrypt_name(uint64_t
 RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_encrypt_name_with_chunk_format(uint64_t ptr, RustBuffer file_id, RustBuffer filename, RustBuffer mime_type, uint8_t chunk_format, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_EXPORT_FOR_KEYCHAIN
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_EXPORT_FOR_KEYCHAIN
-RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_export_for_keychain(uint64_t ptr, RustCallStatus *_Nonnull out_status
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_ENCRYPT_NAME_WITH_VERSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_ENCRYPT_NAME_WITH_VERSION
+RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_encrypt_name_with_version(uint64_t ptr, RustBuffer file_id, RustBuffer filename, RustBuffer mime_type, uint8_t chunk_format, RustBuffer version_id, uint64_t version_counter, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_NEW_FOREIGN_ITEM_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_NEW_FOREIGN_ITEM_ID
+uint64_t uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_new_foreign_item_id(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_NEW_OWNER_ITEM_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_NEW_OWNER_ITEM_ID
+uint64_t uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_new_owner_item_id(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_OPEN_CLIENT_META
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_OPEN_CLIENT_META
+RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_open_client_meta(uint64_t ptr, RustBuffer record_key, RustBuffer device_key, uint8_t field, RustBuffer envelope, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_OPEN_CLIENT_META_MANY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_OPEN_CLIENT_META_MANY
+RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_open_client_meta_many(uint64_t ptr, RustBuffer items, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_OPEN_LEGACY_INVITE_OWNER_COPY
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_OPEN_LEGACY_INVITE_OWNER_COPY
 RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_open_legacy_invite_owner_copy(uint64_t ptr, RustBuffer folder_id, RustBuffer legacy_copy, RustBuffer rows, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_OWNER_FILE_KEY_FOR_CONTENT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_OWNER_FILE_KEY_FOR_CONTENT
+RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_owner_file_key_for_content(uint64_t ptr, RustBuffer file_id, RustBuffer first_chunk_frame, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_OWNER_FILE_KEY_FOR_NAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_OWNER_FILE_KEY_FOR_NAME
+RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_owner_file_key_for_name(uint64_t ptr, RustBuffer file_id, RustBuffer name_encrypted, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_RESOLVE_OWNED_KEY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_RESOLVE_OWNED_KEY
+RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_resolve_owned_key(uint64_t ptr, RustBuffer item_id, uint8_t kind, RustBuffer owner_wrap, RustBuffer name_encrypted, RustBuffer shared_folder_id, RustBuffer folder_key, RustBuffer folder_wrap, RustBuffer first_chunk_frame, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_RESUME_NEW_ITEM_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_RESUME_NEW_ITEM_ID
+uint64_t uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_resume_new_item_id(uint64_t ptr, RustBuffer item_id, RustBuffer tag, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_SEAL_CLIENT_META
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_SEAL_CLIENT_META
+RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_seal_client_meta(uint64_t ptr, RustBuffer record_key, RustBuffer device_key, uint8_t field, RustBuffer plaintext, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_UNWRAP_FOLDER_CUSTODY
@@ -1000,6 +1193,11 @@ uint64_t uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_folder_custody(u
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_UNWRAP_INVITE_OWNER_COPY
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_UNWRAP_INVITE_OWNER_COPY
 uint64_t uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_invite_owner_copy(uint64_t ptr, RustBuffer folder_id, RustBuffer nonce, RustBuffer ciphertext, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_UNWRAP_LINK_LABEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_UNWRAP_LINK_LABEL
+RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_unwrap_link_label(uint64_t ptr, RustBuffer share_id, RustBuffer nonce, RustBuffer ciphertext, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_UNWRAP_LINK_OWNER_KEY
@@ -1037,6 +1235,11 @@ RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_invite_owner_cop
 RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_key(uint64_t ptr, uint64_t inner, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_WRAP_LINK_LABEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_WRAP_LINK_LABEL
+RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_link_label(uint64_t ptr, RustBuffer share_id, RustBuffer text, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_WRAP_LINK_OWNER_KEY
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_WRAP_LINK_OWNER_KEY
 RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_link_owner_key(uint64_t ptr, RustBuffer share_id, uint64_t inner, RustCallStatus *_Nonnull out_status
@@ -1050,6 +1253,66 @@ RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_link_owner_token
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_WRAP_OWNER_FILE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_WRAP_OWNER_FILE_KEY
 RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_wrap_owner_file_key(uint64_t ptr, RustBuffer item_id, uint64_t inner, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_RESOLVE_REQUEST_ROW
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_RESOLVE_REQUEST_ROW
+RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_resolve_request_row(uint64_t ptr, RustBuffer item_id, RustBuffer request_wrap_context, RustBuffer wrapped_request_private, RustBuffer wrap_nonce, RustBuffer sender_ephemeral_pubkey, RustBuffer wrapped_content_key, RustBuffer name_encrypted, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_RESOLVE_REQUEST_ROW_DETAILED
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_RESOLVE_REQUEST_ROW_DETAILED
+RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_resolve_request_row_detailed(uint64_t ptr, RustBuffer item_id, RustBuffer request_wrap_context, RustBuffer wrapped_request_private, RustBuffer wrap_nonce, RustBuffer sender_ephemeral_pubkey, RustBuffer wrapped_content_key, RustBuffer name_encrypted, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_SEAL_REQUEST_RENAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_SEAL_REQUEST_RENAME
+RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_seal_request_rename(uint64_t ptr, RustBuffer item_id, uint8_t pin, RustBuffer filename, RustBuffer mime_type, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_SEAL_REQUEST_RENAME_WITH_VERSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_MASTERKEYHANDLE_SEAL_REQUEST_RENAME_WITH_VERSION
+RustBuffer uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_seal_request_rename_with_version(uint64_t ptr, RustBuffer item_id, uint8_t pin, RustBuffer version_id, uint64_t version_counter, RustBuffer filename, RustBuffer mime_type, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_NEWITEMIDHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_NEWITEMIDHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_newitemidhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_NEWITEMIDHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_NEWITEMIDHANDLE
+void uniffi_beebeeb_uniffi_fn_free_newitemidhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NEWITEMIDHANDLE_ENCRYPT_NAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NEWITEMIDHANDLE_ENCRYPT_NAME
+RustBuffer uniffi_beebeeb_uniffi_fn_method_newitemidhandle_encrypt_name(uint64_t ptr, RustBuffer filename, RustBuffer mime_type, uint8_t chunk_format, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NEWITEMIDHANDLE_ENCRYPT_NAME_WITH_VERSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NEWITEMIDHANDLE_ENCRYPT_NAME_WITH_VERSION
+RustBuffer uniffi_beebeeb_uniffi_fn_method_newitemidhandle_encrypt_name_with_version(uint64_t ptr, RustBuffer filename, RustBuffer mime_type, uint8_t chunk_format, RustBuffer version_id, uint64_t version_counter, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NEWITEMIDHANDLE_ENCRYPT_NOTE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NEWITEMIDHANDLE_ENCRYPT_NOTE
+RustBuffer uniffi_beebeeb_uniffi_fn_method_newitemidhandle_encrypt_note(uint64_t ptr, RustBuffer note, uint8_t chunk_format, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NEWITEMIDHANDLE_ENCRYPT_THUMBNAIL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NEWITEMIDHANDLE_ENCRYPT_THUMBNAIL
+RustBuffer uniffi_beebeeb_uniffi_fn_method_newitemidhandle_encrypt_thumbnail(uint64_t ptr, RustBuffer plaintext, uint8_t chunk_format, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NEWITEMIDHANDLE_ID_TEXT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NEWITEMIDHANDLE_ID_TEXT
+RustBuffer uniffi_beebeeb_uniffi_fn_method_newitemidhandle_id_text(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NEWITEMIDHANDLE_TAG
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NEWITEMIDHANDLE_TAG
+RustBuffer uniffi_beebeeb_uniffi_fn_method_newitemidhandle_tag(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_SEARCHINDEXHANDLE
@@ -1207,9 +1470,1249 @@ RustBuffer uniffi_beebeeb_uniffi_fn_method_signupceremonyhandle_start_registrati
 RustBuffer uniffi_beebeeb_uniffi_fn_method_signupceremonyhandle_step(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_DOWNLOADPROGRESSCALLBACK
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_DOWNLOADPROGRESSCALLBACK
-void uniffi_beebeeb_uniffi_fn_init_callback_vtable_downloadprogresscallback(const UniffiVTableCallbackInterfaceDownloadProgressCallback* _Nonnull vtable
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_WRITETARGETHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_WRITETARGETHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_writetargethandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_WRITETARGETHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_WRITETARGETHANDLE
+void uniffi_beebeeb_uniffi_fn_free_writetargethandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_WRITETARGETHANDLE_ENCRYPT_NAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_WRITETARGETHANDLE_ENCRYPT_NAME
+RustBuffer uniffi_beebeeb_uniffi_fn_method_writetargethandle_encrypt_name(uint64_t ptr, RustBuffer filename, RustBuffer mime_type, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_WRITETARGETHANDLE_ENCRYPT_NAME_FOR_VERSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_WRITETARGETHANDLE_ENCRYPT_NAME_FOR_VERSION
+RustBuffer uniffi_beebeeb_uniffi_fn_method_writetargethandle_encrypt_name_for_version(uint64_t ptr, RustBuffer filename, RustBuffer mime_type, RustBuffer version_id, uint64_t version_counter, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_WRITETARGETHANDLE_ENCRYPT_NOTE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_WRITETARGETHANDLE_ENCRYPT_NOTE
+RustBuffer uniffi_beebeeb_uniffi_fn_method_writetargethandle_encrypt_note(uint64_t ptr, RustBuffer note, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_WRITETARGETHANDLE_ENCRYPT_THUMBNAIL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_WRITETARGETHANDLE_ENCRYPT_THUMBNAIL
+RustBuffer uniffi_beebeeb_uniffi_fn_method_writetargethandle_encrypt_thumbnail(uint64_t ptr, RustBuffer plaintext, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_WRITETARGETHANDLE_ITEM_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_WRITETARGETHANDLE_ITEM_ID
+RustBuffer uniffi_beebeeb_uniffi_fn_method_writetargethandle_item_id(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_WRITETARGETHANDLE_PIN
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_WRITETARGETHANDLE_PIN
+uint8_t uniffi_beebeeb_uniffi_fn_method_writetargethandle_pin(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_WRITETARGETHANDLE_VERSION_COUNTER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_WRITETARGETHANDLE_VERSION_COUNTER
+RustBuffer uniffi_beebeeb_uniffi_fn_method_writetargethandle_version_counter(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_WRITETARGETHANDLE_VERSION_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_WRITETARGETHANDLE_VERSION_ID
+RustBuffer uniffi_beebeeb_uniffi_fn_method_writetargethandle_version_id(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_AUTHENTICATORENROLLMENTHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_AUTHENTICATORENROLLMENTHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_authenticatorenrollmenthandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_AUTHENTICATORENROLLMENTHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_AUTHENTICATORENROLLMENTHANDLE
+void uniffi_beebeeb_uniffi_fn_free_authenticatorenrollmenthandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHENTICATORENROLLMENTHANDLE_CANCEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHENTICATORENROLLMENTHANDLE_CANCEL
+void uniffi_beebeeb_uniffi_fn_method_authenticatorenrollmenthandle_cancel(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHENTICATORENROLLMENTHANDLE_QR_URI
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHENTICATORENROLLMENTHANDLE_QR_URI
+RustBuffer uniffi_beebeeb_uniffi_fn_method_authenticatorenrollmenthandle_qr_uri(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_DEVICEAPPROVALHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_DEVICEAPPROVALHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_deviceapprovalhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_DEVICEAPPROVALHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_DEVICEAPPROVALHANDLE
+void uniffi_beebeeb_uniffi_fn_free_deviceapprovalhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_DEVICELINKHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_DEVICELINKHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_devicelinkhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_DEVICELINKHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_DEVICELINKHANDLE
+void uniffi_beebeeb_uniffi_fn_free_devicelinkhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICELINKHANDLE_BEGIN_TYPED_PATH
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICELINKHANDLE_BEGIN_TYPED_PATH
+RustBuffer uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_begin_typed_path(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICELINKHANDLE_EXPIRES_AT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICELINKHANDLE_EXPIRES_AT
+RustBuffer uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_expires_at(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICELINKHANDLE_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICELINKHANDLE_ID
+RustBuffer uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_id(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICELINKHANDLE_QR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICELINKHANDLE_QR
+RustBuffer uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_qr(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICELINKHANDLE_TYPED_CODE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICELINKHANDLE_TYPED_CODE
+RustBuffer uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_typed_code(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_RECOVEREDSESSIONHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_RECOVEREDSESSIONHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_recoveredsessionhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_RECOVEREDSESSIONHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_RECOVEREDSESSIONHANDLE
+void uniffi_beebeeb_uniffi_fn_free_recoveredsessionhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVEREDSESSIONHANDLE_CANONICAL_EMAIL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVEREDSESSIONHANDLE_CANONICAL_EMAIL
+RustBuffer uniffi_beebeeb_uniffi_fn_method_recoveredsessionhandle_canonical_email(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVEREDSESSIONHANDLE_OWNER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVEREDSESSIONHANDLE_OWNER
+RustBuffer uniffi_beebeeb_uniffi_fn_method_recoveredsessionhandle_owner(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_RECOVERYATTEMPTHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_RECOVERYATTEMPTHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_recoveryattempthandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_RECOVERYATTEMPTHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_RECOVERYATTEMPTHANDLE
+void uniffi_beebeeb_uniffi_fn_free_recoveryattempthandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYATTEMPTHANDLE_CANCEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYATTEMPTHANDLE_CANCEL
+void uniffi_beebeeb_uniffi_fn_method_recoveryattempthandle_cancel(uint64_t ptr, uint64_t auth, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYATTEMPTHANDLE_COMPLETE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYATTEMPTHANDLE_COMPLETE
+uint64_t uniffi_beebeeb_uniffi_fn_method_recoveryattempthandle_complete(uint64_t ptr, uint64_t auth, RustBuffer email, RustBuffer changes, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYATTEMPTHANDLE_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYATTEMPTHANDLE_ID
+RustBuffer uniffi_beebeeb_uniffi_fn_method_recoveryattempthandle_id(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYATTEMPTHANDLE_READY_AT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYATTEMPTHANDLE_READY_AT
+RustBuffer uniffi_beebeeb_uniffi_fn_method_recoveryattempthandle_ready_at(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYATTEMPTHANDLE_STATUS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYATTEMPTHANDLE_STATUS
+RustBuffer uniffi_beebeeb_uniffi_fn_method_recoveryattempthandle_status(uint64_t ptr, uint64_t auth, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYATTEMPTHANDLE_WAITS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYATTEMPTHANDLE_WAITS
+int8_t uniffi_beebeeb_uniffi_fn_method_recoveryattempthandle_waits(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_RECOVERYKITHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_RECOVERYKITHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_recoverykithandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_RECOVERYKITHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_RECOVERYKITHANDLE
+void uniffi_beebeeb_uniffi_fn_free_recoverykithandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYKITHANDLE_DISCARD
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYKITHANDLE_DISCARD
+void uniffi_beebeeb_uniffi_fn_method_recoverykithandle_discard(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYKITHANDLE_FILENAME_STEM
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYKITHANDLE_FILENAME_STEM
+RustBuffer uniffi_beebeeb_uniffi_fn_method_recoverykithandle_filename_stem(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYKITHANDLE_TEXT_FILE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYKITHANDLE_TEXT_FILE
+RustBuffer uniffi_beebeeb_uniffi_fn_method_recoverykithandle_text_file(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYKITHANDLE_TITLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYKITHANDLE_TITLE
+RustBuffer uniffi_beebeeb_uniffi_fn_method_recoverykithandle_title(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYKITHANDLE_WARNINGS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYKITHANDLE_WARNINGS
+RustBuffer uniffi_beebeeb_uniffi_fn_method_recoverykithandle_warnings(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYKITHANDLE_WORDS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_RECOVERYKITHANDLE_WORDS
+RustBuffer uniffi_beebeeb_uniffi_fn_method_recoverykithandle_words(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_SIGNUPSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_SIGNUPSERVICEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_signupservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_SIGNUPSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_SIGNUPSERVICEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_signupservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_ABANDON
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_ABANDON
+void uniffi_beebeeb_uniffi_fn_method_signupservicehandle_abandon(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_ACKNOWLEDGE_RECOVERY_KIT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_ACKNOWLEDGE_RECOVERY_KIT
+void uniffi_beebeeb_uniffi_fn_method_signupservicehandle_acknowledge_recovery_kit(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_BEGIN_RECOVERY_KIT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_BEGIN_RECOVERY_KIT
+uint64_t uniffi_beebeeb_uniffi_fn_method_signupservicehandle_begin_recovery_kit(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_CHALLENGE_POSITIONS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_CHALLENGE_POSITIONS
+RustBuffer uniffi_beebeeb_uniffi_fn_method_signupservicehandle_challenge_positions(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_CONFIRM_RECOVERY_WORDS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_CONFIRM_RECOVERY_WORDS
+void uniffi_beebeeb_uniffi_fn_method_signupservicehandle_confirm_recovery_words(uint64_t ptr, RustBuffer answers, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_CREATE_ACCOUNT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_CREATE_ACCOUNT
+uint64_t uniffi_beebeeb_uniffi_fn_method_signupservicehandle_create_account(uint64_t ptr, RustBuffer terms_version, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_MARK_RECOVERY_PDF_SAVED
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_MARK_RECOVERY_PDF_SAVED
+void uniffi_beebeeb_uniffi_fn_method_signupservicehandle_mark_recovery_pdf_saved(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_MARK_RECOVERY_PRINTED
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_MARK_RECOVERY_PRINTED
+void uniffi_beebeeb_uniffi_fn_method_signupservicehandle_mark_recovery_printed(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_MARK_RECOVERY_TEXT_SAVED
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_MARK_RECOVERY_TEXT_SAVED
+void uniffi_beebeeb_uniffi_fn_method_signupservicehandle_mark_recovery_text_saved(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_SET_PASSWORD
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_SET_PASSWORD
+RustBuffer uniffi_beebeeb_uniffi_fn_method_signupservicehandle_set_password(uint64_t ptr, RustBuffer password, RustBuffer confirmation, RustBuffer breach, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_START_EMAIL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_START_EMAIL
+void uniffi_beebeeb_uniffi_fn_method_signupservicehandle_start_email(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_STEP
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_STEP
+RustBuffer uniffi_beebeeb_uniffi_fn_method_signupservicehandle_step(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_VERIFY_EMAIL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SIGNUPSERVICEHANDLE_VERIFY_EMAIL
+void uniffi_beebeeb_uniffi_fn_method_signupservicehandle_verify_email(uint64_t ptr, RustBuffer code, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_TYPEDDEVICEAPPROVALHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_TYPEDDEVICEAPPROVALHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_typeddeviceapprovalhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_TYPEDDEVICEAPPROVALHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_TYPEDDEVICEAPPROVALHANDLE
+void uniffi_beebeeb_uniffi_fn_free_typeddeviceapprovalhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_TYPEDDEVICELINKHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_TYPEDDEVICELINKHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_typeddevicelinkhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_TYPEDDEVICELINKHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_TYPEDDEVICELINKHANDLE
+void uniffi_beebeeb_uniffi_fn_free_typeddevicelinkhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_TYPEDDEVICELINKHANDLE_FINISH
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_TYPEDDEVICELINKHANDLE_FINISH
+uint64_t uniffi_beebeeb_uniffi_fn_method_typeddevicelinkhandle_finish(uint64_t ptr, RustBuffer peer_message, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_TYPEDDEVICERECEIVERHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_TYPEDDEVICERECEIVERHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_typeddevicereceiverhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_TYPEDDEVICERECEIVERHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_TYPEDDEVICERECEIVERHANDLE
+void uniffi_beebeeb_uniffi_fn_free_typeddevicereceiverhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_ACCOUNTREPLACEMENTHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_ACCOUNTREPLACEMENTHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_accountreplacementhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_ACCOUNTREPLACEMENTHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_ACCOUNTREPLACEMENTHANDLE
+void uniffi_beebeeb_uniffi_fn_free_accountreplacementhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_BACKUPEVENTSTREAMHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_BACKUPEVENTSTREAMHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_backupeventstreamhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_BACKUPEVENTSTREAMHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_BACKUPEVENTSTREAMHANDLE
+void uniffi_beebeeb_uniffi_fn_free_backupeventstreamhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPEVENTSTREAMHANDLE_NEXT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPEVENTSTREAMHANDLE_NEXT
+RustBuffer uniffi_beebeeb_uniffi_fn_method_backupeventstreamhandle_next(uint64_t ptr, uint64_t timeout_ms, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_BACKUPSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_BACKUPSERVICEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_backupservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_BACKUPSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_BACKUPSERVICEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_backupservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPSERVICEHANDLE_ASSETS_CHANGED
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPSERVICEHANDLE_ASSETS_CHANGED
+void uniffi_beebeeb_uniffi_fn_method_backupservicehandle_assets_changed(uint64_t ptr, RustBuffer changes, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPSERVICEHANDLE_CONFIGURE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPSERVICEHANDLE_CONFIGURE
+void uniffi_beebeeb_uniffi_fn_method_backupservicehandle_configure(uint64_t ptr, RustBuffer configuration, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPSERVICEHANDLE_EVENTS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPSERVICEHANDLE_EVENTS
+uint64_t uniffi_beebeeb_uniffi_fn_method_backupservicehandle_events(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPSERVICEHANDLE_NEXT_BATCH
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPSERVICEHANDLE_NEXT_BATCH
+RustBuffer uniffi_beebeeb_uniffi_fn_method_backupservicehandle_next_batch(uint64_t ptr, RustBuffer kind, RustBuffer network_name, int64_t now_ms, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_FILEPROVIDERSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_FILEPROVIDERSERVICEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_fileproviderservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_FILEPROVIDERSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_FILEPROVIDERSERVICEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_fileproviderservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_CHANGES_SINCE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_CHANGES_SINCE
+RustBuffer uniffi_beebeeb_uniffi_fn_method_fileproviderservicehandle_changes_since(uint64_t ptr, int64_t anchor, uint16_t limit, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_CHILDREN
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_CHILDREN
+RustBuffer uniffi_beebeeb_uniffi_fn_method_fileproviderservicehandle_children(uint64_t ptr, RustBuffer parent_id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_CREATE_FILE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_CREATE_FILE
+RustBuffer uniffi_beebeeb_uniffi_fn_method_fileproviderservicehandle_create_file(uint64_t ptr, uint64_t uploads, RustBuffer data, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_CREATE_FOLDER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_CREATE_FOLDER
+RustBuffer uniffi_beebeeb_uniffi_fn_method_fileproviderservicehandle_create_folder(uint64_t ptr, RustBuffer name, RustBuffer parent_id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_DELETE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_DELETE
+void uniffi_beebeeb_uniffi_fn_method_fileproviderservicehandle_delete(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_DELETE_LOCAL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_DELETE_LOCAL
+void uniffi_beebeeb_uniffi_fn_method_fileproviderservicehandle_delete_local(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_FETCH_CONTENTS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_FETCH_CONTENTS
+RustBuffer uniffi_beebeeb_uniffi_fn_method_fileproviderservicehandle_fetch_contents(uint64_t ptr, uint64_t downloads, RustBuffer file, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_ITEM
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_ITEM
+RustBuffer uniffi_beebeeb_uniffi_fn_method_fileproviderservicehandle_item(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_MODIFY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_MODIFY
+RustBuffer uniffi_beebeeb_uniffi_fn_method_fileproviderservicehandle_modify(uint64_t ptr, RustBuffer id, RustBuffer new_name, int8_t change_parent, RustBuffer new_parent, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_SET_SYSTEM_ITEMS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_SET_SYSTEM_ITEMS
+void uniffi_beebeeb_uniffi_fn_method_fileproviderservicehandle_set_system_items(uint64_t ptr, RustBuffer ids, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_WORK_STATE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPROVIDERSERVICEHANDLE_WORK_STATE
+RustBuffer uniffi_beebeeb_uniffi_fn_method_fileproviderservicehandle_work_state(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_SERVICECOORDINATORHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_SERVICECOORDINATORHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_servicecoordinatorhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_SERVICECOORDINATORHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_SERVICECOORDINATORHANDLE
+void uniffi_beebeeb_uniffi_fn_free_servicecoordinatorhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SERVICECOORDINATORHANDLE_START
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SERVICECOORDINATORHANDLE_START
+void uniffi_beebeeb_uniffi_fn_method_servicecoordinatorhandle_start(uint64_t ptr, uint64_t page, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_REQUESTCONTENTREADER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_REQUESTCONTENTREADER
+uint64_t uniffi_beebeeb_uniffi_fn_clone_requestcontentreader(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_REQUESTCONTENTREADER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_REQUESTCONTENTREADER
+void uniffi_beebeeb_uniffi_fn_free_requestcontentreader(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_REQUESTCONTENTREADER_CHUNK_FORMAT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_REQUESTCONTENTREADER_CHUNK_FORMAT
+uint8_t uniffi_beebeeb_uniffi_fn_method_requestcontentreader_chunk_format(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_REQUESTCONTENTREADER_DECRYPTOR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_REQUESTCONTENTREADER_DECRYPTOR
+uint64_t uniffi_beebeeb_uniffi_fn_method_requestcontentreader_decryptor(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_REQUESTCONTENTREADER_FILE_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_REQUESTCONTENTREADER_FILE_ID
+RustBuffer uniffi_beebeeb_uniffi_fn_method_requestcontentreader_file_id(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_REQUESTCONTENTREADER_OPEN_FRAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_REQUESTCONTENTREADER_OPEN_FRAME
+RustBuffer uniffi_beebeeb_uniffi_fn_method_requestcontentreader_open_frame(uint64_t ptr, RustBuffer version_id, uint32_t index, int8_t is_last, uint8_t format, RustBuffer frame, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_AUTHCHALLENGEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_AUTHCHALLENGEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_authchallengehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_AUTHCHALLENGEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_AUTHCHALLENGEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_authchallengehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHCHALLENGEHANDLE_CANONICAL_EMAIL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHCHALLENGEHANDLE_CANONICAL_EMAIL
+RustBuffer uniffi_beebeeb_uniffi_fn_method_authchallengehandle_canonical_email(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHCHALLENGEHANDLE_KIND
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHCHALLENGEHANDLE_KIND
+RustBuffer uniffi_beebeeb_uniffi_fn_method_authchallengehandle_kind(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_AUTHSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_AUTHSERVICEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_authservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_AUTHSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_AUTHSERVICEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_authservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_CHANGE_EMAIL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_CHANGE_EMAIL
+RustBuffer uniffi_beebeeb_uniffi_fn_method_authservicehandle_change_email(uint64_t ptr, RustBuffer new_email, RustBuffer password, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_CHANGE_PASSWORD
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_CHANGE_PASSWORD
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_change_password(uint64_t ptr, RustBuffer current_password, RustBuffer new_password, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_ENABLE_AUTHENTICATOR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_ENABLE_AUTHENTICATOR
+void uniffi_beebeeb_uniffi_fn_method_authservicehandle_enable_authenticator(uint64_t ptr, uint64_t enrollment, RustBuffer code, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_INSTALL_DEVICE_APPROVAL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_INSTALL_DEVICE_APPROVAL
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_install_device_approval(uint64_t ptr, uint64_t accepted, uint64_t approval, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_INSTALL_DEVICE_APPROVAL_REPLACING_ACCOUNT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_INSTALL_DEVICE_APPROVAL_REPLACING_ACCOUNT
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_install_device_approval_replacing_account(uint64_t ptr, uint64_t accepted, uint64_t approval, uint64_t replacement, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_INSTALL_RECOVERED_SESSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_INSTALL_RECOVERED_SESSION
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_install_recovered_session(uint64_t ptr, uint64_t recovered, uint64_t master_key, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_INSTALL_RECOVERED_SESSION_REPLACING_ACCOUNT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_INSTALL_RECOVERED_SESSION_REPLACING_ACCOUNT
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_install_recovered_session_replacing_account(uint64_t ptr, uint64_t recovered, uint64_t master_key, uint64_t replacement, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_REMOVE_AUTHENTICATOR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_REMOVE_AUTHENTICATOR
+void uniffi_beebeeb_uniffi_fn_method_authservicehandle_remove_authenticator(uint64_t ptr, RustBuffer code, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_REQUEST_ACCOUNT_DELETION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_REQUEST_ACCOUNT_DELETION
+void uniffi_beebeeb_uniffi_fn_method_authservicehandle_request_account_deletion(uint64_t ptr, RustBuffer password, RustBuffer authenticator_code, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_SETUP_AUTHENTICATOR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_SETUP_AUTHENTICATOR
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_setup_authenticator(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_SIGNUP
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_SIGNUP
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_signup(uint64_t ptr, RustBuffer email, RustBuffer configuration, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_START_RECOVERY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_START_RECOVERY
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_start_recovery(uint64_t ptr, RustBuffer email, uint64_t master_key, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_START_RECOVERY_WITH_PASSWORD
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_START_RECOVERY_WITH_PASSWORD
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_start_recovery_with_password(uint64_t ptr, RustBuffer email, RustBuffer password, uint64_t master_key, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_ACCEPT_PASSWORD
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_ACCEPT_PASSWORD
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_accept_password(uint64_t ptr, uint64_t challenge, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_CREATE_PASSKEY_COPY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_CREATE_PASSKEY_COPY
+RustBuffer uniffi_beebeeb_uniffi_fn_method_authservicehandle_create_passkey_copy(uint64_t ptr, uint64_t prompt, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_INSTALL_NEW_DEVICE_WITH_PASSKEY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_INSTALL_NEW_DEVICE_WITH_PASSKEY
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_install_new_device_with_passkey(uint64_t ptr, uint64_t accepted, uint64_t master_key, uint64_t email_ticket, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_INSTALL_NEW_DEVICE_WITH_PASSKEY_REPLACING_ACCOUNT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_INSTALL_NEW_DEVICE_WITH_PASSKEY_REPLACING_ACCOUNT
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_install_new_device_with_passkey_replacing_account(uint64_t ptr, uint64_t accepted, uint64_t master_key, uint64_t email_ticket, uint64_t replacement, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_INSTALL_NEW_DEVICE_WITH_RECOVERY_KEY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_INSTALL_NEW_DEVICE_WITH_RECOVERY_KEY
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_install_new_device_with_recovery_key(uint64_t ptr, uint64_t accepted, uint64_t master_key, uint64_t email_ticket, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_INSTALL_NEW_DEVICE_WITH_RECOVERY_KEY_REPLACING_ACCOUNT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_INSTALL_NEW_DEVICE_WITH_RECOVERY_KEY_REPLACING_ACCOUNT
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_install_new_device_with_recovery_key_replacing_account(uint64_t ptr, uint64_t accepted, uint64_t master_key, uint64_t email_ticket, uint64_t replacement, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_OPEN_WITH_PASSKEY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_OPEN_WITH_PASSKEY
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_open_with_passkey(uint64_t ptr, uint64_t accepted, uint64_t prompt, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_REQUEST_EMAIL_CODE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_REQUEST_EMAIL_CODE
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_request_email_code(uint64_t ptr, RustBuffer email, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_SIGN_IN
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_SIGN_IN
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_sign_in(uint64_t ptr, RustBuffer email, RustBuffer password, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_SIGN_IN_ON_DEVICE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_SIGN_IN_ON_DEVICE
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_sign_in_on_device(uint64_t ptr, RustBuffer email, RustBuffer password, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_SUBMIT_EMAIL_CODE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_SUBMIT_EMAIL_CODE
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_submit_email_code(uint64_t ptr, uint64_t challenge, RustBuffer code, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_SUBMIT_TWO_FACTOR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_SUBMIT_TWO_FACTOR
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_submit_two_factor(uint64_t ptr, uint64_t challenge, RustBuffer code, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_UNLOCK_KNOWN_DEVICE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_AUTHSERVICEHANDLE_UNLOCK_KNOWN_DEVICE
+uint64_t uniffi_beebeeb_uniffi_fn_method_authservicehandle_unlock_known_device(uint64_t ptr, uint64_t accepted, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_CONTACTSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_CONTACTSERVICEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_contactservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_CONTACTSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_CONTACTSERVICEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_contactservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_CONTACTSERVICEHANDLE_ACCEPT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_CONTACTSERVICEHANDLE_ACCEPT
+void uniffi_beebeeb_uniffi_fn_method_contactservicehandle_accept(uint64_t ptr, RustBuffer contact_id, int64_t observed_at, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_CONTACTSERVICEHANDLE_OBSERVE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_CONTACTSERVICEHANDLE_OBSERVE
+RustBuffer uniffi_beebeeb_uniffi_fn_method_contactservicehandle_observe(uint64_t ptr, RustBuffer contact_id, int64_t observed_at, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_DEVICESERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_DEVICESERVICEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_deviceservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_DEVICESERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_DEVICESERVICEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_deviceservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_ACKNOWLEDGE_DEVICE_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_ACKNOWLEDGE_DEVICE_LINK
+void uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_acknowledge_device_link(uint64_t ptr, uint64_t approval, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_APPROVE_DEVICE_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_APPROVE_DEVICE_LINK
+void uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_approve_device_link(uint64_t ptr, RustBuffer id, RustBuffer qr, RustBuffer typed_code, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_APPROVE_TYPED_DEVICE_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_APPROVE_TYPED_DEVICE_LINK
+void uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_approve_typed_device_link(uint64_t ptr, uint64_t approval, RustBuffer new_device_message, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_BEGIN_TYPED_DEVICE_APPROVAL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_BEGIN_TYPED_DEVICE_APPROVAL
+RustBuffer uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_begin_typed_device_approval(uint64_t ptr, RustBuffer id, RustBuffer typed_code, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_DENY_DEVICE_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_DENY_DEVICE_LINK
+void uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_deny_device_link(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_LIST_ACCOUNT_SESSIONS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_LIST_ACCOUNT_SESSIONS
+RustBuffer uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_list_account_sessions(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_PENDING_DEVICE_LINKS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_PENDING_DEVICE_LINKS
+RustBuffer uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_pending_device_links(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_POLL_DEVICE_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_POLL_DEVICE_LINK
+RustBuffer uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_poll_device_link(uint64_t ptr, uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_POLL_TYPED_DEVICE_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_POLL_TYPED_DEVICE_LINK
+RustBuffer uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_poll_typed_device_link(uint64_t ptr, uint64_t receiver, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_REVOKE_ACCOUNT_SESSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_REVOKE_ACCOUNT_SESSION
+void uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_revoke_account_session(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_SEND_TYPED_APPROVAL_MESSAGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_SEND_TYPED_APPROVAL_MESSAGE
+void uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_send_typed_approval_message(uint64_t ptr, RustBuffer id, RustBuffer message, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_SEND_TYPED_NEW_DEVICE_MESSAGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_SEND_TYPED_NEW_DEVICE_MESSAGE
+void uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_send_typed_new_device_message(uint64_t ptr, RustBuffer id, RustBuffer message, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_START_DEVICE_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_START_DEVICE_LINK
+uint64_t uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_start_device_link(uint64_t ptr, RustBuffer device_name, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_START_DEVICE_LINK_FOR_SIGN_IN
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_START_DEVICE_LINK_FOR_SIGN_IN
+uint64_t uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_start_device_link_for_sign_in(uint64_t ptr, uint64_t accepted, RustBuffer device_name, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_TYPED_APPROVAL_MESSAGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_TYPED_APPROVAL_MESSAGE
+RustBuffer uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_typed_approval_message(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_TYPED_NEW_DEVICE_MESSAGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_TYPED_NEW_DEVICE_MESSAGE
+RustBuffer uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_typed_new_device_message(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_SIGN_OUT_WHOLE_DEVICE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_SIGN_OUT_WHOLE_DEVICE
+RustBuffer uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_sign_out_whole_device(uint64_t ptr, uint64_t coordinator, RustBuffer device_id, int8_t confirm_last_device, uint64_t canceller, uint64_t purger, int64_t now_ms, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_LIST
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_LIST
+RustBuffer uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_list(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_REMOVE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DEVICESERVICEHANDLE_REMOVE
+void uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_remove(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_DOWNLOADSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_DOWNLOADSERVICEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_downloadservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_DOWNLOADSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_DOWNLOADSERVICEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_downloadservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DOWNLOADSERVICEHANDLE_CANCEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DOWNLOADSERVICEHANDLE_CANCEL
+void uniffi_beebeeb_uniffi_fn_method_downloadservicehandle_cancel(uint64_t ptr, RustBuffer file_id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DOWNLOADSERVICEHANDLE_CLEAR_CACHE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DOWNLOADSERVICEHANDLE_CLEAR_CACHE
+void uniffi_beebeeb_uniffi_fn_method_downloadservicehandle_clear_cache(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DOWNLOADSERVICEHANDLE_OPEN
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_DOWNLOADSERVICEHANDLE_OPEN
+RustBuffer uniffi_beebeeb_uniffi_fn_method_downloadservicehandle_open(uint64_t ptr, RustBuffer file, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_EMAILCODECHALLENGEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_EMAILCODECHALLENGEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_emailcodechallengehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_EMAILCODECHALLENGEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_EMAILCODECHALLENGEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_emailcodechallengehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_EMAILCODECHALLENGEHANDLE_EXPIRES_AT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_EMAILCODECHALLENGEHANDLE_EXPIRES_AT
+RustBuffer uniffi_beebeeb_uniffi_fn_method_emailcodechallengehandle_expires_at(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_EMAILCODECHALLENGEHANDLE_MESSAGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_EMAILCODECHALLENGEHANDLE_MESSAGE
+RustBuffer uniffi_beebeeb_uniffi_fn_method_emailcodechallengehandle_message(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_EMAILCODETICKETHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_EMAILCODETICKETHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_emailcodetickethandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_EMAILCODETICKETHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_EMAILCODETICKETHANDLE
+void uniffi_beebeeb_uniffi_fn_free_emailcodetickethandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_EMAILCODETICKETHANDLE_EXPIRES_IN
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_EMAILCODETICKETHANDLE_EXPIRES_IN
+uint64_t uniffi_beebeeb_uniffi_fn_method_emailcodetickethandle_expires_in(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_EVENTSTREAMHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_EVENTSTREAMHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_eventstreamhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_EVENTSTREAMHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_EVENTSTREAMHANDLE
+void uniffi_beebeeb_uniffi_fn_free_eventstreamhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_EVENTSTREAMHANDLE_NEXT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_EVENTSTREAMHANDLE_NEXT
+RustBuffer uniffi_beebeeb_uniffi_fn_method_eventstreamhandle_next(uint64_t ptr, uint64_t timeout_ms, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_FILEPAGEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_FILEPAGEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_filepagehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_FILEPAGEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_FILEPAGEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_filepagehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPAGEHANDLE_NEXT_CURSOR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPAGEHANDLE_NEXT_CURSOR
+RustBuffer uniffi_beebeeb_uniffi_fn_method_filepagehandle_next_cursor(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPAGEHANDLE_RECORDS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILEPAGEHANDLE_RECORDS
+RustBuffer uniffi_beebeeb_uniffi_fn_method_filepagehandle_records(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_FILESERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_FILESERVICEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_fileservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_FILESERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_FILESERVICEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_fileservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_CREATE_FOLDER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_CREATE_FOLDER
+RustBuffer uniffi_beebeeb_uniffi_fn_method_fileservicehandle_create_folder(uint64_t ptr, RustBuffer name, RustBuffer parent_id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_DELETE_FOREVER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_DELETE_FOREVER
+void uniffi_beebeeb_uniffi_fn_method_fileservicehandle_delete_forever(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_GET
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_GET
+RustBuffer uniffi_beebeeb_uniffi_fn_method_fileservicehandle_get(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_LIST_PAGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_LIST_PAGE
+uint64_t uniffi_beebeeb_uniffi_fn_method_fileservicehandle_list_page(uint64_t ptr, RustBuffer parent_id, int8_t trashed, RustBuffer cursor, uint16_t limit, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_MOVE_ENTRY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_MOVE_ENTRY
+RustBuffer uniffi_beebeeb_uniffi_fn_method_fileservicehandle_move_entry(uint64_t ptr, uint64_t page, RustBuffer id, RustBuffer parent_id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_RENAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_RENAME
+RustBuffer uniffi_beebeeb_uniffi_fn_method_fileservicehandle_rename(uint64_t ptr, uint64_t page, RustBuffer id, RustBuffer new_name, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_RESTORE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_RESTORE
+void uniffi_beebeeb_uniffi_fn_method_fileservicehandle_restore(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_RESTORE_VERSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_RESTORE_VERSION
+RustBuffer uniffi_beebeeb_uniffi_fn_method_fileservicehandle_restore_version(uint64_t ptr, uint64_t store, RustBuffer file_id, RustBuffer version_id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_TRASH
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_FILESERVICEHANDLE_TRASH
+void uniffi_beebeeb_uniffi_fn_method_fileservicehandle_trash(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_NATIVECLIENTHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_NATIVECLIENTHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_nativeclienthandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_NATIVECLIENTHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_NATIVECLIENTHANDLE
+void uniffi_beebeeb_uniffi_fn_free_nativeclienthandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_NATIVECLIENTHANDLE_NEW
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_NATIVECLIENTHANDLE_NEW
+uint64_t uniffi_beebeeb_uniffi_fn_constructor_nativeclienthandle_new(RustBuffer configuration, RustBuffer secret_access, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_BACKUP
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_BACKUP
+uint64_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_backup(uint64_t ptr, uint64_t uploads, uint64_t source, uint64_t manifest_store, RustBuffer configuration, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_FILE_PROVIDER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_FILE_PROVIDER
+uint64_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_file_provider(uint64_t ptr, RustBuffer store_path, RustBuffer device_id, uint64_t notifier, RustBuffer memory_class, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_PREPARE_ACCOUNT_REPLACEMENT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_PREPARE_ACCOUNT_REPLACEMENT
+uint64_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_prepare_account_replacement(uint64_t ptr, uint64_t coordinator, int8_t confirmed_last_device_warning, uint64_t canceller, uint64_t purger, int64_t now_ms, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_SERVICE_COORDINATOR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_SERVICE_COORDINATOR
+uint64_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_service_coordinator(uint64_t ptr, uint64_t uploads, uint64_t downloads, uint64_t thumbnails, uint64_t backup, uint64_t search, uint64_t store, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_SIGN_OUT_THIS_APP
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_SIGN_OUT_THIS_APP
+RustBuffer uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_sign_out_this_app(uint64_t ptr, uint64_t coordinator, uint64_t canceller, uint64_t purger, int64_t now_ms, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_AUTH
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_AUTH
+uint64_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_auth(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_CONTACTS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_CONTACTS
+uint64_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_contacts(uint64_t ptr, uint64_t store, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_DEVICES
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_DEVICES
+uint64_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_devices(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_DOWNLOADS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_DOWNLOADS
+uint64_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_downloads(uint64_t ptr, uint64_t store, RustBuffer cache_root, uint64_t cache_limit_bytes, RustBuffer memory_class, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_EVENTS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_EVENTS
+uint64_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_events(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_FILES
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_FILES
+uint64_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_files(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_GENERATION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_GENERATION
+uint64_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_generation(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_LOAD_SESSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_LOAD_SESSION
+int8_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_load_session(uint64_t ptr, RustBuffer expected_user, RustBuffer app_id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_SETTINGS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_SETTINGS
+uint64_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_settings(uint64_t ptr, uint64_t store, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_SHARES
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_SHARES
+uint64_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_shares(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_SYNC
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_SYNC
+uint64_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_sync(uint64_t ptr, RustBuffer store_path, RustBuffer device_id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_THUMBNAILS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_THUMBNAILS
+uint64_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_thumbnails(uint64_t ptr, uint64_t store, uint64_t codec, RustBuffer cache_root, uint64_t cache_limit_bytes, RustBuffer platform_name, RustBuffer device_id, RustBuffer product, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_UPLOADS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_NATIVECLIENTHANDLE_UPLOADS
+uint64_t uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_uploads(uint64_t ptr, uint64_t store, RustBuffer staging_root, RustBuffer device_id, RustBuffer product, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_PASSWORDACCEPTEDHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_PASSWORDACCEPTEDHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_passwordacceptedhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_PASSWORDACCEPTEDHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_PASSWORDACCEPTEDHANDLE
+void uniffi_beebeeb_uniffi_fn_free_passwordacceptedhandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_PASSWORDACCEPTEDHANDLE_CANONICAL_EMAIL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_PASSWORDACCEPTEDHANDLE_CANONICAL_EMAIL
+RustBuffer uniffi_beebeeb_uniffi_fn_method_passwordacceptedhandle_canonical_email(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_PASSWORDACCEPTEDHANDLE_OWNER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_PASSWORDACCEPTEDHANDLE_OWNER
+RustBuffer uniffi_beebeeb_uniffi_fn_method_passwordacceptedhandle_owner(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_SEARCHSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_SEARCHSERVICEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_searchservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_SEARCHSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_SEARCHSERVICEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_searchservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_SEARCHSERVICEHANDLE_NEW
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_SEARCHSERVICEHANDLE_NEW
+uint64_t uniffi_beebeeb_uniffi_fn_constructor_searchservicehandle_new(uint32_t capacity, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SEARCHSERVICEHANDLE_INDEX_PAGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SEARCHSERVICEHANDLE_INDEX_PAGE
+void uniffi_beebeeb_uniffi_fn_method_searchservicehandle_index_page(uint64_t ptr, uint64_t page, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SEARCHSERVICEHANDLE_QUERY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SEARCHSERVICEHANDLE_QUERY
+RustBuffer uniffi_beebeeb_uniffi_fn_method_searchservicehandle_query(uint64_t ptr, RustBuffer query, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SEARCHSERVICEHANDLE_REMOVE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SEARCHSERVICEHANDLE_REMOVE
+void uniffi_beebeeb_uniffi_fn_method_searchservicehandle_remove(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_SETTINGSSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_SETTINGSSERVICEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_settingsservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_SETTINGSSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_SETTINGSSERVICEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_settingsservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SETTINGSSERVICEHANDLE_LOAD_LOCAL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SETTINGSSERVICEHANDLE_LOAD_LOCAL
+RustBuffer uniffi_beebeeb_uniffi_fn_method_settingsservicehandle_load_local(uint64_t ptr, RustBuffer device_id, RustBuffer product, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SETTINGSSERVICEHANDLE_SAVE_LOCAL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SETTINGSSERVICEHANDLE_SAVE_LOCAL
+void uniffi_beebeeb_uniffi_fn_method_settingsservicehandle_save_local(uint64_t ptr, RustBuffer device_id, RustBuffer product, RustBuffer settings, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SETTINGSSERVICEHANDLE_SET_VERSION_HISTORY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SETTINGSSERVICEHANDLE_SET_VERSION_HISTORY
+void uniffi_beebeeb_uniffi_fn_method_settingsservicehandle_set_version_history(uint64_t ptr, int8_t enabled, uint16_t retention_days, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_SHARESERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_SHARESERVICEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_shareservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_SHARESERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_SHARESERVICEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_shareservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SHARESERVICEHANDLE_CREATE_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SHARESERVICEHANDLE_CREATE_LINK
+RustBuffer uniffi_beebeeb_uniffi_fn_method_shareservicehandle_create_link(uint64_t ptr, RustBuffer file_id, RustBuffer wrapped_file_key, RustBuffer expires_in_hours, RustBuffer passphrase, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SHARESERVICEHANDLE_REVOKE_FOLDER_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SHARESERVICEHANDLE_REVOKE_FOLDER_LINK
+void uniffi_beebeeb_uniffi_fn_method_shareservicehandle_revoke_folder_link(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_STOREHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_STOREHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_storehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_STOREHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_STOREHANDLE
+void uniffi_beebeeb_uniffi_fn_free_storehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_STOREHANDLE_OPEN
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CONSTRUCTOR_STOREHANDLE_OPEN
+uint64_t uniffi_beebeeb_uniffi_fn_constructor_storehandle_open(RustBuffer path, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_STOREHANDLE_PREPARE_FOR_SUSPENSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_STOREHANDLE_PREPARE_FOR_SUSPENSION
+void uniffi_beebeeb_uniffi_fn_method_storehandle_prepare_for_suspension(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_SYNCSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_SYNCSERVICEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_syncservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_SYNCSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_SYNCSERVICEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_syncservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SYNCSERVICEHANDLE_CATCH_UP
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SYNCSERVICEHANDLE_CATCH_UP
+void uniffi_beebeeb_uniffi_fn_method_syncservicehandle_catch_up(uint64_t ptr, uint16_t limit, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SYNCSERVICEHANDLE_FOREGROUND_ONCE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SYNCSERVICEHANDLE_FOREGROUND_ONCE
+int8_t uniffi_beebeeb_uniffi_fn_method_syncservicehandle_foreground_once(uint64_t ptr, uint16_t catch_up_limit, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SYNCSERVICEHANDLE_RECOVER_GAP
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SYNCSERVICEHANDLE_RECOVER_GAP
+void uniffi_beebeeb_uniffi_fn_method_syncservicehandle_recover_gap(uint64_t ptr, uint16_t catch_up_limit, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SYNCSERVICEHANDLE_REFRESH_SNAPSHOT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SYNCSERVICEHANDLE_REFRESH_SNAPSHOT
+void uniffi_beebeeb_uniffi_fn_method_syncservicehandle_refresh_snapshot(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_THUMBNAILSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_THUMBNAILSERVICEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_thumbnailservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_THUMBNAILSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_THUMBNAILSERVICEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_thumbnailservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_THUMBNAILSERVICEHANDLE_CLEAR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_THUMBNAILSERVICEHANDLE_CLEAR
+void uniffi_beebeeb_uniffi_fn_method_thumbnailservicehandle_clear(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_THUMBNAILSERVICEHANDLE_ENQUEUE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_THUMBNAILSERVICEHANDLE_ENQUEUE
+int64_t uniffi_beebeeb_uniffi_fn_method_thumbnailservicehandle_enqueue(uint64_t ptr, RustBuffer data, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_THUMBNAILSERVICEHANDLE_GET
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_THUMBNAILSERVICEHANDLE_GET
+RustBuffer uniffi_beebeeb_uniffi_fn_method_thumbnailservicehandle_get(uint64_t ptr, RustBuffer file_id, RustBuffer name_encrypted, RustBuffer variant, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_THUMBNAILSERVICEHANDLE_RUN_NEXT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_THUMBNAILSERVICEHANDLE_RUN_NEXT
+RustBuffer uniffi_beebeeb_uniffi_fn_method_thumbnailservicehandle_run_next(uint64_t ptr, RustBuffer network, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_UPLOADSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_UPLOADSERVICEHANDLE
+uint64_t uniffi_beebeeb_uniffi_fn_clone_uploadservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_UPLOADSERVICEHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FREE_UPLOADSERVICEHANDLE
+void uniffi_beebeeb_uniffi_fn_free_uploadservicehandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_UPLOADSERVICEHANDLE_CANCEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_UPLOADSERVICEHANDLE_CANCEL
+void uniffi_beebeeb_uniffi_fn_method_uploadservicehandle_cancel(uint64_t ptr, int64_t id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_UPLOADSERVICEHANDLE_ENQUEUE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_UPLOADSERVICEHANDLE_ENQUEUE
+int64_t uniffi_beebeeb_uniffi_fn_method_uploadservicehandle_enqueue(uint64_t ptr, RustBuffer data, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_UPLOADSERVICEHANDLE_LIST
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_UPLOADSERVICEHANDLE_LIST
+RustBuffer uniffi_beebeeb_uniffi_fn_method_uploadservicehandle_list(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_UPLOADSERVICEHANDLE_PAUSE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_UPLOADSERVICEHANDLE_PAUSE
+int8_t uniffi_beebeeb_uniffi_fn_method_uploadservicehandle_pause(uint64_t ptr, int64_t id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_UPLOADSERVICEHANDLE_RESUME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_UPLOADSERVICEHANDLE_RESUME
+int8_t uniffi_beebeeb_uniffi_fn_method_uploadservicehandle_resume(uint64_t ptr, int64_t id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_UPLOADSERVICEHANDLE_RUN_NEXT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_UPLOADSERVICEHANDLE_RUN_NEXT
+uint32_t uniffi_beebeeb_uniffi_fn_method_uploadservicehandle_run_next(uint64_t ptr, uint32_t limit, RustBuffer network, uint64_t transport, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_FILEPROGRESSCALLBACK
@@ -1217,9 +2720,49 @@ void uniffi_beebeeb_uniffi_fn_init_callback_vtable_downloadprogresscallback(cons
 void uniffi_beebeeb_uniffi_fn_init_callback_vtable_fileprogresscallback(const UniffiVTableCallbackInterfaceFileProgressCallback* _Nonnull vtable
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_UPLOADPROGRESSCALLBACK
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_UPLOADPROGRESSCALLBACK
-void uniffi_beebeeb_uniffi_fn_init_callback_vtable_uploadprogresscallback(const UniffiVTableCallbackInterfaceUploadProgressCallback* _Nonnull vtable
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_ACCOUNTDATAPURGERCALLBACK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_ACCOUNTDATAPURGERCALLBACK
+void uniffi_beebeeb_uniffi_fn_init_callback_vtable_accountdatapurgercallback(const UniffiVTableCallbackInterfaceAccountDataPurgerCallback* _Nonnull vtable
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_ASSETSOURCECALLBACK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_ASSETSOURCECALLBACK
+void uniffi_beebeeb_uniffi_fn_init_callback_vtable_assetsourcecallback(const UniffiVTableCallbackInterfaceAssetSourceCallback* _Nonnull vtable
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_BACKUPMANIFESTSTORECALLBACK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_BACKUPMANIFESTSTORECALLBACK
+void uniffi_beebeeb_uniffi_fn_init_callback_vtable_backupmanifeststorecallback(const UniffiVTableCallbackInterfaceBackupManifestStoreCallback* _Nonnull vtable
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_DOMAINNOTIFIERCALLBACK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_DOMAINNOTIFIERCALLBACK
+void uniffi_beebeeb_uniffi_fn_init_callback_vtable_domainnotifiercallback(const UniffiVTableCallbackInterfaceDomainNotifierCallback* _Nonnull vtable
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_PLATFORMTRANSFERCANCELLERCALLBACK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_PLATFORMTRANSFERCANCELLERCALLBACK
+void uniffi_beebeeb_uniffi_fn_init_callback_vtable_platformtransfercancellercallback(const UniffiVTableCallbackInterfacePlatformTransferCancellerCallback* _Nonnull vtable
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_CHUNKTRANSPORT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_CHUNKTRANSPORT
+void uniffi_beebeeb_uniffi_fn_init_callback_vtable_chunktransport(const UniffiVTableCallbackInterfaceChunkTransport* _Nonnull vtable
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_IMAGECODECCALLBACK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_IMAGECODECCALLBACK
+void uniffi_beebeeb_uniffi_fn_init_callback_vtable_imagecodeccallback(const UniffiVTableCallbackInterfaceImageCodecCallback* _Nonnull vtable
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_PASSKEYPROMPT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_PASSKEYPROMPT
+void uniffi_beebeeb_uniffi_fn_init_callback_vtable_passkeyprompt(const UniffiVTableCallbackInterfacePasskeyPrompt* _Nonnull vtable
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_SECRETSTORECALLBACK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_INIT_CALLBACK_VTABLE_SECRETSTORECALLBACK
+void uniffi_beebeeb_uniffi_fn_init_callback_vtable_secretstorecallback(const UniffiVTableCallbackInterfaceSecretStoreCallback* _Nonnull vtable
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BREACH_VERDICT_ALLOWS_PROCEEDING
@@ -1242,11 +2785,6 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_ceremony_step_spec_id(RustBuffer step, 
 RustBuffer uniffi_beebeeb_uniffi_fn_func_classify_direct_answer(RustBuffer call, uint16_t status, RustBuffer content_type, RustBuffer body, RustBuffer retry_after, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_COMPUTE_RECOVERY_CHECK
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_COMPUTE_RECOVERY_CHECK
-RustBuffer uniffi_beebeeb_uniffi_fn_func_compute_recovery_check(RustBuffer master_key, RustCallStatus *_Nonnull out_status
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_CONSTELLATION_ENCODE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_CONSTELLATION_ENCODE
 RustBuffer uniffi_beebeeb_uniffi_fn_func_constellation_encode(RustBuffer payload, uint32_t frame_index, RustCallStatus *_Nonnull out_status
@@ -1265,76 +2803,6 @@ int8_t uniffi_beebeeb_uniffi_fn_func_constellation_verify_code(RustBuffer payloa
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECOMPRESS_GZIP
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECOMPRESS_GZIP
 RustBuffer uniffi_beebeeb_uniffi_fn_func_decompress_gzip(RustBuffer data, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_BLOB
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_BLOB
-RustBuffer uniffi_beebeeb_uniffi_fn_func_decrypt_blob(RustBuffer key, RustBuffer ciphertext, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_CHUNK
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_CHUNK
-RustBuffer uniffi_beebeeb_uniffi_fn_func_decrypt_chunk(RustBuffer key, RustBuffer nonce, RustBuffer ciphertext, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_CHUNKS_TO_FILE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_CHUNKS_TO_FILE
-uint64_t uniffi_beebeeb_uniffi_fn_func_decrypt_chunks_to_file(RustBuffer key, RustBuffer file_id, uint8_t expected_chunk_format, RustBuffer chunks, RustBuffer output_path, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_CONTIGUOUS_TO_FILE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_CONTIGUOUS_TO_FILE
-uint64_t uniffi_beebeeb_uniffi_fn_func_decrypt_contiguous_to_file(RustBuffer file_key, RustBuffer file_id, uint8_t expected_chunk_format, RustBuffer body, uint64_t chunk_size, RustBuffer output_path, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_METADATA
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_METADATA
-RustBuffer uniffi_beebeeb_uniffi_fn_func_decrypt_metadata(RustBuffer key, RustBuffer nonce, RustBuffer ciphertext, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_NAME
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_NAME
-RustBuffer uniffi_beebeeb_uniffi_fn_func_decrypt_name(RustBuffer master_key, RustBuffer file_id, RustBuffer name_encrypted, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_NAME_WITH_MIME
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DECRYPT_NAME_WITH_MIME
-RustBuffer uniffi_beebeeb_uniffi_fn_func_decrypt_name_with_mime(RustBuffer master_key, RustBuffer file_id, RustBuffer name_encrypted, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_FILE_KEY
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_FILE_KEY
-RustBuffer uniffi_beebeeb_uniffi_fn_func_derive_file_key(RustBuffer master_key, RustBuffer file_id, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_MASTER_KEY
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_MASTER_KEY
-RustBuffer uniffi_beebeeb_uniffi_fn_func_derive_master_key(RustBuffer password, RustBuffer salt, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_REQUEST_WRAP_KEY
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_REQUEST_WRAP_KEY
-RustBuffer uniffi_beebeeb_uniffi_fn_func_derive_request_wrap_key(RustBuffer master_key, RustBuffer request_id, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_SAS_BYTES
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_SAS_BYTES
-RustBuffer uniffi_beebeeb_uniffi_fn_func_derive_sas_bytes(RustBuffer shared_secret, RustBuffer info, uint32_t length, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_SHARE_KEY
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_SHARE_KEY
-RustBuffer uniffi_beebeeb_uniffi_fn_func_derive_share_key(RustBuffer shared_secret, RustBuffer file_id, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_X25519_PRIVATE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_X25519_PRIVATE
-RustBuffer uniffi_beebeeb_uniffi_fn_func_derive_x25519_private(RustBuffer master_key, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_X25519_PUBLIC
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DERIVE_X25519_PUBLIC
-RustBuffer uniffi_beebeeb_uniffi_fn_func_derive_x25519_public(RustBuffer private_key, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DIRECT_BACKGROUND_PUT_RESOURCE_TIMEOUT_MS
@@ -1419,50 +2887,19 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_direct_transfer_constants(RustCallStatu
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DOWNLOAD_AND_DECRYPT_FILE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_DOWNLOAD_AND_DECRYPT_FILE
-RustBuffer uniffi_beebeeb_uniffi_fn_func_download_and_decrypt_file(RustBuffer api_url, RustBuffer token, uint64_t master_key_handle, RustBuffer file_id, uint8_t expected_chunk_format, RustBuffer output_path, RustBuffer callback, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ENCRYPT_BLOB
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ENCRYPT_BLOB
-RustBuffer uniffi_beebeeb_uniffi_fn_func_encrypt_blob(RustBuffer key, RustBuffer plaintext, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ENCRYPT_CHUNK
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ENCRYPT_CHUNK
-RustBuffer uniffi_beebeeb_uniffi_fn_func_encrypt_chunk(RustBuffer key, RustBuffer plaintext, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ENCRYPT_METADATA
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ENCRYPT_METADATA
-RustBuffer uniffi_beebeeb_uniffi_fn_func_encrypt_metadata(RustBuffer key, RustBuffer metadata, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ENCRYPT_NAME
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ENCRYPT_NAME
-RustBuffer uniffi_beebeeb_uniffi_fn_func_encrypt_name(RustBuffer master_key, RustBuffer file_id, RustBuffer filename, RustBuffer mime_type, RustCallStatus *_Nonnull out_status
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_EVALUATE_PASSWORD
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_EVALUATE_PASSWORD
 RustBuffer uniffi_beebeeb_uniffi_fn_func_evaluate_password(RustBuffer password, uint32_t min_length, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_FOLDER_KEY_ID
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_FOLDER_KEY_ID
-RustBuffer uniffi_beebeeb_uniffi_fn_func_folder_key_id(RustBuffer folder_key, RustCallStatus *_Nonnull out_status
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_FIT_FOR_SEAL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_FIT_FOR_SEAL
+RustBuffer uniffi_beebeeb_uniffi_fn_func_fit_for_seal(RustBuffer s, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_GENERATE_RECOVERY_PDF
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_GENERATE_RECOVERY_PDF
 RustBuffer uniffi_beebeeb_uniffi_fn_func_generate_recovery_pdf(RustBuffer title, RustBuffer words, RustBuffer metadata_keys, RustBuffer metadata_values, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_GENERATE_RECOVERY_PHRASE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_GENERATE_RECOVERY_PHRASE
-RustBuffer uniffi_beebeeb_uniffi_fn_func_generate_recovery_phrase(RustCallStatus *_Nonnull out_status
-    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_GENERATE_SHARE_TOKEN
@@ -1474,6 +2911,11 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_generate_share_token(RustCallStatus *_N
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_GUESS_MIME_TYPE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_GUESS_MIME_TYPE
 RustBuffer uniffi_beebeeb_uniffi_fn_func_guess_mime_type(RustBuffer filename, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_IS_FOREIGN_ITEM_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_IS_FOREIGN_ITEM_ID
+int8_t uniffi_beebeeb_uniffi_fn_func_is_foreign_item_id(RustBuffer item_id, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_IS_MEDIA
@@ -1499,31 +2941,6 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_list_archive(RustBuffer data, RustBuffe
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_LIST_TAR_ENTRIES
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_LIST_TAR_ENTRIES
 RustBuffer uniffi_beebeeb_uniffi_fn_func_list_tar_entries(RustBuffer data, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_OPAQUE_LOGIN_FINISH
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_OPAQUE_LOGIN_FINISH
-RustBuffer uniffi_beebeeb_uniffi_fn_func_opaque_login_finish(RustBuffer client_state, RustBuffer password, RustBuffer server_response, uint32_t ksf_version, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_OPAQUE_LOGIN_START
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_OPAQUE_LOGIN_START
-RustBuffer uniffi_beebeeb_uniffi_fn_func_opaque_login_start(RustBuffer password, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_OPAQUE_REGISTRATION_FINISH
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_OPAQUE_REGISTRATION_FINISH
-RustBuffer uniffi_beebeeb_uniffi_fn_func_opaque_registration_finish(RustBuffer client_state, RustBuffer password, RustBuffer server_response, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_OPAQUE_REGISTRATION_START
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_OPAQUE_REGISTRATION_START
-RustBuffer uniffi_beebeeb_uniffi_fn_func_opaque_registration_start(RustBuffer password, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_OPEN_REQUEST_UPLOAD
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_OPEN_REQUEST_UPLOAD
-RustBuffer uniffi_beebeeb_uniffi_fn_func_open_request_upload(RustBuffer r_priv, RustBuffer e_pub, RustBuffer file_id, RustBuffer wrapped_key, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_PARSE_DIRECT_DISCOVERY
@@ -1566,19 +2983,9 @@ int64_t uniffi_beebeeb_uniffi_fn_func_plan_max_extra_tb(RustBuffer plan_slug, Ru
 int64_t uniffi_beebeeb_uniffi_fn_func_plan_monthly_cost_cents(RustBuffer plan_slug, int64_t extra_tb, int64_t extra_users, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_RECOVER_FROM_PHRASE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_RECOVER_FROM_PHRASE
-RustBuffer uniffi_beebeeb_uniffi_fn_func_recover_from_phrase(RustBuffer phrase, RustCallStatus *_Nonnull out_status
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_RESIZE_FOR_THUMBNAIL
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_RESIZE_FOR_THUMBNAIL
 RustBuffer uniffi_beebeeb_uniffi_fn_func_resize_for_thumbnail(RustBuffer rgba, uint32_t src_width, uint32_t src_height, uint32_t max_dimension, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_SEAL_TO_REQUEST
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_SEAL_TO_REQUEST
-RustBuffer uniffi_beebeeb_uniffi_fn_func_seal_to_request(RustBuffer r_pub, RustBuffer file_id, RustBuffer content_key, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_SEARCH_INDEX_SYNC_PLAN
@@ -1601,39 +3008,93 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_sha256(RustBuffer data, RustCallStatus 
 RustBuffer uniffi_beebeeb_uniffi_fn_func_storage_format_si(int64_t bytes, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_TRANSFER_DERIVE_KEY
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_TRANSFER_DERIVE_KEY
-RustBuffer uniffi_beebeeb_uniffi_fn_func_transfer_derive_key(RustBuffer shared_secret, RustBuffer session_id, RustCallStatus *_Nonnull out_status
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_CHECK_APP_MUTATION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_CHECK_APP_MUTATION
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_check_app_mutation(RustBuffer position, RustBuffer mutation, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_TRANSFER_DERIVE_SAS_BYTES
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_TRANSFER_DERIVE_SAS_BYTES
-RustBuffer uniffi_beebeeb_uniffi_fn_func_transfer_derive_sas_bytes(RustBuffer shared_secret, RustBuffer session_id, RustCallStatus *_Nonnull out_status
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_CHECK_DRIVE_MUTATION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_CHECK_DRIVE_MUTATION
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_check_drive_mutation(RustBuffer position, RustBuffer own_active_source, RustBuffer mutation, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_TRANSFER_SAS_TO_WORDS
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_TRANSFER_SAS_TO_WORDS
-RustBuffer uniffi_beebeeb_uniffi_fn_func_transfer_sas_to_words(RustBuffer sas_bytes, RustCallStatus *_Nonnull out_status
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_CHECK_ROOT_MUTATION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_CHECK_ROOT_MUTATION
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_check_root_mutation(RustBuffer role, RustBuffer mutation, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_UNWRAP_REQUEST_PRIVATE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_UNWRAP_REQUEST_PRIVATE
-RustBuffer uniffi_beebeeb_uniffi_fn_func_unwrap_request_private(RustBuffer master_key, RustBuffer request_id, RustBuffer wrapped, RustBuffer nonce, RustCallStatus *_Nonnull out_status
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_DEVICE_FOLDER_NAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_DEVICE_FOLDER_NAME
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_device_folder_name(RustBuffer raw, RustBuffer my_id, RustBuffer taken, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_UPLOAD_ENCRYPTED_FILE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_UPLOAD_ENCRYPTED_FILE
-RustBuffer uniffi_beebeeb_uniffi_fn_func_upload_encrypted_file(RustBuffer api_url, RustBuffer token, RustBuffer file_id, RustBuffer name_encrypted, RustBuffer parent_id, RustBuffer mime_type, int8_t is_media, RustBuffer chunk_paths, uint64_t original_size, RustBuffer created_at, RustBuffer callback, RustCallStatus *_Nonnull out_status
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_FIND_DEVICE_FOLDER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_FIND_DEVICE_FOLDER
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_find_device_folder(RustBuffer me, RustBuffer candidates, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_WRAP_REQUEST_PRIVATE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_WRAP_REQUEST_PRIVATE
-RustBuffer uniffi_beebeeb_uniffi_fn_func_wrap_request_private(RustBuffer master_key, RustBuffer request_id, RustBuffer r_priv, RustCallStatus *_Nonnull out_status
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_IS_HIDDEN_ITEM
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_IS_HIDDEN_ITEM
+int8_t uniffi_beebeeb_uniffi_fn_func_backup_is_hidden_item(RustBuffer depth, RustBuffer name, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_X25519_SHARED_SECRET
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_X25519_SHARED_SECRET
-RustBuffer uniffi_beebeeb_uniffi_fn_func_x25519_shared_secret(RustBuffer my_private, RustBuffer their_public, RustCallStatus *_Nonnull out_status
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_ORIGIN_HEADER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_ORIGIN_HEADER
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_origin_header(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_PARSE_MANIFEST
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_PARSE_MANIFEST
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_parse_manifest(RustBuffer json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_PLAN_MERGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_PLAN_MERGE
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_plan_merge(RustBuffer survivor, RustBuffer duplicates, RustBuffer clash_label, RustBuffer hhmm, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_PLAN_PASS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_PLAN_PASS
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_plan_pass(RustBuffer entries, RustBuffer records, RustBuffer live_remote, int8_t live_remote_complete, RustBuffer unseen, RustBuffer held, uint64_t max_uploads, uint64_t max_bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_POSITION_AT_DEPTH
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_POSITION_AT_DEPTH
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_position_at_depth(RustBuffer depth, RustBuffer name, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_RESOLVE_ROOT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_RESOLVE_ROOT
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_resolve_root(RustBuffer candidates, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_ROOT_BADGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_ROOT_BADGE
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_root_badge(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_ROOT_NAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_ROOT_NAME
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_root_name(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_SERIALIZE_MANIFEST
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_SERIALIZE_MANIFEST
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_serialize_manifest(RustBuffer manifest, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_SKIP_REASON
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_SKIP_REASON
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_skip_reason(RustBuffer name, int8_t is_dir, int8_t is_link, int8_t not_local, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_MINT_GUEST_ITEM_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_MINT_GUEST_ITEM_ID
+RustBuffer uniffi_beebeeb_uniffi_fn_func_mint_guest_item_id(RustCallStatus *_Nonnull out_status
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_BEEBEEB_UNIFFI_RUSTBUFFER_ALLOC
@@ -1920,12 +3381,6 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_classify_direct_answer(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_COMPUTE_RECOVERY_CHECK
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_COMPUTE_RECOVERY_CHECK
-uint16_t uniffi_beebeeb_uniffi_checksum_func_compute_recovery_check(void
-    
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_CONSTELLATION_ENCODE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_CONSTELLATION_ENCODE
 uint16_t uniffi_beebeeb_uniffi_checksum_func_constellation_encode(void
@@ -1947,90 +3402,6 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_constellation_verify_code(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECOMPRESS_GZIP
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECOMPRESS_GZIP
 uint16_t uniffi_beebeeb_uniffi_checksum_func_decompress_gzip(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_BLOB
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_BLOB
-uint16_t uniffi_beebeeb_uniffi_checksum_func_decrypt_blob(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_CHUNK
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_CHUNK
-uint16_t uniffi_beebeeb_uniffi_checksum_func_decrypt_chunk(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_CHUNKS_TO_FILE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_CHUNKS_TO_FILE
-uint16_t uniffi_beebeeb_uniffi_checksum_func_decrypt_chunks_to_file(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_CONTIGUOUS_TO_FILE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_CONTIGUOUS_TO_FILE
-uint16_t uniffi_beebeeb_uniffi_checksum_func_decrypt_contiguous_to_file(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_METADATA
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_METADATA
-uint16_t uniffi_beebeeb_uniffi_checksum_func_decrypt_metadata(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_NAME
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_NAME
-uint16_t uniffi_beebeeb_uniffi_checksum_func_decrypt_name(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_NAME_WITH_MIME
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DECRYPT_NAME_WITH_MIME
-uint16_t uniffi_beebeeb_uniffi_checksum_func_decrypt_name_with_mime(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_FILE_KEY
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_FILE_KEY
-uint16_t uniffi_beebeeb_uniffi_checksum_func_derive_file_key(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_MASTER_KEY
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_MASTER_KEY
-uint16_t uniffi_beebeeb_uniffi_checksum_func_derive_master_key(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_REQUEST_WRAP_KEY
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_REQUEST_WRAP_KEY
-uint16_t uniffi_beebeeb_uniffi_checksum_func_derive_request_wrap_key(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_SAS_BYTES
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_SAS_BYTES
-uint16_t uniffi_beebeeb_uniffi_checksum_func_derive_sas_bytes(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_SHARE_KEY
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_SHARE_KEY
-uint16_t uniffi_beebeeb_uniffi_checksum_func_derive_share_key(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_X25519_PRIVATE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_X25519_PRIVATE
-uint16_t uniffi_beebeeb_uniffi_checksum_func_derive_x25519_private(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_X25519_PUBLIC
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DERIVE_X25519_PUBLIC
-uint16_t uniffi_beebeeb_uniffi_checksum_func_derive_x25519_public(void
     
 );
 #endif
@@ -2130,57 +3501,21 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_direct_transfer_constants(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DOWNLOAD_AND_DECRYPT_FILE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_DOWNLOAD_AND_DECRYPT_FILE
-uint16_t uniffi_beebeeb_uniffi_checksum_func_download_and_decrypt_file(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ENCRYPT_BLOB
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ENCRYPT_BLOB
-uint16_t uniffi_beebeeb_uniffi_checksum_func_encrypt_blob(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ENCRYPT_CHUNK
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ENCRYPT_CHUNK
-uint16_t uniffi_beebeeb_uniffi_checksum_func_encrypt_chunk(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ENCRYPT_METADATA
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ENCRYPT_METADATA
-uint16_t uniffi_beebeeb_uniffi_checksum_func_encrypt_metadata(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ENCRYPT_NAME
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ENCRYPT_NAME
-uint16_t uniffi_beebeeb_uniffi_checksum_func_encrypt_name(void
-    
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_EVALUATE_PASSWORD
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_EVALUATE_PASSWORD
 uint16_t uniffi_beebeeb_uniffi_checksum_func_evaluate_password(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_FOLDER_KEY_ID
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_FOLDER_KEY_ID
-uint16_t uniffi_beebeeb_uniffi_checksum_func_folder_key_id(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_FIT_FOR_SEAL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_FIT_FOR_SEAL
+uint16_t uniffi_beebeeb_uniffi_checksum_func_fit_for_seal(void
     
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_GENERATE_RECOVERY_PDF
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_GENERATE_RECOVERY_PDF
 uint16_t uniffi_beebeeb_uniffi_checksum_func_generate_recovery_pdf(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_GENERATE_RECOVERY_PHRASE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_GENERATE_RECOVERY_PHRASE
-uint16_t uniffi_beebeeb_uniffi_checksum_func_generate_recovery_phrase(void
     
 );
 #endif
@@ -2193,6 +3528,12 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_generate_share_token(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_GUESS_MIME_TYPE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_GUESS_MIME_TYPE
 uint16_t uniffi_beebeeb_uniffi_checksum_func_guess_mime_type(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_IS_FOREIGN_ITEM_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_IS_FOREIGN_ITEM_ID
+uint16_t uniffi_beebeeb_uniffi_checksum_func_is_foreign_item_id(void
     
 );
 #endif
@@ -2223,36 +3564,6 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_list_archive(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_LIST_TAR_ENTRIES
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_LIST_TAR_ENTRIES
 uint16_t uniffi_beebeeb_uniffi_checksum_func_list_tar_entries(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_OPAQUE_LOGIN_FINISH
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_OPAQUE_LOGIN_FINISH
-uint16_t uniffi_beebeeb_uniffi_checksum_func_opaque_login_finish(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_OPAQUE_LOGIN_START
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_OPAQUE_LOGIN_START
-uint16_t uniffi_beebeeb_uniffi_checksum_func_opaque_login_start(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_OPAQUE_REGISTRATION_FINISH
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_OPAQUE_REGISTRATION_FINISH
-uint16_t uniffi_beebeeb_uniffi_checksum_func_opaque_registration_finish(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_OPAQUE_REGISTRATION_START
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_OPAQUE_REGISTRATION_START
-uint16_t uniffi_beebeeb_uniffi_checksum_func_opaque_registration_start(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_OPEN_REQUEST_UPLOAD
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_OPEN_REQUEST_UPLOAD
-uint16_t uniffi_beebeeb_uniffi_checksum_func_open_request_upload(void
     
 );
 #endif
@@ -2304,21 +3615,9 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_plan_monthly_cost_cents(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_RECOVER_FROM_PHRASE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_RECOVER_FROM_PHRASE
-uint16_t uniffi_beebeeb_uniffi_checksum_func_recover_from_phrase(void
-    
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_RESIZE_FOR_THUMBNAIL
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_RESIZE_FOR_THUMBNAIL
 uint16_t uniffi_beebeeb_uniffi_checksum_func_resize_for_thumbnail(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_SEAL_TO_REQUEST
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_SEAL_TO_REQUEST
-uint16_t uniffi_beebeeb_uniffi_checksum_func_seal_to_request(void
     
 );
 #endif
@@ -2346,45 +3645,105 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_storage_format_si(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_TRANSFER_DERIVE_KEY
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_TRANSFER_DERIVE_KEY
-uint16_t uniffi_beebeeb_uniffi_checksum_func_transfer_derive_key(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_CHECK_APP_MUTATION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_CHECK_APP_MUTATION
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_check_app_mutation(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_TRANSFER_DERIVE_SAS_BYTES
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_TRANSFER_DERIVE_SAS_BYTES
-uint16_t uniffi_beebeeb_uniffi_checksum_func_transfer_derive_sas_bytes(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_CHECK_DRIVE_MUTATION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_CHECK_DRIVE_MUTATION
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_check_drive_mutation(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_TRANSFER_SAS_TO_WORDS
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_TRANSFER_SAS_TO_WORDS
-uint16_t uniffi_beebeeb_uniffi_checksum_func_transfer_sas_to_words(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_CHECK_ROOT_MUTATION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_CHECK_ROOT_MUTATION
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_check_root_mutation(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_UNWRAP_REQUEST_PRIVATE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_UNWRAP_REQUEST_PRIVATE
-uint16_t uniffi_beebeeb_uniffi_checksum_func_unwrap_request_private(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_DEVICE_FOLDER_NAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_DEVICE_FOLDER_NAME
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_device_folder_name(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_UPLOAD_ENCRYPTED_FILE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_UPLOAD_ENCRYPTED_FILE
-uint16_t uniffi_beebeeb_uniffi_checksum_func_upload_encrypted_file(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_FIND_DEVICE_FOLDER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_FIND_DEVICE_FOLDER
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_find_device_folder(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_WRAP_REQUEST_PRIVATE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_WRAP_REQUEST_PRIVATE
-uint16_t uniffi_beebeeb_uniffi_checksum_func_wrap_request_private(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_IS_HIDDEN_ITEM
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_IS_HIDDEN_ITEM
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_is_hidden_item(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_X25519_SHARED_SECRET
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_X25519_SHARED_SECRET
-uint16_t uniffi_beebeeb_uniffi_checksum_func_x25519_shared_secret(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_ORIGIN_HEADER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_ORIGIN_HEADER
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_origin_header(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_PARSE_MANIFEST
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_PARSE_MANIFEST
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_parse_manifest(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_PLAN_MERGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_PLAN_MERGE
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_plan_merge(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_PLAN_PASS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_PLAN_PASS
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_plan_pass(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_POSITION_AT_DEPTH
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_POSITION_AT_DEPTH
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_position_at_depth(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_RESOLVE_ROOT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_RESOLVE_ROOT
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_resolve_root(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_ROOT_BADGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_ROOT_BADGE
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_root_badge(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_ROOT_NAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_ROOT_NAME
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_root_name(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_SERIALIZE_MANIFEST
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_SERIALIZE_MANIFEST
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_serialize_manifest(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_SKIP_REASON
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_SKIP_REASON
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_skip_reason(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_MINT_GUEST_ITEM_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_MINT_GUEST_ITEM_ID
+uint16_t uniffi_beebeeb_uniffi_checksum_func_mint_guest_item_id(void
     
 );
 #endif
@@ -2481,6 +3840,12 @@ uint16_t uniffi_beebeeb_uniffi_checksum_method_chunkencryptorhandle_push_chunk(v
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_CHUNKENCRYPTORHANDLE_RESUME_POLICY
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_CHUNKENCRYPTORHANDLE_RESUME_POLICY
 uint16_t uniffi_beebeeb_uniffi_checksum_method_chunkencryptorhandle_resume_policy(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_CHUNKENCRYPTORHANDLE_VERSION_COMMITMENT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_CHUNKENCRYPTORHANDLE_VERSION_COMMITMENT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_chunkencryptorhandle_version_commitment(void
     
 );
 #endif
@@ -2676,6 +4041,12 @@ uint16_t uniffi_beebeeb_uniffi_checksum_method_directstoragebodyhandle_push(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEKEYHANDLE_CHILD_WRAP_MATCHES
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEKEYHANDLE_CHILD_WRAP_MATCHES
+uint16_t uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_child_wrap_matches(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEKEYHANDLE_DECRYPT_CHUNK
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEKEYHANDLE_DECRYPT_CHUNK
 uint16_t uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk(void
@@ -2763,6 +4134,24 @@ uint16_t uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_encrypt_thumbnail_f
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEKEYHANDLE_KEY_ID
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEKEYHANDLE_KEY_ID
 uint16_t uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_key_id(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEKEYHANDLE_OPEN_FOLDER_ACTOR_NAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEKEYHANDLE_OPEN_FOLDER_ACTOR_NAME
+uint16_t uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_open_folder_actor_name(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEKEYHANDLE_OPEN_LEGACY_CHILD_KEY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEKEYHANDLE_OPEN_LEGACY_CHILD_KEY
+uint16_t uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_open_legacy_child_key(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEKEYHANDLE_SEAL_FOLDER_ACTOR_NAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEKEYHANDLE_SEAL_FOLDER_ACTOR_NAME
+uint16_t uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_seal_folder_actor_name(void
     
 );
 #endif
@@ -2874,12 +4263,6 @@ uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_derive_file_key(v
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_DERIVE_X25519_PRIVATE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_DERIVE_X25519_PRIVATE
-uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_derive_x25519_private(void
-    
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_ENCRYPT_FILE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_ENCRYPT_FILE
 uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_encrypt_file(void
@@ -2898,15 +4281,69 @@ uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_encrypt_name_with
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_EXPORT_FOR_KEYCHAIN
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_EXPORT_FOR_KEYCHAIN
-uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_export_for_keychain(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_ENCRYPT_NAME_WITH_VERSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_ENCRYPT_NAME_WITH_VERSION
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_encrypt_name_with_version(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_NEW_FOREIGN_ITEM_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_NEW_FOREIGN_ITEM_ID
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_new_foreign_item_id(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_NEW_OWNER_ITEM_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_NEW_OWNER_ITEM_ID
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_new_owner_item_id(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_OPEN_CLIENT_META
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_OPEN_CLIENT_META
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_open_client_meta(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_OPEN_CLIENT_META_MANY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_OPEN_CLIENT_META_MANY
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_open_client_meta_many(void
     
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_OPEN_LEGACY_INVITE_OWNER_COPY
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_OPEN_LEGACY_INVITE_OWNER_COPY
 uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_open_legacy_invite_owner_copy(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_OWNER_FILE_KEY_FOR_CONTENT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_OWNER_FILE_KEY_FOR_CONTENT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_owner_file_key_for_content(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_OWNER_FILE_KEY_FOR_NAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_OWNER_FILE_KEY_FOR_NAME
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_owner_file_key_for_name(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_RESOLVE_OWNED_KEY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_RESOLVE_OWNED_KEY
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_resolve_owned_key(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_RESUME_NEW_ITEM_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_RESUME_NEW_ITEM_ID
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_resume_new_item_id(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_SEAL_CLIENT_META
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_SEAL_CLIENT_META
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_seal_client_meta(void
     
 );
 #endif
@@ -2919,6 +4356,12 @@ uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_folder_cus
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_UNWRAP_INVITE_OWNER_COPY
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_UNWRAP_INVITE_OWNER_COPY
 uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_invite_owner_copy(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_UNWRAP_LINK_LABEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_UNWRAP_LINK_LABEL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_unwrap_link_label(void
     
 );
 #endif
@@ -2964,6 +4407,12 @@ uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_key(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_WRAP_LINK_LABEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_WRAP_LINK_LABEL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_link_label(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_WRAP_LINK_OWNER_KEY
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_WRAP_LINK_OWNER_KEY
 uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_link_owner_key(void
@@ -2979,6 +4428,66 @@ uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_link_owner_t
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_WRAP_OWNER_FILE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_WRAP_OWNER_FILE_KEY
 uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_wrap_owner_file_key(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_RESOLVE_REQUEST_ROW
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_RESOLVE_REQUEST_ROW
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_resolve_request_row(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_RESOLVE_REQUEST_ROW_DETAILED
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_RESOLVE_REQUEST_ROW_DETAILED
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_resolve_request_row_detailed(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_SEAL_REQUEST_RENAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_SEAL_REQUEST_RENAME
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_seal_request_rename(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_SEAL_REQUEST_RENAME_WITH_VERSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_MASTERKEYHANDLE_SEAL_REQUEST_RENAME_WITH_VERSION
+uint16_t uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_seal_request_rename_with_version(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NEWITEMIDHANDLE_ENCRYPT_NAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NEWITEMIDHANDLE_ENCRYPT_NAME
+uint16_t uniffi_beebeeb_uniffi_checksum_method_newitemidhandle_encrypt_name(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NEWITEMIDHANDLE_ENCRYPT_NAME_WITH_VERSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NEWITEMIDHANDLE_ENCRYPT_NAME_WITH_VERSION
+uint16_t uniffi_beebeeb_uniffi_checksum_method_newitemidhandle_encrypt_name_with_version(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NEWITEMIDHANDLE_ENCRYPT_NOTE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NEWITEMIDHANDLE_ENCRYPT_NOTE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_newitemidhandle_encrypt_note(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NEWITEMIDHANDLE_ENCRYPT_THUMBNAIL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NEWITEMIDHANDLE_ENCRYPT_THUMBNAIL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_newitemidhandle_encrypt_thumbnail(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NEWITEMIDHANDLE_ID_TEXT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NEWITEMIDHANDLE_ID_TEXT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_newitemidhandle_id_text(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NEWITEMIDHANDLE_TAG
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NEWITEMIDHANDLE_TAG
+uint16_t uniffi_beebeeb_uniffi_checksum_method_newitemidhandle_tag(void
     
 );
 #endif
@@ -3120,6 +4629,1050 @@ uint16_t uniffi_beebeeb_uniffi_checksum_method_signupceremonyhandle_step(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_WRITETARGETHANDLE_ENCRYPT_NAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_WRITETARGETHANDLE_ENCRYPT_NAME
+uint16_t uniffi_beebeeb_uniffi_checksum_method_writetargethandle_encrypt_name(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_WRITETARGETHANDLE_ENCRYPT_NAME_FOR_VERSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_WRITETARGETHANDLE_ENCRYPT_NAME_FOR_VERSION
+uint16_t uniffi_beebeeb_uniffi_checksum_method_writetargethandle_encrypt_name_for_version(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_WRITETARGETHANDLE_ENCRYPT_NOTE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_WRITETARGETHANDLE_ENCRYPT_NOTE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_writetargethandle_encrypt_note(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_WRITETARGETHANDLE_ENCRYPT_THUMBNAIL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_WRITETARGETHANDLE_ENCRYPT_THUMBNAIL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_writetargethandle_encrypt_thumbnail(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_WRITETARGETHANDLE_ITEM_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_WRITETARGETHANDLE_ITEM_ID
+uint16_t uniffi_beebeeb_uniffi_checksum_method_writetargethandle_item_id(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_WRITETARGETHANDLE_PIN
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_WRITETARGETHANDLE_PIN
+uint16_t uniffi_beebeeb_uniffi_checksum_method_writetargethandle_pin(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_WRITETARGETHANDLE_VERSION_COUNTER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_WRITETARGETHANDLE_VERSION_COUNTER
+uint16_t uniffi_beebeeb_uniffi_checksum_method_writetargethandle_version_counter(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_WRITETARGETHANDLE_VERSION_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_WRITETARGETHANDLE_VERSION_ID
+uint16_t uniffi_beebeeb_uniffi_checksum_method_writetargethandle_version_id(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHENTICATORENROLLMENTHANDLE_CANCEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHENTICATORENROLLMENTHANDLE_CANCEL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authenticatorenrollmenthandle_cancel(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHENTICATORENROLLMENTHANDLE_QR_URI
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHENTICATORENROLLMENTHANDLE_QR_URI
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authenticatorenrollmenthandle_qr_uri(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICELINKHANDLE_BEGIN_TYPED_PATH
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICELINKHANDLE_BEGIN_TYPED_PATH
+uint16_t uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_begin_typed_path(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICELINKHANDLE_EXPIRES_AT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICELINKHANDLE_EXPIRES_AT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_expires_at(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICELINKHANDLE_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICELINKHANDLE_ID
+uint16_t uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_id(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICELINKHANDLE_QR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICELINKHANDLE_QR
+uint16_t uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_qr(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICELINKHANDLE_TYPED_CODE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICELINKHANDLE_TYPED_CODE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_typed_code(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVEREDSESSIONHANDLE_CANONICAL_EMAIL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVEREDSESSIONHANDLE_CANONICAL_EMAIL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_recoveredsessionhandle_canonical_email(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVEREDSESSIONHANDLE_OWNER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVEREDSESSIONHANDLE_OWNER
+uint16_t uniffi_beebeeb_uniffi_checksum_method_recoveredsessionhandle_owner(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYATTEMPTHANDLE_CANCEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYATTEMPTHANDLE_CANCEL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_recoveryattempthandle_cancel(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYATTEMPTHANDLE_COMPLETE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYATTEMPTHANDLE_COMPLETE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_recoveryattempthandle_complete(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYATTEMPTHANDLE_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYATTEMPTHANDLE_ID
+uint16_t uniffi_beebeeb_uniffi_checksum_method_recoveryattempthandle_id(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYATTEMPTHANDLE_READY_AT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYATTEMPTHANDLE_READY_AT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_recoveryattempthandle_ready_at(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYATTEMPTHANDLE_STATUS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYATTEMPTHANDLE_STATUS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_recoveryattempthandle_status(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYATTEMPTHANDLE_WAITS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYATTEMPTHANDLE_WAITS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_recoveryattempthandle_waits(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYKITHANDLE_DISCARD
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYKITHANDLE_DISCARD
+uint16_t uniffi_beebeeb_uniffi_checksum_method_recoverykithandle_discard(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYKITHANDLE_FILENAME_STEM
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYKITHANDLE_FILENAME_STEM
+uint16_t uniffi_beebeeb_uniffi_checksum_method_recoverykithandle_filename_stem(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYKITHANDLE_TEXT_FILE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYKITHANDLE_TEXT_FILE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_recoverykithandle_text_file(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYKITHANDLE_TITLE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYKITHANDLE_TITLE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_recoverykithandle_title(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYKITHANDLE_WARNINGS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYKITHANDLE_WARNINGS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_recoverykithandle_warnings(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYKITHANDLE_WORDS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_RECOVERYKITHANDLE_WORDS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_recoverykithandle_words(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_ABANDON
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_ABANDON
+uint16_t uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_abandon(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_ACKNOWLEDGE_RECOVERY_KIT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_ACKNOWLEDGE_RECOVERY_KIT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_acknowledge_recovery_kit(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_BEGIN_RECOVERY_KIT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_BEGIN_RECOVERY_KIT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_begin_recovery_kit(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_CHALLENGE_POSITIONS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_CHALLENGE_POSITIONS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_challenge_positions(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_CONFIRM_RECOVERY_WORDS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_CONFIRM_RECOVERY_WORDS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_confirm_recovery_words(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_CREATE_ACCOUNT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_CREATE_ACCOUNT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_create_account(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_MARK_RECOVERY_PDF_SAVED
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_MARK_RECOVERY_PDF_SAVED
+uint16_t uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_mark_recovery_pdf_saved(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_MARK_RECOVERY_PRINTED
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_MARK_RECOVERY_PRINTED
+uint16_t uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_mark_recovery_printed(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_MARK_RECOVERY_TEXT_SAVED
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_MARK_RECOVERY_TEXT_SAVED
+uint16_t uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_mark_recovery_text_saved(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_SET_PASSWORD
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_SET_PASSWORD
+uint16_t uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_set_password(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_START_EMAIL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_START_EMAIL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_start_email(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_STEP
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_STEP
+uint16_t uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_step(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_VERIFY_EMAIL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SIGNUPSERVICEHANDLE_VERIFY_EMAIL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_verify_email(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_TYPEDDEVICELINKHANDLE_FINISH
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_TYPEDDEVICELINKHANDLE_FINISH
+uint16_t uniffi_beebeeb_uniffi_checksum_method_typeddevicelinkhandle_finish(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPEVENTSTREAMHANDLE_NEXT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPEVENTSTREAMHANDLE_NEXT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_backupeventstreamhandle_next(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPSERVICEHANDLE_ASSETS_CHANGED
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPSERVICEHANDLE_ASSETS_CHANGED
+uint16_t uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_assets_changed(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPSERVICEHANDLE_CONFIGURE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPSERVICEHANDLE_CONFIGURE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_configure(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPSERVICEHANDLE_EVENTS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPSERVICEHANDLE_EVENTS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_events(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPSERVICEHANDLE_NEXT_BATCH
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPSERVICEHANDLE_NEXT_BATCH
+uint16_t uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_next_batch(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_CHANGES_SINCE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_CHANGES_SINCE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_changes_since(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_CHILDREN
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_CHILDREN
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_children(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_CREATE_FILE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_CREATE_FILE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_create_file(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_CREATE_FOLDER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_CREATE_FOLDER
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_create_folder(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_DELETE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_DELETE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_delete(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_DELETE_LOCAL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_DELETE_LOCAL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_delete_local(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_FETCH_CONTENTS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_FETCH_CONTENTS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_fetch_contents(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_ITEM
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_ITEM
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_item(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_MODIFY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_MODIFY
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_modify(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_SET_SYSTEM_ITEMS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_SET_SYSTEM_ITEMS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_set_system_items(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_WORK_STATE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPROVIDERSERVICEHANDLE_WORK_STATE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_work_state(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SERVICECOORDINATORHANDLE_START
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SERVICECOORDINATORHANDLE_START
+uint16_t uniffi_beebeeb_uniffi_checksum_method_servicecoordinatorhandle_start(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_REQUESTCONTENTREADER_CHUNK_FORMAT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_REQUESTCONTENTREADER_CHUNK_FORMAT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_chunk_format(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_REQUESTCONTENTREADER_DECRYPTOR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_REQUESTCONTENTREADER_DECRYPTOR
+uint16_t uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_decryptor(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_REQUESTCONTENTREADER_FILE_ID
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_REQUESTCONTENTREADER_FILE_ID
+uint16_t uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_file_id(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_REQUESTCONTENTREADER_OPEN_FRAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_REQUESTCONTENTREADER_OPEN_FRAME
+uint16_t uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_open_frame(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHCHALLENGEHANDLE_CANONICAL_EMAIL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHCHALLENGEHANDLE_CANONICAL_EMAIL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authchallengehandle_canonical_email(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHCHALLENGEHANDLE_KIND
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHCHALLENGEHANDLE_KIND
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authchallengehandle_kind(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_CHANGE_EMAIL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_CHANGE_EMAIL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_change_email(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_CHANGE_PASSWORD
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_CHANGE_PASSWORD
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_change_password(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_ENABLE_AUTHENTICATOR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_ENABLE_AUTHENTICATOR
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_enable_authenticator(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_INSTALL_DEVICE_APPROVAL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_INSTALL_DEVICE_APPROVAL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_device_approval(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_INSTALL_DEVICE_APPROVAL_REPLACING_ACCOUNT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_INSTALL_DEVICE_APPROVAL_REPLACING_ACCOUNT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_device_approval_replacing_account(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_INSTALL_RECOVERED_SESSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_INSTALL_RECOVERED_SESSION
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_recovered_session(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_INSTALL_RECOVERED_SESSION_REPLACING_ACCOUNT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_INSTALL_RECOVERED_SESSION_REPLACING_ACCOUNT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_recovered_session_replacing_account(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_REMOVE_AUTHENTICATOR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_REMOVE_AUTHENTICATOR
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_remove_authenticator(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_REQUEST_ACCOUNT_DELETION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_REQUEST_ACCOUNT_DELETION
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_request_account_deletion(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_SETUP_AUTHENTICATOR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_SETUP_AUTHENTICATOR
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_setup_authenticator(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_SIGNUP
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_SIGNUP
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_signup(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_START_RECOVERY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_START_RECOVERY
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_start_recovery(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_START_RECOVERY_WITH_PASSWORD
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_START_RECOVERY_WITH_PASSWORD
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_start_recovery_with_password(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_ACCEPT_PASSWORD
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_ACCEPT_PASSWORD
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_accept_password(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_CREATE_PASSKEY_COPY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_CREATE_PASSKEY_COPY
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_create_passkey_copy(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_INSTALL_NEW_DEVICE_WITH_PASSKEY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_INSTALL_NEW_DEVICE_WITH_PASSKEY
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_new_device_with_passkey(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_INSTALL_NEW_DEVICE_WITH_PASSKEY_REPLACING_ACCOUNT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_INSTALL_NEW_DEVICE_WITH_PASSKEY_REPLACING_ACCOUNT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_new_device_with_passkey_replacing_account(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_INSTALL_NEW_DEVICE_WITH_RECOVERY_KEY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_INSTALL_NEW_DEVICE_WITH_RECOVERY_KEY
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_new_device_with_recovery_key(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_INSTALL_NEW_DEVICE_WITH_RECOVERY_KEY_REPLACING_ACCOUNT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_INSTALL_NEW_DEVICE_WITH_RECOVERY_KEY_REPLACING_ACCOUNT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_new_device_with_recovery_key_replacing_account(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_OPEN_WITH_PASSKEY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_OPEN_WITH_PASSKEY
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_open_with_passkey(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_REQUEST_EMAIL_CODE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_REQUEST_EMAIL_CODE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_request_email_code(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_SIGN_IN
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_SIGN_IN
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_sign_in(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_SIGN_IN_ON_DEVICE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_SIGN_IN_ON_DEVICE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_sign_in_on_device(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_SUBMIT_EMAIL_CODE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_SUBMIT_EMAIL_CODE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_submit_email_code(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_SUBMIT_TWO_FACTOR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_SUBMIT_TWO_FACTOR
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_submit_two_factor(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_UNLOCK_KNOWN_DEVICE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_AUTHSERVICEHANDLE_UNLOCK_KNOWN_DEVICE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_authservicehandle_unlock_known_device(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_CONTACTSERVICEHANDLE_ACCEPT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_CONTACTSERVICEHANDLE_ACCEPT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_contactservicehandle_accept(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_CONTACTSERVICEHANDLE_OBSERVE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_CONTACTSERVICEHANDLE_OBSERVE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_contactservicehandle_observe(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_ACKNOWLEDGE_DEVICE_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_ACKNOWLEDGE_DEVICE_LINK
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_acknowledge_device_link(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_APPROVE_DEVICE_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_APPROVE_DEVICE_LINK
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_approve_device_link(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_APPROVE_TYPED_DEVICE_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_APPROVE_TYPED_DEVICE_LINK
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_approve_typed_device_link(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_BEGIN_TYPED_DEVICE_APPROVAL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_BEGIN_TYPED_DEVICE_APPROVAL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_begin_typed_device_approval(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_DENY_DEVICE_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_DENY_DEVICE_LINK
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_deny_device_link(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_LIST_ACCOUNT_SESSIONS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_LIST_ACCOUNT_SESSIONS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_list_account_sessions(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_PENDING_DEVICE_LINKS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_PENDING_DEVICE_LINKS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_pending_device_links(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_POLL_DEVICE_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_POLL_DEVICE_LINK
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_poll_device_link(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_POLL_TYPED_DEVICE_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_POLL_TYPED_DEVICE_LINK
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_poll_typed_device_link(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_REVOKE_ACCOUNT_SESSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_REVOKE_ACCOUNT_SESSION
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_revoke_account_session(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_SEND_TYPED_APPROVAL_MESSAGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_SEND_TYPED_APPROVAL_MESSAGE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_send_typed_approval_message(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_SEND_TYPED_NEW_DEVICE_MESSAGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_SEND_TYPED_NEW_DEVICE_MESSAGE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_send_typed_new_device_message(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_START_DEVICE_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_START_DEVICE_LINK
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_start_device_link(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_START_DEVICE_LINK_FOR_SIGN_IN
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_START_DEVICE_LINK_FOR_SIGN_IN
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_start_device_link_for_sign_in(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_TYPED_APPROVAL_MESSAGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_TYPED_APPROVAL_MESSAGE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_typed_approval_message(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_TYPED_NEW_DEVICE_MESSAGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_TYPED_NEW_DEVICE_MESSAGE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_typed_new_device_message(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_SIGN_OUT_WHOLE_DEVICE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_SIGN_OUT_WHOLE_DEVICE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_sign_out_whole_device(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_LIST
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_LIST
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_list(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_REMOVE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DEVICESERVICEHANDLE_REMOVE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_remove(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DOWNLOADSERVICEHANDLE_CANCEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DOWNLOADSERVICEHANDLE_CANCEL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_downloadservicehandle_cancel(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DOWNLOADSERVICEHANDLE_CLEAR_CACHE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DOWNLOADSERVICEHANDLE_CLEAR_CACHE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_downloadservicehandle_clear_cache(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DOWNLOADSERVICEHANDLE_OPEN
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DOWNLOADSERVICEHANDLE_OPEN
+uint16_t uniffi_beebeeb_uniffi_checksum_method_downloadservicehandle_open(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_EMAILCODECHALLENGEHANDLE_EXPIRES_AT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_EMAILCODECHALLENGEHANDLE_EXPIRES_AT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_emailcodechallengehandle_expires_at(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_EMAILCODECHALLENGEHANDLE_MESSAGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_EMAILCODECHALLENGEHANDLE_MESSAGE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_emailcodechallengehandle_message(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_EMAILCODETICKETHANDLE_EXPIRES_IN
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_EMAILCODETICKETHANDLE_EXPIRES_IN
+uint16_t uniffi_beebeeb_uniffi_checksum_method_emailcodetickethandle_expires_in(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_EVENTSTREAMHANDLE_NEXT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_EVENTSTREAMHANDLE_NEXT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_eventstreamhandle_next(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPAGEHANDLE_NEXT_CURSOR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPAGEHANDLE_NEXT_CURSOR
+uint16_t uniffi_beebeeb_uniffi_checksum_method_filepagehandle_next_cursor(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPAGEHANDLE_RECORDS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILEPAGEHANDLE_RECORDS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_filepagehandle_records(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_CREATE_FOLDER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_CREATE_FOLDER
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_create_folder(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_DELETE_FOREVER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_DELETE_FOREVER
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_delete_forever(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_GET
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_GET
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_get(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_LIST_PAGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_LIST_PAGE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_list_page(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_MOVE_ENTRY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_MOVE_ENTRY
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_move_entry(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_RENAME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_RENAME
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_rename(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_RESTORE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_RESTORE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_restore(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_RESTORE_VERSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_RESTORE_VERSION
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_restore_version(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_TRASH
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_FILESERVICEHANDLE_TRASH
+uint16_t uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_trash(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_BACKUP
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_BACKUP
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_backup(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_FILE_PROVIDER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_FILE_PROVIDER
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_file_provider(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_PREPARE_ACCOUNT_REPLACEMENT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_PREPARE_ACCOUNT_REPLACEMENT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_prepare_account_replacement(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_SERVICE_COORDINATOR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_SERVICE_COORDINATOR
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_service_coordinator(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_SIGN_OUT_THIS_APP
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_SIGN_OUT_THIS_APP
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sign_out_this_app(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_AUTH
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_AUTH
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_auth(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_CONTACTS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_CONTACTS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_contacts(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_DEVICES
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_DEVICES
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_devices(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_DOWNLOADS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_DOWNLOADS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_downloads(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_EVENTS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_EVENTS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_events(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_FILES
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_FILES
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_files(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_GENERATION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_GENERATION
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_generation(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_LOAD_SESSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_LOAD_SESSION
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_load_session(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_SETTINGS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_SETTINGS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_settings(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_SHARES
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_SHARES
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_shares(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_SYNC
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_SYNC
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sync(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_THUMBNAILS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_THUMBNAILS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_thumbnails(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_UPLOADS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_NATIVECLIENTHANDLE_UPLOADS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_uploads(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_PASSWORDACCEPTEDHANDLE_CANONICAL_EMAIL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_PASSWORDACCEPTEDHANDLE_CANONICAL_EMAIL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_passwordacceptedhandle_canonical_email(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_PASSWORDACCEPTEDHANDLE_OWNER
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_PASSWORDACCEPTEDHANDLE_OWNER
+uint16_t uniffi_beebeeb_uniffi_checksum_method_passwordacceptedhandle_owner(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SEARCHSERVICEHANDLE_INDEX_PAGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SEARCHSERVICEHANDLE_INDEX_PAGE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_searchservicehandle_index_page(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SEARCHSERVICEHANDLE_QUERY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SEARCHSERVICEHANDLE_QUERY
+uint16_t uniffi_beebeeb_uniffi_checksum_method_searchservicehandle_query(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SEARCHSERVICEHANDLE_REMOVE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SEARCHSERVICEHANDLE_REMOVE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_searchservicehandle_remove(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SETTINGSSERVICEHANDLE_LOAD_LOCAL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SETTINGSSERVICEHANDLE_LOAD_LOCAL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_settingsservicehandle_load_local(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SETTINGSSERVICEHANDLE_SAVE_LOCAL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SETTINGSSERVICEHANDLE_SAVE_LOCAL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_settingsservicehandle_save_local(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SETTINGSSERVICEHANDLE_SET_VERSION_HISTORY
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SETTINGSSERVICEHANDLE_SET_VERSION_HISTORY
+uint16_t uniffi_beebeeb_uniffi_checksum_method_settingsservicehandle_set_version_history(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SHARESERVICEHANDLE_CREATE_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SHARESERVICEHANDLE_CREATE_LINK
+uint16_t uniffi_beebeeb_uniffi_checksum_method_shareservicehandle_create_link(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SHARESERVICEHANDLE_REVOKE_FOLDER_LINK
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SHARESERVICEHANDLE_REVOKE_FOLDER_LINK
+uint16_t uniffi_beebeeb_uniffi_checksum_method_shareservicehandle_revoke_folder_link(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_STOREHANDLE_PREPARE_FOR_SUSPENSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_STOREHANDLE_PREPARE_FOR_SUSPENSION
+uint16_t uniffi_beebeeb_uniffi_checksum_method_storehandle_prepare_for_suspension(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SYNCSERVICEHANDLE_CATCH_UP
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SYNCSERVICEHANDLE_CATCH_UP
+uint16_t uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_catch_up(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SYNCSERVICEHANDLE_FOREGROUND_ONCE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SYNCSERVICEHANDLE_FOREGROUND_ONCE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_foreground_once(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SYNCSERVICEHANDLE_RECOVER_GAP
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SYNCSERVICEHANDLE_RECOVER_GAP
+uint16_t uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_recover_gap(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SYNCSERVICEHANDLE_REFRESH_SNAPSHOT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SYNCSERVICEHANDLE_REFRESH_SNAPSHOT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_refresh_snapshot(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_THUMBNAILSERVICEHANDLE_CLEAR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_THUMBNAILSERVICEHANDLE_CLEAR
+uint16_t uniffi_beebeeb_uniffi_checksum_method_thumbnailservicehandle_clear(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_THUMBNAILSERVICEHANDLE_ENQUEUE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_THUMBNAILSERVICEHANDLE_ENQUEUE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_thumbnailservicehandle_enqueue(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_THUMBNAILSERVICEHANDLE_GET
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_THUMBNAILSERVICEHANDLE_GET
+uint16_t uniffi_beebeeb_uniffi_checksum_method_thumbnailservicehandle_get(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_THUMBNAILSERVICEHANDLE_RUN_NEXT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_THUMBNAILSERVICEHANDLE_RUN_NEXT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_thumbnailservicehandle_run_next(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADSERVICEHANDLE_CANCEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADSERVICEHANDLE_CANCEL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_cancel(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADSERVICEHANDLE_ENQUEUE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADSERVICEHANDLE_ENQUEUE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_enqueue(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADSERVICEHANDLE_LIST
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADSERVICEHANDLE_LIST
+uint16_t uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_list(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADSERVICEHANDLE_PAUSE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADSERVICEHANDLE_PAUSE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_pause(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADSERVICEHANDLE_RESUME
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADSERVICEHANDLE_RESUME
+uint16_t uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_resume(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADSERVICEHANDLE_RUN_NEXT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADSERVICEHANDLE_RUN_NEXT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_run_next(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_BREACHCHECKHANDLE_NEW
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_BREACHCHECKHANDLE_NEW
 uint16_t uniffi_beebeeb_uniffi_checksum_constructor_breachcheckhandle_new(void
@@ -3132,15 +5685,15 @@ uint16_t uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_pus
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_CHUNKDECRYPTORHANDLE_FOR_PUSH_WITH_FILE_KEY
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_CHUNKDECRYPTORHANDLE_FOR_PUSH_WITH_FILE_KEY
-uint16_t uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push_with_file_key(void
-    
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_CHUNKDECRYPTORHANDLE_FOR_PUSH_WITH_FILE_KEY_HANDLE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_CHUNKDECRYPTORHANDLE_FOR_PUSH_WITH_FILE_KEY_HANDLE
 uint16_t uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push_with_file_key_handle(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_CHUNKDECRYPTORHANDLE_FOR_VERSION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_CHUNKDECRYPTORHANDLE_FOR_VERSION
+uint16_t uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version(void
     
 );
 #endif
@@ -3153,6 +5706,18 @@ uint16_t uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_from_fi
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_CHUNKENCRYPTORHANDLE_FOR_PUSH
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_CHUNKENCRYPTORHANDLE_FOR_PUSH
 uint16_t uniffi_beebeeb_uniffi_checksum_constructor_chunkencryptorhandle_for_push(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_CHUNKENCRYPTORHANDLE_FOR_PUSH_FOR_NEW_ITEM
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_CHUNKENCRYPTORHANDLE_FOR_PUSH_FOR_NEW_ITEM
+uint16_t uniffi_beebeeb_uniffi_checksum_constructor_chunkencryptorhandle_for_push_for_new_item(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_CHUNKENCRYPTORHANDLE_FOR_PUSH_FOR_TARGET
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_CHUNKENCRYPTORHANDLE_FOR_PUSH_FOR_TARGET
+uint16_t uniffi_beebeeb_uniffi_checksum_constructor_chunkencryptorhandle_for_push_for_target(void
     
 );
 #endif
@@ -3210,12 +5775,6 @@ uint16_t uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_folder_li
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_FILEKEYHANDLE_FROM_KEY_BYTES
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_FILEKEYHANDLE_FROM_KEY_BYTES
-uint16_t uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_from_key_bytes(void
-    
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_FILEKEYHANDLE_GENERATE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_FILEKEYHANDLE_GENERATE
 uint16_t uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_generate(void
@@ -3225,12 +5784,6 @@ uint16_t uniffi_beebeeb_uniffi_checksum_constructor_filekeyhandle_generate(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_FILEPROVIDERCACHEHANDLE_OPEN
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_FILEPROVIDERCACHEHANDLE_OPEN
 uint16_t uniffi_beebeeb_uniffi_checksum_constructor_fileprovidercachehandle_open(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_MASTERKEYHANDLE_FROM_KEYCHAIN_BYTES
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_MASTERKEYHANDLE_FROM_KEYCHAIN_BYTES
-uint16_t uniffi_beebeeb_uniffi_checksum_constructor_masterkeyhandle_from_keychain_bytes(void
     
 );
 #endif
@@ -3264,21 +5817,21 @@ uint16_t uniffi_beebeeb_uniffi_checksum_constructor_signupceremonyhandle_new(voi
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DOWNLOADPROGRESSCALLBACK_ON_CHUNK_DECRYPTED
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DOWNLOADPROGRESSCALLBACK_ON_CHUNK_DECRYPTED
-uint16_t uniffi_beebeeb_uniffi_checksum_method_downloadprogresscallback_on_chunk_decrypted(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_NATIVECLIENTHANDLE_NEW
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_NATIVECLIENTHANDLE_NEW
+uint16_t uniffi_beebeeb_uniffi_checksum_constructor_nativeclienthandle_new(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DOWNLOADPROGRESSCALLBACK_ON_COMPLETE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DOWNLOADPROGRESSCALLBACK_ON_COMPLETE
-uint16_t uniffi_beebeeb_uniffi_checksum_method_downloadprogresscallback_on_complete(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_SEARCHSERVICEHANDLE_NEW
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_SEARCHSERVICEHANDLE_NEW
+uint16_t uniffi_beebeeb_uniffi_checksum_constructor_searchservicehandle_new(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DOWNLOADPROGRESSCALLBACK_ON_ERROR
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DOWNLOADPROGRESSCALLBACK_ON_ERROR
-uint16_t uniffi_beebeeb_uniffi_checksum_method_downloadprogresscallback_on_error(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_STOREHANDLE_OPEN
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_CONSTRUCTOR_STOREHANDLE_OPEN
+uint16_t uniffi_beebeeb_uniffi_checksum_constructor_storehandle_open(void
     
 );
 #endif
@@ -3288,21 +5841,93 @@ uint16_t uniffi_beebeeb_uniffi_checksum_method_fileprogresscallback_on_progress(
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADPROGRESSCALLBACK_ON_CHUNK_UPLOADED
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADPROGRESSCALLBACK_ON_CHUNK_UPLOADED
-uint16_t uniffi_beebeeb_uniffi_checksum_method_uploadprogresscallback_on_chunk_uploaded(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_ACCOUNTDATAPURGERCALLBACK_PURGE_ACCOUNT_DATA
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_ACCOUNTDATAPURGERCALLBACK_PURGE_ACCOUNT_DATA
+uint16_t uniffi_beebeeb_uniffi_checksum_method_accountdatapurgercallback_purge_account_data(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADPROGRESSCALLBACK_ON_COMPLETE
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADPROGRESSCALLBACK_ON_COMPLETE
-uint16_t uniffi_beebeeb_uniffi_checksum_method_uploadprogresscallback_on_complete(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_ASSETSOURCECALLBACK_SNAPSHOT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_ASSETSOURCECALLBACK_SNAPSHOT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_assetsourcecallback_snapshot(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADPROGRESSCALLBACK_ON_ERROR
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_UPLOADPROGRESSCALLBACK_ON_ERROR
-uint16_t uniffi_beebeeb_uniffi_checksum_method_uploadprogresscallback_on_error(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_ASSETSOURCECALLBACK_EXPORT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_ASSETSOURCECALLBACK_EXPORT
+uint16_t uniffi_beebeeb_uniffi_checksum_method_assetsourcecallback_export(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPMANIFESTSTORECALLBACK_LOAD
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPMANIFESTSTORECALLBACK_LOAD
+uint16_t uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_load(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPMANIFESTSTORECALLBACK_REPLACE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPMANIFESTSTORECALLBACK_REPLACE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_replace(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPMANIFESTSTORECALLBACK_CLEAR
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPMANIFESTSTORECALLBACK_CLEAR
+uint16_t uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_clear(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DOMAINNOTIFIERCALLBACK_SIGNAL_WORKING_SET
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_DOMAINNOTIFIERCALLBACK_SIGNAL_WORKING_SET
+uint16_t uniffi_beebeeb_uniffi_checksum_method_domainnotifiercallback_signal_working_set(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_PLATFORMTRANSFERCANCELLERCALLBACK_CANCEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_PLATFORMTRANSFERCANCELLERCALLBACK_CANCEL
+uint16_t uniffi_beebeeb_uniffi_checksum_method_platformtransfercancellercallback_cancel(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_CHUNKTRANSPORT_UPLOAD_FILE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_CHUNKTRANSPORT_UPLOAD_FILE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_chunktransport_upload_file(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_CHUNKTRANSPORT_DOWNLOAD_RANGE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_CHUNKTRANSPORT_DOWNLOAD_RANGE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_chunktransport_download_range(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_CHUNKTRANSPORT_CANCEL_BACKGROUND
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_CHUNKTRANSPORT_CANCEL_BACKGROUND
+uint16_t uniffi_beebeeb_uniffi_checksum_method_chunktransport_cancel_background(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_IMAGECODECCALLBACK_ENCODE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_IMAGECODECCALLBACK_ENCODE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_imagecodeccallback_encode(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_PASSKEYPROMPT_CREATE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_PASSKEYPROMPT_CREATE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_passkeyprompt_create(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_PASSKEYPROMPT_AUTHENTICATE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_PASSKEYPROMPT_AUTHENTICATE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_passkeyprompt_authenticate(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SECRETSTORECALLBACK_AUTHORIZE_ACCESS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_SECRETSTORECALLBACK_AUTHORIZE_ACCESS
+uint16_t uniffi_beebeeb_uniffi_checksum_method_secretstorecallback_authorize_access(void
     
 );
 #endif

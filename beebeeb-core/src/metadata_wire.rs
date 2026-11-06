@@ -114,11 +114,9 @@ impl MetadataEnvelope {
     /// subkey per purpose (`beebeeb/name/v1`, `beebeeb/thumb/v1`,
     /// `beebeeb/note/v1`, all in [`crate::encrypt`]). Subkeys apply to a file
     /// whose metadata records a v2 pin — every name, thumbnail and note write
-    /// for that file is subkey-sealed — and to every write once the gated
-    /// [`crate::chunk_stream::WRITE_FORMAT`] switch flips. Until then
-    /// [`crate::encrypt::METADATA_SEAL_WRITE`] is
-    /// [`crate::encrypt::MetadataSeal::Legacy`], so a non-v2 file's names,
-    /// thumbnails and notes are sealed under the raw file key.
+    /// for that file is subkey-sealed. [`crate::encrypt::METADATA_SEAL_WRITE`]
+    /// is now [`crate::encrypt::MetadataSeal::Subkey`]; raw-key envelopes are
+    /// read only for unprotected legacy metadata.
     ///
     /// Seal a name with [`crate::encrypt::encrypt_name_for_new_item`] (a new
     /// row) or [`crate::encrypt::encrypt_name_for_target`] (an existing row);

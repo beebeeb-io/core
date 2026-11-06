@@ -113,6 +113,10 @@ pub fn encrypt_name(
 /// JSON field in the encrypted name metadata that records the file's chunk
 /// format (task 1908). Present only as `2` (v2); absent = unrecorded.
 pub const METADATA_CHUNK_FORMAT_FIELD: &str = "chunk_format";
+/// Hex-encoded frame-0 nonce committed by protected metadata.
+pub const METADATA_VERSION_ID_FIELD: &str = "version_id";
+/// Monotonic per-file version counter committed by protected metadata.
+pub const METADATA_VERSION_COUNTER_FIELD: &str = "version_counter";
 
 /// [`encrypt_name`] that also records the file's chunk format **inside the
 /// encrypted metadata** (task 1908 review round 2, P1-1), so readers can pin
@@ -147,11 +151,25 @@ pub fn encrypt_name_with_chunk_format(
     // A v2 file's metadata is ALWAYS sealed under the name subkey: only a
     // reader on this core can open v2 content anyway, so nothing breaks, and a
     // v2 file then has no blob under its raw file key at all. Everything else
-    // follows the write switch (legacy during the read-only phase, so clients
-    // not yet on this core keep reading the names this core writes). One rule
+    // follows the write format. One rule
     // for content, names and thumbnails: chunk_format_for_pin + metadata_seal_for.
     let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
     encrypt_name_for(&file_key, filename, mime_type, chunk_format)
+}
+
+/// Seal file metadata for a newly written version. The commitment is generated
+/// by [`crate::chunk_stream::ChunkEncryptor::version_commitment`] after frame 0
+/// has been sealed.
+pub fn encrypt_name_with_version(
+    master_key: &crate::kdf::MasterKey,
+    file_id: &str,
+    filename: &str,
+    mime_type: Option<&str>,
+    chunk_format: crate::chunk_stream::ExpectedChunkFormat,
+    version: crate::chunk_stream::VersionCommitment,
+) -> Result<String, CoreError> {
+    let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
+    encrypt_name_for_version(&file_key, filename, mime_type, chunk_format, version)
 }
 
 /// Key for a brand-new row (task 2275, L13). Only an owner id can be sealed
@@ -181,6 +199,19 @@ pub fn encrypt_name_for_new_item(
     encrypt_name_for(&key, filename, mime_type, chunk_format)
 }
 
+/// Protected metadata writer for a new core-minted row.
+pub fn encrypt_name_for_new_item_version(
+    master_key: &crate::kdf::MasterKey,
+    item_id: &NewItemId,
+    filename: &str,
+    mime_type: Option<&str>,
+    chunk_format: crate::chunk_stream::ExpectedChunkFormat,
+    version: crate::chunk_stream::VersionCommitment,
+) -> Result<String, CoreError> {
+    let key = new_item_name_key(master_key, item_id)?;
+    encrypt_name_for_version(&key, filename, mime_type, chunk_format, version)
+}
+
 /// Seal a **replacement** name through the row's [`WriteTarget`] (task 2275,
 /// L13): id, key and format pin all come from the resolved row.
 pub fn encrypt_name_for_target(
@@ -188,7 +219,36 @@ pub fn encrypt_name_for_target(
     filename: &str,
     mime_type: Option<&str>,
 ) -> Result<String, CoreError> {
-    encrypt_name_for(target.key(), filename, mime_type, target.pin())
+    match target.version() {
+        Some(version) => encrypt_name_for_version(target.key(), filename, mime_type, target.pin(), version),
+        None => encrypt_name_for(target.key(), filename, mime_type, target.pin()),
+    }
+}
+
+/// Seal metadata for a replacement version through a resolved target. The
+/// caller obtains `version` from the replacement encryptor using the target's
+/// current commitment; this function verifies the counter transition before
+/// writing it.
+pub fn encrypt_name_for_target_version(
+    target: &WriteTarget,
+    filename: &str,
+    mime_type: Option<&str>,
+    version: crate::chunk_stream::VersionCommitment,
+) -> Result<String, CoreError> {
+    let expected = match target.version() {
+        None => 1,
+        Some(current) => current
+            .counter
+            .checked_add(1)
+            .ok_or_else(|| CoreError::InvalidInput("version counter overflow".into()))?,
+    };
+    if version.counter != expected {
+        return Err(CoreError::InvalidInput(format!(
+            "replacement version counter must be {expected}, got {}",
+            version.counter
+        )));
+    }
+    encrypt_name_for_version(target.key(), filename, mime_type, target.pin(), version)
 }
 
 #[cfg(test)]
@@ -201,7 +261,7 @@ pub(crate) fn encrypt_name_sealed(
     seal: MetadataSeal,
 ) -> Result<String, CoreError> {
     let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
-    seal_name_envelope(&file_key, filename, mime_type, chunk_format, seal, random_nonce())
+    seal_name_envelope(&file_key, filename, mime_type, chunk_format, None, seal, random_nonce())
 }
 
 /// Seal the name/MIME envelope under a per-file key, by the rule of the `pin`
@@ -212,8 +272,7 @@ pub(crate) fn encrypt_name_sealed(
 /// (file-request uploads, shared-folder files):
 /// - a v2 pin records `chunk_format: 2` and is ALWAYS sealed under the name
 ///   subkey (as [`encrypt_name_with_chunk_format`] does);
-/// - `Unrecorded` follows [`METADATA_SEAL_WRITE`] (legacy, the raw file key,
-///   during the read-only phase) and records nothing.
+/// - `Unrecorded` follows [`METADATA_SEAL_WRITE`] and records no format pin.
 ///
 /// Which `pin` to pass:
 /// - an EXISTING file (rename): the pin its metadata records;
@@ -238,6 +297,40 @@ pub fn encrypt_name_for(
     encrypt_name_for_nonce(file_key, filename, mime_type, pin, random_nonce())
 }
 
+/// Known-key writer for a new current version. It records the authenticated
+/// frame-0 version id and monotonic counter together.
+pub fn encrypt_name_for_version(
+    file_key: &FileKey,
+    filename: &str,
+    mime_type: Option<&str>,
+    pin: crate::chunk_stream::ExpectedChunkFormat,
+    version: crate::chunk_stream::VersionCommitment,
+) -> Result<String, CoreError> {
+    let seal = metadata_seal_for(crate::chunk_stream::ChunkFormat::V2);
+    seal_name_envelope(file_key, filename, mime_type, pin, Some(version), seal, random_nonce())
+}
+
+/// Rename a file while carrying its format and version commitment forward
+/// unchanged. A replace uses [`encrypt_name_for_version`] with the successor
+/// commitment instead.
+pub fn encrypt_name_carrying_version(
+    file_key: &FileKey,
+    filename: &str,
+    mime_type: Option<&str>,
+    current: &NameMetadata,
+) -> Result<String, CoreError> {
+    let seal = metadata_seal_for(crate::chunk_stream::chunk_format_for_pin(current.chunk_format));
+    seal_name_envelope(
+        file_key,
+        filename,
+        mime_type,
+        current.chunk_format,
+        current.version,
+        seal,
+        random_nonce(),
+    )
+}
+
 /// [`encrypt_name_for`] with the nonce as a parameter: the shipped writers pass a
 /// fresh [`random_nonce`], and only the `cfg(test)` / `test-support` vector seams
 /// ([`encrypt_name_for_with_nonce`], [`encrypt_name_with_chunk_format_and_nonce`])
@@ -252,7 +345,7 @@ fn encrypt_name_for_nonce(
     nonce: [u8; NONCE_LEN],
 ) -> Result<String, CoreError> {
     let seal = metadata_seal_for(crate::chunk_stream::chunk_format_for_pin(pin));
-    seal_name_envelope(file_key, filename, mime_type, pin, seal, nonce)
+    seal_name_envelope(file_key, filename, mime_type, pin, None, seal, nonce)
 }
 
 /// The one name sealer: [`encrypt_name_for_nonce`] (every pin-ruled writer and
@@ -263,10 +356,11 @@ fn seal_name_envelope(
     filename: &str,
     mime_type: Option<&str>,
     chunk_format: crate::chunk_stream::ExpectedChunkFormat,
+    version: Option<crate::chunk_stream::VersionCommitment>,
     seal: MetadataSeal,
     nonce: [u8; NONCE_LEN],
 ) -> Result<String, CoreError> {
-    let plaintext = name_plaintext(filename, mime_type, chunk_format);
+    let plaintext = name_plaintext(filename, mime_type, chunk_format, version);
     // The blob `encrypt_metadata` builds (no AAD), with the caller's nonce.
     let frame = match seal {
         MetadataSeal::Legacy => seal_raw_with_nonce(file_key, &nonce, plaintext.as_bytes(), &[])?,
@@ -303,6 +397,30 @@ pub fn encrypt_name_with_chunk_format_and_nonce(
     encrypt_name_for_nonce(&file_key, filename, mime_type, chunk_format, nonce)
 }
 
+/// Fixed-nonce version-commitment vector seam. Never compiled into a shipped
+/// client; production callers use [`encrypt_name_with_version`].
+#[cfg(any(test, feature = "test-support"))]
+pub fn encrypt_name_with_version_and_nonce(
+    master_key: &crate::kdf::MasterKey,
+    file_id: &str,
+    filename: &str,
+    mime_type: Option<&str>,
+    chunk_format: crate::chunk_stream::ExpectedChunkFormat,
+    version: crate::chunk_stream::VersionCommitment,
+    nonce: [u8; NONCE_LEN],
+) -> Result<String, CoreError> {
+    let file_key = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
+    seal_name_envelope(
+        &file_key,
+        filename,
+        mime_type,
+        chunk_format,
+        Some(version),
+        MetadataSeal::Subkey,
+        nonce,
+    )
+}
+
 /// [`encrypt_name_for`] with a FIXED nonce — for the published known-answer
 /// vectors only (task 1958), under the same `cfg(test)` / `test-support` gate as
 /// every other nonce seam. The shipped writer's own path
@@ -325,6 +443,7 @@ fn name_plaintext(
     filename: &str,
     mime_type: Option<&str>,
     chunk_format: crate::chunk_stream::ExpectedChunkFormat,
+    version: Option<crate::chunk_stream::VersionCommitment>,
 ) -> String {
     let mut meta = serde_json::json!({
         "name": filename,
@@ -332,6 +451,10 @@ fn name_plaintext(
     });
     if chunk_format == crate::chunk_stream::ExpectedChunkFormat::V2 {
         meta[METADATA_CHUNK_FORMAT_FIELD] = serde_json::json!(chunk_format.as_u8());
+    }
+    if let Some(version) = version {
+        meta[METADATA_VERSION_ID_FIELD] = serde_json::json!(encode_version_id(&version.version_id));
+        meta[METADATA_VERSION_COUNTER_FIELD] = serde_json::json!(version.counter);
     }
     meta.to_string()
 }
@@ -364,11 +487,8 @@ pub enum MetadataSeal {
     Subkey,
 }
 
-/// How new name envelopes (of files whose metadata records no v2 format), new
-/// thumbnails and new file notes are sealed. Tied to [`crate::chunk_stream::WRITE_FORMAT`] so
-/// the two flip in ONE gated release: while content is still written as v1,
-/// a subkey-sealed name would be unreadable by every client not yet on this
-/// core, and there is no v2 file for it to protect. A name that records
+/// How new name envelopes, thumbnails and file notes are sealed. Tied to
+/// [`crate::chunk_stream::WRITE_FORMAT`]. A name that records
 /// `chunk_format: 2` (and a thumbnail written with [`encrypt_thumbnail_for`] a
 /// v2 pin, and a note written with [`encrypt_note_for`] a v2 pin) is
 /// subkey-sealed regardless. `= metadata_seal_for(WRITE_FORMAT)`.
@@ -378,8 +498,7 @@ pub const METADATA_SEAL_WRITE: MetadataSeal = metadata_seal_for(crate::chunk_str
 /// (task 1908 review round 4, P2-1): v1 content → [`MetadataSeal::Legacy`]
 /// (readable by clients not yet on this core), v2 content →
 /// [`MetadataSeal::Subkey`] (only a reader on this core opens v2 content
-/// anyway). Both arms are pinned by a test, so the V2 arm is checked although
-/// [`METADATA_SEAL_WRITE`] does not take it yet.
+/// anyway). Both arms remain pinned by tests for legacy vector compatibility.
 pub const fn metadata_seal_for(format: crate::chunk_stream::ChunkFormat) -> MetadataSeal {
     match format {
         crate::chunk_stream::ChunkFormat::V1Legacy => MetadataSeal::Legacy,
@@ -466,6 +585,21 @@ pub fn decrypt_thumbnail(file_key: &FileKey, frame: &[u8]) -> Result<Vec<u8>, Co
     open_raw_with_aad(&derive_thumbnail_key(file_key), frame, &[]).or_else(|_| open_raw_with_aad(file_key, frame, &[]))
 }
 
+/// Open a thumbnail under an authenticated file-metadata record. Protected
+/// files never try the legacy raw file key.
+pub fn decrypt_thumbnail_for_metadata(
+    file_key: &FileKey,
+    frame: &[u8],
+    metadata: &NameMetadata,
+) -> Result<Vec<u8>, CoreError> {
+    let opened = open_raw_with_aad(&derive_thumbnail_key(file_key), frame, &[]);
+    if metadata.chunk_format == crate::chunk_stream::ExpectedChunkFormat::V2 || metadata.version.is_some() {
+        opened
+    } else {
+        opened.or_else(|_| open_raw_with_aad(file_key, frame, &[]))
+    }
+}
+
 // ── File notes (task 1908 review round 5) ──────────────────────────────────
 //
 // Web sealed a file's note with `encrypt_metadata` under the RAW per-file key
@@ -495,8 +629,7 @@ pub(crate) fn derive_note_key(file_key: &FileKey) -> FileKey {
 ///
 /// Returns the canonical `EncryptedBlob` JSON (`{"cipher_suite":"V1Aes256Gcm",
 /// "nonce":[..],"ciphertext":[..]}`) — the shape web stores in
-/// `note_encrypted` today, so readers not yet on this core still open notes
-/// this core writes during the read-only phase. Read it back with
+/// `note_encrypted` today. Read it back with
 /// [`decrypt_note`]. These two writers are the only way clients should seal a
 /// note — never `encrypt_metadata` / `encrypt_chunk` under the file key.
 ///
@@ -513,7 +646,7 @@ pub fn encrypt_note(file_key: &FileKey, note: &str) -> Result<String, CoreError>
 /// [`decrypt_file_metadata`], never a server field). The same rule as names
 /// and thumbnails: a v2 pin is ALWAYS sealed under the note subkey (the note
 /// can then never stand in for the file's name or content); `Unrecorded`
-/// follows [`METADATA_SEAL_WRITE`] (legacy during the read-only phase).
+/// follows [`METADATA_SEAL_WRITE`].
 #[deprecated(
     note = "task 2275 L13: use the NewItemId/WriteTarget sealers (encrypt_*_for_new_item / encrypt_*_for_target)"
 )]
@@ -570,6 +703,26 @@ pub fn decrypt_note(file_key: &FileKey, note_encrypted: &str) -> Result<String, 
         .ok_or(CoreError::Decryption)
 }
 
+/// Open a note under an authenticated file-metadata record. Protected files
+/// never try the legacy raw file key.
+pub fn decrypt_note_for_metadata(
+    file_key: &FileKey,
+    note_encrypted: &str,
+    metadata: &NameMetadata,
+) -> Result<String, CoreError> {
+    if !note_encrypted.starts_with('{') {
+        return Err(CoreError::InvalidInput("note is not an encrypted envelope".into()));
+    }
+    let opened = decrypt_envelope_plaintext_under(&derive_note_key(file_key), note_encrypted);
+    if metadata.chunk_format == crate::chunk_stream::ExpectedChunkFormat::V2 || metadata.version.is_some() {
+        opened.ok_or(CoreError::Decryption)
+    } else {
+        opened
+            .or_else(|| decrypt_envelope_plaintext_under(file_key, note_encrypted))
+            .ok_or(CoreError::Decryption)
+    }
+}
+
 /// The decrypted name metadata of a file, including the chunk format its
 /// content must be read with (task 1908).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -583,6 +736,17 @@ pub struct NameMetadata {
     /// records it; a plaintext legacy name, or an envelope without the field,
     /// is `Unrecorded`.
     pub chunk_format: crate::chunk_stream::ExpectedChunkFormat,
+    /// Authenticated current/historical version identity. `None` means the
+    /// stored metadata predates replay protection and is readable but
+    /// unprotected.
+    pub version: Option<crate::chunk_stream::VersionCommitment>,
+}
+
+impl NameMetadata {
+    /// Whether content reads can bind frame 0 to this metadata record.
+    pub fn is_version_protected(&self) -> bool {
+        self.version.is_some()
+    }
 }
 
 /// Decrypt `name_encrypted` (same format + key matrix as [`decrypt_name`]) and
@@ -604,16 +768,16 @@ pub fn decrypt_name_metadata(
         return Ok(legacy_plaintext_metadata(name_encrypted));
     }
     let key_from_string = crate::kdf::derive_file_key(master_key, file_id.as_bytes());
-    if let Some(pt) = decrypt_envelope_plaintext(&key_from_string, name_encrypted) {
-        return parse_name_metadata(&pt);
+    if let Some(meta) = decrypt_file_metadata_under(&key_from_string, name_encrypted)? {
+        return Ok(meta);
     }
     if let Some(key) = file_id
         .parse::<uuid::Uuid>()
         .ok()
         .map(|u| crate::kdf::derive_file_key(master_key, u.as_bytes()))
     {
-        if let Some(pt) = decrypt_envelope_plaintext(&key, name_encrypted) {
-            return parse_name_metadata(&pt);
+        if let Some(meta) = decrypt_file_metadata_under(&key, name_encrypted)? {
+            return Ok(meta);
         }
     }
     Err(CoreError::Decryption)
@@ -625,8 +789,7 @@ pub fn decrypt_name_metadata_with_key(file_key: &FileKey, name_encrypted: &str) 
     if !name_encrypted.starts_with('{') {
         return Ok(legacy_plaintext_metadata(name_encrypted));
     }
-    let pt = decrypt_envelope_plaintext(file_key, name_encrypted).ok_or(CoreError::Decryption)?;
-    parse_name_metadata(&pt)
+    decrypt_file_metadata_under(file_key, name_encrypted)?.ok_or(CoreError::Decryption)
 }
 
 /// The metadata reader for **files** (task 1908 round 3, P1-B): exactly
@@ -673,6 +836,7 @@ fn legacy_plaintext_metadata(name: &str) -> NameMetadata {
         name: name.to_string(),
         mime_type: None,
         chunk_format: crate::chunk_stream::ExpectedChunkFormat::Unrecorded,
+        version: None,
     }
 }
 
@@ -700,11 +864,80 @@ fn parse_name_metadata(decrypted: &str) -> Result<NameMetadata, CoreError> {
             }
         }
     };
+    let parsed = serde_json::from_str::<serde_json::Value>(decrypted).ok();
+    let version_id = parsed.as_ref().and_then(|value| value.get(METADATA_VERSION_ID_FIELD));
+    let version_counter = parsed
+        .as_ref()
+        .and_then(|value| value.get(METADATA_VERSION_COUNTER_FIELD));
+    let version = match (version_id, version_counter) {
+        (None, None) => None,
+        (Some(version_id), Some(version_counter)) => {
+            let encoded = version_id
+                .as_str()
+                .ok_or_else(|| CoreError::InvalidInput("metadata version_id is not a hex string".into()))?;
+            if encoded.len() != crate::chunk_stream::VERSION_ID_LEN * 2
+                || encoded
+                    .bytes()
+                    .any(|byte| !byte.is_ascii_hexdigit() || byte.is_ascii_uppercase())
+            {
+                return Err(CoreError::InvalidInput(
+                    "metadata version_id must be 24 lowercase hexadecimal characters".into(),
+                ));
+            }
+            let version_id = decode_version_id(encoded)?;
+            let counter = version_counter
+                .as_u64()
+                .ok_or_else(|| CoreError::InvalidInput("metadata version_counter is not an unsigned integer".into()))?;
+            Some(crate::chunk_stream::VersionCommitment::new(version_id, counter)?)
+        }
+        _ => {
+            return Err(CoreError::InvalidInput(
+                "metadata version_id and version_counter must appear together".into(),
+            ));
+        }
+    };
     Ok(NameMetadata {
         name,
         mime_type,
         chunk_format,
+        version,
     })
+}
+
+fn encode_version_id(version_id: &[u8; crate::chunk_stream::VERSION_ID_LEN]) -> String {
+    version_id.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn decode_version_id(encoded: &str) -> Result<[u8; crate::chunk_stream::VERSION_ID_LEN], CoreError> {
+    if encoded.len() != crate::chunk_stream::VERSION_ID_LEN * 2 || !encoded.is_ascii() {
+        return Err(CoreError::InvalidInput(
+            "metadata version_id has the wrong length".into(),
+        ));
+    }
+    let mut decoded = [0u8; crate::chunk_stream::VERSION_ID_LEN];
+    for (index, output) in decoded.iter_mut().enumerate() {
+        let start = index * 2;
+        *output = u8::from_str_radix(&encoded[start..start + 2], 16)
+            .map_err(|_| CoreError::InvalidInput("metadata version_id is not valid hexadecimal".into()))?;
+    }
+    Ok(decoded)
+}
+
+/// Open one name envelope and retain which key authenticated it. Protected
+/// metadata is valid only under the purpose subkey; raw-key fallback remains
+/// solely for old unpinned, uncommitted records.
+fn decrypt_file_metadata_under(file_key: &FileKey, name_encrypted: &str) -> Result<Option<NameMetadata>, CoreError> {
+    if let Some(plaintext) = decrypt_envelope_plaintext_under(&derive_name_key(file_key), name_encrypted) {
+        return parse_name_metadata(&plaintext).map(Some);
+    }
+    let Some(plaintext) = decrypt_envelope_plaintext_under(file_key, name_encrypted) else {
+        return Ok(None);
+    };
+    let metadata = parse_name_metadata(&plaintext)?;
+    if metadata.chunk_format == crate::chunk_stream::ExpectedChunkFormat::V2 || metadata.version.is_some() {
+        return Err(CoreError::Decryption);
+    }
+    Ok(Some(metadata))
 }
 
 /// Decrypt a `name_encrypted` value from the server back to a plaintext
@@ -828,10 +1061,16 @@ fn decrypt_name_envelope(file_key: &FileKey, name_encrypted: &str) -> Option<(St
 /// `EncryptedBlob` shape then the web `{nonce, ciphertext}` shape, and return
 /// the metadata plaintext (usually the `{name, mime_type[, chunk_format]}` JSON).
 fn decrypt_envelope_plaintext(file_key: &FileKey, name_encrypted: &str) -> Option<String> {
-    // Name subkey first (envelopes written since task 1908 round 3), then the
-    // legacy raw file key (every envelope written before).
-    decrypt_envelope_plaintext_under(&derive_name_key(file_key), name_encrypted)
-        .or_else(|| decrypt_envelope_plaintext_under(file_key, name_encrypted))
+    if let Some(plaintext) = decrypt_envelope_plaintext_under(&derive_name_key(file_key), name_encrypted) {
+        return Some(plaintext);
+    }
+    let plaintext = decrypt_envelope_plaintext_under(file_key, name_encrypted)?;
+    let metadata = parse_name_metadata(&plaintext).ok()?;
+    if metadata.chunk_format == crate::chunk_stream::ExpectedChunkFormat::V2 || metadata.version.is_some() {
+        None
+    } else {
+        Some(plaintext)
+    }
 }
 
 /// Whether `name_encrypted` authenticates under `file_key` — exactly the
@@ -1242,6 +1481,35 @@ mod tests {
     fn test_file_key() -> FileKey {
         let mk = derive_master_key("test-password", b"test-salt-16bytes").unwrap();
         derive_file_key(&mk, b"test-file-id")
+    }
+
+    #[test]
+    fn protected_metadata_fields_are_all_or_nothing_and_canonical() {
+        let base = r#"{"name":"a.txt","chunk_format":2"#;
+        for suffix in [
+            r#","version_id":"000000000000000000000000"}"#,
+            r#","version_counter":1}"#,
+            r#","version_id":"00000000000000000000000A","version_counter":1}"#,
+            r#","version_id":"000000000000000000000000","version_counter":0}"#,
+            r#","version_id":"000000000000000000000000","version_counter":9007199254740992}"#,
+        ] {
+            assert!(
+                parse_name_metadata(&format!("{base}{suffix}")).is_err(),
+                "accepted hostile metadata: {suffix}"
+            );
+        }
+    }
+
+    #[test]
+    fn protected_metadata_accepts_the_largest_exact_counter() {
+        let metadata = parse_name_metadata(
+            r#"{"name":"a.txt","chunk_format":2,"version_id":"000102030405060708090a0b","version_counter":9007199254740991}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            metadata.version.unwrap().counter,
+            crate::chunk_stream::MAX_VERSION_COUNTER
+        );
     }
 
     #[test]
@@ -2029,7 +2297,7 @@ mod tests {
             let ne = seal_metadata(&mk, NAME_FID, bad);
             assert!(decrypt_name_metadata(&mk, NAME_FID, &ne).is_err(), "{bad}");
         }
-        let ne = seal_metadata(&mk, NAME_FID, r#"{"name":"x","chunk_format":2}"#);
+        let ne = encrypt_name_with_chunk_format(&mk, NAME_FID, "x", None, V2).unwrap();
         assert_eq!(decrypt_name_metadata(&mk, NAME_FID, &ne).unwrap().chunk_format, V2);
     }
 

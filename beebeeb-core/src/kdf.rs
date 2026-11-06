@@ -24,11 +24,10 @@ impl MasterKey {
         &self.bytes
     }
 
-    /// Export the raw key bytes. **WASM boundary only** — the caller is
-    /// responsible for zeroizing the returned array when it is no longer needed.
+    /// Export the raw key bytes in a buffer that wipes itself on drop.
     /// Prefer keeping a `MasterKey` handle whenever possible.
-    pub fn to_bytes(&self) -> [u8; 32] {
-        self.bytes
+    pub fn to_bytes(&self) -> Zeroizing<[u8; 32]> {
+        Zeroizing::new(self.bytes)
     }
 
     /// Reconstruct a `MasterKey` from raw bytes that previously crossed
@@ -1198,7 +1197,7 @@ pub fn open_legacy_child_key(folder_key: &FileKey, frame: &[u8]) -> Option<FileK
 /// link can never be opened with the wrong mode's key. This derivation is
 /// public by design: `K_c` is in the link fragment and never reaches the
 /// server; it is not an account key.
-pub fn combine_folder_link_key(k_c: &[u8; 32], passphrase_stretch: Option<&[u8; 32]>) -> [u8; 32] {
+pub fn combine_folder_link_key(k_c: &[u8; 32], passphrase_stretch: Option<&[u8; 32]>) -> Zeroizing<[u8; 32]> {
     let mut ikm = Zeroizing::new(Vec::with_capacity(64));
     ikm.extend_from_slice(k_c);
     if let Some(stretch) = passphrase_stretch {
@@ -1211,7 +1210,7 @@ pub fn combine_folder_link_key(k_c: &[u8; 32], passphrase_stretch: Option<&[u8; 
     let mut okm = Zeroizing::new([0u8; 32]);
     hk.expand(&info, &mut *okm)
         .expect("HKDF-SHA256 expand for 32 bytes cannot fail");
-    *okm
+    okm
 }
 
 #[cfg(test)]
@@ -1329,7 +1328,15 @@ mod tests {
     #[test]
     fn l6_folder_name_cannot_be_substituted_for_custody() {
         let master = MasterKey::from_bytes([0x40; 32]);
-        let name = crate::encrypt::encrypt_name(&master, "folder", "ABCD", None).unwrap();
+        let name = crate::encrypt::encrypt_name_sealed(
+            &master,
+            "folder",
+            "ABCD",
+            None,
+            crate::chunk_stream::ExpectedChunkFormat::Unrecorded,
+            crate::encrypt::MetadataSeal::Legacy,
+        )
+        .unwrap();
         let blob: beebeeb_types::EncryptedBlob = serde_json::from_str(&name).unwrap();
         let legacy = crate::encrypt::decrypt_chunk(&derive_file_key(&master, b"folder"), &blob).unwrap();
         assert_eq!(legacy.len(), 32, "regression fixture must pass the old length gate");
@@ -1583,16 +1590,16 @@ mod tests {
     fn combine_folder_link_key_modes_are_domain_separated() {
         let k_c = KAT_FOLDER_KEY;
         let none = combine_folder_link_key(&k_c, None);
-        assert_ne!(none, k_c, "a passphrase-free link still uses the combiner domain");
+        assert_ne!(*none, k_c, "a passphrase-free link still uses the combiner domain");
         let zero_stretch = combine_folder_link_key(&k_c, Some(&[0u8; 32]));
         assert_ne!(none, zero_stretch, "presence byte distinguishes the modes");
 
         // Distinct from every other derivation in this module even with the
         // same 32 input bytes.
         let folder_key = FileKey::from_bytes(KAT_FOLDER_KEY);
-        assert_ne!(none, *derive_shared_folder_index_key(&folder_key, 0).as_bytes());
+        assert_ne!(*none, *derive_shared_folder_index_key(&folder_key, 0).as_bytes());
         let mk = MasterKey::from_bytes(KAT_FOLDER_KEY);
-        assert_ne!(none, *derive_search_index_key(&mk, 0).as_bytes());
+        assert_ne!(*none, *derive_search_index_key(&mk, 0).as_bytes());
 
         // A different K_c or stretch never collides.
         let mut other = KAT_FOLDER_KEY;

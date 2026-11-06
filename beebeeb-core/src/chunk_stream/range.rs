@@ -10,7 +10,10 @@
 //! frame opens under that format and version id only, never by detection. The v2 chunk subkey is
 //! derived once, and the plaintext comes back `Zeroizing` (I8).
 //!
-//! What it does NOT give v1 (every file written today, `WRITE_FORMAT = V1Legacy`): v1 frames carry
+//! A version commitment from the same metadata, when present, fixes frame 0 to that one v2 upload,
+//! so an older upload of the same file cannot be served (the rule the whole-file read applies).
+//!
+//! What it does NOT give v1 (legacy files; new files are v2, `WRITE_FORMAT = V2`): v1 frames carry
 //! no position, version or truncation binding, so equal-length frames of one file key can be
 //! reordered, duplicated or spliced from another version, and the file truncated at a chunk
 //! boundary. That is the same gap the whole-file read has (I9; test T5 pins it). And under an
@@ -25,8 +28,8 @@
 use zeroize::Zeroizing;
 
 use super::{
-    ChunkDecryptorSummary, ChunkFormat, ExpectedChunkFormat, VERSION_ID_LEN, chunk_aad_v2, derive_chunk_key_v2,
-    version_id_of,
+    ChunkDecryptorSummary, ChunkFormat, ExpectedChunkFormat, VERSION_ID_LEN, VersionCommitment, chunk_aad_v2,
+    derive_chunk_key_v2, version_id_of,
 };
 use crate::CoreError;
 use crate::direct_transfer::range::RunSet;
@@ -41,6 +44,8 @@ pub struct RangeOpener {
     chunk_key: FileKey,
     file_id: Vec<u8>,
     pin: ExpectedChunkFormat,
+    /// From the same authenticated metadata as the pin: frame 0 must be this upload's.
+    committed_version_id: Option<[u8; VERSION_ID_LEN]>,
     geometry: Geometry,
     format: Option<ChunkFormat>,
     version_id: Option<[u8; VERSION_ID_LEN]>,
@@ -59,7 +64,9 @@ impl std::fmt::Debug for RangeOpener {
 }
 
 impl RangeOpener {
-    /// `pin` is the content pin from `decrypt_file_metadata[_with_key]` (never a server value);
+    /// `pin` is the content pin from `decrypt_file_metadata[_with_key]` (never a server value), and
+    /// `commitment` is the version commitment from the same metadata: when present, frame 0 opens
+    /// only as that v2 upload, the same rule `ChunkDecryptor::for_current_version` applies;
     /// `geometry` is the session's one geometry; `expected_size` is the size the OS holds for the
     /// file (the placeholder's `FileSize`). A geometry no real version has, or one whose
     /// `original_size` differs from `expected_size`, is refused: nothing may be released (I2).
@@ -67,6 +74,7 @@ impl RangeOpener {
         file_key: FileKey,
         file_id: &str,
         pin: ExpectedChunkFormat,
+        commitment: Option<VersionCommitment>,
         geometry: Geometry,
         expected_size: u64,
     ) -> Result<RangeOpener, CoreError> {
@@ -85,6 +93,7 @@ impl RangeOpener {
             file_key,
             file_id: file_id.as_bytes().to_vec(),
             pin,
+            committed_version_id: commitment.map(|value| value.version_id),
             geometry,
             format: None,
             version_id: None,
@@ -180,6 +189,13 @@ impl RangeOpener {
         frame: &[u8],
     ) -> Result<(Zeroizing<Vec<u8>>, ChunkFormat, Option<[u8; VERSION_ID_LEN]>), CoreError> {
         let v2 = version_id_of(frame).and_then(|vid| self.open_v2(&vid, 0, is_last, frame).ok().map(|p| (p, vid)));
+        // A commitment names the one upload this read may open: v2, with that version id.
+        if let Some(committed) = self.committed_version_id {
+            return match v2 {
+                Some((plain, vid)) if vid == committed => Ok((plain, ChunkFormat::V2, Some(vid))),
+                _ => Err(CoreError::Decryption),
+            };
+        }
         match (self.pin, v2) {
             (_, Some((plain, vid))) => Ok((plain, ChunkFormat::V2, Some(vid))),
             (ExpectedChunkFormat::V2, None) => Err(CoreError::Decryption),
@@ -244,7 +260,7 @@ mod tests {
     }
 
     fn opener(pin: ExpectedChunkFormat, g: Geometry) -> RangeOpener {
-        RangeOpener::new(key(), FILE, pin, g, g.original_size).unwrap()
+        RangeOpener::new(key(), FILE, pin, None, g, g.original_size).unwrap()
     }
 
     fn released_nothing(o: &RangeOpener, before: u64) {
@@ -284,10 +300,36 @@ mod tests {
     #[test]
     fn the_size_must_be_the_size_the_file_is_known_to_have() {
         let g = geometry(3, 2500);
-        assert!(RangeOpener::new(key(), FILE, ExpectedChunkFormat::V2, g, 2499).is_err());
+        assert!(RangeOpener::new(key(), FILE, ExpectedChunkFormat::V2, None, g, 2499).is_err());
         let mut bad = g;
         bad.encrypted_size += 1;
-        assert!(RangeOpener::new(key(), FILE, ExpectedChunkFormat::V2, bad, 2500).is_err());
+        assert!(RangeOpener::new(key(), FILE, ExpectedChunkFormat::V2, None, bad, 2500).is_err());
+    }
+
+    /// The version commitment: a protected read opens frame 0 only from the committed upload,
+    /// so a server cannot serve an older upload of the same file. Mutant: the commitment check
+    /// dropped from frame 0.
+    #[test]
+    fn a_committed_read_opens_only_the_committed_upload() {
+        let data = plain(2500, 7);
+        let current = frames(FILE, &data, ChunkFormat::V2);
+        let older = frames(FILE, &data, ChunkFormat::V2);
+        let legacy = frames(FILE, &data, ChunkFormat::V1Legacy);
+        let vid: [u8; VERSION_ID_LEN] = current[0][..VERSION_ID_LEN].try_into().unwrap();
+        let commitment = VersionCommitment::new(vid, 2).unwrap();
+        for pin in [ExpectedChunkFormat::V2, ExpectedChunkFormat::Unrecorded] {
+            let g = geometry(3, 2500);
+            let mut o = RangeOpener::new(key(), FILE, pin, Some(commitment), g, 2500).unwrap();
+            assert!(
+                o.open(0, &older[0]).is_err(),
+                "another upload of this file is a rollback"
+            );
+            assert!(o.open(0, &legacy[0]).is_err(), "a committed read never opens v1");
+            released_nothing(&o, 0);
+            assert_eq!(o.format(), None, "a refused frame 0 locks no format");
+            o.open(0, &current[0]).unwrap();
+            assert_eq!(o.version_id(), Some(vid));
+        }
     }
 
     #[test]

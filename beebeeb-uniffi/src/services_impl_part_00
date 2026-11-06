@@ -1,0 +1,897 @@
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use beebeeb_client::auth::{SignInChallenge, SignInStateKind};
+use beebeeb_client::contacts::ContactTrust;
+use beebeeb_client::downloads::{DownloadFile, DownloadResult, DownloadService};
+use beebeeb_client::files::{FileRecord, FileRecordPage};
+use beebeeb_client::search::SearchService;
+use beebeeb_client::settings::DeviceSettings;
+use beebeeb_client::thumbnails::{ImageCodec, ImageCodecError, ThumbnailJob, ThumbnailService};
+use beebeeb_client::uploads::{NetworkKind, UploadRequest, UploadService, transfer_now_ms};
+use beebeeb_client::{Client, ClientConfig, ClientRuntime, EngineEvent, KeychainSecretStore, Session};
+use beebeeb_core::kdf::MasterKey;
+use beebeeb_core::thumbnail::{Platform, ThumbnailFormat, ThumbnailVariant};
+use beebeeb_store::Store;
+use beebeeb_types::limits::MemoryBudget;
+use zeroize::Zeroizing;
+
+use crate::{AccountReplacementHandle, MasterKeyHandle};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum RuntimeProfile {
+    Application,
+    Lightweight,
+}
+
+impl RuntimeProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Application => "application",
+            Self::Lightweight => "lightweight",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ServiceErrorKind {
+    InvalidInput,
+    SessionRequired,
+    Authentication,
+    Network,
+    Storage,
+    Crypto,
+    Cancelled,
+    ManagedByService,
+    Quota,
+    SessionExpired,
+    RetryAfter,
+    AnchorExpired,
+    AnotherAccountOnDevice,
+    Unavailable,
+}
+
+impl ServiceErrorKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidInput => "invalid_input",
+            Self::SessionRequired => "session_required",
+            Self::Authentication => "authentication",
+            Self::Network => "network",
+            Self::Storage => "storage",
+            Self::Crypto => "crypto",
+            Self::Cancelled => "cancelled",
+            Self::ManagedByService => "managed_by_service",
+            Self::Quota => "quota",
+            Self::SessionExpired => "session_expired",
+            Self::RetryAfter => "retry_after",
+            Self::AnchorExpired => "anchor_expired",
+            Self::AnotherAccountOnDevice => "another_account_on_device",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum ServiceError {
+    #[error("invalid input")]
+    InvalidInput,
+    #[error("an authenticated session is required")]
+    SessionRequired,
+    #[error("authentication failed")]
+    Authentication,
+    #[error("the network operation failed")]
+    Network,
+    #[error("local storage is unavailable")]
+    Storage,
+    #[error("cryptographic processing failed")]
+    Crypto,
+    #[error("the operation was cancelled")]
+    Cancelled,
+    #[error("this item is managed by a service")]
+    ManagedByService,
+    #[error("the account storage quota was exceeded")]
+    Quota {
+        limit_bytes: Option<u64>,
+        used_bytes: Option<u64>,
+    },
+    #[error("the authenticated session expired")]
+    SessionExpired,
+    #[error("the operation may be retried after {seconds} seconds")]
+    RetryAfter { seconds: u64 },
+    #[error("the local change anchor expired")]
+    AnchorExpired,
+    #[error("another account is stored on this device")]
+    AnotherAccountOnDevice,
+    #[error("the service is unavailable")]
+    Unavailable,
+}
+
+impl ServiceError {
+    pub(crate) fn new(kind: ServiceErrorKind) -> Self {
+        match kind {
+            ServiceErrorKind::InvalidInput => Self::InvalidInput,
+            ServiceErrorKind::SessionRequired => Self::SessionRequired,
+            ServiceErrorKind::Authentication => Self::Authentication,
+            ServiceErrorKind::Network => Self::Network,
+            ServiceErrorKind::Storage => Self::Storage,
+            ServiceErrorKind::Crypto => Self::Crypto,
+            ServiceErrorKind::Cancelled => Self::Cancelled,
+            ServiceErrorKind::ManagedByService => Self::ManagedByService,
+            ServiceErrorKind::Quota => Self::Quota {
+                limit_bytes: None,
+                used_bytes: None,
+            },
+            ServiceErrorKind::SessionExpired => Self::SessionExpired,
+            ServiceErrorKind::RetryAfter => Self::RetryAfter { seconds: 0 },
+            ServiceErrorKind::AnchorExpired => Self::AnchorExpired,
+            ServiceErrorKind::AnotherAccountOnDevice => Self::AnotherAccountOnDevice,
+            ServiceErrorKind::Unavailable => Self::Unavailable,
+        }
+    }
+
+    pub(crate) fn unavailable() -> Self {
+        Self::new(ServiceErrorKind::Unavailable)
+    }
+}
+
+pub(crate) fn map_client_error(error: impl std::error::Error + 'static) -> ServiceError {
+    let mut current: &(dyn std::error::Error + 'static) = &error;
+    loop {
+        if let Some(file) = current.downcast_ref::<beebeeb_client::files::FileServiceError>()
+            && matches!(file, beebeeb_client::files::FileServiceError::ManagedByService { .. })
+        {
+            return ServiceError::ManagedByService;
+        }
+        if let Some(sync) = current.downcast_ref::<beebeeb_core::sync::SyncEngineError>()
+            && matches!(sync, beebeeb_core::sync::SyncEngineError::AnchorExpired { .. })
+        {
+            return ServiceError::AnchorExpired;
+        }
+        if let Some(upload) = current.downcast_ref::<beebeeb_client::uploads::UploadServiceError>()
+            && matches!(upload, beebeeb_client::uploads::UploadServiceError::QuotaFull)
+        {
+            return ServiceError::Quota {
+                limit_bytes: None,
+                used_bytes: None,
+            };
+        }
+        if let Some(download) = current.downcast_ref::<beebeeb_client::downloads::DownloadServiceError>()
+            && matches!(download, beebeeb_client::downloads::DownloadServiceError::Cancelled)
+        {
+            return ServiceError::Cancelled;
+        }
+        if let Some(client) = current.downcast_ref::<beebeeb_client::ClientError>() {
+            if let beebeeb_client::ClientError::Api(beebeeb_api::ApiError::Server(server)) = client {
+                if server.is_code(beebeeb_core::system_folders::SYSTEM_FOLDER_MANAGED_CODE) {
+                    return ServiceError::ManagedByService;
+                }
+                if server.is_code("quota_exceeded") || server.is_trial_cap() || server.status == 507 {
+                    return ServiceError::Quota {
+                        limit_bytes: server.limit_bytes(),
+                        used_bytes: server.used_bytes(),
+                    };
+                }
+                if server.is_code("cancelled") {
+                    return ServiceError::Cancelled;
+                }
+                if server.status == 401 || server.is_code("session_expired") {
+                    return ServiceError::SessionExpired;
+                }
+                if let Some(seconds) = server.retry_after() {
+                    return ServiceError::RetryAfter { seconds };
+                }
+            }
+            return match client {
+                beebeeb_client::ClientError::Transport(_) => ServiceError::Network,
+                beebeeb_client::ClientError::InvalidAuthentication => ServiceError::Authentication,
+                _ => ServiceError::Unavailable,
+            };
+        }
+        let Some(source) = current.source() else {
+            break;
+        };
+        current = source;
+    }
+    ServiceError::unavailable()
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FileData {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub name: String,
+    pub mime_type: Option<String>,
+    pub is_folder: bool,
+    pub is_trashed: bool,
+    pub size_bytes: u64,
+    pub managed_by: Option<String>,
+    pub storage_country: Option<String>,
+}
+
+impl From<&FileRecord> for FileData {
+    fn from(value: &FileRecord) -> Self {
+        Self {
+            id: value.id.clone(),
+            parent_id: value.parent_id.clone(),
+            name: value.name.clone(),
+            mime_type: value.mime_type.clone(),
+            is_folder: value.is_folder,
+            is_trashed: value.is_trashed,
+            size_bytes: value.size_bytes,
+            managed_by: value.managed_by.clone(),
+            storage_country: value.storage_country.clone(),
+        }
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct FilePageHandle {
+    pub(crate) page: FileRecordPage,
+}
+
+#[uniffi::export]
+impl FilePageHandle {
+    pub fn records(&self) -> Vec<FileData> {
+        self.page.files.iter().map(FileData::from).collect()
+    }
+
+    pub fn next_cursor(&self) -> Option<String> {
+        self.page.next_cursor.clone()
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct EngineEventData {
+    pub kind: String,
+    pub generation: Option<u64>,
+    pub file_id: Option<String>,
+    pub observed: Option<u64>,
+    pub highest: Option<u64>,
+    pub sequence_id: Option<i64>,
+    pub user_sequence: Option<i64>,
+}
+
+impl From<EngineEvent> for EngineEventData {
+    fn from(value: EngineEvent) -> Self {
+        let mut data = Self {
+            kind: String::new(),
+            generation: None,
+            file_id: None,
+            observed: None,
+            highest: None,
+            sequence_id: None,
+            user_sequence: None,
+        };
+        match value {
+            EngineEvent::AccountChanged { generation } => {
+                data.kind = "account_changed".into();
+                data.generation = Some(generation);
+            }
+            EngineEvent::AccountMismatch => data.kind = "account_mismatch".into(),
+            EngineEvent::SessionExpired => data.kind = "session_expired".into(),
+            EngineEvent::HandOff { .. } => data.kind = "hand_off".into(),
+            EngineEvent::VersionRollback {
+                file_id,
+                observed,
+                highest,
+            } => {
+                data.kind = "version_rollback".into();
+                data.file_id = Some(file_id);
+                data.observed = Some(observed);
+                data.highest = Some(highest);
+            }
+            EngineEvent::SyncCaughtUp { seq_id, user_seq } => {
+                data.kind = "sync_caught_up".into();
+                data.sequence_id = Some(seq_id);
+                data.user_sequence = Some(user_seq);
+            }
+            EngineEvent::WorkStopped => data.kind = "work_stopped".into(),
+        }
+        data
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct EventStreamHandle {
+    runtime: ClientRuntime,
+    receiver: Mutex<tokio::sync::broadcast::Receiver<EngineEvent>>,
+}
+
+#[uniffi::export]
+impl EventStreamHandle {
+    pub fn next(&self, timeout_ms: u64) -> Result<Option<EngineEventData>, ServiceError> {
+        let mut receiver = self.receiver.lock().map_err(|_| ServiceError::unavailable())?;
+        let wait = async {
+            match tokio::time::timeout(Duration::from_millis(timeout_ms), receiver.recv()).await {
+                Ok(Ok(event)) => Ok(Some(event.into())),
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => Err(ServiceError::unavailable()),
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => Ok(None),
+                Err(_) => Ok(None),
+            }
+        };
+        self.runtime.block_on(wait)
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct NativeClientHandle {
+    pub(crate) client: Arc<Client>,
+    pub(crate) runtime: ClientRuntime,
+    pub(crate) api_base: String,
+    pub(crate) app_id: String,
+    pub(crate) secret_store: Arc<KeychainSecretStore>,
+    pub(crate) secret_access: Option<Box<dyn SecretStoreCallback>>,
+    pub(crate) session: Mutex<Option<Arc<Session>>>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct NativeClientConfiguration {
+    pub api_base: String,
+    pub client_name: String,
+    pub client_version: String,
+    pub app_id: String,
+    pub keychain_service: String,
+    pub keychain_access_group: String,
+    pub runtime_profile: RuntimeProfile,
+}
+
+impl NativeClientHandle {
+    pub(crate) fn session(&self) -> Result<Arc<Session>, ServiceError> {
+        self.session
+            .lock()
+            .map_err(|_| ServiceError::unavailable())?
+            .clone()
+            .ok_or_else(|| ServiceError::new(ServiceErrorKind::SessionRequired))
+    }
+
+    pub(crate) fn load_installed_session(&self, owner: &str) -> Result<(), ServiceError> {
+        let session = Session::load_for_user(self.secret_store.as_ref(), owner, &self.app_id)
+            .map_err(|_| ServiceError::new(ServiceErrorKind::Storage))?
+            .ok_or_else(|| ServiceError::new(ServiceErrorKind::Storage))?;
+        self.client.set_session(&session).map_err(map_client_error)?;
+        *self.session.lock().map_err(|_| ServiceError::unavailable())? = Some(Arc::new(session));
+        Ok(())
+    }
+}
+
+#[uniffi::export]
+impl NativeClientHandle {
+    #[uniffi::constructor]
+    pub fn new(
+        configuration: NativeClientConfiguration,
+        secret_access: Option<Box<dyn SecretStoreCallback>>,
+    ) -> Result<Arc<Self>, ServiceError> {
+        let app_id = configuration.app_id;
+        let api_base = configuration.api_base;
+        let config = ClientConfig::new(configuration.client_name, configuration.client_version, app_id.clone());
+        let client = Arc::new(Client::with_reqwest(config, &api_base).map_err(map_client_error)?);
+        let runtime = match configuration.runtime_profile {
+            RuntimeProfile::Application => ClientRuntime::multi_thread(),
+            RuntimeProfile::Lightweight => ClientRuntime::lightweight(),
+        }
+        .map_err(map_client_error)?;
+        Ok(Arc::new(Self {
+            client,
+            runtime,
+            api_base,
+            app_id,
+            secret_store: Arc::new(KeychainSecretStore::new(
+                configuration.keychain_service,
+                configuration.keychain_access_group,
+            )),
+            secret_access,
+            session: Mutex::new(None),
+        }))
+    }
+
+    pub fn load_session(&self, expected_user: String, app_id: String) -> Result<bool, ServiceError> {
+        if self
+            .secret_access
+            .as_ref()
+            .is_some_and(|callback| !callback.authorize_access("session".into()))
+        {
+            return Err(ServiceError::new(ServiceErrorKind::Storage));
+        }
+        let session = Session::load_for_user(self.secret_store.as_ref(), &expected_user, &app_id)
+            .map_err(|_| ServiceError::new(ServiceErrorKind::Storage))?;
+        let Some(session) = session else {
+            return Ok(false);
+        };
+        self.client.set_session(&session).map_err(map_client_error)?;
+        *self.session.lock().map_err(|_| ServiceError::unavailable())? = Some(Arc::new(session));
+        Ok(true)
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.client.generation()
+    }
+
+    pub fn events(&self) -> Arc<EventStreamHandle> {
+        Arc::new(EventStreamHandle {
+            runtime: self.runtime.clone(),
+            receiver: Mutex::new(self.client.events().subscribe()),
+        })
+    }
+
+    pub fn auth(self: &Arc<Self>) -> Arc<AuthServiceHandle> {
+        Arc::new(AuthServiceHandle { root: self.clone() })
+    }
+
+    pub fn files(self: &Arc<Self>) -> Arc<FileServiceHandle> {
+        Arc::new(FileServiceHandle { root: self.clone() })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum AuthChallengeKind {
+    TwoFactor,
+    PasswordAccepted,
+    RecoveryPasswordProven,
+}
+
+impl From<SignInStateKind> for AuthChallengeKind {
+    fn from(value: SignInStateKind) -> Self {
+        match value {
+            SignInStateKind::TwoFactor => Self::TwoFactor,
+            SignInStateKind::PasswordAccepted => Self::PasswordAccepted,
+            SignInStateKind::RecoveryPasswordProven => Self::RecoveryPasswordProven,
+        }
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct AuthChallengeHandle {
+    pub(crate) state: Mutex<Option<SignInChallenge>>,
+    kind: AuthChallengeKind,
+    canonical_email: String,
+}
+
+#[uniffi::export]
+impl AuthChallengeHandle {
+    pub fn kind(&self) -> AuthChallengeKind {
+        self.kind
+    }
+
+    pub fn canonical_email(&self) -> String {
+        self.canonical_email.clone()
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct PasswordAcceptedHandle {
+    pub(crate) state: Mutex<Option<beebeeb_client::auth::PasswordAccepted>>,
+    owner: String,
+    canonical_email: String,
+}
+
+#[derive(uniffi::Object)]
+pub struct EmailCodeChallengeHandle {
+    state: Mutex<Option<beebeeb_api::proposed::EmailCodeChallenge>>,
+    expires_at: String,
+    message: String,
+}
+
+#[uniffi::export]
+impl EmailCodeChallengeHandle {
+    pub fn expires_at(&self) -> String {
+        self.expires_at.clone()
+    }
+
+    pub fn message(&self) -> String {
+        self.message.clone()
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct EmailCodeTicketHandle {
+    state: Mutex<Option<beebeeb_api::proposed::EmailCodeTicket>>,
+    expires_in: u64,
+}
+
+#[uniffi::export]
+impl EmailCodeTicketHandle {
+    pub fn expires_in(&self) -> u64 {
+        self.expires_in
+    }
+}
+
+#[uniffi::export]
+impl PasswordAcceptedHandle {
+    pub fn owner(&self) -> String {
+        self.owner.clone()
+    }
+
+    pub fn canonical_email(&self) -> String {
+        self.canonical_email.clone()
+    }
+}
+
+pub(crate) fn password_accepted_handle(
+    accepted: beebeeb_client::auth::PasswordAccepted,
+) -> Arc<PasswordAcceptedHandle> {
+    let owner = accepted.owner().to_owned();
+    let canonical_email = accepted.canonical_email().to_owned();
+    Arc::new(PasswordAcceptedHandle {
+        state: Mutex::new(Some(accepted)),
+        owner,
+        canonical_email,
+    })
+}
+
+fn auth_challenge_handle(challenge: SignInChallenge) -> Arc<AuthChallengeHandle> {
+    let kind = challenge.kind().into();
+    let canonical_email = challenge.canonical_email().to_owned();
+    Arc::new(AuthChallengeHandle {
+        state: Mutex::new(Some(challenge)),
+        kind,
+        canonical_email,
+    })
+}
+
+#[derive(uniffi::Object)]
+pub struct AuthServiceHandle {
+    pub(crate) root: Arc<NativeClientHandle>,
+}
+
+#[uniffi::export]
+impl AuthServiceHandle {
+    pub fn sign_in(&self, email: String, password: String) -> Result<Arc<AuthChallengeHandle>, ServiceError> {
+        let challenge = self
+            .root
+            .runtime
+            .block_on(self.root.client.sign_in(&email, Zeroizing::new(password), None))
+            .map_err(|_| ServiceError::new(ServiceErrorKind::Authentication))?;
+        Ok(auth_challenge_handle(challenge))
+    }
+
+    pub fn sign_in_on_device(&self, email: String, password: String) -> Result<Arc<AuthChallengeHandle>, ServiceError> {
+        let challenge = self
+            .root
+            .runtime
+            .block_on(self.root.client.sign_in_on_device(
+                &email,
+                Zeroizing::new(password),
+                None,
+                self.root.secret_store.as_ref(),
+            ))
+            .map_err(|_| ServiceError::new(ServiceErrorKind::Authentication))?;
+        Ok(auth_challenge_handle(challenge))
+    }
+
+    pub fn submit_two_factor(
+        &self,
+        challenge: &AuthChallengeHandle,
+        code: String,
+    ) -> Result<Arc<PasswordAcceptedHandle>, ServiceError> {
+        let state = challenge
+            .state
+            .lock()
+            .map_err(|_| ServiceError::unavailable())?
+            .take()
+            .ok_or_else(|| ServiceError::new(ServiceErrorKind::InvalidInput))?;
+        let SignInChallenge::TwoFactor(state) = state else {
+            return Err(ServiceError::new(ServiceErrorKind::InvalidInput));
+        };
+        let accepted = self
+            .root
+            .runtime
+            .block_on(self.root.client.submit_two_factor(state, code))
+            .map_err(|_| ServiceError::new(ServiceErrorKind::Authentication))?;
+        Ok(password_accepted_handle(accepted))
+    }
+
+    pub fn accept_password(
+        &self,
+        challenge: &AuthChallengeHandle,
+    ) -> Result<Arc<PasswordAcceptedHandle>, ServiceError> {
+        let state = challenge
+            .state
+            .lock()
+            .map_err(|_| ServiceError::unavailable())?
+            .take()
+            .ok_or_else(|| ServiceError::new(ServiceErrorKind::InvalidInput))?;
+        let SignInChallenge::PasswordAccepted(accepted) = state else {
+            return Err(ServiceError::new(ServiceErrorKind::InvalidInput));
+        };
+        Ok(password_accepted_handle(accepted))
+    }
+
+    pub fn unlock_known_device(&self, accepted: &PasswordAcceptedHandle) -> Result<u64, ServiceError> {
+        self.refuse_account_mismatch(accepted)?;
+        let accepted = take_password_accepted(accepted)?;
+        let owner = accepted.owner().to_owned();
+        let installed = self
+            .root
+            .runtime
+            .block_on(
+                self.root
+                    .client
+                    .unlock_known_device(accepted, self.root.secret_store.as_ref()),
+            )
+            .map_err(|_| ServiceError::new(ServiceErrorKind::Authentication))?;
+        self.root.load_installed_session(&owner)?;
+        Ok(installed.generation())
+    }
+
+    pub fn install_new_device_with_passkey(
+        &self,
+        accepted: &PasswordAcceptedHandle,
+        master_key: &MasterKeyHandle,
+        email_ticket: &EmailCodeTicketHandle,
+    ) -> Result<u64, ServiceError> {
+        self.install_new_device(accepted, master_key, email_ticket, true, None)
+    }
+
+    pub fn install_new_device_with_recovery_key(
+        &self,
+        accepted: &PasswordAcceptedHandle,
+        master_key: &MasterKeyHandle,
+        email_ticket: &EmailCodeTicketHandle,
+    ) -> Result<u64, ServiceError> {
+        self.install_new_device(accepted, master_key, email_ticket, false, None)
+    }
+
+    pub fn install_new_device_with_passkey_replacing_account(
+        &self,
+        accepted: &PasswordAcceptedHandle,
+        master_key: &MasterKeyHandle,
+        email_ticket: &EmailCodeTicketHandle,
+        replacement: &AccountReplacementHandle,
+    ) -> Result<u64, ServiceError> {
+        self.install_new_device(accepted, master_key, email_ticket, true, Some(replacement))
+    }
+
+    pub fn install_new_device_with_recovery_key_replacing_account(
+        &self,
+        accepted: &PasswordAcceptedHandle,
+        master_key: &MasterKeyHandle,
+        email_ticket: &EmailCodeTicketHandle,
+        replacement: &AccountReplacementHandle,
+    ) -> Result<u64, ServiceError> {
+        self.install_new_device(accepted, master_key, email_ticket, false, Some(replacement))
+    }
+
+    pub fn request_email_code(&self, email: String) -> Result<Arc<EmailCodeChallengeHandle>, ServiceError> {
+        let challenge = self
+            .root
+            .runtime
+            .block_on(self.root.client.request_email_code(email))
+            .map_err(map_client_error)?;
+        Ok(Arc::new(EmailCodeChallengeHandle {
+            expires_at: challenge.expires_at.clone(),
+            message: challenge.message.clone(),
+            state: Mutex::new(Some(challenge)),
+        }))
+    }
+
+    pub fn submit_email_code(
+        &self,
+        challenge: &EmailCodeChallengeHandle,
+        code: String,
+    ) -> Result<Arc<EmailCodeTicketHandle>, ServiceError> {
+        let challenge = challenge
+            .state
+            .lock()
+            .map_err(|_| ServiceError::unavailable())?
+            .take()
+            .ok_or_else(|| ServiceError::new(ServiceErrorKind::InvalidInput))?;
+        let ticket = self
+            .root
+            .runtime
+            .block_on(self.root.client.submit_email_code(challenge.challenge, code))
+            .map_err(map_client_error)?;
+        Ok(Arc::new(EmailCodeTicketHandle {
+            expires_in: ticket.expires_in,
+            state: Mutex::new(Some(ticket)),
+        }))
+    }
+
+    pub fn create_passkey_copy(&self, prompt: Box<dyn PasskeyPrompt>) -> Result<String, ServiceError> {
+        let adapter = PasskeyPromptAdapter {
+            callback: prompt,
+            account_id: self.root.client.account_id().map_err(map_client_error)?,
+        };
+        self.root
+            .runtime
+            .block_on(self.root.client.create_passkey_copy(&adapter))
+            .map_err(|_| ServiceError::new(ServiceErrorKind::Authentication))
+    }
+
+    pub fn open_with_passkey(
+        &self,
+        accepted: &PasswordAcceptedHandle,
+        prompt: Box<dyn PasskeyPrompt>,
+    ) -> Result<Arc<MasterKeyHandle>, ServiceError> {
+        let state = accepted.state.lock().map_err(|_| ServiceError::unavailable())?;
+        let accepted = state
+            .as_ref()
+            .ok_or_else(|| ServiceError::new(ServiceErrorKind::InvalidInput))?;
+        let adapter = PasskeyPromptAdapter {
+            callback: prompt,
+            account_id: accepted.owner().to_owned(),
+        };
+        let key = self
+            .root
+            .runtime
+            .block_on(self.root.client.open_with_passkey(accepted, &adapter))
+            .map_err(|_| ServiceError::new(ServiceErrorKind::Authentication))?;
+        Ok(MasterKeyHandle::new(key))
+    }
+}
+
+impl AuthServiceHandle {
+    pub(crate) fn refuse_account_mismatch(&self, accepted: &PasswordAcceptedHandle) -> Result<(), ServiceError> {
+        let stored = Session::stored_owner(self.root.secret_store.as_ref())
+            .map_err(|_| ServiceError::new(ServiceErrorKind::Storage))?;
+        if stored.as_deref().is_some_and(|owner| owner != accepted.owner) {
+            Err(ServiceError::new(ServiceErrorKind::AnotherAccountOnDevice))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn install_new_device(
+        &self,
+        accepted: &PasswordAcceptedHandle,
+        master_key: &MasterKeyHandle,
+        email_ticket: &EmailCodeTicketHandle,
+        passkey: bool,
+        replacement: Option<&AccountReplacementHandle>,
+    ) -> Result<u64, ServiceError> {
+        if replacement.is_none() {
+            self.refuse_account_mismatch(accepted)?;
+        }
+        let accepted = take_password_accepted(accepted)?;
+        let owner = accepted.owner().to_owned();
+        let mut unlock = if passkey {
+            beebeeb_client::auth::NewDeviceUnlock::passkey(accepted)
+        } else {
+            beebeeb_client::auth::NewDeviceUnlock::recovery(accepted)
+        }
+        .map_err(|_| ServiceError::new(ServiceErrorKind::Authentication))?;
+        let ticket = email_ticket
+            .state
+            .lock()
+            .map_err(|_| ServiceError::unavailable())?
+            .take()
+            .ok_or_else(|| ServiceError::new(ServiceErrorKind::InvalidInput))?;
+        unlock
+            .provide_email_code_ticket(ticket)
+            .map_err(|_| ServiceError::new(ServiceErrorKind::Authentication))?;
+        let key = copy_master_key(master_key)?;
+        let key_bytes = Zeroizing::new(*key.to_bytes());
+        let key = MasterKey::from_bytes(*key_bytes);
+        if passkey {
+            unlock.provide_passkey(key)
+        } else {
+            unlock.provide_recovery_key(key)
+        }
+        .map_err(|_| ServiceError::new(ServiceErrorKind::Authentication))?;
+        let ready = unlock
+            .into_ready()
+            .map_err(|_| ServiceError::new(ServiceErrorKind::Authentication))?;
+        let installed = if let Some(replacement) = replacement {
+            let replacement = replacement.take(&self.root)?;
+            self.root
+                .runtime
+                .block_on(self.root.client.install_new_device_replacing_account(
+                    ready,
+                    &self.root.api_base,
+                    self.root.secret_store.as_ref(),
+                    replacement,
+                ))
+        } else {
+            self.root.runtime.block_on(self.root.client.install_new_device(
+                ready,
+                &self.root.api_base,
+                self.root.secret_store.as_ref(),
+            ))
+        }
+        .map_err(|_| ServiceError::new(ServiceErrorKind::Authentication))?;
+        self.root.load_installed_session(&owner)?;
+        Ok(installed.generation())
+    }
+}
+
+pub(crate) fn take_password_accepted(
+    handle: &PasswordAcceptedHandle,
+) -> Result<beebeeb_client::auth::PasswordAccepted, ServiceError> {
+    handle
+        .state
+        .lock()
+        .map_err(|_| ServiceError::unavailable())?
+        .take()
+        .ok_or_else(|| ServiceError::new(ServiceErrorKind::InvalidInput))
+}
+
+#[uniffi::export(callback_interface)]
+pub trait SecretStoreCallback: Send + Sync {
+    /// Authorize Rust to access a named native secret. Secret bytes never enter
+    /// the callback; storage is performed by the Rust Keychain backend.
+    fn authorize_access(&self, name: String) -> bool;
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct PasskeyPromptResult {
+    pub credential_id: String,
+    pub prf_output: Vec<u8>,
+    pub user_verified: bool,
+}
+
+#[uniffi::export(callback_interface)]
+pub trait PasskeyPrompt: Send + Sync {
+    fn create(&self, account_id: String) -> Option<PasskeyPromptResult>;
+    fn authenticate(&self, account_id: String) -> Option<PasskeyPromptResult>;
+}
+
+struct PasskeyPromptAdapter {
+    callback: Box<dyn PasskeyPrompt>,
+    account_id: String,
+}
+
+impl beebeeb_client::auth::PasskeyPrompt for PasskeyPromptAdapter {
+    fn create<'a>(&'a self) -> beebeeb_client::auth::PasskeyPromptFuture<'a> {
+        Box::pin(async move {
+            let output = self
+                .callback
+                .create(self.account_id.clone())
+                .filter(|output| output.user_verified)
+                .ok_or(beebeeb_client::auth::PasskeyPromptError)?;
+            Ok(beebeeb_client::auth::PasskeyPromptOutput {
+                credential_id: output.credential_id,
+                prf_output: Zeroizing::new(output.prf_output),
+            })
+        })
+    }
+
+    fn authenticate<'a>(&'a self) -> beebeeb_client::auth::PasskeyPromptFuture<'a> {
+        Box::pin(async move {
+            let output = self
+                .callback
+                .authenticate(self.account_id.clone())
+                .filter(|output| output.user_verified)
+                .ok_or(beebeeb_client::auth::PasskeyPromptError)?;
+            Ok(beebeeb_client::auth::PasskeyPromptOutput {
+                credential_id: output.credential_id,
+                prf_output: Zeroizing::new(output.prf_output),
+            })
+        })
+    }
+}
+
+#[uniffi::export(callback_interface)]
+pub trait ImageCodecCallback: Send + Sync {
+    fn encode(&self, source_path: String, max_dimension: u32, quality: f32, format: String) -> Option<Vec<u8>>;
+}
+
+struct ImageCodecAdapter {
+    callback: Box<dyn ImageCodecCallback>,
+}
+
+impl ImageCodec for ImageCodecAdapter {
+    fn encode(
+        &self,
+        source_path: &std::path::Path,
+        max_dimension: u32,
+        quality: f32,
+        format: ThumbnailFormat,
+    ) -> Result<Vec<u8>, ImageCodecError> {
+        self.callback
+            .encode(
+                source_path.to_string_lossy().into_owned(),
+                max_dimension,
+                quality,
+                format.as_str().into(),
+            )
+            .ok_or(ImageCodecError::Encode)
+    }
+}
+
+#[uniffi::export(callback_interface)]
+pub trait ChunkTransport: Send + Sync {
+    fn upload_file(&self, location: String, headers: Vec<String>, body_path: String) -> u16;
+    fn download_range(&self, location: String, start: Option<u64>, end: Option<u64>, max_bytes: u64)
+    -> Option<Vec<u8>>;
+    fn cancel_background(&self, tickets: Vec<String>) -> bool;
+}

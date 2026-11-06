@@ -11,8 +11,11 @@ mod zeroing_alloc;
 #[global_allocator]
 static GLOBAL_ALLOCATOR: zeroing_alloc::ZeroingAllocator = zeroing_alloc::ZeroingAllocator;
 
+mod device_security;
 mod exports;
 mod request_row_exports;
+
+pub use device_security::*;
 
 use beebeeb_core::client_meta as cm;
 use beebeeb_core::encrypt;
@@ -295,10 +298,9 @@ pub fn opaque_login_start(password: &[u8]) -> Result<JsValue, JsError> {
 
 /// Finish OPAQUE client login. Returns `{ message: Uint8Array, session_key: Uint8Array, export_key: Uint8Array }`.
 ///
-/// `ksf_version` selects the KSF the account's password file was registered
-/// under (0 = legacy Identity KSF, anything else = current Argon2id). The web
-/// client reads it from the login-start response (`server_state` JSON) and
-/// passes it through verbatim. The KSF must match or finish fails.
+/// Normal login accepts only the current KSF version (1). A server-supplied
+/// legacy or unknown version is rejected; legacy accounts require the explicit
+/// migration path in core.
 #[wasm_bindgen]
 pub fn opaque_login_finish(
     client_state: &[u8],
@@ -830,8 +832,7 @@ impl WasmChunkEncryptor {
         self.inner.chunks_emitted()
     }
 
-    /// The chunk format this encryptor writes: 1 = v1, 2 = v2 (task 1908).
-    /// Still 1 during the read-only rollout phase. Record it at upload via
+    /// The chunk format this encryptor writes: 2 = v2. Record it at upload via
     /// `encrypt_name_with_chunk_format` (2 if this is 2, else 0) so readers
     /// can pin it.
     #[wasm_bindgen(getter)]
@@ -839,20 +840,32 @@ impl WasmChunkEncryptor {
         self.inner.format().as_u8()
     }
 
+    /// Protected metadata values after frame 0 has been emitted. The previous
+    /// counter is omitted for a new file and supplied for a replacement.
+    #[wasm_bindgen(js_name = versionCommitment)]
+    pub fn version_commitment(&self, previous_counter: Option<f64>) -> Result<JsValue, JsError> {
+        let previous_counter = previous_counter.map(version_counter_from_js).transpose()?;
+        let version = self
+            .inner
+            .version_commitment_after(previous_counter)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let value = js_sys::Object::new();
+        set(
+            &value,
+            "versionId",
+            js_sys::Uint8Array::from(version.version_id.as_slice()).into(),
+        )?;
+        set(&value, "versionCounter", JsValue::from_f64(version.counter as f64))?;
+        Ok(value.into())
+    }
+
     /// Replace / new version of an EXISTING file (task 1908 round 4, I-1):
     /// returns this encryptor writing in the format the file's recorded pin
     /// requires. `recordedPin` = the `chunk_format` from
     /// `decrypt_file_metadata` (0 = unrecorded, 2 = v2), never a server field.
-    /// A v2 pin forces v2 frames even during the read-only phase; 0 keeps the
-    /// default. Before the first `pushChunk` only; other codes throw. Consumes
+    /// Both supported pins produce v2 output; 0 preserves compatibility with
+    /// legacy history. Before the first `pushChunk` only; other codes throw. Consumes
     /// the old JS object — use the returned one.
-    ///
-    /// **New-file rule (lead ruling 2026-10-17):** pass 2 ONLY when it was
-    /// read from an EXISTING file's authenticated metadata. A brand-new file
-    /// makes NO call (the default write format applies) and records `format`
-    /// in its name; passing 2 for a new file would create a v2 file before the
-    /// switch. Core cannot enforce this; the web client keeps a test that its
-    /// new-file path never calls this with 2.
     #[wasm_bindgen(js_name = withRecordedPin)]
     pub fn with_recorded_pin(self, recorded_pin: u8) -> Result<WasmChunkEncryptor, JsError> {
         let inner = recorded_pin_core(self.inner, recorded_pin).map_err(|e| JsError::new(&e.to_string()))?;
@@ -952,6 +965,30 @@ impl WasmChunkDecryptor {
         })
     }
 
+    /// Protected current or historical read. Supply the fields from that
+    /// version's own decrypted metadata record.
+    #[wasm_bindgen(js_name = forVersion)]
+    pub fn for_version(
+        master_key: &[u8],
+        file_id: String,
+        expected_chunk_format: u8,
+        version_id: &[u8],
+        version_counter: f64,
+    ) -> Result<WasmChunkDecryptor, JsError> {
+        let mk = master_key_from_slice(master_key)?;
+        let expected = expected_from_u8(expected_chunk_format)?;
+        let version = version_commitment_from_js(version_id, version_counter)?;
+        let file_key = kdf::derive_file_key(&mk, file_id.as_bytes());
+        Ok(Self {
+            inner: beebeeb_core::chunk_stream::ChunkDecryptor::for_version_with_file_key(
+                file_key,
+                &file_id,
+                expected,
+                Some(version),
+            ),
+        })
+    }
+
     /// v2: the upload's version id (chunk 0's 12-byte nonce) once chunk 0 has
     /// authenticated — what a seeking reader passes to `decrypt_chunk_frame`.
     /// `undefined` before chunk 0 and for v1 files.
@@ -1028,6 +1065,28 @@ fn expected_from_u8(code: u8) -> Result<beebeeb_core::chunk_stream::ExpectedChun
     beebeeb_core::chunk_stream::ExpectedChunkFormat::from_u8(code).map_err(|e| JsError::new(&e.to_string()))
 }
 
+fn version_counter_from_js(counter: f64) -> Result<u64, JsError> {
+    if !counter.is_finite()
+        || counter.fract() != 0.0
+        || counter < 1.0
+        || counter > beebeeb_core::chunk_stream::MAX_VERSION_COUNTER as f64
+    {
+        return Err(JsError::new("versionCounter must be a positive safe integer"));
+    }
+    Ok(counter as u64)
+}
+
+fn version_commitment_from_js(
+    version_id: &[u8],
+    version_counter: f64,
+) -> Result<beebeeb_core::chunk_stream::VersionCommitment, JsError> {
+    let version_id = version_id
+        .try_into()
+        .map_err(|_| JsError::new("versionId must be exactly 12 bytes"))?;
+    beebeeb_core::chunk_stream::VersionCommitment::new(version_id, version_counter_from_js(version_counter)?)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
 /// Encrypt a filename (+ MIME) into a `name_encrypted` envelope that also
 /// records the file's chunk format (task 1908): `chunk_format` 2 = every upload
 /// of this file id is v2, 0 = record nothing (the pre-1908 shape). New file:
@@ -1049,20 +1108,46 @@ pub fn encrypt_name_with_chunk_format(
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Seal protected metadata for a newly written version.
+#[wasm_bindgen]
+pub fn encrypt_name_with_version(
+    master_key: &[u8],
+    file_id: &str,
+    filename: &str,
+    mime_type: Option<String>,
+    chunk_format: u8,
+    version_id: &[u8],
+    version_counter: f64,
+) -> Result<String, JsError> {
+    let mk = master_key_from_slice(master_key)?;
+    let chunk_format = expected_from_u8(chunk_format)?;
+    let version = version_commitment_from_js(version_id, version_counter)?;
+    encrypt::encrypt_name_with_version(&mk, file_id, filename, mime_type.as_deref(), chunk_format, version)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
 #[derive(serde::Serialize)]
 struct NameMetadataJs {
     name: String,
     mime_type: Option<String>,
     /// 0 = unrecorded (detect), 2 = v2 — pass to `WasmChunkDecryptor`.
     chunk_format: u8,
+    version_id: Option<String>,
+    version_counter: Option<u64>,
 }
 
 impl From<encrypt::NameMetadata> for NameMetadataJs {
     fn from(m: encrypt::NameMetadata) -> Self {
+        let version_id = m
+            .version
+            .map(|version| version.version_id.iter().map(|byte| format!("{byte:02x}")).collect());
+        let version_counter = m.version.map(|version| version.counter);
         Self {
             name: m.name,
             mime_type: m.mime_type,
             chunk_format: m.chunk_format.as_u8(),
+            version_id,
+            version_counter,
         }
     }
 }
@@ -1648,7 +1733,7 @@ impl WasmSignupCeremony {
     #[wasm_bindgen(js_name = accountCreated)]
     pub fn account_created(&mut self) -> Result<js_sys::Uint8Array, JsValue> {
         let key = self.inner.account_created().map_err(ceremony_error)?;
-        let bytes = zeroize::Zeroizing::new(key.to_bytes());
+        let bytes = key.to_bytes();
         Ok(js_sys::Uint8Array::from(&bytes[..]))
     }
 }
@@ -3561,7 +3646,7 @@ mod tests {
         // Explicit 16-byte chunks => 3 frames (16 + 16 + 8); exercises the
         // server-dictated-chunk-size constructor.
         let mut enc =
-            WasmChunkEncryptor::with_chunk_size(&mk_bytes, file_id.to_string(), data.len() as u64, 16).unwrap();
+            WasmChunkEncryptor::with_chunk_size(mk_bytes.as_ref(), file_id.to_string(), data.len() as u64, 16).unwrap();
         assert_eq!(enc.chunk_count(), 3);
         assert_eq!(enc.chunk_size(), 16.0);
         assert_eq!(enc.expected_total_ciphertext(), (40 + 28 * 3) as f64);
@@ -3594,7 +3679,8 @@ mod tests {
         let file_id = "wasm-file-2";
         let data = pattern(1000); // < 4 MiB floor => single chunk on any profile
 
-        let mut enc = WasmChunkEncryptor::new(&mk_bytes, file_id.to_string(), data.len() as u64, "web").unwrap();
+        let mut enc =
+            WasmChunkEncryptor::new(mk_bytes.as_ref(), file_id.to_string(), data.len() as u64, "web").unwrap();
         assert_eq!(enc.chunk_count(), 1);
 
         let chunk_size = enc.chunk_size() as usize;
@@ -3609,8 +3695,8 @@ mod tests {
     #[test]
     fn wasm_decryptor_roundtrip_and_v2_format() {
         // Task 1908: the web decryptor (both constructors, pinned v2 as the
-        // metadata records it) reads v2 back in order; the web encryptor still
-        // writes v1 during the read-only rollout. Error paths throw JsError,
+        // metadata records it) reads v2 back in order; the web encryptor also
+        // writes v2. Error paths throw JsError,
         // which cannot be constructed off-wasm (see NOTE below), so only the
         // success seams are exercised here; the rejection cases live in core.
         use beebeeb_core::chunk_stream::{ChunkEncryptor, ChunkFormat, ExpectedChunkFormat};
@@ -3618,10 +3704,11 @@ mod tests {
         let mk_bytes = mk.to_bytes();
         let file_id = "wasm-dec-1";
         let data = pattern(40);
-        let enc = WasmChunkEncryptor::with_chunk_size(&mk_bytes, file_id.to_string(), data.len() as u64, 16).unwrap();
-        assert_eq!(enc.format(), 1, "web uploads stay v1 until the gated v2 switch");
+        let enc =
+            WasmChunkEncryptor::with_chunk_size(mk_bytes.as_ref(), file_id.to_string(), data.len() as u64, 16).unwrap();
+        assert_eq!(enc.format(), 2, "web uploads use v2");
 
-        // v2 frames as a client writes them after the switch (dev-only feature).
+        // Explicit v2 frames exercise the fixed-size test seam.
         let mut enc = ChunkEncryptor::for_push_with_chunk_size(&mk, file_id, data.len() as u64, 16)
             .unwrap()
             .with_format(ChunkFormat::V2)
@@ -3630,12 +3717,12 @@ mod tests {
         enc.finish().unwrap();
 
         // The name metadata a v2 upload writes records 2.
-        let ne = encrypt_name_with_chunk_format(&mk_bytes, file_id, "a.txt", None, 2).unwrap();
+        let ne = encrypt_name_with_chunk_format(mk_bytes.as_ref(), file_id, "a.txt", None, 2).unwrap();
         let meta = encrypt::decrypt_name_metadata(&mk, file_id, &ne).unwrap();
         assert_eq!(meta.chunk_format, ExpectedChunkFormat::V2);
         let pin = meta.chunk_format.as_u8();
 
-        let mut dec = WasmChunkDecryptor::new(&mk_bytes, file_id.to_string(), pin).unwrap();
+        let mut dec = WasmChunkDecryptor::new(mk_bytes.as_ref(), file_id.to_string(), pin).unwrap();
         assert_eq!(dec.format(), 0);
         assert_eq!(dec.version_id(), None);
         let mut out = Vec::new();
@@ -3785,11 +3872,11 @@ mod tests {
         let mk = kdf::derive_master_key("test-password", b"test-salt-16bytes").unwrap();
         let mk_bytes = mk.to_bytes();
         let id = "wasm-replace-v2";
-        let name = encrypt_name_with_chunk_format(&mk_bytes, id, "a.pdf", None, 2).unwrap();
+        let name = encrypt_name_with_chunk_format(mk_bytes.as_ref(), id, "a.pdf", None, 2).unwrap();
         let pin = encrypt::decrypt_file_metadata(&mk, id, &name).unwrap().chunk_format;
         assert_eq!(pin.as_u8(), 2);
         let data = pattern(40);
-        let mut enc = WasmChunkEncryptor::with_chunk_size(&mk_bytes, id.to_string(), data.len() as u64, 16)
+        let mut enc = WasmChunkEncryptor::with_chunk_size(mk_bytes.as_ref(), id.to_string(), data.len() as u64, 16)
             .unwrap()
             .with_recorded_pin(pin.as_u8())
             .unwrap();
@@ -3804,12 +3891,12 @@ mod tests {
         dec.finish().unwrap();
         assert_eq!(out, data);
 
-        let unrec = WasmChunkEncryptor::with_chunk_size(&mk_bytes, "wasm-replace-v1".into(), 4, 16)
+        let unrec = WasmChunkEncryptor::with_chunk_size(mk_bytes.as_ref(), "wasm-replace-v1".into(), 4, 16)
             .unwrap()
             .with_recorded_pin(0)
             .unwrap();
         assert_eq!(unrec.format(), beebeeb_core::chunk_stream::WRITE_FORMAT.as_u8());
-        let bad = WasmChunkEncryptor::with_chunk_size(&mk_bytes, "wasm-bad-pin".into(), 4, 16).unwrap();
+        let bad = WasmChunkEncryptor::with_chunk_size(mk_bytes.as_ref(), "wasm-bad-pin".into(), 4, 16).unwrap();
         assert!(recorded_pin_core(bad.inner, 1).is_err());
 
         let fk = kdf::derive_file_key(&mk, b"wasm-thumb-pin");
@@ -3823,12 +3910,12 @@ mod tests {
 
     #[test]
     fn resume_policy_and_thumbnail_wrappers() {
-        // Task 1908 round 3: the resume rule and the thumbnail seal through the
-        // WASM wrappers (native seams; the JsError paths need a JS runtime).
+        // Production v2 writes always restart an interrupted upload session.
+        // The JsError paths need a JS runtime and are covered separately.
         let mk = kdf::derive_master_key("test-password", b"test-salt-16bytes").unwrap();
         let enc =
             beebeeb_core::chunk_stream::ChunkEncryptor::for_push_with_chunk_size(&mk, "wasm-resume", 10, 16).unwrap();
-        assert_eq!(resume_policy_str(&enc, Some(1)).unwrap(), "continue");
+        assert_eq!(resume_policy_str(&enc, Some(1)).unwrap(), "restart");
         assert_eq!(resume_policy_str(&enc, None).unwrap(), "restart");
         assert_eq!(resume_policy_str(&enc, Some(2)).unwrap(), "restart");
         assert!(resume_policy_str(&enc, Some(9)).is_err());
@@ -5091,6 +5178,16 @@ impl WasmWriteTarget {
     pub fn pin(&self) -> u8 {
         self.inner.pin().as_u8()
     }
+
+    #[wasm_bindgen(getter, js_name = versionId)]
+    pub fn version_id(&self) -> Option<Vec<u8>> {
+        self.inner.version().map(|version| version.version_id.to_vec())
+    }
+
+    #[wasm_bindgen(getter, js_name = versionCounter)]
+    pub fn version_counter(&self) -> Option<f64> {
+        self.inner.version().map(|version| version.counter as f64)
+    }
 }
 
 /// Mint a new owner (O) item id (random UUID v4) for `master_key`.
@@ -5276,6 +5373,27 @@ pub fn encrypt_name_for_new_item(
     .map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Protected name metadata for a NEW row after frame 0 was emitted.
+#[wasm_bindgen(js_name = encryptNameForNewItemVersion)]
+pub fn encrypt_name_for_new_item_version(
+    item_id: &WasmNewItemId,
+    filename: &str,
+    mime_type: Option<String>,
+    pin: u8,
+    version_id: &[u8],
+    version_counter: f64,
+) -> Result<String, JsError> {
+    encrypt::encrypt_name_for_new_item_version(
+        &item_id.master,
+        &item_id.id,
+        filename,
+        mime_type.as_deref(),
+        pin_of(pin)?,
+        version_commitment_from_js(version_id, version_counter)?,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
+}
+
 /// Seal a replacement name through the resolved row's write target. The key and
 /// the pin come from the target, so a caller cannot substitute either.
 #[wasm_bindgen(js_name = encryptNameForTarget)]
@@ -5286,6 +5404,24 @@ pub fn encrypt_name_for_target(
 ) -> Result<String, JsError> {
     encrypt::encrypt_name_for_target(&target.inner, filename, mime_type.as_deref())
         .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Protected metadata for a replacement version through the resolved target.
+#[wasm_bindgen(js_name = encryptNameForTargetVersion)]
+pub fn encrypt_name_for_target_version(
+    target: &WasmWriteTarget,
+    filename: &str,
+    mime_type: Option<String>,
+    version_id: &[u8],
+    version_counter: f64,
+) -> Result<String, JsError> {
+    encrypt::encrypt_name_for_target_version(
+        &target.inner,
+        filename,
+        mime_type.as_deref(),
+        version_commitment_from_js(version_id, version_counter)?,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Seal a note for a NEW row minted by `newOwnerItemId`/`newForeignItemId`.

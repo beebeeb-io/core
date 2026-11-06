@@ -26,6 +26,24 @@ pub const IEC_BASE: u64 = 1_024;
 const SI_UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
 const IEC_UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FormatPrecisionError {
+    pub requested: usize,
+    pub maximum: usize,
+}
+
+impl std::fmt::Display for FormatPrecisionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "format precision {} exceeds maximum {}",
+            self.requested, self.maximum
+        )
+    }
+}
+
+impl std::error::Error for FormatPrecisionError {}
+
 /// Formats a byte count in decimal units, the canonical storage form.
 ///
 /// Byte-identical to the historical `quota::format_storage_si`: `0 B`,
@@ -79,6 +97,21 @@ pub fn format_binary(bytes: i64) -> String {
 /// that rounds up to the next unit is carried into it. Byte counts below
 /// 1,000 always print as `N B` with no decimals.
 pub fn format_compact(bytes: i64, decimals: usize) -> String {
+    format_compact_inner(bytes, decimals.min(crate::limits::MAX_FORMAT_PRECISION))
+}
+
+/// Rejecting form for binding and caller values.
+pub fn try_format_compact(bytes: i64, decimals: usize) -> Result<String, FormatPrecisionError> {
+    if decimals > crate::limits::MAX_FORMAT_PRECISION {
+        return Err(FormatPrecisionError {
+            requested: decimals,
+            maximum: crate::limits::MAX_FORMAT_PRECISION,
+        });
+    }
+    Ok(format_compact_inner(bytes, decimals))
+}
+
+fn format_compact_inner(bytes: i64, decimals: usize) -> String {
     if bytes < SI_BASE as i64 {
         return format!("{bytes} B");
     }
@@ -96,4 +129,16 @@ pub fn format_compact(bytes: i64, decimals: usize) -> String {
         text = format!("{value:.decimals$}");
     }
     format!("{text} {}", SI_UNITS[unit])
+}
+
+#[cfg(test)]
+mod limit_tests {
+    use super::*;
+
+    #[test]
+    fn excessive_precision_is_rejected_and_convenience_form_is_bounded() {
+        assert!(try_format_compact(1_000, 3).is_err());
+        assert!(try_format_compact(1_000, usize::MAX).is_err());
+        assert_eq!(format_compact(1_000, usize::MAX), "1.00 KB");
+    }
 }

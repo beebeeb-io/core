@@ -25,6 +25,10 @@ use beebeeb_core::direct_transfer::{
     Outcome, PinnedRetry, PlannerConfig, Poll, STORAGE_CONNECT_TIMEOUT, STORAGE_GET_IDLE, StorageBody, StorageGet,
     Verdict, classify, download_grants_path, max_in_flight_bytes, paced_until_ms, pinned_chunk_path, storage_get_total,
 };
+use beebeeb_core::download::{DownloadFailure as CoreDownloadFailure, checked_frame_size_with_budget};
+use beebeeb_core::encrypt::NameMetadata;
+use beebeeb_core::kdf::MasterKey;
+use beebeeb_types::limits::MemoryBudget;
 use bytes::Bytes;
 use futures_util::future::{Either, select};
 use futures_util::stream::{FuturesUnordered, StreamExt};
@@ -46,6 +50,12 @@ pub struct DownloadRequest {
     /// version means the file changed.
     pub pinned_version: Option<String>,
     pub memory: MemoryClass,
+    /// Per-platform resource ceiling. A valid frame above this limit is
+    /// handed off to a less constrained context before any storage fetch.
+    pub budget: MemoryBudget,
+    /// Plaintext chunk stride from authenticated metadata, when present.
+    /// This wins over a server-supplied stride and must agree with it.
+    pub authenticated_chunk_size: Option<u64>,
     /// `Some(kbps)`: hold the wire rate at or under this (KiB/s).
     pub kbps_limit: Option<u64>,
     /// The caller asked for the API path; no request is made.
@@ -84,6 +94,8 @@ pub trait PlaintextSink: Send {
 pub enum AfterWriteCause {
     /// The direct attempt cannot finish, but the API path can serve the file.
     ApiNeeded(UseApiReason),
+    /// A later window exposed a frame too large for this context.
+    HandOff { frame_size: u64, context_limit: u64 },
     /// The attempt failed for a reason the API path will not fix.
     Failed(Box<DownloadError>),
 }
@@ -92,6 +104,7 @@ impl fmt::Display for AfterWriteCause {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AfterWriteCause::ApiNeeded(_) => f.write_str("the API path must serve the file"),
+            AfterWriteCause::HandOff { .. } => f.write_str("a less constrained context must serve the file"),
             AfterWriteCause::Failed(error) => write!(f, "{error}"),
         }
     }
@@ -159,7 +172,7 @@ impl std::error::Error for DownloadError {
             DownloadError::Sink(e) => Some(e),
             DownloadError::DirectFailedAfterWrite { cause, .. } => match cause {
                 AfterWriteCause::Failed(error) => Some(error.as_ref()),
-                AfterWriteCause::ApiNeeded(_) => None,
+                AfterWriteCause::ApiNeeded(_) | AfterWriteCause::HandOff { .. } => None,
             },
             _ => None,
         }
@@ -193,6 +206,9 @@ pub enum DownloadOutcome {
     /// The API path must serve this file; the sink holds nothing (never
     /// written, or discarded).
     UseApi(UseApiReason),
+    /// The file is valid, but this execution context cannot buffer one frame.
+    /// The caller should hand the request to its main application.
+    HandOff { frame_size: u64, context_limit: u64 },
 }
 
 /// The dirty flag and the counters of one attempt, plus the drop guard that
@@ -268,6 +284,13 @@ impl<'a> Attempt<'a> {
             _ => {
                 let cause = match result {
                     Ok(DownloadOutcome::UseApi(reason)) => AfterWriteCause::ApiNeeded(reason),
+                    Ok(DownloadOutcome::HandOff {
+                        frame_size,
+                        context_limit,
+                    }) => AfterWriteCause::HandOff {
+                        frame_size,
+                        context_limit,
+                    },
                     Err(error) => AfterWriteCause::Failed(Box::new(error)),
                     Ok(DownloadOutcome::Done(_)) => unreachable!("handled above"),
                 };
@@ -368,6 +391,91 @@ pub async fn download<I: DirectIo>(
     let mut attempt = Attempt::new(sink, observer);
     let end = run(io, shared, &req, decryptor, &mut attempt, observer).await;
     finish_attempt(attempt, end, io, shared, observer)
+}
+
+/// Current-version entry point. The authenticated metadata supplies both the
+/// chunk-format pin and the committed version id.
+pub async fn download_current<I: DirectIo>(
+    io: &I,
+    shared: &DirectShared,
+    req: DownloadRequest,
+    master_key: &MasterKey,
+    metadata: &NameMetadata,
+    sink: &mut dyn PlaintextSink,
+    observer: &dyn Observer,
+) -> Result<DownloadOutcome, DownloadError> {
+    let decryptor = ChunkDecryptor::for_current_version(master_key, &req.file_id, metadata);
+    download(io, shared, req, decryptor, sink, observer).await
+}
+
+/// Historical-version entry point. Callers pass the selected version's own
+/// authenticated metadata, never the current version's metadata.
+pub async fn download_historical<I: DirectIo>(
+    io: &I,
+    shared: &DirectShared,
+    req: DownloadRequest,
+    master_key: &MasterKey,
+    historical_metadata: &NameMetadata,
+    sink: &mut dyn PlaintextSink,
+    observer: &dyn Observer,
+) -> Result<DownloadOutcome, DownloadError> {
+    let decryptor = ChunkDecryptor::for_historical_version(master_key, &req.file_id, historical_metadata);
+    download(io, shared, req, decryptor, sink, observer).await
+}
+
+#[cfg(unix)]
+struct TrustedFileSink {
+    file: Option<std::fs::File>,
+}
+
+#[cfg(unix)]
+impl PlaintextSink for TrustedFileSink {
+    fn write(&mut self, plain: &[u8]) -> std::io::Result<()> {
+        use std::io::Write as _;
+        self.file
+            .as_mut()
+            .ok_or_else(|| std::io::Error::other("the output was discarded"))?
+            .write_all(plain)
+    }
+
+    fn discardable(&self) -> bool {
+        true
+    }
+
+    fn discard(&mut self) -> std::io::Result<()> {
+        self.file.take();
+        Ok(())
+    }
+}
+
+/// Download the current version and atomically publish it relative to an
+/// already-open trusted directory. The restrictive `.bbtmp-*` sibling is
+/// removed on every handoff or failure and renamed only after full stream
+/// authentication succeeds.
+#[cfg(unix)]
+#[allow(clippy::too_many_arguments)]
+pub async fn download_current_to_directory<I: DirectIo>(
+    io: &I,
+    shared: &DirectShared,
+    req: DownloadRequest,
+    master_key: &MasterKey,
+    metadata: &NameMetadata,
+    directory: &beebeeb_core::path_safety::TrustedDirectory,
+    output_name: &str,
+    rules: beebeeb_core::path_safety::Rules,
+    observer: &dyn Observer,
+) -> Result<DownloadOutcome, DownloadError> {
+    let (pending, file) = directory.begin_publish(output_name, rules)?;
+    let mut sink = TrustedFileSink { file: Some(file) };
+    let result = download_current(io, shared, req, master_key, metadata, &mut sink, observer).await;
+    drop(sink);
+    match result {
+        Ok(outcome @ DownloadOutcome::Done(_)) => {
+            pending.commit()?;
+            Ok(outcome)
+        }
+        other => other,
+    }
 }
 
 /// The single exit: record the breaker on every exit, then apply the sink
@@ -484,6 +592,12 @@ async fn run<I: DirectIo>(
                         }));
                     }
                     Poll::Fetch { index, grant } => {
+                        if grant.length > req.budget.download_frame_bytes {
+                            stop!(Ok(DownloadOutcome::HandOff {
+                                frame_size: grant.length,
+                                context_limit: req.budget.download_frame_bytes,
+                            }));
+                        }
                         if !attempted.insert(index) {
                             observer.event(TransferEvent::Renewed { index });
                         }
@@ -603,6 +717,32 @@ async fn run<I: DirectIo>(
                             // something the API path fixes.
                             if window.chunk_count != req.chunk_count {
                                 stop!(Err(DownloadError::FileChanged));
+                            }
+                            if let Some(authenticated) = req.authenticated_chunk_size
+                                && window.chunk_size != authenticated
+                            {
+                                stop!(Err(DownloadError::FileChanged));
+                            }
+                            let preferred_chunk_size = req.authenticated_chunk_size.or(Some(window.chunk_size));
+                            match checked_frame_size_with_budget(
+                                window.encrypted_size,
+                                window.chunk_count,
+                                preferred_chunk_size,
+                                req.budget,
+                            ) {
+                                Ok(_) => {}
+                                Err(CoreDownloadFailure::TooLargeForContext {
+                                    frame_size,
+                                    context_limit,
+                                }) => {
+                                    stop!(Ok(DownloadOutcome::HandOff {
+                                        frame_size,
+                                        context_limit,
+                                    }));
+                                }
+                                Err(_) => {
+                                    stop!(Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile)));
+                                }
                             }
                             if let Some(expected) = &req.pinned_version {
                                 if !window.object_version_id.eq_ignore_ascii_case(expected) {

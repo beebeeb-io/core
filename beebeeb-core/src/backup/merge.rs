@@ -12,7 +12,7 @@ use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
 use super::fold_name;
-use crate::sync::conflict::keep_both_name;
+use crate::sync::conflict::{InvalidKeepBothTime, keep_both_name};
 
 /// One folder or file of a tree, as the client lists it (decrypted names).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,14 +42,20 @@ pub enum MergeStep {
     },
 }
 
-fn merge_into(target: &mut MergeNode, source: &MergeNode, clash_label: &str, hhmm: &str, steps: &mut Vec<MergeStep>) {
+fn merge_into(
+    target: &mut MergeNode,
+    source: &MergeNode,
+    clash_label: &str,
+    hhmm: &str,
+    steps: &mut Vec<MergeStep>,
+) -> Result<(), InvalidKeepBothTime> {
     for child in &source.children {
         // Two siblings that differ only in case collide in a drive, so they
         // merge.
         let key = fold_name(&child.name);
         match target.children.iter().position(|t| fold_name(&t.name) == key) {
             Some(i) if child.is_folder && target.children[i].is_folder => {
-                merge_into(&mut target.children[i], child, clash_label, hhmm, steps);
+                merge_into(&mut target.children[i], child, clash_label, hhmm, steps)?;
                 steps.push(MergeStep::Trash { id: child.id });
             }
             Some(_) => {
@@ -58,7 +64,7 @@ fn merge_into(target: &mut MergeNode, source: &MergeNode, clash_label: &str, hhm
                 // its test is exactly `fold_name`.
                 let taken: HashSet<String> = target.children.iter().map(|t| fold_name(&t.name)).collect();
                 let original: String = child.name.nfc().collect();
-                let new_name = keep_both_name(&original, clash_label, hhmm, &taken);
+                let new_name = keep_both_name(&original, clash_label, hhmm, &taken)?;
                 steps.push(MergeStep::MoveRenamed {
                     id: child.id,
                     new_parent: target.id,
@@ -78,6 +84,7 @@ fn merge_into(target: &mut MergeNode, source: &MergeNode, clash_label: &str, hhm
             }
         }
     }
+    Ok(())
 }
 
 /// The steps that merge `duplicates` (in the given order) into `survivor`:
@@ -86,13 +93,53 @@ fn merge_into(target: &mut MergeNode, source: &MergeNode, clash_label: &str, hhm
 /// `hhmm` with a dot (`"14.05"`), as `keep_both_name` documents, because a `:`
 /// is refused on Windows and shows as `/` in Finder (plan Amendment 1, item 4).
 /// Replaying the steps in order is safe: a step only ever names a row that an
-/// earlier step left in place.
-pub fn plan_merge(survivor: &MergeNode, duplicates: &[MergeNode], clash_label: &str, hhmm: &str) -> Vec<MergeStep> {
+/// earlier step left in place. A clash with a time that is not `HH.MM` refuses
+/// the whole plan, so no step is returned for a merge that cannot finish.
+pub fn plan_merge(
+    survivor: &MergeNode,
+    duplicates: &[MergeNode],
+    clash_label: &str,
+    hhmm: &str,
+) -> Result<Vec<MergeStep>, InvalidKeepBothTime> {
     let mut target = survivor.clone();
     let mut steps = Vec::new();
     for duplicate in duplicates {
-        merge_into(&mut target, duplicate, clash_label, hhmm, &mut steps);
+        merge_into(&mut target, duplicate, clash_label, hhmm, &mut steps)?;
         steps.push(MergeStep::Trash { id: duplicate.id });
     }
-    steps
+    Ok(steps)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn file(n: u128, name: &str) -> MergeNode {
+        MergeNode {
+            id: Uuid::from_u128(n),
+            name: name.into(),
+            is_folder: false,
+            children: Vec::new(),
+        }
+    }
+
+    fn folder(n: u128, children: Vec<MergeNode>) -> MergeNode {
+        MergeNode {
+            id: Uuid::from_u128(n),
+            name: "Backups".into(),
+            is_folder: true,
+            children,
+        }
+    }
+
+    /// A clash needs a keep-both name; a time that is not `HH.MM` refuses the
+    /// whole plan instead of naming a copy with it. Mutant: the error dropped.
+    #[test]
+    fn a_clash_with_a_bad_time_returns_no_steps() {
+        let survivor = folder(1, vec![file(2, "a.txt")]);
+        let duplicate = folder(3, vec![file(4, "A.TXT")]);
+        assert!(plan_merge(&survivor, std::slice::from_ref(&duplicate), "merged", "14:05").is_err());
+        let steps = plan_merge(&survivor, &[duplicate], "merged", "14.05").expect("HH.MM");
+        assert!(matches!(steps[0], MergeStep::MoveRenamed { .. }));
+    }
 }

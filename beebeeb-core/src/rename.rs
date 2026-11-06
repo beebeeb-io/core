@@ -33,7 +33,12 @@ pub fn encrypt_name_for_rename_target(
     filename: &str,
     mime_type: Option<&str>,
 ) -> Result<String, CoreError> {
-    crate::encrypt::encrypt_name_for(target.key(), filename, mime_type, target.pin())
+    match target.version() {
+        Some(version) => {
+            crate::encrypt::encrypt_name_for_version(target.key(), filename, mime_type, target.pin(), version)
+        }
+        None => crate::encrypt::encrypt_name_for(target.key(), filename, mime_type, target.pin()),
+    }
 }
 
 /// Seal a request-row rename from `(master, item_id, pin)` instead of a
@@ -59,6 +64,20 @@ pub fn encrypt_name_for_request_rename(
     filename: &str,
     mime_type: Option<&str>,
 ) -> Result<String, CoreError> {
+    encrypt_name_for_request_rename_with_version(master_key, item_id, pin, None, filename, mime_type)
+}
+
+/// Version-preserving request-row rename for binding callers that cannot hold a
+/// core [`RenameTarget`]. `version` comes from the resolved row's authenticated
+/// metadata; passing `None` is only for an unprotected legacy row.
+pub fn encrypt_name_for_request_rename_with_version(
+    master_key: &MasterKey,
+    item_id: &str,
+    pin: ExpectedChunkFormat,
+    version: Option<crate::chunk_stream::VersionCommitment>,
+    filename: &str,
+    mime_type: Option<&str>,
+) -> Result<String, CoreError> {
     if crate::item_id::item_class(item_id)? != crate::item_id::ItemClass::Owner {
         return Err(CoreError::InvalidInput(
             "request row class check: a request row must have an owner item id; foreign items resolve only via L8 or L7"
@@ -66,5 +85,8 @@ pub fn encrypt_name_for_request_rename(
         ));
     }
     let key = derive_file_key(master_key, item_id.as_bytes());
-    crate::encrypt::encrypt_name_for(&key, filename, mime_type, pin)
+    match version {
+        Some(version) => crate::encrypt::encrypt_name_for_version(&key, filename, mime_type, pin, version),
+        None => crate::encrypt::encrypt_name_for(&key, filename, mime_type, pin),
+    }
 }

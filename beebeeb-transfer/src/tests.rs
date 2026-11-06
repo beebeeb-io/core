@@ -10,6 +10,7 @@ use beebeeb_core::direct_transfer::{
     pinned_chunk_path, storage_get_total,
 };
 use beebeeb_core::kdf::FileKey;
+use beebeeb_types::limits::MemoryBudget;
 use bytes::Bytes;
 use futures_util::FutureExt;
 
@@ -355,11 +356,45 @@ fn request_for(fx: &Fixture) -> DownloadRequest {
         chunk_count: fx.chunk_count,
         pinned_version: None,
         memory: MemoryClass::Native,
+        budget: MemoryBudget::NATIVE,
+        authenticated_chunk_size: Some(fx.chunk_size),
         kbps_limit: None,
         forced_api: false,
         allow_legacy_chunk0: false,
         jitter_seed: 11,
     }
+}
+
+#[tokio::test]
+async fn a_valid_frame_too_large_for_this_context_is_handed_off_before_fetch() {
+    let chunk_size = 8 * 1024 * 1024;
+    let fx = Arc::new(Fixture::synthetic(2, chunk_size));
+    let io = ScriptedIo::new({
+        let fx = fx.clone();
+        move |req, wall, _mono| match req {
+            Request::Api(call) if call.path == DISCOVERY_PATH => discovery_reply(),
+            Request::Api(call) if call.path == beebeeb_core::direct_transfer::download_grants_path(FILE_ID) => {
+                let request = grant_body(call);
+                json_reply(200, fx.window(request.start_index, request.count, wall))
+            }
+            other => panic!("the constrained context must not fetch a frame: {other:?}"),
+        }
+    });
+    let mut request = request_for(&fx);
+    request.memory = MemoryClass::MobileExtension;
+    request.budget = MemoryBudget::MOBILE_EXTENSION;
+
+    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request).await;
+    assert!(matches!(
+        outcome,
+        Ok(DownloadOutcome::HandOff {
+            frame_size,
+            context_limit,
+        }) if frame_size == chunk_size + 28
+            && context_limit == MemoryBudget::MOBILE_EXTENSION.download_frame_bytes
+    ));
+    assert!(sink.0.is_empty());
+    assert_eq!(storage_gets(&io), 0);
 }
 
 async fn run_download(

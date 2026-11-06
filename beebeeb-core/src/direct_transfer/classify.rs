@@ -245,6 +245,11 @@ pub fn classify(call: Call, answer: &ApiAnswer) -> Outcome {
             error: answer.json_error.clone(),
         })
     };
+    // The server uses 426 as a compatibility fence. Repeating the same
+    // request cannot make this client satisfy the required protocol.
+    if status == 426 {
+        return terminal();
+    }
     match call {
         Call::Discovery => match status {
             // A real, JSON-bodied 404: the server says it has no such thing.
@@ -953,6 +958,12 @@ mod tests {
                 UploadGrant,
                 json(401, r#"{"error":"unauthorized"}"#),
                 terminal(401, Some("unauthorized")),
+            ),
+            (
+                "426 is an upgrade fence that cannot pass on retry",
+                UploadCommit,
+                json(426, r#"{"error":"client_upgrade_required"}"#),
+                terminal(426, Some("client_upgrade_required")),
             ),
             (
                 "direct_unavailable: the session cannot go direct",

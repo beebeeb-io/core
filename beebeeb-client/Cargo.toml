@@ -1,0 +1,57 @@
+[package]
+name = "beebeeb-client"
+description = "Native Beebeeb client services, transport, sessions, and events"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+base64 = "0.22"
+beebeeb-api = { path = "../beebeeb-api" }
+beebeeb-core = { path = "../beebeeb-core", default-features = false }
+beebeeb-transfer = { path = "../beebeeb-transfer", optional = true }
+beebeeb-store = { path = "../beebeeb-store", optional = true }
+beebeeb-types = { path = "../beebeeb-types", optional = true }
+chrono = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["native-tls"], optional = true }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+zeroize = { version = "1", features = ["derive"] }
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+security-framework = { version = "3.7", features = ["OSX_10_15"] }
+security-framework-sys = "2.17"
+
+[features]
+default = [
+    "native-transport", "runtime-multi-thread", "store", "auth", "devices", "files",
+    "sync", "uploads", "downloads", "thumbnails", "backup", "file_provider", "shares",
+    "contacts", "search", "settings",
+]
+native-transport = ["dep:reqwest"]
+runtime-multi-thread = ["tokio/rt-multi-thread"]
+runtime-lightweight = []
+store = ["dep:beebeeb-store", "dep:beebeeb-types"]
+auth = []
+devices = []
+files = []
+sync = ["store"]
+uploads = ["dep:beebeeb-transfer"]
+downloads = ["dep:beebeeb-transfer"]
+thumbnails = []
+backup = ["uploads", "store"]
+file_provider = ["store", "uploads", "downloads"]
+shares = []
+contacts = []
+search = []
+settings = []
+test-support = []
+
+[dev-dependencies]
+tempfile = "3"
+hmac = "0.12"
+sha1 = "0.10"

@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-bindings")]
+
 use std::path::{Path, PathBuf};
 
 use beebeeb_uniffi::UploadError;

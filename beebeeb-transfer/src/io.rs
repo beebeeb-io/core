@@ -19,6 +19,7 @@
 
 use std::fmt;
 use std::future::Future;
+use std::path::Path;
 use std::time::Duration;
 
 use beebeeb_core::direct_transfer::redact;
@@ -30,11 +31,13 @@ use bytes::Bytes;
 pub enum ApiMethod {
     Get,
     Post,
+    Put,
 }
 
 /// One API request, fully described. The transport adds the `Authorization`
-/// header and its client headers; it sends `capabilities` ONLY when this field
-/// is `Some` (the grant requests), never on discovery.
+/// header and its client headers; it sends `capabilities` only when this field
+/// is `Some`. Discovery leaves it empty; gated upload routes name every
+/// capability they require.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiCall {
     pub method: ApiMethod,
@@ -145,6 +148,25 @@ pub trait DirectIo: Send + Sync {
         headers: &[(&'static str, String)],
         total: Duration,
     ) -> impl Future<Output = u16> + Send;
+
+    /// PUT one object from a file. Background-capable transports override
+    /// this to let the operating system stream the file without loading it
+    /// into the application process. The default preserves compatibility for
+    /// existing transports by reading the file and using [`storage_put`].
+    fn storage_put_file(
+        &self,
+        url: &SignedUrl,
+        body_path: &Path,
+        headers: &[(&'static str, String)],
+        total: Duration,
+    ) -> impl Future<Output = u16> + Send {
+        async move {
+            match std::fs::read(body_path) {
+                Ok(body) => self.storage_put(url, Bytes::from(body), headers, total).await,
+                Err(_) => 0,
+            }
+        }
+    }
 
     /// Wait. The driver uses this for the planner's backoff and for pacing.
     fn sleep(&self, d: Duration) -> impl Future<Output = ()> + Send;

@@ -13,6 +13,7 @@ use flate2::read::GzDecoder;
 use std::io::Read;
 
 use crate::CoreError;
+use beebeeb_types::limits::{MAX_QUEUE_LENGTH, MemoryBudget};
 
 /// A single entry inside a TAR archive.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,7 +48,7 @@ pub fn list_tar_entries(data: &[u8]) -> Result<Vec<ArchiveEntry>, CoreError> {
     let mut entries = Vec::new();
     let mut offset: usize = 0;
 
-    while offset + TAR_BLOCK_SIZE <= data.len() {
+    while offset.checked_add(TAR_BLOCK_SIZE).is_some_and(|end| end <= data.len()) {
         // Check for end-of-archive (all-zero block)
         if data[offset..offset + TAR_BLOCK_SIZE].iter().all(|&b| b == 0) {
             break;
@@ -69,6 +70,11 @@ pub fn list_tar_entries(data: &[u8]) -> Result<Vec<ArchiveEntry>, CoreError> {
 
         // Skip the "." and "./" pseudo-entries
         if !full_name.is_empty() && full_name != "." && full_name != "./" {
+            if entries.len() >= MAX_QUEUE_LENGTH {
+                return Err(CoreError::InvalidInput(format!(
+                    "archive has more than {MAX_QUEUE_LENGTH} entries"
+                )));
+            }
             let clean_name = full_name.trim_end_matches('/').to_string();
             entries.push(ArchiveEntry {
                 name: clean_name,
@@ -78,12 +84,18 @@ pub fn list_tar_entries(data: &[u8]) -> Result<Vec<ArchiveEntry>, CoreError> {
         }
 
         // Advance past header + data (data padded to 512-byte boundary)
-        let data_blocks = if size > 0 {
-            (size as usize).div_ceil(TAR_BLOCK_SIZE)
-        } else {
-            0
-        };
-        offset += TAR_BLOCK_SIZE + data_blocks * TAR_BLOCK_SIZE;
+        let data_blocks = size.div_ceil(TAR_BLOCK_SIZE as u64);
+        let data_bytes = data_blocks
+            .checked_mul(TAR_BLOCK_SIZE as u64)
+            .and_then(|bytes| usize::try_from(bytes).ok())
+            .ok_or_else(|| CoreError::InvalidInput("tar entry offset overflow".into()))?;
+        offset = offset
+            .checked_add(TAR_BLOCK_SIZE)
+            .and_then(|value| value.checked_add(data_bytes))
+            .ok_or_else(|| CoreError::InvalidInput("tar entry offset overflow".into()))?;
+        if offset > data.len() {
+            return Err(CoreError::InvalidInput("tar entry extends beyond archive".into()));
+        }
     }
 
     Ok(entries)
@@ -104,9 +116,8 @@ fn read_null_string(data: &[u8], offset: usize, max_len: usize) -> String {
 /// Maximum bytes we will decompress from a gzip stream.
 ///
 /// Prevents zip-bomb / OOM DoS: a tiny `.gz` can decompress to gigabytes.
-/// 1 GiB is large enough for legitimate archives but small enough that an
-/// adversarial input cannot exhaust memory on a typical client device.
-const MAX_DECOMPRESS_BYTES: u64 = 1024 * 1024 * 1024;
+/// This wire ceiling is further reduced by the caller's device budget.
+pub const MAX_DECOMPRESS_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Decompress gzip-compressed data. Returns the decompressed bytes.
 ///
@@ -114,7 +125,15 @@ const MAX_DECOMPRESS_BYTES: u64 = 1024 * 1024 * 1024;
 /// to more than that are rejected with [`CoreError::Io`] rather than allowed
 /// to balloon the process memory.
 pub fn decompress_gzip(data: &[u8]) -> Result<Vec<u8>, CoreError> {
-    let mut decoder = GzDecoder::new(data).take(MAX_DECOMPRESS_BYTES);
+    decompress_gzip_with_budget(data, MemoryBudget::MOBILE_APP)
+}
+
+pub fn decompress_gzip_with_budget(data: &[u8], budget: MemoryBudget) -> Result<Vec<u8>, CoreError> {
+    let limit = budget.archive_output_bytes.min(MAX_DECOMPRESS_BYTES);
+    let read_limit = limit
+        .checked_add(1)
+        .ok_or_else(|| CoreError::InvalidInput("archive output limit overflow".into()))?;
+    let mut decoder = GzDecoder::new(data).take(read_limit);
     let mut result = Vec::new();
     decoder
         .read_to_end(&mut result)
@@ -122,10 +141,8 @@ pub fn decompress_gzip(data: &[u8]) -> Result<Vec<u8>, CoreError> {
     // `Read::take` silently stops at the limit; if we hit exactly the cap the
     // stream may have been truncated. Treat that as an error rather than
     // returning partial data the caller will try to parse.
-    if result.len() as u64 == MAX_DECOMPRESS_BYTES {
-        return Err(CoreError::Io(format!(
-            "gzip decompression exceeded {MAX_DECOMPRESS_BYTES}-byte limit"
-        )));
+    if result.len() as u64 > limit {
+        return Err(CoreError::Io(format!("gzip decompression exceeded {limit}-byte limit")));
     }
     Ok(result)
 }
@@ -142,13 +159,21 @@ pub fn decompress_gzip(data: &[u8]) -> Result<Vec<u8>, CoreError> {
 ///   otherwise return a single "(decompressed content)" entry
 /// - `.tgz`, `.tar.gz` — decompress then parse as TAR
 pub fn list_archive(data: &[u8], filename: &str) -> Result<Vec<ArchiveEntry>, CoreError> {
+    list_archive_with_budget(data, filename, MemoryBudget::MOBILE_APP)
+}
+
+pub fn list_archive_with_budget(
+    data: &[u8],
+    filename: &str,
+    budget: MemoryBudget,
+) -> Result<Vec<ArchiveEntry>, CoreError> {
     let lower = filename.to_lowercase();
 
     if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
-        let decompressed = decompress_gzip(data)?;
+        let decompressed = decompress_gzip_with_budget(data, budget)?;
         list_tar_entries(&decompressed)
     } else if lower.ends_with(".gz") {
-        let decompressed = decompress_gzip(data)?;
+        let decompressed = decompress_gzip_with_budget(data, budget)?;
         // Heuristic: if decompressed data looks like a TAR, parse it
         if decompressed.len() >= TAR_BLOCK_SIZE && decompressed[0] != 0 {
             match list_tar_entries(&decompressed) {
@@ -287,6 +312,24 @@ mod tests {
     fn gzip_invalid_data() {
         let result = decompress_gzip(b"not gzip data");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn gzip_obeys_the_callers_device_budget() {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&[7u8; 1025]).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let tiny = MemoryBudget::new(1024, 1024);
+        let error = decompress_gzip_with_budget(&compressed, tiny).unwrap_err();
+        assert!(error.to_string().contains("1024-byte limit"));
+    }
+
+    #[test]
+    fn tar_offset_overflow_is_an_error() {
+        let mut tar = vec![0u8; 512];
+        tar[..1].copy_from_slice(b"x");
+        tar[124..136].copy_from_slice(b"77777777777\0");
+        assert!(list_tar_entries(&tar).is_err());
     }
 
     #[test]

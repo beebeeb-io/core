@@ -9,6 +9,7 @@ use std::io::{BufWriter, Write};
 
 use beebeeb_core::chunk_stream::{ChunkDecryptor, ExpectedChunkFormat};
 use beebeeb_core::download::DownloadFailure;
+use beebeeb_types::limits::MemoryBudget;
 
 use crate::error::UploadError;
 use crate::retry;
@@ -22,8 +23,26 @@ fn map_download_failure(failure: DownloadFailure) -> UploadError {
     match failure {
         DownloadFailure::InvalidInput(message) => UploadError::InvalidInput(message),
         DownloadFailure::Io(message) => UploadError::IoError(message),
+        DownloadFailure::TooLargeForContext {
+            frame_size,
+            context_limit,
+        } => UploadError::TooLargeForContext {
+            frame_size,
+            context_limit,
+        },
         other => UploadError::InvalidResponse(other.to_string()),
     }
+}
+
+fn check_temp_disk_limit(total: u64, budget: MemoryBudget) -> Result<(), UploadError> {
+    if let Some(limit) = budget.temp_disk_bytes {
+        if total > limit {
+            return Err(UploadError::InvalidResponse(format!(
+                "download exceeds the caller's temporary cache limit {limit} bytes"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// The `{output}.tmp` file a download writes into before the atomic rename.
@@ -36,11 +55,13 @@ fn map_download_failure(failure: DownloadFailure) -> UploadError {
 /// `panic = "abort"` for release builds (`Cargo.toml`), so a panic does not
 /// unwind there and the temp file can remain. The guard is error cleanup, not
 /// a panic safety net.
+#[cfg(not(unix))]
 struct TempOutput {
     path: std::path::PathBuf,
     renamed: bool,
 }
 
+#[cfg(not(unix))]
 impl TempOutput {
     /// Create the parent directory and the temp file; the guard removes the
     /// file on drop until it is committed.
@@ -63,6 +84,7 @@ impl TempOutput {
     }
 }
 
+#[cfg(not(unix))]
 impl Drop for TempOutput {
     fn drop(&mut self) {
         if !self.renamed {
@@ -71,15 +93,56 @@ impl Drop for TempOutput {
     }
 }
 
+#[cfg(unix)]
+struct TempOutput {
+    pending: Option<beebeeb_core::path_safety::PendingPublish>,
+}
+
+#[cfg(unix)]
+impl TempOutput {
+    fn create(output_path: &str) -> Result<(Self, std::fs::File), UploadError> {
+        let output = std::path::Path::new(output_path);
+        let parent = output
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| std::path::Path::new("."));
+        std::fs::create_dir_all(parent)
+            .map_err(|error| UploadError::IoError(format!("create output parent dir: {error}")))?;
+        let name = output
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| UploadError::InvalidInput("output path has no UTF-8 file name".into()))?;
+        let directory = beebeeb_core::path_safety::TrustedDirectory::open(parent)
+            .map_err(|error| UploadError::IoError(format!("open output directory: {error}")))?;
+        let (pending, file) = directory
+            .begin_publish(name, beebeeb_core::path_safety::Rules::Host)
+            .map_err(|error| UploadError::IoError(format!("create output temp file: {error}")))?;
+        Ok((Self { pending: Some(pending) }, file))
+    }
+
+    fn commit(mut self, _output_path: &str) -> Result<(), UploadError> {
+        self.pending
+            .take()
+            .ok_or_else(|| UploadError::IoError("output publication already finished".into()))?
+            .commit()
+            .map_err(|error| UploadError::IoError(format!("publish output: {error}")))
+    }
+}
+
 /// Read more body bytes (via `Response::chunk`) until `buf.len() >= want` or EOF.
-async fn fill_to(resp: &mut reqwest::Response, buf: &mut Vec<u8>, want: usize) -> Result<(), UploadError> {
+async fn fill_to(
+    resp: &mut reqwest::Response,
+    buf: &mut Vec<u8>,
+    want: usize,
+    limit: usize,
+) -> Result<(), UploadError> {
     while buf.len() < want {
         match resp
             .chunk()
             .await
             .map_err(|e| UploadError::Network(format!("reading response body: {e}")))?
         {
-            Some(b) => buf.extend_from_slice(&b),
+            Some(b) => push_frame_bytes(buf, &b, limit)?,
             None => break,
         }
     }
@@ -99,16 +162,32 @@ fn push_frame_bytes(buf: &mut Vec<u8>, bytes: &[u8], limit: usize) -> Result<(),
     Ok(())
 }
 
+fn encrypted_size_estimate(
+    content_length: Option<u64>,
+    original_size: u64,
+    chunk_count: u32,
+) -> Result<u64, UploadError> {
+    if let Some(length) = content_length.filter(|length| *length > 0) {
+        return Ok(length);
+    }
+    let overhead = GCM_OVERHEAD
+        .checked_mul(u64::from(chunk_count))
+        .ok_or_else(|| UploadError::InvalidResponse("encrypted size overhead overflow".into()))?;
+    original_size
+        .checked_add(overhead)
+        .ok_or_else(|| UploadError::InvalidResponse("encrypted size estimate overflow".into()))
+}
+
 /// Drain the rest of the response body into `buf`, capped at one maximum wire
 /// frame. The last frame (and the single-frame `usize::MAX` case) has no size
 /// header to trust, so the cap is enforced here while reading.
-async fn drain_rest(resp: &mut reqwest::Response, buf: &mut Vec<u8>) -> Result<(), UploadError> {
+async fn drain_rest(resp: &mut reqwest::Response, buf: &mut Vec<u8>, limit: usize) -> Result<(), UploadError> {
     while let Some(b) = resp
         .chunk()
         .await
         .map_err(|e| UploadError::Network(format!("reading response body: {e}")))?
     {
-        push_frame_bytes(buf, &b, beebeeb_core::download::MAX_FRAME_SIZE)?;
+        push_frame_bytes(buf, &b, limit)?;
     }
     Ok(())
 }
@@ -141,6 +220,7 @@ pub struct DownloadClient {
     api_url: String,
     token: String,
     http: reqwest::Client,
+    memory_budget: MemoryBudget,
 }
 
 impl DownloadClient {
@@ -158,7 +238,13 @@ impl DownloadClient {
             api_url: api_url.trim_end_matches('/').to_string(),
             token: token.to_string(),
             http,
+            memory_budget: MemoryBudget::MOBILE_APP,
         }
+    }
+
+    pub fn with_memory_budget(mut self, memory_budget: MemoryBudget) -> Self {
+        self.memory_budget = memory_budget;
+        self
     }
 
     /// Download an encrypted file and **stream-decrypt** it to disk with
@@ -205,18 +291,25 @@ impl DownloadClient {
                 .send()
                 .await
                 .map_err(|e| UploadError::Network(e.to_string()))?;
+            crate::error::check_response_headers(&resp)?;
 
             let status = resp.status().as_u16();
             if status == 429 {
                 return Err(Self::parse_rate_limit(&resp).await);
             }
             if status >= 500 {
-                let text = resp.text().await.unwrap_or_default();
-                return Err(UploadError::ServerError { status, message: text });
+                let error = crate::error::read_server_error(resp).await;
+                return Err(UploadError::ServerError {
+                    status,
+                    message: error.message,
+                });
             }
             if status >= 400 {
-                let text = resp.text().await.unwrap_or_default();
-                return Err(UploadError::ClientError { status, message: text });
+                let error = crate::error::read_server_error(resp).await;
+                return Err(UploadError::ClientError {
+                    status,
+                    message: error.message,
+                });
             }
             Ok(resp)
         })
@@ -247,10 +340,7 @@ impl DownloadClient {
         // plaintext size + per-chunk overhead. Only sizes the first N-1 frames;
         // the last frame drains the remainder, so a small estimate error
         // self-corrects (and a wrong size fails the GCM tag).
-        let total: u64 = resp
-            .content_length()
-            .filter(|&v| v > 0)
-            .unwrap_or(original_size + GCM_OVERHEAD * chunk_count as u64);
+        let total = encrypted_size_estimate(resp.content_length(), original_size, chunk_count)?;
 
         self.stream_decrypt_to_disk(
             &mut resp,
@@ -291,7 +381,10 @@ impl DownloadClient {
         // responses (no header) fall back to the `total / chunk_count` average,
         // which matches `compute_chunk_boundaries`.
         let frame_size =
-            beebeeb_core::download::checked_frame_size(total, chunk_count, chunk_size).map_err(map_download_failure)?;
+            beebeeb_core::download::checked_frame_size_with_budget(total, chunk_count, chunk_size, self.memory_budget)
+                .map_err(map_download_failure)?;
+        let frame_limit = usize::try_from(self.memory_budget.download_frame_bytes)
+            .map_err(|_| UploadError::InvalidInput("download memory budget does not fit usize".into()))?;
 
         // Write to .tmp then atomic rename; the guard deletes the temp file on
         // every error path (including the `?` before the loop finishes).
@@ -306,10 +399,10 @@ impl DownloadClient {
         for i in 0..n {
             let is_last = i == n - 1;
             let frame: Vec<u8> = if is_last || frame_size == usize::MAX {
-                drain_rest(resp, &mut carry).await?;
+                drain_rest(resp, &mut carry, frame_limit).await?;
                 std::mem::take(&mut carry)
             } else {
-                fill_to(resp, &mut carry, frame_size).await?;
+                fill_to(resp, &mut carry, frame_size, frame_limit).await?;
                 if carry.len() < frame_size {
                     return Err(UploadError::InvalidResponse(format!(
                         "download truncated at chunk {i}/{n}: wanted {frame_size}, got {}",
@@ -331,7 +424,11 @@ impl DownloadClient {
             if let Err(e) = writer.write_all(&dec.data) {
                 return Err(UploadError::IoError(format!("write output: {e}")));
             }
-            total_plaintext += dec.data.len() as u64;
+            let next_total = total_plaintext
+                .checked_add(dec.data.len() as u64)
+                .ok_or_else(|| UploadError::InvalidResponse("plaintext size overflow".into()))?;
+            check_temp_disk_limit(next_total, self.memory_budget)?;
+            total_plaintext = next_total;
             chunks_decrypted += 1;
             if let Some(cb) = callback {
                 cb.on_chunk_decrypted(chunks_decrypted, chunk_count);
@@ -376,7 +473,7 @@ impl DownloadClient {
             .headers()
             .get("Retry-After")
             .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<u64>().ok())
+            .and_then(beebeeb_core::retry::parse_retry_after)
             .unwrap_or(60);
 
         UploadError::RateLimited {
@@ -410,7 +507,6 @@ pub fn decrypt_downloaded_bytes(
     if chunk_count == 0 {
         return Err(UploadError::InvalidInput("chunk_count must be > 0".into()));
     }
-
     // Write to .tmp then atomic rename; the guard deletes the temp file on
     // every error path (a chunk failure, a flush error and the `?` exits).
     let (tmp, output_file) = TempOutput::create(output_path)?;
@@ -523,6 +619,12 @@ mod tests {
         assert_eq!(result.output_path, "/tmp/file.bin");
         assert_eq!(result.plaintext_size, 1024);
         assert_eq!(result.chunks_decrypted, 2);
+    }
+
+    #[test]
+    fn hostile_original_size_cannot_overflow_even_with_content_length() {
+        assert_eq!(encrypted_size_estimate(Some(42), u64::MAX, u32::MAX).unwrap(), 42);
+        assert!(encrypted_size_estimate(None, u64::MAX, 1).is_err());
     }
 
     // -- compute_chunk_boundaries --
@@ -842,6 +944,13 @@ mod tests {
         let mut ok = Vec::new();
         push_frame_bytes(&mut ok, &[1, 2, 3], 3).expect("a frame at the limit is accepted");
         assert_eq!(ok.len(), 3);
+    }
+
+    #[test]
+    fn main_app_does_not_refuse_a_file_above_512_mib_by_size() {
+        let size = 513 * 1024 * 1024;
+        assert!(check_temp_disk_limit(size, MemoryBudget::MOBILE_APP).is_ok());
+        assert!(check_temp_disk_limit(size, MemoryBudget::MOBILE_APP.with_temp_disk_limit(512 * 1024 * 1024)).is_err());
     }
 
     #[test]

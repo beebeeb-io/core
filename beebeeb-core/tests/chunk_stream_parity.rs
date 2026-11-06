@@ -9,11 +9,9 @@
 //!    instant someone re-introduces a hand-rolled chunk loop that drifts.
 //! 2. Output written by the new primitive is a valid ordered stream for the
 //!    shared `ChunkDecryptor`, in `WRITE_FORMAT` (task 1908). The frame LAYOUT
-//!    is the same in both formats (same sizes, asserted above). While
-//!    `WRITE_FORMAT` is v1 (the read-only rollout phase) the frames also open
-//!    with the legacy no-AAD `encrypt::decrypt_chunk_raw`, exactly as before
-//!    1908; once it is v2 they deliberately must NOT (downgrade guarantee).
-//!    The assertion follows `WRITE_FORMAT`, so the gated switch flips it.
+//!    is the same in both formats (same sizes, asserted above). Production v2
+//!    frames deliberately do NOT open with legacy no-AAD
+//!    `encrypt::decrypt_chunk_raw` (downgrade guarantee).
 
 #![allow(deprecated)] // pre-L13 writers are the parity baseline
 

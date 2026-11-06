@@ -105,13 +105,14 @@ impl SyncEngine {
     /// file routes are finalized.
     pub fn sync_once(&mut self) -> Result<Vec<SyncOp>, SyncError> {
         info!("starting sync cycle");
+        // An unavailable listing is not an empty listing. Do not mutate state,
+        // scan, diff, or execute any operation until remote authority exists.
+        let remote_files = self.list_remote_files()?;
+
         self.state.status = SyncStatus::Syncing {
             files_remaining: 0,
             bytes_remaining: 0,
         };
-
-        // 1. List remote files (placeholder — would call the API).
-        let remote_files = self.list_remote_files()?;
 
         // 2. Scan local file tree.
         let local_files = self.scan_local_files()?;
@@ -233,8 +234,7 @@ impl SyncEngine {
     /// Placeholder: list remote files from the API.
     fn list_remote_files(&self) -> Result<Vec<FileMeta>, SyncError> {
         debug!(api = %self.config.api_url, "listing remote files (placeholder)");
-        // Will call GET /v1/files once the API route exists.
-        Ok(Vec::new())
+        Err(SyncError::RemoteListingUnavailable)
     }
 
     /// Walk the local vault directory and collect file metadata.
@@ -253,6 +253,11 @@ impl SyncEngine {
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
+
+            beebeeb_core::path_safety::ensure_contained(&self.config.vault_path, &path).map_err(SyncError::Other)?;
+            if entry.file_type()?.is_symlink() {
+                continue;
+            }
 
             // Respect selective sync.
             let rel = path.strip_prefix(&self.config.vault_path).unwrap_or(&path);
@@ -356,7 +361,9 @@ impl SyncEngine {
         // Files from pending_changes that were deleted locally.
         for change in &self.pending_changes {
             if let FileChange::Deleted(p) = change {
-                let rel = p.strip_prefix(&self.config.vault_path).unwrap_or(p);
+                let Ok(rel) = p.strip_prefix(&self.config.vault_path) else {
+                    continue;
+                };
                 if remote_set.contains(rel) {
                     ops.push(SyncOp::DeleteRemote(rel.to_path_buf()));
                 }
@@ -412,7 +419,21 @@ impl SyncEngine {
     /// Never panics: a `NotFound` is treated as success (the user may have already
     /// removed it); any other error is logged and reported as a non-removal.
     fn delete_local_file(&self, rel: &Path) -> bool {
-        let abs = self.config.vault_path.join(rel);
+        let Some(rel) = rel.to_str() else {
+            warn!(path = %rel.display(), "refusing non-UTF-8 local delete path");
+            return false;
+        };
+        let abs = match beebeeb_core::path_safety::safe_rel_join(
+            &self.config.vault_path,
+            rel,
+            beebeeb_core::path_safety::Rules::Host,
+        ) {
+            Ok(path) => path,
+            Err(error) => {
+                warn!(path = rel, %error, "refusing unsafe local delete path");
+                return false;
+            }
+        };
         match std::fs::remove_file(&abs) {
             Ok(()) => true,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
@@ -464,16 +485,17 @@ mod tests {
     }
 
     #[test]
-    fn sync_once_uploads_local_only_files() {
+    fn local_scan_can_plan_new_file_uploads() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("notes.txt"), "hello").unwrap();
         fs::write(dir.path().join("draft.md"), "world").unwrap();
 
         let mut cfg = test_config(dir.path());
         cfg.sync_mode = crate::config::SyncMode::Full;
-        let mut engine = SyncEngine::new(cfg);
+        let engine = SyncEngine::new(cfg);
 
-        let ops = engine.sync_once().unwrap();
+        let local = engine.scan_local_files().unwrap();
+        let ops = engine.compute_operations(&local, &[], &[]);
 
         // Both files should be queued for upload (no remote files).
         let uploads: Vec<_> = ops
@@ -489,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_once_respects_selective_sync() {
+    fn local_scan_respects_selective_sync() {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join("photos")).unwrap();
         fs::create_dir_all(dir.path().join("archive")).unwrap();
@@ -498,9 +520,10 @@ mod tests {
 
         let mut cfg = test_config(dir.path());
         cfg.sync_mode = crate::config::SyncMode::Custom(vec!["photos/".into()]);
-        let mut engine = SyncEngine::new(cfg);
+        let engine = SyncEngine::new(cfg);
 
-        let ops = engine.sync_once().unwrap();
+        let local = engine.scan_local_files().unwrap();
+        let ops = engine.compute_operations(&local, &[], &[]);
 
         let uploads: Vec<_> = ops
             .iter()
@@ -515,14 +538,14 @@ mod tests {
     }
 
     #[test]
-    fn sync_once_marks_last_sync() {
+    fn unavailable_listing_does_not_mark_last_sync() {
         let dir = TempDir::new().unwrap();
         let cfg = test_config(dir.path());
         let mut engine = SyncEngine::new(cfg);
 
         assert!(engine.state().last_sync.is_none());
-        engine.sync_once().unwrap();
-        assert!(engine.state().last_sync.is_some());
+        assert!(matches!(engine.sync_once(), Err(SyncError::RemoteListingUnavailable)));
+        assert!(engine.state().last_sync.is_none());
     }
 
     #[test]
@@ -673,9 +696,8 @@ mod tests {
         assert!(!ops.contains(&SyncOp::DeleteLocal(path)));
     }
 
-    /// (c) The exec path removes the file from disk AND clears it from state.
     #[test]
-    fn sync_once_delete_local_removes_file_and_state() {
+    fn sync_once_does_not_treat_placeholder_as_remote_delete() {
         let dir = TempDir::new().unwrap();
         // A previously-synced file that exists on disk.
         let on_disk = dir.path().join("gone.txt");
@@ -688,27 +710,13 @@ mod tests {
         let rel = PathBuf::from("gone.txt");
         engine.state.files.insert(rel.clone(), FileState::Synced);
 
-        // `list_remote_files` is the placeholder empty snapshot, so the on-disk,
-        // previously-synced file is absent from remote → a remote delete.
-        let ops = engine.sync_once().unwrap();
-
-        assert!(
-            ops.contains(&SyncOp::DeleteLocal(rel.clone())),
-            "expected DeleteLocal for the remotely-removed file; got {ops:?}"
-        );
-        // Exec removed it from disk …
-        assert!(!on_disk.exists(), "the local mirror file must be removed from disk");
-        // … and cleared it from state.
-        assert!(
-            !engine.state().files.contains_key(&rel),
-            "the state entry must be cleared after the local delete"
-        );
+        assert!(matches!(engine.sync_once(), Err(SyncError::RemoteListingUnavailable)));
+        assert!(on_disk.exists());
+        assert_eq!(engine.state().files.get(&rel), Some(&FileState::Synced));
     }
 
-    /// The exec delete is best-effort: an already-gone file is fine (NotFound is
-    /// treated as success), and the state entry is still cleared.
     #[test]
-    fn sync_once_delete_local_already_gone_clears_state() {
+    fn sync_once_does_not_prune_state_on_unavailable_listing() {
         let dir = TempDir::new().unwrap();
         let mut cfg = test_config(dir.path());
         cfg.sync_mode = crate::config::SyncMode::Full;
@@ -719,13 +727,8 @@ mod tests {
         let rel = PathBuf::from("already-gone.txt");
         engine.state.files.insert(rel.clone(), FileState::Synced);
 
-        let ops = engine.sync_once().unwrap();
-
-        assert!(ops.contains(&SyncOp::DeleteLocal(rel.clone())));
-        assert!(
-            !engine.state().files.contains_key(&rel),
-            "a stale settled row gone from both disk and remote must be pruned"
-        );
+        assert!(matches!(engine.sync_once(), Err(SyncError::RemoteListingUnavailable)));
+        assert_eq!(engine.state().files.get(&rel), Some(&FileState::Synced));
     }
 
     /// A locally-modified file whose remote was deleted survives a full
@@ -743,12 +746,26 @@ mod tests {
         let rel = PathBuf::from("keep-me.md");
         engine.state.files.insert(rel.clone(), FileState::Modified);
 
-        let ops = engine.sync_once().unwrap();
-
-        assert!(!ops.contains(&SyncOp::DeleteLocal(rel.clone())));
+        assert!(matches!(engine.sync_once(), Err(SyncError::RemoteListingUnavailable)));
         assert!(
             on_disk.exists(),
             "a locally-modified file must NEVER be deleted on a remote delete"
         );
+    }
+
+    #[test]
+    fn unavailable_remote_listing_never_mutates_local_state_or_disk() {
+        let dir = TempDir::new().unwrap();
+        let on_disk = dir.path().join("keep.txt");
+        fs::write(&on_disk, "keep").unwrap();
+        let mut engine = SyncEngine::new(test_config(dir.path()));
+        let rel = PathBuf::from("keep.txt");
+        engine.state.files.insert(rel.clone(), FileState::Synced);
+
+        let error = engine.sync_once().expect_err("placeholder listing is unavailable");
+        assert!(matches!(error, SyncError::RemoteListingUnavailable));
+        assert!(on_disk.exists());
+        assert_eq!(engine.state.files.get(&rel), Some(&FileState::Synced));
+        assert!(engine.state.last_sync.is_none());
     }
 }

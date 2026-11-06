@@ -7,7 +7,7 @@
 1568 beebeeb-core/src/direct_transfer/vectors.rs
 3150 beebeeb-core/src/direct_transfer/window.rs
 2191 beebeeb-core/src/encrypt.rs
-2482 beebeeb-core/src/kdf.rs
+2419 beebeeb-core/src/kdf.rs
 1795 beebeeb-transfer/src/tests.rs
 8243 beebeeb-uniffi/src/lib.rs
 5387 beebeeb-wasm/src/lib.rs

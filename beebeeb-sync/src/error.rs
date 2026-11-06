@@ -8,6 +8,9 @@ pub enum SyncError {
     #[error("network error: {0}")]
     NetworkError(String),
 
+    #[error("remote file listing is unavailable")]
+    RemoteListingUnavailable,
+
     #[error("conflict detected on {path}: modified locally at {local_modified} and remotely at {remote_modified}")]
     ConflictDetected {
         path: String,
