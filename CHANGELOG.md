@@ -22,25 +22,29 @@ filesystem pass (`beebeeb-backup`). No v0.2.0 API changes. LD-0113, spec
   - layout: `ROOT_NAME` `"Backups"`, `MANIFEST_NAME` `".device.json"`, `backup_rel_path`;
   - protection: `check_mutation` and the words, `Mutation`, `own_backup_refusal`. Only the Backups
     root is refused; its children and moving items into it are ordinary;
-  - skip rules: `skip_reason`, `SkipReason` (OS junk, library bundles, links, not-local entries,
-    plus the client-set `Locked` and `TooLarge`, and the walk's `TooDeep` and `Unreadable`);
+  - skip rules: `skip_reason`, `SkipReason` (OS junk, library bundles, links, not-local entries
+    and `.icloud` stubs, plus the client-set `Locked` and `TooLarge`, and the walk's `TooDeep`,
+    `Unreadable` and `Excluded`);
   - device folders: `device_folder_name`, `device_id_from_machine_id` (label
     `beebeeb/backup-device-id/v1`), `find_device_folder` (by manifest id, legacy desktop adoption,
     create);
   - the manifest: `DeviceManifest`, `parse_manifest`, `serialize_manifest` (a real iOS manifest
-    round-trips; unknown fields are kept);
+    round-trips; unknown fields are kept; a known field always wins over kept text of its name);
   - the root: `resolve_root` (use the flagged root, claim the oldest live `Backups`, or create) and
     `plan_merge` (legacy duplicate roots, depth unbounded, keep-both on a clash);
   - the pass planner: `plan_pass` (new, changed, unchanged, gone, unique moves, the budget,
-    removed elsewhere, keys the walk did not look into), `folder_presence`, `records_from_remote`,
-    `normalize_key`.
-- **`beebeeb-backup`** (new crate, for desktop and the CLI): `walk_source` (never opens a file,
-  never follows a link, never descends into what is not local; depth cap 64), `fingerprint`,
-  `attrs_of`, and `run_pass` over the `BackupHost` trait the client implements.
+    removed elsewhere, keys the walk did not look into), `folder_presence`, `records_from_remote`
+    (exact key first, then the normalised key when unique), `normalize_key`.
+- **`beebeeb-backup`** (new crate, for desktop and the CLI): `walk_source(root, exclude)` (never
+  opens a file, never follows a link, never descends into what is not local or into an excluded
+  path such as the client's own sync root; attributes from the directory listing only; a folder is
+  listed whole or reported unreadable; depth cap 64), `fingerprint`, `attrs_of`, and
+  `run_pass(host, root, exclude, category, budget)` over the `BackupHost` trait the client
+  implements.
 - **Bindings**: uniffi `backup_*` (9 functions; every unknown string is `InvalidInput`) and wasm
   `backupCheckMutation`, `backupProtectionMany`, `backupParseManifest`.
-- **Vectors**: `test-vectors/consolidation/backup_{protect,device,root,plan}.json` (46, 45, 20 and
-  49 cases), run by `cross_client_vectors`, with independent Python generators in
+- **Vectors**: `test-vectors/consolidation/backup_{protect,device,root,plan}.json` (50, 45, 20 and
+  53 cases), run by `cross_client_vectors`, with independent Python generators in
   `test-vectors/tools/make_backup_*_vectors.py`.
 
 ## [0.2.0] - 2026-11-06

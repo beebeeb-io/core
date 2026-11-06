@@ -44,7 +44,7 @@ symbols in the generated `beebeeb_uniffiFFI.h` (`uniffi-bindgen generate
 | `backup_device_folder_name(raw, my_id, taken)` | The device folder name, with the device-id suffix on a collision |
 | `backup_find_device_folder(me, candidates)` | `BackupDeviceFolderChoice`: `Existing`, `AdoptLegacy`, `Create { name }` |
 | `backup_parse_manifest(json)` / `backup_serialize_manifest(manifest)` | `.device.json`; unknown fields cross as `other_json` |
-| `backup_plan_pass(entries, records, live_remote, unseen, max_uploads, max_bytes)` | `BackupPassPlan` (iOS passes an empty `unseen`) |
+| `backup_plan_pass(entries, records, live_remote, unseen, max_uploads, max_bytes)` | `BackupPassPlan` (iOS passes an empty `unseen` and asset ids with `/` replaced by `\|`) |
 
 Every string the binding parses (mutation, role, platform, record state, id)
 that it does not know is `CryptoError.InvalidInput`, never a pass.
