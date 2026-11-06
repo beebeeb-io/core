@@ -14,7 +14,9 @@
 //!   roots into it;
 //! - protection: the Backups root is never trashed, deleted, renamed or moved;
 //! - skip: what is never backed up (OS junk, library bundles, links, files
-//!   whose bytes are not on this device).
+//!   whose bytes are not on this device);
+//! - plan and rebuild: what one pass uploads, moves or marks, and records
+//!   rebuilt from the server after a reinstall.
 //!
 //! The root is never located by path: it is the folder whose server row
 //! carries [`beebeeb_types::backup::SystemRole::BackupsRoot`].
@@ -23,7 +25,9 @@ mod device;
 mod layout;
 mod manifest;
 mod merge;
+mod plan;
 mod protect;
+mod rebuild;
 mod root;
 mod skip;
 
@@ -31,6 +35,8 @@ pub use device::*;
 pub use layout::*;
 pub use manifest::*;
 pub use merge::*;
+pub use plan::*;
 pub use protect::*;
+pub use rebuild::*;
 pub use root::*;
 pub use skip::*;

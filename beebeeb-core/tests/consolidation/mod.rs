@@ -13,6 +13,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 
 pub mod backup_device;
+pub mod backup_plan;
 pub mod backup_protect;
 pub mod backup_root;
 pub mod download;

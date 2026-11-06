@@ -1,0 +1,305 @@
+//! The pass planner (spec §4.2 rules 9 and 11).
+//!
+//! One pass compares what is in the source folder now with what this device
+//! backed up before, and says what to do: upload, move, mark as removed
+//! elsewhere, or nothing. The plan is idempotent: whatever the budget leaves
+//! out comes back on the next pass, from exactly where this one stopped.
+
+use std::collections::{BTreeSet, HashMap, HashSet};
+
+use serde::{Deserialize, Serialize};
+use unicode_normalization::UnicodeNormalization;
+use uuid::Uuid;
+
+/// A backup key in its one comparable form: NFC (macOS names arrive NFD),
+/// `\` as `/`, no leading `/`.
+pub fn normalize_key(raw: &str) -> String {
+    let key: String = raw.nfc().map(|c| if c == '\\' { '/' } else { c }).collect();
+    key.trim_start_matches('/').to_string()
+}
+
+/// One entry of the source folder, as the walk reports it. `key` is the
+/// `/`-joined path relative to the backed-up folder (on iOS: the asset id).
+/// Entries that are not local never reach the planner.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceEntry {
+    pub key: String,
+    pub is_dir: bool,
+    pub size: u64,
+    pub modified_ms: i64,
+}
+
+/// Where a record stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordState {
+    /// The server holds this device's copy.
+    BackedUp,
+    /// Someone deleted it from the backup elsewhere (web, another device). It
+    /// stays deleted until the file changes on this device (Guus, 2026-11-06).
+    RemovedElsewhere,
+}
+
+/// What this device backed up for one key.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BackupRecord {
+    pub key: String,
+    pub size: u64,
+    pub modified_ms: i64,
+    pub remote_id: Uuid,
+    pub uploaded_at_ms: i64,
+    pub state: RecordState,
+}
+
+/// The most one pass queues.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PassBudget {
+    pub max_uploads: usize,
+    pub max_bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UploadReason {
+    /// No record for this key.
+    New,
+    /// Its size or `modified_ms` differs from the record.
+    Changed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlannedUpload {
+    pub key: String,
+    pub size: u64,
+    pub reason: UploadReason,
+}
+
+/// A file that moved (or was renamed) in the source: a server-side move of
+/// `remote_id`, never a second upload.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlannedMove {
+    pub remote_id: Uuid,
+    /// The record's key.
+    pub from_key: String,
+    /// The entry's key.
+    pub to_key: String,
+}
+
+/// One pass's work.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PassPlan {
+    /// In key order; the budget keeps a prefix.
+    pub uploads: Vec<PlannedUpload>,
+    pub moves: Vec<PlannedMove>,
+    /// Parent folders (keys) of the planned uploads and moves, parents first.
+    pub folders: Vec<String>,
+    /// Record keys whose server copy is gone: mark them `RemovedElsewhere`.
+    pub mark_removed_elsewhere: Vec<String>,
+    /// Backed up, on the server and unchanged.
+    pub unchanged: usize,
+    /// Records with no entry any more. No action: a file deleted locally
+    /// stays in the backup.
+    pub gone_locally: usize,
+    /// Uploads the budget left for the next pass.
+    pub deferred: usize,
+}
+
+/// Whether this backup still has somewhere to go (spec §4.2 rule 11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FolderPresence {
+    Present,
+    /// The category folder (`Backups/<device>/Pictures`) was deleted
+    /// elsewhere: that backup turns off on this device.
+    CategoryDeleted,
+    /// The device folder was deleted elsewhere: every backup of this device
+    /// turns off.
+    DeviceDeleted,
+}
+
+/// `device_folder_live` is false only when this device's folder existed and is
+/// now trashed or gone. `category_folder_live` is `None` when this category
+/// never had a folder (a first backup), which is `Present`.
+pub fn folder_presence(device_folder_live: bool, category_folder_live: Option<bool>) -> FolderPresence {
+    if !device_folder_live {
+        FolderPresence::DeviceDeleted
+    } else if category_folder_live == Some(false) {
+        FolderPresence::CategoryDeleted
+    } else {
+        FolderPresence::Present
+    }
+}
+
+/// The last `/` segment.
+pub(super) fn file_name(key: &str) -> &str {
+    key.rsplit('/').next().unwrap_or(key)
+}
+
+/// Every parent of `key`: `"a/b/c"` gives `"a"` and `"a/b"`.
+fn parents(key: &str) -> impl Iterator<Item = &str> {
+    key.match_indices('/').map(move |(i, _)| &key[..i])
+}
+
+/// Pair each file (sorted) with its record (sorted): the exact key first; then,
+/// among what is left, the normalised key when it is unique on both sides.
+/// Returns, per file, the index of its record.
+fn pair(files: &[&SourceEntry], records: &[&BackupRecord]) -> Vec<Option<usize>> {
+    let mut paired: Vec<Option<usize>> = vec![None; files.len()];
+    let mut record_taken = vec![false; records.len()];
+    let mut by_key: HashMap<&str, usize> = HashMap::new();
+    for (i, r) in records.iter().enumerate() {
+        by_key.entry(r.key.as_str()).or_insert(i);
+    }
+    for (f, file) in files.iter().enumerate() {
+        if let Some(&r) = by_key.get(file.key.as_str())
+            && !record_taken[r]
+        {
+            paired[f] = Some(r);
+            record_taken[r] = true;
+        }
+    }
+    let mut left_files: HashMap<String, Vec<usize>> = HashMap::new();
+    for (f, file) in files.iter().enumerate() {
+        if paired[f].is_none() {
+            left_files.entry(normalize_key(&file.key)).or_default().push(f);
+        }
+    }
+    let mut left_records: HashMap<String, Vec<usize>> = HashMap::new();
+    for (r, record) in records.iter().enumerate() {
+        if !record_taken[r] {
+            left_records.entry(normalize_key(&record.key)).or_default().push(r);
+        }
+    }
+    for (key, fs) in &left_files {
+        if let (&[f], Some(&[r])) = (fs.as_slice(), left_records.get(key).map(Vec::as_slice)) {
+            paired[f] = Some(r);
+        }
+    }
+    paired
+}
+
+type MoveSignature = (u64, i64, String);
+
+fn signature(size: u64, modified_ms: i64, key: &str) -> MoveSignature {
+    (size, modified_ms, file_name(&normalize_key(key)).to_lowercase())
+}
+
+/// Spec §4.2 rules 9 and 11. `live_remote` holds the ids of this category's
+/// files on the server now (not trashed). The result does not depend on the
+/// order of `entries` or `records`.
+pub fn plan_pass(
+    entries: &[SourceEntry],
+    records: &[BackupRecord],
+    live_remote: &HashSet<Uuid>,
+    budget: PassBudget,
+) -> PassPlan {
+    let mut files: Vec<&SourceEntry> = entries.iter().filter(|e| !e.is_dir).collect();
+    files.sort_by(|a, b| a.key.cmp(&b.key));
+    let mut records: Vec<&BackupRecord> = records.iter().collect();
+    records.sort_by(|a, b| (&a.key, a.remote_id).cmp(&(&b.key, b.remote_id)));
+
+    let paired = pair(&files, &records);
+    let mut record_paired = vec![false; records.len()];
+    for r in paired.iter().flatten() {
+        record_paired[*r] = true;
+    }
+
+    // A backed-up record whose server copy is gone was deleted from the
+    // backup elsewhere, whether or not the file is still here.
+    let mut plan = PassPlan {
+        mark_removed_elsewhere: records
+            .iter()
+            .filter(|r| r.state == RecordState::BackedUp && !live_remote.contains(&r.remote_id))
+            .map(|r| r.key.clone())
+            .collect(),
+        ..PassPlan::default()
+    };
+
+    // Moves: a gone, live, backed-up record and a new entry with the same
+    // size, mtime and case-folded name, unique in both directions.
+    let mut source_count: HashMap<MoveSignature, Vec<usize>> = HashMap::new();
+    for (r, record) in records.iter().enumerate() {
+        if !record_paired[r] && record.state == RecordState::BackedUp && live_remote.contains(&record.remote_id) {
+            source_count
+                .entry(signature(record.size, record.modified_ms, &record.key))
+                .or_default()
+                .push(r);
+        }
+    }
+    let mut target_count: HashMap<MoveSignature, usize> = HashMap::new();
+    for (f, file) in files.iter().enumerate() {
+        if paired[f].is_none() {
+            *target_count
+                .entry(signature(file.size, file.modified_ms, &file.key))
+                .or_default() += 1;
+        }
+    }
+    let mut moved_record = vec![false; records.len()];
+
+    let mut wanted: Vec<PlannedUpload> = Vec::new();
+    for (f, file) in files.iter().enumerate() {
+        match paired[f] {
+            Some(r) => {
+                let record = records[r];
+                let changed = file.size != record.size || file.modified_ms != record.modified_ms;
+                if changed {
+                    wanted.push(PlannedUpload {
+                        key: file.key.clone(),
+                        size: file.size,
+                        reason: UploadReason::Changed,
+                    });
+                } else if record.state == RecordState::BackedUp && live_remote.contains(&record.remote_id) {
+                    plan.unchanged += 1;
+                }
+            }
+            None => {
+                let sig = signature(file.size, file.modified_ms, &file.key);
+                let source = match (source_count.get(&sig).map(Vec::as_slice), target_count.get(&sig)) {
+                    (Some(&[r]), Some(1)) => Some(r),
+                    _ => None,
+                };
+                match source {
+                    Some(r) => {
+                        moved_record[r] = true;
+                        plan.moves.push(PlannedMove {
+                            remote_id: records[r].remote_id,
+                            from_key: records[r].key.clone(),
+                            to_key: file.key.clone(),
+                        });
+                    }
+                    None => wanted.push(PlannedUpload {
+                        key: file.key.clone(),
+                        size: file.size,
+                        reason: UploadReason::New,
+                    }),
+                }
+            }
+        }
+    }
+    plan.gone_locally = (0..records.len())
+        .filter(|&r| !record_paired[r] && !moved_record[r])
+        .count();
+
+    // The budget keeps a prefix: the first upload always fits, so one big file
+    // is never stuck; after the first that does not fit, the rest wait.
+    let mut bytes: u64 = 0;
+    for upload in wanted {
+        let fits = plan.deferred == 0
+            && plan.uploads.len() < budget.max_uploads
+            && (plan.uploads.is_empty() || bytes.saturating_add(upload.size) <= budget.max_bytes);
+        if fits {
+            bytes = bytes.saturating_add(upload.size);
+            plan.uploads.push(upload);
+        } else {
+            plan.deferred += 1;
+        }
+    }
+
+    let folders: BTreeSet<&str> = plan
+        .uploads
+        .iter()
+        .map(|u| u.key.as_str())
+        .chain(plan.moves.iter().map(|m| m.to_key.as_str()))
+        .flat_map(parents)
+        .collect();
+    plan.folders = folders.into_iter().map(str::to_string).collect();
+    plan
+}
