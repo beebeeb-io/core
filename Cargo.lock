@@ -218,6 +218,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "beebeeb-backup"
+version = "0.2.0"
+dependencies = [
+ "beebeeb-core",
+ "beebeeb-types",
+ "tokio",
+ "unicode-normalization",
+ "uuid",
+]
+
+[[package]]
 name = "beebeeb-core"
 version = "0.2.0"
 dependencies = [

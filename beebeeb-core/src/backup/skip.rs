@@ -40,6 +40,9 @@ pub enum SkipReason {
     TooLarge,
     /// Deeper than the walk's depth cap. Plan Amendment 1 (lead, 2026-11-06).
     TooDeep,
+    /// The walk could not list this folder or read this entry's attributes
+    /// (permission denied); it is retried next pass and not descended into.
+    Unreadable,
 }
 
 impl SkipReason {
@@ -53,6 +56,7 @@ impl SkipReason {
             SkipReason::Locked => "locked",
             SkipReason::TooLarge => "too_large",
             SkipReason::TooDeep => "too_deep",
+            SkipReason::Unreadable => "unreadable",
         }
     }
 }
