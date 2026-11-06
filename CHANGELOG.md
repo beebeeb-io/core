@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.1]
+## [0.2.1] - 2026-11-06
 
 Additive: backup rules (`beebeeb_core::backup`), the vocabulary (`beebeeb_types::backup`) and the
 filesystem pass (`beebeeb-backup`). No v0.2.0 API changes. LD-0113, spec
