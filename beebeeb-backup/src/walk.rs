@@ -367,7 +367,7 @@ fn unique_key(prefix: &str, name: &str, seen: &mut HashSet<String>) -> Option<St
 }
 
 /// Windows and macOS (by default) do not tell names apart by case.
-const CASE_INSENSITIVE: bool = cfg!(any(windows, target_os = "macos"));
+pub(crate) const CASE_INSENSITIVE: bool = cfg!(any(windows, target_os = "macos"));
 
 /// A name as the exclusion compares it: with `case_insensitive`, core's
 /// `fold_name` (NFC + lowercase, the one fold every backup rule uses);

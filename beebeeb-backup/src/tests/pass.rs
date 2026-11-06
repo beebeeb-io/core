@@ -9,7 +9,8 @@ use beebeeb_types::backup::Category;
 use uuid::Uuid;
 
 use super::TempDir;
-use crate::pass::{Handoff, handoff};
+use crate::pass::{Handoff, PassFs, handoff, run_pass_with};
+use crate::walk::walk_with_paths;
 use crate::{BackupHost, DeviceTree, Fingerprint, HostError, UploadRequest, fingerprint, run_pass};
 
 const BUDGET: PassBudget = PassBudget {
@@ -38,6 +39,8 @@ struct State {
     held_keys: Vec<String>,
     /// Runs inside `ensure_folder`: between the walk and the fingerprints.
     on_ensure_folder: Option<Box<dyn Fn() + Send>>,
+    /// `device_tree` leaves the category folder's id out (a broken host).
+    omit_category_id: bool,
 }
 
 struct FakeHost(Mutex<State>);
@@ -134,7 +137,9 @@ impl BackupHost for FakeHost {
         state.calls.push("device_tree".to_string());
         let mut folders = HashMap::new();
         if state.category_folder_live != Some(false) {
-            folders.insert(String::new(), state.category_id);
+            if !state.omit_category_id {
+                folders.insert(String::new(), state.category_id);
+            }
             for id in state.folders.values() {
                 if let Some(key) = Self::folder_key(&state, *id) {
                     folders.insert(key, *id);
@@ -685,4 +690,141 @@ async fn run_pass_twin_appearing_in_pass_2_never_takes_the_first_files_record() 
         .find(|r| r.remote_id == first_id)
         .expect("first record");
     assert_eq!(first.key, "Rene\u{301}.txt", "the first file keeps its key");
+}
+
+/// The real walk, with the given case rule.
+fn real_fs(case_insensitive: bool) -> PassFs {
+    PassFs {
+        walk: Box::new(walk_with_paths),
+        case_insensitive,
+    }
+}
+
+/// Delta 3 #2: on Windows and macOS a folder renamed only in case (or only in
+/// normalisation) is the same folder: its files move into the server folder
+/// that is already there, never into a new sibling that differs only in case.
+#[tokio::test]
+async fn run_pass_case_only_folder_rename_creates_no_sibling() {
+    for case_insensitive in [true, false] {
+        let src = TempDir::new("caserename");
+        let x = src.write("Photos/x.jpg", b"xx");
+        let y = src.write("Photos/2026/y.jpg", b"yyy");
+        let host = FakeHost::new();
+        {
+            let mut state = host.state();
+            let (category, photos) = (state.category_id, Uuid::new_v4());
+            state.folders.insert((category, "photos".to_string()), photos);
+            state.folders.insert((photos, "2026".to_string()), Uuid::new_v4());
+        }
+        host.backed_up("photos/x.jpg", &x);
+        host.backed_up("photos/2026/y.jpg", &y);
+
+        let report = run_pass_with(
+            &host,
+            src.path(),
+            &[],
+            &Category::Pictures,
+            BUDGET,
+            real_fs(case_insensitive),
+        )
+        .await
+        .expect("pass");
+        assert_eq!(
+            (report.moved, report.queued),
+            (2, 0),
+            "case_insensitive {case_insensitive}"
+        );
+        let mut keys: Vec<String> = host.state().records.iter().map(|r| r.key.clone()).collect();
+        keys.sort();
+        assert_eq!(keys, ["Photos/2026/y.jpg", "Photos/x.jpg"]);
+        if case_insensitive {
+            assert!(host.calls("ensure_folder").is_empty(), "{:?}", host.state().calls);
+            assert!(
+                host.calls("move_file").is_empty(),
+                "already in place: {:?}",
+                host.state().calls
+            );
+        } else {
+            // Linux tells `photos` and `Photos` apart: a folder of its own.
+            assert_eq!(
+                host.calls("ensure_folder"),
+                ["ensure_folder Photos", "ensure_folder 2026"]
+            );
+            assert_eq!(host.calls("move_file").len(), 2);
+        }
+    }
+}
+
+/// Delta 3 #6: on Windows a directory entry's size and mtime can be stale
+/// (a file another process keeps open, a hard link), while the record holds
+/// the handle's values. An entry whose listing differs from its record is
+/// read again from the file before planning, so a stale entry never takes the
+/// budget from a real change.
+#[tokio::test]
+async fn run_pass_stale_listing_never_takes_the_budget() {
+    let src = TempDir::new("stale");
+    let a = src.write("a.jpg", b"aa");
+    src.write("b.jpg", b"bbb");
+    let host = FakeHost::new();
+    host.backed_up("a.jpg", &a);
+    let stale = PassFs {
+        walk: Box::new(|root, exclude| {
+            let mut walk = walk_with_paths(root, exclude)?;
+            for entry in walk.result.entries.iter_mut().filter(|e| e.key == "a.jpg") {
+                entry.modified_ms -= 5_000;
+            }
+            Ok(walk)
+        }),
+        case_insensitive: false,
+    };
+    let one = PassBudget {
+        max_uploads: 1,
+        max_bytes: u64::MAX,
+    };
+
+    let report = run_pass_with(&host, src.path(), &[], &Category::Pictures, one, stale)
+        .await
+        .expect("pass");
+    assert_eq!(
+        (report.queued, report.deferred, report.unchanged),
+        (1, 0, 1),
+        "{report:?}"
+    );
+    assert_eq!(host.calls("enqueue_upload"), ["enqueue_upload b.jpg"]);
+}
+
+/// Delta 3 #8: run_pass checks what can fail before it changes anything. A
+/// host whose tree lacks the category folder's id gets an error, and its
+/// records and server files are as they were: nothing marked, moved or
+/// re-keyed.
+#[tokio::test]
+async fn run_pass_error_before_any_change() {
+    let src = TempDir::new("validate");
+    let gone = src.write("gone.jpg", b"g");
+    let moved = src.write("new/b.jpg", b"bb");
+    let host = FakeHost::new();
+    let gone_id = host.backed_up("gone.jpg", &gone);
+    host.state().files.remove(&gone_id); // deleted from the backup elsewhere
+    host.backed_up("old/b.jpg", &moved); // moved locally from old/ to new/
+    host.state().omit_category_id = true;
+    let (records, files) = {
+        let state = host.state();
+        (state.records.clone(), state.files.clone())
+    };
+
+    let err = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
+        .await
+        .expect_err("no category folder id");
+    assert!(err.0.contains("no id"), "{err:?}");
+    for mutation in [
+        "mark_removed_elsewhere",
+        "ensure_folder",
+        "move_file",
+        "put_record",
+        "enqueue_upload",
+    ] {
+        assert!(host.calls(mutation).is_empty(), "{mutation}: {:?}", host.state().calls);
+    }
+    let state = host.state();
+    assert_eq!((&state.records, &state.files), (&records, &files));
 }

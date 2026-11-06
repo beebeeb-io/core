@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use beebeeb_core::backup::{
-    BackupRecord, EntryAttrs, FolderPresence, PassBudget, RecordState, SkipReason, file_name, folder_presence, parents,
-    plan_pass,
+    BackupRecord, EntryAttrs, FolderPresence, PassBudget, RecordState, SkipReason, file_name, fold_name,
+    folder_presence, normalize_key, parents, plan_pass,
 };
 use beebeeb_types::backup::Category;
 use uuid::Uuid;
@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::Fingerprint;
 use crate::fingerprint::fingerprint_with_attrs;
 use crate::host::{BackupHost, HostError, UploadRequest};
-use crate::walk::{check_excludes, walk_with_paths};
+use crate::walk::{CASE_INSENSITIVE, Walk, check_excludes, walk_with_paths};
 
 /// What one pass did, in counts (what a client shows and logs).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -72,6 +72,58 @@ pub(crate) fn handoff(now: std::io::Result<(Fingerprint, EntryAttrs)>) -> Handof
     }
 }
 
+/// On Windows a listing's size and mtime are the directory entry's
+/// (`FindNextFileW`), which can be stale: a file another process keeps open,
+/// a hard link whose other names' entries NTFS does not update. A record
+/// holds the handle's values (`UploadRequest::fingerprint`). So an entry whose
+/// listing differs from its record (by exact key, else by normalised key) is
+/// read again from the file before planning: a stale entry is then
+/// unchanged, never a `Changed` upload that takes the budget (delta 3 #6).
+/// Only entries the walk listed as local reach here (a not-local one is a
+/// skip, never an entry); one that cannot be read again, or now says not
+/// local, keeps its listing, and the handoff decides.
+fn refresh_stale(walk: &mut Walk, records: &[BackupRecord]) {
+    let mut exact: HashMap<&str, Vec<(u64, i64)>> = HashMap::new();
+    for r in records {
+        exact.entry(r.key.as_str()).or_default().push((r.size, r.modified_ms));
+    }
+    // Built on the first entry with no exact record (a new file), if any.
+    let mut normalized: Option<HashMap<String, Vec<(u64, i64)>>> = None;
+    let mut stale = Vec::new();
+    for (i, entry) in walk.result.entries.iter().enumerate().filter(|(_, e)| !e.is_dir) {
+        let here = (entry.size, entry.modified_ms);
+        let differs = match exact.get(entry.key.as_str()) {
+            Some(recorded) => !recorded.contains(&here),
+            None => normalized
+                .get_or_insert_with(|| {
+                    let mut by_key: HashMap<String, Vec<(u64, i64)>> = HashMap::new();
+                    for r in records {
+                        by_key
+                            .entry(normalize_key(&r.key))
+                            .or_default()
+                            .push((r.size, r.modified_ms));
+                    }
+                    by_key
+                })
+                .get(&normalize_key(&entry.key))
+                .is_some_and(|recorded| !recorded.contains(&here)),
+        };
+        if differs {
+            stale.push(i);
+        }
+    }
+    for i in stale {
+        let entry = &mut walk.result.entries[i];
+        if let Some(path) = walk.paths.get(&entry.key)
+            && let Ok((now, attrs)) = fingerprint_with_attrs(path)
+            && !attrs.not_local
+        {
+            entry.size = now.size;
+            entry.modified_ms = now.modified_ms;
+        }
+    }
+}
+
 fn folder_id(folders: &HashMap<String, Uuid>, key: &str) -> Result<Uuid, HostError> {
     folders
         .get(key)
@@ -88,12 +140,18 @@ fn folder_id(folders: &HashMap<String, Uuid>, key: &str) -> Result<Uuid, HostErr
 ///    after it, never mistaken for a deletion elsewhere);
 /// 2. if the device or category folder was deleted elsewhere, `turn_off` and
 ///    stop: nothing is queued;
-/// 3. walk the source (on a blocking thread) and plan with
-///    `beebeeb_core::backup::plan_pass`, then mark what was removed elsewhere
-///    (only from a [`DeviceTree::complete`] listing);
-/// 4. ensure the planned folders, parents first;
-/// 5. apply the moves, re-keying each record with `put_record`;
-/// 6. fingerprint each planned upload, re-check that its bytes are still
+/// 3. walk the source (on a blocking thread), read again from the file each
+///    entry whose listing differs from its record (a stale directory entry on
+///    Windows), and plan with `beebeeb_core::backup::plan_pass`;
+/// 4. check what can fail (the category folder's id, every move's record,
+///    every upload's path) before anything changes, then mark what was
+///    removed elsewhere (only from a [`DeviceTree::complete`] listing);
+/// 5. ensure the planned folders, parents first; on Windows and macOS a
+///    folder whose key folds equal to an existing one is that folder, so a
+///    case-only rename creates no sibling;
+/// 6. apply the moves, re-keying each record with `put_record` (a file
+///    already where the move puts it is only re-keyed);
+/// 7. fingerprint each planned upload, re-check that its bytes are still
 ///    here, read the records again, and `enqueue_upload` each one no record
 ///    already holds (an upload that completed during the pass wrote its
 ///    record meanwhile). A fingerprint that cannot be read or a file gone
@@ -110,6 +168,31 @@ pub async fn run_pass<H: BackupHost>(
     c: &Category,
     budget: PassBudget,
 ) -> Result<PassReport, HostError> {
+    let fs = PassFs {
+        walk: Box::new(walk_with_paths),
+        case_insensitive: CASE_INSENSITIVE,
+    };
+    run_pass_with(host, source_root, exclude, c, budget, fs).await
+}
+
+/// What a pass reads from the disk and how the platform compares names: the
+/// real walk and the platform's rule in [`run_pass`]; a test's in the tests
+/// (a stale listing, a case-insensitive drive on Linux).
+pub(crate) struct PassFs {
+    pub(crate) walk: Box<dyn FnOnce(&Path, &[PathBuf]) -> std::io::Result<Walk> + Send>,
+    /// Names that differ only in case or normalisation are one name (Windows,
+    /// macOS).
+    pub(crate) case_insensitive: bool,
+}
+
+pub(crate) async fn run_pass_with<H: BackupHost>(
+    host: &H,
+    source_root: &Path,
+    exclude: &[PathBuf],
+    c: &Category,
+    budget: PassBudget,
+    fs: PassFs,
+) -> Result<PassReport, HostError> {
     check_excludes(exclude).map_err(|_| HostError("an excluded path is empty, relative or holds `..`".to_string()))?;
     let records = host.records(c).await?;
     let tree = host.device_tree(c).await?;
@@ -123,10 +206,16 @@ pub async fn run_pass<H: BackupHost>(
     }
 
     let (root, exclude) = (source_root.to_path_buf(), exclude.to_vec());
-    let walk = tokio::task::spawn_blocking(move || walk_with_paths(&root, &exclude))
-        .await
-        .map_err(|_| HostError("the folder walk stopped before it finished".to_string()))?
-        .map_err(|e| HostError(format!("cannot read the backed-up folder ({:?})", e.kind())))?;
+    let (walk_fs, listed) = (fs.walk, records.clone());
+    let walk = tokio::task::spawn_blocking(move || {
+        walk_fs(&root, &exclude).map(|mut walk| {
+            refresh_stale(&mut walk, &listed);
+            walk
+        })
+    })
+    .await
+    .map_err(|_| HostError("the folder walk stopped before it finished".to_string()))?
+    .map_err(|e| HostError(format!("cannot read the backed-up folder ({:?})", e.kind())))?;
 
     let live: HashSet<Uuid> = tree.files.iter().map(|f| f.remote_id).collect();
     let held = host.held_keys(c).await?;
@@ -139,6 +228,26 @@ pub async fn run_pass<H: BackupHost>(
         &held,
         budget,
     );
+
+    // Everything that can fail is checked before the first change to the
+    // host's store or the server (delta 3 #8).
+    let mut folders = tree.folders;
+    folder_id(&folders, "")?;
+    let by_remote: HashMap<Uuid, &BackupRecord> = records.iter().map(|r| (r.remote_id, r)).collect();
+    let moves = plan
+        .moves
+        .iter()
+        .map(|planned| {
+            by_remote
+                .get(&planned.remote_id)
+                .map(|before| (planned, *before))
+                .ok_or_else(|| HostError("a planned move has no record".to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if plan.uploads.iter().any(|u| !walk.paths.contains_key(&u.key)) {
+        return Err(HostError("a planned upload has no path from the walk".to_string()));
+    }
+
     if !plan.mark_removed_elsewhere.is_empty() {
         host.mark_removed_elsewhere(c, &plan.mark_removed_elsewhere).await?;
     }
@@ -155,29 +264,51 @@ pub async fn run_pass<H: BackupHost>(
         *report.skipped.entry(*reason).or_default() += 1;
     }
 
-    let mut folders = tree.folders;
-    folder_id(&folders, "")?;
+    // Where the platform does not tell names apart by case or normalisation,
+    // a planned folder is the existing one whose key folds equal: a case-only
+    // or NFC/NFD-only rename never creates a sibling (delta 3 #2). The
+    // smallest such key wins when two fold equal.
+    let mut folded: HashMap<String, Uuid> = HashMap::new();
+    if fs.case_insensitive {
+        let mut existing: Vec<(&String, &Uuid)> = folders.iter().collect();
+        existing.sort();
+        for (key, id) in existing {
+            folded.entry(fold_name(key)).or_insert(*id);
+        }
+    }
     for key in &plan.folders {
         if folders.contains_key(key) {
+            continue;
+        }
+        if let Some(id) = fs.case_insensitive.then(|| folded.get(&fold_name(key))).flatten() {
+            folders.insert(key.clone(), *id);
             continue;
         }
         let (parent, name) = split_key(key);
         let id = host.ensure_folder(folder_id(&folders, parent)?, name).await?;
         folders.insert(key.clone(), id);
+        if fs.case_insensitive {
+            folded.entry(fold_name(key)).or_insert(id);
+        }
     }
 
-    let by_remote: HashMap<Uuid, &BackupRecord> = records.iter().map(|r| (r.remote_id, r)).collect();
-    for planned in &plan.moves {
+    // A file already where the move puts it (its folder resolved to the one
+    // it is in, by the rule above) is only re-keyed.
+    let remote_keys: HashMap<Uuid, &str> = tree.files.iter().map(|f| (f.remote_id, f.key.as_str())).collect();
+    for (planned, before) in moves {
         let (parent, name) = split_key(&planned.to_key);
-        host.move_file(planned.remote_id, folder_id(&folders, parent)?, name)
-            .await?;
-        let before = by_remote
-            .get(&planned.remote_id)
-            .ok_or_else(|| HostError("a planned move has no record".to_string()))?;
+        let parent_id = folder_id(&folders, parent)?;
+        let in_place = remote_keys.get(&planned.remote_id).is_some_and(|now| {
+            let (now_parent, now_name) = split_key(now);
+            now_name == name && folders.get(now_parent) == Some(&parent_id)
+        });
+        if !in_place {
+            host.move_file(planned.remote_id, parent_id, name).await?;
+        }
         let moved = BackupRecord {
             key: planned.to_key.clone(),
             state: RecordState::BackedUp,
-            ..(*before).clone()
+            ..before.clone()
         };
         host.put_record(c, moved).await?;
         report.moved += 1;

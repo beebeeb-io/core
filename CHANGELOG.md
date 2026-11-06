@@ -56,7 +56,9 @@ filesystem pass (`beebeeb-backup`). No v0.2.0 API changes. LD-0113, spec
   path such as the client's own sync root; attributes from the directory listing only; a folder is
   listed whole or reported unreadable; depth cap 64), `fingerprint`, `attrs_of`, and
   `run_pass(host, root, exclude, category, budget)` over the `BackupHost` trait the client
-  implements.
+  implements (it re-reads an entry whose listing differs from its record, checks what can fail
+  before it changes anything, and on Windows and macOS never creates a folder that differs from
+  an existing one only in case or normalisation).
 - **Bindings**: uniffi `backup_*` (10 functions; every unknown string is `InvalidInput`) and wasm
   `backupCheckMutation`, `backupCheckDriveMutation`, `backupProtectionMany`, `backupParseManifest`.
 - **Vectors**: `test-vectors/consolidation/backup_{protect,device,root,plan}.json` (76, 49, 21 and
