@@ -10,6 +10,8 @@
 //! - device: the device folder's name, the desktop device id, and which
 //!   folder is this device's;
 //! - manifest: the encrypted `.device.json` in each device folder;
+//! - root and merge: which folder is the root, and folding legacy duplicate
+//!   roots into it;
 //! - protection: the Backups root is never trashed, deleted, renamed or moved;
 //! - skip: what is never backed up (OS junk, library bundles, links, files
 //!   whose bytes are not on this device).
@@ -20,11 +22,15 @@
 mod device;
 mod layout;
 mod manifest;
+mod merge;
 mod protect;
+mod root;
 mod skip;
 
 pub use device::*;
 pub use layout::*;
 pub use manifest::*;
+pub use merge::*;
 pub use protect::*;
+pub use root::*;
 pub use skip::*;

@@ -14,6 +14,7 @@ use std::path::PathBuf;
 
 pub mod backup_device;
 pub mod backup_protect;
+pub mod backup_root;
 pub mod download;
 pub mod envelope;
 pub mod error_body;

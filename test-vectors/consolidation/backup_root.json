@@ -1,0 +1,831 @@
+{
+  "description": "LD-0113 Backups root (spec 2026-11-06-backup-from-source §4.2 rules 5-6): resolve_root (a flagged live root wins; else the oldest live root-level folder named exactly Backups is claimed, ties by id, the rest merge into it; a pending name never counts; else create) and plan_merge (children move depth-first, same-name folders recurse, a clash keeps both with core's keep_both_name, emptied duplicates go to Trash last).",
+  "source": "spec §4.2 rules 5-6 + mobile src/services/BackupService.ts:829-960 (tasks 0811, 0813, 0814); written by test-vectors/tools/make_backup_root_vectors.py (independent of core)",
+  "cases": [
+    {
+      "id": "root_none_creates",
+      "kind": "root",
+      "candidates": [],
+      "expect": "create"
+    },
+    {
+      "id": "root_one_is_claimed",
+      "kind": "root",
+      "candidates": [
+        {
+          "id": "00000001-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 1000,
+          "system_role": null
+        }
+      ],
+      "expect": {
+        "claim": {
+          "id": "00000001-0000-4000-8000-000000000000",
+          "merge_from": []
+        }
+      }
+    },
+    {
+      "id": "root_six_same_name_claims_the_oldest",
+      "kind": "root",
+      "candidates": [
+        {
+          "id": "00000006-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 5000,
+          "system_role": null
+        },
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 1000,
+          "system_role": null
+        },
+        {
+          "id": "00000005-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 3000,
+          "system_role": null
+        },
+        {
+          "id": "00000001-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 2000,
+          "system_role": null
+        },
+        {
+          "id": "00000004-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 6000,
+          "system_role": null
+        },
+        {
+          "id": "00000003-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 4000,
+          "system_role": null
+        }
+      ],
+      "expect": {
+        "claim": {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "merge_from": [
+            "00000001-0000-4000-8000-000000000000",
+            "00000003-0000-4000-8000-000000000000",
+            "00000004-0000-4000-8000-000000000000",
+            "00000005-0000-4000-8000-000000000000",
+            "00000006-0000-4000-8000-000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "id": "root_oldest_trashed_claims_the_next",
+      "kind": "root",
+      "candidates": [
+        {
+          "id": "00000001-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": true,
+          "created_at_ms": 1000,
+          "system_role": null
+        },
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 2000,
+          "system_role": null
+        },
+        {
+          "id": "00000003-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 3000,
+          "system_role": null
+        }
+      ],
+      "expect": {
+        "claim": {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "merge_from": [
+            "00000003-0000-4000-8000-000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "id": "root_flagged_wins_over_older_unflagged",
+      "kind": "root",
+      "candidates": [
+        {
+          "id": "00000001-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 1000,
+          "system_role": null
+        },
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 9000,
+          "system_role": "backups_root"
+        }
+      ],
+      "expect": {
+        "use": "00000002-0000-4000-8000-000000000000"
+      }
+    },
+    {
+      "id": "root_flagged_with_pending_name_is_used",
+      "kind": "root",
+      "candidates": [
+        {
+          "id": "00000001-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 1000,
+          "system_role": null
+        },
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": null,
+          "is_trashed": false,
+          "created_at_ms": 9000,
+          "system_role": "backups_root"
+        }
+      ],
+      "expect": {
+        "use": "00000002-0000-4000-8000-000000000000"
+      }
+    },
+    {
+      "id": "root_flagged_in_trash_does_not_count",
+      "kind": "root",
+      "candidates": [
+        {
+          "id": "00000001-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 5000,
+          "system_role": null
+        },
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": true,
+          "created_at_ms": 1000,
+          "system_role": "backups_root"
+        }
+      ],
+      "expect": {
+        "claim": {
+          "id": "00000001-0000-4000-8000-000000000000",
+          "merge_from": []
+        }
+      }
+    },
+    {
+      "id": "root_all_names_pending_creates",
+      "kind": "root",
+      "candidates": [
+        {
+          "id": "00000001-0000-4000-8000-000000000000",
+          "name": null,
+          "is_trashed": false,
+          "created_at_ms": 1000,
+          "system_role": null
+        },
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": null,
+          "is_trashed": false,
+          "created_at_ms": 2000,
+          "system_role": null
+        }
+      ],
+      "expect": "create"
+    },
+    {
+      "id": "root_pending_name_never_counts",
+      "kind": "root",
+      "candidates": [
+        {
+          "id": "00000001-0000-4000-8000-000000000000",
+          "name": null,
+          "is_trashed": false,
+          "created_at_ms": 1000,
+          "system_role": null
+        },
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 2000,
+          "system_role": null
+        }
+      ],
+      "expect": {
+        "claim": {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "merge_from": []
+        }
+      }
+    },
+    {
+      "id": "root_tie_on_created_at_takes_the_smallest_id",
+      "kind": "root",
+      "candidates": [
+        {
+          "id": "00000009-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 1000,
+          "system_role": null
+        },
+        {
+          "id": "00000007-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 1000,
+          "system_role": null
+        }
+      ],
+      "expect": {
+        "claim": {
+          "id": "00000007-0000-4000-8000-000000000000",
+          "merge_from": [
+            "00000009-0000-4000-8000-000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "id": "root_name_must_be_exact",
+      "kind": "root",
+      "candidates": [
+        {
+          "id": "00000001-0000-4000-8000-000000000000",
+          "name": "backups",
+          "is_trashed": false,
+          "created_at_ms": 1000,
+          "system_role": null
+        },
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": "Backups ",
+          "is_trashed": false,
+          "created_at_ms": 1000,
+          "system_role": null
+        },
+        {
+          "id": "00000003-0000-4000-8000-000000000000",
+          "name": "Backup",
+          "is_trashed": false,
+          "created_at_ms": 1000,
+          "system_role": null
+        }
+      ],
+      "expect": "create"
+    },
+    {
+      "id": "root_other_folders_are_ignored",
+      "kind": "root",
+      "candidates": [
+        {
+          "id": "00000001-0000-4000-8000-000000000000",
+          "name": "Documents",
+          "is_trashed": false,
+          "created_at_ms": 1000,
+          "system_role": null
+        },
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_trashed": false,
+          "created_at_ms": 3000,
+          "system_role": null
+        },
+        {
+          "id": "00000003-0000-4000-8000-000000000000",
+          "name": "Photos",
+          "is_trashed": false,
+          "created_at_ms": 500,
+          "system_role": null
+        }
+      ],
+      "expect": {
+        "claim": {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "merge_from": []
+        }
+      }
+    },
+    {
+      "id": "merge_empty_duplicate_is_only_trashed",
+      "kind": "merge",
+      "survivor": {
+        "id": "00000001-0000-4000-8000-000000000000",
+        "name": "Backups",
+        "is_folder": true,
+        "children": []
+      },
+      "duplicates": [
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_folder": true,
+          "children": []
+        }
+      ],
+      "clash_label": "merged",
+      "hhmm": "14.05",
+      "expect": [
+        {
+          "trash": "00000002-0000-4000-8000-000000000000"
+        }
+      ]
+    },
+    {
+      "id": "merge_moves_children_then_trashes",
+      "kind": "merge",
+      "survivor": {
+        "id": "00000001-0000-4000-8000-000000000000",
+        "name": "Backups",
+        "is_folder": true,
+        "children": [
+          {
+            "id": "0000000a-0000-4000-8000-000000000000",
+            "name": "iPhone",
+            "is_folder": true,
+            "children": []
+          }
+        ]
+      },
+      "duplicates": [
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_folder": true,
+          "children": [
+            {
+              "id": "00000014-0000-4000-8000-000000000000",
+              "name": "GLegion",
+              "is_folder": true,
+              "children": []
+            },
+            {
+              "id": "00000015-0000-4000-8000-000000000000",
+              "name": "notes.txt",
+              "is_folder": false,
+              "children": []
+            }
+          ]
+        }
+      ],
+      "clash_label": "merged",
+      "hhmm": "14.05",
+      "expect": [
+        {
+          "move": {
+            "id": "00000014-0000-4000-8000-000000000000",
+            "new_parent": "00000001-0000-4000-8000-000000000000"
+          }
+        },
+        {
+          "move": {
+            "id": "00000015-0000-4000-8000-000000000000",
+            "new_parent": "00000001-0000-4000-8000-000000000000"
+          }
+        },
+        {
+          "trash": "00000002-0000-4000-8000-000000000000"
+        }
+      ]
+    },
+    {
+      "id": "merge_nested_same_name_folders_recurse",
+      "kind": "merge",
+      "survivor": {
+        "id": "00000001-0000-4000-8000-000000000000",
+        "name": "Backups",
+        "is_folder": true,
+        "children": [
+          {
+            "id": "0000000a-0000-4000-8000-000000000000",
+            "name": "iPhone",
+            "is_folder": true,
+            "children": [
+              {
+                "id": "0000000b-0000-4000-8000-000000000000",
+                "name": "Camera Roll",
+                "is_folder": true,
+                "children": [
+                  {
+                    "id": "0000000c-0000-4000-8000-000000000000",
+                    "name": "2026-05",
+                    "is_folder": true,
+                    "children": [
+                      {
+                        "id": "0000000d-0000-4000-8000-000000000000",
+                        "name": "IMG_1.heic",
+                        "is_folder": false,
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "duplicates": [
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_folder": true,
+          "children": [
+            {
+              "id": "00000014-0000-4000-8000-000000000000",
+              "name": "iPhone",
+              "is_folder": true,
+              "children": [
+                {
+                  "id": "00000015-0000-4000-8000-000000000000",
+                  "name": "Camera Roll",
+                  "is_folder": true,
+                  "children": [
+                    {
+                      "id": "00000016-0000-4000-8000-000000000000",
+                      "name": "2026-05",
+                      "is_folder": true,
+                      "children": [
+                        {
+                          "id": "00000017-0000-4000-8000-000000000000",
+                          "name": "IMG_2.heic",
+                          "is_folder": false,
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "id": "00000018-0000-4000-8000-000000000000",
+                      "name": "2026-06",
+                      "is_folder": true,
+                      "children": [
+                        {
+                          "id": "00000019-0000-4000-8000-000000000000",
+                          "name": "IMG_3.heic",
+                          "is_folder": false,
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "clash_label": "merged",
+      "hhmm": "14.05",
+      "expect": [
+        {
+          "move": {
+            "id": "00000017-0000-4000-8000-000000000000",
+            "new_parent": "0000000c-0000-4000-8000-000000000000"
+          }
+        },
+        {
+          "trash": "00000016-0000-4000-8000-000000000000"
+        },
+        {
+          "move": {
+            "id": "00000018-0000-4000-8000-000000000000",
+            "new_parent": "0000000b-0000-4000-8000-000000000000"
+          }
+        },
+        {
+          "trash": "00000015-0000-4000-8000-000000000000"
+        },
+        {
+          "trash": "00000014-0000-4000-8000-000000000000"
+        },
+        {
+          "trash": "00000002-0000-4000-8000-000000000000"
+        }
+      ]
+    },
+    {
+      "id": "merge_file_clash_keeps_both",
+      "kind": "merge",
+      "survivor": {
+        "id": "00000001-0000-4000-8000-000000000000",
+        "name": "Backups",
+        "is_folder": true,
+        "children": [
+          {
+            "id": "0000000a-0000-4000-8000-000000000000",
+            "name": "IMG_1.heic",
+            "is_folder": false,
+            "children": []
+          }
+        ]
+      },
+      "duplicates": [
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_folder": true,
+          "children": [
+            {
+              "id": "00000014-0000-4000-8000-000000000000",
+              "name": "IMG_1.heic",
+              "is_folder": false,
+              "children": []
+            }
+          ]
+        }
+      ],
+      "clash_label": "merged",
+      "hhmm": "14.05",
+      "expect": [
+        {
+          "move_renamed": {
+            "id": "00000014-0000-4000-8000-000000000000",
+            "new_parent": "00000001-0000-4000-8000-000000000000",
+            "new_name": "IMG_1 (merged, 14.05).heic"
+          }
+        },
+        {
+          "trash": "00000002-0000-4000-8000-000000000000"
+        }
+      ]
+    },
+    {
+      "id": "merge_second_clash_counts_up",
+      "kind": "merge",
+      "survivor": {
+        "id": "00000001-0000-4000-8000-000000000000",
+        "name": "Backups",
+        "is_folder": true,
+        "children": [
+          {
+            "id": "0000000a-0000-4000-8000-000000000000",
+            "name": "IMG_1.heic",
+            "is_folder": false,
+            "children": []
+          }
+        ]
+      },
+      "duplicates": [
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_folder": true,
+          "children": [
+            {
+              "id": "00000014-0000-4000-8000-000000000000",
+              "name": "IMG_1.heic",
+              "is_folder": false,
+              "children": []
+            }
+          ]
+        },
+        {
+          "id": "00000003-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_folder": true,
+          "children": [
+            {
+              "id": "0000001e-0000-4000-8000-000000000000",
+              "name": "IMG_1.heic",
+              "is_folder": false,
+              "children": []
+            }
+          ]
+        }
+      ],
+      "clash_label": "merged",
+      "hhmm": "14.05",
+      "expect": [
+        {
+          "move_renamed": {
+            "id": "00000014-0000-4000-8000-000000000000",
+            "new_parent": "00000001-0000-4000-8000-000000000000",
+            "new_name": "IMG_1 (merged, 14.05).heic"
+          }
+        },
+        {
+          "trash": "00000002-0000-4000-8000-000000000000"
+        },
+        {
+          "move_renamed": {
+            "id": "0000001e-0000-4000-8000-000000000000",
+            "new_parent": "00000001-0000-4000-8000-000000000000",
+            "new_name": "IMG_1 (merged, 14.05) 2.heic"
+          }
+        },
+        {
+          "trash": "00000003-0000-4000-8000-000000000000"
+        }
+      ]
+    },
+    {
+      "id": "merge_folder_clashing_with_a_file_keeps_both",
+      "kind": "merge",
+      "survivor": {
+        "id": "00000001-0000-4000-8000-000000000000",
+        "name": "Backups",
+        "is_folder": true,
+        "children": [
+          {
+            "id": "0000000a-0000-4000-8000-000000000000",
+            "name": "Notes",
+            "is_folder": false,
+            "children": []
+          }
+        ]
+      },
+      "duplicates": [
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_folder": true,
+          "children": [
+            {
+              "id": "00000014-0000-4000-8000-000000000000",
+              "name": "Notes",
+              "is_folder": true,
+              "children": [
+                {
+                  "id": "00000015-0000-4000-8000-000000000000",
+                  "name": "a.txt",
+                  "is_folder": false,
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "clash_label": "merged",
+      "hhmm": "14.05",
+      "expect": [
+        {
+          "move_renamed": {
+            "id": "00000014-0000-4000-8000-000000000000",
+            "new_parent": "00000001-0000-4000-8000-000000000000",
+            "new_name": "Notes (merged, 14.05)"
+          }
+        },
+        {
+          "trash": "00000002-0000-4000-8000-000000000000"
+        }
+      ]
+    },
+    {
+      "id": "merge_names_compare_case_insensitively",
+      "kind": "merge",
+      "survivor": {
+        "id": "00000001-0000-4000-8000-000000000000",
+        "name": "Backups",
+        "is_folder": true,
+        "children": [
+          {
+            "id": "0000000a-0000-4000-8000-000000000000",
+            "name": "Camera Roll",
+            "is_folder": true,
+            "children": []
+          }
+        ]
+      },
+      "duplicates": [
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_folder": true,
+          "children": [
+            {
+              "id": "00000014-0000-4000-8000-000000000000",
+              "name": "camera roll",
+              "is_folder": true,
+              "children": [
+                {
+                  "id": "00000015-0000-4000-8000-000000000000",
+                  "name": "IMG_9.heic",
+                  "is_folder": false,
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "clash_label": "merged",
+      "hhmm": "14.05",
+      "expect": [
+        {
+          "move": {
+            "id": "00000015-0000-4000-8000-000000000000",
+            "new_parent": "0000000a-0000-4000-8000-000000000000"
+          }
+        },
+        {
+          "trash": "00000014-0000-4000-8000-000000000000"
+        },
+        {
+          "trash": "00000002-0000-4000-8000-000000000000"
+        }
+      ]
+    },
+    {
+      "id": "merge_later_duplicate_merges_into_a_moved_folder",
+      "kind": "merge",
+      "survivor": {
+        "id": "00000001-0000-4000-8000-000000000000",
+        "name": "Backups",
+        "is_folder": true,
+        "children": []
+      },
+      "duplicates": [
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_folder": true,
+          "children": [
+            {
+              "id": "00000014-0000-4000-8000-000000000000",
+              "name": "Camera Roll",
+              "is_folder": true,
+              "children": [
+                {
+                  "id": "00000015-0000-4000-8000-000000000000",
+                  "name": "x.jpg",
+                  "is_folder": false,
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "00000003-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_folder": true,
+          "children": [
+            {
+              "id": "0000001e-0000-4000-8000-000000000000",
+              "name": "Camera Roll",
+              "is_folder": true,
+              "children": [
+                {
+                  "id": "0000001f-0000-4000-8000-000000000000",
+                  "name": "y.jpg",
+                  "is_folder": false,
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "clash_label": "merged",
+      "hhmm": "14.05",
+      "expect": [
+        {
+          "move": {
+            "id": "00000014-0000-4000-8000-000000000000",
+            "new_parent": "00000001-0000-4000-8000-000000000000"
+          }
+        },
+        {
+          "trash": "00000002-0000-4000-8000-000000000000"
+        },
+        {
+          "move": {
+            "id": "0000001f-0000-4000-8000-000000000000",
+            "new_parent": "00000014-0000-4000-8000-000000000000"
+          }
+        },
+        {
+          "trash": "0000001e-0000-4000-8000-000000000000"
+        },
+        {
+          "trash": "00000003-0000-4000-8000-000000000000"
+        }
+      ]
+    }
+  ]
+}
