@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
+use super::fold_name;
+
 /// A backup key in its one comparable form: NFC (macOS names arrive NFD),
 /// `\` as `/`, no leading `/`.
 pub fn normalize_key(raw: &str) -> String {
@@ -207,8 +209,17 @@ fn pair(files: &[&SourceEntry], records: &[&BackupRecord]) -> Vec<Option<usize>>
 
 type MoveSignature = (u64, i64, String);
 
+/// A file's side of the pairing: its record, or (unpaired) the signature a
+/// move looks up.
+enum Pairing {
+    Record(usize),
+    Unpaired(MoveSignature),
+}
+
+/// Size, mtime and the folded name (`fold_name`) of the normalised key's
+/// last segment. `plan_pass` computes it once per unpaired record and file.
 fn signature(size: u64, modified_ms: i64, key: &str) -> MoveSignature {
-    (size, modified_ms, file_name(&normalize_key(key)).to_lowercase())
+    (size, modified_ms, fold_name(file_name(&normalize_key(key))))
 }
 
 /// Whether `key` is one of `unseen` or lies under one, comparing the keys as
@@ -303,38 +314,50 @@ pub fn plan_pass(
 
     // Moves: a gone record whose server copy is live and a new entry with the
     // same size, mtime and case-folded name, unique in both directions.
-    let mut source_count: HashMap<MoveSignature, Vec<usize>> = HashMap::new();
-    for (r, record) in records.iter().enumerate() {
-        if !record_paired[r] && live(record) {
-            source_count
-                .entry(signature(record.size, record.modified_ms, &record.key))
-                .or_default()
-                .push(r);
-        }
-    }
-    // A record missing from an incomplete listing may still be live: a new
-    // entry that matches it may be its file moved, so it waits too.
-    let unknown_sources: HashSet<MoveSignature> = records
+    // Each signature is computed once: for an unpaired record that is live
+    // or unknown, and for an unpaired file.
+    let record_sig: Vec<Option<MoveSignature>> = records
         .iter()
         .enumerate()
-        .filter(|(r, record)| !record_paired[*r] && unknown(record))
-        .map(|(_, record)| signature(record.size, record.modified_ms, &record.key))
+        .map(|(r, record)| {
+            (!record_paired[r] && (live(record) || unknown(record)))
+                .then(|| signature(record.size, record.modified_ms, &record.key))
+        })
         .collect();
-    let mut target_count: HashMap<MoveSignature, usize> = HashMap::new();
-    for (f, file) in files.iter().enumerate() {
-        if paired[f].is_none() {
-            *target_count
-                .entry(signature(file.size, file.modified_ms, &file.key))
-                .or_default() += 1;
+    let pairing: Vec<Pairing> = files
+        .iter()
+        .zip(&paired)
+        .map(|(file, paired)| match paired {
+            Some(r) => Pairing::Record(*r),
+            None => Pairing::Unpaired(signature(file.size, file.modified_ms, &file.key)),
+        })
+        .collect();
+    let mut source_count: HashMap<&MoveSignature, Vec<usize>> = HashMap::new();
+    // A record missing from an incomplete listing may still be live: a new
+    // entry that matches it may be its file moved, so it waits too.
+    let mut unknown_sources: HashSet<&MoveSignature> = HashSet::new();
+    for (r, sig) in record_sig.iter().enumerate() {
+        if let Some(sig) = sig {
+            if live(records[r]) {
+                source_count.entry(sig).or_default().push(r);
+            } else {
+                unknown_sources.insert(sig);
+            }
+        }
+    }
+    let mut target_count: HashMap<&MoveSignature, usize> = HashMap::new();
+    for pairing in &pairing {
+        if let Pairing::Unpaired(sig) = pairing {
+            *target_count.entry(sig).or_default() += 1;
         }
     }
     let mut moved_record = vec![false; records.len()];
 
     let mut wanted: Vec<PlannedUpload> = Vec::new();
-    for (f, file) in files.iter().enumerate() {
-        match paired[f] {
-            Some(r) => {
-                let record = records[r];
+    for (file, pairing) in files.iter().zip(&pairing) {
+        match pairing {
+            Pairing::Record(r) => {
+                let record = records[*r];
                 let changed = file.size != record.size || file.modified_ms != record.modified_ms;
                 if changed && unknown(record) {
                     plan.deferred_unknown += 1;
@@ -357,9 +380,8 @@ pub fn plan_pass(
                     plan.unchanged += 1;
                 }
             }
-            None => {
-                let sig = signature(file.size, file.modified_ms, &file.key);
-                let source = match (source_count.get(&sig).map(Vec::as_slice), target_count.get(&sig)) {
+            Pairing::Unpaired(sig) => {
+                let source = match (source_count.get(sig).map(Vec::as_slice), target_count.get(sig)) {
                     (Some(&[r]), Some(1)) => Some(r),
                     _ => None,
                 };
@@ -372,7 +394,7 @@ pub fn plan_pass(
                             to_key: file.key.clone(),
                         });
                     }
-                    None if unknown_sources.contains(&sig) => plan.deferred_unknown += 1,
+                    None if unknown_sources.contains(sig) => plan.deferred_unknown += 1,
                     None => wanted.push(PlannedUpload {
                         key: file.key.clone(),
                         size: file.size,
