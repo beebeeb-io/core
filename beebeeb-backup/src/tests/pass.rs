@@ -9,7 +9,8 @@ use beebeeb_types::backup::Category;
 use uuid::Uuid;
 
 use super::TempDir;
-use crate::{BackupHost, DeviceTree, HostError, UploadRequest, fingerprint, run_pass};
+use crate::pass::{Handoff, handoff};
+use crate::{BackupHost, DeviceTree, Fingerprint, HostError, UploadRequest, fingerprint, run_pass};
 
 const BUDGET: PassBudget = PassBudget {
     max_uploads: 256,
@@ -31,6 +32,10 @@ struct State {
     /// The client finishes every queued upload right after the next
     /// `records` call returns (an upload completing mid-pass).
     finish_after_next_records: bool,
+    /// What `device_tree` reports as `complete`.
+    listing_complete: bool,
+    /// Runs inside `ensure_folder`: between the walk and the fingerprints.
+    on_ensure_folder: Option<Box<dyn Fn() + Send>>,
 }
 
 struct FakeHost(Mutex<State>);
@@ -41,6 +46,7 @@ impl FakeHost {
             category_id: Uuid::new_v4(),
             device_folder_live: true,
             category_folder_live: Some(true),
+            listing_complete: true,
             ..State::default()
         }))
     }
@@ -148,12 +154,16 @@ impl BackupHost for FakeHost {
             category_folder_live: state.category_folder_live,
             folders,
             files,
+            complete: state.listing_complete,
         })
     }
 
     async fn ensure_folder(&self, parent: Uuid, name: &str) -> Result<Uuid, HostError> {
         let mut state = self.state();
         state.calls.push(format!("ensure_folder {name}"));
+        if let Some(hook) = &state.on_ensure_folder {
+            hook();
+        }
         let next = Uuid::new_v4();
         Ok(*state.folders.entry((parent, name.to_string())).or_insert(next))
     }
@@ -485,4 +495,134 @@ async fn run_pass_never_queues_from_an_excluded_path() {
     assert_eq!(report.queued, 1);
     assert_eq!(report.skipped, BTreeMap::from([(SkipReason::Excluded, 1)]));
     assert_eq!(host.calls("enqueue_upload"), ["enqueue_upload a.jpg"]);
+}
+
+/// Review finding 2: a listing that misses a page proves no deletion, so a
+/// partial tree marks nothing removed elsewhere and the record stays backed
+/// up.
+#[tokio::test]
+async fn partial_device_tree_marks_nothing_removed() {
+    let src = TempDir::new("partial");
+    let path = src.write("a.jpg", b"aa");
+    let host = FakeHost::new();
+    let id = host.backed_up("a.jpg", &path);
+    {
+        let mut state = host.state();
+        state.files.remove(&id);
+        state.listing_complete = false;
+    }
+    let report = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
+        .await
+        .expect("pass");
+    assert!(
+        host.calls("mark_removed_elsewhere").is_empty(),
+        "{:?}",
+        host.state().calls
+    );
+    assert_eq!(host.state().records[0].state, RecordState::BackedUp);
+    assert_eq!((report.queued, report.unchanged), (0, 0));
+
+    // The same listing, complete: now the missing id is a deletion.
+    host.state().listing_complete = true;
+    run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
+        .await
+        .expect("pass 2");
+    assert_eq!(host.calls("mark_removed_elsewhere"), ["mark_removed_elsewhere a.jpg"]);
+}
+
+/// Review finding 3, through the pass: refused before anything is read.
+#[tokio::test]
+async fn run_pass_refuses_an_empty_exclude_path() {
+    let src = TempDir::new("passemptyexclude");
+    src.write("a.jpg", b"aa");
+    let host = FakeHost::new();
+    let err = run_pass(
+        &host,
+        src.path(),
+        &[std::path::PathBuf::new()],
+        &Category::Pictures,
+        BUDGET,
+    )
+    .await
+    .expect_err("an empty exclude path is refused");
+    assert!(err.0.contains("excluded path"), "{}", err.0);
+    assert!(
+        host.state().calls.is_empty(),
+        "nothing was read: {:?}",
+        host.state().calls
+    );
+}
+
+/// Review finding 5: a file whose fingerprint cannot be read (here it turned
+/// into a symlink after the walk) is reported with its key, never a silent
+/// deferral, and is not handed to the uploader.
+#[cfg(unix)]
+#[tokio::test]
+async fn run_pass_reports_a_file_it_cannot_fingerprint() {
+    let src = TempDir::new("nofingerprint");
+    let path = src.write("sub/a.jpg", b"aa");
+    src.write("sub/b.jpg", b"bb");
+    let host = FakeHost::new();
+    let target = src.path().join("sub/b.jpg");
+    host.state().on_ensure_folder = Some(Box::new(move || {
+        let _ = std::fs::remove_file(&path);
+        let _ = std::os::unix::fs::symlink(&target, &path);
+    }));
+    let report = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
+        .await
+        .expect("pass");
+    assert_eq!((report.queued, report.deferred, report.vanished), (1, 0, 0));
+    assert_eq!(report.held_back, [("sub/a.jpg".to_string(), SkipReason::Unreadable)]);
+    assert_eq!(report.skipped, BTreeMap::from([(SkipReason::Unreadable, 1)]));
+    assert_eq!(host.calls("enqueue_upload"), ["enqueue_upload sub/b.jpg"]);
+}
+
+/// Review finding 5: the handoff decision from a fresh fingerprint. A file
+/// that went online-only after the walk is held back as not local (reading
+/// it would download it); a vanished one is counted, not reported unreadable.
+#[test]
+fn handoff_holds_back_what_went_online_only_or_cannot_be_read() {
+    let fp = Fingerprint {
+        size: 3,
+        modified_ms: 1_000,
+        file_id: None,
+    };
+    let local = beebeeb_core::backup::EntryAttrs::default();
+    let online_only = beebeeb_core::backup::EntryAttrs {
+        not_local: true,
+        ..local
+    };
+    assert_eq!(handoff(Ok((fp, local))), Handoff::Queue(fp));
+    assert_eq!(handoff(Ok((fp, online_only))), Handoff::Hold(SkipReason::NotLocal));
+    let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+    assert_eq!(handoff(Err(denied)), Handoff::Hold(SkipReason::Unreadable));
+    let gone = std::io::Error::from(std::io::ErrorKind::NotFound);
+    assert_eq!(handoff(Err(gone)), Handoff::Vanished);
+}
+
+/// Review finding 4, end to end on Linux: an unreadable NFD folder hides
+/// nothing of its readable NFC twin.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn run_pass_unreadable_nfd_twin_hides_nothing_of_the_nfc_twin() {
+    use std::os::unix::fs::PermissionsExt;
+    let src = TempDir::new("twinfolders");
+    src.write("R\u{e9}/a.jpg", b"nfc");
+    src.write("Re\u{301}/b.jpg", b"nfd");
+    let closed = src.path().join("Re\u{301}");
+    std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+    if std::fs::read_dir(&closed).is_ok() {
+        std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o755)).expect("chmod back");
+        eprintln!(
+            "run_pass_unreadable_nfd_twin_hides_nothing_of_the_nfc_twin: permissions ignored (root); not checked"
+        );
+        return;
+    }
+    let host = FakeHost::new();
+    let report = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET).await;
+    std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o755)).expect("chmod back");
+    let report = report.expect("pass");
+    assert_eq!(report.queued, 1);
+    assert_eq!(host.calls("enqueue_upload"), ["enqueue_upload R\u{e9}/a.jpg"]);
+    assert_eq!(report.skipped, BTreeMap::from([(SkipReason::Unreadable, 1)]));
 }

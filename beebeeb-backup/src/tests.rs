@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use beebeeb_core::backup::SkipReason;
 
-use crate::walk::{attrs_from_parts, collect_listing, is_within, walk_with_paths};
+use crate::walk::{Excludes, attrs_from_parts, collect_listing, is_within, walk_with_paths};
 use crate::{MAX_DEPTH, fingerprint, walk_source};
 
 /// `run_pass` over a recording host.
@@ -283,4 +283,62 @@ fn a_listing_that_fails_partway_is_not_used() {
         .map(|(name, ())| name)
         .collect();
     assert_eq!(names, ["a.jpg", "b.jpg"]);
+}
+
+/// Review finding 3: an empty path would exclude everything (no components)
+/// and a relative or `..` one nothing, so both are refused.
+#[test]
+fn empty_exclude_path_is_refused() {
+    let dir = TempDir::new("emptyexclude");
+    dir.write("a.txt", b"x");
+    for bad in [
+        PathBuf::new(),
+        PathBuf::from("Beebeeb"),
+        dir.path().join("x/../Beebeeb"),
+    ] {
+        let err = walk_source(dir.path(), std::slice::from_ref(&bad)).expect_err("refused");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput, "{bad:?}");
+    }
+    assert_eq!(keys(&walk_source(dir.path(), &[]).expect("walk")), ["a.txt"]);
+}
+
+/// An excluded path two folders down: the folders above it are walked, the
+/// path itself is not.
+#[test]
+fn walk_excludes_a_nested_path_only() {
+    let dir = TempDir::new("nestedexclude");
+    dir.write("a/x.txt", b"x");
+    dir.write("a/b/inside.txt", b"y");
+    dir.write("b/kept.txt", b"z");
+    let result = walk_source(dir.path(), &[dir.path().join("a/b")]).expect("walk");
+    assert_eq!(keys(&result), ["a", "a/x.txt", "b", "b/kept.txt"]);
+    assert_eq!(result.skipped, [("a/b".to_string(), SkipReason::Excluded)]);
+}
+
+/// Review finding 10: the excluded paths are folded once; a name is compared
+/// only while an excluded path runs through its folder, without case where
+/// the OS has none.
+#[test]
+fn excludes_are_folded_once_and_followed_by_component() {
+    use std::ffi::OsStr;
+    let root = Path::new("/home/u/Documents");
+    let sync = [PathBuf::from("/home/u/documents/BEEBEEB/Drive")];
+    let folded = Excludes::new(root, &sync, true).expect("excludes");
+    let through = folded
+        .step(&folded.everywhere(), 0, OsStr::new("Beebeeb"))
+        .expect("runs on");
+    assert_eq!(through.len(), 1);
+    assert_eq!(folded.step(&through, 1, OsStr::new("drive")), None, "excluded");
+    assert_eq!(folded.step(&through, 1, OsStr::new("Other")), Some(Vec::new()));
+    assert_eq!(
+        folded.step(&[], 1, OsStr::new("drive")),
+        Some(Vec::new()),
+        "no path runs through"
+    );
+    // With case (Linux), the spelling differs from the root: nothing is excluded.
+    let exact = Excludes::new(root, &sync, false).expect("excludes");
+    assert!(exact.everywhere().is_empty());
+    // The root inside an excluded path: every entry is.
+    let inside = Excludes::new(root, &[PathBuf::from("/home/u")], false).expect("excludes");
+    assert_eq!(inside.step(&[], 0, OsStr::new("anything")), None);
 }

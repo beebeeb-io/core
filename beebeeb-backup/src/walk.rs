@@ -12,7 +12,7 @@ use std::fs::{DirEntry, Metadata};
 use std::io;
 use std::path::{Component, Path, PathBuf, Prefix};
 
-use beebeeb_core::backup::{EntryAttrs, SkipReason, SourceEntry, skip_reason};
+use beebeeb_core::backup::{EntryAttrs, SkipReason, SourceEntry, fold_name, skip_reason};
 use unicode_normalization::{UnicodeNormalization, is_nfc};
 
 use crate::fingerprint::modified_ms;
@@ -134,11 +134,14 @@ pub fn attrs_of(meta: &Metadata) -> EntryAttrs {
 ///   reported as [`SkipReason::Excluded`] (plan Amendment 1, item 8). Desktop
 ///   passes its sync root, the CLI its own sync folders: otherwise a sync root
 ///   inside a backed-up folder would back the drive, its own Backups
-///   included, up into Backups. Give them absolute, without `..`, spelled from
-///   the same base as `root`; they are compared component by component, and
-///   without case on Windows and macOS. A `root` that itself lies inside an
-///   excluded path is refused by the client (desktop D4), not here; passed
-///   anyway, every entry is excluded and nothing is backed up.
+///   included, up into Backups. Each is absolute and without `..`; an empty,
+///   relative or `..` path is an `InvalidInput` error, never "exclude
+///   everything". They are compared with `root` component by component (a
+///   relative `root` is made absolute first, without touching the disk), and
+///   without case on Windows and macOS, so spell both from the same base. A
+///   `root` that itself lies inside an excluded path is refused by the client
+///   (desktop D4), not here; passed anyway, every entry is excluded and
+///   nothing is backed up.
 /// - Attributes come from the directory listing alone (plan Amendment 1, item
 ///   9): on Windows `DirEntry::metadata` is served from the `FindNextFileW`
 ///   data with no handle opened, so a not-local entry is known before anything
@@ -156,13 +159,16 @@ pub(crate) fn walk_with_paths(root: &Path, exclude: &[PathBuf]) -> io::Result<Wa
             "the backed-up folder is not a folder",
         ));
     }
+    let excludes = Excludes::new(root, exclude, CASE_INSENSITIVE)?;
     let mut walk = Walk {
         result: WalkResult::default(),
         paths: HashMap::new(),
     };
     let mut seen: HashSet<String> = HashSet::new();
-    let mut stack: Vec<(PathBuf, String, usize)> = vec![(root.to_path_buf(), String::new(), 0)];
-    while let Some((dir, prefix, depth)) = stack.pop() {
+    // Each folder carries the excluded paths that still run through it.
+    let mut stack: Vec<(PathBuf, String, usize, Vec<usize>)> =
+        vec![(root.to_path_buf(), String::new(), 0, excludes.everywhere())];
+    while let Some((dir, prefix, depth, through)) = stack.pop() {
         let listing = match list(&dir) {
             Ok(listing) => listing,
             // The backed-up folder itself, whole or partly unreadable: the
@@ -182,13 +188,10 @@ pub(crate) fn walk_with_paths(root: &Path, exclude: &[PathBuf]) -> io::Result<Wa
                 continue;
             };
             let path = item.path();
-            if exclude
-                .iter()
-                .any(|excluded| is_within(&path, excluded, CASE_INSENSITIVE))
-            {
+            let Some(through_child) = excludes.step(&through, depth, &item.file_name()) else {
                 walk.result.skipped.push((key, SkipReason::Excluded));
                 continue;
-            }
+            };
             if depth + 1 > MAX_DEPTH {
                 walk.result.skipped.push((key, SkipReason::TooDeep));
                 continue;
@@ -217,7 +220,7 @@ pub(crate) fn walk_with_paths(root: &Path, exclude: &[PathBuf]) -> io::Result<Wa
                 modified_ms: modified_ms(&meta),
             });
             if attrs.is_dir {
-                stack.push((path, key, depth + 1));
+                stack.push((path, key, depth + 1, through_child));
             } else {
                 walk.paths.insert(key, path);
             }
@@ -270,35 +273,120 @@ fn unique_key(prefix: &str, name: &str, seen: &mut HashSet<String>) -> Option<St
 /// Windows and macOS (by default) do not tell names apart by case.
 const CASE_INSENSITIVE: bool = cfg!(any(windows, target_os = "macos"));
 
-/// True when `path` is `base` or lies under it, component by component. With
-/// `case_insensitive`, names compare after NFC and lowercasing, and a
-/// verbatim prefix (`\\?\C:\`) equals its plain form (`C:\`).
-pub(crate) fn is_within(path: &Path, base: &Path, case_insensitive: bool) -> bool {
-    let mut path = path.components();
-    base.components()
-        .all(|b| path.next().is_some_and(|p| same_component(p, b, case_insensitive)))
-}
-
-fn same_component(a: Component<'_>, b: Component<'_>, case_insensitive: bool) -> bool {
-    let same_name = |a: &OsStr, b: &OsStr| {
-        if case_insensitive { fold(a) == fold(b) } else { a == b }
-    };
-    match (a, b) {
-        (Component::Prefix(a), Component::Prefix(b)) => match (a.kind(), b.kind()) {
-            (Prefix::Disk(x) | Prefix::VerbatimDisk(x), Prefix::Disk(y) | Prefix::VerbatimDisk(y)) => {
-                x.eq_ignore_ascii_case(&y)
-            }
-            (
-                Prefix::UNC(server_a, share_a) | Prefix::VerbatimUNC(server_a, share_a),
-                Prefix::UNC(server_b, share_b) | Prefix::VerbatimUNC(server_b, share_b),
-            ) => fold(server_a) == fold(server_b) && same_name(share_a, share_b),
-            (a, b) => a == b,
-        },
-        (Component::Normal(a), Component::Normal(b)) => same_name(a, b),
-        (a, b) => a == b,
+/// A name as the exclusion compares it: with `case_insensitive`, core's
+/// `fold_name` (NFC + lowercase, the one fold every backup rule uses);
+/// otherwise its exact bytes.
+fn name_key(name: &OsStr, case_insensitive: bool) -> Vec<u8> {
+    if case_insensitive {
+        fold_name(&name.to_string_lossy()).into_bytes()
+    } else {
+        name.as_encoded_bytes().to_vec()
     }
 }
 
-fn fold(name: &OsStr) -> String {
-    name.to_string_lossy().nfc().collect::<String>().to_lowercase()
+/// One path component as the exclusion compares it. A verbatim prefix
+/// (`\\?\C:\`) equals its plain form (`C:\`).
+fn component_key(c: Component<'_>, case_insensitive: bool) -> Vec<u8> {
+    match c {
+        Component::Prefix(p) => match p.kind() {
+            Prefix::Disk(d) | Prefix::VerbatimDisk(d) => vec![d.to_ascii_uppercase(), b':'],
+            Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) => {
+                let mut key = b"\\\\".to_vec();
+                key.extend(name_key(server, true));
+                key.push(b'\\');
+                key.extend(name_key(share, case_insensitive));
+                key
+            }
+            _ => p.as_os_str().as_encoded_bytes().to_vec(),
+        },
+        other => name_key(other.as_os_str(), case_insensitive),
+    }
+}
+
+fn path_keys(path: &Path, case_insensitive: bool) -> Vec<Vec<u8>> {
+    path.components().map(|c| component_key(c, case_insensitive)).collect()
+}
+
+/// True when `path` is `base` or lies under it, component by component (the
+/// rule [`Excludes`] applies, one path at a time).
+#[cfg(test)]
+pub(crate) fn is_within(path: &Path, base: &Path, case_insensitive: bool) -> bool {
+    let (path, base) = (path_keys(path, case_insensitive), path_keys(base, case_insensitive));
+    !base.is_empty() && path.starts_with(&base)
+}
+
+/// An empty, relative or `..` excluded path is refused: compared as
+/// components, an empty path would cover everything and a relative or `..`
+/// one nothing (review finding 3).
+pub(crate) fn check_excludes(exclude: &[PathBuf]) -> io::Result<()> {
+    for path in exclude {
+        if path.as_os_str().is_empty() || !path.is_absolute() || path.components().any(|c| c == Component::ParentDir) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "an excluded path is empty, relative or holds `..`",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The excluded paths, each folded once before the walk into the components
+/// left below the root, so an entry's name is folded only while an excluded
+/// path still runs through its folder (review finding 10).
+pub(crate) struct Excludes {
+    /// The root is an excluded path or lies inside one: every entry is.
+    root_inside: bool,
+    /// Per excluded path under the root, its components below the root.
+    below_root: Vec<Vec<Vec<u8>>>,
+    case_insensitive: bool,
+}
+
+impl Excludes {
+    pub(crate) fn new(root: &Path, exclude: &[PathBuf], case_insensitive: bool) -> io::Result<Excludes> {
+        check_excludes(exclude)?;
+        let root_keys = path_keys(&std::path::absolute(root)?, case_insensitive);
+        let mut excludes = Excludes {
+            root_inside: false,
+            below_root: Vec::new(),
+            case_insensitive,
+        };
+        for path in exclude {
+            let keys = path_keys(path, case_insensitive);
+            if root_keys.starts_with(&keys) {
+                excludes.root_inside = true;
+            } else if keys.starts_with(&root_keys) {
+                excludes.below_root.push(keys[root_keys.len()..].to_vec());
+            }
+        }
+        Ok(excludes)
+    }
+
+    /// Every excluded path below the root: what runs through the root.
+    pub(crate) fn everywhere(&self) -> Vec<usize> {
+        (0..self.below_root.len()).collect()
+    }
+
+    /// For the entry `name` in a folder `depth` below the root that the
+    /// excluded paths `through` run through: `None` when the entry is
+    /// excluded, else the excluded paths that run on through it.
+    pub(crate) fn step(&self, through: &[usize], depth: usize, name: &OsStr) -> Option<Vec<usize>> {
+        if self.root_inside {
+            return None;
+        }
+        if through.is_empty() {
+            return Some(Vec::new());
+        }
+        let key = name_key(name, self.case_insensitive);
+        let mut on = Vec::new();
+        for &i in through {
+            let rest = &self.below_root[i];
+            if rest[depth] == key {
+                if rest.len() == depth + 1 {
+                    return None;
+                }
+                on.push(i);
+            }
+        }
+        Some(on)
+    }
 }

@@ -21,10 +21,20 @@ use crate::Fingerprint;
 /// record for `key`.
 ///
 /// `reason`: [`UploadReason::New`] creates a file named `name` in
-/// `parent_id`. [`UploadReason::Changed`] uploads a new version of the remote
-/// file of the client's own record at `key` (its `remote_id`), so the backup
-/// keeps one file with its history, never two. A `Changed` request whose key
-/// has no record any more is uploaded as `New`.
+/// `parent_id`, also when the key's record was removed elsewhere (it comes
+/// back as a new file, ruling A); when it completes the client writes a fresh
+/// record for `key` (new `remote_id`, `BackedUp`) in place of the old one.
+/// [`UploadReason::Changed`] uploads a new version of the remote file of the
+/// client's own record at `key` (its `remote_id`, live at planning time), so
+/// the backup keeps one file with its history, never two. A `Changed` request
+/// whose key has no record any more, or whose remote file the server reports
+/// gone, is uploaded as `New`.
+///
+/// The pass re-checked the attributes just before the handoff, but the file
+/// can still go online-only before the uploader opens it: the uploader
+/// (desktop D3) reads the attributes on the handle it opens and never reads a
+/// placeholder whose recall or offline bit is set (that read would download
+/// it); it abandons the session and the file is retried next pass.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UploadRequest {
     pub category: Category,
@@ -53,8 +63,14 @@ pub struct DeviceTree {
     /// Live folders by key under the category folder; key `""` is the category
     /// folder itself and must be present whenever the tree is `Present`.
     pub folders: HashMap<String, Uuid>,
-    /// Live (not trashed) files under the category folder.
+    /// Live (not trashed) files under the category folder. A file whose name
+    /// is still pending decryption is listed too, with an empty `key`: it is
+    /// live by its id, and the pass reads only the id.
     pub files: Vec<RemoteEntry>,
+    /// `true` only when the client read every page of the listing and dropped
+    /// no entry. A pass marks records removed elsewhere only from a complete
+    /// listing (review finding 2); from a partial one it marks nothing.
+    pub complete: bool,
 }
 
 /// A client failure, in the client's words. It carries a kind or a count,

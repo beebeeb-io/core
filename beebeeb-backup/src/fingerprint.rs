@@ -10,6 +10,10 @@ use std::io;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use beebeeb_core::backup::EntryAttrs;
+
+use crate::walk::attrs_of;
+
 /// What identifies one version of a file without reading it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Fingerprint {
@@ -46,15 +50,25 @@ fn file_id(_meta: &Metadata) -> Option<u128> {
 }
 
 /// The fingerprint of the regular file at `path`, from its metadata only (the
-/// file is not opened, and a link is not followed).
+/// file is not opened for reading, and a link is not followed).
 pub fn fingerprint(path: &Path) -> io::Result<Fingerprint> {
+    fingerprint_with_attrs(path).map(|(fp, _)| fp)
+}
+
+/// The fingerprint and the entry's attributes as they are now, so the pass
+/// can re-check, right before the handoff, that the bytes are still here (a
+/// OneDrive file can go online-only after the walk). Called only for a file
+/// the walk already found local: on Windows `symlink_metadata` opens a handle
+/// with no data access, which reads attributes and never recalls a file.
+pub(crate) fn fingerprint_with_attrs(path: &Path) -> io::Result<(Fingerprint, EntryAttrs)> {
     let meta = std::fs::symlink_metadata(path)?;
     if !meta.is_file() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a regular file"));
     }
-    Ok(Fingerprint {
+    let fp = Fingerprint {
         size: meta.len(),
         modified_ms: modified_ms(&meta),
         file_id: file_id(&meta),
-    })
+    };
+    Ok((fp, attrs_of(&meta)))
 }

@@ -90,6 +90,7 @@ fn run_plan_case(case: &Value) -> Value {
         &list(&case["entries"], entry),
         &list(&case["records"], record),
         &live,
+        case["live_remote_complete"].as_bool().expect("live_remote_complete"),
         &list(&case["unseen"], s),
         budget,
     ))
@@ -98,7 +99,7 @@ fn run_plan_case(case: &Value) -> Value {
 #[test]
 fn backup_plan_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 53, "every named backup_plan case is present");
+    assert_eq!(cases.len(), 60, "every named backup_plan case is present");
 
     let (mut plans, mut keys, mut presences, mut rebuilds) = (0, 0, 0, 0);
     for case in &cases {
@@ -160,7 +161,7 @@ fn backup_plan_cases_match_core() {
     );
     assert_eq!(
         (plans, keys, presences, rebuilds),
-        (34, 4, 5, 10),
+        (41, 4, 5, 10),
         "case counts per kind"
     );
 }
@@ -200,6 +201,7 @@ fn case_only_rename_is_a_move() {
         &[file("Trip/img.jpg", 4_000_000, 1_700_000_000_000)],
         std::slice::from_ref(&record),
         &live,
+        true,
         &[],
         UNLIMITED,
     );
@@ -228,13 +230,20 @@ fn plan_and_rebuild_handle_negative_future_and_coarse_mtimes() {
     for &m in &times {
         let record = backed_up("a.jpg", 7, m, 1_762_430_500_000);
         let live: HashSet<Uuid> = [record.remote_id].into_iter().collect();
-        let plan = plan_pass(&[file("a.jpg", 7, m)], &[record], &live, &[], UNLIMITED);
+        let plan = plan_pass(&[file("a.jpg", 7, m)], &[record], &live, true, &[], UNLIMITED);
         assert_eq!((plan.unchanged, plan.uploads.len()), (1, 0), "modified_ms {m}");
     }
     // A FAT/exFAT copy rounds the mtime to 2 s: a different value, so it uploads.
     let record = backed_up("a.jpg", 7, 1_762_430_401_337, 1_762_430_500_000);
     let live: HashSet<Uuid> = [record.remote_id].into_iter().collect();
-    let plan = plan_pass(&[file("a.jpg", 7, 1_762_430_402_000)], &[record], &live, &[], UNLIMITED);
+    let plan = plan_pass(
+        &[file("a.jpg", 7, 1_762_430_402_000)],
+        &[record],
+        &live,
+        true,
+        &[],
+        UNLIMITED,
+    );
     assert_eq!(plan.uploads.len(), 1);
     assert_eq!(plan.uploads[0].reason, UploadReason::Changed);
 
@@ -286,6 +295,7 @@ fn unreadable_folder_records_are_not_gone_or_move_sources() {
         &[file("open/a.jpg", 9, 1_700_000_000_000)],
         &[hidden, marked_elsewhere],
         &live,
+        true,
         &["closed".to_string()],
         UNLIMITED,
     );
@@ -305,7 +315,8 @@ fn unreadable_folder_records_are_not_gone_or_move_sources() {
 }
 
 /// The same for a folder that is not local (OneDrive online-only, iCloud
-/// dataless), given in NFD as a macOS walk may first see it.
+/// dataless). Its name is NFD on disk (an HFS+-era macOS folder); the walk
+/// keys it NFC, as it keys the records, and unseen keys match raw.
 #[test]
 fn notlocal_folder_records_are_not_move_sources() {
     let record = backed_up("Ren\u{e9}/IMG_1.jpg", 9, 1_700_000_000_000, 1_700_000_100_000);
@@ -314,7 +325,8 @@ fn notlocal_folder_records_are_not_move_sources() {
         &[file("Camera/IMG_1.jpg", 9, 1_700_000_000_000)],
         &[record],
         &live,
-        &["Rene\u{301}".to_string()],
+        true,
+        &["Ren\u{e9}".to_string()],
         UNLIMITED,
     );
     assert!(plan.moves.is_empty(), "{:?}", plan.moves);

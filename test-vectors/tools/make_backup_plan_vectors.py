@@ -33,13 +33,13 @@ def up(key, size=10, reason="new"):
     return {"key": key, "size": size, "reason": reason}
 
 
-def plan(id_, entries, records, live, expect, budget=None, unseen=()):
+def plan(id_, entries, records, live, expect, budget=None, unseen=(), complete=True):
     full = {"uploads": [], "moves": [], "folders": [], "mark_removed_elsewhere": [], "unchanged": 0,
             "gone_locally": 0, "deferred": 0}
     full.update(expect)
     cases.append({"id": id_, "kind": "plan", "entries": entries, "records": records,
-                  "live_remote": [uid(n) for n in live], "unseen": list(unseen), "budget": budget or NO_LIMIT,
-                  "expect": full})
+                  "live_remote": [uid(n) for n in live], "live_remote_complete": complete,
+                  "unseen": list(unseen), "budget": budget or NO_LIMIT, "expect": full})
 
 
 plan("plan_new_file", [e("a.jpg")], [], [], {"uploads": [up("a.jpg")]})
@@ -78,10 +78,27 @@ plan("plan_nfd_record_matches_nfc_entry", [e(unicodedata.normalize("NFC", "Rene�
 plan("removed_elsewhere_unchanged_plans_nothing", [e("a.jpg")], [r("a.jpg", 1)], [],
      {"mark_removed_elsewhere": ["a.jpg"]})
 plan("removed_elsewhere_already_marked_and_unchanged", [e("a.jpg")], [r("a.jpg", 1, state="removed_elsewhere")], [], {})
+# Ruling A (Guus 2026-11-06): it stays deleted until it changes on the device, then it comes back as a NEW file,
+# never as a version of the trashed or purged remote file.
 plan("removed_elsewhere_then_changed_uploads", [e("a.jpg", m=9000)], [r("a.jpg", 1, state="removed_elsewhere")], [],
-     {"uploads": [up("a.jpg", 10, "changed")]})
+     {"uploads": [up("a.jpg", 10, "new")]})
 plan("removed_elsewhere_noticed_and_changed", [e("a.jpg", size=12)], [r("a.jpg", 1)], [],
-     {"mark_removed_elsewhere": ["a.jpg"], "uploads": [up("a.jpg", 12, "changed")]})
+     {"mark_removed_elsewhere": ["a.jpg"], "uploads": [up("a.jpg", 12, "new")]})
+# Restored from Trash: the remote is live again, so the record is held again, whatever its state.
+plan("restored_from_trash_after_the_mark_is_unchanged", [e("a.jpg")], [r("a.jpg", 1, state="removed_elsewhere")], [1],
+     {"unchanged": 1})
+plan("restored_from_trash_after_the_mark_is_a_move_source", [e("sub/a.jpg")],
+     [r("a.jpg", 1, state="removed_elsewhere")], [1],
+     {"moves": [{"remote_id": uid(1), "from_key": "a.jpg", "to_key": "sub/a.jpg"}], "folders": ["sub"]})
+plan("restored_from_trash_after_the_mark_and_changed_is_a_version", [e("a.jpg", m=9000)],
+     [r("a.jpg", 1, state="removed_elsewhere")], [1], {"uploads": [up("a.jpg", 10, "changed")]})
+# A partial listing (a page missing, an entry dropped) proves no deletion.
+plan("partial_listing_marks_nothing_removed", [e("a.jpg"), e("b.jpg", m=2000)], [r("a.jpg", 1), r("b.jpg", 2)], [],
+     {"uploads": [up("b.jpg", 10, "new")]}, complete=False)
+plan("partial_listing_takes_no_move_source_from_an_unlisted_record", [e("new/a.jpg")], [r("old/a.jpg", 1)], [],
+     {"uploads": [up("new/a.jpg")], "folders": ["new"], "gone_locally": 1}, complete=False)
+plan("partial_listing_still_counts_what_it_lists", [e("a.jpg"), e("b.jpg")], [r("a.jpg", 1), r("b.jpg", 2)], [1],
+     {"unchanged": 1}, complete=False)
 plan("restored_from_trash_before_the_pass_changes_nothing", [e("a.jpg")], [r("a.jpg", 1)], [1], {"unchanged": 1})
 # Plan Amendment 1, items 5-6: what the walk did not look into is not gone.
 plan("unreadable_folder_records_are_not_gone_or_move_sources", [e("open/a.jpg")], [r("closed/a.jpg", 1)], [1],
@@ -93,7 +110,12 @@ plan("unseen_file_key_is_untouched", [], [r("cloud.jpg", 1)], [1], {}, unseen=["
 plan("unseen_nested_folder_covers_its_subtree", [], [r("a/b/c/d.jpg", 1)], [1], {}, unseen=["a/b"])
 plan("unseen_prefix_is_a_path_prefix_only", [], [r("closed-2/a.jpg", 1)], [1], {"gone_locally": 1},
      unseen=["closed"])
-plan("unseen_nfd_key_matches_nfc_record", [], [r("René/x.jpg", 1)], [1], {},
+# Unseen keys are matched raw (the walk's keys are the record keys): an unreadable NFD folder never hides its NFC twin.
+plan("unseen_nfd_key_does_not_cover_its_nfc_twin", [], [r(unicodedata.normalize("NFC", "René/x.jpg"), 1)], [1],
+     {"gone_locally": 1}, unseen=[unicodedata.normalize("NFD", "René")])
+plan("unseen_nfd_twin_folder_hides_nothing_of_the_nfc_twin",
+     [e(unicodedata.normalize("NFC", "René/a.jpg"))], [r(unicodedata.normalize("NFD", "René/b.jpg"), 2)], [2],
+     {"uploads": [up(unicodedata.normalize("NFC", "René/a.jpg"))], "folders": [unicodedata.normalize("NFC", "René")]},
      unseen=[unicodedata.normalize("NFD", "René")])
 plan("unseen_root_covers_every_record", [], [r("a.jpg", 1), r("x/b.jpg", 2), r("c.jpg", 3)], [1, 2], {},
      unseen=[""])

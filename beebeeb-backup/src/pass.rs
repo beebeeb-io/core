@@ -5,14 +5,16 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use beebeeb_core::backup::{
-    BackupRecord, FolderPresence, PassBudget, RecordState, SkipReason, folder_presence, plan_pass,
+    BackupRecord, EntryAttrs, FolderPresence, PassBudget, RecordState, SkipReason, file_name, folder_presence, parents,
+    plan_pass,
 };
 use beebeeb_types::backup::Category;
 use uuid::Uuid;
 
+use crate::Fingerprint;
+use crate::fingerprint::fingerprint_with_attrs;
 use crate::host::{BackupHost, HostError, UploadRequest};
-use crate::walk::walk_with_paths;
-use crate::{Fingerprint, fingerprint};
+use crate::walk::{check_excludes, walk_with_paths};
 
 /// What one pass did, in counts (what a client shows and logs).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -24,19 +26,46 @@ pub struct PassReport {
     pub unchanged: usize,
     /// Deleted locally; they stay in the backup.
     pub gone_locally: usize,
-    /// Left for the next pass (the budget, or a file that vanished between
-    /// the walk and its fingerprint).
+    /// Left for the next pass by the budget.
     pub deferred: usize,
-    /// Not backed up, by reason.
+    /// Gone between the walk and the handoff (deleted or renamed meanwhile):
+    /// the next pass sees where it went.
+    pub vanished: usize,
+    /// Not backed up, by reason: the walk's skips plus `held_back`.
     pub skipped: BTreeMap<SkipReason, usize>,
+    /// Planned uploads not handed to the uploader, by key, with the reason:
+    /// `Unreadable` (its fingerprint could not be read: permission denied, a
+    /// sharing violation, no longer a regular file) or `NotLocal` (it went
+    /// online-only after the walk). For the client's list; logs carry the
+    /// counts only.
+    pub held_back: Vec<(String, SkipReason)>,
     /// Set when the device or category folder was deleted elsewhere: the pass
     /// turned this backup off and queued nothing.
     pub turned_off: Option<FolderPresence>,
 }
 
-/// The parent key of `key` (`""` for a top-level entry) and its last segment.
+/// The parent key of `key` (`""` for a top-level entry) and its last segment,
+/// by core's key rules.
 fn split_key(key: &str) -> (&str, &str) {
-    key.rsplit_once('/').unwrap_or(("", key))
+    (parents(key).last().unwrap_or(""), file_name(key))
+}
+
+/// What becomes of one planned upload at the handoff, from a fingerprint read
+/// just now.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Handoff {
+    Queue(Fingerprint),
+    Hold(SkipReason),
+    Vanished,
+}
+
+pub(crate) fn handoff(now: std::io::Result<(Fingerprint, EntryAttrs)>) -> Handoff {
+    match now {
+        Ok((_, attrs)) if attrs.not_local => Handoff::Hold(SkipReason::NotLocal),
+        Ok((fp, _)) => Handoff::Queue(fp),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Handoff::Vanished,
+        Err(_) => Handoff::Hold(SkipReason::Unreadable),
+    }
 }
 
 fn folder_id(folders: &HashMap<String, Uuid>, key: &str) -> Result<Uuid, HostError> {
@@ -56,12 +85,18 @@ fn folder_id(folders: &HashMap<String, Uuid>, key: &str) -> Result<Uuid, HostErr
 /// 2. if the device or category folder was deleted elsewhere, `turn_off` and
 ///    stop: nothing is queued;
 /// 3. walk the source (on a blocking thread) and plan with
-///    `beebeeb_core::backup::plan_pass`, then mark what was removed elsewhere;
+///    `beebeeb_core::backup::plan_pass`, then mark what was removed elsewhere
+///    (only from a [`DeviceTree::complete`] listing);
 /// 4. ensure the planned folders, parents first;
 /// 5. apply the moves, re-keying each record with `put_record`;
-/// 6. fingerprint each planned upload, read the records again, and
-///    `enqueue_upload` each one no record already holds (an upload that
-///    completed during the pass wrote its record meanwhile).
+/// 6. fingerprint each planned upload, re-check that its bytes are still
+///    here, read the records again, and `enqueue_upload` each one no record
+///    already holds (an upload that completed during the pass wrote its
+///    record meanwhile). A fingerprint that cannot be read or a file gone
+///    online-only is reported in [`PassReport::held_back`].
+///
+/// An empty, relative or `..` path in `exclude` is an error before anything
+/// is read.
 ///
 /// A pass never writes a record for an upload, and never touches the source.
 pub async fn run_pass<H: BackupHost>(
@@ -71,6 +106,7 @@ pub async fn run_pass<H: BackupHost>(
     c: &Category,
     budget: PassBudget,
 ) -> Result<PassReport, HostError> {
+    check_excludes(exclude).map_err(|_| HostError("an excluded path is empty, relative or holds `..`".to_string()))?;
     let records = host.records(c).await?;
     let tree = host.device_tree(c).await?;
     let presence = folder_presence(tree.device_folder_live, tree.category_folder_live);
@@ -89,7 +125,14 @@ pub async fn run_pass<H: BackupHost>(
         .map_err(|e| HostError(format!("cannot read the backed-up folder ({:?})", e.kind())))?;
 
     let live: HashSet<Uuid> = tree.files.iter().map(|f| f.remote_id).collect();
-    let plan = plan_pass(&walk.result.entries, &records, &live, &walk.result.unseen(), budget);
+    let plan = plan_pass(
+        &walk.result.entries,
+        &records,
+        &live,
+        tree.complete,
+        &walk.result.unseen(),
+        budget,
+    );
     if !plan.mark_removed_elsewhere.is_empty() {
         host.mark_removed_elsewhere(c, &plan.mark_removed_elsewhere).await?;
     }
@@ -137,10 +180,10 @@ pub async fn run_pass<H: BackupHost>(
         .iter()
         .filter_map(|u| walk.paths.get(&u.key).map(|p| (u.key.clone(), p.clone())))
         .collect();
-    let fingerprints: HashMap<String, Fingerprint> = tokio::task::spawn_blocking(move || {
+    let handoffs: HashMap<String, Handoff> = tokio::task::spawn_blocking(move || {
         sources
             .into_iter()
-            .filter_map(|(key, path)| fingerprint(&path).ok().map(|fp| (key, fp)))
+            .map(|(key, path)| (key, handoff(fingerprint_with_attrs(&path))))
             .collect()
     })
     .await
@@ -157,10 +200,20 @@ pub async fn run_pass<H: BackupHost>(
         .map(|r| (r.key, (r.size, r.modified_ms)))
         .collect();
     for upload in plan.uploads {
-        let (Some(fp), Some(path)) = (fingerprints.get(&upload.key), walk.paths.get(&upload.key)) else {
-            // Gone or no longer a file since the walk: the next pass sees it.
-            report.deferred += 1;
-            continue;
+        let (Some(handoff), Some(path)) = (handoffs.get(&upload.key), walk.paths.get(&upload.key)) else {
+            return Err(HostError("a planned upload has no path from the walk".to_string()));
+        };
+        let fp = match handoff {
+            Handoff::Queue(fp) => fp,
+            Handoff::Vanished => {
+                report.vanished += 1;
+                continue;
+            }
+            Handoff::Hold(reason) => {
+                *report.skipped.entry(*reason).or_default() += 1;
+                report.held_back.push((upload.key.clone(), *reason));
+                continue;
+            }
         };
         if held.get(&upload.key) == Some(&(fp.size, fp.modified_ms)) {
             report.unchanged += 1;

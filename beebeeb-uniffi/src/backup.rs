@@ -429,13 +429,17 @@ fn parse_state(s: &str) -> Result<rules::RecordState, CryptoError> {
     serde_json::from_value(serde_json::Value::String(s.to_string())).map_err(|_| invalid("unknown record state"))
 }
 
-/// `unseen`: keys the source did not look at or into (iOS passes an empty
-/// list). `max_uploads` saturates at the platform's `usize`.
+/// `live_remote`: every live file id of the category, a file whose name is
+/// still pending decryption included. `live_remote_complete`: the listing read
+/// every page and dropped nothing; only then is anything marked removed
+/// elsewhere. `unseen`: keys the source did not look at or into (iOS passes
+/// an empty list). `max_uploads` saturates at the platform's `usize`.
 #[uniffi::export]
 pub fn backup_plan_pass(
     entries: Vec<BackupSourceEntry>,
     records: Vec<BackupRecordEntry>,
     live_remote: Vec<String>,
+    live_remote_complete: bool,
     unseen: Vec<String>,
     max_uploads: u64,
     max_bytes: u64,
@@ -467,7 +471,7 @@ pub fn backup_plan_pass(
         max_uploads: usize::try_from(max_uploads).unwrap_or(usize::MAX),
         max_bytes,
     };
-    let plan = rules::plan_pass(&entries, &records, &live, &unseen, budget);
+    let plan = rules::plan_pass(&entries, &records, &live, live_remote_complete, &unseen, budget);
     Ok(BackupPassPlan {
         uploads: plan
             .uploads
@@ -570,8 +574,19 @@ mod tests {
             uploaded_at_ms: 2,
             state: state.to_string(),
         };
-        assert!(backup_plan_pass(Vec::new(), vec![record("BackedUp")], Vec::new(), Vec::new(), 1, 1).is_err());
-        assert!(backup_plan_pass(Vec::new(), vec![record("backed_up")], Vec::new(), Vec::new(), 1, 1).is_ok());
+        assert!(backup_plan_pass(Vec::new(), vec![record("BackedUp")], Vec::new(), true, Vec::new(), 1, 1).is_err());
+        assert!(
+            backup_plan_pass(
+                Vec::new(),
+                vec![record("backed_up")],
+                Vec::new(),
+                true,
+                Vec::new(),
+                1,
+                1
+            )
+            .is_ok()
+        );
     }
 
     /// The real iOS manifest vector round-trips through the DTO.

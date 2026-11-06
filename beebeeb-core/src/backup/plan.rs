@@ -63,9 +63,14 @@ pub struct PassBudget {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UploadReason {
-    /// No record for this key.
+    /// No record for this key, or the record's server copy is not live (it
+    /// was removed elsewhere, or is gone now): the file comes back as a new
+    /// file and never becomes a version of a trashed or purged `remote_id`
+    /// (Guus, 2026-11-06, ruling A). The client writes a fresh record when the
+    /// upload completes.
     New,
-    /// Its size or `modified_ms` differs from the record.
+    /// Its size or `modified_ms` differs from the record, whose server copy is
+    /// live: a new version of the record's `remote_id`.
     Changed,
 }
 
@@ -131,13 +136,14 @@ pub fn folder_presence(device_folder_live: bool, category_folder_live: Option<bo
     }
 }
 
-/// The last `/` segment.
-pub(super) fn file_name(key: &str) -> &str {
+/// The last `/` segment of a key: `"a/b/c.jpg"` gives `"c.jpg"`.
+pub fn file_name(key: &str) -> &str {
     key.rsplit('/').next().unwrap_or(key)
 }
 
-/// Every parent of `key`: `"a/b/c"` gives `"a"` and `"a/b"`.
-fn parents(key: &str) -> impl Iterator<Item = &str> {
+/// Every parent of a key, outermost first: `"a/b/c"` gives `"a"` and
+/// `"a/b"`. The last one is the key's own folder.
+pub fn parents(key: &str) -> impl Iterator<Item = &str> {
     key.match_indices('/').map(move |(i, _)| &key[..i])
 }
 
@@ -185,37 +191,47 @@ fn signature(size: u64, modified_ms: i64, key: &str) -> MoveSignature {
     (size, modified_ms, file_name(&normalize_key(key)).to_lowercase())
 }
 
-/// Whether `key` is one of `unseen` (normalised keys) or lies under one.
-fn under_unseen(key: &str, unseen: &HashSet<String>) -> bool {
+/// Whether `key` is one of `unseen` or lies under one, comparing raw keys:
+/// the walk's keys are already the record keys, and normalising would let an
+/// unreadable NFD folder hide its readable NFC twin.
+fn under_unseen(key: &str, unseen: &HashSet<&str>) -> bool {
     if unseen.is_empty() {
         return false;
     }
     // `""` is the backed-up folder itself: nothing in it was seen.
-    let key = normalize_key(key);
-    unseen.contains("") || unseen.contains(&key) || parents(&key).any(|parent| unseen.contains(parent))
+    unseen.contains("") || unseen.contains(key) || parents(key).any(|parent| unseen.contains(parent))
 }
 
-/// Spec §4.2 rules 9 and 11. `live_remote` holds the ids of this category's
-/// files on the server now (not trashed). `unseen` holds the keys the walk did
-/// not look at or into (a skipped folder or file, `WalkResult::unseen`): a
-/// record at or under one is left untouched, never gone, never a move source
-/// and never marked removed elsewhere, because the walk cannot know whether it
-/// is still there (plan Amendment 1, items 5-6). `""` stands for the whole
-/// folder. A file entry at or under an unseen key is not planned either (a
-/// walk never reports both; if one does, the entry waits for a pass that sees
-/// its folder whole). iOS passes an empty list. The result does not depend on
-/// the order of `entries` or `records`.
+/// Spec §4.2 rules 9 and 11.
+///
+/// - `live_remote` holds the ids of this category's files on the server now
+///   (not trashed), a file whose name is still pending decryption included.
+///   A record is held while its id is live, whatever its state: a file
+///   restored from Trash is unchanged again and a valid move source.
+/// - `live_remote_complete`: the listing read every page and dropped nothing.
+///   Only then is a missing id proof of a deletion: a backed-up record whose
+///   id is missing from a complete listing is marked removed elsewhere; from
+///   an incomplete one nothing is marked. Either way a record whose id is not
+///   live is never a move source and never gets a `Changed` upload.
+/// - `unseen` holds the keys the walk did not look at or into (a skipped
+///   folder or file, `WalkResult::unseen`), matched as raw keys: a record at
+///   or under one is left untouched, never gone, never a move source and never
+///   marked removed elsewhere, because the walk cannot know whether it is
+///   still there (plan Amendment 1, items 5-6). `""` stands for the whole
+///   folder. A file entry at or under an unseen key is not planned either (it
+///   waits for a pass that sees its folder whole). iOS passes an empty list.
+///
+/// The result does not depend on the order of `entries` or `records`.
 pub fn plan_pass(
     entries: &[SourceEntry],
     records: &[BackupRecord],
     live_remote: &HashSet<Uuid>,
+    live_remote_complete: bool,
     unseen: &[String],
     budget: PassBudget,
 ) -> PassPlan {
-    let unseen: HashSet<String> = unseen
-        .iter()
-        .map(|key| normalize_key(key).trim_end_matches('/').to_string())
-        .collect();
+    let unseen: HashSet<&str> = unseen.iter().map(|key| key.trim_end_matches('/')).collect();
+    let live = |r: &BackupRecord| live_remote.contains(&r.remote_id);
     let mut files: Vec<&SourceEntry> = entries
         .iter()
         .filter(|e| !e.is_dir && !under_unseen(&e.key, &unseen))
@@ -230,22 +246,23 @@ pub fn plan_pass(
         record_paired[*r] = true;
     }
 
-    // A backed-up record whose server copy is gone was deleted from the
-    // backup elsewhere, whether or not the file is still here.
+    // A backed-up record whose server copy is missing from a complete listing
+    // was deleted from the backup elsewhere, whether or not the file is still
+    // here. A partial listing proves nothing, so it marks nothing.
     let mut plan = PassPlan {
         mark_removed_elsewhere: records
             .iter()
-            .filter(|r| r.state == RecordState::BackedUp && !live_remote.contains(&r.remote_id))
+            .filter(|r| live_remote_complete && r.state == RecordState::BackedUp && !live(r))
             .map(|r| r.key.clone())
             .collect(),
         ..PassPlan::default()
     };
 
-    // Moves: a gone, live, backed-up record and a new entry with the same
-    // size, mtime and case-folded name, unique in both directions.
+    // Moves: a gone record whose server copy is live and a new entry with the
+    // same size, mtime and case-folded name, unique in both directions.
     let mut source_count: HashMap<MoveSignature, Vec<usize>> = HashMap::new();
     for (r, record) in records.iter().enumerate() {
-        if !record_paired[r] && record.state == RecordState::BackedUp && live_remote.contains(&record.remote_id) {
+        if !record_paired[r] && live(record) {
             source_count
                 .entry(signature(record.size, record.modified_ms, &record.key))
                 .or_default()
@@ -269,12 +286,18 @@ pub fn plan_pass(
                 let record = records[r];
                 let changed = file.size != record.size || file.modified_ms != record.modified_ms;
                 if changed {
+                    // Ruling A: a file deleted from the backup elsewhere comes
+                    // back as a new file, never as a version of the deleted one.
                     wanted.push(PlannedUpload {
                         key: file.key.clone(),
                         size: file.size,
-                        reason: UploadReason::Changed,
+                        reason: if live(record) {
+                            UploadReason::Changed
+                        } else {
+                            UploadReason::New
+                        },
                     });
-                } else if record.state == RecordState::BackedUp && live_remote.contains(&record.remote_id) {
+                } else if live(record) {
                     plan.unchanged += 1;
                 }
             }
