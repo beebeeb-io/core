@@ -5,8 +5,8 @@
 //! binding.
 
 use beebeeb_core::backup::{
-    EntryAttrs, Mutation, SkipReason, backup_rel_path, check_mutation, custom_category_name, own_backup_refusal,
-    skip_reason,
+    EntryAttrs, Mutation, SkipReason, backup_rel_path, check_drive_mutation, check_mutation, custom_category_name,
+    own_backup_refusal, skip_reason,
 };
 use beebeeb_types::backup::{Category, SystemRole};
 use serde_json::Value;
@@ -31,9 +31,9 @@ fn reason_key(reason: Option<SkipReason>) -> Value {
 #[test]
 fn backup_protect_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 60, "every named backup_protect case is present");
+    assert_eq!(cases.len(), 76, "every named backup_protect case is present");
 
-    let (mut mutations, mut skips, mut layout) = (0, 0, 0);
+    let (mut mutations, mut skips, mut layout, mut drives) = (0, 0, 0, 0);
     for case in &cases {
         let id = case["id"].as_str().expect("case id");
         match case["kind"].as_str().expect("case kind") {
@@ -72,6 +72,20 @@ fn backup_protect_cases_match_core() {
                 let got = own_backup_refusal(case["source_path"].as_str().expect("source_path"));
                 assert_eq!(got, case["expected"].as_str().expect("expected"), "{id}");
             }
+            "drive_mutation" => {
+                drives += 1;
+                let m = Mutation::parse(case["mutation"].as_str().expect("mutation")).expect("known mutation");
+                let got = match check_drive_mutation(
+                    case["is_root"].as_bool().expect("is_root"),
+                    case["under_root"].as_bool().expect("under_root"),
+                    case["own_active_source"].as_str(),
+                    m,
+                ) {
+                    Ok(()) => "ok".to_string(),
+                    Err(protected) => protected.message.to_string(),
+                };
+                assert_eq!(got, case["expect"].as_str().expect("expect"), "{id}");
+            }
             "custom_name" => {
                 layout += 1;
                 let taken: Vec<&str> = case["taken"]
@@ -87,8 +101,12 @@ fn backup_protect_cases_match_core() {
         }
     }
     println!(
-        "backup_protect: {} cases ({mutations} mutation, {skips} skip, {layout} layout)",
+        "backup_protect: {} cases ({mutations} mutation, {drives} drive, {skips} skip, {layout} layout)",
         cases.len()
     );
-    assert_eq!((mutations, skips, layout), (13, 34, 13), "case counts per kind");
+    assert_eq!(
+        (mutations, drives, skips, layout),
+        (13, 16, 34, 13),
+        "case counts per kind"
+    );
 }

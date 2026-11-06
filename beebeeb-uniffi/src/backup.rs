@@ -53,6 +53,25 @@ pub fn backup_check_mutation(role: Option<String>, mutation: String) -> Result<O
         .map(|p| p.message.to_string()))
 }
 
+/// The drive rule (Explorer, Finder, the iOS Files app): the words to show
+/// when `mutation` of a row at (`is_root`) or under (`under_root`) the Backups
+/// root is refused, or `None`. `own_active_source`: the original's path when
+/// the row is this device's own backup of a folder still being backed up.
+#[uniffi::export]
+pub fn backup_check_drive_mutation(
+    is_root: bool,
+    under_root: bool,
+    own_active_source: Option<String>,
+    mutation: String,
+) -> Result<Option<String>, CryptoError> {
+    let m = rules::Mutation::parse(&mutation).ok_or_else(|| invalid("unknown mutation"))?;
+    Ok(
+        rules::check_drive_mutation(is_root, under_root, own_active_source.as_deref(), m)
+            .err()
+            .map(|p| p.message.into_owned()),
+    )
+}
+
 /// Why an entry is never backed up (`"junk"`, `"not_local"`, ...), or `None`.
 #[uniffi::export]
 pub fn backup_skip_reason(name: String, is_dir: bool, is_link: bool, not_local: bool) -> Option<String> {
@@ -560,6 +579,33 @@ mod tests {
             }
         }
         assert_eq!(matrix, 12, "the 4 x 3 matrix");
+    }
+
+    /// The drive rule, through the binding, against every drive case of the
+    /// shared vector (4 mutations x {root, under root, own active, outside}).
+    #[test]
+    fn uniffi_backup_check_drive_mutation_matches_core() {
+        let mut matrix = 0;
+        for case in vector_cases("backup_protect")
+            .iter()
+            .filter(|c| c["kind"] == "drive_mutation")
+        {
+            let got = backup_check_drive_mutation(
+                case["is_root"].as_bool().unwrap(),
+                case["under_root"].as_bool().unwrap(),
+                case["own_active_source"].as_str().map(str::to_string),
+                case["mutation"].as_str().unwrap().to_string(),
+            )
+            .expect("known strings");
+            let want = match case["expect"].as_str().unwrap() {
+                "ok" => None,
+                words => Some(words.to_string()),
+            };
+            assert_eq!(got, want, "{}", case["id"]);
+            matrix += 1;
+        }
+        assert_eq!(matrix, 16, "the 4 x 4 matrix");
+        assert!(backup_check_drive_mutation(false, true, None, "erase".to_string()).is_err());
     }
 
     /// Plan Amendment 1, item 3: an unknown string is an error, never a pass.

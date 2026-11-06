@@ -34,6 +34,16 @@ nodeTest('backupCheckMutation agrees with every mutation case of the shared vect
   }
 });
 
+nodeTest('backupCheckDriveMutation agrees with every drive case of the shared vector', () => {
+  const cases = protect.cases.filter((c) => c.kind === 'drive_mutation');
+  assert.equal(cases.length, 16, '4 mutations x {root, under root, own active, outside}');
+  for (const c of cases) {
+    const got = wasm.backupCheckDriveMutation(c.is_root, c.under_root, c.own_active_source, c.mutation);
+    assert.equal(got, c.expect === 'ok' ? undefined : c.expect, c.id);
+  }
+  assert.throws(() => wasm.backupCheckDriveMutation(false, true, null, 'erase'), /unknown mutation/);
+});
+
 nodeTest('backupProtectionMany: one crossing per listing, 1 = protected', () => {
   assert.deepEqual(Array.from(wasm.backupProtectionMany(['backups_root', '', ''])), [1, 0, 0]);
   assert.ok(wasm.backupProtectionMany([]) instanceof Uint8Array);

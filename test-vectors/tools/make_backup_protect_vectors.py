@@ -127,6 +127,22 @@ cases.append({
     "expected": "Backups/GLegion/a_b/x.txt",
 })
 
+# The drive rule (Guus 2026-11-06 17:49, "Protect the whole tree"): in Explorer, Finder and the iOS Files app
+# nothing at or under the root can be deleted, renamed or moved. Precedence: the root's own words; then the
+# own-active-backup words; then "managed in the app"; else ok. 4 mutations x {root, under root, own active, outside}.
+APP = "Backups are managed in the Beebeeb app. Open Beebeeb to delete or move a backup."
+SOURCE = "C:\\Users\\guus\\Pictures\\beach.jpg"
+OWN = f"This is a backup of {SOURCE}. Change the original instead."
+for m in ["trash", "delete", "rename", "move"]:
+    for target, is_root, under, own, expect in [
+        ("root", True, False, None, WORDS[m]),
+        ("under_root", False, True, None, APP),
+        ("own_active", False, True, SOURCE, OWN),
+        ("outside", False, False, None, "ok"),
+    ]:
+        cases.append({"id": f"drive_{m}_{target}", "kind": "drive_mutation", "is_root": is_root,
+                      "under_root": under, "own_active_source": own, "mutation": m, "expect": expect})
+
 doc = {
     "description": "LD-0113 backup protection and skip rules (spec 2026-11-06-backup-from-source §4.2 rules 1, 7 and 8): "
     "the 4 x 3 mutation matrix (trash, delete, rename, move against the Backups root, a child and another row), "

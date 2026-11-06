@@ -18,6 +18,7 @@ what a bundler sees.
 | Name | What |
 | --- | --- |
 | `backupCheckMutation(role, mutation)` | Core's words when a trash / delete / rename / move of the row is refused, else `undefined`. An unknown string throws. |
+| `backupCheckDriveMutation(isRoot, underRoot, ownActiveSource, mutation)` | The drive rule: the root's words, then the own-active-backup words, then "Backups are managed in the Beebeeb app…" for anything under the root, else `undefined`. An unknown mutation throws. |
 | `backupProtectionMany(roles: string[])` | One byte per listing row, 1 = protected (one crossing per listing). A role this build does not know is protected (1), never a throw. |
 | `backupParseManifest(json)` | A decrypted `.device.json` as a plain object; unknown fields kept. |
 
@@ -38,6 +39,7 @@ symbols in the generated `beebeeb_uniffiFFI.h` (`uniffi-bindgen generate
 | Function | What |
 | --- | --- |
 | `backup_check_mutation(role, mutation)` | `throws -> String?`: the refusal words, or none |
+| `backup_check_drive_mutation(is_root, under_root, own_active_source, mutation)` | `throws -> String?`: the drive rule (Files app), same precedence as core |
 | `backup_skip_reason(name, is_dir, is_link, not_local)` | Why an entry is never backed up, or none |
 | `backup_resolve_root(candidates)` | `BackupRootPlan`: `Use`, `Claim { id, merge_from }`, `Create` |
 | `backup_plan_merge(survivor, duplicates, clash_label, hhmm)` | `[BackupMergeStep]` from flat listing rows; pass `hhmm` with a dot |

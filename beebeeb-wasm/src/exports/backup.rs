@@ -6,7 +6,7 @@
 //! never passes (plan Amendment 1, item 3), except in the per-row protection
 //! bit, where an unknown role is protected (review #8): a role the server adds
 //! later must never break an older bundle's listing.
-use beebeeb_core::backup::{Mutation, check_mutation, parse_manifest};
+use beebeeb_core::backup::{Mutation, check_drive_mutation, check_mutation, parse_manifest};
 use beebeeb_types::backup::SystemRole;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -30,6 +30,26 @@ pub fn backup_check_mutation(role: Option<String>, mutation: &str) -> Result<Opt
     Ok(check_mutation(parse_role(role.as_deref())?, m)
         .err()
         .map(|p| p.message.to_string()))
+}
+
+/// The drive rule (the web drive view of the Backups tree follows the drive
+/// surfaces): the words to show when `mutation` of a row at (`isRoot`) or
+/// under (`underRoot`) the Backups root is refused, or `undefined`.
+/// `ownActiveSource`: the original's path when the row is this device's own
+/// backup of a folder still being backed up. An unknown mutation throws.
+#[wasm_bindgen(js_name = backupCheckDriveMutation)]
+pub fn backup_check_drive_mutation(
+    is_root: bool,
+    under_root: bool,
+    own_active_source: Option<String>,
+    mutation: &str,
+) -> Result<Option<String>, JsError> {
+    let m = Mutation::parse(mutation).ok_or_else(|| JsError::new("unknown mutation"))?;
+    Ok(
+        check_drive_mutation(is_root, under_root, own_active_source.as_deref(), m)
+            .err()
+            .map(|p| p.message.into_owned()),
+    )
 }
 
 /// One byte per row of a listing (its `system_role`, `""` for none): 1 when

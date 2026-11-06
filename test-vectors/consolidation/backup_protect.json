@@ -509,6 +509,150 @@
       "category": "custom:a/b",
       "rel": "x.txt",
       "expected": "Backups/GLegion/a_b/x.txt"
+    },
+    {
+      "id": "drive_trash_root",
+      "kind": "drive_mutation",
+      "is_root": true,
+      "under_root": false,
+      "own_active_source": null,
+      "mutation": "trash",
+      "expect": "Backups is a system folder and can't be deleted."
+    },
+    {
+      "id": "drive_trash_under_root",
+      "kind": "drive_mutation",
+      "is_root": false,
+      "under_root": true,
+      "own_active_source": null,
+      "mutation": "trash",
+      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete or move a backup."
+    },
+    {
+      "id": "drive_trash_own_active",
+      "kind": "drive_mutation",
+      "is_root": false,
+      "under_root": true,
+      "own_active_source": "C:\\Users\\guus\\Pictures\\beach.jpg",
+      "mutation": "trash",
+      "expect": "This is a backup of C:\\Users\\guus\\Pictures\\beach.jpg. Change the original instead."
+    },
+    {
+      "id": "drive_trash_outside",
+      "kind": "drive_mutation",
+      "is_root": false,
+      "under_root": false,
+      "own_active_source": null,
+      "mutation": "trash",
+      "expect": "ok"
+    },
+    {
+      "id": "drive_delete_root",
+      "kind": "drive_mutation",
+      "is_root": true,
+      "under_root": false,
+      "own_active_source": null,
+      "mutation": "delete",
+      "expect": "Backups is a system folder and can't be deleted."
+    },
+    {
+      "id": "drive_delete_under_root",
+      "kind": "drive_mutation",
+      "is_root": false,
+      "under_root": true,
+      "own_active_source": null,
+      "mutation": "delete",
+      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete or move a backup."
+    },
+    {
+      "id": "drive_delete_own_active",
+      "kind": "drive_mutation",
+      "is_root": false,
+      "under_root": true,
+      "own_active_source": "C:\\Users\\guus\\Pictures\\beach.jpg",
+      "mutation": "delete",
+      "expect": "This is a backup of C:\\Users\\guus\\Pictures\\beach.jpg. Change the original instead."
+    },
+    {
+      "id": "drive_delete_outside",
+      "kind": "drive_mutation",
+      "is_root": false,
+      "under_root": false,
+      "own_active_source": null,
+      "mutation": "delete",
+      "expect": "ok"
+    },
+    {
+      "id": "drive_rename_root",
+      "kind": "drive_mutation",
+      "is_root": true,
+      "under_root": false,
+      "own_active_source": null,
+      "mutation": "rename",
+      "expect": "Backups is a system folder and can't be renamed."
+    },
+    {
+      "id": "drive_rename_under_root",
+      "kind": "drive_mutation",
+      "is_root": false,
+      "under_root": true,
+      "own_active_source": null,
+      "mutation": "rename",
+      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete or move a backup."
+    },
+    {
+      "id": "drive_rename_own_active",
+      "kind": "drive_mutation",
+      "is_root": false,
+      "under_root": true,
+      "own_active_source": "C:\\Users\\guus\\Pictures\\beach.jpg",
+      "mutation": "rename",
+      "expect": "This is a backup of C:\\Users\\guus\\Pictures\\beach.jpg. Change the original instead."
+    },
+    {
+      "id": "drive_rename_outside",
+      "kind": "drive_mutation",
+      "is_root": false,
+      "under_root": false,
+      "own_active_source": null,
+      "mutation": "rename",
+      "expect": "ok"
+    },
+    {
+      "id": "drive_move_root",
+      "kind": "drive_mutation",
+      "is_root": true,
+      "under_root": false,
+      "own_active_source": null,
+      "mutation": "move",
+      "expect": "Backups is a system folder and can't be moved."
+    },
+    {
+      "id": "drive_move_under_root",
+      "kind": "drive_mutation",
+      "is_root": false,
+      "under_root": true,
+      "own_active_source": null,
+      "mutation": "move",
+      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete or move a backup."
+    },
+    {
+      "id": "drive_move_own_active",
+      "kind": "drive_mutation",
+      "is_root": false,
+      "under_root": true,
+      "own_active_source": "C:\\Users\\guus\\Pictures\\beach.jpg",
+      "mutation": "move",
+      "expect": "This is a backup of C:\\Users\\guus\\Pictures\\beach.jpg. Change the original instead."
+    },
+    {
+      "id": "drive_move_outside",
+      "kind": "drive_mutation",
+      "is_root": false,
+      "under_root": false,
+      "own_active_source": null,
+      "mutation": "move",
+      "expect": "ok"
     }
   ]
 }

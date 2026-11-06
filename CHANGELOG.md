@@ -20,8 +20,11 @@ filesystem pass (`beebeeb-backup`). No v0.2.0 API changes. LD-0113, spec
   (keys and display names) and `Platform`.
 - **`beebeeb_core::backup`** (pure: no I/O, no clock, no network):
   - layout: `ROOT_NAME` `"Backups"`, `MANIFEST_NAME` `".device.json"`, `backup_rel_path`;
-  - protection: `check_mutation` and the words, `Mutation`, `own_backup_refusal`. Only the Backups
-    root is refused; its children and moving items into it are ordinary;
+  - protection: `check_mutation` and the words, `Mutation`, `own_backup_refusal`. In the app (web,
+    desktop, iOS) only the Backups root is refused; its children and moving items into it are
+    ordinary. In a drive surface (Explorer, Finder, the iOS Files app) `check_drive_mutation`
+    refuses everything at or under the root (`MSG_MANAGED_IN_APP`; Guus, "Protect the whole
+    tree"), the root and the device's own active backups keeping their own words;
   - skip rules: `skip_reason`, `SkipReason` (OS junk, library bundles, links, not-local entries
     and `.icloud` stubs, plus the client-set `Locked` and `TooLarge`, and the walk's `TooDeep`,
     `Unreadable` and `Excluded`);
@@ -49,9 +52,9 @@ filesystem pass (`beebeeb-backup`). No v0.2.0 API changes. LD-0113, spec
   listed whole or reported unreadable; depth cap 64), `fingerprint`, `attrs_of`, and
   `run_pass(host, root, exclude, category, budget)` over the `BackupHost` trait the client
   implements.
-- **Bindings**: uniffi `backup_*` (9 functions; every unknown string is `InvalidInput`) and wasm
-  `backupCheckMutation`, `backupProtectionMany`, `backupParseManifest`.
-- **Vectors**: `test-vectors/consolidation/backup_{protect,device,root,plan}.json` (60, 49, 21 and
+- **Bindings**: uniffi `backup_*` (10 functions; every unknown string is `InvalidInput`) and wasm
+  `backupCheckMutation`, `backupCheckDriveMutation`, `backupProtectionMany`, `backupParseManifest`.
+- **Vectors**: `test-vectors/consolidation/backup_{protect,device,root,plan}.json` (76, 49, 21 and
   66 cases; `check-backup-vectors-generated.sh` guards them in CI), run by `cross_client_vectors`, with independent Python generators in
   `test-vectors/tools/make_backup_*_vectors.py`.
 
