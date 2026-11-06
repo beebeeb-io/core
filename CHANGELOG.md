@@ -7,7 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-06
+
+### Breaking and behaviour changes
+
+- **`owned_keys::resolve_owned_key` signature changed** to six arguments: takes `name_encrypted`
+  and, for a plaintext-named file, `first_chunk`. The old five-argument form and `foreign_added`
+  are removed; the id class now decides. `ResolvedOwnedKey` gains `name` and `write_target`.
+  Callers must add the two new arguments.
+- **`kdf::wrap_owner_file_key` / `unwrap_owner_file_key` now refuse a non-foreign id.** L8 is
+  adoption-only. Any call that passes an owner id must switch to a foreign id.
+- **`ChunkDecryptor::{from_reader, for_push, for_push_with_file_key}` and several decrypt helpers
+  now require `ExpectedChunkFormat` and/or the file id.** Affected: `encrypt::decrypt_chunks_to_file`,
+  `encrypt::decrypt_contiguous_to_file`, `file_encrypt::decrypt_chunks_to_file`,
+  `zip::ZipEntry` (new `chunk_format` field), `beebeeb_upload::{decrypt_downloaded_bytes,
+  download_and_decrypt_file, DownloadClient::download_and_decrypt}`, and the UniFFI/WASM
+  equivalents. `chunk_stream::open_chunk` now also takes the version id. Callers must read
+  `ExpectedChunkFormat` from the file's authenticated metadata (`decrypt_name_metadata`) and
+  pass it on every decrypt call.
+- **`encrypt::decrypt_file_metadata[_with_key]`** (new, for files): a plaintext `name_encrypted`
+  is now refused. Use `decrypt_name_metadata` for folders; use `decrypt_file_metadata` for files.
+- **`DownloadPlanner` verdict ordering changed**: a file keeps the strongest verdict received
+  (`Corrupt` > `Terminal` > `Restart` > `ApiForFile`); once set, a weaker answer can no longer
+  override it. Stale, repeated, or out-of-order window answers no longer downgrade a verdict.
+- **Discovery authorization answers (401/403) no longer count toward the routing-failure budget**
+  and no longer disable direct discovery for ten minutes on repeated refusals. Reauthentication
+  leaves cached discovery and real transport failures unchanged.
+
 ### Added
+
+- Range reads for streaming hydration (LD-0105, core PR #71): `chunk_stream::RangeOpener`
+  opens one authenticated frame at any index under the file's one geometry and version id;
+  `direct_transfer::range::RangePlanner` grants windows at any start (chunk 0 first, then
+  demands, then read-ahead), aging out idle grants without spending renewals; `range_session`
+  in `beebeeb-transfer` hands each authenticated 4 KiB piece to the system; `RangeLessor`
+  bounds the shared memory budget: at most four sessions hold a lease at once; together their
+  ciphertext in flight is at most max(256 MiB, k × (chunk_size + 28)) for k active sessions,
+  plus one plaintext chunk per session (256 MiB at 32 MiB chunks, up to 1 GiB at 128 MiB chunks). New test vectors:
+  `test-vectors/direct_range.json`, generated and drift-guarded in CI.
 - `beebeeb-transfer`, the L2 driver crate for direct S3 downloads (task 2173, plan K2):
   `download()` drives core's `DownloadPlanner` over any `DirectIo` transport (API calls,
   bounded storage GETs, the pinned per-chunk route, injected sleep and clocks), decrypts
@@ -39,191 +76,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `item_ids` and re-publishes the L8 owner-file-key vector under a foreign id (vendored copies must
   be refreshed: web `test/core-vectors-kat.test.ts`, mobile `CoreVectorsKATTests.swift` and
   `CoreVectorsKATTest.kt`).
-
-### Changed
-- **Breaking:** `owned_keys::resolve_owned_key(master, item_id, owner_wrap, folder_wrap, name_encrypted,
-  first_chunk)` replaces the five-argument form; `foreign_added` is gone (the id class decides) and
-  `ResolvedOwnedKey` gains `name` and `write_target`. Callers must pass the served `name_encrypted`
-  and, for a plaintext-named file, its chunk 0.
-
-- `kdf::owner_file_key_for_name` with `kdf::OwnerKeyConvention` (`String`, `Binary`,
-  `UpperRepair`): resolves an owner's per-file key from the `(file_id, name_encrypted)`
-  pair and reports which id convention it came from. The repair convention reads files the
-  iOS File Provider sealed under an uppercase id (SF-0002) and is READ-ONLY — a client that
-  gets `UpperRepair` must not rename or write a new version, only save edits as a new file.
-  `kdf::owner_file_key_for_content` does the same per content version from that version's
-  first chunk frame (v1 legacy `nonce || ciphertext || tag`, or core's v2 frame 0), because
-  a Files-app edit could seal a later version under the lowercase id while the name and the
-  first version stayed under the uppercase one. A file is read-only if EITHER its name or ANY
-  version reports `UpperRepair`. Both resolvers accept only the canonical lowercase
-  hyphenated UUID form. The shared master-key readers (`decrypt_name_metadata`,
-  `decrypt_name_with_mime`, and therefore `decrypt_file_metadata` / `decrypt_name` /
-  `decrypt_names`) deliberately do NOT gain the uppercase candidate: they stay
-  two-convention (string, then binary), so a client that only bumps core cannot mistake an
-  uppercase-sealed file for a writable one. WASM `ownerFileKeyForName` /
-  `ownerFileKeyForContent`, UniFFI `MasterKeyHandle.owner_file_key_for_name` /
-  `owner_file_key_for_content` returning `OwnerFileKey`. Nothing writes under the uppercase
-  convention; no row is re-sealed or migrated. Vectors `upper_repair_v1` and
-  `upper_repair_split_v1` (vectors version 13).
-- Link labels and guest actor names (task 2275, L16): `kdf::wrap_link_label` /
-  `unwrap_link_label` seal a link's display label to the master key under
-  `HKDF-SHA256(master, "beebeeb-link-label-v1" || share_id)` with the same string as AAD; the label
-  is NFC and 1..40 Unicode scalar values after NFC. `kdf::seal_folder_actor_name` /
-  `open_folder_actor_name` seal a guest's name under
-  `HKDF-SHA256(folder key, "beebeeb-folder-actor-name-v1" || root_id)` with the same string as AAD.
-  Both sides of the actor name apply ONE rule, `kdf::sanitize_actor_name`, and the writer seals its
-  result, so core never seals a name its own opener refuses: (1) NFC; (2) strip every `Cc`
-  character and U+00AD, U+061C, U+180E, U+200B, U+200E, U+200F, U+2028-U+202E, U+2060-U+2064,
-  U+2066-U+206F, U+FEFF, U+FFF9-U+FFFB, while keeping U+200C ZWNJ, U+200D ZWJ, the variation
-  selectors and the tag characters U+E0020-U+E007F (Persian and Indic spelling, emoji ZWJ
-  sequences and subdivision flags need them); (3) NFC again; (4) refuse a leading combining mark;
-  (5) 1..64 scalars, counted after steps 1-4; (6) refuse a visibly blank name, one with no
-  character that is neither whitespace nor an invisible filler (Hangul fillers, U+2800, U+034F,
-  the Mongolian and other variation selectors, Khmer inherent vowels, U+1D173-U+1D17A, ZWNJ, ZWJ,
-  the tags, and every other Default_Ignorable_Code_Point that is not stripped). The writer refuses
-  with `InvalidInput`; the openers normalize instead of refusing non-NFC plaintext, and refuse
-  anything else they cannot display with `Decryption`; a non-16-byte id is `InvalidInput`. The
-  actor-name envelope is a JSON text value with exactly the keys `cipher_suite`, `nonce` and
-  `ciphertext` (all required, none `null`, no other or repeated key); key order and JSON
-  whitespace are free, so a hop that re-encodes the JSON keeps it openable.
-  `kdf::open_legacy_child_key` is the one legacy unbound child opener (60-byte frame, no AAD)
-  and refuses a 32-byte plaintext that is valid UTF-8; a genuine random legacy child key that
-  happens to be UTF-8 (about 2^-30) is refused and reads as a wrong key (accepted L9 residual,
-  recorded on the function). WASM `wrapLinkLabel` / `unwrapLinkLabel` / `sealFolderActorName` /
-  `openFolderActorName` / `openLegacyChildKey`; UniFFI `MasterKeyHandle.wrap_link_label` /
-  `unwrap_link_label` and `FileKeyHandle.seal_folder_actor_name` / `open_folder_actor_name` /
-  `open_legacy_child_key`. Test vectors are version 16 (`link_label_v1`, `folder_actor_name_v1`,
-  `legacy_child_refusal_v1`); version 14 is main's `item_ids` set alone, and 15 is not used (it
-  named an earlier draft of these vectors on the unmerged branch). Vendored copies must be
-  refreshed to 16: web `test/core-vectors-kat.test.ts`, mobile `CoreVectorsKATTests.swift` and
-  `CoreVectorsKATTest.kt`.
-- `direct_transfer::storage::check_storage_get`: a storage GET delivered the chunk only for a
-  `200` whose `Content-Length` is exactly the grant's length; anything else is `Failed { status }`
-  (status `0`: no HTTP answer). `check_storage_body` applies the same rule to the bytes actually
-  counted (a truncated stream after a good head is still failed). `StorageGet::kind()` is the stable
-  `"stored"`/`"failed"` name bindings and vectors print. WASM `checkStorageGet` / `checkStorageBody`,
-  UniFFI `direct_check_storage_get` / `direct_check_storage_body`.
-- `direct_transfer::pacing::paced_until_ms`: desktop's download-ceiling formula (`kbps` is KiB/s,
-  `kbps == 0` is `i64::MIN`, saturating), so the direct path can hold requests back instead of
-  sleeping after each chunk. WASM `pacedUntilMs` crosses numbers as `f64` and reports the no-ceiling
-  case as `-Infinity` (test with `Number.isFinite`); UniFFI keeps `i64`/`u64`.
-- `direct_transfer::context`: `MemoryClass` with `max_in_flight_bytes` (256 MiB native, 64 MiB
-  browser, 64 MiB mobile app, 16 MiB mobile extension) and `pairs_allowed` (the direction must be
-  offered and every discovery storage pair allowlisted; hosts ASCII case-insensitive, buckets
-  exact, and a discovery that lists no pairs is refused rather than allowed vacuously). WASM
-  `maxInFlightBytes` / `pairsAllowed`, UniFFI `DirectMemoryClassDto` / `direct_max_in_flight_bytes`
-  / `direct_pairs_allowed`.
-- `WasmDownloadPlanner.chunkLength(index)` and `DirectDownloadPlannerHandle::chunk_length(index)`:
-  the ciphertext length of a chunk from the accepted window's geometry (`null`/`None` before it).
-- `directTransferConstants()` / `DirectConstantsDto` gain the response caps
-  `max_discovery_body_bytes` (256 KiB), `max_grant_body_bytes` (1 MiB) and `max_chunk_body_bytes`
-  (256 MiB + 28), so no client re-types them.
-- Contract vectors `test-vectors/direct_transfer.json`: `storage_get` (13 rows: 10 heads and 3 counted bodies), `pacing` (7),
-  `pairs_allowed` (12) and `memory_class` (4), each row naming its `source`; `vectors::run_all`
-  checks them on native, WASM and UniFFI.
-- Pure direct-upload pipeline planner (task 2173 C1-C2): one PUT lane per file, bounded
-  commit overlap and ciphertext retention, per-chunk retries, separate ack/hold waits,
-  interrupt draining, and grant-version-aware replay handling. Shared PUT totals scale
-  with concurrent PUTs while staying thirty seconds below the server fence. This exposes
-  Rust rules only; client drivers and the combined upload bindings follow separately,
-  and the server's upload flag remains off.
-
-### Fixed
-- Discovery authorization answers (401/403) no longer consume or extend the routing-failure
-  budget. Reauthentication leaves cached discovery and real transport failures unchanged;
-  repeated authorization refusals no longer disable direct discovery for ten minutes.
-
-### Security
-- Chunk format v2 (task 1908): file-content frames authenticate their position as AES-GCM
-  associated data — `"beebeeb/chunk/v2" || len(file_id) || file_id || version_id(12) ||
-  chunk_index || is_last` (STREAM construction) — and are sealed under a dedicated chunk subkey
-  `HKDF-SHA256(file_key, "beebeeb/chunk/v2/key")` that no other blob type uses. `version_id` is
-  the random nonce of the upload's frame 0, so frames of two uploads (versions) of one file id
-  cannot be mixed. Previously (v1) frames carried no associated data, so a malicious server could
-  reorder, duplicate, drop, truncate or splice chunks undetected. Same frame layout and sizes;
-  the server is unaffected.
-- Every file-content reader now REQUIRES an `ExpectedChunkFormat` taken from the file's
-  encrypted metadata (`encrypt::decrypt_name_metadata[_with_key]`): `V2` accepts only v2 frames,
-  so a server can no longer pass a same-key no-AAD blob (encrypted name, thumbnail) off as a
-  one-frame v1 file; `Unrecorded` (metadata without a format: files from before the switch) lets
-  frame 0 decide. Readers reject out-of-order frames, frames from another upload, frames after
-  the last chunk, and fail at `finish()`/EOF when a v2 file ended early. A zero-frame body is now
-  an error (it used to decrypt to an empty file). Uploads record the format with
-  `encrypt::encrypt_name_with_chunk_format` (`"chunk_format": 2`); `encrypt_name` output is
-  unchanged.
-- Read-only rollout phase: `chunk_stream::WRITE_FORMAT` stays `V1Legacy`. Clients on this core
-  read v2 but keep writing v1 until every client's read path is on this core; flipping it is a
-  separate, gated release (task 1908).
-- Breaking: `ChunkDecryptor::{from_reader, for_push, for_push_with_file_key}`,
-  `encrypt::decrypt_chunks_to_file`, `encrypt::decrypt_contiguous_to_file`,
-  `file_encrypt::decrypt_chunks_to_file`, `zip::ZipEntry` (new `chunk_format` field),
-  `beebeeb_upload::{decrypt_downloaded_bytes, download_and_decrypt_file,
-  DownloadClient::download_and_decrypt}` take the file id and/or the expected format;
-  `chunk_stream::open_chunk` takes the version id. UniFFI: `decrypt_chunks_to_file`,
-  `decrypt_contiguous_to_file`, `download_and_decrypt_file`, `MasterKeyHandle.decrypt_file`,
-  `ChunkDecryptorHandle.{from_file, for_push, for_push_with_file_key}` take
-  `expected_chunk_format` (0 = unrecorded, 2 = v2); `FileKeyHandle.decrypt_chunk_frame` takes
-  `version_id`. WASM: `WasmChunkDecryptor` constructors take `expectedChunkFormat`;
-  `decrypt_chunk_frame` takes `version_id`. New: `ExpectedChunkFormat`,
-  `ChunkDecryptor::{version_id, format, chunks_decrypted, finish}`, `encrypt::{NameMetadata,
-  decrypt_name_metadata, decrypt_name_metadata_with_key, encrypt_name_with_chunk_format}`,
-  UniFFI `ChunkDecryptorHandle.{for_push_with_file_key_handle, version_id, chunk_format,
-  finish}`, `MasterKeyHandle.{encrypt_name_with_chunk_format, decrypt_name_metadata}`,
-  `FileKeyHandle.decrypt_name_metadata`, WASM `encrypt_name_with_chunk_format`,
-  `decrypt_name_metadata[_with_key]`, `WasmChunkDecryptor.versionId`. Feature `test-support`
-  (dev-dependencies only) exposes `ChunkEncryptor::with_format` to tests.
-- Metadata domain separation (task 1908 review round 3): name/MIME envelopes and thumbnails can
-  now be sealed under their own subkeys, `HKDF-SHA256(file_key, "beebeeb/name/v1")` and
-  `HKDF-SHA256(file_key, "beebeeb/thumb/v1")`, so neither can ever open as file content (v1 or
-  v2) or as each other. Every name reader (`decrypt_name*`, `decrypt_names`,
-  `decrypt_*_metadata*`) and the new `encrypt::decrypt_thumbnail` try the subkey first, then the
-  legacy raw file key, so every stored blob keeps opening. Writing: a name that records
-  `chunk_format: 2` is always subkey-sealed; everything else follows
-  `encrypt::METADATA_SEAL_WRITE`, which is tied to `WRITE_FORMAT` and stays `Legacy` during the
-  read-only phase (clients not yet on this core must keep reading the names this core writes).
-- `encrypt::decrypt_file_metadata[_with_key]` (task 1908 review round 3): the metadata reader for
-  FILES. Same as `decrypt_name_metadata`, but a plaintext (non-JSON) `name_encrypted` is refused:
-  a plaintext name carries no chunk-format pin, so a server could otherwise swap a v2 file's
-  metadata for a plaintext name and re-enable frame-0 detection. Folders keep using
-  `decrypt_name_metadata`.
-- Resumed uploads (task 1908 review round 3): `chunk_stream::{SessionResume, resume_policy}` and
-  `ChunkEncryptor::resume_policy`. A v2 upload's frames all bind one version id (frame 0's
-  nonce), and a resumed upload builds a new encryptor with a new one, so continuing the old
-  server session would store an unreadable mix. Only a v1 session resumed by a v1 encryptor may
-  continue; anything else, including a resume record that does not say which format it holds,
-  must restart from chunk 0 in a fresh session. Clients persist `ChunkEncryptor::format` next to
-  the session id.
-- New bindings: UniFFI `MasterKeyHandle.decrypt_file_metadata`,
-  `FileKeyHandle.{decrypt_file_metadata, encrypt_thumbnail, decrypt_thumbnail}`,
-  `ChunkEncryptorHandle.resume_policy` + enum `SessionResumeAction`; WASM
-  `decrypt_file_metadata[_with_key]`, `encrypt_thumbnail`, `decrypt_thumbnail`,
-  `WasmChunkEncryptor.resumePolicy`. `kdf::derive_file_subkey` is public.
-- Replace / new version honours the file's recorded pin (task 1908 review round 4, I-1):
-  `ChunkEncryptor::with_recorded_pin(pin)` writes v2 frames for a file whose encrypted metadata
-  records v2, even while `WRITE_FORMAT` is still v1 (the server keeps a file's metadata on
-  replace, so a v1 new version of a v2-pinned file would never open); `Unrecorded` keeps
-  `WRITE_FORMAT`. One rule for content, names and thumbnails: `chunk_stream::chunk_format_for_pin`
-  + `encrypt::metadata_seal_for` (`METADATA_SEAL_WRITE = metadata_seal_for(WRITE_FORMAT)`).
-  New `encrypt::encrypt_thumbnail_for(file_key, plaintext, pin)` (a v2 pin is always
-  subkey-sealed). Bindings: UniFFI `ChunkEncryptorHandle.apply_recorded_pin`,
-  `FileKeyHandle.encrypt_thumbnail_for`; WASM `WasmChunkEncryptor.withRecordedPin`,
-  `encrypt_thumbnail_for`. Restart path for resumed v2 uploads documented (abandon or lease
-  expiry before re-init; never the old session on a 409).
-- File notes get their own subkey (task 1908 review round 5): web sealed `note_encrypted` with
-  `encrypt_metadata` under the raw file key, in the same envelope shape as a legacy name, so a
-  server could serve a note as a v2 file's `name_encrypted` (read as a name with no pin) and then
-  as its only frame (a one-frame v1 file), undoing the v2 pin. New
-  `encrypt::{NOTE_KEY_INFO, encrypt_note, encrypt_note_for, decrypt_note}`: notes are sealed under
-  `HKDF-SHA256(file_key, "beebeeb/note/v1")` with the same rule as names and thumbnails (a v2 pin
-  is always subkey-sealed; `Unrecorded` follows `METADATA_SEAL_WRITE`), returned as the canonical
-  `EncryptedBlob` JSON; `decrypt_note` tries the note subkey, then the legacy raw key. Bindings:
-  UniFFI `FileKeyHandle.{encrypt_note, encrypt_note_for, decrypt_note}`; WASM `encrypt_note`,
-  `encrypt_note_for`, `decrypt_note`. Clients must write and read notes through these (web
-  `file-details-panel.tsx` follow-up).
-- `with_recorded_pin` / `apply_recorded_pin` / `withRecordedPin` docs: `V2` only with the pin
-  read from an existing file's authenticated metadata; a new file uses `WRITE_FORMAT` (doctest).
-
-### Added
 - `onboarding` module (task 1744): password-policy evaluator driven by the server's numbers
   (floored at the shipped 12), k-anonymity breached-password helper (hashing and matching
   only; no I/O, no third-party endpoint, fail-open or fail-closed as the server declares), and
@@ -320,6 +172,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (including any `design/` folder), so a false audit or compliance claim fails the build.
 
 ### Changed
+
+- **Breaking:** `owned_keys::resolve_owned_key(master, item_id, owner_wrap, folder_wrap, name_encrypted,
+  first_chunk)` replaces the five-argument form; `foreign_added` is gone (the id class decides) and
+  `ResolvedOwnedKey` gains `name` and `write_target`. Callers must pass the served `name_encrypted`
+  and, for a plaintext-named file, its chunk 0.
+
+- `kdf::owner_file_key_for_name` with `kdf::OwnerKeyConvention` (`String`, `Binary`,
+  `UpperRepair`): resolves an owner's per-file key from the `(file_id, name_encrypted)`
+  pair and reports which id convention it came from. The repair convention reads files the
+  iOS File Provider sealed under an uppercase id (SF-0002) and is READ-ONLY — a client that
+  gets `UpperRepair` must not rename or write a new version, only save edits as a new file.
+  `kdf::owner_file_key_for_content` does the same per content version from that version's
+  first chunk frame (v1 legacy `nonce || ciphertext || tag`, or core's v2 frame 0), because
+  a Files-app edit could seal a later version under the lowercase id while the name and the
+  first version stayed under the uppercase one. A file is read-only if EITHER its name or ANY
+  version reports `UpperRepair`. Both resolvers accept only the canonical lowercase
+  hyphenated UUID form. The shared master-key readers (`decrypt_name_metadata`,
+  `decrypt_name_with_mime`, and therefore `decrypt_file_metadata` / `decrypt_name` /
+  `decrypt_names`) deliberately do NOT gain the uppercase candidate: they stay
+  two-convention (string, then binary), so a client that only bumps core cannot mistake an
+  uppercase-sealed file for a writable one. WASM `ownerFileKeyForName` /
+  `ownerFileKeyForContent`, UniFFI `MasterKeyHandle.owner_file_key_for_name` /
+  `owner_file_key_for_content` returning `OwnerFileKey`. Nothing writes under the uppercase
+  convention; no row is re-sealed or migrated. Vectors `upper_repair_v1` and
+  `upper_repair_split_v1` (vectors version 13).
+- Link labels and guest actor names (task 2275, L16): `kdf::wrap_link_label` /
+  `unwrap_link_label` seal a link's display label to the master key under
+  `HKDF-SHA256(master, "beebeeb-link-label-v1" || share_id)` with the same string as AAD; the label
+  is NFC and 1..40 Unicode scalar values after NFC. `kdf::seal_folder_actor_name` /
+  `open_folder_actor_name` seal a guest's name under
+  `HKDF-SHA256(folder key, "beebeeb-folder-actor-name-v1" || root_id)` with the same string as AAD.
+  Both sides of the actor name apply ONE rule, `kdf::sanitize_actor_name`, and the writer seals its
+  result, so core never seals a name its own opener refuses: (1) NFC; (2) strip every `Cc`
+  character and U+00AD, U+061C, U+180E, U+200B, U+200E, U+200F, U+2028-U+202E, U+2060-U+2064,
+  U+2066-U+206F, U+FEFF, U+FFF9-U+FFFB, while keeping U+200C ZWNJ, U+200D ZWJ, the variation
+  selectors and the tag characters U+E0020-U+E007F (Persian and Indic spelling, emoji ZWJ
+  sequences and subdivision flags need them); (3) NFC again; (4) refuse a leading combining mark;
+  (5) 1..64 scalars, counted after steps 1-4; (6) refuse a visibly blank name, one with no
+  character that is neither whitespace nor an invisible filler (Hangul fillers, U+2800, U+034F,
+  the Mongolian and other variation selectors, Khmer inherent vowels, U+1D173-U+1D17A, ZWNJ, ZWJ,
+  the tags, and every other Default_Ignorable_Code_Point that is not stripped). The writer refuses
+  with `InvalidInput`; the openers normalize instead of refusing non-NFC plaintext, and refuse
+  anything else they cannot display with `Decryption`; a non-16-byte id is `InvalidInput`. The
+  actor-name envelope is a JSON text value with exactly the keys `cipher_suite`, `nonce` and
+  `ciphertext` (all required, none `null`, no other or repeated key); key order and JSON
+  whitespace are free, so a hop that re-encodes the JSON keeps it openable.
+  `kdf::open_legacy_child_key` is the one legacy unbound child opener (60-byte frame, no AAD)
+  and refuses a 32-byte plaintext that is valid UTF-8; a genuine random legacy child key that
+  happens to be UTF-8 (about 2^-30) is refused and reads as a wrong key (accepted L9 residual,
+  recorded on the function). WASM `wrapLinkLabel` / `unwrapLinkLabel` / `sealFolderActorName` /
+  `openFolderActorName` / `openLegacyChildKey`; UniFFI `MasterKeyHandle.wrap_link_label` /
+  `unwrap_link_label` and `FileKeyHandle.seal_folder_actor_name` / `open_folder_actor_name` /
+  `open_legacy_child_key`. Test vectors are version 16 (`link_label_v1`, `folder_actor_name_v1`,
+  `legacy_child_refusal_v1`); version 14 is main's `item_ids` set alone, and 15 is not used (it
+  named an earlier draft of these vectors on the unmerged branch). Vendored copies must be
+  refreshed to 16: web `test/core-vectors-kat.test.ts`, mobile `CoreVectorsKATTests.swift` and
+  `CoreVectorsKATTest.kt`.
+- `direct_transfer::storage::check_storage_get`: a storage GET delivered the chunk only for a
+  `200` whose `Content-Length` is exactly the grant's length; anything else is `Failed { status }`
+  (status `0`: no HTTP answer). `check_storage_body` applies the same rule to the bytes actually
+  counted (a truncated stream after a good head is still failed). `StorageGet::kind()` is the stable
+  `"stored"`/`"failed"` name bindings and vectors print. WASM `checkStorageGet` / `checkStorageBody`,
+  UniFFI `direct_check_storage_get` / `direct_check_storage_body`.
+- `direct_transfer::pacing::paced_until_ms`: desktop's download-ceiling formula (`kbps` is KiB/s,
+  `kbps == 0` is `i64::MIN`, saturating), so the direct path can hold requests back instead of
+  sleeping after each chunk. WASM `pacedUntilMs` crosses numbers as `f64` and reports the no-ceiling
+  case as `-Infinity` (test with `Number.isFinite`); UniFFI keeps `i64`/`u64`.
+- `direct_transfer::context`: `MemoryClass` with `max_in_flight_bytes` (256 MiB native, 64 MiB
+  browser, 64 MiB mobile app, 16 MiB mobile extension) and `pairs_allowed` (the direction must be
+  offered and every discovery storage pair allowlisted; hosts ASCII case-insensitive, buckets
+  exact, and a discovery that lists no pairs is refused rather than allowed vacuously). WASM
+  `maxInFlightBytes` / `pairsAllowed`, UniFFI `DirectMemoryClassDto` / `direct_max_in_flight_bytes`
+  / `direct_pairs_allowed`.
+- `WasmDownloadPlanner.chunkLength(index)` and `DirectDownloadPlannerHandle::chunk_length(index)`:
+  the ciphertext length of a chunk from the accepted window's geometry (`null`/`None` before it).
+- `directTransferConstants()` / `DirectConstantsDto` gain the response caps
+  `max_discovery_body_bytes` (256 KiB), `max_grant_body_bytes` (1 MiB) and `max_chunk_body_bytes`
+  (256 MiB + 28), so no client re-types them.
+- Contract vectors `test-vectors/direct_transfer.json`: `storage_get` (13 rows: 10 heads and 3 counted bodies), `pacing` (7),
+  `pairs_allowed` (12) and `memory_class` (4), each row naming its `source`; `vectors::run_all`
+  checks them on native, WASM and UniFFI.
+- Pure direct-upload pipeline planner (task 2173 C1-C2): one PUT lane per file, bounded
+  commit overlap and ciphertext retention, per-chunk retries, separate ack/hold waits,
+  interrupt draining, and grant-version-aware replay handling. Shared PUT totals scale
+  with concurrent PUTs while staying thirty seconds below the server fence. This exposes
+  Rust rules only; client drivers and the combined upload bindings follow separately,
+  and the server's upload flag remains off.
 - Direct transfer bindings (task 2173; the surface is unreleased, so this is breaking only for a branch that
   already read it): the presigned link of a `fetch` step is an OBJECT, not a string, so that no habitual
   logging shows its signature. WASM: `WasmSignedUrl` (`raw()` is the link; `redacted()`, `toString()` and
@@ -345,6 +284,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer turn a chunk that does not authenticate, a revoked grant or a changed version into "use the API".
 
 ### Fixed
+
+- Discovery authorization answers (401/403) no longer consume or extend the routing-failure
+  budget. Reauthentication leaves cached discovery and real transport failures unchanged;
+  repeated authorization refusals no longer disable direct discovery for ten minutes.
 - `beebeeb-wasm`: the generated `beebeeb_wasm.js` and `beebeeb_wasm.d.ts` did not parse since core #34
   (`SyntaxError: Illegal break statement`). The driver example in the `WasmDownloadPlanner` doc comment
   used inline `/* ... */` comments; wasm-bindgen copies doc comments into a JSDoc block, whose first inner
@@ -354,6 +297,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `beebeeb-wasm` and `beebeeb-uniffi` fails on any block-comment token in a `///` doc comment.
 
 ### Removed
+
 - `design/hifi/`: a stale snapshot of UI mockups committed with the initial import. Its mockup
   copy claimed that this code had been externally audited (naming a security firm and a date)
   and named the EU Digital Operational Resilience Act as a fit. Neither was ever true: `core`
@@ -361,7 +305,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the private design workspace; this repo is the crypto core.
 
 ### Security
-- Nothing yet.
+
+- Chunk format v2 (task 1908): core now reads chunk format v2. File-content frames carry position
+  as AES-GCM associated data — `"beebeeb/chunk/v2" || len(file_id) || file_id || version_id(12) ||
+  chunk_index || is_last` (STREAM construction) — and are sealed under a dedicated chunk subkey
+  `HKDF-SHA256(file_key, "beebeeb/chunk/v2/key")` that no other blob type uses. `version_id` is
+  the random nonce of the upload's frame 0, so frames of two uploads (versions) of one file id
+  cannot be mixed. v1 frames, which every client still writes, carry no associated data, so a
+  malicious server can reorder, duplicate, drop, truncate or splice them undetected. Same frame layout and sizes;
+  the server is unaffected. `chunk_stream::WRITE_FORMAT` stays `V1Legacy`: every client still
+  WRITES v1 until all clients' read paths are on this core; flipping it is a separate, gated
+  release (task 1908). Files written today still carry no position binding.
+- Every file-content reader now REQUIRES an `ExpectedChunkFormat` taken from the file's
+  encrypted metadata (`encrypt::decrypt_name_metadata[_with_key]`): `V2` accepts only v2 frames,
+  so a server can no longer pass a same-key no-AAD blob (encrypted name, thumbnail) off as a
+  one-frame v1 file; `Unrecorded` (metadata without a format: files from before the switch) lets
+  frame 0 decide. Readers reject out-of-order frames, frames from another upload, frames after
+  the last chunk, and fail at `finish()`/EOF when a v2 file ended early. A zero-frame body is now
+  an error (it used to decrypt to an empty file). Uploads record the format with
+  `encrypt::encrypt_name_with_chunk_format` (`"chunk_format": 2`); `encrypt_name` output is
+  unchanged.
+- Breaking: `ChunkDecryptor::{from_reader, for_push, for_push_with_file_key}`,
+  `encrypt::decrypt_chunks_to_file`, `encrypt::decrypt_contiguous_to_file`,
+  `file_encrypt::decrypt_chunks_to_file`, `zip::ZipEntry` (new `chunk_format` field),
+  `beebeeb_upload::{decrypt_downloaded_bytes, download_and_decrypt_file,
+  DownloadClient::download_and_decrypt}` take the file id and/or the expected format;
+  `chunk_stream::open_chunk` takes the version id. UniFFI: `decrypt_chunks_to_file`,
+  `decrypt_contiguous_to_file`, `download_and_decrypt_file`, `MasterKeyHandle.decrypt_file`,
+  `ChunkDecryptorHandle.{from_file, for_push, for_push_with_file_key}` take
+  `expected_chunk_format` (0 = unrecorded, 2 = v2); `FileKeyHandle.decrypt_chunk_frame` takes
+  `version_id`. WASM: `WasmChunkDecryptor` constructors take `expectedChunkFormat`;
+  `decrypt_chunk_frame` takes `version_id`. New: `ExpectedChunkFormat`,
+  `ChunkDecryptor::{version_id, format, chunks_decrypted, finish}`, `encrypt::{NameMetadata,
+  decrypt_name_metadata, decrypt_name_metadata_with_key, encrypt_name_with_chunk_format}`,
+  UniFFI `ChunkDecryptorHandle.{for_push_with_file_key_handle, version_id, chunk_format,
+  finish}`, `MasterKeyHandle.{encrypt_name_with_chunk_format, decrypt_name_metadata}`,
+  `FileKeyHandle.decrypt_name_metadata`, WASM `encrypt_name_with_chunk_format`,
+  `decrypt_name_metadata[_with_key]`, `WasmChunkDecryptor.versionId`. Feature `test-support`
+  (dev-dependencies only) exposes `ChunkEncryptor::with_format` to tests.
+- Metadata domain separation (task 1908 review round 3): name/MIME envelopes and thumbnails can
+  now be sealed under their own subkeys, `HKDF-SHA256(file_key, "beebeeb/name/v1")` and
+  `HKDF-SHA256(file_key, "beebeeb/thumb/v1")`, so neither can ever open as file content (v1 or
+  v2) or as each other. Every name reader (`decrypt_name*`, `decrypt_names`,
+  `decrypt_*_metadata*`) and the new `encrypt::decrypt_thumbnail` try the subkey first, then the
+  legacy raw file key, so every stored blob keeps opening. Writing: a name that records
+  `chunk_format: 2` is always subkey-sealed; everything else follows
+  `encrypt::METADATA_SEAL_WRITE`, which is tied to `WRITE_FORMAT` and stays `Legacy` during the
+  read-only phase (clients not yet on this core must keep reading the names this core writes).
+- `encrypt::decrypt_file_metadata[_with_key]` (task 1908 review round 3): the metadata reader for
+  FILES. Same as `decrypt_name_metadata`, but a plaintext (non-JSON) `name_encrypted` is refused:
+  a plaintext name carries no chunk-format pin, so a server could otherwise swap a v2 file's
+  metadata for a plaintext name and re-enable frame-0 detection. Folders keep using
+  `decrypt_name_metadata`.
+- Resumed uploads (task 1908 review round 3): `chunk_stream::{SessionResume, resume_policy}` and
+  `ChunkEncryptor::resume_policy`. A v2 upload's frames all bind one version id (frame 0's
+  nonce), and a resumed upload builds a new encryptor with a new one, so continuing the old
+  server session would store an unreadable mix. Only a v1 session resumed by a v1 encryptor may
+  continue; anything else, including a resume record that does not say which format it holds,
+  must restart from chunk 0 in a fresh session. Clients persist `ChunkEncryptor::format` next to
+  the session id.
+- New bindings: UniFFI `MasterKeyHandle.decrypt_file_metadata`,
+  `FileKeyHandle.{decrypt_file_metadata, encrypt_thumbnail, decrypt_thumbnail}`,
+  `ChunkEncryptorHandle.resume_policy` + enum `SessionResumeAction`; WASM
+  `decrypt_file_metadata[_with_key]`, `encrypt_thumbnail`, `decrypt_thumbnail`,
+  `WasmChunkEncryptor.resumePolicy`. `kdf::derive_file_subkey` is public.
+- Replace / new version honours the file's recorded pin (task 1908 review round 4, I-1):
+  `ChunkEncryptor::with_recorded_pin(pin)` writes v2 frames for a file whose encrypted metadata
+  records v2, even while `WRITE_FORMAT` is still v1 (the server keeps a file's metadata on
+  replace, so a v1 new version of a v2-pinned file would never open); `Unrecorded` keeps
+  `WRITE_FORMAT`. One rule for content, names and thumbnails: `chunk_stream::chunk_format_for_pin`
+  + `encrypt::metadata_seal_for` (`METADATA_SEAL_WRITE = metadata_seal_for(WRITE_FORMAT)`).
+  New `encrypt::encrypt_thumbnail_for(file_key, plaintext, pin)` (a v2 pin is always
+  subkey-sealed). Bindings: UniFFI `ChunkEncryptorHandle.apply_recorded_pin`,
+  `FileKeyHandle.encrypt_thumbnail_for`; WASM `WasmChunkEncryptor.withRecordedPin`,
+  `encrypt_thumbnail_for`. Restart path for resumed v2 uploads documented (abandon or lease
+  expiry before re-init; never the old session on a 409).
+- File notes get their own subkey (task 1908 review round 5): web sealed `note_encrypted` with
+  `encrypt_metadata` under the raw file key, in the same envelope shape as a legacy name, so a
+  server could serve a note as a v2 file's `name_encrypted` (read as a name with no pin) and then
+  as its only frame (a one-frame v1 file), undoing the v2 pin. New
+  `encrypt::{NOTE_KEY_INFO, encrypt_note, encrypt_note_for, decrypt_note}`: notes are sealed under
+  `HKDF-SHA256(file_key, "beebeeb/note/v1")` with the same rule as names and thumbnails (a v2 pin
+  is always subkey-sealed; `Unrecorded` follows `METADATA_SEAL_WRITE`), returned as the canonical
+  `EncryptedBlob` JSON; `decrypt_note` tries the note subkey, then the legacy raw key. Bindings:
+  UniFFI `FileKeyHandle.{encrypt_note, encrypt_note_for, decrypt_note}`; WASM `encrypt_note`,
+  `encrypt_note_for`, `decrypt_note`. Clients must write and read notes through these (web
+  `file-details-panel.tsx` follow-up).
+- `with_recorded_pin` / `apply_recorded_pin` / `withRecordedPin` docs: `V2` only with the pin
+  read from an existing file's authenticated metadata; a new file uses `WRITE_FORMAT` (doctest).
 
 ## [0.1.0] - 2026-05-13
 
