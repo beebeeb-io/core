@@ -9,6 +9,9 @@ use beebeeb_core::backup::SkipReason;
 use crate::walk::{attrs_from_parts, walk_with_paths};
 use crate::{MAX_DEPTH, fingerprint, walk_source};
 
+/// `run_pass` over a recording host.
+mod pass;
+
 /// A fresh directory under the system temp dir, removed on drop.
 pub(crate) struct TempDir(PathBuf);
 
