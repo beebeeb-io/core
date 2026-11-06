@@ -13,7 +13,7 @@ use std::io;
 use std::path::{Component, Path, PathBuf, Prefix};
 
 use beebeeb_core::backup::{EntryAttrs, SkipReason, SourceEntry, fold_name, skip_reason};
-use unicode_normalization::{UnicodeNormalization, is_nfc};
+use unicode_normalization::UnicodeNormalization;
 
 use crate::fingerprint::modified_ms;
 
@@ -34,7 +34,7 @@ pub struct WalkResult {
 }
 
 impl WalkResult {
-    /// Every key the walk did not look at or into (NFC). A record at or under
+    /// Every key the walk did not look at or into. A record at or under
     /// one of them is not gone: the planner leaves it untouched (plan
     /// Amendment 1, items 5-6).
     pub fn unseen(&self) -> Vec<String> {
@@ -42,8 +42,9 @@ impl WalkResult {
     }
 }
 
-/// A walk plus the real path of every file entry. The key is NFC; the path is
-/// what is on disk, which can differ (an NFD name on Linux).
+/// A walk plus the real path of every file entry. The key is NFC on macOS
+/// (the path is what is on disk, which can be NFD) and the name itself on
+/// Linux and Windows (spec Amendment 5).
 pub(crate) struct Walk {
     pub(crate) result: WalkResult,
     pub(crate) paths: HashMap<String, PathBuf>,
@@ -235,8 +236,8 @@ pub(crate) fn walk_with_paths(root: &Path, exclude: &[PathBuf]) -> io::Result<Wa
 /// The whole listing of `dir`, or an error. A folder is listed completely or
 /// not at all: a listing that fails partway must not leave some of its files
 /// planned while the folder is reported unreadable and its records are set
-/// aside (they would be uploaded again). Names already in NFC come first, so
-/// they keep their own key when a Linux folder also holds an NFD twin.
+/// aside (they would be uploaded again). Sorted by name, so every pass lists
+/// a folder in the same order.
 fn list(dir: &Path) -> io::Result<Vec<(String, DirEntry)>> {
     collect_listing(
         std::fs::read_dir(dir)?.map(|item| item.map(|item| (item.file_name().to_string_lossy().into_owned(), item))),
@@ -248,7 +249,7 @@ pub(crate) fn collect_listing<T>(
     listing: impl Iterator<Item = io::Result<(String, T)>>,
 ) -> io::Result<Vec<(String, T)>> {
     let mut items = listing.collect::<io::Result<Vec<_>>>()?;
-    items.sort_by(|(a, _), (b, _)| (!is_nfc(a), a).cmp(&(!is_nfc(b), b)));
+    items.sort_by(|(a, _), (b, _)| a.cmp(b));
     Ok(items)
 }
 
@@ -260,14 +261,23 @@ fn join(prefix: &str, segment: &str) -> String {
     }
 }
 
-/// The key of `name` under `prefix`: NFC, unless that collides with a key
-/// already listed (an NFD twin of a name listed before it), then the name as
-/// it is. Because NFC names are listed first, this is `None` only for two
+/// Keys are NFC on macOS: names can arrive NFD there, and APFS and HFS+
+/// cannot hold two names in one folder that differ only in normalisation, so
+/// a key never moves from one file to another. Linux and NTFS can hold such
+/// twins, so there the key is the name itself: each twin keeps its own key on
+/// every pass, whichever appeared first (spec Amendment 5, lead 17:34; review
+/// #4). Records under the other form still pair through `normalize_key`.
+const NFC_KEYS: bool = cfg!(target_os = "macos");
+
+/// The key of `name` under `prefix` (see [`NFC_KEYS`]). `None` only for two
 /// names that read the same after a lossy (non-UTF-8) conversion.
 fn unique_key(prefix: &str, name: &str, seen: &mut HashSet<String>) -> Option<String> {
-    [join(prefix, &name.nfc().collect::<String>()), join(prefix, name)]
-        .into_iter()
-        .find(|key| seen.insert(key.clone()))
+    let key = if NFC_KEYS {
+        join(prefix, &name.nfc().collect::<String>())
+    } else {
+        join(prefix, name)
+    };
+    seen.insert(key.clone()).then_some(key)
 }
 
 /// Windows and macOS (by default) do not tell names apart by case.

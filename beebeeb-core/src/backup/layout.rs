@@ -3,6 +3,9 @@
 
 use beebeeb_types::backup::Category;
 
+use super::device::clean_name;
+use super::fold_name;
+
 /// The root folder's name. It identifies nothing: the root is the folder with
 /// the `backups_root` role.
 pub const ROOT_NAME: &str = "Backups";
@@ -10,11 +13,49 @@ pub const ROOT_NAME: &str = "Backups";
 /// The encrypted device manifest in each device folder.
 pub const MANIFEST_NAME: &str = ".device.json";
 
-/// `Backups/<device_folder>/<category display name>/<rel>`, with `/` between
+/// The folder name when a custom folder's name has nothing usable in it.
+const CUSTOM_FALLBACK_NAME: &str = "Folder";
+
+/// The server folder of a category under `Backups/<device>/`: a fixed
+/// category's display name, or a custom name made safe for one path component
+/// by the device-folder rule (idempotent, so a name from
+/// [`custom_category_name`] is unchanged). Clients name the category folder
+/// with this, never with the raw `Category::display_name`.
+pub fn category_folder_name(category: &Category) -> String {
+    match category {
+        Category::Custom(name) => clean_name(name, CUSTOM_FALLBACK_NAME),
+        fixed => fixed.display_name().to_string(),
+    }
+}
+
+/// The name of a custom backup folder the person adds (review #5): `raw`, the
+/// folder's own name, made safe by the device-folder rule, and never equal
+/// (compared with `fold_name`) to a fixed category's folder or to one of
+/// `taken`, the device's other custom folder names: it gets ` (2)`, ` (3)`,
+/// ... The client stores the result as `Category::Custom(name)` when the
+/// folder is added, so the name never changes afterwards.
+pub fn custom_category_name(raw: &str, taken: &[&str]) -> String {
+    let used: Vec<String> = Category::FIXED
+        .iter()
+        .map(|c| fold_name(c.display_name()))
+        .chain(taken.iter().map(|t| fold_name(t)))
+        .collect();
+    let base = clean_name(raw, CUSTOM_FALLBACK_NAME);
+    let mut candidate = base.clone();
+    let mut n = 2;
+    while used.contains(&fold_name(&candidate)) {
+        candidate = format!("{base} ({n})");
+        n += 1;
+    }
+    candidate
+}
+
+/// `Backups/<device_folder>/<category folder>/<rel>`, with `/` between
 /// segments. An empty `rel` is the category folder itself. `rel` is a backup
-/// key (already normalised, `/`-separated, no leading `/`).
+/// key (`/`-separated, no leading `/`). The category folder is
+/// [`category_folder_name`].
 pub fn backup_rel_path(device_folder: &str, category: &Category, rel: &str) -> String {
-    let mut path = format!("{ROOT_NAME}/{device_folder}/{}", category.display_name());
+    let mut path = format!("{ROOT_NAME}/{device_folder}/{}", category_folder_name(category));
     if !rel.is_empty() {
         path.push('/');
         path.push_str(rel);

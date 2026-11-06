@@ -104,7 +104,10 @@ impl Category {
         Category::FIXED.into_iter().find(|c| c.key() == key)
     }
 
-    /// The folder name under `Backups/<device>/`.
+    /// The person-facing name. For a custom folder this is the stored name as
+    /// given; the server folder is `beebeeb_core::backup::category_folder_name`,
+    /// and a new custom name comes from `custom_category_name`, which makes it
+    /// safe and unique.
     pub fn display_name(&self) -> &str {
         match self {
             Category::Desktop => "Desktop",

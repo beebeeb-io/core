@@ -27,8 +27,9 @@ const NAME_MAX_BYTES: usize = 200;
 /// `MachineGuid`, macOS `IOPlatformUUID`, Linux `/etc/machine-id`), so a
 /// reinstall keeps its id: SHA-256(`DEVICE_ID_LABEL` || 0x00 || trimmed id),
 /// the first 16 bytes, with the RFC 4122 version-8 and variant bits set. The
-/// raw machine id never leaves the device.
-pub fn device_id_from_machine_id(machine_id: &str) -> Uuid {
+/// raw machine id never leaves the device. The id is a string identity (the
+/// hyphenated lowercase UUID), like every other device id.
+pub fn device_id_from_machine_id(machine_id: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(DEVICE_ID_LABEL);
     hasher.update([0u8]);
@@ -38,7 +39,25 @@ pub fn device_id_from_machine_id(machine_id: &str) -> Uuid {
     bytes.copy_from_slice(&digest[..16]);
     bytes[6] = (bytes[6] & 0x0f) | 0x80;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    Uuid::from_bytes(bytes)
+    Uuid::from_bytes(bytes).to_string()
+}
+
+/// Whether two device ids name the same device: as UUIDs when both are UUIDs
+/// (any case or form), else as exact strings (an iOS legacy id).
+pub fn same_device_id(a: &str, b: &str) -> bool {
+    match (Uuid::parse_str(a), Uuid::parse_str(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+/// The hex digits a collision suffix is cut from: a UUID's own digits, else
+/// the hex of the id's UTF-8 bytes (a legacy id), so every id has a suffix.
+fn suffix_hex(id: &str) -> String {
+    match Uuid::parse_str(id) {
+        Ok(uuid) => uuid.simple().to_string(),
+        Err(_) => id.bytes().map(|b| format!("{b:02x}")).collect(),
+    }
 }
 
 /// A name already used under the Backups root, and the device id from its
@@ -46,15 +65,15 @@ pub fn device_id_from_machine_id(machine_id: &str) -> Uuid {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TakenName {
     pub name: String,
-    pub device_id: Option<Uuid>,
+    pub device_id: Option<String>,
 }
 
 /// The person-facing name made safe for one path component on every
 /// platform. Separators, control characters and the characters Windows
 /// refuses become `_`; display controls (bidi, zero-width) are removed;
 /// trailing dots and spaces become `_`; a reserved Windows name gets `_` after
-/// its stem. A name with nothing visible left of the original is `"Device"`.
-fn clean_name(raw: &str) -> String {
+/// its stem. A name with nothing visible left of the original is `fallback`.
+pub(super) fn clean_name(raw: &str, fallback: &str) -> String {
     // (char, came from the original unchanged)
     let mut out: Vec<(char, bool)> = Vec::with_capacity(raw.len());
     for c in raw.nfc() {
@@ -79,7 +98,7 @@ fn clean_name(raw: &str) -> String {
         .iter()
         .any(|(c, original)| *original && !c.is_whitespace() && !is_invisible_filler(*c));
     if !visible {
-        return FALLBACK_NAME.to_string();
+        return fallback.to_string();
     }
     let mut name: String = out.into_iter().map(|(c, _)| c).collect();
     if is_windows_reserved_stem(&name) {
@@ -88,54 +107,78 @@ fn clean_name(raw: &str) -> String {
         name.insert(stem_end, '_');
     }
     if check_component_for(&name, true, true).is_err() {
-        return FALLBACK_NAME.to_string();
+        return fallback.to_string();
     }
     name
 }
 
-fn taken_by_another(name: &str, my_id: Uuid, taken: &[TakenName]) -> bool {
+fn taken_by_another(name: &str, my_id: &str, taken: &[TakenName]) -> bool {
     let folded = fold_name(name);
     taken
         .iter()
-        .any(|t| t.device_id != Some(my_id) && fold_name(&t.name) == folded)
+        .any(|t| !t.device_id.as_deref().is_some_and(|id| same_device_id(id, my_id)) && fold_name(&t.name) == folded)
 }
 
 /// The device folder name for `raw` (the platform's user-facing computer or
 /// device name). When another device already uses the name (its manifest has a
 /// different id, or it has none), the first 4 hex digits of `my_id` are added:
 /// `GLegion (a3f2)`; if that is taken too, the suffix widens 4 digits at a time.
-pub fn device_folder_name(raw: &str, my_id: Uuid, taken: &[TakenName]) -> String {
-    let base = clean_name(raw);
+/// A legacy id that is not a UUID gives the hex of its bytes.
+pub fn device_folder_name(raw: &str, my_id: &str, taken: &[TakenName]) -> String {
+    let base = clean_name(raw, FALLBACK_NAME);
     if !taken_by_another(&base, my_id, taken) {
         return base;
     }
-    let hex = my_id.simple().to_string();
-    let mut width = 4;
+    let hex = suffix_hex(my_id);
+    let mut width = 4.min(hex.len());
     loop {
         let candidate = format!("{base} ({})", &hex[..width]);
-        if width == hex.len() || !taken_by_another(&candidate, my_id, taken) {
+        if width >= hex.len() || !taken_by_another(&candidate, my_id, taken) {
             return candidate;
         }
-        width += 4;
+        width = (width + 4).min(hex.len());
     }
 }
 
 /// This device, as the identity rule sees it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceSelf {
-    pub device_id: Uuid,
+    /// A string identity (see [`DeviceManifest::device_id`]).
+    pub device_id: String,
     /// The platform's user-facing name (before [`device_folder_name`]).
     pub name: String,
     pub platform: Platform,
 }
 
-/// One folder directly under the Backups root, with its manifest when it has
-/// one (decrypted and parsed by the client).
+/// What a device folder's `.device.json` gave the client.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FolderManifest {
+    /// The folder has no manifest (only the old desktop mirror wrote such
+    /// folders).
+    Absent,
+    /// It has one that could not be read or parsed (corrupt, half-written, a
+    /// newer format): not mine, never adopted, and its name is taken. It never
+    /// fails the choice for the other folders (review #6).
+    Unreadable,
+    Parsed(DeviceManifest),
+}
+
+/// One folder directly under the Backups root, with its manifest state
+/// (decrypted and parsed by the client).
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeviceFolderCandidate {
     pub folder_id: Uuid,
     pub name: String,
-    pub manifest: Option<DeviceManifest>,
+    pub manifest: FolderManifest,
+}
+
+impl DeviceFolderCandidate {
+    fn device_id(&self) -> Option<&str> {
+        match &self.manifest {
+            FolderManifest::Parsed(m) => m.device_id.as_deref(),
+            FolderManifest::Absent | FolderManifest::Unreadable => None,
+        }
+    }
 }
 
 /// Which folder this device backs up into.
@@ -162,17 +205,17 @@ fn is_desktop(platform: Platform) -> bool {
 pub fn find_device_folder(me: &DeviceSelf, candidates: &[DeviceFolderCandidate]) -> DeviceFolderChoice {
     let mine = candidates
         .iter()
-        .filter(|c| c.manifest.as_ref().and_then(|m| m.device_id) == Some(me.device_id))
+        .filter(|c| c.device_id().is_some_and(|id| same_device_id(id, &me.device_id)))
         .map(|c| c.folder_id)
         .min();
     if let Some(id) = mine {
         return DeviceFolderChoice::Existing(id);
     }
     if is_desktop(me.platform) {
-        let legacy_name = device_folder_name(&me.name, me.device_id, &[]);
+        let legacy_name = device_folder_name(&me.name, &me.device_id, &[]);
         let legacy = candidates
             .iter()
-            .filter(|c| c.manifest.is_none() && c.name.nfc().eq(legacy_name.chars()))
+            .filter(|c| c.manifest == FolderManifest::Absent && c.name.nfc().eq(legacy_name.chars()))
             .map(|c| c.folder_id)
             .min();
         if let Some(id) = legacy {
@@ -183,10 +226,10 @@ pub fn find_device_folder(me: &DeviceSelf, candidates: &[DeviceFolderCandidate])
         .iter()
         .map(|c| TakenName {
             name: c.name.clone(),
-            device_id: c.manifest.as_ref().and_then(|m| m.device_id),
+            device_id: c.device_id().map(str::to_string),
         })
         .collect();
     DeviceFolderChoice::Create {
-        name: device_folder_name(&me.name, me.device_id, &taken),
+        name: device_folder_name(&me.name, &me.device_id, &taken),
     }
 }

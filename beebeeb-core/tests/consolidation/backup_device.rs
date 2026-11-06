@@ -5,8 +5,8 @@
 //! `test-vectors/tools/make_backup_device_vectors.py` (ids via hashlib).
 
 use beebeeb_core::backup::{
-    DeviceFolderCandidate, DeviceFolderChoice, DeviceManifest, DeviceSelf, TakenName, device_folder_name,
-    device_id_from_machine_id, find_device_folder, parse_manifest, serialize_manifest,
+    DeviceFolderCandidate, DeviceFolderChoice, DeviceManifest, DeviceSelf, FolderManifest, TakenName,
+    device_folder_name, device_id_from_machine_id, find_device_folder, parse_manifest, serialize_manifest,
 };
 use beebeeb_types::backup::Platform;
 use serde_json::Value;
@@ -18,8 +18,8 @@ fn uuid(v: &Value) -> Uuid {
     Uuid::parse_str(v.as_str().expect("uuid string")).expect("uuid")
 }
 
-fn opt_uuid(v: &Value) -> Option<Uuid> {
-    (!v.is_null()).then(|| uuid(v))
+fn opt_str(v: &Value) -> Option<String> {
+    v.as_str().map(str::to_string)
 }
 
 fn platform(v: &Value) -> Platform {
@@ -28,7 +28,7 @@ fn platform(v: &Value) -> Platform {
 
 fn me(v: &Value) -> DeviceSelf {
     DeviceSelf {
-        device_id: uuid(&v["device_id"]),
+        device_id: v["device_id"].as_str().expect("device_id").to_string(),
         name: v["name"].as_str().expect("name").to_string(),
         platform: platform(&v["platform"]),
     }
@@ -39,8 +39,9 @@ fn candidate(v: &Value) -> DeviceFolderCandidate {
         folder_id: uuid(&v["folder_id"]),
         name: v["name"].as_str().expect("name").to_string(),
         manifest: match &v["manifest"] {
-            Value::Null => None,
-            m => Some(parse_manifest(&m.to_string()).expect("candidate manifest parses")),
+            Value::Null => FolderManifest::Absent,
+            Value::String(s) if s == "unreadable" => FolderManifest::Unreadable,
+            m => FolderManifest::Parsed(parse_manifest(&m.to_string()).expect("candidate manifest parses")),
         },
     }
 }
@@ -54,7 +55,7 @@ fn key_sorted(json: &str) -> String {
 #[test]
 fn backup_device_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 45, "every named backup_device case is present");
+    assert_eq!(cases.len(), 49, "every named backup_device case is present");
 
     let (mut names, mut machine_ids, mut finds, mut manifests) = (0, 0, 0, 0);
     for case in &cases {
@@ -68,18 +69,21 @@ fn backup_device_cases_match_core() {
                     .iter()
                     .map(|t| TakenName {
                         name: t["name"].as_str().expect("name").to_string(),
-                        device_id: opt_uuid(&t["device_id"]),
+                        device_id: opt_str(&t["device_id"]),
                     })
                     .collect();
-                let got = device_folder_name(case["raw"].as_str().expect("raw"), uuid(&case["my_id"]), &taken);
+                let my_id = case["my_id"].as_str().expect("my_id");
+                let got = device_folder_name(case["raw"].as_str().expect("raw"), my_id, &taken);
                 assert_eq!(got, case["expected"].as_str().expect("expected"), "{id}");
             }
             "machine_id" => {
                 machine_ids += 1;
                 let got = device_id_from_machine_id(case["machine_id"].as_str().expect("machine_id"));
-                assert_eq!(got, uuid(&case["expected"]), "{id}");
-                assert_eq!(got.get_version_num(), 8, "{id}: RFC 4122 version 8");
-                assert_eq!(got.get_variant(), uuid::Variant::RFC4122, "{id}: RFC 4122 variant");
+                assert_eq!(got, case["expected"].as_str().expect("expected"), "{id}");
+                let parsed = Uuid::parse_str(&got).expect("a UUID string");
+                assert_eq!(got, parsed.to_string(), "{id}: lowercase hyphenated");
+                assert_eq!(parsed.get_version_num(), 8, "{id}: RFC 4122 version 8");
+                assert_eq!(parsed.get_variant(), uuid::Variant::RFC4122, "{id}: RFC 4122 variant");
             }
             "find" => {
                 finds += 1;
@@ -107,7 +111,7 @@ fn backup_device_cases_match_core() {
                 let json = case["json"].as_str().expect("json");
                 let parsed = parse_manifest(json).unwrap_or_else(|e| panic!("{id}: {e}"));
                 let expect = &case["expect"];
-                assert_eq!(parsed.device_id, opt_uuid(&expect["device_id"]), "{id}: device_id");
+                assert_eq!(parsed.device_id, opt_str(&expect["device_id"]), "{id}: device_id");
                 let want_platform = (!expect["platform"].is_null()).then(|| platform(&expect["platform"]));
                 assert_eq!(parsed.platform, want_platform, "{id}: platform");
                 assert_eq!(
@@ -139,7 +143,7 @@ fn backup_device_cases_match_core() {
     );
     assert_eq!(
         (names, machine_ids, finds, manifests),
-        (25, 3, 11, 6),
+        (27, 3, 13, 6),
         "case counts per kind"
     );
 }
@@ -159,7 +163,7 @@ fn manifest_known_field_wins_over_kept_text() {
     other.insert("note".into(), Value::from("kept"));
     let manifest = DeviceManifest {
         version: 1,
-        device_id: Some(id),
+        device_id: Some(id.to_string()),
         device_name: "New name".into(),
         platform: None,
         folders: Vec::new(),
@@ -176,7 +180,7 @@ fn manifest_known_field_wins_over_kept_text() {
     assert_eq!(back["note"], "kept", "{written}");
     let reparsed = parse_manifest(&written).expect("parses");
     assert_eq!(
-        (reparsed.device_id, reparsed.device_name.as_str()),
-        (Some(id), "New name")
+        (reparsed.device_id.as_deref(), reparsed.device_name.as_str()),
+        (Some(id.to_string().as_str()), "New name")
     );
 }

@@ -66,6 +66,8 @@ fn plan_json(plan: &PassPlan) -> Value {
             "key": u.key,
             "size": u.size,
             "reason": match u.reason { UploadReason::New => "new", UploadReason::Changed => "changed" },
+            "record_key": u.record_key,
+            "remote_id": u.remote_id.map(|id| id.to_string()),
         })).collect::<Vec<_>>(),
         "moves": plan.moves.iter().map(|m| json!({
             "remote_id": m.remote_id.to_string(),
@@ -77,6 +79,8 @@ fn plan_json(plan: &PassPlan) -> Value {
         "unchanged": plan.unchanged,
         "gone_locally": plan.gone_locally,
         "deferred": plan.deferred,
+        "held": plan.held,
+        "deferred_unknown": plan.deferred_unknown,
     })
 }
 
@@ -92,6 +96,7 @@ fn run_plan_case(case: &Value) -> Value {
         &live,
         case["live_remote_complete"].as_bool().expect("live_remote_complete"),
         &list(&case["unseen"], s),
+        &list(&case["held"], s),
         budget,
     ))
 }
@@ -99,7 +104,7 @@ fn run_plan_case(case: &Value) -> Value {
 #[test]
 fn backup_plan_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 60, "every named backup_plan case is present");
+    assert_eq!(cases.len(), 66, "every named backup_plan case is present");
 
     let (mut plans, mut keys, mut presences, mut rebuilds) = (0, 0, 0, 0);
     for case in &cases {
@@ -161,7 +166,7 @@ fn backup_plan_cases_match_core() {
     );
     assert_eq!(
         (plans, keys, presences, rebuilds),
-        (41, 4, 5, 10),
+        (47, 4, 5, 10),
         "case counts per kind"
     );
 }
@@ -203,6 +208,7 @@ fn case_only_rename_is_a_move() {
         &live,
         true,
         &[],
+        &[],
         UNLIMITED,
     );
     assert!(
@@ -230,7 +236,7 @@ fn plan_and_rebuild_handle_negative_future_and_coarse_mtimes() {
     for &m in &times {
         let record = backed_up("a.jpg", 7, m, 1_762_430_500_000);
         let live: HashSet<Uuid> = [record.remote_id].into_iter().collect();
-        let plan = plan_pass(&[file("a.jpg", 7, m)], &[record], &live, true, &[], UNLIMITED);
+        let plan = plan_pass(&[file("a.jpg", 7, m)], &[record], &live, true, &[], &[], UNLIMITED);
         assert_eq!((plan.unchanged, plan.uploads.len()), (1, 0), "modified_ms {m}");
     }
     // A FAT/exFAT copy rounds the mtime to 2 s: a different value, so it uploads.
@@ -241,6 +247,7 @@ fn plan_and_rebuild_handle_negative_future_and_coarse_mtimes() {
         &[record],
         &live,
         true,
+        &[],
         &[],
         UNLIMITED,
     );
@@ -297,6 +304,7 @@ fn unreadable_folder_records_are_not_gone_or_move_sources() {
         &live,
         true,
         &["closed".to_string()],
+        &[],
         UNLIMITED,
     );
     assert!(
@@ -327,8 +335,70 @@ fn notlocal_folder_records_are_not_move_sources() {
         &live,
         true,
         &["Ren\u{e9}".to_string()],
+        &[],
         UNLIMITED,
     );
     assert!(plan.moves.is_empty(), "{:?}", plan.moves);
     assert_eq!((plan.uploads.len(), plan.gone_locally), (1, 0));
+}
+
+/// Review #1: N keys that keep failing (N >= max_uploads), first in key order,
+/// still let every other file through: held keys are skipped and charged
+/// nothing.
+#[test]
+fn failing_first_key_does_not_starve_others() {
+    let budget = PassBudget {
+        max_uploads: 3,
+        max_bytes: u64::MAX,
+    };
+    let mut entries: Vec<SourceEntry> = (0..4)
+        .map(|i| file(&format!("a{i}.pst"), 9, 1_700_000_000_000))
+        .collect();
+    entries.extend((0..5).map(|i| file(&format!("b{i}.jpg"), 9, 1_700_000_000_000)));
+    let held: Vec<String> = (0..4).map(|i| format!("a{i}.pst")).collect();
+    let plan = plan_pass(&entries, &[], &HashSet::new(), true, &[], &held, budget);
+    let keys: Vec<&str> = plan.uploads.iter().map(|u| u.key.as_str()).collect();
+    assert_eq!(keys, ["b0.jpg", "b1.jpg", "b2.jpg"]);
+    assert_eq!((plan.held, plan.deferred), (4, 2));
+    // Without the host's held list the same entries starve: every pass plans
+    // the four failing keys first.
+    let starved = plan_pass(&entries, &[], &HashSet::new(), true, &[], &[], budget);
+    assert!(starved.uploads.iter().all(|u| u.key.ends_with(".pst")));
+}
+
+/// Review #2 (lead 17:28): a record whose id is missing from an incomplete
+/// listing is unknown, not dead. A change to its file waits for a complete
+/// listing: no Changed or New upload, no move, no mark.
+#[test]
+fn incomplete_listing_defers_unlisted_record_change() {
+    let record = backed_up("a.jpg", 9, 1_700_000_000_000, 1_700_000_100_000);
+    let changed = [file("a.jpg", 10, 1_700_000_200_000)];
+    let partial = plan_pass(
+        &changed,
+        std::slice::from_ref(&record),
+        &HashSet::new(),
+        false,
+        &[],
+        &[],
+        UNLIMITED,
+    );
+    assert!(partial.uploads.is_empty(), "{:?}", partial.uploads);
+    assert!(partial.moves.is_empty() && partial.mark_removed_elsewhere.is_empty());
+    assert_eq!(partial.deferred_unknown, 1);
+    // The next pass, with a complete listing, decides: the copy is gone, so the
+    // file comes back as a new file (ruling A) and the record is marked.
+    let complete = plan_pass(
+        &changed,
+        std::slice::from_ref(&record),
+        &HashSet::new(),
+        true,
+        &[],
+        &[],
+        UNLIMITED,
+    );
+    assert_eq!(complete.uploads.len(), 1);
+    assert_eq!(complete.uploads[0].reason, UploadReason::New);
+    assert_eq!(complete.uploads[0].record_key.as_deref(), Some("a.jpg"));
+    assert_eq!(complete.uploads[0].remote_id, None);
+    assert_eq!(complete.mark_removed_elsewhere, ["a.jpg"]);
 }

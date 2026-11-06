@@ -30,12 +30,12 @@ F2 = "22222222-2222-4222-8222-222222222222"
 cases = []
 
 
-def name(id_, raw, expected, taken=()):
+def name(id_, raw, expected, taken=(), my_id=ME):
     cases.append({
         "id": id_,
         "kind": "name",
         "raw": raw,
-        "my_id": ME,
+        "my_id": my_id,
         "taken": [{"name": n, "device_id": d} for n, d in taken],
         "expected": expected,
     })
@@ -67,6 +67,12 @@ name("name_collision_with_my_own_id", "GLegion", "GLegion", [("GLegion", ME)])
 name("name_collision_twice_widens_suffix", "GLegion", "GLegion (a3f2b1c4)",
      [("GLegion", OTHER), ("GLegion (a3f2)", OTHER)])
 name("name_no_collision_with_other_names", "GLegion", "GLegion", [("Guus's iPhone", OTHER)])
+# Review #7: a device id is a string identity. A legacy non-UUID id gets the hex of its bytes as the suffix
+# ("legacy-7" -> 6c 65 67 61 ...), and its own legacy id is never a collision.
+name("name_collision_with_a_legacy_id", "Example iPhone", "Example iPhone (6c65)",
+     [("Example iPhone", OTHER)], my_id="legacy-7")
+name("name_own_legacy_id_is_not_a_collision", "Example iPhone", "Example iPhone",
+     [("Example iPhone", "legacy-7")], my_id="legacy-7")
 
 GLEGION_MACHINE = "7f3e9c2a-1b4d-4e8f-9a6c-5d2b8e1f0a3c"
 for id_, raw in [("machine_id_trimmed", " 4c4c4544-0042 "), ("machine_id_plain", "4c4c4544-0042"),
@@ -122,6 +128,14 @@ find("find_same_name_other_id_creates_suffixed", WIN,
 find("find_same_name_other_platform_creates_suffixed", WIN,
      [(F1, "GLegion", manifest(OTHER, "ios"))], {"create": "GLegion (a3f2)"})
 find("find_nothing_creates", WIN, [], {"create": "GLegion"})
+# Review #7: an iOS device that carries its legacy beebeeb_device_id value forward verbatim finds its folder.
+IOS_LEGACY_ID = "ios-1730000000000-k3j9x"
+find("find_ios_legacy_id_is_existing",
+     {"device_id": IOS_LEGACY_ID, "name": "Example iPhone", "platform": "ios"},
+     [(F1, "Example iPhone", manifest(IOS_LEGACY_ID, None, "Example iPhone"))], {"existing": F1})
+# Review #6: a manifest that does not parse is not mine, is never adopted, and its name is taken.
+find("find_unreadable_manifest_is_not_mine_or_adopted", WIN, [(F1, "GLegion", "unreadable")],
+     {"create": "GLegion (a3f2)"})
 
 IOS_MANIFEST = json.dumps({
     "version": 1,
@@ -179,7 +193,7 @@ man("manifest_real_ios_round_trips", IOS_MANIFEST, "0b7e4a2c-9d1f-4c3a-8e5b-2f6d
     "Example iPhone", 0)
 man("manifest_desktop_round_trips", DESKTOP_MANIFEST, DESKTOP_ID, "windows", "GLegion", 2)
 man("manifest_unknown_field_is_kept", FUTURE_MANIFEST, DESKTOP_ID, "windows", "GLegion", 0)
-man("manifest_non_uuid_id_and_unknown_platform_are_kept_verbatim", LEGACY_ID_MANIFEST, None, None,
+man("manifest_legacy_id_is_the_id_and_unknown_platform_is_kept", LEGACY_ID_MANIFEST, "legacy-device-7", None,
     "Old iPad", 0)
 cases.append({"id": "manifest_not_an_object_is_an_error", "kind": "manifest_error", "json": "[1, 2]"})
 cases.append({"id": "manifest_not_json_is_an_error", "kind": "manifest_error", "json": "{\"version\": 1,"})

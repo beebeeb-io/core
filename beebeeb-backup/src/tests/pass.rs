@@ -34,6 +34,8 @@ struct State {
     finish_after_next_records: bool,
     /// What `device_tree` reports as `complete`.
     listing_complete: bool,
+    /// What `held_keys` reports.
+    held_keys: Vec<String>,
     /// Runs inside `ensure_folder`: between the walk and the fingerprints.
     on_ensure_folder: Option<Box<dyn Fn() + Send>>,
 }
@@ -190,6 +192,10 @@ impl BackupHost for FakeHost {
         state.calls.push(format!("enqueue_upload {}", req.key));
         state.queued.push(req);
         Ok(())
+    }
+
+    async fn held_keys(&self, _c: &Category) -> Result<Vec<String>, HostError> {
+        Ok(self.state().held_keys.clone())
     }
 
     async fn records(&self, _c: &Category) -> Result<Vec<BackupRecord>, HostError> {
@@ -625,4 +631,58 @@ async fn run_pass_unreadable_nfd_twin_hides_nothing_of_the_nfc_twin() {
     assert_eq!(report.queued, 1);
     assert_eq!(host.calls("enqueue_upload"), ["enqueue_upload R\u{e9}/a.jpg"]);
     assert_eq!(report.skipped, BTreeMap::from([(SkipReason::Unreadable, 1)]));
+}
+
+/// Review #1, through the pass: the keys the host holds (a lasting failure,
+/// or in flight) are skipped and not charged, so the next file goes out.
+#[tokio::test]
+async fn run_pass_skips_keys_the_host_holds() {
+    let src = TempDir::new("heldkeys");
+    src.write("a.pst", b"locked");
+    src.write("b.jpg", b"bb");
+    let host = FakeHost::new();
+    host.state().held_keys = vec!["a.pst".to_string()];
+    let one = PassBudget {
+        max_uploads: 1,
+        max_bytes: u64::MAX,
+    };
+    let report = run_pass(&host, src.path(), &[], &Category::Documents, one)
+        .await
+        .expect("pass");
+    assert_eq!((report.queued, report.held, report.deferred), (1, 1, 0));
+    assert_eq!(host.calls("enqueue_upload"), ["enqueue_upload b.jpg"]);
+}
+
+/// Review #4 (spec Amendment 5): a lone NFD file, then an NFC twin in pass 2.
+/// The NFD file keeps its record and is unchanged; the NFC twin uploads as a
+/// new file. Its bytes never become a version of the NFD file's copy.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn run_pass_twin_appearing_in_pass_2_never_takes_the_first_files_record() {
+    let src = TempDir::new("twinpass2");
+    src.write("Rene\u{301}.txt", b"the first file");
+    let host = FakeHost::new();
+    run_pass(&host, src.path(), &[], &Category::Documents, BUDGET)
+        .await
+        .expect("pass 1");
+    assert_eq!(host.complete_uploads(), ["Rene\u{301}.txt"]);
+    let first_id = host.state().records[0].remote_id;
+
+    src.write("Ren\u{e9}.txt", b"another file, longer");
+    host.state().calls.clear();
+    let report = run_pass(&host, src.path(), &[], &Category::Documents, BUDGET)
+        .await
+        .expect("pass 2");
+    assert_eq!((report.queued, report.unchanged), (1, 1));
+    let state = host.state();
+    let queued = &state.queued[0];
+    assert_eq!(queued.key, "Ren\u{e9}.txt");
+    assert_eq!(queued.reason, beebeeb_core::backup::UploadReason::New);
+    assert_eq!((queued.record_key.as_deref(), queued.remote_id), (None, None));
+    let first = state
+        .records
+        .iter()
+        .find(|r| r.remote_id == first_id)
+        .expect("first record");
+    assert_eq!(first.key, "Rene\u{301}.txt", "the first file keeps its key");
 }

@@ -18,7 +18,7 @@ what a bundler sees.
 | Name | What |
 | --- | --- |
 | `backupCheckMutation(role, mutation)` | Core's words when a trash / delete / rename / move of the row is refused, else `undefined`. An unknown string throws. |
-| `backupProtectionMany(roles: string[])` | One byte per listing row, 1 = protected (one crossing per listing). |
+| `backupProtectionMany(roles: string[])` | One byte per listing row, 1 = protected (one crossing per listing). A role this build does not know is protected (1), never a throw. |
 | `backupParseManifest(json)` | A decrypted `.device.json` as a plain object; unknown fields kept. |
 
 Dialog copy (the device-folder confirmation) stays in the web UI. The web
@@ -41,10 +41,10 @@ symbols in the generated `beebeeb_uniffiFFI.h` (`uniffi-bindgen generate
 | `backup_skip_reason(name, is_dir, is_link, not_local)` | Why an entry is never backed up, or none |
 | `backup_resolve_root(candidates)` | `BackupRootPlan`: `Use`, `Claim { id, merge_from }`, `Create` |
 | `backup_plan_merge(survivor, duplicates, clash_label, hhmm)` | `[BackupMergeStep]` from flat listing rows; pass `hhmm` with a dot |
-| `backup_device_folder_name(raw, my_id, taken)` | The device folder name, with the device-id suffix on a collision |
-| `backup_find_device_folder(me, candidates)` | `BackupDeviceFolderChoice`: `Existing`, `AdoptLegacy`, `Create { name }` |
+| `backup_device_folder_name(raw, my_id, taken)` | The device folder name, with the device-id suffix on a collision; ids are strings (a UUID or an iOS legacy id) |
+| `backup_find_device_folder(me, candidates)` | `BackupDeviceFolderChoice`: `Existing`, `AdoptLegacy`, `Create { name }`; a manifest that does not parse is "unreadable" (not mine, not adoptable), never an error; a legacy non-UUID id matches `Existing` |
 | `backup_parse_manifest(json)` / `backup_serialize_manifest(manifest)` | `.device.json`; unknown fields cross as `other_json` |
-| `backup_plan_pass(entries, records, live_remote, live_remote_complete, unseen, max_uploads, max_bytes)` | `BackupPassPlan` (iOS passes an empty `unseen` and asset ids with `/` replaced by `\|`) |
+| `backup_plan_pass(entries, records, live_remote, live_remote_complete, unseen, held, max_uploads, max_bytes)` | `BackupPassPlan` with `held` and `deferred_unknown`; each upload carries `record_key` and, for `changed`, `remote_id` (iOS passes an empty `unseen` and asset ids with `/` replaced by `\|`) |
 
 Every string the binding parses (mutation, role, platform, record state, id)
 that it does not know is `CryptoError.InvalidInput`, never a pass.

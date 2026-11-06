@@ -106,6 +106,9 @@ fn walk_depth_cap() {
     assert_eq!(result.skipped[0].0.split('/').count(), MAX_DEPTH + 1);
 }
 
+/// macOS keys are NFC (spec Amendment 5): an NFD name is listed as NFC, read
+/// from the path on disk.
+#[cfg(target_os = "macos")]
 #[test]
 fn walk_keys_are_nfc() {
     let dir = TempDir::new("nfc");
@@ -341,4 +344,15 @@ fn excludes_are_folded_once_and_followed_by_component() {
     // The root inside an excluded path: every entry is.
     let inside = Excludes::new(root, &[PathBuf::from("/home/u")], false).expect("excludes");
     assert_eq!(inside.step(&[], 0, OsStr::new("anything")), None);
+}
+
+/// Spec Amendment 5 (review #4): on Linux the key is the name itself, so an
+/// NFD file keeps its NFD key.
+#[cfg(target_os = "linux")]
+#[test]
+fn walk_keys_are_the_names_on_linux() {
+    let dir = TempDir::new("rawkeys");
+    dir.write("Rene\u{301}.txt", b"x");
+    let walk = walk_with_paths(dir.path(), &[]).expect("walk");
+    assert_eq!(keys(&walk.result), ["Rene\u{301}.txt"]);
 }

@@ -76,9 +76,20 @@ pub enum UploadReason {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlannedUpload {
+    /// The entry's key: where the file is now.
     pub key: String,
     pub size: u64,
     pub reason: UploadReason,
+    /// The paired record's key, `Some` whenever a record pairs. It can differ
+    /// from `key` (a record stored under an NFD key or with `\`, paired by
+    /// [`normalize_key`]): the host re-keys that record to `key` when the
+    /// upload completes (`put_record`, which drops the old key), and never
+    /// looks the record up by `key` (review #3).
+    pub record_key: Option<String>,
+    /// For [`UploadReason::Changed`]: the remote file this upload is a new
+    /// version of (the paired record's id, live at planning time). `None` for
+    /// `New`.
+    pub remote_id: Option<Uuid>,
 }
 
 /// A file that moved (or was renamed) in the source: a server-side move of
@@ -109,6 +120,15 @@ pub struct PassPlan {
     pub gone_locally: usize,
     /// Uploads the budget left for the next pass.
     pub deferred: usize,
+    /// Uploads skipped because the host holds their key (a lasting failure:
+    /// locked, too large, refused; or one already in flight). They are not
+    /// charged to the budget (review #1).
+    pub held: usize,
+    /// Work that waits for a complete listing: a change to a file whose
+    /// record's id is missing from an incomplete listing, and a new entry that
+    /// may be such a record's file moved. No upload, no move, no mark: the
+    /// next pass with a complete listing decides (lead 17:28, review #2).
+    pub deferred_unknown: usize,
 }
 
 /// Whether this backup still has somewhere to go (spec §4.2 rule 11).
@@ -220,6 +240,14 @@ fn under_unseen(key: &str, unseen: &HashSet<&str>) -> bool {
 ///   still there (plan Amendment 1, items 5-6). `""` stands for the whole
 ///   folder. A file entry at or under an unseen key is not planned either (it
 ///   waits for a pass that sees its folder whole). iOS passes an empty list.
+/// - `held`: entry keys the host holds (an upload that failed for a lasting
+///   reason, or is still in flight). They are skipped this pass and not
+///   charged to the budget, so one stuck file never starves the rest; "the
+///   first upload always fits" applies to the first key not held (review #1).
+///
+/// A record whose id is missing from an INCOMPLETE listing is unknown, not
+/// dead (lead 17:28): no upload for its file, no move from it, no mark; it
+/// counts in `deferred_unknown`. A listed record behaves as normal.
 ///
 /// The result does not depend on the order of `entries` or `records`.
 pub fn plan_pass(
@@ -228,10 +256,13 @@ pub fn plan_pass(
     live_remote: &HashSet<Uuid>,
     live_remote_complete: bool,
     unseen: &[String],
+    held: &[String],
     budget: PassBudget,
 ) -> PassPlan {
     let unseen: HashSet<&str> = unseen.iter().map(|key| key.trim_end_matches('/')).collect();
+    let held: HashSet<&str> = held.iter().map(String::as_str).collect();
     let live = |r: &BackupRecord| live_remote.contains(&r.remote_id);
+    let unknown = |r: &BackupRecord| !live_remote_complete && !live(r);
     let mut files: Vec<&SourceEntry> = entries
         .iter()
         .filter(|e| !e.is_dir && !under_unseen(&e.key, &unseen))
@@ -269,6 +300,14 @@ pub fn plan_pass(
                 .push(r);
         }
     }
+    // A record missing from an incomplete listing may still be live: a new
+    // entry that matches it may be its file moved, so it waits too.
+    let unknown_sources: HashSet<MoveSignature> = records
+        .iter()
+        .enumerate()
+        .filter(|(r, record)| !record_paired[*r] && unknown(record))
+        .map(|(_, record)| signature(record.size, record.modified_ms, &record.key))
+        .collect();
     let mut target_count: HashMap<MoveSignature, usize> = HashMap::new();
     for (f, file) in files.iter().enumerate() {
         if paired[f].is_none() {
@@ -285,17 +324,22 @@ pub fn plan_pass(
             Some(r) => {
                 let record = records[r];
                 let changed = file.size != record.size || file.modified_ms != record.modified_ms;
-                if changed {
+                if changed && unknown(record) {
+                    plan.deferred_unknown += 1;
+                } else if changed {
                     // Ruling A: a file deleted from the backup elsewhere comes
                     // back as a new file, never as a version of the deleted one.
+                    let live_copy = live(record);
                     wanted.push(PlannedUpload {
                         key: file.key.clone(),
                         size: file.size,
-                        reason: if live(record) {
+                        reason: if live_copy {
                             UploadReason::Changed
                         } else {
                             UploadReason::New
                         },
+                        record_key: Some(record.key.clone()),
+                        remote_id: live_copy.then_some(record.remote_id),
                     });
                 } else if live(record) {
                     plan.unchanged += 1;
@@ -316,10 +360,13 @@ pub fn plan_pass(
                             to_key: file.key.clone(),
                         });
                     }
+                    None if unknown_sources.contains(&sig) => plan.deferred_unknown += 1,
                     None => wanted.push(PlannedUpload {
                         key: file.key.clone(),
                         size: file.size,
                         reason: UploadReason::New,
+                        record_key: None,
+                        remote_id: None,
                     }),
                 }
             }
@@ -330,9 +377,14 @@ pub fn plan_pass(
         .count();
 
     // The budget keeps a prefix: the first upload always fits, so one big file
-    // is never stuck; after the first that does not fit, the rest wait.
+    // is never stuck; after the first that does not fit, the rest wait. A held
+    // key is skipped and charged nothing.
     let mut bytes: u64 = 0;
     for upload in wanted {
+        if held.contains(upload.key.as_str()) {
+            plan.held += 1;
+            continue;
+        }
         let fits = plan.deferred == 0
             && plan.uploads.len() < budget.max_uploads
             && (plan.uploads.is_empty() || bytes.saturating_add(upload.size) <= budget.max_bytes);

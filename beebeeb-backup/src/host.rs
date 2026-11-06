@@ -21,14 +21,17 @@ use crate::Fingerprint;
 /// record for `key`.
 ///
 /// `reason`: [`UploadReason::New`] creates a file named `name` in
-/// `parent_id`, also when the key's record was removed elsewhere (it comes
+/// `parent_id`, also when the paired record was removed elsewhere (it comes
 /// back as a new file, ruling A); when it completes the client writes a fresh
-/// record for `key` (new `remote_id`, `BackedUp`) in place of the old one.
-/// [`UploadReason::Changed`] uploads a new version of the remote file of the
-/// client's own record at `key` (its `remote_id`, live at planning time), so
-/// the backup keeps one file with its history, never two. A `Changed` request
-/// whose key has no record any more, or whose remote file the server reports
-/// gone, is uploaded as `New`.
+/// record for `key` (new `remote_id`, `BackedUp`) and drops the record at
+/// `record_key`, if any. [`UploadReason::Changed`] uploads a new version of
+/// `remote_id` (the paired record's remote file, live at planning time), so
+/// the backup keeps one file with its history, never two; when it completes
+/// the client re-keys that record to `key` with `put_record`, which drops the
+/// old key. The client never finds the record by looking `key` up: after a
+/// normalised pairing the record's own key is `record_key` (review #3). A
+/// `Changed` request whose remote file the server reports gone is uploaded as
+/// `New`.
 ///
 /// The pass re-checked the attributes just before the handoff, but the file
 /// can still go online-only before the uploader opens it: the uploader
@@ -46,13 +49,24 @@ pub struct UploadRequest {
     pub name: String,
     pub fingerprint: Fingerprint,
     pub reason: UploadReason,
+    /// The paired record's key (`None` for a file with no record).
+    pub record_key: Option<String>,
+    /// For `Changed`: the remote file to add a version to.
+    pub remote_id: Option<Uuid>,
 }
 
 /// This device's backup of one category on the server, as the client lists
 /// it. Before reporting a `Present` tree the client has resolved the root,
 /// found or created this device's folder (`find_device_folder`) and, on a first
-/// backup, created the category folder.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// backup, created the category folder. There is no `Default`: every field is
+/// set on purpose, so a host can never say "device folder deleted" by
+/// accident (review #9).
+///
+/// ```compile_fail
+/// // A defaulted tree would read as "device folder deleted": it must not build.
+/// let _ = beebeeb_backup::DeviceTree::default();
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceTree {
     /// `false` only when this device's folder existed and is now trashed or
     /// gone.
@@ -115,6 +129,14 @@ pub trait BackupHost: Send + Sync {
 
     /// This device's records for `c`.
     fn records(&self, c: &Category) -> impl Future<Output = Result<Vec<BackupRecord>, HostError>> + Send;
+
+    /// The keys of `c` the client holds this pass (review #1): an upload that
+    /// failed for a lasting reason (locked, too large, refused by the server),
+    /// a key a pass reported in [`crate::PassReport::held_back`], and an
+    /// upload still in flight. The pass skips them and charges them nothing
+    /// against the budget, so one stuck file never starves the rest. The
+    /// client releases a key when its file changes or the reason clears.
+    fn held_keys(&self, c: &Category) -> impl Future<Output = Result<Vec<String>, HostError>> + Send;
 
     /// Store `record`: upsert by key, and remove any other record of `c` with
     /// the same `remote_id`, so one remote file never has two keys. A pass

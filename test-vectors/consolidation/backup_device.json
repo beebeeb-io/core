@@ -237,6 +237,32 @@
       "expected": "GLegion"
     },
     {
+      "id": "name_collision_with_a_legacy_id",
+      "kind": "name",
+      "raw": "Example iPhone",
+      "my_id": "legacy-7",
+      "taken": [
+        {
+          "name": "Example iPhone",
+          "device_id": "0d4e5f60-7182-4a3b-9c4d-5e6f708192a3"
+        }
+      ],
+      "expected": "Example iPhone (6c65)"
+    },
+    {
+      "id": "name_own_legacy_id_is_not_a_collision",
+      "kind": "name",
+      "raw": "Example iPhone",
+      "my_id": "legacy-7",
+      "taken": [
+        {
+          "name": "Example iPhone",
+          "device_id": "legacy-7"
+        }
+      ],
+      "expected": "Example iPhone"
+    },
+    {
       "id": "machine_id_trimmed",
       "kind": "machine_id",
       "machine_id": " 4c4c4544-0042 ",
@@ -496,6 +522,48 @@
       }
     },
     {
+      "id": "find_ios_legacy_id_is_existing",
+      "kind": "find",
+      "me": {
+        "device_id": "ios-1730000000000-k3j9x",
+        "name": "Example iPhone",
+        "platform": "ios"
+      },
+      "candidates": [
+        {
+          "folder_id": "11111111-1111-4111-8111-111111111111",
+          "name": "Example iPhone",
+          "manifest": {
+            "version": 1,
+            "device_id": "ios-1730000000000-k3j9x",
+            "device_name": "Example iPhone"
+          }
+        }
+      ],
+      "expect": {
+        "existing": "11111111-1111-4111-8111-111111111111"
+      }
+    },
+    {
+      "id": "find_unreadable_manifest_is_not_mine_or_adopted",
+      "kind": "find",
+      "me": {
+        "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+        "name": "GLegion",
+        "platform": "windows"
+      },
+      "candidates": [
+        {
+          "folder_id": "11111111-1111-4111-8111-111111111111",
+          "name": "GLegion",
+          "manifest": "unreadable"
+        }
+      ],
+      "expect": {
+        "create": "GLegion (a3f2)"
+      }
+    },
+    {
       "id": "manifest_real_ios_round_trips",
       "kind": "manifest",
       "json": "{\"version\": 1, \"device_id\": \"0b7e4a2c-9d1f-4c3a-8e5b-2f6d9a1c7e40\", \"device_name\": \"Example iPhone\", \"device_model\": \"iPhone 17 Pro\", \"os_version\": \"iOS 26.5\", \"app_version\": \"1.0.214\", \"created_at\": \"2026-05-01T09:30:00.000Z\", \"deletion_behavior\": \"keep\", \"keep_vault_unlocked\": false, \"backups\": {\"camera_roll\": {\"enabled\": true, \"last_sync\": \"2026-11-05T21:14:03.120Z\", \"items_synced\": 4210, \"include_videos\": true, \"wifi_only\": true, \"background_enabled\": true, \"legacy_items_migrated\": 0}, \"contacts\": {\"enabled\": false, \"last_sync\": null, \"items_synced\": 0, \"contact_count\": 0}, \"calendar\": {\"enabled\": false, \"last_sync\": null, \"items_synced\": 0, \"calendar_count\": 0}}}",
@@ -529,11 +597,11 @@
       }
     },
     {
-      "id": "manifest_non_uuid_id_and_unknown_platform_are_kept_verbatim",
+      "id": "manifest_legacy_id_is_the_id_and_unknown_platform_is_kept",
       "kind": "manifest",
       "json": "{\"version\": 1, \"device_id\": \"legacy-device-7\", \"device_name\": \"Old iPad\", \"platform\": \"visionos\"}",
       "expect": {
-        "device_id": null,
+        "device_id": "legacy-device-7",
         "platform": null,
         "device_name": "Old iPad",
         "folders": 0

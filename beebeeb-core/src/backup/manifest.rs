@@ -8,7 +8,6 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use uuid::Uuid;
 
 use beebeeb_types::backup::Platform;
 
@@ -26,10 +25,12 @@ fn manifest_version() -> u32 {
 pub struct DeviceManifest {
     #[serde(default = "manifest_version")]
     pub version: u32,
-    /// `None` when the file has no id, or an id that is not a UUID (that text
-    /// is kept verbatim in `other`).
+    /// The device's id, a string identity: desktop's machine-derived UUID, an
+    /// iOS id, or an iOS legacy `beebeeb_device_id` value carried forward
+    /// verbatim. `None` when the file has no id, or one that is not a string
+    /// (that value is kept verbatim in `other`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub device_id: Option<Uuid>,
+    pub device_id: Option<String>,
     #[serde(default)]
     pub device_name: String,
     /// `None` when the file has no platform (iOS files) or one this version
@@ -70,9 +71,10 @@ fn json_error(e: &serde_json::Error) -> CoreError {
     ))
 }
 
-/// Parse a decrypted `.device.json`. A `device_id` that is not a UUID and a
+/// Parse a decrypted `.device.json`. A `device_id` that is not a string and a
 /// `platform` this version does not know do not fail the file: they parse as
-/// `None` and their text is kept in `other`, so it is written back unchanged.
+/// `None` and their value is kept in `other`, so it is written back unchanged.
+/// Any string id is the id, a legacy non-UUID one included (review #7).
 pub fn parse_manifest(json: &str) -> Result<DeviceManifest, CoreError> {
     let mut object = match serde_json::from_str::<Value>(json) {
         Ok(Value::Object(object)) => object,
@@ -80,7 +82,7 @@ pub fn parse_manifest(json: &str) -> Result<DeviceManifest, CoreError> {
         Err(e) => return Err(json_error(&e)),
     };
     let mut kept = Map::new();
-    let id_ok = |v: &Value| v.is_null() || v.as_str().is_some_and(|s| Uuid::parse_str(s).is_ok());
+    let id_ok = |v: &Value| v.is_null() || v.is_string();
     if object.get("device_id").is_some_and(|v| !id_ok(v)) {
         kept.insert("device_id".to_string(), object.remove("device_id").unwrap_or_default());
     }

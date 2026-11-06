@@ -39,6 +39,10 @@ pub struct PassReport {
     /// online-only after the walk). For the client's list; logs carry the
     /// counts only.
     pub held_back: Vec<(String, SkipReason)>,
+    /// Skipped because the client holds the key (see `BackupHost::held_keys`).
+    pub held: usize,
+    /// Waiting for a complete listing (see `PassPlan::deferred_unknown`).
+    pub deferred_unknown: usize,
     /// Set when the device or category folder was deleted elsewhere: the pass
     /// turned this backup off and queued nothing.
     pub turned_off: Option<FolderPresence>,
@@ -125,12 +129,14 @@ pub async fn run_pass<H: BackupHost>(
         .map_err(|e| HostError(format!("cannot read the backed-up folder ({:?})", e.kind())))?;
 
     let live: HashSet<Uuid> = tree.files.iter().map(|f| f.remote_id).collect();
+    let held = host.held_keys(c).await?;
     let plan = plan_pass(
         &walk.result.entries,
         &records,
         &live,
         tree.complete,
         &walk.result.unseen(),
+        &held,
         budget,
     );
     if !plan.mark_removed_elsewhere.is_empty() {
@@ -141,6 +147,8 @@ pub async fn run_pass<H: BackupHost>(
         unchanged: plan.unchanged,
         gone_locally: plan.gone_locally,
         deferred: plan.deferred,
+        held: plan.held,
+        deferred_unknown: plan.deferred_unknown,
         ..PassReport::default()
     };
     for (_, reason) in &walk.result.skipped {
@@ -192,7 +200,7 @@ pub async fn run_pass<H: BackupHost>(
     // An upload of an earlier pass that completed while this one ran has
     // written its record since step 1: queueing it again would upload the
     // same bytes twice (and, for a changed file, add a version).
-    let held: HashMap<String, (u64, i64)> = host
+    let recorded: HashMap<String, (u64, i64)> = host
         .records(c)
         .await?
         .into_iter()
@@ -215,7 +223,7 @@ pub async fn run_pass<H: BackupHost>(
                 continue;
             }
         };
-        if held.get(&upload.key) == Some(&(fp.size, fp.modified_ms)) {
+        if recorded.get(&upload.key) == Some(&(fp.size, fp.modified_ms)) {
             report.unchanged += 1;
             continue;
         }
@@ -228,6 +236,8 @@ pub async fn run_pass<H: BackupHost>(
             name: name.to_string(),
             fingerprint: *fp,
             reason: upload.reason,
+            record_key: upload.record_key.clone(),
+            remote_id: upload.remote_id,
         })
         .await?;
         report.queued += 1;

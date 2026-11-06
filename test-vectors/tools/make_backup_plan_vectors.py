@@ -29,24 +29,48 @@ def r(key, rid, size=10, m=1000, up=5000, state="backed_up"):
     return {"key": key, "size": size, "modified_ms": m, "remote_id": uid(rid), "uploaded_at_ms": up, "state": state}
 
 
-def up(key, size=10, reason="new"):
-    return {"key": key, "size": size, "reason": reason}
+def up(key, size=10, reason="new", record=None, rid=None):
+    """record: the paired record's key (review #3); rid: the remote a Changed upload versions."""
+    return {"key": key, "size": size, "reason": reason, "record_key": record,
+            "remote_id": uid(rid) if rid is not None else None}
 
 
-def plan(id_, entries, records, live, expect, budget=None, unseen=(), complete=True):
+def plan(id_, entries, records, live, expect, budget=None, unseen=(), complete=True, held=()):
     full = {"uploads": [], "moves": [], "folders": [], "mark_removed_elsewhere": [], "unchanged": 0,
-            "gone_locally": 0, "deferred": 0}
+            "gone_locally": 0, "deferred": 0, "held": 0, "deferred_unknown": 0}
     full.update(expect)
     cases.append({"id": id_, "kind": "plan", "entries": entries, "records": records,
                   "live_remote": [uid(n) for n in live], "live_remote_complete": complete,
-                  "unseen": list(unseen), "budget": budget or NO_LIMIT, "expect": full})
+                  "unseen": list(unseen), "held": list(held), "budget": budget or NO_LIMIT, "expect": full})
 
 
 plan("plan_new_file", [e("a.jpg")], [], [], {"uploads": [up("a.jpg")]})
 plan("plan_new_file_in_subfolders", [e("2026/05/a.jpg")], [], [],
      {"uploads": [up("2026/05/a.jpg")], "folders": ["2026", "2026/05"]})
-plan("plan_changed_by_size", [e("a.jpg", size=11)], [r("a.jpg", 1)], [1], {"uploads": [up("a.jpg", 11, "changed")]})
-plan("plan_changed_by_mtime", [e("a.jpg", m=2000)], [r("a.jpg", 1)], [1], {"uploads": [up("a.jpg", 10, "changed")]})
+plan("plan_changed_by_size", [e("a.jpg", size=11)], [r("a.jpg", 1)], [1],
+     {"uploads": [up("a.jpg", 11, "changed", "a.jpg", 1)]})
+plan("plan_changed_by_mtime", [e("a.jpg", m=2000)], [r("a.jpg", 1)], [1],
+     {"uploads": [up("a.jpg", 10, "changed", "a.jpg", 1)]})
+# Review #3: a Changed upload carries the paired record's key and id, so a normalised pairing never loses them.
+plan("changed_under_a_normalised_pairing_carries_the_record", [e(unicodedata.normalize("NFC", "René.jpg"), m=2000)],
+     [r(unicodedata.normalize("NFD", "René.jpg"), 1)], [1],
+     {"uploads": [up(unicodedata.normalize("NFC", "René.jpg"), 10, "changed",
+                     unicodedata.normalize("NFD", "René.jpg"), 1)]})
+# Spec Amendment 5 (lead 17:34): keys are the raw names on Linux and Windows. An upgrade from NFC keys still pairs
+# through the fallback with no re-upload; a twin that appears later never takes the existing file's record.
+plan("plan_nfc_record_matches_nfd_entry_without_a_twin", [e(unicodedata.normalize("NFD", "René.jpg"))],
+     [r(unicodedata.normalize("NFC", "René.jpg"), 1)], [1], {"unchanged": 1})
+plan("twin_appears_the_nfd_file_keeps_its_record_the_nfc_twin_is_new",
+     [e(unicodedata.normalize("NFD", "René.jpg")), e(unicodedata.normalize("NFC", "René.jpg"), size=99, m=7000)],
+     [r(unicodedata.normalize("NFD", "René.jpg"), 1)], [1],
+     {"unchanged": 1, "uploads": [up(unicodedata.normalize("NFC", "René.jpg"), 99)]})
+# Review #1: held keys (a lasting failure, or in flight) are skipped and charged nothing.
+plan("held_keys_are_skipped_and_not_charged", [e("a.jpg"), e("b.jpg"), e("c.jpg"), e("d.jpg")], [], [],
+     {"uploads": [up("c.jpg"), up("d.jpg")], "held": 2}, {"max_uploads": 2, "max_bytes": 1000 * GIB},
+     held=["a.jpg", "b.jpg"])
+plan("first_key_not_held_always_fits", [e("a.bin", 200), e("b.bin", 150), e("c.bin", 10)], [], [],
+     {"uploads": [up("b.bin", 150)], "deferred": 1, "held": 1}, {"max_uploads": 256, "max_bytes": 100},
+     held=["a.bin"])
 plan("plan_unchanged", [e("a.jpg")], [r("a.jpg", 1)], [1], {"unchanged": 1})
 plan("plan_gone_locally_stays_in_the_backup", [], [r("b.jpg", 1)], [1], {"gone_locally": 1})
 plan("plan_directories_are_not_uploaded", [e("empty", 0, 1000, True)], [], [], {})
@@ -81,9 +105,9 @@ plan("removed_elsewhere_already_marked_and_unchanged", [e("a.jpg")], [r("a.jpg",
 # Ruling A (Guus 2026-11-06): it stays deleted until it changes on the device, then it comes back as a NEW file,
 # never as a version of the trashed or purged remote file.
 plan("removed_elsewhere_then_changed_uploads", [e("a.jpg", m=9000)], [r("a.jpg", 1, state="removed_elsewhere")], [],
-     {"uploads": [up("a.jpg", 10, "new")]})
+     {"uploads": [up("a.jpg", 10, "new", "a.jpg")]})
 plan("removed_elsewhere_noticed_and_changed", [e("a.jpg", size=12)], [r("a.jpg", 1)], [],
-     {"mark_removed_elsewhere": ["a.jpg"], "uploads": [up("a.jpg", 12, "new")]})
+     {"mark_removed_elsewhere": ["a.jpg"], "uploads": [up("a.jpg", 12, "new", "a.jpg")]})
 # Restored from Trash: the remote is live again, so the record is held again, whatever its state.
 plan("restored_from_trash_after_the_mark_is_unchanged", [e("a.jpg")], [r("a.jpg", 1, state="removed_elsewhere")], [1],
      {"unchanged": 1})
@@ -91,12 +115,15 @@ plan("restored_from_trash_after_the_mark_is_a_move_source", [e("sub/a.jpg")],
      [r("a.jpg", 1, state="removed_elsewhere")], [1],
      {"moves": [{"remote_id": uid(1), "from_key": "a.jpg", "to_key": "sub/a.jpg"}], "folders": ["sub"]})
 plan("restored_from_trash_after_the_mark_and_changed_is_a_version", [e("a.jpg", m=9000)],
-     [r("a.jpg", 1, state="removed_elsewhere")], [1], {"uploads": [up("a.jpg", 10, "changed")]})
-# A partial listing (a page missing, an entry dropped) proves no deletion.
+     [r("a.jpg", 1, state="removed_elsewhere")], [1], {"uploads": [up("a.jpg", 10, "changed", "a.jpg", 1)]})
+# A partial listing (a page missing, an entry dropped) proves no deletion. A record missing from it is UNKNOWN,
+# not dead (lead 17:28): no upload, no move, no mark; the next complete listing decides.
 plan("partial_listing_marks_nothing_removed", [e("a.jpg"), e("b.jpg", m=2000)], [r("a.jpg", 1), r("b.jpg", 2)], [],
-     {"uploads": [up("b.jpg", 10, "new")]}, complete=False)
+     {"deferred_unknown": 1}, complete=False)
 plan("partial_listing_takes_no_move_source_from_an_unlisted_record", [e("new/a.jpg")], [r("old/a.jpg", 1)], [],
-     {"uploads": [up("new/a.jpg")], "folders": ["new"], "gone_locally": 1}, complete=False)
+     {"deferred_unknown": 1, "gone_locally": 1}, complete=False)
+plan("partial_listing_listed_record_behaves_as_normal", [e("a.jpg", m=2000), e("c.jpg")], [r("a.jpg", 1)], [1],
+     {"uploads": [up("a.jpg", 10, "changed", "a.jpg", 1), up("c.jpg")]}, complete=False)
 plan("partial_listing_still_counts_what_it_lists", [e("a.jpg"), e("b.jpg")], [r("a.jpg", 1), r("b.jpg", 2)], [1],
      {"unchanged": 1}, complete=False)
 plan("restored_from_trash_before_the_pass_changes_nothing", [e("a.jpg")], [r("a.jpg", 1)], [1], {"unchanged": 1})

@@ -237,20 +237,23 @@ pub fn backup_device_folder_name(
     my_id: String,
     taken: Vec<BackupTakenName>,
 ) -> Result<String, CryptoError> {
-    let taken = taken
+    let taken: Vec<rules::TakenName> = taken
         .into_iter()
-        .map(|t| {
-            Ok(rules::TakenName {
-                name: t.name,
-                device_id: t.device_id.as_deref().map(|d| parse_id("device_id", d)).transpose()?,
-            })
+        .map(|t| rules::TakenName {
+            name: t.name,
+            device_id: t.device_id,
         })
-        .collect::<Result<Vec<_>, CryptoError>>()?;
-    Ok(rules::device_folder_name(&raw, parse_id("my_id", &my_id)?, &taken))
+        .collect();
+    if my_id.is_empty() {
+        return Err(invalid("my_id is empty"));
+    }
+    Ok(rules::device_folder_name(&raw, &my_id, &taken))
 }
 
 #[derive(uniffi::Record)]
 pub struct BackupDeviceSelf {
+    /// A string identity: a UUID, or the iOS legacy `beebeeb_device_id`
+    /// value carried forward verbatim.
     pub device_id: String,
     pub name: String,
     /// `"windows" | "macos" | "linux" | "ios" | "android" | "cli"`.
@@ -261,8 +264,9 @@ pub struct BackupDeviceSelf {
 pub struct BackupDeviceFolderCandidate {
     pub folder_id: String,
     pub name: String,
-    /// The decrypted `.device.json`, `None` when the folder has none. A
-    /// manifest that does not parse is an error, never "no manifest".
+    /// The decrypted `.device.json`, `None` when the folder has none. One that
+    /// does not parse counts as an unreadable manifest: not mine, never
+    /// adopted, its name taken. It never fails the call.
     pub manifest_json: Option<String>,
 }
 
@@ -278,8 +282,11 @@ pub fn backup_find_device_folder(
     me: BackupDeviceSelf,
     candidates: Vec<BackupDeviceFolderCandidate>,
 ) -> Result<BackupDeviceFolderChoice, CryptoError> {
+    if me.device_id.is_empty() {
+        return Err(invalid("device_id is empty"));
+    }
     let me = rules::DeviceSelf {
-        device_id: parse_id("device_id", &me.device_id)?,
+        device_id: me.device_id,
         name: me.name,
         platform: parse_platform(&me.platform)?,
     };
@@ -289,7 +296,11 @@ pub fn backup_find_device_folder(
             Ok(rules::DeviceFolderCandidate {
                 folder_id: parse_id("folder_id", &c.folder_id)?,
                 name: c.name,
-                manifest: c.manifest_json.as_deref().map(rules::parse_manifest).transpose()?,
+                manifest: match c.manifest_json.as_deref().map(rules::parse_manifest) {
+                    None => rules::FolderManifest::Absent,
+                    Some(Ok(m)) => rules::FolderManifest::Parsed(m),
+                    Some(Err(_)) => rules::FolderManifest::Unreadable,
+                },
             })
         })
         .collect::<Result<Vec<_>, CryptoError>>()?;
@@ -329,7 +340,7 @@ pub fn backup_parse_manifest(json: String) -> Result<BackupDeviceManifest, Crypt
     let m = rules::parse_manifest(&json)?;
     Ok(BackupDeviceManifest {
         version: m.version,
-        device_id: m.device_id.map(|id| id.to_string()),
+        device_id: m.device_id,
         device_name: m.device_name,
         platform: m.platform.map(|p| p.as_str().to_string()),
         folders: m
@@ -354,11 +365,7 @@ pub fn backup_serialize_manifest(manifest: BackupDeviceManifest) -> Result<Strin
     };
     let m = rules::DeviceManifest {
         version: manifest.version,
-        device_id: manifest
-            .device_id
-            .as_deref()
-            .map(|d| parse_id("device_id", d))
-            .transpose()?,
+        device_id: manifest.device_id,
         device_name: manifest.device_name,
         platform: manifest.platform.as_deref().map(parse_platform).transpose()?,
         folders: manifest
@@ -405,6 +412,10 @@ pub struct BackupPlannedUpload {
     pub size: u64,
     /// `"new" | "changed"`.
     pub reason: String,
+    /// The paired record's key (re-key it to `key` when the upload completes).
+    pub record_key: Option<String>,
+    /// For `"changed"`: the remote file to add a version to.
+    pub remote_id: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, uniffi::Record)]
@@ -423,6 +434,8 @@ pub struct BackupPassPlan {
     pub unchanged: u64,
     pub gone_locally: u64,
     pub deferred: u64,
+    pub held: u64,
+    pub deferred_unknown: u64,
 }
 
 fn parse_state(s: &str) -> Result<rules::RecordState, CryptoError> {
@@ -433,7 +446,11 @@ fn parse_state(s: &str) -> Result<rules::RecordState, CryptoError> {
 /// still pending decryption included. `live_remote_complete`: the listing read
 /// every page and dropped nothing; only then is anything marked removed
 /// elsewhere. `unseen`: keys the source did not look at or into (iOS passes
-/// an empty list). `max_uploads` saturates at the platform's `usize`.
+/// an empty list). `held`: keys the client holds (a lasting upload failure, or
+/// one in flight), skipped and not charged to the budget. `max_uploads`
+/// saturates at the platform's `usize`.
+// Flat FFI arguments, as the other uniffi exports with many inputs (lib.rs).
+#[allow(clippy::too_many_arguments)]
 #[uniffi::export]
 pub fn backup_plan_pass(
     entries: Vec<BackupSourceEntry>,
@@ -441,6 +458,7 @@ pub fn backup_plan_pass(
     live_remote: Vec<String>,
     live_remote_complete: bool,
     unseen: Vec<String>,
+    held: Vec<String>,
     max_uploads: u64,
     max_bytes: u64,
 ) -> Result<BackupPassPlan, CryptoError> {
@@ -471,7 +489,7 @@ pub fn backup_plan_pass(
         max_uploads: usize::try_from(max_uploads).unwrap_or(usize::MAX),
         max_bytes,
     };
-    let plan = rules::plan_pass(&entries, &records, &live, live_remote_complete, &unseen, budget);
+    let plan = rules::plan_pass(&entries, &records, &live, live_remote_complete, &unseen, &held, budget);
     Ok(BackupPassPlan {
         uploads: plan
             .uploads
@@ -484,6 +502,8 @@ pub fn backup_plan_pass(
                     rules::UploadReason::Changed => "changed",
                 }
                 .to_string(),
+                record_key: u.record_key,
+                remote_id: u.remote_id.map(|id| id.to_string()),
             })
             .collect(),
         moves: plan
@@ -500,6 +520,8 @@ pub fn backup_plan_pass(
         unchanged: plan.unchanged as u64,
         gone_locally: plan.gone_locally as u64,
         deferred: plan.deferred as u64,
+        held: plan.held as u64,
+        deferred_unknown: plan.deferred_unknown as u64,
     })
 }
 
@@ -574,7 +596,19 @@ mod tests {
             uploaded_at_ms: 2,
             state: state.to_string(),
         };
-        assert!(backup_plan_pass(Vec::new(), vec![record("BackedUp")], Vec::new(), true, Vec::new(), 1, 1).is_err());
+        assert!(
+            backup_plan_pass(
+                Vec::new(),
+                vec![record("BackedUp")],
+                Vec::new(),
+                true,
+                Vec::new(),
+                Vec::new(),
+                1,
+                1
+            )
+            .is_err()
+        );
         assert!(
             backup_plan_pass(
                 Vec::new(),
@@ -582,10 +616,47 @@ mod tests {
                 Vec::new(),
                 true,
                 Vec::new(),
+                Vec::new(),
                 1,
                 1
             )
             .is_ok()
+        );
+    }
+
+    /// Review #6 and #7: a candidate whose manifest does not parse is not
+    /// mine and not adoptable, and never fails the call; a legacy non-UUID id
+    /// is matched as the device's own.
+    #[test]
+    fn uniffi_backup_unreadable_manifest_never_fails_the_call() {
+        let me = || BackupDeviceSelf {
+            device_id: "legacy-device-7".to_string(),
+            name: "GLegion".to_string(),
+            platform: "windows".to_string(),
+        };
+        let folder = |n: u128, name: &str, manifest: Option<&str>| BackupDeviceFolderCandidate {
+            folder_id: Uuid::from_u128(n).to_string(),
+            name: name.to_string(),
+            manifest_json: manifest.map(str::to_string),
+        };
+        let broken = r#"{"version": "two", "folders": [{"enabled": true}]}"#;
+        let mine = r#"{"version": 1, "device_id": "legacy-device-7", "device_name": "GLegion"}"#;
+        assert_eq!(
+            backup_find_device_folder(me(), vec![folder(1, "GLegion", Some(broken))]).expect("no error"),
+            BackupDeviceFolderChoice::Create {
+                name: "GLegion (6c65)".to_string()
+            },
+            "an unreadable manifest is not adopted and its name is taken"
+        );
+        assert_eq!(
+            backup_find_device_folder(
+                me(),
+                vec![folder(1, "GLegion", Some(broken)), folder(2, "Old name", Some(mine))]
+            )
+            .expect("no error"),
+            BackupDeviceFolderChoice::Existing {
+                folder_id: Uuid::from_u128(2).to_string()
+            }
         );
     }
 

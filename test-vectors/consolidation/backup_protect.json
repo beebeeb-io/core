@@ -433,6 +433,82 @@
       "kind": "own_backup_refusal",
       "source_path": "C:\\Users\\guus\\Pictures\\beach.jpg",
       "expected": "This is a backup of C:\\Users\\guus\\Pictures\\beach.jpg. Change the original instead."
+    },
+    {
+      "id": "custom_plain_name_is_kept",
+      "kind": "custom_name",
+      "raw": "Projects",
+      "taken": [],
+      "expected": "Projects"
+    },
+    {
+      "id": "custom_fixed_name_gets_a_suffix",
+      "kind": "custom_name",
+      "raw": "Pictures",
+      "taken": [],
+      "expected": "Pictures (2)"
+    },
+    {
+      "id": "custom_fixed_name_differs_only_in_case",
+      "kind": "custom_name",
+      "raw": "pictures",
+      "taken": [],
+      "expected": "pictures (2)"
+    },
+    {
+      "id": "custom_camera_roll_display_name_clashes",
+      "kind": "custom_name",
+      "raw": "Camera Roll",
+      "taken": [],
+      "expected": "Camera Roll (2)"
+    },
+    {
+      "id": "custom_other_custom_name_gets_a_suffix",
+      "kind": "custom_name",
+      "raw": "Projects",
+      "taken": [
+        "Projects"
+      ],
+      "expected": "Projects (2)"
+    },
+    {
+      "id": "custom_second_clash_counts_up",
+      "kind": "custom_name",
+      "raw": "Projects",
+      "taken": [
+        "Projects",
+        "projects (2)"
+      ],
+      "expected": "Projects (3)"
+    },
+    {
+      "id": "custom_separator_is_replaced",
+      "kind": "custom_name",
+      "raw": "a/b",
+      "taken": [],
+      "expected": "a_b"
+    },
+    {
+      "id": "custom_reserved_windows_name",
+      "kind": "custom_name",
+      "raw": "CON",
+      "taken": [],
+      "expected": "CON_"
+    },
+    {
+      "id": "custom_nothing_usable_is_folder",
+      "kind": "custom_name",
+      "raw": "",
+      "taken": [],
+      "expected": "Folder"
+    },
+    {
+      "id": "layout_rel_path_custom_name_is_safe",
+      "kind": "rel_path",
+      "device": "GLegion",
+      "category": "custom:a/b",
+      "rel": "x.txt",
+      "expected": "Backups/GLegion/a_b/x.txt"
     }
   ]
 }

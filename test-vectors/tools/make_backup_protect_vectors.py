@@ -103,6 +103,30 @@ cases.append({
     "expected": "This is a backup of C:\\Users\\guus\\Pictures\\beach.jpg. Change the original instead.",
 })
 
+# Review #5: a custom folder's name is made safe like a device folder's and never equals a fixed category folder
+# or another custom folder of the device (folded: NFC + lowercase); it gets " (2)", " (3)", ...
+def custom(id_, raw, expected, taken=()):
+    cases.append({"id": id_, "kind": "custom_name", "raw": raw, "taken": list(taken), "expected": expected})
+
+
+custom("custom_plain_name_is_kept", "Projects", "Projects")
+custom("custom_fixed_name_gets_a_suffix", "Pictures", "Pictures (2)")
+custom("custom_fixed_name_differs_only_in_case", "pictures", "pictures (2)")
+custom("custom_camera_roll_display_name_clashes", "Camera Roll", "Camera Roll (2)")
+custom("custom_other_custom_name_gets_a_suffix", "Projects", "Projects (2)", ["Projects"])
+custom("custom_second_clash_counts_up", "Projects", "Projects (3)", ["Projects", "projects (2)"])
+custom("custom_separator_is_replaced", "a/b", "a_b")
+custom("custom_reserved_windows_name", "CON", "CON_")
+custom("custom_nothing_usable_is_folder", "", "Folder")
+cases.append({
+    "id": "layout_rel_path_custom_name_is_safe",
+    "kind": "rel_path",
+    "device": "GLegion",
+    "category": "custom:a/b",
+    "rel": "x.txt",
+    "expected": "Backups/GLegion/a_b/x.txt",
+})
+
 doc = {
     "description": "LD-0113 backup protection and skip rules (spec 2026-11-06-backup-from-source §4.2 rules 1, 7 and 8): "
     "the 4 x 3 mutation matrix (trash, delete, rename, move against the Backups root, a child and another row), "
