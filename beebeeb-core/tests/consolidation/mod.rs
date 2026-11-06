@@ -12,6 +12,7 @@
 use serde_json::Value;
 use std::path::PathBuf;
 
+pub mod backup_protect;
 pub mod download;
 pub mod envelope;
 pub mod error_body;

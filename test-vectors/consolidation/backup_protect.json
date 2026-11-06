@@ -1,0 +1,402 @@
+{
+  "description": "LD-0113 backup protection and skip rules (spec 2026-11-06-backup-from-source §4.2 rules 1, 7 and 8): the 4 x 3 mutation matrix (trash, delete, rename, move against the Backups root, a child and another row), a move into the root allowed, the never-backed-up names, library bundles (folders only), links and not-local entries with their precedence, and the layout path.",
+  "source": "mobile src/lib/protected-folders.ts (the delete and move words, byte-for-byte) + spec §4.2; written by test-vectors/tools/make_backup_protect_vectors.py (independent of core)",
+  "cases": [
+    {
+      "id": "protect_trash_root",
+      "kind": "mutation",
+      "target": "root",
+      "role": "backups_root",
+      "mutation": "trash",
+      "expect": "Backups is a system folder and can't be deleted."
+    },
+    {
+      "id": "protect_trash_child",
+      "kind": "mutation",
+      "target": "child",
+      "role": null,
+      "mutation": "trash",
+      "expect": "ok"
+    },
+    {
+      "id": "protect_trash_other",
+      "kind": "mutation",
+      "target": "other",
+      "role": null,
+      "mutation": "trash",
+      "expect": "ok"
+    },
+    {
+      "id": "protect_delete_root",
+      "kind": "mutation",
+      "target": "root",
+      "role": "backups_root",
+      "mutation": "delete",
+      "expect": "Backups is a system folder and can't be deleted."
+    },
+    {
+      "id": "protect_delete_child",
+      "kind": "mutation",
+      "target": "child",
+      "role": null,
+      "mutation": "delete",
+      "expect": "ok"
+    },
+    {
+      "id": "protect_delete_other",
+      "kind": "mutation",
+      "target": "other",
+      "role": null,
+      "mutation": "delete",
+      "expect": "ok"
+    },
+    {
+      "id": "protect_rename_root",
+      "kind": "mutation",
+      "target": "root",
+      "role": "backups_root",
+      "mutation": "rename",
+      "expect": "Backups is a system folder and can't be renamed."
+    },
+    {
+      "id": "protect_rename_child",
+      "kind": "mutation",
+      "target": "child",
+      "role": null,
+      "mutation": "rename",
+      "expect": "ok"
+    },
+    {
+      "id": "protect_rename_other",
+      "kind": "mutation",
+      "target": "other",
+      "role": null,
+      "mutation": "rename",
+      "expect": "ok"
+    },
+    {
+      "id": "protect_move_root",
+      "kind": "mutation",
+      "target": "root",
+      "role": "backups_root",
+      "mutation": "move",
+      "expect": "Backups is a system folder and can't be moved."
+    },
+    {
+      "id": "protect_move_child",
+      "kind": "mutation",
+      "target": "child",
+      "role": null,
+      "mutation": "move",
+      "expect": "ok"
+    },
+    {
+      "id": "protect_move_other",
+      "kind": "mutation",
+      "target": "other",
+      "role": null,
+      "mutation": "move",
+      "expect": "ok"
+    },
+    {
+      "id": "protect_move_into_root_allowed",
+      "kind": "mutation",
+      "target": "an item moved into the root (the item has no role)",
+      "role": null,
+      "mutation": "move",
+      "expect": "ok"
+    },
+    {
+      "id": "skip_desktop_ini",
+      "kind": "skip",
+      "name": "desktop.ini",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": "junk"
+    },
+    {
+      "id": "skip_desktop_ini_upper",
+      "kind": "skip",
+      "name": "DESKTOP.INI",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": "junk"
+    },
+    {
+      "id": "skip_thumbs_db",
+      "kind": "skip",
+      "name": "Thumbs.db",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": "junk"
+    },
+    {
+      "id": "skip_thumbs_db_lower",
+      "kind": "skip",
+      "name": "thumbs.db",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": "junk"
+    },
+    {
+      "id": "skip_ds_store",
+      "kind": "skip",
+      "name": ".DS_Store",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": "junk"
+    },
+    {
+      "id": "skip_icon_cr",
+      "kind": "skip",
+      "name": "Icon\r",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": "junk"
+    },
+    {
+      "id": "skip_office_lock",
+      "kind": "skip",
+      "name": "~$Quarterly report.docx",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": "junk"
+    },
+    {
+      "id": "skip_crdownload",
+      "kind": "skip",
+      "name": "setup.exe.crdownload",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": "junk"
+    },
+    {
+      "id": "skip_part",
+      "kind": "skip",
+      "name": "movie.mkv.part",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": "junk"
+    },
+    {
+      "id": "skip_part_upper",
+      "kind": "skip",
+      "name": "MOVIE.MKV.PART",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": "junk"
+    },
+    {
+      "id": "skip_partial",
+      "kind": "skip",
+      "name": "photo.jpg.partial",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": "junk"
+    },
+    {
+      "id": "skip_recycle_bin",
+      "kind": "skip",
+      "name": "$RECYCLE.BIN",
+      "is_dir": true,
+      "is_link": false,
+      "not_local": false,
+      "expect": "junk"
+    },
+    {
+      "id": "skip_system_volume_information",
+      "kind": "skip",
+      "name": "System Volume Information",
+      "is_dir": true,
+      "is_link": false,
+      "not_local": false,
+      "expect": "junk"
+    },
+    {
+      "id": "keep_thumbs_db_lookalike",
+      "kind": "skip",
+      "name": ".Thumbs.db.txt",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": null
+    },
+    {
+      "id": "keep_icon_without_cr",
+      "kind": "skip",
+      "name": "Icon",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": null
+    },
+    {
+      "id": "keep_part_in_the_middle",
+      "kind": "skip",
+      "name": "report.part.pdf",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": null
+    },
+    {
+      "id": "keep_tilde_without_dollar",
+      "kind": "skip",
+      "name": "~notes.txt",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": null
+    },
+    {
+      "id": "skip_photos_library_folder",
+      "kind": "skip",
+      "name": "Photos Library.photoslibrary",
+      "is_dir": true,
+      "is_link": false,
+      "not_local": false,
+      "expect": "library_bundle"
+    },
+    {
+      "id": "keep_photos_library_named_file",
+      "kind": "skip",
+      "name": "Photos Library.photoslibrary",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": null
+    },
+    {
+      "id": "skip_music_library_folder",
+      "kind": "skip",
+      "name": "Music Library.musiclibrary",
+      "is_dir": true,
+      "is_link": false,
+      "not_local": false,
+      "expect": "library_bundle"
+    },
+    {
+      "id": "skip_tv_library_folder",
+      "kind": "skip",
+      "name": "TV Library.tvlibrary",
+      "is_dir": true,
+      "is_link": false,
+      "not_local": false,
+      "expect": "library_bundle"
+    },
+    {
+      "id": "skip_library_bundle_mixed_case",
+      "kind": "skip",
+      "name": "Old.PhotosLibrary",
+      "is_dir": true,
+      "is_link": false,
+      "not_local": false,
+      "expect": "library_bundle"
+    },
+    {
+      "id": "skip_symlink",
+      "kind": "skip",
+      "name": "shortcut",
+      "is_dir": false,
+      "is_link": true,
+      "not_local": false,
+      "expect": "link"
+    },
+    {
+      "id": "skip_not_local_file",
+      "kind": "skip",
+      "name": "IMG_0001.HEIC",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": true,
+      "expect": "not_local"
+    },
+    {
+      "id": "skip_not_local_folder",
+      "kind": "skip",
+      "name": "Holiday 2025",
+      "is_dir": true,
+      "is_link": false,
+      "not_local": true,
+      "expect": "not_local"
+    },
+    {
+      "id": "precedence_junk_over_not_local",
+      "kind": "skip",
+      "name": "Thumbs.db",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": true,
+      "expect": "junk"
+    },
+    {
+      "id": "precedence_not_local_over_link",
+      "kind": "skip",
+      "name": "cloud placeholder.jpg",
+      "is_dir": false,
+      "is_link": true,
+      "not_local": true,
+      "expect": "not_local"
+    },
+    {
+      "id": "keep_dot_git_folder",
+      "kind": "skip",
+      "name": ".git",
+      "is_dir": true,
+      "is_link": false,
+      "not_local": false,
+      "expect": null
+    },
+    {
+      "id": "keep_hidden_file",
+      "kind": "skip",
+      "name": ".bashrc",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": null
+    },
+    {
+      "id": "keep_ordinary_photo",
+      "kind": "skip",
+      "name": "IMG_0001.HEIC",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": null
+    },
+    {
+      "id": "layout_rel_path",
+      "kind": "rel_path",
+      "device": "GLegion",
+      "category": "pictures",
+      "rel": "2026/beach.jpg",
+      "expected": "Backups/GLegion/Pictures/2026/beach.jpg"
+    },
+    {
+      "id": "layout_rel_path_category_folder",
+      "kind": "rel_path",
+      "device": "Guus's iPhone",
+      "category": "camera_roll",
+      "rel": "",
+      "expected": "Backups/Guus's iPhone/Camera Roll"
+    },
+    {
+      "id": "layout_own_backup_refusal",
+      "kind": "own_backup_refusal",
+      "source_path": "C:\\Users\\guus\\Pictures\\beach.jpg",
+      "expected": "This is a backup of C:\\Users\\guus\\Pictures\\beach.jpg. Change the original instead."
+    }
+  ]
+}
