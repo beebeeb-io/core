@@ -334,12 +334,22 @@ pub fn backup_find_device_folder(
     })
 }
 
+/// One `folders` entry, plus its fields this version does not know as one
+/// JSON object string (`other_json`), written back unchanged.
 #[derive(Debug, PartialEq, Eq, uniffi::Record)]
 pub struct BackupFolderState {
     pub category: String,
     pub enabled: bool,
     pub last_pass_at_ms: Option<i64>,
     pub items: u64,
+    pub other_json: String,
+}
+
+fn json_object(text: &str, field: &str) -> Result<serde_json::Map<String, serde_json::Value>, CryptoError> {
+    match serde_json::from_str::<serde_json::Value>(text) {
+        Ok(serde_json::Value::Object(object)) => Ok(object),
+        _ => Err(invalid(format!("{field} must be a JSON object"))),
+    }
 }
 
 /// The manifest's known fields, plus every field this version does not know
@@ -370,6 +380,7 @@ pub fn backup_parse_manifest(json: String) -> Result<BackupDeviceManifest, Crypt
                 enabled: f.enabled,
                 last_pass_at_ms: f.last_pass_at_ms,
                 items: f.items,
+                other_json: serde_json::Value::Object(f.other).to_string(),
             })
             .collect(),
         other_json: serde_json::Value::Object(m.other).to_string(),
@@ -378,10 +389,7 @@ pub fn backup_parse_manifest(json: String) -> Result<BackupDeviceManifest, Crypt
 
 #[uniffi::export]
 pub fn backup_serialize_manifest(manifest: BackupDeviceManifest) -> Result<String, CryptoError> {
-    let other = match serde_json::from_str::<serde_json::Value>(&manifest.other_json) {
-        Ok(serde_json::Value::Object(other)) => other,
-        _ => return Err(invalid("other_json must be a JSON object")),
-    };
+    let other = json_object(&manifest.other_json, "other_json")?;
     let m = rules::DeviceManifest {
         version: manifest.version,
         device_id: manifest.device_id,
@@ -390,13 +398,16 @@ pub fn backup_serialize_manifest(manifest: BackupDeviceManifest) -> Result<Strin
         folders: manifest
             .folders
             .into_iter()
-            .map(|f| rules::FolderState {
-                category: f.category,
-                enabled: f.enabled,
-                last_pass_at_ms: f.last_pass_at_ms,
-                items: f.items,
+            .map(|f| {
+                Ok(rules::FolderState {
+                    category: f.category,
+                    enabled: f.enabled,
+                    last_pass_at_ms: f.last_pass_at_ms,
+                    items: f.items,
+                    other: json_object(&f.other_json, "a folder's other_json")?,
+                })
             })
-            .collect(),
+            .collect::<Result<_, CryptoError>>()?,
         other,
     };
     Ok(rules::serialize_manifest(&m))
@@ -685,7 +696,9 @@ mod tests {
             name: name.to_string(),
             manifest_json: manifest.map(str::to_string),
         };
-        let broken = r#"{"version": "two", "folders": [{"enabled": true}]}"#;
+        // Half-written: only a document that is not a JSON object is
+        // unreadable (a bad field is read leniently, delta 3 #7).
+        let broken = r#"{"version": 1, "device_id": "legacy-dev"#;
         let mine = r#"{"version": 1, "device_id": "legacy-device-7", "device_name": "GLegion"}"#;
         assert_eq!(
             backup_find_device_folder(me(), vec![folder(1, "GLegion", Some(broken))]).expect("no error"),
@@ -720,6 +733,33 @@ mod tests {
         assert_eq!(dto.device_name, "Example iPhone");
         let sorted = serde_json::from_str::<serde_json::Value>(json).unwrap().to_string();
         assert_eq!(backup_serialize_manifest(dto).expect("serialize"), sorted);
+    }
+
+    /// Every manifest vector writes back what core writes through the DTO, a
+    /// folder's unknown fields included (delta 3 #7).
+    #[test]
+    fn uniffi_backup_manifest_vectors_write_back_through_the_dto() {
+        let mut checked = 0;
+        for case in vector_cases("backup_device").iter().filter(|c| c["kind"] == "manifest") {
+            let json = case["json"].as_str().unwrap();
+            let written = case["expect"]["written"].as_str().unwrap_or(json);
+            let sorted = serde_json::from_str::<serde_json::Value>(written).unwrap().to_string();
+            let dto = backup_parse_manifest(json.to_string()).expect("parse");
+            assert_eq!(
+                backup_serialize_manifest(dto).expect("serialize"),
+                sorted,
+                "{}",
+                case["id"]
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 10, "every manifest vector");
+        let mut dto = backup_parse_manifest(r#"{"folders":[{"category":"pictures"}]}"#.to_string()).expect("parse");
+        dto.folders[0].other_json = "[1]".to_string();
+        assert!(
+            backup_serialize_manifest(dto).is_err(),
+            "a folder's other_json must be an object"
+        );
     }
 
     /// A flat listing becomes the tree core merges.

@@ -33,7 +33,9 @@ filesystem pass (`beebeeb-backup`). No v0.2.0 API changes. LD-0113, spec
     create; an unreadable manifest is not mine and not adoptable). A device id is a string identity:
     a UUID or an iOS legacy id carried forward verbatim;
   - the manifest: `DeviceManifest`, `parse_manifest`, `serialize_manifest` (a real iOS manifest
-    round-trips; unknown fields are kept; a known field always wins over kept text of its name);
+    round-trips; unknown fields are kept, a folder entry's own included; only a document that is
+    not a JSON object is unreadable: a bad field takes its default and a bad `folders` entry is
+    dropped alone; a known field always wins over kept text of its name);
   - the root: `resolve_root` (use the flagged root, claim the oldest live `Backups`, or create) and
     `plan_merge` (legacy duplicate roots, depth unbounded, keep-both on a clash);
   - the pass planner: `plan_pass(entries, records, live_remote, live_remote_complete, unseen, held,

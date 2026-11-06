@@ -5,7 +5,7 @@
 //! `test-vectors/tools/make_backup_device_vectors.py` (ids via hashlib).
 
 use beebeeb_core::backup::{
-    DeviceFolderCandidate, DeviceFolderChoice, DeviceManifest, DeviceSelf, FolderManifest, TakenName,
+    DeviceFolderCandidate, DeviceFolderChoice, DeviceManifest, DeviceSelf, FolderManifest, FolderState, TakenName,
     device_folder_name, device_id_from_machine_id, find_device_folder, parse_manifest, serialize_manifest,
 };
 use beebeeb_types::backup::Platform;
@@ -41,7 +41,12 @@ fn candidate(v: &Value) -> DeviceFolderCandidate {
         manifest: match &v["manifest"] {
             Value::Null => FolderManifest::Absent,
             Value::String(s) if s == "unreadable" => FolderManifest::Unreadable,
-            m => FolderManifest::Parsed(parse_manifest(&m.to_string()).expect("candidate manifest parses")),
+            // What a client does with the text it decrypted: a manifest that
+            // does not parse is Unreadable (the uniffi binding does the same).
+            m => match parse_manifest(&m.to_string()) {
+                Ok(parsed) => FolderManifest::Parsed(parsed),
+                Err(_) => FolderManifest::Unreadable,
+            },
         },
     }
 }
@@ -55,7 +60,7 @@ fn key_sorted(json: &str) -> String {
 #[test]
 fn backup_device_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 49, "every named backup_device case is present");
+    assert_eq!(cases.len(), 56, "every named backup_device case is present");
 
     let (mut names, mut machine_ids, mut finds, mut manifests) = (0, 0, 0, 0);
     for case in &cases {
@@ -124,9 +129,11 @@ fn backup_device_cases_match_core() {
                     expect["folders"].as_u64().unwrap(),
                     "{id}: folders"
                 );
+                // The input itself, unless the case names what is written back.
+                let written = expect["written"].as_str().unwrap_or(json);
                 assert_eq!(
                     serialize_manifest(&parsed),
-                    key_sorted(json),
+                    key_sorted(written),
                     "{id}: byte-for-byte round trip"
                 );
             }
@@ -143,7 +150,7 @@ fn backup_device_cases_match_core() {
     );
     assert_eq!(
         (names, machine_ids, finds, manifests),
-        (27, 3, 13, 6),
+        (27, 3, 14, 12),
         "case counts per kind"
     );
 }
@@ -166,7 +173,16 @@ fn manifest_known_field_wins_over_kept_text() {
         device_id: Some(id.to_string()),
         device_name: "New name".into(),
         platform: None,
-        folders: Vec::new(),
+        folders: vec![FolderState {
+            category: "pictures".into(),
+            enabled: true,
+            last_pass_at_ms: None,
+            items: 3,
+            other: serde_json::Map::from_iter([
+                ("enabled".to_string(), Value::from("no")),
+                ("source_hint".to_string(), Value::from("kept")),
+            ]),
+        }],
         other,
     };
     let written = serialize_manifest(&manifest);
@@ -174,7 +190,11 @@ fn manifest_known_field_wins_over_kept_text() {
     assert_eq!(back["device_name"], "New name", "{written}");
     assert_eq!(back["device_id"], id.to_string(), "{written}");
     assert_eq!(back["version"], 1, "{written}");
-    assert!(back.get("folders").is_none(), "{written}");
+    // The struct's folders win over the kept "folders" text, and a folder's
+    // known field over its own kept text of that name (delta 3 #7).
+    assert_eq!(back["folders"][0]["enabled"], true, "{written}");
+    assert_eq!(back["folders"][0]["source_hint"], "kept", "{written}");
+    assert_eq!(back["folders"].as_array().map(Vec::len), Some(1), "{written}");
     // No platform field: the text parse could not read is kept.
     assert_eq!(back["platform"], "amiga", "{written}");
     assert_eq!(back["note"], "kept", "{written}");

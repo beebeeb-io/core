@@ -136,6 +136,10 @@ find("find_ios_legacy_id_is_existing",
 # Review #6: a manifest that does not parse is not mine, is never adopted, and its name is taken.
 find("find_unreadable_manifest_is_not_mine_or_adopted", WIN, [(F1, "GLegion", "unreadable")],
      {"create": "GLegion (a3f2)"})
+# Delta 3 #7: the device's own folder is found whenever its device_id parses, whatever its folders hold.
+find("find_by_id_whatever_the_folders_hold", WIN,
+     [(F1, "GLegion", dict(manifest(ME, "windows"), folders=[{"enabled": None}, "pictures", {"category": None}]))],
+     {"existing": F1})
 
 IOS_MANIFEST = json.dumps({
     "version": 1,
@@ -180,13 +184,30 @@ LEGACY_ID_MANIFEST = json.dumps({
 }, ensure_ascii=False)
 
 
-def man(id_, text, device_id, platform, device_name, folders):
-    cases.append({
+def man(id_, text, device_id, platform, device_name, folders, written=None):
+    """written: what serialize_manifest writes back (any key order), when it is not the input itself."""
+    case = {
         "id": id_,
         "kind": "manifest",
         "json": text,
         "expect": {"device_id": device_id, "platform": platform, "device_name": device_name, "folders": folders},
-    })
+    }
+    if written is not None:
+        case["expect"]["written"] = written
+    cases.append(case)
+
+
+# Delta 3 #7: one folders entry this version cannot read never makes the manifest unreadable (the device would
+# then create a new suffixed folder and orphan its backup). A missing or null field takes its default; an entry
+# that still does not fit (no category, a wrong type, not an object) is dropped alone; `folders` that is not a
+# list is empty; a null name or version takes its default. Unknown per-folder fields are kept and written back.
+def desktop(**fields):
+    doc = {"version": 1, "device_id": DESKTOP_ID, "device_name": "GLegion", "platform": "windows"}
+    doc.update(fields)
+    return json.dumps(doc, ensure_ascii=False)
+
+
+GOOD_FOLDER = {"category": "pictures", "enabled": True, "last_pass_at_ms": 1762430400000, "items": 18342}
 
 
 man("manifest_real_ios_round_trips", IOS_MANIFEST, "0b7e4a2c-9d1f-4c3a-8e5b-2f6d9a1c7e40", None,
@@ -195,6 +216,22 @@ man("manifest_desktop_round_trips", DESKTOP_MANIFEST, DESKTOP_ID, "windows", "GL
 man("manifest_unknown_field_is_kept", FUTURE_MANIFEST, DESKTOP_ID, "windows", "GLegion", 0)
 man("manifest_legacy_id_is_the_id_and_unknown_platform_is_kept", LEGACY_ID_MANIFEST, "legacy-device-7", None,
     "Old iPad", 0)
+man("manifest_folder_null_fields_take_their_defaults",
+    desktop(folders=[{"category": "documents", "enabled": None, "last_pass_at_ms": None, "items": None}]),
+    DESKTOP_ID, "windows", "GLegion", 1,
+    desktop(folders=[{"category": "documents", "enabled": False, "last_pass_at_ms": None, "items": 0}]))
+man("manifest_folder_without_a_category_is_dropped_alone",
+    desktop(folders=[{"enabled": True, "items": 3}, GOOD_FOLDER]), DESKTOP_ID, "windows", "GLegion", 1,
+    desktop(folders=[GOOD_FOLDER]))
+man("manifest_folder_of_the_wrong_shape_is_dropped_alone",
+    desktop(folders=["pictures", {"category": "documents", "enabled": "yes"}, {"category": 7}, GOOD_FOLDER]),
+    DESKTOP_ID, "windows", "GLegion", 1, desktop(folders=[GOOD_FOLDER]))
+man("manifest_folders_null_is_empty", desktop(folders=None), DESKTOP_ID, "windows", "GLegion", 0, desktop())
+man("manifest_folder_unknown_field_round_trips",
+    desktop(folders=[dict(GOOD_FOLDER, source_hint="C:\\Users\\guus\\Pictures", rules={"skip": ["*.tmp"]})]),
+    DESKTOP_ID, "windows", "GLegion", 1)
+man("manifest_null_name_and_version_take_their_defaults", desktop(version=None, device_name=None),
+    DESKTOP_ID, "windows", "", 0, desktop(device_name=""))
 cases.append({"id": "manifest_not_an_object_is_an_error", "kind": "manifest_error", "json": "[1, 2]"})
 cases.append({"id": "manifest_not_json_is_an_error", "kind": "manifest_error", "json": "{\"version\": 1,"})
 

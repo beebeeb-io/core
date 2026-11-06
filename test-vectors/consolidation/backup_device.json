@@ -564,6 +564,39 @@
       }
     },
     {
+      "id": "find_by_id_whatever_the_folders_hold",
+      "kind": "find",
+      "me": {
+        "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+        "name": "GLegion",
+        "platform": "windows"
+      },
+      "candidates": [
+        {
+          "folder_id": "11111111-1111-4111-8111-111111111111",
+          "name": "GLegion",
+          "manifest": {
+            "version": 1,
+            "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+            "device_name": "GLegion",
+            "platform": "windows",
+            "folders": [
+              {
+                "enabled": null
+              },
+              "pictures",
+              {
+                "category": null
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "existing": "11111111-1111-4111-8111-111111111111"
+      }
+    },
+    {
       "id": "manifest_real_ios_round_trips",
       "kind": "manifest",
       "json": "{\"version\": 1, \"device_id\": \"0b7e4a2c-9d1f-4c3a-8e5b-2f6d9a1c7e40\", \"device_name\": \"Example iPhone\", \"device_model\": \"iPhone 17 Pro\", \"os_version\": \"iOS 26.5\", \"app_version\": \"1.0.214\", \"created_at\": \"2026-05-01T09:30:00.000Z\", \"deletion_behavior\": \"keep\", \"keep_vault_unlocked\": false, \"backups\": {\"camera_roll\": {\"enabled\": true, \"last_sync\": \"2026-11-05T21:14:03.120Z\", \"items_synced\": 4210, \"include_videos\": true, \"wifi_only\": true, \"background_enabled\": true, \"legacy_items_migrated\": 0}, \"contacts\": {\"enabled\": false, \"last_sync\": null, \"items_synced\": 0, \"contact_count\": 0}, \"calendar\": {\"enabled\": false, \"last_sync\": null, \"items_synced\": 0, \"calendar_count\": 0}}}",
@@ -605,6 +638,77 @@
         "platform": null,
         "device_name": "Old iPad",
         "folders": 0
+      }
+    },
+    {
+      "id": "manifest_folder_null_fields_take_their_defaults",
+      "kind": "manifest",
+      "json": "{\"version\": 1, \"device_id\": \"9a4c58d8-a395-8789-8f4f-1a01677f9351\", \"device_name\": \"GLegion\", \"platform\": \"windows\", \"folders\": [{\"category\": \"documents\", \"enabled\": null, \"last_pass_at_ms\": null, \"items\": null}]}",
+      "expect": {
+        "device_id": "9a4c58d8-a395-8789-8f4f-1a01677f9351",
+        "platform": "windows",
+        "device_name": "GLegion",
+        "folders": 1,
+        "written": "{\"version\": 1, \"device_id\": \"9a4c58d8-a395-8789-8f4f-1a01677f9351\", \"device_name\": \"GLegion\", \"platform\": \"windows\", \"folders\": [{\"category\": \"documents\", \"enabled\": false, \"last_pass_at_ms\": null, \"items\": 0}]}"
+      }
+    },
+    {
+      "id": "manifest_folder_without_a_category_is_dropped_alone",
+      "kind": "manifest",
+      "json": "{\"version\": 1, \"device_id\": \"9a4c58d8-a395-8789-8f4f-1a01677f9351\", \"device_name\": \"GLegion\", \"platform\": \"windows\", \"folders\": [{\"enabled\": true, \"items\": 3}, {\"category\": \"pictures\", \"enabled\": true, \"last_pass_at_ms\": 1762430400000, \"items\": 18342}]}",
+      "expect": {
+        "device_id": "9a4c58d8-a395-8789-8f4f-1a01677f9351",
+        "platform": "windows",
+        "device_name": "GLegion",
+        "folders": 1,
+        "written": "{\"version\": 1, \"device_id\": \"9a4c58d8-a395-8789-8f4f-1a01677f9351\", \"device_name\": \"GLegion\", \"platform\": \"windows\", \"folders\": [{\"category\": \"pictures\", \"enabled\": true, \"last_pass_at_ms\": 1762430400000, \"items\": 18342}]}"
+      }
+    },
+    {
+      "id": "manifest_folder_of_the_wrong_shape_is_dropped_alone",
+      "kind": "manifest",
+      "json": "{\"version\": 1, \"device_id\": \"9a4c58d8-a395-8789-8f4f-1a01677f9351\", \"device_name\": \"GLegion\", \"platform\": \"windows\", \"folders\": [\"pictures\", {\"category\": \"documents\", \"enabled\": \"yes\"}, {\"category\": 7}, {\"category\": \"pictures\", \"enabled\": true, \"last_pass_at_ms\": 1762430400000, \"items\": 18342}]}",
+      "expect": {
+        "device_id": "9a4c58d8-a395-8789-8f4f-1a01677f9351",
+        "platform": "windows",
+        "device_name": "GLegion",
+        "folders": 1,
+        "written": "{\"version\": 1, \"device_id\": \"9a4c58d8-a395-8789-8f4f-1a01677f9351\", \"device_name\": \"GLegion\", \"platform\": \"windows\", \"folders\": [{\"category\": \"pictures\", \"enabled\": true, \"last_pass_at_ms\": 1762430400000, \"items\": 18342}]}"
+      }
+    },
+    {
+      "id": "manifest_folders_null_is_empty",
+      "kind": "manifest",
+      "json": "{\"version\": 1, \"device_id\": \"9a4c58d8-a395-8789-8f4f-1a01677f9351\", \"device_name\": \"GLegion\", \"platform\": \"windows\", \"folders\": null}",
+      "expect": {
+        "device_id": "9a4c58d8-a395-8789-8f4f-1a01677f9351",
+        "platform": "windows",
+        "device_name": "GLegion",
+        "folders": 0,
+        "written": "{\"version\": 1, \"device_id\": \"9a4c58d8-a395-8789-8f4f-1a01677f9351\", \"device_name\": \"GLegion\", \"platform\": \"windows\"}"
+      }
+    },
+    {
+      "id": "manifest_folder_unknown_field_round_trips",
+      "kind": "manifest",
+      "json": "{\"version\": 1, \"device_id\": \"9a4c58d8-a395-8789-8f4f-1a01677f9351\", \"device_name\": \"GLegion\", \"platform\": \"windows\", \"folders\": [{\"category\": \"pictures\", \"enabled\": true, \"last_pass_at_ms\": 1762430400000, \"items\": 18342, \"source_hint\": \"C:\\\\Users\\\\guus\\\\Pictures\", \"rules\": {\"skip\": [\"*.tmp\"]}}]}",
+      "expect": {
+        "device_id": "9a4c58d8-a395-8789-8f4f-1a01677f9351",
+        "platform": "windows",
+        "device_name": "GLegion",
+        "folders": 1
+      }
+    },
+    {
+      "id": "manifest_null_name_and_version_take_their_defaults",
+      "kind": "manifest",
+      "json": "{\"version\": null, \"device_id\": \"9a4c58d8-a395-8789-8f4f-1a01677f9351\", \"device_name\": null, \"platform\": \"windows\"}",
+      "expect": {
+        "device_id": "9a4c58d8-a395-8789-8f4f-1a01677f9351",
+        "platform": "windows",
+        "device_name": "",
+        "folders": 0,
+        "written": "{\"version\": 1, \"device_id\": \"9a4c58d8-a395-8789-8f4f-1a01677f9351\", \"device_name\": \"\", \"platform\": \"windows\"}"
       }
     },
     {
