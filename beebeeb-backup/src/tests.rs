@@ -410,6 +410,29 @@ fn walk_never_lists_a_linked_root_whose_target_is_not_local() {
     assert_eq!(keys(&walk.result), ["a.jpg"]);
 }
 
+/// Two names in one folder that read the same once converted to Unicode
+/// (non-UTF-8 bytes) cannot both have a key: the second is reported
+/// Unreadable at its key plus NUL, which covers no other key. The same name
+/// in two folders is two keys: the collision set is per folder (delta 3 #9).
+#[cfg(target_os = "linux")]
+#[test]
+fn walk_lossy_names_collide_only_within_one_folder() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    let dir = TempDir::new("lossy");
+    for folder in ["x", "y"] {
+        std::fs::create_dir_all(dir.path().join(folder)).expect("mkdir");
+    }
+    for name in [b"a\xff".as_slice(), b"a\xfe"] {
+        std::fs::write(dir.path().join("x").join(OsStr::from_bytes(name)), b"1").expect("write");
+    }
+    std::fs::write(dir.path().join("y").join(OsStr::from_bytes(b"a\xff")), b"2").expect("write");
+
+    let result = walk_source(dir.path(), &[]).expect("walk");
+    assert_eq!(keys(&result), ["x", "x/a\u{fffd}", "y", "y/a\u{fffd}"]);
+    assert_eq!(result.skipped, [("x/a\u{fffd}\0".to_string(), SkipReason::Unreadable)]);
+}
+
 /// A root whose parent can be traversed but not listed still walks: its own
 /// metadata (not followed) stands in for the parent's listing.
 #[cfg(unix)]
