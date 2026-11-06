@@ -2119,7 +2119,62 @@
       }
     },
     {
-      "id": "unseen_nfd_key_does_not_cover_its_nfc_twin",
+      "id": "unseen_nfc_key_covers_its_nfd_record",
+      "kind": "plan",
+      "entries": [
+        {
+          "key": "Other/a.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1000
+        }
+      ],
+      "records": [
+        {
+          "key": "Café/a.jpg",
+          "size": 10,
+          "modified_ms": 1000,
+          "remote_id": "00000001-0000-4000-8000-0000000000aa",
+          "uploaded_at_ms": 5000,
+          "state": "backed_up"
+        }
+      ],
+      "live_remote": [
+        "00000001-0000-4000-8000-0000000000aa"
+      ],
+      "live_remote_complete": true,
+      "unseen": [
+        "Café"
+      ],
+      "held": [],
+      "budget": {
+        "max_uploads": 1000,
+        "max_bytes": 1073741824000
+      },
+      "expect": {
+        "uploads": [
+          {
+            "key": "Other/a.jpg",
+            "size": 10,
+            "reason": "new",
+            "record_key": null,
+            "remote_id": null
+          }
+        ],
+        "moves": [],
+        "folders": [
+          "Other"
+        ],
+        "mark_removed_elsewhere": [],
+        "unchanged": 0,
+        "gone_locally": 0,
+        "deferred": 0,
+        "held": 0,
+        "deferred_unknown": 0
+      }
+    },
+    {
+      "id": "unseen_nfd_key_covers_an_nfc_record_with_no_exact_entry",
       "kind": "plan",
       "entries": [],
       "records": [
@@ -2150,7 +2205,52 @@
         "folders": [],
         "mark_removed_elsewhere": [],
         "unchanged": 0,
-        "gone_locally": 1,
+        "gone_locally": 0,
+        "deferred": 0,
+        "held": 0,
+        "deferred_unknown": 0
+      }
+    },
+    {
+      "id": "unseen_nfd_twin_keeps_the_nfc_record_its_entry_has",
+      "kind": "plan",
+      "entries": [
+        {
+          "key": "René/x.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1000
+        }
+      ],
+      "records": [
+        {
+          "key": "René/x.jpg",
+          "size": 10,
+          "modified_ms": 1000,
+          "remote_id": "00000001-0000-4000-8000-0000000000aa",
+          "uploaded_at_ms": 5000,
+          "state": "backed_up"
+        }
+      ],
+      "live_remote": [
+        "00000001-0000-4000-8000-0000000000aa"
+      ],
+      "live_remote_complete": true,
+      "unseen": [
+        "René"
+      ],
+      "held": [],
+      "budget": {
+        "max_uploads": 1000,
+        "max_bytes": 1073741824000
+      },
+      "expect": {
+        "uploads": [],
+        "moves": [],
+        "folders": [],
+        "mark_removed_elsewhere": [],
+        "unchanged": 1,
+        "gone_locally": 0,
         "deferred": 0,
         "held": 0,
         "deferred_unknown": 0
@@ -2315,59 +2415,59 @@
       }
     },
     {
-      "id": "normalize_key_47",
+      "id": "normalize_key_49",
       "kind": "normalize_key",
       "raw": "a\\b\\c.jpg",
       "expected": "a/b/c.jpg"
     },
     {
-      "id": "normalize_key_48",
+      "id": "normalize_key_50",
       "kind": "normalize_key",
       "raw": "/a/b.jpg",
       "expected": "a/b.jpg"
     },
     {
-      "id": "normalize_key_49",
+      "id": "normalize_key_51",
       "kind": "normalize_key",
       "raw": "a/b.jpg",
       "expected": "a/b.jpg"
     },
     {
-      "id": "normalize_key_50",
+      "id": "normalize_key_52",
       "kind": "normalize_key",
       "raw": "René/x.jpg",
       "expected": "René/x.jpg"
     },
     {
-      "id": "presence_present_51",
+      "id": "presence_present_53",
       "kind": "presence",
       "device_folder_live": true,
       "category_folder_live": null,
       "expect": "present"
     },
     {
-      "id": "presence_present_52",
+      "id": "presence_present_54",
       "kind": "presence",
       "device_folder_live": true,
       "category_folder_live": true,
       "expect": "present"
     },
     {
-      "id": "presence_category_deleted_53",
+      "id": "presence_category_deleted_55",
       "kind": "presence",
       "device_folder_live": true,
       "category_folder_live": false,
       "expect": "category_deleted"
     },
     {
-      "id": "presence_device_deleted_54",
+      "id": "presence_device_deleted_56",
       "kind": "presence",
       "device_folder_live": false,
       "category_folder_live": true,
       "expect": "device_deleted"
     },
     {
-      "id": "presence_device_deleted_55",
+      "id": "presence_device_deleted_57",
       "kind": "presence",
       "device_folder_live": false,
       "category_folder_live": null,

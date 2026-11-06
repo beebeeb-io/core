@@ -137,9 +137,17 @@ plan("unseen_file_key_is_untouched", [], [r("cloud.jpg", 1)], [1], {}, unseen=["
 plan("unseen_nested_folder_covers_its_subtree", [], [r("a/b/c/d.jpg", 1)], [1], {}, unseen=["a/b"])
 plan("unseen_prefix_is_a_path_prefix_only", [], [r("closed-2/a.jpg", 1)], [1], {"gone_locally": 1},
      unseen=["closed"])
-# Unseen keys are matched raw (the walk's keys are the record keys): an unreadable NFD folder never hides its NFC twin.
-plan("unseen_nfd_key_does_not_cover_its_nfc_twin", [], [r(unicodedata.normalize("NFC", "René/x.jpg"), 1)], [1],
-     {"gone_locally": 1}, unseen=[unicodedata.normalize("NFD", "René")])
+# Delta 3 #3: a record matches an unseen key raw, or, when no entry has its exact key, by its normalised key (the
+# exact-then-normalised rule of Amendment 5), so a record under a folder the walk did not look into is never gone and
+# never a move source, whatever its normal form. An entry matches raw only: an unreadable NFD folder never hides the
+# files of its readable NFC twin, and a record whose exact entry is there stays paired with it.
+plan("unseen_nfc_key_covers_its_nfd_record", [e("Other/a.jpg")], [r(unicodedata.normalize("NFD", "Café/a.jpg"), 1)],
+     [1], {"uploads": [up("Other/a.jpg")], "folders": ["Other"]}, unseen=[unicodedata.normalize("NFC", "Café")])
+plan("unseen_nfd_key_covers_an_nfc_record_with_no_exact_entry", [], [r(unicodedata.normalize("NFC", "René/x.jpg"), 1)],
+     [1], {}, unseen=[unicodedata.normalize("NFD", "René")])
+plan("unseen_nfd_twin_keeps_the_nfc_record_its_entry_has", [e(unicodedata.normalize("NFC", "René/x.jpg"))],
+     [r(unicodedata.normalize("NFC", "René/x.jpg"), 1)], [1], {"unchanged": 1},
+     unseen=[unicodedata.normalize("NFD", "René")])
 plan("unseen_nfd_twin_folder_hides_nothing_of_the_nfc_twin",
      [e(unicodedata.normalize("NFC", "René/a.jpg"))], [r(unicodedata.normalize("NFD", "René/b.jpg"), 2)], [2],
      {"uploads": [up(unicodedata.normalize("NFC", "René/a.jpg"))], "folders": [unicodedata.normalize("NFC", "René")]},

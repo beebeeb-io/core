@@ -93,7 +93,7 @@ The rules whose breakage costs data, a key, a credential or a user. One line eac
 - Passphrase NFC normalization never grows an unwiped secret buffer; core never seals a name its own opener refuses (`kdf::sanitize_actor_name`).
 - `kdf::open_legacy_child_key` refuses a 32-byte UTF-8 plaintext, so a name or label sealed under the same folder key can never be served as a child key.
 - Direct vectors: add rows in the generator, never in the JSON (`check-direct-vectors-generated.sh` fails on hand edits); the backup vectors likewise (`check-backup-vectors-generated.sh`).
-- Backups (LD-0113): the root is the `backups_root` row, never a name or a path; the pass never writes, moves, deletes, stages or hydrates a source file; a record at or under a key the walk did not look into is never gone and never a move source; only a complete remote listing marks anything removed elsewhere, and a removed file that changes comes back as a new file, never a version of the deleted one.
+- Backups (LD-0113): the root is the `backups_root` row, never a name or a path; the pass never writes, moves, deletes, stages or hydrates a source file; a record at or under a key the walk did not look into (whatever its normal form) is never gone and never a move source; only a complete remote listing marks anything removed elsewhere, and a removed file that changes comes back as a new file, never a version of the deleted one.
 - Never release plaintext before `finish()` outside `RangeSession` (`beebeeb_transfer::range_session`); `RangeSession` releases only `RangeOpener`-authenticated frames of one recorded version (`docs/agent-notes.md`, I1–I9).
 
 ## How we work

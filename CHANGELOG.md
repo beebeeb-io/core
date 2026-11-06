@@ -40,7 +40,8 @@ filesystem pass (`beebeeb-backup`). No v0.2.0 API changes. LD-0113, spec
     budget)` (new, changed, unchanged, gone, unique moves, the budget, removed elsewhere only from a
     complete listing, a record missing from an incomplete listing is unknown and its work waits,
     a changed file whose remote copy is gone uploads as new, a record whose copy is live again is
-    held again, raw unseen keys, held keys skipped and not charged; each upload carries the paired
+    held again, a record under an unseen key (raw, or normalised when no entry has its exact key) is
+    untouched, held keys skipped and not charged; each upload carries the paired
     `record_key` and, for a change, the `remote_id` it versions), `folder_presence`,
     `records_from_remote` (exact key first, then the normalised key when unique), `normalize_key`,
     and the key helpers `file_name`, `parents` and `fold_name`;

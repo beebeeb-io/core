@@ -211,9 +211,8 @@ fn signature(size: u64, modified_ms: i64, key: &str) -> MoveSignature {
     (size, modified_ms, file_name(&normalize_key(key)).to_lowercase())
 }
 
-/// Whether `key` is one of `unseen` or lies under one, comparing raw keys:
-/// the walk's keys are already the record keys, and normalising would let an
-/// unreadable NFD folder hide its readable NFC twin.
+/// Whether `key` is one of `unseen` or lies under one, comparing the keys as
+/// given (`plan_pass` decides when they are normalised first).
 fn under_unseen(key: &str, unseen: &HashSet<&str>) -> bool {
     if unseen.is_empty() {
         return false;
@@ -234,12 +233,17 @@ fn under_unseen(key: &str, unseen: &HashSet<&str>) -> bool {
 ///   an incomplete one nothing is marked. Either way a record whose id is not
 ///   live is never a move source and never gets a `Changed` upload.
 /// - `unseen` holds the keys the walk did not look at or into (a skipped
-///   folder or file, `WalkResult::unseen`), matched as raw keys: a record at
-///   or under one is left untouched, never gone, never a move source and never
-///   marked removed elsewhere, because the walk cannot know whether it is
-///   still there (plan Amendment 1, items 5-6). `""` stands for the whole
-///   folder. A file entry at or under an unseen key is not planned either (it
-///   waits for a pass that sees its folder whole). iOS passes an empty list.
+///   folder or file, `WalkResult::unseen`): a record at or under one is left
+///   untouched, never gone, never a move source and never marked removed
+///   elsewhere, because the walk cannot know whether it is still there (plan
+///   Amendment 1, items 5-6). `""` stands for the whole folder. A record
+///   matches by its raw key, or, when no entry has its exact key, by its
+///   normalised key (the exact-then-normalised rule of spec Amendment 5), so
+///   a legacy NFD record under an unseen NFC folder is covered too. A file
+///   entry at or under an unseen raw key is not planned either (it waits for
+///   a pass that sees its folder whole); entries match raw only, so an
+///   unreadable NFD folder never hides its readable NFC twin. iOS passes an
+///   empty list.
 /// - `held`: entry keys the host holds (an upload that failed for a lasting
 ///   reason, or is still in flight). They are skipped this pass and not
 ///   charged to the budget, so one stuck file never starves the rest; "the
@@ -268,7 +272,15 @@ pub fn plan_pass(
         .filter(|e| !e.is_dir && !under_unseen(&e.key, &unseen))
         .collect();
     files.sort_by(|a, b| a.key.cmp(&b.key));
-    let mut records: Vec<&BackupRecord> = records.iter().filter(|r| !under_unseen(&r.key, &unseen)).collect();
+    let unseen_normalized: Vec<String> = unseen.iter().map(|key| normalize_key(key)).collect();
+    let unseen_normalized: HashSet<&str> = unseen_normalized.iter().map(String::as_str).collect();
+    let file_keys: HashSet<&str> = files.iter().map(|f| f.key.as_str()).collect();
+    let record_unseen = |r: &BackupRecord| {
+        !unseen.is_empty()
+            && (under_unseen(&r.key, &unseen)
+                || (!file_keys.contains(r.key.as_str()) && under_unseen(&normalize_key(&r.key), &unseen_normalized)))
+    };
+    let mut records: Vec<&BackupRecord> = records.iter().filter(|r| !record_unseen(r)).collect();
     records.sort_by(|a, b| (&a.key, a.remote_id).cmp(&(&b.key, b.remote_id)));
 
     let paired = pair(&files, &records);
