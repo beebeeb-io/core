@@ -69,17 +69,17 @@
 //! are `Send`, so a caller can move one into a blocking thread (e.g. the CLI's
 //! `spawn_blocking`) and keep AES off the async reactor.
 
-use std::io::Read;
-
-use zeroize::Zeroizing;
-
 use beebeeb_types::{ChunkPlan, ChunkProfile, ChunkStrategy, STORAGE_FORMAT_VERSION_V2, plan_chunks};
+use std::io::Read;
+use zeroize::Zeroizing;
 
 use crate::CoreError;
 use crate::encrypt::{NONCE_LEN, TAG_LEN, open_raw_with_aad, random_nonce, seal_raw_with_aad, seal_raw_with_nonce};
 use crate::item_id::NewItemId;
 use crate::kdf::{FileKey, MasterKey, derive_file_key};
 use crate::owned_keys::WriteTarget;
+mod range;
+pub use range::RangeOpener;
 
 /// Per-chunk AEAD overhead on the wire: `nonce(12) + tag(16)` = 28 bytes. The ONE
 /// definition: `direct_transfer` sizes chunk lengths from it.

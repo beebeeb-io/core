@@ -31,11 +31,14 @@
 pub mod download;
 pub mod io;
 pub mod observer;
+pub mod range;
 pub mod shared;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
+#[cfg(test)]
+mod range_tests;
 #[cfg(test)]
 mod tests;
 
@@ -44,4 +47,8 @@ pub use download::{
 };
 pub use io::{ApiCall, ApiMethod, ApiReply, DirectIo, SignedUrl, StorageReply};
 pub use observer::{ChunkVia, Observer, TransferEvent, TransportKind, UseApiReason};
+pub use range::{
+    RangeControl, RangeIdentity, RangeLessor, RangeOutcome, RangeRequest, RangeSessionError, RangeSink, RangeStats,
+    range_session,
+};
 pub use shared::{DirectShared, DirectStore, HealthSnapshot};

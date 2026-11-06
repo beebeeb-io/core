@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+"""Generate test-vectors/direct_range.json: the range-read rules (LD-0105 spec S1, S4, S5, S8, C3).
+
+An independent implementation of the spec text, not a port of the Rust: the slot and window
+formulas, the demand-to-chunk mapping, the 4 KiB piece cutter and the process byte budget are
+re-derived here from the spec's words, and the planner scenarios are written out by hand from
+the spec's ordering rules. Rows are added HERE, never in the JSON:
+`test-vectors/tools/check-direct-range-vectors-generated.sh` fails on a hand edit.
+
+    python3 test-vectors/tools/make_direct_range_vectors.py test-vectors/direct_range.json
+"""
+import json
+import sys
+
+MIB = 1024 * 1024
+OVERHEAD = 28
+ALIGN = 4096
+BUDGET = 256 * MIB  # MemoryClass::Native
+MAX_SLOTS = 16
+MAX_WINDOW = 32
+MAX_LEASES = 4
+
+
+def slots(share, chunk):
+    """S8: clamp(floor(share / (chunk + 28)), 1, 16)."""
+    return max(1, min(MAX_SLOTS, share // (chunk + OVERHEAD)))
+
+
+def window(server_max, n):
+    """C3: min(server max_window, max(8, N + 2)); the server's number clamped to 1..=32 first."""
+    return min(max(1, min(MAX_WINDOW, server_max)), max(8, n + 2))
+
+
+def demand_chunks(count, chunk, size, offset, length):
+    """S1: the chunks a demand needs once it is widened to whole 4 KiB pieces (clipped to EoF)."""
+    if size == 0:
+        return [0, 0] if offset == 0 else None
+    if length == 0 or offset >= size or chunk == 0:
+        return None
+    start = offset - offset % ALIGN
+    end = min(offset + length, size)
+    end = min(-(-end // ALIGN) * ALIGN, size)
+    return [min(start // chunk, count - 1), min((end - 1) // chunk, count - 1)]
+
+
+def pieces(size, chunk, order):
+    """S1: after each chunk is released, the pieces that can go to the OS, in file order.
+
+    A 4 KiB block (the file's last one may be shorter) can go once every byte of it is released.
+    Blocks that lie wholly inside the chunk just released go as ONE piece; a block it shares with a
+    neighbour goes as its own piece, as soon as the neighbour is out too."""
+    released = set()
+    sent = set()
+    out = []
+
+    def block_done(b):
+        lo, hi = b, min(b + ALIGN, size)
+        return all(i in released for i in range(lo // chunk, (hi - 1) // chunk + 1))
+
+    for c in order:
+        released.add(c)
+        lo, hi = c * chunk, min((c + 1) * chunk, size)
+        step = []
+        b = lo - lo % ALIGN
+        run = None
+        while b < hi:
+            be = min(b + ALIGN, size)
+            inside = b >= lo and be <= hi
+            if b not in sent and block_done(b):
+                sent.add(b)
+                if inside:
+                    run = [run[0], be - run[0]] if run else [b, be - b]
+                else:
+                    if run:
+                        step.append(run)
+                        run = None
+                    step.append([b, be - b])
+            b += ALIGN
+        if run:
+            step.append(run)
+        out.append(sorted(step))
+    return out
+
+
+def budget_steps(steps):
+    """S8's lessor: at most 4 leases; a hold must fit the session's share (one chunk always does)
+    and the process: total + len <= max(budget, leased * len)."""
+    leases = {}
+    rows = []
+    for op in steps:
+        kind, s = op[0], op[1]
+        if kind == "lease":
+            ok = s in leases or len(leases) < MAX_LEASES
+            if ok:
+                leases.setdefault(s, 0)
+            rows.append({"op": "lease", "session": s, "expect": ok})
+        elif kind == "hold":
+            n = op[2]
+            share = BUDGET // max(1, len(leases))
+            total = sum(leases.values())
+            ok = s in leases and leases[s] + n <= max(share, n) and total + n <= max(BUDGET, len(leases) * n)
+            if ok:
+                leases[s] += n
+            rows.append({"op": "hold", "session": s, "len": n, "expect": ok})
+        elif kind == "unhold":
+            leases[s] = max(0, leases.get(s, 0) - op[2])
+            rows.append({"op": "unhold", "session": s, "len": op[2]})
+        elif kind == "release":
+            leases.pop(s, None)
+            rows.append({"op": "release", "session": s})
+        rows[-1]["after"] = {"leased": len(leases), "total_held": sum(leases.values())}
+    return rows
+
+
+def main(path):
+    c32 = 32 * MIB + OVERHEAD
+    ten_sessions = [("lease", s) for s in range(1, 11)]
+    for _round in range(3):
+        ten_sessions += [("hold", s, c32) for s in range(1, 11)]
+    alone_then_joined = [("lease", 1)] + [("hold", 1, c32)] * 8 + [("lease", 2), ("hold", 2, c32), ("unhold", 1, c32), ("hold", 2, c32), ("release", 1), ("hold", 2, c32)]
+    big = 128 * MIB + OVERHEAD
+    big_chunks = [("lease", s) for s in range(1, 5)] + [("hold", s, big) for s in range(1, 5)] + [("hold", 1, big)]
+
+    sizes = [4, 8, 16, 32, 64, 128]
+    doc = {
+        "_provenance": "LD-0105 range-read vectors for beebeeb_core::direct_transfer::range. Generated by "
+        "test-vectors/tools/make_direct_range_vectors.py, an independent implementation of the spec text "
+        "(workspace spec 2026-11-05-ld0105 S1, S4, S5, S8, C3); the planner scenarios are hand-written from the "
+        "spec's ordering rules. Never edit by hand.",
+        "version": 1,
+        "slots": [
+            {"name": f"{m} MiB chunks on the native 256 MiB share", "share": BUDGET, "chunk_size": m * MIB,
+             "expect": slots(BUDGET, m * MIB)} for m in sizes
+        ] + [
+            {"name": f"{m} MiB chunks on a quarter share (4 sessions)", "share": BUDGET // 4, "chunk_size": m * MIB,
+             "expect": slots(BUDGET // 4, m * MIB)} for m in (4, 32, 128)
+        ] + [{"name": "no share still holds one chunk", "share": 0, "chunk_size": MIB, "expect": slots(0, MIB)}],
+        "window": [
+            {"name": name, "server_max": m, "slots": n, "expect": window(m, n)}
+            for name, m, n in [
+                ("16 slots on the server's 32", 32, 16), ("15 slots", 32, 15), ("7 slots", 32, 7), ("one slot", 32, 1),
+                ("a server that says 8", 8, 16), ("a server that says 0", 0, 4), ("a server above the cap", 99, 31),
+            ]
+        ],
+        "demand_chunks": [
+            {"name": name, "chunk_count": n, "chunk_size": cs, "original_size": size, "offset": o, "len": ln,
+             "expect": demand_chunks(n, cs, size, o, ln)}
+            for name, n, cs, size, o, ln in [
+                ("byte 0", 21, 16 * MIB, 348731194, 0, 1),
+                ("the first byte of chunk 1", 21, 16 * MIB, 348731194, 16 * MIB, 1),
+                ("a read that ends on a chunk boundary", 21, 16 * MIB, 348731194, 0, 16 * MIB),
+                ("the last short chunk", 21, 16 * MIB, 348731194, 348731194 - 10, 10),
+                ("a read past the end of the file is clipped", 21, 16 * MIB, 348731194, 348731000, 10 * MIB),
+                ("at the end of the file: nothing", 21, 16 * MIB, 348731194, 348731194, 10),
+                ("the whole file", 21, 16 * MIB, 348731194, 0, 348731194),
+                ("1,000,000-byte chunks: a read inside chunk 0's last whole piece", 3, 1000000, 2500000, 999000, 100),
+                ("1,000,000-byte chunks: a piece that straddles chunks 0 and 1 needs both", 3, 1000000, 2500000, 999500, 10),
+                ("1,000,000-byte chunks: widened to the piece before", 3, 1000000, 2500000, 1000100, 10),
+                ("overlapping demands: the first", 10, MIB, 10 * MIB - 5, 0, 3 * MIB),
+                ("overlapping demands: the second", 10, MIB, 10 * MIB - 5, 2 * MIB, 3 * MIB),
+                ("an empty file has one chunk", 1, 4 * MIB, 0, 0, 0),
+                ("an empty read asks for nothing", 10, MIB, 10 * MIB, 5, 0),
+            ]
+        ],
+        "pieces": [
+            {"name": name, "file_size": size, "chunk_size": cs, "order": order, "expect": pieces(size, cs, order)}
+            for name, size, cs, order in [
+                ("1 MiB chunks in order", 3 * MIB - 100, MIB, [0, 1, 2]),
+                ("1 MiB chunks, the last first", 3 * MIB - 100, MIB, [2, 0, 1]),
+                ("1,000,000-byte chunks in order: each carries its tail", 2500000, 1000000, [0, 1, 2]),
+                ("1,000,000-byte chunks in reverse: heads wait for the chunk before", 2500000, 1000000, [2, 1, 0]),
+                ("1,000,000-byte chunks, a seek then the start", 2500000, 1000000, [1, 0, 2]),
+                ("a file smaller than one piece", 3000, 1000, [1, 0, 2]),
+                ("a file that ends on a piece boundary", 3 * ALIGN, ALIGN, [0, 2, 1]),
+            ]
+        ],
+        "budget": [
+            {"name": "10 sessions x 32 MiB chunks: at most 4 leased, at most 256 MiB held",
+             "budget": BUDGET, "steps": budget_steps(ten_sessions)},
+            {"name": "a session alone holds 7 chunks of 32 MiB; one that joins waits for room",
+             "budget": BUDGET, "steps": budget_steps(alone_then_joined)},
+            {"name": "4 sessions x 128 MiB chunks hold one chunk each (the floor), and no second",
+             "budget": BUDGET, "steps": budget_steps(big_chunks)},
+        ],
+        "planner": planner_scenarios(),
+    }
+    max_held = max(r["after"]["total_held"] for r in doc["budget"][0]["steps"])
+    assert max_held <= BUDGET, max_held
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        json.dump(doc, f, indent=1, sort_keys=False)
+        f.write("\n")
+
+
+def planner_scenarios():
+    """Hand-written from the spec: 20 chunks of 8 KiB (the last 500 bytes), 256 MiB share, server
+    max_window 32, so 16 slots and windows of min(32, max(8, 18)) = 18 grants."""
+    stride = 8192
+    return [
+        {"name": "a seek: chunk 0 first (it fixes the identity, I3), then the demand, the last chunk, forward",
+         "chunk_count": 20, "chunk_size": stride, "share": BUDGET,
+         "steps": [
+             {"op": "demand", "id": 1, "offset": 10 * stride, "len": stride},
+             {"op": "poll", "expect": {"kind": "request_window", "start": 0, "count": 1, "renewal": False}},
+             {"op": "answer"},
+             {"op": "poll", "expect": {"kind": "request_window", "start": 10, "count": 10, "renewal": False}},
+             {"op": "poll", "expect": {"kind": "fetch", "index": 0}},
+             {"op": "answer"},
+             {"op": "poll", "expect": {"kind": "fetch", "index": 10}},
+             {"op": "poll", "expect": {"kind": "fetch", "index": 19}},
+             {"op": "poll", "expect": {"kind": "fetch", "index": 11}},
+         ]},
+        {"name": "a cancel with no other demand stops read-ahead; nothing outstanding is idle",
+         "chunk_count": 20, "chunk_size": stride, "share": BUDGET,
+         "steps": [
+             {"op": "demand", "id": 1, "offset": 0, "len": 10},
+             {"op": "poll", "expect": {"kind": "request_window", "start": 0, "count": 1, "renewal": False}},
+             {"op": "answer"},
+             {"op": "cancel", "id": 1},
+             {"op": "poll", "expect": {"kind": "idle"}},
+         ]},
+        {"name": "an idle grant: re-granted only for a demanded chunk, once per demand",
+         "chunk_count": 20, "chunk_size": stride, "share": BUDGET,
+         "steps": [
+             {"op": "demand", "id": 1, "offset": 5 * stride, "len": 10},
+             {"op": "poll", "expect": {"kind": "request_window", "start": 0, "count": 1, "renewal": False}},
+             {"op": "answer"},
+             {"op": "poll", "no_fetch": True, "expect": {"kind": "request_window", "start": 5, "count": 15, "renewal": False}},
+             {"op": "answer"},
+             {"op": "advance", "ms": 300000},
+             {"op": "poll", "no_fetch": True, "expect": {"kind": "request_window", "start": 0, "count": 1, "renewal": True}},
+             {"op": "answer"},
+             {"op": "poll", "no_fetch": True, "expect": {"kind": "request_window", "start": 5, "count": 1, "renewal": True}},
+             {"op": "answer"},
+             {"op": "poll", "no_fetch": True, "expect": {"kind": "wait"}},
+             {"op": "demand", "id": 2, "offset": 6 * stride, "len": 10},
+             {"op": "poll", "no_fetch": True, "expect": {"kind": "request_window", "start": 6, "count": 1, "renewal": True}},
+         ]},
+    ]
+
+
+if __name__ == "__main__":
+    main(sys.argv[1] if len(sys.argv) > 1 else "test-vectors/direct_range.json")
