@@ -26,7 +26,8 @@ regeneration test checks the production sealer against these independently gener
 The four backup rule groups (LD-0113, `beebeeb_core::backup`) are written the same way: expected answers come from the
 spec (`2026-11-06-backup-from-source-design.md` §4.2) and the device ids from `hashlib`, never from the Rust they test.
 Each file is run by `cross_client_vectors` (`beebeeb-core/tests/consolidation/backup_*.rs`) and by every client's own
-binding.
+binding. `check-backup-vectors-generated.sh` (CI, with `--self-test`) fails when a committed `backup_*.json` is not
+byte-for-byte what its generator writes: add a case in the generator, never in the JSON.
 
 ```sh
 python3 -I test-vectors/tools/make_backup_protect_vectors.py test-vectors/consolidation/backup_protect.json
