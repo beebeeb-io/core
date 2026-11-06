@@ -163,6 +163,16 @@ pub fn check_component_for(name: &str, portable: bool, windows: bool) -> Result<
     Ok(())
 }
 
+/// Whether `name`'s stem (the part before the first `.`, trailing spaces
+/// trimmed) is a reserved Windows device name, ASCII case-insensitively. The
+/// same test `check_component_for` and `sanitize_component` apply.
+pub(crate) fn is_windows_reserved_stem(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).trim_end();
+    WINDOWS_RESERVED
+        .iter()
+        .any(|reserved| reserved.eq_ignore_ascii_case(stem))
+}
+
 /// Bidirectional OVERRIDE and ISOLATE characters. They are not control
 /// characters to `char::is_control`, but a name containing one can render as a
 /// different name (`evil\u{202e}fdp.exe` shows as `evilexe.pdf`), so they are

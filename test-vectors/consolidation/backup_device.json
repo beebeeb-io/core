@@ -1,0 +1,553 @@
+{
+  "description": "LD-0113 device folders (spec 2026-11-06-backup-from-source §4.2 rules 2-4): the device folder name under path_safety's portable rules with the device-id suffix on a collision, find_device_folder (by id, legacy desktop adoption, create), the device id derived from the OS machine id, and the device manifest (a real iOS manifest round-trips; unknown fields are kept).",
+  "source": "spec §4.2 rules 2-4 + mobile src/services/BackupService.ts:94-125 (the iOS manifest shape, values replaced); written by test-vectors/tools/make_backup_device_vectors.py (ids via hashlib, independent of core)",
+  "cases": [
+    {
+      "id": "name_glegion_unchanged",
+      "kind": "name",
+      "raw": "GLegion",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "GLegion"
+    },
+    {
+      "id": "name_iphone_unchanged",
+      "kind": "name",
+      "raw": "Guus's iPhone",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "Guus's iPhone"
+    },
+    {
+      "id": "name_reserved_con",
+      "kind": "name",
+      "raw": "CON",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "CON_"
+    },
+    {
+      "id": "name_reserved_lowercase",
+      "kind": "name",
+      "raw": "com1",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "com1_"
+    },
+    {
+      "id": "name_reserved_with_extension",
+      "kind": "name",
+      "raw": "CON.local",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "CON_.local"
+    },
+    {
+      "id": "name_trailing_dot",
+      "kind": "name",
+      "raw": "name.",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "name_"
+    },
+    {
+      "id": "name_trailing_space",
+      "kind": "name",
+      "raw": "name ",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "name_"
+    },
+    {
+      "id": "name_separator",
+      "kind": "name",
+      "raw": "a/b",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "a_b"
+    },
+    {
+      "id": "name_backslash",
+      "kind": "name",
+      "raw": "a\\b",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "a_b"
+    },
+    {
+      "id": "name_windows_characters",
+      "kind": "name",
+      "raw": "a:b*c?",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "a_b_c_"
+    },
+    {
+      "id": "name_control_character",
+      "kind": "name",
+      "raw": "a\tb",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "a_b"
+    },
+    {
+      "id": "name_bidi_override_removed",
+      "kind": "name",
+      "raw": "‮GLegion",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "GLegion"
+    },
+    {
+      "id": "name_empty",
+      "kind": "name",
+      "raw": "",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "Device"
+    },
+    {
+      "id": "name_only_dots",
+      "kind": "name",
+      "raw": "...",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "Device"
+    },
+    {
+      "id": "name_only_separators",
+      "kind": "name",
+      "raw": "///",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "Device"
+    },
+    {
+      "id": "name_only_space",
+      "kind": "name",
+      "raw": " ",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "Device"
+    },
+    {
+      "id": "name_only_invisible",
+      "kind": "name",
+      "raw": "​",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "Device"
+    },
+    {
+      "id": "name_nfd_becomes_nfc",
+      "kind": "name",
+      "raw": "René's Mac",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "René's Mac"
+    },
+    {
+      "id": "name_long_is_cut_to_200_bytes",
+      "kind": "name",
+      "raw": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [],
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "name_collision_other_id",
+      "kind": "name",
+      "raw": "GLegion",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [
+        {
+          "name": "GLegion",
+          "device_id": "0d4e5f60-7182-4a3b-9c4d-5e6f708192a3"
+        }
+      ],
+      "expected": "GLegion (a3f2)"
+    },
+    {
+      "id": "name_collision_manifest_less",
+      "kind": "name",
+      "raw": "GLegion",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [
+        {
+          "name": "GLegion",
+          "device_id": null
+        }
+      ],
+      "expected": "GLegion (a3f2)"
+    },
+    {
+      "id": "name_collision_differs_only_in_case",
+      "kind": "name",
+      "raw": "GLegion",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [
+        {
+          "name": "glegion",
+          "device_id": "0d4e5f60-7182-4a3b-9c4d-5e6f708192a3"
+        }
+      ],
+      "expected": "GLegion (a3f2)"
+    },
+    {
+      "id": "name_collision_with_my_own_id",
+      "kind": "name",
+      "raw": "GLegion",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [
+        {
+          "name": "GLegion",
+          "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "expected": "GLegion"
+    },
+    {
+      "id": "name_collision_twice_widens_suffix",
+      "kind": "name",
+      "raw": "GLegion",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [
+        {
+          "name": "GLegion",
+          "device_id": "0d4e5f60-7182-4a3b-9c4d-5e6f708192a3"
+        },
+        {
+          "name": "GLegion (a3f2)",
+          "device_id": "0d4e5f60-7182-4a3b-9c4d-5e6f708192a3"
+        }
+      ],
+      "expected": "GLegion (a3f2b1c4)"
+    },
+    {
+      "id": "name_no_collision_with_other_names",
+      "kind": "name",
+      "raw": "GLegion",
+      "my_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+      "taken": [
+        {
+          "name": "Guus's iPhone",
+          "device_id": "0d4e5f60-7182-4a3b-9c4d-5e6f708192a3"
+        }
+      ],
+      "expected": "GLegion"
+    },
+    {
+      "id": "machine_id_trimmed",
+      "kind": "machine_id",
+      "machine_id": " 4c4c4544-0042 ",
+      "expected": "7bc217b3-4134-80ef-9bfa-3998347195fb",
+      "source": "python3 -c \"import hashlib,uuid; b=bytearray(hashlib.sha256(b'beebeeb/backup-device-id/v1'+b'\\x00'+'4c4c4544-0042'.encode()).digest()[:16]); b[6]=b[6]&15|128; b[8]=b[8]&63|128; print(uuid.UUID(bytes=bytes(b)))\""
+    },
+    {
+      "id": "machine_id_plain",
+      "kind": "machine_id",
+      "machine_id": "4c4c4544-0042",
+      "expected": "7bc217b3-4134-80ef-9bfa-3998347195fb",
+      "source": "python3 -c \"import hashlib,uuid; b=bytearray(hashlib.sha256(b'beebeeb/backup-device-id/v1'+b'\\x00'+'4c4c4544-0042'.encode()).digest()[:16]); b[6]=b[6]&15|128; b[8]=b[8]&63|128; print(uuid.UUID(bytes=bytes(b)))\""
+    },
+    {
+      "id": "machine_id_windows_guid",
+      "kind": "machine_id",
+      "machine_id": "7f3e9c2a-1b4d-4e8f-9a6c-5d2b8e1f0a3c",
+      "expected": "9a4c58d8-a395-8789-8f4f-1a01677f9351",
+      "source": "python3 -c \"import hashlib,uuid; b=bytearray(hashlib.sha256(b'beebeeb/backup-device-id/v1'+b'\\x00'+'7f3e9c2a-1b4d-4e8f-9a6c-5d2b8e1f0a3c'.encode()).digest()[:16]); b[6]=b[6]&15|128; b[8]=b[8]&63|128; print(uuid.UUID(bytes=bytes(b)))\""
+    },
+    {
+      "id": "find_by_id",
+      "kind": "find",
+      "me": {
+        "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+        "name": "GLegion",
+        "platform": "windows"
+      },
+      "candidates": [
+        {
+          "folder_id": "11111111-1111-4111-8111-111111111111",
+          "name": "GLegion",
+          "manifest": {
+            "version": 1,
+            "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+            "device_name": "GLegion",
+            "platform": "windows"
+          }
+        }
+      ],
+      "expect": {
+        "existing": "11111111-1111-4111-8111-111111111111"
+      }
+    },
+    {
+      "id": "find_renamed_folder_by_id",
+      "kind": "find",
+      "me": {
+        "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+        "name": "GLegion",
+        "platform": "windows"
+      },
+      "candidates": [
+        {
+          "folder_id": "11111111-1111-4111-8111-111111111111",
+          "name": "Guus's gaming PC",
+          "manifest": {
+            "version": 1,
+            "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+            "device_name": "GLegion",
+            "platform": "windows"
+          }
+        }
+      ],
+      "expect": {
+        "existing": "11111111-1111-4111-8111-111111111111"
+      }
+    },
+    {
+      "id": "find_reinstall_same_machine_id",
+      "kind": "find",
+      "me": {
+        "device_id": "9a4c58d8-a395-8789-8f4f-1a01677f9351",
+        "name": "GLegion",
+        "platform": "windows"
+      },
+      "candidates": [
+        {
+          "folder_id": "11111111-1111-4111-8111-111111111111",
+          "name": "GLegion",
+          "manifest": {
+            "version": 1,
+            "device_id": "9a4c58d8-a395-8789-8f4f-1a01677f9351",
+            "device_name": "GLegion",
+            "platform": "windows"
+          }
+        }
+      ],
+      "expect": {
+        "existing": "11111111-1111-4111-8111-111111111111"
+      }
+    },
+    {
+      "id": "find_by_id_wins_over_legacy",
+      "kind": "find",
+      "me": {
+        "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+        "name": "GLegion",
+        "platform": "windows"
+      },
+      "candidates": [
+        {
+          "folder_id": "11111111-1111-4111-8111-111111111111",
+          "name": "GLegion",
+          "manifest": null
+        },
+        {
+          "folder_id": "22222222-2222-4222-8222-222222222222",
+          "name": "Old name",
+          "manifest": {
+            "version": 1,
+            "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+            "device_name": "GLegion",
+            "platform": "windows"
+          }
+        }
+      ],
+      "expect": {
+        "existing": "22222222-2222-4222-8222-222222222222"
+      }
+    },
+    {
+      "id": "find_adopts_manifest_less_legacy_on_windows",
+      "kind": "find",
+      "me": {
+        "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+        "name": "GLegion",
+        "platform": "windows"
+      },
+      "candidates": [
+        {
+          "folder_id": "11111111-1111-4111-8111-111111111111",
+          "name": "GLegion",
+          "manifest": null
+        }
+      ],
+      "expect": {
+        "adopt_legacy": "11111111-1111-4111-8111-111111111111"
+      }
+    },
+    {
+      "id": "find_adopts_manifest_less_legacy_on_linux",
+      "kind": "find",
+      "me": {
+        "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+        "name": "guus-laptop",
+        "platform": "linux"
+      },
+      "candidates": [
+        {
+          "folder_id": "11111111-1111-4111-8111-111111111111",
+          "name": "guus-laptop",
+          "manifest": null
+        }
+      ],
+      "expect": {
+        "adopt_legacy": "11111111-1111-4111-8111-111111111111"
+      }
+    },
+    {
+      "id": "find_legacy_is_never_adopted_on_ios",
+      "kind": "find",
+      "me": {
+        "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+        "name": "GLegion",
+        "platform": "ios"
+      },
+      "candidates": [
+        {
+          "folder_id": "11111111-1111-4111-8111-111111111111",
+          "name": "GLegion",
+          "manifest": null
+        }
+      ],
+      "expect": {
+        "create": "GLegion (a3f2)"
+      }
+    },
+    {
+      "id": "find_legacy_needs_the_exact_name",
+      "kind": "find",
+      "me": {
+        "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+        "name": "GLegion",
+        "platform": "windows"
+      },
+      "candidates": [
+        {
+          "folder_id": "11111111-1111-4111-8111-111111111111",
+          "name": "glegion",
+          "manifest": null
+        }
+      ],
+      "expect": {
+        "create": "GLegion (a3f2)"
+      }
+    },
+    {
+      "id": "find_same_name_other_id_creates_suffixed",
+      "kind": "find",
+      "me": {
+        "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+        "name": "GLegion",
+        "platform": "windows"
+      },
+      "candidates": [
+        {
+          "folder_id": "11111111-1111-4111-8111-111111111111",
+          "name": "GLegion",
+          "manifest": {
+            "version": 1,
+            "device_id": "0d4e5f60-7182-4a3b-9c4d-5e6f708192a3",
+            "device_name": "GLegion",
+            "platform": "windows"
+          }
+        }
+      ],
+      "expect": {
+        "create": "GLegion (a3f2)"
+      }
+    },
+    {
+      "id": "find_same_name_other_platform_creates_suffixed",
+      "kind": "find",
+      "me": {
+        "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+        "name": "GLegion",
+        "platform": "windows"
+      },
+      "candidates": [
+        {
+          "folder_id": "11111111-1111-4111-8111-111111111111",
+          "name": "GLegion",
+          "manifest": {
+            "version": 1,
+            "device_id": "0d4e5f60-7182-4a3b-9c4d-5e6f708192a3",
+            "device_name": "GLegion",
+            "platform": "ios"
+          }
+        }
+      ],
+      "expect": {
+        "create": "GLegion (a3f2)"
+      }
+    },
+    {
+      "id": "find_nothing_creates",
+      "kind": "find",
+      "me": {
+        "device_id": "a3f2b1c4-5d6e-4f70-8a9b-0c1d2e3f4a5b",
+        "name": "GLegion",
+        "platform": "windows"
+      },
+      "candidates": [],
+      "expect": {
+        "create": "GLegion"
+      }
+    },
+    {
+      "id": "manifest_real_ios_round_trips",
+      "kind": "manifest",
+      "json": "{\"version\": 1, \"device_id\": \"0b7e4a2c-9d1f-4c3a-8e5b-2f6d9a1c7e40\", \"device_name\": \"Example iPhone\", \"device_model\": \"iPhone 17 Pro\", \"os_version\": \"iOS 26.5\", \"app_version\": \"1.0.214\", \"created_at\": \"2026-05-01T09:30:00.000Z\", \"deletion_behavior\": \"keep\", \"keep_vault_unlocked\": false, \"backups\": {\"camera_roll\": {\"enabled\": true, \"last_sync\": \"2026-11-05T21:14:03.120Z\", \"items_synced\": 4210, \"include_videos\": true, \"wifi_only\": true, \"background_enabled\": true, \"legacy_items_migrated\": 0}, \"contacts\": {\"enabled\": false, \"last_sync\": null, \"items_synced\": 0, \"contact_count\": 0}, \"calendar\": {\"enabled\": false, \"last_sync\": null, \"items_synced\": 0, \"calendar_count\": 0}}}",
+      "expect": {
+        "device_id": "0b7e4a2c-9d1f-4c3a-8e5b-2f6d9a1c7e40",
+        "platform": null,
+        "device_name": "Example iPhone",
+        "folders": 0
+      }
+    },
+    {
+      "id": "manifest_desktop_round_trips",
+      "kind": "manifest",
+      "json": "{\"version\": 1, \"device_id\": \"9a4c58d8-a395-8789-8f4f-1a01677f9351\", \"device_name\": \"GLegion\", \"platform\": \"windows\", \"folders\": [{\"category\": \"pictures\", \"enabled\": true, \"last_pass_at_ms\": 1762430400000, \"items\": 18342}, {\"category\": \"documents\", \"enabled\": false, \"last_pass_at_ms\": null, \"items\": 0}]}",
+      "expect": {
+        "device_id": "9a4c58d8-a395-8789-8f4f-1a01677f9351",
+        "platform": "windows",
+        "device_name": "GLegion",
+        "folders": 2
+      }
+    },
+    {
+      "id": "manifest_unknown_field_is_kept",
+      "kind": "manifest",
+      "json": "{\"version\": 1, \"device_id\": \"9a4c58d8-a395-8789-8f4f-1a01677f9351\", \"device_name\": \"GLegion\", \"platform\": \"windows\", \"a_future_field\": {\"nested\": [1, 2, 3], \"flag\": true}}",
+      "expect": {
+        "device_id": "9a4c58d8-a395-8789-8f4f-1a01677f9351",
+        "platform": "windows",
+        "device_name": "GLegion",
+        "folders": 0
+      }
+    },
+    {
+      "id": "manifest_non_uuid_id_and_unknown_platform_are_kept_verbatim",
+      "kind": "manifest",
+      "json": "{\"version\": 1, \"device_id\": \"legacy-device-7\", \"device_name\": \"Old iPad\", \"platform\": \"visionos\"}",
+      "expect": {
+        "device_id": null,
+        "platform": null,
+        "device_name": "Old iPad",
+        "folders": 0
+      }
+    },
+    {
+      "id": "manifest_not_an_object_is_an_error",
+      "kind": "manifest_error",
+      "json": "[1, 2]"
+    },
+    {
+      "id": "manifest_not_json_is_an_error",
+      "kind": "manifest_error",
+      "json": "{\"version\": 1,"
+    }
+  ]
+}

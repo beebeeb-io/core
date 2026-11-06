@@ -21,7 +21,9 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use crate::{chunk_stream, cli_auth, client_meta, encrypt, file_request, folder_key, item_id, kdf, recovery, transfer};
+use crate::{
+    backup, chunk_stream, cli_auth, client_meta, encrypt, file_request, folder_key, item_id, kdf, recovery, transfer,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Slot {
@@ -261,6 +263,13 @@ const LABELS: &[Label] = &[
         Slot::Salt,
         "SHA-256 domain prefix",
     ),
+    // backup (LD-0113)
+    label(
+        "backup::DEVICE_ID_LABEL",
+        backup::DEVICE_ID_LABEL,
+        Slot::Salt,
+        "SHA-256 domain prefix over the OS machine id; the output is a device id, never a key",
+    ),
 ];
 
 /// Every pair where one label is a prefix of another, with why it is not a
@@ -305,7 +314,7 @@ fn find(name: &str) -> &'static Label {
 
 #[test]
 fn every_label_is_distinct_and_no_id_carrying_info_is_a_prefix_of_another_info() {
-    assert_eq!(LABELS.len(), 32, "a label was added or removed: review the slot rules");
+    assert_eq!(LABELS.len(), 33, "a label was added or removed: review the slot rules");
     for (i, a) in LABELS.iter().enumerate() {
         assert!(!a.with.is_empty());
         for b in &LABELS[i + 1..] {
