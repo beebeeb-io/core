@@ -32,9 +32,12 @@ filesystem pass (`beebeeb-backup`). No v0.2.0 API changes. LD-0113, spec
     round-trips; unknown fields are kept; a known field always wins over kept text of its name);
   - the root: `resolve_root` (use the flagged root, claim the oldest live `Backups`, or create) and
     `plan_merge` (legacy duplicate roots, depth unbounded, keep-both on a clash);
-  - the pass planner: `plan_pass` (new, changed, unchanged, gone, unique moves, the budget,
-    removed elsewhere, keys the walk did not look into), `folder_presence`, `records_from_remote`
-    (exact key first, then the normalised key when unique), `normalize_key`.
+  - the pass planner: `plan_pass(entries, records, live_remote, live_remote_complete, unseen,
+    budget)` (new, changed, unchanged, gone, unique moves, the budget, removed elsewhere only from a
+    complete listing, a changed file whose remote copy is not live uploads as new, a record whose
+    copy is live again is held again, raw unseen keys), `folder_presence`, `records_from_remote`
+    (exact key first, then the normalised key when unique), `normalize_key`, and the key helpers
+    `file_name`, `parents` and `fold_name`.
 - **`beebeeb-backup`** (new crate, for desktop and the CLI): `walk_source(root, exclude)` (never
   opens a file, never follows a link, never descends into what is not local or into an excluded
   path such as the client's own sync root; attributes from the directory listing only; a folder is
@@ -43,8 +46,8 @@ filesystem pass (`beebeeb-backup`). No v0.2.0 API changes. LD-0113, spec
   implements.
 - **Bindings**: uniffi `backup_*` (9 functions; every unknown string is `InvalidInput`) and wasm
   `backupCheckMutation`, `backupProtectionMany`, `backupParseManifest`.
-- **Vectors**: `test-vectors/consolidation/backup_{protect,device,root,plan}.json` (50, 45, 20 and
-  53 cases), run by `cross_client_vectors`, with independent Python generators in
+- **Vectors**: `test-vectors/consolidation/backup_{protect,device,root,plan}.json` (50, 45, 21 and
+  60 cases), run by `cross_client_vectors`, with independent Python generators in
   `test-vectors/tools/make_backup_*_vectors.py`.
 
 ## [0.2.0] - 2026-11-06
