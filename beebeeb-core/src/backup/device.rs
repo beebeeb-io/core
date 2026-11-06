@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use beebeeb_types::backup::Platform;
 
+use super::fold_name;
 use super::manifest::DeviceManifest;
 use crate::invisible::{is_invisible_filler, is_stripped_display_control};
 use crate::path_safety::{check_component_for, is_windows_reserved_stem};
@@ -92,17 +93,11 @@ fn clean_name(raw: &str) -> String {
     name
 }
 
-/// Names compare as a case-insensitive filesystem would show them: two device
-/// folders that differ only in case would collide in a drive.
-fn fold(name: &str) -> String {
-    name.nfc().collect::<String>().to_lowercase()
-}
-
 fn taken_by_another(name: &str, my_id: Uuid, taken: &[TakenName]) -> bool {
-    let folded = fold(name);
+    let folded = fold_name(name);
     taken
         .iter()
-        .any(|t| t.device_id != Some(my_id) && fold(&t.name) == folded)
+        .any(|t| t.device_id != Some(my_id) && fold_name(&t.name) == folded)
 }
 
 /// The device folder name for `raw` (the platform's user-facing computer or

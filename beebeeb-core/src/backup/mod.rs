@@ -40,3 +40,10 @@ pub use protect::*;
 pub use rebuild::*;
 pub use root::*;
 pub use skip::*;
+
+/// Names compare as a case-insensitive filesystem would show them: two
+/// siblings that differ only in case or normalisation collide in a drive.
+fn fold_name(name: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    name.nfc().collect::<String>().to_lowercase()
+}

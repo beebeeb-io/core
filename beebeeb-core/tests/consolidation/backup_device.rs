@@ -5,8 +5,8 @@
 //! `test-vectors/tools/make_backup_device_vectors.py` (ids via hashlib).
 
 use beebeeb_core::backup::{
-    DeviceFolderCandidate, DeviceFolderChoice, DeviceSelf, TakenName, device_folder_name, device_id_from_machine_id,
-    find_device_folder, parse_manifest, serialize_manifest,
+    DeviceFolderCandidate, DeviceFolderChoice, DeviceManifest, DeviceSelf, TakenName, device_folder_name,
+    device_id_from_machine_id, find_device_folder, parse_manifest, serialize_manifest,
 };
 use beebeeb_types::backup::Platform;
 use serde_json::Value;
@@ -141,5 +141,42 @@ fn backup_device_cases_match_core() {
         (names, machine_ids, finds, manifests),
         (25, 3, 11, 6),
         "case counts per kind"
+    );
+}
+
+/// Review finding 4: a field this version knows wins over kept text of the
+/// same name, so a renamed device is written with its new name, and a real id
+/// replaces the legacy text it was parsed next to.
+#[test]
+fn manifest_known_field_wins_over_kept_text() {
+    let id = Uuid::parse_str("00000001-0000-4000-8000-0000000000aa").expect("uuid");
+    let mut other = serde_json::Map::new();
+    other.insert("device_name".into(), Value::from("Old name"));
+    other.insert("device_id".into(), Value::from("legacy-text"));
+    other.insert("platform".into(), Value::from("amiga"));
+    other.insert("version".into(), Value::from(7));
+    other.insert("folders".into(), Value::from("not a list"));
+    other.insert("note".into(), Value::from("kept"));
+    let manifest = DeviceManifest {
+        version: 1,
+        device_id: Some(id),
+        device_name: "New name".into(),
+        platform: None,
+        folders: Vec::new(),
+        other,
+    };
+    let written = serialize_manifest(&manifest);
+    let back: Value = serde_json::from_str(&written).expect("json");
+    assert_eq!(back["device_name"], "New name", "{written}");
+    assert_eq!(back["device_id"], id.to_string(), "{written}");
+    assert_eq!(back["version"], 1, "{written}");
+    assert!(back.get("folders").is_none(), "{written}");
+    // No platform field: the text parse could not read is kept.
+    assert_eq!(back["platform"], "amiga", "{written}");
+    assert_eq!(back["note"], "kept", "{written}");
+    let reparsed = parse_manifest(&written).expect("parses");
+    assert_eq!(
+        (reparsed.device_id, reparsed.device_name.as_str()),
+        (Some(id), "New name")
     );
 }

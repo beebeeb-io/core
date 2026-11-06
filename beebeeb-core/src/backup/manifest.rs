@@ -94,10 +94,21 @@ pub fn parse_manifest(json: &str) -> Result<DeviceManifest, CoreError> {
 }
 
 /// Write a manifest as compact JSON with its keys sorted, so the same manifest
-/// always gives the same bytes.
+/// always gives the same bytes. A field this version knows always wins over
+/// text of the same name kept in `other`: a renamed device is written with
+/// its new name. `other` keeps `device_id` / `platform` text only while the
+/// field itself is `None` (the text parse could not read).
 pub fn serialize_manifest(m: &DeviceManifest) -> String {
+    let (keep_id_text, keep_platform_text) = (m.device_id.is_none(), m.platform.is_none());
+    let mut m = m.clone();
+    m.other.retain(|key, _| match key.as_str() {
+        "version" | "device_name" | "folders" => false,
+        "device_id" => keep_id_text,
+        "platform" => keep_platform_text,
+        _ => true,
+    });
     // A manifest is plain JSON data (string keys only), so neither step can
     // fail; an empty object is never written in its place.
-    let value = serde_json::to_value(m).expect("a DeviceManifest is plain JSON");
+    let value = serde_json::to_value(&m).expect("a DeviceManifest is plain JSON");
     serde_json::to_string(&value).expect("a JSON value always serializes")
 }

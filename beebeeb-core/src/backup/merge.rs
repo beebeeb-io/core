@@ -8,9 +8,9 @@
 
 use std::collections::HashSet;
 
-use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
+use super::fold_name;
 use crate::sync::conflict::keep_both_name;
 
 /// One folder or file of a tree, as the client lists it (decrypted names).
@@ -41,15 +41,12 @@ pub enum MergeStep {
     },
 }
 
-/// Two siblings that differ only in case collide in a drive, so they merge.
-fn fold(name: &str) -> String {
-    name.nfc().collect::<String>().to_lowercase()
-}
-
 fn merge_into(target: &mut MergeNode, source: &MergeNode, clash_label: &str, hhmm: &str, steps: &mut Vec<MergeStep>) {
     for child in &source.children {
-        let key = fold(&child.name);
-        match target.children.iter().position(|t| fold(&t.name) == key) {
+        // Two siblings that differ only in case collide in a drive, so they
+        // merge.
+        let key = fold_name(&child.name);
+        match target.children.iter().position(|t| fold_name(&t.name) == key) {
             Some(i) if child.is_folder && target.children[i].is_folder => {
                 merge_into(&mut target.children[i], child, clash_label, hhmm, steps);
                 steps.push(MergeStep::Trash { id: child.id });
