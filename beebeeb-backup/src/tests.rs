@@ -378,7 +378,11 @@ fn walk_never_lists_a_root_that_is_not_local() {
     assert!(walk.result.entries.is_empty(), "{:?}", walk.result.entries);
     assert_eq!(walk.result.skipped, [(String::new(), SkipReason::NotLocal)]);
     assert!(walk.paths.is_empty());
-    assert_eq!(*read.borrow(), [root.clone()], "only the root's own entry was read");
+    assert_eq!(
+        *read.borrow(),
+        std::slice::from_ref(&root),
+        "only the root's own entry was read"
+    );
     // The same folder, local: listed as before.
     let walk = walk_with(&root, &[], &|_, meta| attrs_of(meta)).expect("walk");
     assert_eq!(keys(&walk.result), ["a.jpg", "sub", "sub/b.jpg"]);

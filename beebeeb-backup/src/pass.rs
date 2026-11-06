@@ -175,11 +175,14 @@ pub async fn run_pass<H: BackupHost>(
     run_pass_with(host, source_root, exclude, c, budget, fs).await
 }
 
+/// The walk a pass runs: `(root, exclude)` to the walk and its paths.
+pub(crate) type WalkFn = Box<dyn FnOnce(&Path, &[PathBuf]) -> std::io::Result<Walk> + Send>;
+
 /// What a pass reads from the disk and how the platform compares names: the
 /// real walk and the platform's rule in [`run_pass`]; a test's in the tests
 /// (a stale listing, a case-insensitive drive on Linux).
 pub(crate) struct PassFs {
-    pub(crate) walk: Box<dyn FnOnce(&Path, &[PathBuf]) -> std::io::Result<Walk> + Send>,
+    pub(crate) walk: WalkFn,
     /// Names that differ only in case or normalisation are one name (Windows,
     /// macOS).
     pub(crate) case_insensitive: bool,
