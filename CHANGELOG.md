@@ -41,9 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `direct_transfer::range::RangePlanner` grants windows at any start (chunk 0 first, then
   demands, then read-ahead), aging out idle grants without spending renewals; `range_session`
   in `beebeeb-transfer` hands each authenticated 4 KiB piece to the system; `RangeLessor`
-  bounds the shared memory budget to at most four active sessions, with ciphertext in flight of
-  at most max(256 MiB, k × (chunk_size + 28)) per session plus one plaintext chunk per session —
-  256 MiB at 32 MiB chunks, up to 1 GiB at 128 MiB chunks. New test vectors:
+  bounds the shared memory budget: at most four sessions hold a lease at once; together their
+  ciphertext in flight is at most max(256 MiB, k × (chunk_size + 28)) for k active sessions,
+  plus one plaintext chunk per session (256 MiB at 32 MiB chunks, up to 1 GiB at 128 MiB chunks). New test vectors:
   `test-vectors/direct_range.json`, generated and drift-guarded in CI.
 - `beebeeb-transfer`, the L2 driver crate for direct S3 downloads (task 2173, plan K2):
   `download()` drives core's `DownloadPlanner` over any `DirectIo` transport (API calls,
@@ -311,8 +311,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chunk_index || is_last` (STREAM construction) — and are sealed under a dedicated chunk subkey
   `HKDF-SHA256(file_key, "beebeeb/chunk/v2/key")` that no other blob type uses. `version_id` is
   the random nonce of the upload's frame 0, so frames of two uploads (versions) of one file id
-  cannot be mixed. Previously (v1) frames carried no associated data, so a malicious server could
-  reorder, duplicate, drop, truncate or splice chunks undetected. Same frame layout and sizes;
+  cannot be mixed. v1 frames, which every client still writes, carry no associated data, so a
+  malicious server can reorder, duplicate, drop, truncate or splice them undetected. Same frame layout and sizes;
   the server is unaffected. `chunk_stream::WRITE_FORMAT` stays `V1Legacy`: every client still
   WRITES v1 until all clients' read paths are on this core; flipping it is a separate, gated
   release (task 1908). Files written today still carry no position binding.
