@@ -19,6 +19,12 @@ use crate::Fingerprint;
 /// after the last, and abandons the session on any difference (the file is
 /// retried next pass). When the upload completes, the client writes the
 /// record for `key`.
+///
+/// `reason`: [`UploadReason::New`] creates a file named `name` in
+/// `parent_id`. [`UploadReason::Changed`] uploads a new version of the remote
+/// file of the client's own record at `key` (its `remote_id`), so the backup
+/// keeps one file with its history, never two. A `Changed` request whose key
+/// has no record any more is uploaded as `New`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UploadRequest {
     pub category: Category,
@@ -84,7 +90,11 @@ pub trait BackupHost: Send + Sync {
     ) -> impl Future<Output = Result<(), HostError>> + Send;
 
     /// Hand one file to the client's uploader. Idempotent per
-    /// (category, key): a key already queued is not queued twice.
+    /// (category, key): a key already queued is not queued twice, and a
+    /// request whose key already has a `BackedUp` record with the request's
+    /// fingerprint size and `modified_ms` is dropped (an upload that completed
+    /// after the pass last read the records). The pass checks this itself
+    /// just before it enqueues; the client closes the window that is left.
     fn enqueue_upload(&self, req: UploadRequest) -> impl Future<Output = Result<(), HostError>> + Send;
 
     /// This device's records for `c`.

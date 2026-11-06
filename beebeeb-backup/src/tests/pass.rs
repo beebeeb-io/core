@@ -28,6 +28,9 @@ struct State {
     records: Vec<BackupRecord>,
     calls: Vec<String>,
     queued: Vec<UploadRequest>,
+    /// The client finishes every queued upload right after the next
+    /// `records` call returns (an upload completing mid-pass).
+    finish_after_next_records: bool,
 }
 
 struct FakeHost(Mutex<State>);
@@ -71,7 +74,10 @@ impl FakeHost {
 
     /// The client finishing every queued upload: a server file and a record.
     fn complete_uploads(&self) -> Vec<String> {
-        let mut state = self.state();
+        Self::complete(&mut self.state())
+    }
+
+    fn complete(state: &mut State) -> Vec<String> {
         let queued = std::mem::take(&mut state.queued);
         let mut keys = Vec::new();
         for req in queued {
@@ -177,7 +183,12 @@ impl BackupHost for FakeHost {
     }
 
     async fn records(&self, _c: &Category) -> Result<Vec<BackupRecord>, HostError> {
-        Ok(self.state().records.clone())
+        let mut state = self.state();
+        let records = state.records.clone();
+        if std::mem::take(&mut state.finish_after_next_records) {
+            Self::complete(&mut state);
+        }
+        Ok(records)
     }
 
     async fn put_record(&self, _c: &Category, record: BackupRecord) -> Result<(), HostError> {
@@ -215,7 +226,7 @@ async fn run_pass_first_pass_queues_all_and_creates_folders_parents_first() {
     src.write("Thumbs.db", b"junk");
     let host = FakeHost::new();
 
-    let report = run_pass(&host, src.path(), &Category::Pictures, BUDGET)
+    let report = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
         .await
         .expect("pass");
     assert_eq!(report.queued, 3);
@@ -247,13 +258,13 @@ async fn run_pass_second_pass_after_records_queues_nothing() {
     src.write("a.jpg", b"aa");
     src.write("2026/05/b.jpg", b"bbb");
     let host = FakeHost::new();
-    run_pass(&host, src.path(), &Category::Pictures, BUDGET)
+    run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
         .await
         .expect("pass 1");
     assert_eq!(host.complete_uploads().len(), 2);
     host.state().calls.clear();
 
-    let report = run_pass(&host, src.path(), &Category::Pictures, BUDGET)
+    let report = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
         .await
         .expect("pass 2");
     assert_eq!((report.queued, report.unchanged, report.moved), (0, 2, 0));
@@ -268,7 +279,7 @@ async fn run_pass_deleted_category_folder_turns_off_and_queues_nothing() {
     let host = FakeHost::new();
     host.state().category_folder_live = Some(false);
 
-    let report = run_pass(&host, src.path(), &Category::Pictures, BUDGET)
+    let report = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
         .await
         .expect("pass");
     assert_eq!(report.turned_off, Some(FolderPresence::CategoryDeleted));
@@ -283,7 +294,7 @@ async fn run_pass_deleted_device_folder_turns_off() {
     src.write("a.jpg", b"aa");
     let host = FakeHost::new();
     host.state().device_folder_live = false;
-    let report = run_pass(&host, src.path(), &Category::Documents, BUDGET)
+    let report = run_pass(&host, src.path(), &[], &Category::Documents, BUDGET)
         .await
         .expect("pass");
     assert_eq!(report.turned_off, Some(FolderPresence::DeviceDeleted));
@@ -298,7 +309,7 @@ async fn run_pass_removed_elsewhere_marks_and_does_not_upload() {
     let id = host.backed_up("a.jpg", &path);
     host.state().files.remove(&id); // deleted from the backup on the web
 
-    let report = run_pass(&host, src.path(), &Category::Pictures, BUDGET)
+    let report = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
         .await
         .expect("pass");
     assert_eq!(host.calls("mark_removed_elsewhere"), ["mark_removed_elsewhere a.jpg"]);
@@ -307,7 +318,7 @@ async fn run_pass_removed_elsewhere_marks_and_does_not_upload() {
 
     // It stays deleted while unchanged.
     host.state().calls.clear();
-    let report = run_pass(&host, src.path(), &Category::Pictures, BUDGET)
+    let report = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
         .await
         .expect("pass 2");
     assert_eq!(report.queued, 0);
@@ -324,14 +335,14 @@ async fn run_pass_large_folder_respects_budget_and_resumes() {
     }
     let host = FakeHost::new();
 
-    let first = run_pass(&host, src.path(), &Category::Downloads, BUDGET)
+    let first = run_pass(&host, src.path(), &[], &Category::Downloads, BUDGET)
         .await
         .expect("pass 1");
     assert_eq!((first.queued, first.deferred), (256, 19_744));
     let pass1: HashSet<String> = host.complete_uploads().into_iter().collect();
     assert_eq!(pass1.len(), 256);
 
-    let second = run_pass(&host, src.path(), &Category::Downloads, BUDGET)
+    let second = run_pass(&host, src.path(), &[], &Category::Downloads, BUDGET)
         .await
         .expect("pass 2");
     assert_eq!((second.queued, second.deferred, second.unchanged), (256, 19_488, 256));
@@ -347,7 +358,7 @@ async fn run_pass_move_rekeys_record_and_next_pass_plans_nothing() {
     let host = FakeHost::new();
     let id = host.backed_up("old/a.jpg", &path);
 
-    let report = run_pass(&host, src.path(), &Category::Pictures, BUDGET)
+    let report = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
         .await
         .expect("pass");
     assert_eq!((report.moved, report.queued, report.gone_locally), (1, 0, 0));
@@ -363,7 +374,7 @@ async fn run_pass_move_rekeys_record_and_next_pass_plans_nothing() {
     }
 
     host.state().calls.clear();
-    let again = run_pass(&host, src.path(), &Category::Pictures, BUDGET)
+    let again = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
         .await
         .expect("pass 2");
     assert_eq!((again.moved, again.queued, again.unchanged), (0, 0, 1));
@@ -379,7 +390,7 @@ async fn run_pass_case_only_rename_leaves_one_record() {
     let host = FakeHost::new();
     let id = host.backed_up("IMG.JPG", &path);
 
-    let report = run_pass(&host, src.path(), &Category::Pictures, BUDGET)
+    let report = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
         .await
         .expect("pass");
     assert_eq!((report.moved, report.queued), (1, 0));
@@ -414,7 +425,7 @@ async fn run_pass_unreadable_folder_is_not_a_move_source() {
         eprintln!("run_pass_unreadable_folder_is_not_a_move_source: permissions ignored (root); not checked");
         return;
     }
-    let report = run_pass(&host, src.path(), &Category::Pictures, BUDGET).await;
+    let report = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET).await;
     std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o755)).expect("chmod back");
     let report = report.expect("pass");
     assert_eq!((report.moved, report.queued, report.gone_locally), (0, 1, 0));
@@ -427,9 +438,51 @@ async fn run_pass_missing_source_folder_is_an_error_without_a_path() {
     let src = TempDir::new("missing");
     let gone = src.path().join("not-there");
     let host = FakeHost::new();
-    let err = run_pass(&host, &gone, &Category::Pictures, BUDGET)
+    let err = run_pass(&host, &gone, &[], &Category::Pictures, BUDGET)
         .await
         .expect_err("no folder");
     assert!(!err.0.contains("not-there"), "errors never carry a path: {}", err.0);
     assert!(host.calls("enqueue_upload").is_empty());
+}
+
+/// An upload of an earlier pass that completes after this pass read its
+/// records is not queued again (review finding 6): the pass reads the records
+/// once more before it enqueues.
+#[tokio::test]
+async fn run_pass_upload_completed_mid_pass_is_not_queued_again() {
+    let src = TempDir::new("midpass");
+    src.write("a.jpg", b"aa");
+    let host = FakeHost::new();
+    run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
+        .await
+        .expect("pass 1");
+    assert_eq!(host.state().queued.len(), 1, "pass 1 queued a.jpg, not finished");
+    host.state().finish_after_next_records = true;
+
+    let report = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
+        .await
+        .expect("pass 2");
+    assert_eq!((report.queued, report.unchanged), (0, 1));
+    assert!(
+        host.state().queued.is_empty(),
+        "the finished upload is not queued twice"
+    );
+    assert_eq!(host.state().records.len(), 1);
+}
+
+/// Plan Amendment 1, item 8, through the pass: the sync root is counted as
+/// excluded and nothing under it is queued.
+#[tokio::test]
+async fn run_pass_never_queues_from_an_excluded_path() {
+    let src = TempDir::new("passexclude");
+    src.write("a.jpg", b"aa");
+    src.write("Beebeeb/Backups/b.jpg", b"bb");
+    let host = FakeHost::new();
+    let sync_root = src.path().join("Beebeeb");
+    let report = run_pass(&host, src.path(), &[sync_root], &Category::Pictures, BUDGET)
+        .await
+        .expect("pass");
+    assert_eq!(report.queued, 1);
+    assert_eq!(report.skipped, BTreeMap::from([(SkipReason::Excluded, 1)]));
+    assert_eq!(host.calls("enqueue_upload"), ["enqueue_upload a.jpg"]);
 }

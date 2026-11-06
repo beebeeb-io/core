@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use beebeeb_core::backup::SkipReason;
 
-use crate::walk::{attrs_from_parts, walk_with_paths};
+use crate::walk::{attrs_from_parts, collect_listing, is_within, walk_with_paths};
 use crate::{MAX_DEPTH, fingerprint, walk_source};
 
 /// `run_pass` over a recording host.
@@ -58,7 +58,7 @@ fn walk_skips_junk_links_and_bundles() {
     dir.write("x.photoslibrary/database/Photos.sqlite", b"db");
     std::os::unix::fs::symlink(dir.path().join("a"), dir.path().join("shortcut")).expect("symlink");
 
-    let result = walk_source(dir.path()).expect("walk");
+    let result = walk_source(dir.path(), &[]).expect("walk");
     assert_eq!(keys(&result), ["a", "a/b", "a/b/c.txt"]);
     let mut skipped = result.skipped.clone();
     skipped.sort();
@@ -82,7 +82,7 @@ fn walk_never_opens_files() {
     let dir = TempDir::new("closed");
     let locked = dir.write("private.txt", b"secret");
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).expect("chmod");
-    let result = walk_source(dir.path()).expect("walk");
+    let result = walk_source(dir.path(), &[]).expect("walk");
     assert_eq!(keys(&result), ["private.txt"]);
     assert_eq!(result.entries[0].size, 6);
     assert!(result.skipped.is_empty());
@@ -97,7 +97,7 @@ fn walk_depth_cap() {
     }
     std::fs::create_dir_all(&path).expect("nested folders");
 
-    let result = walk_source(dir.path()).expect("walk");
+    let result = walk_source(dir.path(), &[]).expect("walk");
     let deepest = result.entries.iter().map(|e| e.key.split('/').count()).max();
     assert_eq!(deepest, Some(MAX_DEPTH));
     assert_eq!(result.entries.len(), MAX_DEPTH);
@@ -111,7 +111,7 @@ fn walk_keys_are_nfc() {
     let dir = TempDir::new("nfc");
     let nfd = "Rene\u{301}.txt";
     dir.write(nfd, b"x");
-    let walk = walk_with_paths(dir.path()).expect("walk");
+    let walk = walk_with_paths(dir.path(), &[]).expect("walk");
     assert_eq!(keys(&walk.result), ["Ren\u{e9}.txt"]);
     // The key is NFC; the path the uploader reads is the real one on disk.
     let real = walk.paths.get("Ren\u{e9}.txt").expect("a path for the key");
@@ -128,7 +128,7 @@ fn walk_reports_an_unreadable_folder_and_keeps_going() {
     let closed = dir.path().join("closed");
     std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o000)).expect("chmod");
     let readable_anyway = std::fs::read_dir(&closed).is_ok();
-    let result = walk_source(dir.path()).expect("walk");
+    let result = walk_source(dir.path(), &[]).expect("walk");
     std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o755)).expect("chmod back");
     if readable_anyway {
         // Running as root: permissions do not apply, so there is nothing to refuse.
@@ -153,11 +153,16 @@ fn attrs_of_decodes_the_not_local_and_reparse_bits() {
     const ARCHIVE: u32 = 0x20;
     const SF_DATALESS: u32 = 0x4000_0000;
 
-    let win = |bits: u32| attrs_from_parts("IMG_1.jpg", false, false, Some(bits), None);
+    let win = |bits: u32| attrs_from_parts(false, false, Some(bits), None);
     assert!(win(RECALL_ON_DATA_ACCESS).not_local);
     assert!(win(RECALL_ON_OPEN).not_local);
     assert!(win(OFFLINE).not_local);
-    assert!(win(REPARSE_POINT).is_link && !win(REPARSE_POINT).not_local);
+    // Plan Amendment 1, item 7: OneDrive sets the reparse bit on every file,
+    // local ones included. Alone it is a local file, backed up; a link is
+    // std's name-surrogate test (`link_or_special`), never this bit.
+    let local_onedrive = win(REPARSE_POINT | ARCHIVE);
+    assert!(!local_onedrive.is_link && !local_onedrive.not_local);
+    assert_eq!(beebeeb_core::backup::skip_reason("IMG_1.jpg", &local_onedrive), None);
     let plain = win(ARCHIVE);
     assert!(!plain.not_local && !plain.is_link);
     // A OneDrive cloud-only file is a reparse point with a recall bit: it is
@@ -168,14 +173,70 @@ fn attrs_of_decodes_the_not_local_and_reparse_bits() {
         Some(SkipReason::NotLocal)
     );
 
-    let mac = |flags: u32| attrs_from_parts("IMG_1.jpg", true, false, None, Some(flags));
+    let mac = |flags: u32| attrs_from_parts(true, false, None, Some(flags));
     assert!(mac(SF_DATALESS).not_local && mac(SF_DATALESS).is_dir);
     assert!(!mac(0).not_local);
 
-    assert!(attrs_from_parts(".IMG_1.jpg.icloud", false, false, None, None).not_local);
-    assert!(attrs_from_parts(".notes.ICLOUD", false, false, None, None).not_local);
-    assert!(!attrs_from_parts("IMG_1.icloud", false, false, None, None).not_local);
-    assert!(attrs_from_parts("fifo", false, true, None, None).is_link);
+    // A symlink, a junction, a FIFO: never followed, never read.
+    assert!(attrs_from_parts(false, true, Some(REPARSE_POINT), None).is_link);
+    assert!(attrs_from_parts(false, true, None, None).is_link);
+}
+
+/// Plan Amendment 1, item 8: the client's own sync root inside a backed-up
+/// folder is never listed or entered, so the drive (its Backups included) is
+/// never backed up into itself.
+#[test]
+fn walk_never_descends_into_excluded_path() {
+    let dir = TempDir::new("exclude");
+    dir.write("report.pdf", b"x");
+    dir.write("Beebeeb/notes.txt", b"y");
+    dir.write("Beebeeb/Backups/GLegion/Documents/report.pdf", b"x");
+    dir.write("BeebeebOld/kept.txt", b"z");
+    let sync_root = dir.path().join("Beebeeb");
+
+    let result = walk_source(dir.path(), &[sync_root]).expect("walk");
+    let under: Vec<&str> = keys(&result)
+        .into_iter()
+        .filter(|k| *k == "Beebeeb" || k.starts_with("Beebeeb/"))
+        .collect();
+    assert!(under.is_empty(), "{under:?}");
+    assert_eq!(result.skipped, [("Beebeeb".to_string(), SkipReason::Excluded)]);
+    assert_eq!(keys(&result), ["BeebeebOld", "BeebeebOld/kept.txt", "report.pdf"]);
+}
+
+#[test]
+fn excluded_paths_compare_by_component_and_by_case_where_the_os_does() {
+    let base = Path::new("/home/u/Documents/Beebeeb");
+    assert!(is_within(Path::new("/home/u/Documents/Beebeeb"), base, false));
+    assert!(is_within(Path::new("/home/u/Documents/Beebeeb/Backups"), base, false));
+    assert!(is_within(Path::new("/home/u/Documents/Beebeeb/"), base, false));
+    assert!(!is_within(Path::new("/home/u/Documents/BeebeebOld"), base, false));
+    assert!(!is_within(Path::new("/home/u/Documents"), base, false));
+    assert!(!is_within(Path::new("/home/u/documents/beebeeb"), base, false));
+    // Windows and macOS: no case, and NFC.
+    assert!(is_within(Path::new("/home/u/documents/BEEBEEB/x"), base, true));
+    assert!(is_within(
+        Path::new("/home/u/Cafe\u{301}/a"),
+        Path::new("/home/u/caf\u{e9}"),
+        true
+    ));
+    assert!(!is_within(Path::new("/home/u/documents/beebeebold"), base, true));
+}
+
+/// Two names in one Linux folder that differ only in normalisation are both
+/// backed up, each from its own bytes; the NFC one keeps the NFC key. The NFD
+/// name sorts first byte-wise, so taking names in listing order fails this.
+#[cfg(target_os = "linux")]
+#[test]
+fn walk_nfc_and_nfd_twins_both_listed() {
+    let dir = TempDir::new("twins");
+    dir.write("Rene\u{301}.txt", b"nfd");
+    dir.write("Ren\u{e9}.txt", b"nfc");
+    let walk = walk_with_paths(dir.path(), &[]).expect("walk");
+    assert_eq!(walk.result.entries.len(), 2);
+    assert!(walk.result.skipped.is_empty(), "{:?}", walk.result.skipped);
+    assert_eq!(std::fs::read(&walk.paths["Ren\u{e9}.txt"]).expect("nfc"), b"nfc");
+    assert_eq!(std::fs::read(&walk.paths["Rene\u{301}.txt"]).expect("nfd"), b"nfd");
 }
 
 #[test]
@@ -202,4 +263,24 @@ fn fingerprint_tracks_size_mtime_and_file_id() {
     let folder = dir.path().join("folder");
     std::fs::create_dir(&folder).expect("mkdir");
     assert!(fingerprint(&folder).is_err(), "a folder has no fingerprint");
+}
+
+/// Review finding 2: a listing that fails partway yields no entries at all,
+/// so the folder is reported unreadable as a whole (or, for the backed-up
+/// folder itself, the pass stops) instead of half its files being planned.
+#[test]
+fn a_listing_that_fails_partway_is_not_used() {
+    let listing = vec![
+        Ok(("a.jpg".to_string(), ())),
+        Err(std::io::Error::other("the listing broke off")),
+        Ok(("b.jpg".to_string(), ())),
+    ];
+    assert!(collect_listing(listing.into_iter()).is_err());
+    let whole = vec![Ok(("b.jpg".to_string(), ())), Ok(("a.jpg".to_string(), ()))];
+    let names: Vec<String> = collect_listing(whole.into_iter())
+        .expect("listing")
+        .into_iter()
+        .map(|(name, ())| name)
+        .collect();
+    assert_eq!(names, ["a.jpg", "b.jpg"]);
 }

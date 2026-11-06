@@ -47,7 +47,8 @@ fn folder_id(folders: &HashMap<String, Uuid>, key: &str) -> Result<Uuid, HostErr
 }
 
 /// Run one pass of the backup of `c` from `source_root` (the person's own
-/// folder, read in place). In order:
+/// folder, read in place), never entering `exclude` (the client's own sync
+/// root; see [`crate::walk_source`]). In order:
 ///
 /// 1. read this device's records, then the device tree (records first, so a
 ///    record written meanwhile by a finishing upload is in the tree listed
@@ -58,12 +59,15 @@ fn folder_id(folders: &HashMap<String, Uuid>, key: &str) -> Result<Uuid, HostErr
 ///    `beebeeb_core::backup::plan_pass`, then mark what was removed elsewhere;
 /// 4. ensure the planned folders, parents first;
 /// 5. apply the moves, re-keying each record with `put_record`;
-/// 6. fingerprint each planned upload and `enqueue_upload` it.
+/// 6. fingerprint each planned upload, read the records again, and
+///    `enqueue_upload` each one no record already holds (an upload that
+///    completed during the pass wrote its record meanwhile).
 ///
 /// A pass never writes a record for an upload, and never touches the source.
 pub async fn run_pass<H: BackupHost>(
     host: &H,
     source_root: &Path,
+    exclude: &[PathBuf],
     c: &Category,
     budget: PassBudget,
 ) -> Result<PassReport, HostError> {
@@ -78,8 +82,8 @@ pub async fn run_pass<H: BackupHost>(
         });
     }
 
-    let root = source_root.to_path_buf();
-    let walk = tokio::task::spawn_blocking(move || walk_with_paths(&root))
+    let (root, exclude) = (source_root.to_path_buf(), exclude.to_vec());
+    let walk = tokio::task::spawn_blocking(move || walk_with_paths(&root, &exclude))
         .await
         .map_err(|_| HostError("the folder walk stopped before it finished".to_string()))?
         .map_err(|e| HostError(format!("cannot read the backed-up folder ({:?})", e.kind())))?;
@@ -142,12 +146,26 @@ pub async fn run_pass<H: BackupHost>(
     .await
     .map_err(|_| HostError("fingerprinting stopped before it finished".to_string()))?;
 
+    // An upload of an earlier pass that completed while this one ran has
+    // written its record since step 1: queueing it again would upload the
+    // same bytes twice (and, for a changed file, add a version).
+    let held: HashMap<String, (u64, i64)> = host
+        .records(c)
+        .await?
+        .into_iter()
+        .filter(|r| r.state == RecordState::BackedUp)
+        .map(|r| (r.key, (r.size, r.modified_ms)))
+        .collect();
     for upload in plan.uploads {
         let (Some(fp), Some(path)) = (fingerprints.get(&upload.key), walk.paths.get(&upload.key)) else {
             // Gone or no longer a file since the walk: the next pass sees it.
             report.deferred += 1;
             continue;
         };
+        if held.get(&upload.key) == Some(&(fp.size, fp.modified_ms)) {
+            report.unchanged += 1;
+            continue;
+        }
         let (parent, name) = split_key(&upload.key);
         host.enqueue_upload(UploadRequest {
             category: c.clone(),
