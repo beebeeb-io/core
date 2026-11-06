@@ -152,11 +152,7 @@ pub fn check_component_for(name: &str, portable: bool, windows: bool) -> Result<
         if name.ends_with('.') || name.ends_with(' ') {
             return Err(UnsafeName("ends with a dot or space (Windows strips it)"));
         }
-        let stem = name.split('.').next().unwrap_or(name).trim_end();
-        if WINDOWS_RESERVED
-            .iter()
-            .any(|reserved| reserved.eq_ignore_ascii_case(stem))
-        {
+        if is_windows_reserved_stem(name) {
             return Err(UnsafeName("is a reserved Windows device name"));
         }
     }
@@ -165,7 +161,8 @@ pub fn check_component_for(name: &str, portable: bool, windows: bool) -> Result<
 
 /// Whether `name`'s stem (the part before the first `.`, trailing spaces
 /// trimmed) is a reserved Windows device name, ASCII case-insensitively. The
-/// same test `check_component_for` and `sanitize_component` apply.
+/// one copy of this test: `check_component_for`, `sanitize_component` and the
+/// backup device-folder name all call it.
 pub(crate) fn is_windows_reserved_stem(name: &str) -> bool {
     let stem = name.split('.').next().unwrap_or(name).trim_end();
     WINDOWS_RESERVED
@@ -234,11 +231,7 @@ pub fn sanitize_component(name: &str, rules: Rules) -> Result<String, UnsafeName
         out.truncate(trimmed);
         out.push_str(&pad);
     }
-    let stem = out.split('.').next().unwrap_or(&out).trim_end();
-    if WINDOWS_RESERVED
-        .iter()
-        .any(|reserved| reserved.eq_ignore_ascii_case(stem))
-    {
+    if is_windows_reserved_stem(&out) {
         out.insert(0, '_');
     }
     check_component_for(&out, true, true)?;
