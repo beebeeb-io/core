@@ -30,7 +30,7 @@ fn reason_key(reason: Option<SkipReason>) -> Value {
 #[test]
 fn backup_protect_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 46, "every named backup_protect case is present");
+    assert_eq!(cases.len(), 50, "every named backup_protect case is present");
 
     let (mut mutations, mut skips, mut layout) = (0, 0, 0);
     for case in &cases {
@@ -78,5 +78,5 @@ fn backup_protect_cases_match_core() {
         "backup_protect: {} cases ({mutations} mutation, {skips} skip, {layout} layout)",
         cases.len()
     );
-    assert_eq!((mutations, skips, layout), (13, 30, 3), "case counts per kind");
+    assert_eq!((mutations, skips, layout), (13, 34, 3), "case counts per kind");
 }

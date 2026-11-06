@@ -13,8 +13,9 @@ pub struct EntryAttrs {
     /// neither a regular file nor a folder: never followed, never read.
     pub is_link: bool,
     /// The entry reports its bytes are not on this device (OneDrive Files
-    /// On-Demand, iCloud dataless, a `.icloud` stub). Reading it would
-    /// download it, so it is counted and shown, never read.
+    /// On-Demand, iCloud dataless). Reading it would download it, so it is
+    /// counted and shown, never read. A legacy `.icloud` stub is recognised
+    /// by its name in [`skip_reason`], whatever this says.
     pub not_local: bool,
 }
 
@@ -43,6 +44,9 @@ pub enum SkipReason {
     /// The walk could not list this folder or read this entry's attributes
     /// (permission denied); it is retried next pass and not descended into.
     Unreadable,
+    /// A path the client told the walk to leave out (its own sync root): not
+    /// listed, not read, not descended into. Plan Amendment 1, item 8.
+    Excluded,
 }
 
 impl SkipReason {
@@ -57,6 +61,7 @@ impl SkipReason {
             SkipReason::TooLarge => "too_large",
             SkipReason::TooDeep => "too_deep",
             SkipReason::Unreadable => "unreadable",
+            SkipReason::Excluded => "excluded",
         }
     }
 }
@@ -90,6 +95,13 @@ fn is_junk(name: &str) -> bool {
             .any(|suffix| ends_with_ignore_ascii_case(name, suffix))
 }
 
+/// A legacy iCloud stub, `.<name>.icloud` (ASCII case ignored), stands in for
+/// a file whose bytes are not on this Mac.
+fn is_icloud_stub(name: &str) -> bool {
+    const STUB_SUFFIX: &str = ".icloud";
+    name.len() > STUB_SUFFIX.len() + 1 && name.starts_with('.') && ends_with_ignore_ascii_case(name, STUB_SUFFIX)
+}
+
 /// `Some(reason)` when the entry `name` (one path component) is never backed
 /// up. The name rules come first, then the attributes: a not-local entry is
 /// reported as [`SkipReason::NotLocal`] even when it is also a reparse point,
@@ -105,7 +117,7 @@ pub fn skip_reason(name: &str, attrs: &EntryAttrs) -> Option<SkipReason> {
     {
         return Some(SkipReason::LibraryBundle);
     }
-    if attrs.not_local {
+    if attrs.not_local || is_icloud_stub(name) {
         return Some(SkipReason::NotLocal);
     }
     if attrs.is_link {

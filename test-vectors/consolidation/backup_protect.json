@@ -350,6 +350,42 @@
       "expect": "not_local"
     },
     {
+      "id": "skip_icloud_stub",
+      "kind": "skip",
+      "name": ".IMG_0001.HEIC.icloud",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": "not_local"
+    },
+    {
+      "id": "skip_icloud_stub_upper",
+      "kind": "skip",
+      "name": ".notes.ICLOUD",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": "not_local"
+    },
+    {
+      "id": "keep_icloud_without_dot",
+      "kind": "skip",
+      "name": "IMG_0001.icloud",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": null
+    },
+    {
+      "id": "keep_bare_dot_icloud",
+      "kind": "skip",
+      "name": ".icloud",
+      "is_dir": false,
+      "is_link": false,
+      "not_local": false,
+      "expect": null
+    },
+    {
       "id": "keep_dot_git_folder",
       "kind": "skip",
       "name": ".git",
