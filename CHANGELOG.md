@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1]
+
+Additive: backup rules (`beebeeb_core::backup`), the vocabulary (`beebeeb_types::backup`) and the
+filesystem pass (`beebeeb-backup`). No v0.2.0 API changes. LD-0113, spec
+`2026-11-06-backup-from-source-design.md` §4.
+
+### Added
+
+- **`beebeeb_types::backup`**: `SystemRole` (wire `"backups_root"`), `PROTECTED_FOLDER_ERROR`
+  (`"protected_folder"`), `BACKUPS_ROOT_UNCLAIMABLE_ERROR` (`"backups_root_unclaimable"`), `Category`
+  (keys and display names) and `Platform`.
+- **`beebeeb_core::backup`** (pure: no I/O, no clock, no network):
+  - layout: `ROOT_NAME` `"Backups"`, `MANIFEST_NAME` `".device.json"`, `backup_rel_path`;
+  - protection: `check_mutation` and the words, `Mutation`, `own_backup_refusal`. Only the Backups
+    root is refused; its children and moving items into it are ordinary;
+  - skip rules: `skip_reason`, `SkipReason` (OS junk, library bundles, links, not-local entries,
+    plus the client-set `Locked` and `TooLarge`, and the walk's `TooDeep` and `Unreadable`);
+  - device folders: `device_folder_name`, `device_id_from_machine_id` (label
+    `beebeeb/backup-device-id/v1`), `find_device_folder` (by manifest id, legacy desktop adoption,
+    create);
+  - the manifest: `DeviceManifest`, `parse_manifest`, `serialize_manifest` (a real iOS manifest
+    round-trips; unknown fields are kept);
+  - the root: `resolve_root` (use the flagged root, claim the oldest live `Backups`, or create) and
+    `plan_merge` (legacy duplicate roots, depth unbounded, keep-both on a clash);
+  - the pass planner: `plan_pass` (new, changed, unchanged, gone, unique moves, the budget,
+    removed elsewhere, keys the walk did not look into), `folder_presence`, `records_from_remote`,
+    `normalize_key`.
+- **`beebeeb-backup`** (new crate, for desktop and the CLI): `walk_source` (never opens a file,
+  never follows a link, never descends into what is not local; depth cap 64), `fingerprint`,
+  `attrs_of`, and `run_pass` over the `BackupHost` trait the client implements.
+- **Bindings**: uniffi `backup_*` (9 functions; every unknown string is `InvalidInput`) and wasm
+  `backupCheckMutation`, `backupProtectionMany`, `backupParseManifest`.
+- **Vectors**: `test-vectors/consolidation/backup_{protect,device,root,plan}.json` (46, 45, 20 and
+  49 cases), run by `cross_client_vectors`, with independent Python generators in
+  `test-vectors/tools/make_backup_*_vectors.py`.
+
 ## [0.2.0] - 2026-11-06
 
 ### Breaking and behaviour changes

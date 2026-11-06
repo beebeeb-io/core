@@ -1,93 +1,62 @@
-# beebeeb-wasm / uniffi exports — branch `feat/2326-request-row-shipped-seal`
+# beebeeb-wasm / uniffi exports — branch `feat/LD-0113-backup-rules`
 
-Task 2275 §15 + 2326 delta2 (request-row shipped seal). Base: core #65 head
-`2f5cd8a` (branch point; the generated WASM package at `5894fa4`, its parent,
-has the same 145 export names).
+LD-0113 (backups from the real folder, a protected Backups root, backup rules
+in core). Base: tag `v0.2.0` (`3db0cc26f286`). Additive only: nothing in v0.2.0
+is renamed, retyped or removed.
+
+## WASM
 
 Counts are the `export function` / `export class` names in the generated
-`beebeeb_wasm.d.ts`, which is what a bundler sees.
+`beebeeb_wasm.d.ts` (`wasm-pack build beebeeb-wasm --target web`), which is
+what a bundler sees.
 
-- base: 145 names
-- head: 149 names
+- base (`v0.2.0`): 149 names
+- head: 152 names
 - **removed: 0**
-- **added: 4**
+- **added: 3**
 
-Added names:
+| Name | What |
+| --- | --- |
+| `backupCheckMutation(role, mutation)` | Core's words when a trash / delete / rename / move of the row is refused, else `undefined`. An unknown string throws. |
+| `backupProtectionMany(roles: string[])` | One byte per listing row, 1 = protected (one crossing per listing). |
+| `backupParseManifest(json)` | A decrypted `.device.json` as a plain object; unknown fields kept. |
 
-| Name | Since | What |
-| --- | --- | --- |
-| `mintGuestItemId` | 2326 §15 | Mint a guest (F) item id with no master key |
-| `sealRequestRename` | 2326 §15 | Seal a request-row rename under the §15 string-derived key |
-| `previewableBatchFor` | core #65 merge | Per-platform preview table (`web` / `desktop` / `mobile`) |
-| `WasmRequestContentReader` | 2326 delta2 P2-2 | Request-row content reader: `fileId`, `chunkFormat`, `decryptor()`, `openFrame(...)` |
+Dialog copy (the device-folder confirmation) stays in the web UI. The web
+client keeps the row's `system_role` from the listing and passes it here.
 
-Nothing was renamed or removed. The request-row content handle changed shape;
-`WasmChunkDecryptor`, `ChunkDecryptorHandle` and `FileKeyHandle` are untouched.
+## UniFFI
 
-## Changed result shapes
+Counts are the `uniffi_beebeeb_uniffi_fn_*` and `uniffi_beebeeb_uniffi_checksum_*`
+symbols in the generated `beebeeb_uniffiFFI.h` (`uniffi-bindgen generate
+--language swift` over the built library), base against head.
 
-The request-row results no longer carry raw keys. Each row below is a change,
-not a removal; the exported function/class names are unchanged.
+- base (`v0.2.0`): 576 symbols
+- head: 594 symbols
+- **removed: 0**
+- **added: 18** (9 functions, each with its checksum)
 
-| Surface | Before | Replacement |
-| --- | --- | --- |
-| WASM `resolveRequestRow` result | `content: WasmChunkDecryptor`; before delta2 also `contentKey` / `nameKey` | `content: WasmRequestContentReader` (`fileId`, `chunkFormat`, `decryptor()`, `openFrame(versionId, index, isLast, format, frame)`); no key fields |
-| WASM `resolveRequestRow.renameTarget` | `{origin, pin, key}` | `{origin, pin}`; seal with `sealRequestRename(master, itemId, pin, filename, mimeType)` |
-| uniffi `RequestRowKeys` | `content: ChunkDecryptorHandle`; before delta2 also `content_key`, `name_key` | `content: RequestContentReader`; no key fields |
-| uniffi `resolve_request_row` | returned `RequestRowKeys.content: ChunkDecryptorHandle` | returns `RequestRowKeys.content: RequestContentReader` (same name, new shape) |
-| uniffi `resolve_request_row_detailed` | returned `ResolvedRequestRow.content: ChunkDecryptorHandle` | returns `ResolvedRequestRow.content: RequestContentReader` (same name, new shape) |
-| uniffi `ResolvedRequestRow` | `content: ChunkDecryptorHandle` | `content: RequestContentReader` |
-| uniffi `RequestRenameTarget` | `{origin, pin, key: FileKeyHandle}` | `{origin, pin}`; seal with `MasterKeyHandle::seal_request_rename` |
+| Function | What |
+| --- | --- |
+| `backup_check_mutation(role, mutation)` | `throws -> String?`: the refusal words, or none |
+| `backup_skip_reason(name, is_dir, is_link, not_local)` | Why an entry is never backed up, or none |
+| `backup_resolve_root(candidates)` | `BackupRootPlan`: `Use`, `Claim { id, merge_from }`, `Create` |
+| `backup_plan_merge(survivor, duplicates, clash_label, hhmm)` | `[BackupMergeStep]` from flat listing rows; pass `hhmm` with a dot |
+| `backup_device_folder_name(raw, my_id, taken)` | The device folder name, with the device-id suffix on a collision |
+| `backup_find_device_folder(me, candidates)` | `BackupDeviceFolderChoice`: `Existing`, `AdoptLegacy`, `Create { name }` |
+| `backup_parse_manifest(json)` / `backup_serialize_manifest(manifest)` | `.device.json`; unknown fields cross as `other_json` |
+| `backup_plan_pass(entries, records, live_remote, unseen, max_uploads, max_bytes)` | `BackupPassPlan` (iOS passes an empty `unseen`) |
 
-`RequestContentReader` (uniffi) / `WasmRequestContentReader` (WASM) has no key
-getter; the key is zeroized when the reader drops, it is bound to the row's
-file id and chunk-format pin, `decryptor()` returns a fresh sequential
-decryptor per call, and `open_frame` / `openFrame` reads one frame by index.
+Every string the binding parses (mutation, role, platform, record state, id)
+that it does not know is `CryptoError.InvalidInput`, never a pass.
 
-## UniFFI additions and generated-binding shape (2326, request content)
+The committed `beebeeb-uniffi/bindings/` copy is regenerated by `build-ios.sh`
+/ `build-android.sh` on the platform rung; this branch does not commit it.
+Before this branch it was already behind v0.2.0's source (43 functions of
+v0.2.0 are missing from the committed header), so a regeneration also brings
+those in.
 
-The `cargo check` surface is not the whole story for UniFFI: the committed
-Kotlin/Swift bindings are generated from these annotations. This branch adds
-three items to the UniFFI surface (all additions; nothing removed):
+## Rust (rustdoc JSON, private items included)
 
-| uniffi item | Kind | What |
-| --- | --- | --- |
-| `RequestContentReader` | object | Request-row content reader: `file_id`, `chunk_format`, `decryptor()`, `open_frame(...)`; no key getter |
-| `MasterKeyHandle::seal_request_rename` | method | Seal a request-row rename under the §15 string-derived key |
-| `mint_guest_item_id` | function | Mint a guest (F) item id with no master key |
-
-The generated bindings must be regenerated for these three (`build-ios.sh` /
-`build-android.sh`); the in-tree Rust tests do not compile the Swift/Kotlin
-glue.
-
-One uniffi caller change (not an export change): the request-row readers used
-to be consumed as `content.push_frame(...)`; they are now
-`content.decryptor().push_frame(...)`, because every call returns a fresh
-sequential cursor. Callers that kept the old `ChunkDecryptorHandle`-shaped
-field still compile against the record but must follow the new call.
-
-The WASM counts above are unchanged by these docs: 145 base, 149 head,
-0 removed, 4 added.
-
-## Reconciliation of the changed-shape count
-
-The delta report said **4 changed** and the reviewer said **3**. Both are
-right about different sets:
-
-- 4 changed exported shapes = the WASM `resolveRequestRow` result plus the
-  three uniffi records (`RequestRowKeys`, `ResolvedRequestRow`,
-  `RequestRenameTarget`).
-- the reviewer's 3 = the uniffi records only (the same three).
-- the table above has 7 rows because it also lists `resolve_request_row`,
-  `resolve_request_row_detailed` and `resolveRequestRow.renameTarget`: those
-  are the same record changes seen at their entry points, plus the removed
-  `renameTarget.key` field. They are not additional exported names.
-
-The earlier delta report's "4 changed" counted the request-row records; no
-exported item was removed in either count.
-
-## Artifact
-
-The generated WASM package for the branch head is under
-`bb-gate-logs/fullspeed/core-wasm-pkg/<head-sha>/` (web target, release); its
-`EXPORTS.md` repeats these counts for that head.
+`beebeeb_core` +171 items, `beebeeb_types` +31, `beebeeb_uniffi` +374 (the
+uniffi scaffolding behind the 9 exports), `beebeeb_wasm` +5; **0 removed and 0
+changed** in all four. New crate: `beebeeb-backup`.

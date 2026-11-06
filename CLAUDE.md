@@ -34,9 +34,11 @@ beebeeb-core/   AES-256-GCM, Argon2id KDF (256MiB/4iter/2par), BIP39 recovery, H
   src/direct_transfer/       pure-Rust rules of the direct S3 transfer contract (no I/O, clock or runtime); vectors in test-vectors/direct_transfer.json
   src/direct_transfer/range/ RangePlanner, PieceCutter, RangeBudget, the in-flight split (C3); vectors in test-vectors/direct_range.json
   src/onboarding/            password policy, breach (k-anonymity) check, signup ceremony; src/opaque*.rs, recovery.rs
+  src/backup/                pure backup rules (LD-0113): protection, skip, device folders, manifest, root/merge, pass planner; vectors in test-vectors/consolidation/backup_*.json
 beebeeb-types/  CipherSuite, EncryptedBlob, KdfParams, ChunkMeta (shared across all repos)
 beebeeb-sync/   desktop sync engine: watcher (notify), conflicts (KeepBoth), selective sync
 beebeeb-transfer/  L2 driver above direct_transfer: one download() over any DirectIo (CLI + desktop); range_session() + RangeLessor (LD-0105)
+beebeeb-backup/    L2 backup pass (LD-0113): walk_source (never opens a file), fingerprint, run_pass over a client's BackupHost (desktop + CLI)
 beebeeb-upload/, beebeeb-wasm/ (web; js-tests/), beebeeb-uniffi/ (mobile/desktop handles)   bindings/
 test-vectors/vectors.json + direct_*.json + tools/ (independent Python generators)   drift guards: test_vectors_v2, published_v2_vectors_match_core
 ```
@@ -91,6 +93,7 @@ The rules whose breakage costs data, a key, a credential or a user. One line eac
 - Passphrase NFC normalization never grows an unwiped secret buffer; core never seals a name its own opener refuses (`kdf::sanitize_actor_name`).
 - `kdf::open_legacy_child_key` refuses a 32-byte UTF-8 plaintext, so a name or label sealed under the same folder key can never be served as a child key.
 - Direct vectors: add rows in the generator, never in the JSON (`check-direct-vectors-generated.sh` fails on hand edits).
+- Backups (LD-0113): the root is the `backups_root` row, never a name or a path; the pass never writes, moves, deletes, stages or hydrates a source file; a record at or under a key the walk did not look into is never gone and never a move source.
 - Never release plaintext before `finish()` outside `RangeSession` (`beebeeb_transfer::range_session`); `RangeSession` releases only `RangeOpener`-authenticated frames of one recorded version (`docs/agent-notes.md`, I1–I9).
 
 ## How we work
