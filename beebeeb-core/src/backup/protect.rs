@@ -223,7 +223,7 @@ pub fn check_root_mutation(role: Option<SystemRole>, m: Mutation) -> Result<(), 
 /// - the root: everything refused, with the root's words;
 /// - a device's manifest: everything refused, [`MSG_READ_ONLY`];
 /// - a device folder, a category folder or anything inside: trash and delete
-///   are allowed (the "Delete <device>'s backup?" dialog, and one file
+///   are allowed (the "Delete `<device>`'s backup?" dialog, and one file
 ///   deleted from a backup, rule 11); rename, move, create and write are
 ///   refused, [`MSG_READ_ONLY`];
 /// - outside: `Ok`.

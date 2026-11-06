@@ -73,6 +73,7 @@ those in.
 
 ## Rust (rustdoc JSON, private items included)
 
-`beebeeb_core` +171 items, `beebeeb_types` +31, `beebeeb_uniffi` +374 (the
-uniffi scaffolding behind the 9 exports), `beebeeb_wasm` +5; **0 removed and 0
-changed** in all four. New crate: `beebeeb-backup`.
+`beebeeb_core` +211 items, `beebeeb_types` +33, `beebeeb_uniffi` +439 (the
+uniffi scaffolding behind the 16 exports), `beebeeb_wasm` +13; **0 removed and 0
+changed** in all four (rustdoc JSON of `v0.2.0` and of this branch, pinned
+1.96.0, item paths compared). New crate: `beebeeb-backup`.
