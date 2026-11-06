@@ -219,7 +219,7 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -257,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-sync"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "beebeeb-core",
  "beebeeb-types",
@@ -275,7 +275,7 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-transfer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "beebeeb-core",
  "bytes",
@@ -288,14 +288,14 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-types"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "beebeeb-uniffi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "beebeeb-core",
  "beebeeb-types",
@@ -310,7 +310,7 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-upload"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "beebeeb-core",
  "beebeeb-types",
@@ -325,7 +325,7 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-wasm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64",
  "beebeeb-core",

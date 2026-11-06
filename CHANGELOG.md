@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-06
+
 ### Added
+- Range reads for streaming hydration (LD-0105, core PR #71): `chunk_stream::RangeOpener`
+  opens one authenticated frame at any index under the file's one geometry and version id;
+  `direct_transfer::range::RangePlanner` grants windows at any start (chunk 0 first, then
+  demands, then read-ahead), aging out idle grants without spending renewals; `range_session`
+  in `beebeeb-transfer` hands each authenticated 4 KiB piece to the system; `RangeLessor`
+  bounds the shared memory budget (four files at a time, at most 256 MiB of chunks in
+  flight). Additive: no existing public item changed behaviour. New test vectors:
+  `test-vectors/direct_range.json`, generated and drift-guarded in CI.
 - `beebeeb-transfer`, the L2 driver crate for direct S3 downloads (task 2173, plan K2):
   `download()` drives core's `DownloadPlanner` over any `DirectIo` transport (API calls,
   bounded storage GETs, the pinned per-chunk route, injected sleep and clocks), decrypts
@@ -359,9 +369,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and named the EU Digital Operational Resilience Act as a fit. Neither was ever true: `core`
   has **not** had an external audit (see "Audit status" in the README). The mockups live in
   the private design workspace; this repo is the crypto core.
-
-### Security
-- Nothing yet.
 
 ## [0.1.0] - 2026-05-13
 
