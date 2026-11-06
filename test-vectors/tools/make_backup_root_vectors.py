@@ -7,6 +7,7 @@ expected answer is written here from the spec. Usage:
     python3 -I test-vectors/tools/make_backup_root_vectors.py test-vectors/consolidation/backup_root.json
 """
 import json
+import unicodedata
 import sys
 
 
@@ -115,6 +116,13 @@ merge("merge_names_compare_case_insensitively",
       node(1, "Backups", True, [node(10, "Camera Roll", True)]),
       [node(2, "Backups", True, [node(20, "camera roll", True, [node(21, "IMG_9.heic", False)])])],
       [move(21, 10), trash(20), trash(2)])
+# keep_both's taken names use the same fold as the clash test (NFC + lowercase): the survivor already holds the
+# first keep-both name, stored NFD by an old Mac client, so the copy counts up instead of colliding with it.
+merge("merge_keep_both_name_is_free_after_nfc_fold",
+      node(1, "Backups", True, [node(10, unicodedata.normalize("NFD", "Café (merged, 14.05).jpg"), False),
+                                node(11, "Café.jpg", False)]),
+      [node(2, "Backups", True, [node(20, "Café.jpg", False)])],
+      [move_renamed(20, 1, "Café (merged, 14.05) 2.jpg"), trash(2)])
 # A folder moved in from the first duplicate receives the second duplicate's same-name folder.
 merge("merge_later_duplicate_merges_into_a_moved_folder",
       node(1, "Backups", True),

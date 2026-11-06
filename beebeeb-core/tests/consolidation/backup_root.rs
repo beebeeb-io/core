@@ -75,7 +75,7 @@ fn expected_plan(v: &Value) -> RootPlan {
 #[test]
 fn backup_root_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 20, "every named backup_root case is present");
+    assert_eq!(cases.len(), 21, "every named backup_root case is present");
 
     let (mut roots, mut merges) = (0, 0);
     for case in &cases {
@@ -121,5 +121,5 @@ fn backup_root_cases_match_core() {
         }
     }
     println!("backup_root: {} cases ({roots} root, {merges} merge)", cases.len());
-    assert_eq!((roots, merges), (12, 8), "case counts per kind");
+    assert_eq!((roots, merges), (12, 9), "case counts per kind");
 }

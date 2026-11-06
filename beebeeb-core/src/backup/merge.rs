@@ -8,6 +8,7 @@
 
 use std::collections::HashSet;
 
+use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
 use super::fold_name;
@@ -52,8 +53,12 @@ fn merge_into(target: &mut MergeNode, source: &MergeNode, clash_label: &str, hhm
                 steps.push(MergeStep::Trash { id: child.id });
             }
             Some(_) => {
-                let taken: HashSet<String> = target.children.iter().map(|t| t.name.to_lowercase()).collect();
-                let new_name = keep_both_name(&child.name, clash_label, hhmm, &taken);
+                // The same fold as the clash test above. keep_both_name
+                // lowercases its candidate, so it gets the name in NFC: then
+                // its test is exactly `fold_name`.
+                let taken: HashSet<String> = target.children.iter().map(|t| fold_name(&t.name)).collect();
+                let original: String = child.name.nfc().collect();
+                let new_name = keep_both_name(&original, clash_label, hhmm, &taken);
                 steps.push(MergeStep::MoveRenamed {
                     id: child.id,
                     new_parent: target.id,

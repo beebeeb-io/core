@@ -751,6 +751,58 @@
       ]
     },
     {
+      "id": "merge_keep_both_name_is_free_after_nfc_fold",
+      "kind": "merge",
+      "survivor": {
+        "id": "00000001-0000-4000-8000-000000000000",
+        "name": "Backups",
+        "is_folder": true,
+        "children": [
+          {
+            "id": "0000000a-0000-4000-8000-000000000000",
+            "name": "Café (merged, 14.05).jpg",
+            "is_folder": false,
+            "children": []
+          },
+          {
+            "id": "0000000b-0000-4000-8000-000000000000",
+            "name": "Café.jpg",
+            "is_folder": false,
+            "children": []
+          }
+        ]
+      },
+      "duplicates": [
+        {
+          "id": "00000002-0000-4000-8000-000000000000",
+          "name": "Backups",
+          "is_folder": true,
+          "children": [
+            {
+              "id": "00000014-0000-4000-8000-000000000000",
+              "name": "Café.jpg",
+              "is_folder": false,
+              "children": []
+            }
+          ]
+        }
+      ],
+      "clash_label": "merged",
+      "hhmm": "14.05",
+      "expect": [
+        {
+          "move_renamed": {
+            "id": "00000014-0000-4000-8000-000000000000",
+            "new_parent": "00000001-0000-4000-8000-000000000000",
+            "new_name": "Café (merged, 14.05) 2.jpg"
+          }
+        },
+        {
+          "trash": "00000002-0000-4000-8000-000000000000"
+        }
+      ]
+    },
+    {
       "id": "merge_later_duplicate_merges_into_a_moved_folder",
       "kind": "merge",
       "survivor": {
