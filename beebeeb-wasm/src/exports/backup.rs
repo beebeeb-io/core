@@ -3,7 +3,9 @@
 //! with its words, one crossing per listing for the "is this protected" bit,
 //! and the device manifest (to show a device's name, model and last backup).
 //! Dialog copy stays in the web UI. An unknown mutation or role string throws,
-//! never passes (plan Amendment 1, item 3).
+//! never passes (plan Amendment 1, item 3), except in the per-row protection
+//! bit, where an unknown role is protected (review #8): a role the server adds
+//! later must never break an older bundle's listing.
 use beebeeb_core::backup::{Mutation, check_mutation, parse_manifest};
 use beebeeb_types::backup::SystemRole;
 use serde::Serialize;
@@ -31,13 +33,34 @@ pub fn backup_check_mutation(role: Option<String>, mutation: &str) -> Result<Opt
 }
 
 /// One byte per row of a listing (its `system_role`, `""` for none): 1 when
-/// the row is protected (no trash, delete, rename or move), else 0.
+/// the row is protected (no trash, delete, rename or move), else 0. A role this
+/// build does not know is protected (1), never an error: it fails safe, and the
+/// rest of the listing still renders.
 #[wasm_bindgen(js_name = backupProtectionMany)]
-pub fn backup_protection_many(roles: Vec<String>) -> Result<Vec<u8>, JsError> {
+pub fn backup_protection_many(roles: Vec<String>) -> Vec<u8> {
+    protection_bits(&roles)
+}
+
+pub(crate) fn protection_bits(roles: &[String]) -> Vec<u8> {
     roles
         .iter()
-        .map(|r| parse_role(Some(r)).map(|role| u8::from(check_mutation(role, Mutation::Trash).is_err())))
+        .map(|r| match r.as_str() {
+            "" => u8::from(check_mutation(None, Mutation::Trash).is_err()),
+            s => SystemRole::parse(s).map_or(1, |role| u8::from(check_mutation(Some(role), Mutation::Trash).is_err())),
+        })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::protection_bits;
+
+    /// Review #8: an unknown role is protected, never an error.
+    #[test]
+    fn unknown_role_is_protected() {
+        let roles = ["backups_root", "", "photos_root", "Backups"].map(String::from);
+        assert_eq!(protection_bits(&roles), [1, 0, 1, 1]);
+    }
 }
 
 /// Parse a decrypted `.device.json` into a plain object: the known fields and
