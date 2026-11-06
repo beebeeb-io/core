@@ -153,6 +153,7 @@ pub fn attrs_of(meta: &Metadata) -> EntryAttrs {
 ///   reported as one [`SkipReason::NotLocal`] skip at key `""` and never
 ///   listed (delta 3 #4).
 pub fn walk_source(root: &Path, exclude: &[PathBuf]) -> io::Result<WalkResult> {
+    check_excludes(exclude)?;
     walk_with_paths(root, exclude).map(|walk| walk.result)
 }
 
@@ -165,9 +166,19 @@ pub(crate) fn walk_with_paths(root: &Path, exclude: &[PathBuf]) -> io::Result<Wa
     walk_with(root, exclude, &|_, meta| attrs_of(meta))
 }
 
+/// The walk behind [`walk_source`] and the pass. `exclude` is checked by the
+/// caller, once ([`walk_source`], `run_pass`: [`check_excludes`]).
 pub(crate) fn walk_with(root: &Path, exclude: &[PathBuf], attrs: AttrsOf<'_>) -> io::Result<Walk> {
-    check_excludes(exclude)?;
     let root = std::path::absolute(root)?;
+    // On Unix `absolute` keeps `..`, and a root ending in one has no entry of
+    // its own to read before it is listed (review 4 #5): refused, as an
+    // excluded path with `..` is. Windows resolves `..` in `absolute`.
+    if root.components().any(|c| c == Component::ParentDir) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the backed-up folder's path holds `..`",
+        ));
+    }
     let not_a_folder = || io::Error::new(io::ErrorKind::NotADirectory, "the backed-up folder is not a folder");
     // The root is read like every entry, before anything opens or lists it
     // (plan Amendment 1, item 9; delta 3 #4). It may be a link (an XDG folder
@@ -442,9 +453,9 @@ impl Excludes {
     /// resolved (`canonicalize`: links followed, when the path exists), each
     /// spelling against each, so a root reached through a link still meets a
     /// sync root spelled through the link's target, and the other way round
-    /// (delta 3 #5). The walk calls this only once the root is known local.
+    /// (delta 3 #5). The walk calls this only once the root is known local,
+    /// with `exclude` already checked ([`check_excludes`]).
     pub(crate) fn new(root: &Path, exclude: &[PathBuf], case_insensitive: bool) -> io::Result<Excludes> {
-        check_excludes(exclude)?;
         let spellings = |path: &Path| {
             let mut keys = vec![path_keys(path, case_insensitive)];
             if let Ok(real) = std::fs::canonicalize(path) {

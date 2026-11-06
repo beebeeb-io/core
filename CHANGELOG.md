@@ -16,15 +16,26 @@ filesystem pass (`beebeeb-backup`). No v0.2.0 API changes. LD-0113, spec
 ### Added
 
 - **`beebeeb_types::backup`**: `SystemRole` (wire `"backups_root"`), `PROTECTED_FOLDER_ERROR`
-  (`"protected_folder"`), `BACKUPS_ROOT_UNCLAIMABLE_ERROR` (`"backups_root_unclaimable"`), `Category`
-  (keys and display names) and `Platform`.
+  (`"protected_folder"`), `BACKUPS_ROOT_UNCLAIMABLE_ERROR` (`"backups_root_unclaimable"`),
+  `ORIGIN_HEADER` (`"X-Beebeeb-Origin"`) and `ORIGIN_BACKUP` (`"backup"`), the header every request of
+  a backup pass carries (spec Amendment 8; the server ignores it until phase 2), `Category` (keys and
+  display names) and `Platform`.
 - **`beebeeb_core::backup`** (pure: no I/O, no clock, no network):
   - layout: `ROOT_NAME` `"Backups"`, `MANIFEST_NAME` `".device.json"`, `backup_rel_path`;
-  - protection: `check_mutation` and the words, `Mutation`, `own_backup_refusal`. In the app (web,
-    desktop, iOS) only the Backups root is refused; its children and moving items into it are
-    ordinary. In a drive surface (Explorer, Finder, the iOS Files app) `check_drive_mutation`
-    refuses everything at or under the root (`MSG_MANAGED_IN_APP`; Guus, "Protect the whole
-    tree"), the root and the device's own active backups keeping their own words;
+  - protection (spec Amendments 7 and 8; a backup is written by its device's own backup and by
+    nothing else): `Mutation` (`trash`, `delete`, `rename`, `move`, `create`, `write`; a move checks
+    the row with `Move` and the destination folder with `Create`), `BackupPosition` (`Root`,
+    `DeviceFolder`, `Manifest`, `CategoryFolder`, `Inside`, `Outside`) with
+    `BackupPosition::at_depth(depth, name)` and `is_hidden_backup_item` (a device folder's manifest,
+    never listed), and three rules with one set of words (`MSG_DELETE`, `MSG_MOVE`, `MSG_RENAME`,
+    `MSG_MANAGED_IN_APP`, `MSG_READ_ONLY`, and `MSG_BADGE` "Read-only", the badge every client shows
+    on the Backups root; Guus, "keep it Backups and just add a read-only badge"): `check_app_mutation` (web, desktop in the app,
+    iOS, the CLI: the root and a device's manifest refuse everything; under the root a backup can be
+    trashed or deleted and nothing else changes), `check_drive_mutation`
+    (Explorer, Finder, the iOS Files app: nothing at or under the root changes; the root's words,
+    then `own_backup_refusal` for the device's own active backups, then the rest) and
+    `check_root_mutation` (the server's phase-1 rule: the root is never trashed, deleted, renamed or
+    moved). The backup pass never goes through these rules;
   - skip rules: `skip_reason`, `SkipReason` (OS junk, library bundles, links, not-local entries
     and `.icloud` stubs, plus the client-set `Locked` and `TooLarge`, and the walk's `TooDeep`,
     `Unreadable` and `Excluded`);
@@ -40,29 +51,44 @@ filesystem pass (`beebeeb-backup`). No v0.2.0 API changes. LD-0113, spec
     `plan_merge` (legacy duplicate roots, depth unbounded, keep-both on a clash);
   - the pass planner: `plan_pass(entries, records, live_remote, live_remote_complete, unseen, held,
     budget)` (new, changed, unchanged, gone, unique moves, the budget, removed elsewhere only from a
-    complete listing, a record missing from an incomplete listing is unknown and its work waits,
-    a changed file whose remote copy is gone uploads as new, a record whose copy is live again is
-    held again, a record under an unseen key (raw, or normalised when no entry has its exact key) is
-    untouched, held keys skipped and not charged; each upload carries the paired
-    `record_key` and, for a change, the `remote_id` it versions), `folder_presence`,
+    complete listing, a record missing from an incomplete listing is unknown and its work waits (a
+    move whose signature an unknown record shares waits too), a changed file whose remote copy is
+    gone uploads as new, a record whose copy is live again is held again, a record under an unseen
+    key (raw, or by its folded key, NFC and case, when no entry has its exact key) is untouched,
+    held keys skipped and not charged, the first upload always fits (`max_uploads` 0 counts as 1);
+    each upload carries the paired `record_key` and, for a change, the `remote_id` it versions;
+    each record to mark removed elsewhere is a `RecordRef` (key and remote id) for a
+    compare-and-set), `folder_presence`,
     `records_from_remote` (exact key first, then the normalised key when unique), `normalize_key`,
     and the key helpers `file_name`, `parents` and `fold_name`;
   - custom folders: `custom_category_name` (safe like a device folder, never equal to a fixed
-    category or another custom folder: ` (2)`, ` (3)`; at most 200 bytes with the suffix, the base
-    is cut, never the suffix) and `category_folder_name`.
+    category or another custom folder: ` (2)`, ` (3)`; at most 200 bytes with the suffix and a
+    reserved stem's `_`, the base is cut, never the suffix) and `category_folder_name`.
 - **`beebeeb-backup`** (new crate, for desktop and the CLI): `walk_source(root, exclude)` (never
   opens a file, never follows a link, never descends into what is not local (the backed-up folder
   itself included: a not-local root is one skip, never listed) or into an excluded
   path such as the client's own sync root; attributes from the directory listing only; a folder is
-  listed whole or reported unreadable; depth cap 64), `fingerprint`, `attrs_of`, and
+  listed whole or reported unreadable; depth cap 64; a root whose path holds `..` is
+  `InvalidInput`), `fingerprint`, `attrs_of`, and
   `run_pass(host, root, exclude, category, budget)` over the `BackupHost` trait the client
   implements (it re-reads an entry whose listing differs from its record, checks what can fail
   before it changes anything, and on Windows and macOS never creates a folder that differs from
-  an existing one only in case or normalisation).
-- **Bindings**: uniffi `backup_*` (10 functions; every unknown string is `InvalidInput`) and wasm
-  `backupCheckMutation`, `backupCheckDriveMutation`, `backupProtectionMany`, `backupParseManifest`.
-- **Vectors**: `test-vectors/consolidation/backup_{protect,device,root,plan}.json` (76, 49, 21 and
-  66 cases; `check-backup-vectors-generated.sh` guards them in CI), run by `cross_client_vectors`, with independent Python generators in
+  an existing one only in case or normalisation). `BackupHost::mark_removed_elsewhere` is
+  compare-and-set on the key and remote id the pass read: a record a finishing upload rewrote
+  meanwhile is left alone. `BackupHost::put_record` (after a move) re-keys the record the pass read,
+  keeping the fields stored now, or stores the moved record when no record names that remote file
+  any more; it answers whether it stored, and a move it left alone counts as deferred. Every request a host makes for a pass carries
+  `ORIGIN_HEADER: ORIGIN_BACKUP`.
+- **Bindings**: uniffi `backup_*` (16 functions, among them `backup_check_root_mutation`,
+  `backup_check_app_mutation`, `backup_check_drive_mutation`, `backup_position_at_depth`,
+  `backup_is_hidden_item`, `backup_root_badge`, `backup_root_name` and `backup_origin_header`;
+  every unknown string is `InvalidInput`) and wasm `backupCheckRootMutation`,
+  `backupCheckAppMutation`, `backupCheckDriveMutation`, `backupPositionAtDepth`,
+  `backupIsHiddenItem`, `backupRootBadge`, `backupProtectionMany`, `backupParseManifest` (8).
+- **Vectors**: `test-vectors/consolidation/backup_{protect,device,root,plan}.json` (163, 57, 21 and
+  71 cases, counted with `python3 -I -c "import json,sys; [print(p, len(json.load(open(p))['cases'])) for p in
+  sys.argv[1:]]" test-vectors/consolidation/backup_*.json`; `check-backup-vectors-generated.sh` guards them in
+  CI), run by `cross_client_vectors`, with independent Python generators in
   `test-vectors/tools/make_backup_*_vectors.py`.
 
 ## [0.2.0] - 2026-11-06

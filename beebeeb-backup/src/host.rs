@@ -7,7 +7,7 @@ use std::fmt;
 use std::future::Future;
 use std::path::PathBuf;
 
-use beebeeb_core::backup::{BackupRecord, FolderPresence, RemoteEntry, UploadReason};
+use beebeeb_core::backup::{BackupRecord, FolderPresence, RecordRef, RemoteEntry, UploadReason};
 use beebeeb_types::backup::Category;
 use uuid::Uuid;
 
@@ -27,8 +27,9 @@ use crate::Fingerprint;
 /// `record_key`, if any. [`UploadReason::Changed`] uploads a new version of
 /// `remote_id` (the paired record's remote file, live at planning time), so
 /// the backup keeps one file with its history, never two; when it completes
-/// the client re-keys that record to `key` with `put_record`, which drops the
-/// old key. The client never finds the record by looking `key` up: after a
+/// the client re-keys that record to `key` with `put_record` (expected:
+/// `record_key` and `remote_id`), which drops the old key. The client never
+/// finds the record by looking `key` up: after a
 /// normalised pairing the record's own key is `record_key` (review #3). A
 /// `Changed` request whose remote file the server reports gone is uploaded as
 /// `New`.
@@ -102,6 +103,15 @@ impl std::error::Error for HostError {}
 
 /// The client side of one pass. `Send + Sync` because the pass holds the host
 /// across awaits.
+///
+/// A backup is written by its device's own backup and by nothing else (spec
+/// Amendment 8). Every server request a host makes for the pass (listing,
+/// folders, moves, uploads, the uploader's own) carries the header
+/// [`beebeeb_types::backup::ORIGIN_HEADER`] with
+/// [`beebeeb_types::backup::ORIGIN_BACKUP`]; the server ignores it until
+/// phase 2. The pass itself never goes through the protection rules
+/// (`beebeeb_core::backup::check_app_mutation`, `check_drive_mutation`,
+/// `check_root_mutation`): it is the one writer they protect the tree for.
 pub trait BackupHost: Send + Sync {
     /// List this device's backup of `c` (see [`DeviceTree`]).
     fn device_tree(&self, c: &Category) -> impl Future<Output = Result<DeviceTree, HostError>> + Send;
@@ -138,18 +148,44 @@ pub trait BackupHost: Send + Sync {
     /// client releases a key when its file changes or the reason clears.
     fn held_keys(&self, c: &Category) -> impl Future<Output = Result<Vec<String>, HostError>> + Send;
 
-    /// Store `record`: upsert by key, and remove any other record of `c` with
-    /// the same `remote_id`, so one remote file never has two keys. A pass
-    /// calls it only after a successful [`BackupHost::move_file`] (plan
-    /// Amendment 1); an upload's record is written by the client when the
-    /// upload completes.
-    fn put_record(&self, c: &Category, record: BackupRecord) -> impl Future<Output = Result<(), HostError>> + Send;
+    /// Re-key the record of a remote file the pass just moved (plan Amendment
+    /// 1). A pass calls it only after a successful [`BackupHost::move_file`]:
+    /// `expected` is the record as the pass read it (its key before the move
+    /// and its remote id), `record` the moved record (the new key,
+    /// `BackedUp`). Compare-and-set (review 4 #3, and the delta-4 self-review):
+    ///
+    /// - the record of `c` at `expected.key` still names `expected.remote_id`:
+    ///   only its key (to `record.key`) and its state (`BackedUp`) change. Its
+    ///   size, `modified_ms` and `uploaded_at_ms` stay as stored: an upload of
+    ///   a new version that finished after the pass read the records wrote
+    ///   them, and they are newer than the pass's copy;
+    /// - no record of `c` names `expected.remote_id` (an upload that finished
+    ///   meanwhile replaced the record at `expected.key` with another remote
+    ///   file): `record` is stored, so the moved file keeps a record and the
+    ///   next pass never uploads it again;
+    /// - otherwise (a record at another key names the remote id now) nothing
+    ///   changes.
+    ///
+    /// When it stores, it upserts by key and removes any other record of `c`
+    /// with the same `remote_id`, so one remote file never has two keys, and
+    /// answers `true`; else `false`. An upload's record is written by the
+    /// client when the upload completes.
+    fn put_record(
+        &self,
+        c: &Category,
+        expected: &RecordRef,
+        record: BackupRecord,
+    ) -> impl Future<Output = Result<bool, HostError>> + Send;
 
-    /// Set these records (by key) to `RemovedElsewhere`.
+    /// Set each of these records to `RemovedElsewhere`, compare-and-set like
+    /// [`BackupHost::put_record`]: only while the record at its `key` still
+    /// names its `remote_id` and is `BackedUp`. A record a finishing upload
+    /// rewrote since the pass read the records (a new `remote_id`) is left
+    /// alone (review 4 #3).
     fn mark_removed_elsewhere(
         &self,
         c: &Category,
-        keys: &[String],
+        records: &[RecordRef],
     ) -> impl Future<Output = Result<(), HostError>> + Send;
 
     /// The device or category folder was deleted elsewhere: turn this backup

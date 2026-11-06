@@ -1,37 +1,91 @@
 """Generator for test-vectors/consolidation/backup_protect.json (LD-0113 A2).
 
 Independent of core: the expected words and skip answers are written here from
-the spec (§4.2 rules 1, 7, 8) and mobile's protected-folders.ts, never read back
-from Rust. Usage: python3 -I test-vectors/tools/make_backup_protect_vectors.py test-vectors/consolidation/backup_protect.json
+the spec (§4.2 rules 1, 7, 8; Amendments 7 and 8, Guus 2026-11-06 19:30, 19:33
+and 20:04) and mobile's protected-folders.ts, never read back from Rust. Usage: python3 -I test-vectors/tools/make_backup_protect_vectors.py test-vectors/consolidation/backup_protect.json
 """
 import json
 import sys
 
+# Guus 2026-11-06 20:04, "keep it Backups and just add a read-only badge": the words name the folder.
 DEL = "Backups is a system folder and can't be deleted."  # mobile protected-folders.ts:11
 MOV = "Backups is a system folder and can't be moved."  # mobile protected-folders.ts:12
 REN = "Backups is a system folder and can't be renamed."  # new (spec §4.2 rule 7)
-WORDS = {"trash": DEL, "delete": DEL, "rename": REN, "move": MOV}
+MANAGED = "Backups are managed in the Beebeeb app. Open Beebeeb to delete a backup."
+READ_ONLY = ("Backups are read-only: each device writes its own. Change the file on that device, or save a copy "
+             "outside Backups.")
+BADGE = "Read-only"
+MUTATIONS = ["trash", "delete", "rename", "move", "create", "write"]
+STRUCTURAL = {"trash", "delete", "rename", "move"}
+# The root's own words: what was tried, for the four structural mutations; a new item or a content change is
+# read-only.
+ROOT_WORDS = {"trash": DEL, "delete": DEL, "rename": REN, "move": MOV, "create": READ_ONLY, "write": READ_ONLY}
+POSITIONS = ["root", "device_folder", "manifest", "category_folder", "inside", "outside"]
+MANIFEST = ".device.json"
 
 cases = []
-for m in ["trash", "delete", "rename", "move"]:
+# The root's name, the badge every client shows on it, and the origin header every request of a backup pass carries
+# (Amendment 8; the server ignores it until phase 2).
+cases.append({"id": "names_root_badge_and_origin", "kind": "names", "root_name": "Backups", "badge": BADGE,
+              "origin_header": "X-Beebeeb-Origin", "origin_backup": "backup"})
+
+# The server's root rule (phase 1): only the root's trash, delete, rename and move are refused. A new item in the
+# root (a device folder) and a content change are ok: the whole rule is the clients' (and the server's in phase 2).
+for m in MUTATIONS:
     for target, role in [("root", "backups_root"), ("child", None), ("other", None)]:
         cases.append({
-            "id": f"protect_{m}_{target}",
-            "kind": "mutation",
+            "id": f"root_{m}_{target}",
+            "kind": "root_mutation",
             "target": target,
             "role": role,
             "mutation": m,
-            "expect": WORDS[m] if role else "ok",
+            "expect": ROOT_WORDS[m] if role and m in STRUCTURAL else "ok",
         })
 cases.append({
-    "id": "protect_move_into_root_allowed",
-    "kind": "mutation",
+    "id": "root_move_into_root_allowed",
+    "kind": "root_mutation",
     "target": "an item moved into the root (the item has no role)",
     "role": None,
     "mutation": "move",
     "expect": "ok",
 })
 
+# A row's position: its depth below the flagged root (None: not under it) and, at depth 2, its name: a device
+# folder's manifest is its own position (lead 20:01), and only it is hidden from every listing.
+for id_, depth, name, expected in [
+    ("none", None, "Pictures", "outside"),
+    ("none_manifest_name", None, MANIFEST, "outside"),
+    ("0", 0, "Backups", "root"),
+    ("1", 1, "GLegion", "device_folder"),
+    ("1_manifest_name", 1, MANIFEST, "device_folder"),
+    ("2", 2, "Pictures", "category_folder"),
+    ("2_manifest", 2, MANIFEST, "manifest"),
+    ("2_manifest_name_other_case", 2, ".Device.json", "category_folder"),
+    ("3", 3, "beach.jpg", "inside"),
+    ("3_manifest_name", 3, MANIFEST, "inside"),
+    ("7", 7, "beach.jpg", "inside"),
+]:
+    cases.append({"id": f"position_at_depth_{id_}", "kind": "position", "depth": depth, "name": name,
+                  "expected": expected, "hidden": expected == "manifest"})
+
+
+# The app rule (web, desktop in the app, the iOS app, the CLI; Guus 19:33 "Both, staged"): the root refuses
+# everything with its own words; a device's manifest refuses everything (lead 20:01); under it, a backup can be
+# deleted (trash or delete) and nothing else changes; outside is ok. 6 positions x 6 mutations.
+def app_expect(position, m):
+    if position == "outside":
+        return "ok"
+    if position == "root":
+        return ROOT_WORDS[m]
+    if position == "manifest":
+        return READ_ONLY
+    return "ok" if m in {"trash", "delete"} else READ_ONLY
+
+
+for position in POSITIONS:
+    for m in MUTATIONS:
+        cases.append({"id": f"app_{m}_{position}", "kind": "app_mutation", "position": position, "mutation": m,
+                      "expect": app_expect(position, m)})
 
 def skip(id_, name, expect, is_dir=False, is_link=False, not_local=False):
     cases.append({
@@ -126,6 +180,11 @@ custom("custom_long_name_is_cut_to_200_bytes", LONG + "x" * 50, LONG)
 custom("custom_long_clash_keeps_its_suffix", LONG + "y" * 50, "a" * 196 + " (2)", [LONG])
 custom("custom_long_multibyte_clash_cuts_at_a_char_boundary", "é" * 120, "é" * 98 + " (2)",
        ["é" * 100])
+# Review 4 #4: a reserved stem's `_` stays inside the 200 bytes, so the stored name is its own folder's name and
+# never the folder of another custom name that cleans to the same 200 bytes.
+custom("custom_reserved_stem_at_the_byte_cap", "CON." + "a" * 196, "CON_." + "a" * 195)
+custom("custom_reserved_stem_at_the_cap_never_shares_a_folder", "CON." + "a" * 196, "CON_." + "a" * 191 + " (2)",
+       ["CON_." + "a" * 195])
 cases.append({
     "id": "layout_rel_path_long_custom_name_keeps_its_suffix",
     "kind": "rel_path",
@@ -143,29 +202,46 @@ cases.append({
     "expected": "Backups/GLegion/a_b/x.txt",
 })
 
-# The drive rule (Guus 2026-11-06 17:49, "Protect the whole tree"): in Explorer, Finder and the iOS Files app
-# nothing at or under the root can be deleted, renamed or moved. Precedence: the root's own words; then the
-# own-active-backup words; then "managed in the app"; else ok. 4 mutations x {root, under root, own active, outside}.
-APP = "Backups are managed in the Beebeeb app. Open Beebeeb to delete or move a backup."
+# The drive rule (Explorer, Finder, the iOS Files app; Guus 17:49 "Protect the whole tree", 19:30 and 19:33):
+# nothing at or under the root is trashed, deleted, renamed, moved, created or changed. Precedence: the root's own
+# words for its structural mutations; then the own-active-backup words; then "managed in the app" for a structural
+# mutation and "read-only" for a create, a write or anything on a device's manifest; outside is ok. 6 positions x 6
+# mutations, then 6 own-active cases and one precedence case.
 SOURCE = "C:\\Users\\guus\\Pictures\\beach.jpg"
 OWN = f"This is a backup of {SOURCE}. Change the original instead."
-for m in ["trash", "delete", "rename", "move"]:
-    for target, is_root, under, own, expect in [
-        ("root", True, False, None, WORDS[m]),
-        ("under_root", False, True, None, APP),
-        ("own_active", False, True, SOURCE, OWN),
-        ("outside", False, False, None, "ok"),
-    ]:
-        cases.append({"id": f"drive_{m}_{target}", "kind": "drive_mutation", "is_root": is_root,
-                      "under_root": under, "own_active_source": own, "mutation": m, "expect": expect})
+
+
+def drive_expect(position, m):
+    if position == "outside":
+        return "ok"
+    if position == "root" and m in STRUCTURAL:
+        return ROOT_WORDS[m]
+    if position == "manifest":
+        return READ_ONLY
+    return MANAGED if m in STRUCTURAL else READ_ONLY
+
+
+for position in POSITIONS:
+    for m in MUTATIONS:
+        cases.append({"id": f"drive_{m}_{position}", "kind": "drive_mutation", "position": position,
+                      "own_active_source": None, "mutation": m, "expect": drive_expect(position, m)})
+for m in MUTATIONS:
+    cases.append({"id": f"drive_{m}_own_active", "kind": "drive_mutation", "position": "inside",
+                  "own_active_source": SOURCE, "mutation": m, "expect": OWN})
+cases.append({"id": "drive_trash_root_words_before_own_active", "kind": "drive_mutation", "position": "root",
+              "own_active_source": SOURCE, "mutation": "trash", "expect": DEL})
 
 doc = {
-    "description": "LD-0113 backup protection and skip rules (spec 2026-11-06-backup-from-source §4.2 rules 1, 7 and 8): "
-    "the 4 x 3 mutation matrix (trash, delete, rename, move against the Backups root, a child and another row), "
-    "a move into the root allowed, the never-backed-up names, library bundles (folders only), links and not-local "
-    "entries with their precedence, and the layout path.",
-    "source": "mobile src/lib/protected-folders.ts (the delete and move words, byte-for-byte) + spec §4.2; "
-    "written by test-vectors/tools/make_backup_protect_vectors.py (independent of core)",
+    "description": "LD-0113 backup protection and skip rules (spec 2026-11-06-backup-from-source §4.2 rules 1, 7 and 8; "
+    "Amendments 7 and 8, lead 2026-11-06 20:01, Guus 20:04): the root name, its badge and the origin header; the server's "
+    "root rule (6 mutations x {the root, a child, another row}, a move into the root allowed); the position of a row by "
+    "its depth below the root and its name (a device's manifest), and which rows are hidden; the app rule and the "
+    "drive rule (6 positions x 6 mutations each, the drive rule's own-active words and their precedence); the "
+    "never-backed-up names, library bundles (folders only), links and not-local entries with their precedence; custom "
+    "folder names; and the layout path.",
+    "source": "Guus 2026-11-06 17:49, 19:30, 19:33 and 20:04 (the rules, their words and the badge), lead 20:01 (the "
+    "manifest) + mobile src/lib/protected-folders.ts (the delete and move words, byte-for-byte) + spec §4.2; written by "
+    "test-vectors/tools/make_backup_protect_vectors.py (independent of core)",
     "cases": cases,
 }
 with open(sys.argv[1], "w", encoding="utf-8") as f:

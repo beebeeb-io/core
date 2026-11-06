@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 
 use beebeeb_core::backup as rules;
-use beebeeb_types::backup::{Platform, SystemRole};
+use beebeeb_types::backup::{ORIGIN_BACKUP, ORIGIN_HEADER, Platform, SystemRole};
 use uuid::Uuid;
 
 use super::CryptoError;
@@ -43,33 +43,107 @@ fn parse_platform(s: &str) -> Result<Platform, CryptoError> {
 
 // ── Protection and skip ────────────────────────────────────────────────────
 
-/// The words to show when `mutation` (`"trash" | "delete" | "rename" |
-/// "move"`) of a row with `role` is refused, or `None` when it is allowed.
+fn parse_mutation(s: &str) -> Result<rules::Mutation, CryptoError> {
+    rules::Mutation::parse(s).ok_or_else(|| invalid("unknown mutation"))
+}
+
+fn parse_position(s: &str) -> Result<rules::BackupPosition, CryptoError> {
+    rules::BackupPosition::parse(s).ok_or_else(|| invalid("unknown backup position"))
+}
+
+/// The server's root rule (spec Amendment 8): the words to show when
+/// `mutation` (`"trash" | "delete" | "rename" | "move" | "create" | "write"`)
+/// of a row with `role` is refused, or `None` when it is allowed. Only the
+/// root's trash, delete, rename and move are refused; the app and drive rules
+/// below are the whole rule.
 #[uniffi::export]
-pub fn backup_check_mutation(role: Option<String>, mutation: String) -> Result<Option<String>, CryptoError> {
-    let m = rules::Mutation::parse(&mutation).ok_or_else(|| invalid("unknown mutation"))?;
-    Ok(rules::check_mutation(parse_role(role.as_deref())?, m)
+pub fn backup_check_root_mutation(role: Option<String>, mutation: String) -> Result<Option<String>, CryptoError> {
+    let m = parse_mutation(&mutation)?;
+    Ok(rules::check_root_mutation(parse_role(role.as_deref())?, m)
         .err()
         .map(|p| p.message.to_string()))
 }
 
-/// The drive rule (Explorer, Finder, the iOS Files app): the words to show
-/// when `mutation` of a row at (`is_root`) or under (`under_root`) the Backups
-/// root is refused, or `None`. `own_active_source`: the original's path when
+/// The app rule (the iOS app; spec Amendment 8): the words to show when
+/// `mutation` of a row at `position` (`"root" | "device_folder" | "manifest" |
+/// "category_folder" | "inside" | "outside"`, from
+/// [`backup_position_at_depth`]; for `"create"`, the folder the new item goes
+/// into) is refused, or `None`. A move checks the row with `"move"` and the
+/// destination folder with `"create"`.
+#[uniffi::export]
+pub fn backup_check_app_mutation(position: String, mutation: String) -> Result<Option<String>, CryptoError> {
+    let m = parse_mutation(&mutation)?;
+    Ok(rules::check_app_mutation(parse_position(&position)?, m)
+        .err()
+        .map(|p| p.message.to_string()))
+}
+
+/// The drive rule (the iOS Files app): the words to show when `mutation` of a
+/// row at `position` is refused, or `None`. Nothing at or under the root is
+/// changed in a drive surface. `own_active_source`: the original's path when
 /// the row is this device's own backup of a folder still being backed up.
 #[uniffi::export]
 pub fn backup_check_drive_mutation(
-    is_root: bool,
-    under_root: bool,
+    position: String,
     own_active_source: Option<String>,
     mutation: String,
 ) -> Result<Option<String>, CryptoError> {
-    let m = rules::Mutation::parse(&mutation).ok_or_else(|| invalid("unknown mutation"))?;
+    let m = parse_mutation(&mutation)?;
     Ok(
-        rules::check_drive_mutation(is_root, under_root, own_active_source.as_deref(), m)
+        rules::check_drive_mutation(parse_position(&position)?, own_active_source.as_deref(), m)
             .err()
             .map(|p| p.message.into_owned()),
     )
+}
+
+/// The position of the row `name`, `depth` folders below the flagged root
+/// (`None`: not under it): `"outside"`, `"root"` (0), `"device_folder"` (1),
+/// `"manifest"` (2, a device folder's `.device.json`), `"category_folder"`
+/// (2) or `"inside"` (3 or more).
+#[uniffi::export]
+pub fn backup_position_at_depth(depth: Option<u32>, name: String) -> String {
+    rules::BackupPosition::at_depth(depth.map(|d| d as usize), &name)
+        .as_str()
+        .to_string()
+}
+
+/// `true` for a row no listing ever shows (a device folder's `.device.json`);
+/// `depth` and `name` as for [`backup_position_at_depth`].
+#[uniffi::export]
+pub fn backup_is_hidden_item(depth: Option<u32>, name: String) -> bool {
+    rules::is_hidden_backup_item(depth.map(|d| d as usize), &name)
+}
+
+/// The badge every client shows on the Backups root (`"Read-only"`).
+#[uniffi::export]
+pub fn backup_root_badge() -> String {
+    rules::MSG_BADGE.to_string()
+}
+
+/// The name a new root gets on [`BackupRootPlan::Create`] (`"Backups"`). It
+/// identifies nothing: the root is the `backups_root` row.
+#[uniffi::export]
+pub fn backup_root_name() -> String {
+    rules::ROOT_NAME.to_string()
+}
+
+/// One HTTP header, name and value.
+#[derive(Debug, PartialEq, Eq, uniffi::Record)]
+pub struct BackupHeader {
+    pub name: String,
+    pub value: String,
+}
+
+/// The header every request of a backup pass carries (spec Amendment 8):
+/// `X-Beebeeb-Origin: backup`. iOS's backup sends it on its listing, folder,
+/// move and upload requests, and nothing else does; the server ignores it
+/// until phase 2.
+#[uniffi::export]
+pub fn backup_origin_header() -> BackupHeader {
+    BackupHeader {
+        name: ORIGIN_HEADER.to_string(),
+        value: ORIGIN_BACKUP.to_string(),
+    }
 }
 
 /// Why an entry is never backed up (`"junk"`, `"not_local"`, ...), or `None`.
@@ -96,6 +170,8 @@ pub struct BackupRootCandidate {
     pub system_role: Option<String>,
 }
 
+/// What the client does about the root; on `Create` it names the new root
+/// [`backup_root_name`].
 #[derive(Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum BackupRootPlan {
     Use { id: String },
@@ -455,12 +531,21 @@ pub struct BackupPlannedMove {
     pub to_key: String,
 }
 
+/// A record as the plan read it. Mark it removed elsewhere only while the
+/// record at `key` still names `remote_id` (compare-and-set): a record a
+/// finishing upload rewrote since is left alone.
+#[derive(Debug, PartialEq, Eq, uniffi::Record)]
+pub struct BackupRecordRef {
+    pub key: String,
+    pub remote_id: String,
+}
+
 #[derive(Debug, PartialEq, Eq, uniffi::Record)]
 pub struct BackupPassPlan {
     pub uploads: Vec<BackupPlannedUpload>,
     pub moves: Vec<BackupPlannedMove>,
     pub folders: Vec<String>,
-    pub mark_removed_elsewhere: Vec<String>,
+    pub mark_removed_elsewhere: Vec<BackupRecordRef>,
     pub unchanged: u64,
     pub gone_locally: u64,
     pub deferred: u64,
@@ -478,7 +563,9 @@ fn parse_state(s: &str) -> Result<rules::RecordState, CryptoError> {
 /// elsewhere. `unseen`: keys the source did not look at or into (iOS passes
 /// an empty list). `held`: keys the client holds (a lasting upload failure, or
 /// one in flight), skipped and not charged to the budget. `max_uploads`
-/// saturates at the platform's `usize`.
+/// saturates at the platform's `usize`, and 0 counts as 1: the first upload
+/// always fits (review 4 #7). Each `mark_removed_elsewhere` entry carries
+/// the remote id the record named, for a compare-and-set mark.
 // Flat FFI arguments, as the other uniffi exports with many inputs (lib.rs).
 #[allow(clippy::too_many_arguments)]
 #[uniffi::export]
@@ -546,7 +633,14 @@ pub fn backup_plan_pass(
             })
             .collect(),
         folders: plan.folders,
-        mark_removed_elsewhere: plan.mark_removed_elsewhere,
+        mark_removed_elsewhere: plan
+            .mark_removed_elsewhere
+            .into_iter()
+            .map(|m| BackupRecordRef {
+                key: m.key,
+                remote_id: m.remote_id.to_string(),
+            })
+            .collect(),
         unchanged: plan.unchanged as u64,
         gone_locally: plan.gone_locally as u64,
         deferred: plan.deferred as u64,
@@ -569,54 +663,103 @@ mod tests {
         doc["cases"].as_array().expect("cases").clone()
     }
 
-    /// The shared protection matrix through the binding iOS calls.
-    #[test]
-    fn uniffi_backup_check_mutation_matches_core() {
-        let mut matrix = 0;
-        for case in vector_cases("backup_protect")
-            .iter()
-            .filter(|c| c["kind"] == "mutation")
-        {
-            let role = case["role"].as_str().map(str::to_string);
-            let got =
-                backup_check_mutation(role, case["mutation"].as_str().unwrap().to_string()).expect("known strings");
-            let want = match case["expect"].as_str().unwrap() {
-                "ok" => None,
-                words => Some(words.to_string()),
-            };
-            assert_eq!(got, want, "{}", case["id"]);
-            if ["root", "child", "other"].contains(&case["target"].as_str().unwrap()) {
-                matrix += 1;
-            }
+    fn want(case: &serde_json::Value) -> Option<String> {
+        match case["expect"].as_str().unwrap() {
+            "ok" => None,
+            words => Some(words.to_string()),
         }
-        assert_eq!(matrix, 12, "the 4 x 3 matrix");
     }
 
-    /// The drive rule, through the binding, against every drive case of the
-    /// shared vector (4 mutations x {root, under root, own active, outside}).
+    /// The server's root rule through the binding, against every root case of
+    /// the shared vector (6 mutations x {root, child, other}, plus a move into
+    /// the root).
     #[test]
-    fn uniffi_backup_check_drive_mutation_matches_core() {
-        let mut matrix = 0;
+    fn uniffi_backup_check_root_mutation_matches_core() {
+        let mut n = 0;
         for case in vector_cases("backup_protect")
             .iter()
-            .filter(|c| c["kind"] == "drive_mutation")
+            .filter(|c| c["kind"] == "root_mutation")
         {
-            let got = backup_check_drive_mutation(
-                case["is_root"].as_bool().unwrap(),
-                case["under_root"].as_bool().unwrap(),
-                case["own_active_source"].as_str().map(str::to_string),
-                case["mutation"].as_str().unwrap().to_string(),
-            )
-            .expect("known strings");
-            let want = match case["expect"].as_str().unwrap() {
-                "ok" => None,
-                words => Some(words.to_string()),
-            };
-            assert_eq!(got, want, "{}", case["id"]);
-            matrix += 1;
+            let role = case["role"].as_str().map(str::to_string);
+            let got = backup_check_root_mutation(role, case["mutation"].as_str().unwrap().to_string())
+                .expect("known strings");
+            assert_eq!(got, want(case), "{}", case["id"]);
+            n += 1;
         }
-        assert_eq!(matrix, 16, "the 4 x 4 matrix");
-        assert!(backup_check_drive_mutation(false, true, None, "erase".to_string()).is_err());
+        assert_eq!(n, 19, "the 6 x 3 matrix plus a move into the root");
+    }
+
+    /// The app and drive rules through the binding, against every case of the
+    /// shared vector: 6 positions x 6 mutations each, and the drive rule's
+    /// own-active cases.
+    #[test]
+    fn uniffi_backup_check_app_and_drive_mutation_match_core() {
+        let (mut app, mut drive) = (0, 0);
+        for case in vector_cases("backup_protect") {
+            let position = || case["position"].as_str().unwrap().to_string();
+            let mutation = || case["mutation"].as_str().unwrap().to_string();
+            let got = match case["kind"].as_str().unwrap() {
+                "app_mutation" => {
+                    app += 1;
+                    backup_check_app_mutation(position(), mutation())
+                }
+                "drive_mutation" => {
+                    drive += 1;
+                    backup_check_drive_mutation(
+                        position(),
+                        case["own_active_source"].as_str().map(str::to_string),
+                        mutation(),
+                    )
+                }
+                _ => continue,
+            };
+            assert_eq!(got.expect("known strings"), want(&case), "{}", case["id"]);
+        }
+        assert_eq!(app, 36, "6 positions x 6 mutations");
+        assert_eq!(drive, 43, "6 positions x 6 mutations, 6 own active, 1 precedence");
+        for bad in ["erase", "Write", ""] {
+            assert!(backup_check_drive_mutation("inside".to_string(), None, bad.to_string()).is_err());
+            assert!(backup_check_app_mutation("inside".to_string(), bad.to_string()).is_err());
+        }
+        for bad in ["Inside", "under_root", ""] {
+            assert!(backup_check_drive_mutation(bad.to_string(), None, "write".to_string()).is_err());
+            assert!(backup_check_app_mutation(bad.to_string(), "create".to_string()).is_err());
+        }
+    }
+
+    /// The position helper and the words, against the shared vector.
+    #[test]
+    fn uniffi_backup_positions_and_names_match_core() {
+        let (mut positions, mut names) = (0, 0);
+        for case in vector_cases("backup_protect") {
+            match case["kind"].as_str().unwrap() {
+                "position" => {
+                    let depth = case["depth"].as_u64().map(|d| u32::try_from(d).unwrap());
+                    let name = case["name"].as_str().unwrap().to_string();
+                    assert_eq!(
+                        backup_position_at_depth(depth, name.clone()),
+                        case["expected"],
+                        "{}",
+                        case["id"]
+                    );
+                    assert_eq!(backup_is_hidden_item(depth, name), case["hidden"], "{}", case["id"]);
+                    positions += 1;
+                }
+                "names" => {
+                    assert_eq!(backup_root_name(), case["root_name"]);
+                    assert_eq!(backup_root_badge(), case["badge"]);
+                    assert_eq!(backup_origin_header().name, case["origin_header"]);
+                    assert_eq!(backup_origin_header().value, case["origin_backup"]);
+                    names += 1;
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(
+            (positions, names),
+            (11, 1),
+            "11 positions by depth and name; one names case"
+        );
     }
 
     /// Plan Amendment 1, item 3: an unknown string is an error, never a pass.
@@ -625,17 +768,17 @@ mod tests {
         let root = Some("backups_root".to_string());
         for bad in ["Trash", "erase", "", "delete "] {
             assert!(
-                backup_check_mutation(root.clone(), bad.to_string()).is_err(),
+                backup_check_root_mutation(root.clone(), bad.to_string()).is_err(),
                 "mutation {bad:?}"
             );
             assert!(
-                backup_check_mutation(None, bad.to_string()).is_err(),
+                backup_check_root_mutation(None, bad.to_string()).is_err(),
                 "mutation {bad:?} without a role"
             );
         }
-        assert!(backup_check_mutation(Some("Backups".to_string()), "trash".to_string()).is_err());
+        assert!(backup_check_root_mutation(Some("Backups".to_string()), "trash".to_string()).is_err());
         assert_eq!(
-            backup_check_mutation(Some(String::new()), "trash".to_string()).unwrap(),
+            backup_check_root_mutation(Some(String::new()), "trash".to_string()).unwrap(),
             None
         );
         let me = |platform: &str| BackupDeviceSelf {
@@ -679,6 +822,47 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    /// Review 4 #3 and #7 through the binding iOS calls: a mark carries the
+    /// remote id its record named (for a compare-and-set), and a budget of 0
+    /// uploads still plans the first.
+    #[test]
+    fn uniffi_backup_plan_pass_marks_by_ref_and_never_stalls() {
+        let id = Uuid::from_u128(7).to_string();
+        let record = BackupRecordEntry {
+            key: "gone.jpg".to_string(),
+            size: 1,
+            modified_ms: 1,
+            remote_id: id.clone(),
+            uploaded_at_ms: 2,
+            state: "backed_up".to_string(),
+        };
+        let entry = |key: &str| BackupSourceEntry {
+            key: key.to_string(),
+            is_dir: false,
+            size: 3,
+            modified_ms: 4,
+        };
+        let plan = backup_plan_pass(
+            vec![entry("a.jpg"), entry("b.jpg")],
+            vec![record],
+            Vec::new(),
+            true,
+            Vec::new(),
+            Vec::new(),
+            0,
+            u64::MAX,
+        )
+        .expect("plan");
+        assert_eq!(
+            plan.mark_removed_elsewhere,
+            [BackupRecordRef {
+                key: "gone.jpg".to_string(),
+                remote_id: id
+            }]
+        );
+        assert_eq!((plan.uploads.len(), plan.deferred), (1, 1));
     }
 
     /// Review #6 and #7: a candidate whose manifest does not parse is not

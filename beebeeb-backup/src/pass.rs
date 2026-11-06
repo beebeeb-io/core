@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use beebeeb_core::backup::{
-    BackupRecord, EntryAttrs, FolderPresence, PassBudget, RecordState, SkipReason, file_name, fold_name,
+    BackupRecord, EntryAttrs, FolderPresence, PassBudget, RecordRef, RecordState, SkipReason, file_name, fold_name,
     folder_presence, normalize_key, parents, plan_pass,
 };
 use beebeeb_types::backup::Category;
@@ -21,12 +21,14 @@ use crate::walk::{CASE_INSENSITIVE, Walk, check_excludes, walk_with_paths};
 pub struct PassReport {
     /// Handed to the uploader.
     pub queued: usize,
-    /// Moved on the server instead of uploaded again.
+    /// Moved on the server instead of uploaded again, its record re-keyed.
     pub moved: usize,
     pub unchanged: usize,
     /// Deleted locally; they stay in the backup.
     pub gone_locally: usize,
-    /// Left for the next pass by the budget.
+    /// Left for the next pass: by the budget, or a move whose record another
+    /// key holds by now (the server file moved, the record was left alone:
+    /// `BackupHost::put_record` answered `false`).
     pub deferred: usize,
     /// Gone between the walk and the handoff (deleted or renamed meanwhile):
     /// the next pass sees where it went.
@@ -313,14 +315,23 @@ pub(crate) async fn run_pass_with<H: BackupHost>(
             state: RecordState::BackedUp,
             ..before.clone()
         };
-        host.put_record(c, moved).await?;
-        report.moved += 1;
+        // Compare-and-set on the record as this pass read it (review 4 #3).
+        let expected = RecordRef {
+            key: planned.from_key.clone(),
+            remote_id: planned.remote_id,
+        };
+        if host.put_record(c, &expected, moved).await? {
+            report.moved += 1;
+        } else {
+            report.deferred += 1;
+        }
     }
 
+    // Every planned upload has a path: checked before the first change.
     let sources: Vec<(String, PathBuf)> = plan
         .uploads
         .iter()
-        .filter_map(|u| walk.paths.get(&u.key).map(|p| (u.key.clone(), p.clone())))
+        .map(|u| (u.key.clone(), walk.paths[&u.key].clone()))
         .collect();
     let handoffs: HashMap<String, Handoff> = tokio::task::spawn_blocking(move || {
         sources
@@ -342,9 +353,7 @@ pub(crate) async fn run_pass_with<H: BackupHost>(
         .map(|r| (r.key, (r.size, r.modified_ms)))
         .collect();
     for upload in plan.uploads {
-        let (Some(handoff), Some(path)) = (handoffs.get(&upload.key), walk.paths.get(&upload.key)) else {
-            return Err(HostError("a planned upload has no path from the walk".to_string()));
-        };
+        let (handoff, path) = (&handoffs[&upload.key], &walk.paths[&upload.key]);
         let fp = match handoff {
             Handoff::Queue(fp) => fp,
             Handoff::Vanished => {

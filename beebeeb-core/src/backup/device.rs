@@ -73,6 +73,8 @@ pub struct TakenName {
 /// refuses become `_`; display controls (bidi, zero-width) are removed;
 /// trailing dots and spaces become `_`; a reserved Windows name gets `_` after
 /// its stem. A name with nothing visible left of the original is `fallback`.
+/// The result is at most `NAME_MAX_BYTES`, the stem's `_` included, and
+/// cleaning it again changes nothing (review 4 #4).
 pub(super) fn clean_name(raw: &str, fallback: &str) -> String {
     // (char, came from the original unchanged)
     let mut out: Vec<(char, bool)> = Vec::with_capacity(raw.len());
@@ -83,25 +85,19 @@ pub(super) fn clean_name(raw: &str, fallback: &str) -> String {
             out.push((c, true));
         }
     }
-    let mut bytes = 0;
-    out.retain(|(c, _)| {
-        bytes += c.len_utf8();
-        bytes <= NAME_MAX_BYTES
-    });
-    for slot in out.iter_mut().rev() {
-        if slot.0 != '.' && slot.0 != ' ' {
-            break;
-        }
-        *slot = ('_', false);
-    }
+    cap(&mut out, NAME_MAX_BYTES);
     let visible = out
         .iter()
         .any(|(c, original)| *original && !c.is_whitespace() && !is_invisible_filler(*c));
     if !visible {
         return fallback.to_string();
     }
-    let mut name: String = out.into_iter().map(|(c, _)| c).collect();
+    let collect = |out: &[(char, bool)]| out.iter().map(|(c, _)| *c).collect::<String>();
+    let mut name = collect(&out);
     if is_windows_reserved_stem(&name) {
+        // The stem's `_` takes one of the bytes: the tail gives it up.
+        cap(&mut out, NAME_MAX_BYTES - 1);
+        name = collect(&out);
         let stem_end = name.find('.').unwrap_or(name.len());
         let stem_end = name[..stem_end].trim_end().len();
         name.insert(stem_end, '_');
@@ -110,6 +106,22 @@ pub(super) fn clean_name(raw: &str, fallback: &str) -> String {
         return fallback.to_string();
     }
     name
+}
+
+/// Keep at most `max` bytes of `out`, then turn its trailing dots and spaces
+/// into `_` (Windows drops them).
+fn cap(out: &mut Vec<(char, bool)>, max: usize) {
+    let mut bytes = 0;
+    out.retain(|(c, _)| {
+        bytes += c.len_utf8();
+        bytes <= max
+    });
+    for slot in out.iter_mut().rev() {
+        if slot.0 != '.' && slot.0 != ' ' {
+            break;
+        }
+        *slot = ('_', false);
+    }
 }
 
 fn taken_by_another(name: &str, my_id: &str, taken: &[TakenName]) -> bool {

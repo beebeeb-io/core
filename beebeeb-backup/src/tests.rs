@@ -388,6 +388,28 @@ fn walk_never_lists_a_root_that_is_not_local() {
     assert_eq!(keys(&walk.result), ["a.jpg", "sub", "sub/b.jpg"]);
 }
 
+/// Review 4 #5: a root with a `..` component is refused before anything is
+/// read. `std::path::absolute` keeps `..` on Unix, and a root ending in one
+/// has no entry of its own to read, so the not-local check could not run.
+#[test]
+fn walk_refuses_a_root_with_a_parent_component() {
+    let dir = TempDir::new("dotdot");
+    dir.write("Docs/sub/a.jpg", b"x");
+    let root = dir.path().join("Docs/sub/..");
+    let read = std::cell::RefCell::new(0);
+    let counted = |_: &Path, meta: &std::fs::Metadata| {
+        *read.borrow_mut() += 1;
+        attrs_of(meta)
+    };
+    match walk_with(&root, &[], &counted) {
+        Ok(walk) => panic!("walked {:?}", keys(&walk.result)),
+        Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput),
+    }
+    assert_eq!(*read.borrow(), 0, "nothing was read");
+    let err = walk_source(&root, &[]).expect_err("refused");
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+}
+
 /// A linked root is followed (the person's choice), and the folder it leads
 /// to is checked the same way.
 #[cfg(unix)]

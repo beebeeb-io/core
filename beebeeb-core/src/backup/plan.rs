@@ -56,7 +56,10 @@ pub struct BackupRecord {
     pub state: RecordState,
 }
 
-/// The most one pass queues.
+/// The most one pass queues. The first upload always fits, whatever the
+/// budget: `max_uploads` 0 counts as 1, and a first file larger than
+/// `max_bytes` is still planned, so a pass never stalls without a word
+/// (review 4 #7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PassBudget {
     pub max_uploads: usize,
@@ -105,6 +108,16 @@ pub struct PlannedMove {
     pub to_key: String,
 }
 
+/// A record as the pass read it: its key and the remote file it named then.
+/// A host changes a record from a plan only while the record at `key` still
+/// names `remote_id` (compare-and-set): one that a finishing upload rewrote
+/// since the pass read the records is left alone (review 4 #3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecordRef {
+    pub key: String,
+    pub remote_id: Uuid,
+}
+
 /// One pass's work.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PassPlan {
@@ -113,8 +126,10 @@ pub struct PassPlan {
     pub moves: Vec<PlannedMove>,
     /// Parent folders (keys) of the planned uploads and moves, parents first.
     pub folders: Vec<String>,
-    /// Record keys whose server copy is gone: mark them `RemovedElsewhere`.
-    pub mark_removed_elsewhere: Vec<String>,
+    /// Records whose server copy is gone: mark them `RemovedElsewhere`, each
+    /// only while the record at its key still names its `remote_id` (a
+    /// finishing upload may have written a fresh record meanwhile).
+    pub mark_removed_elsewhere: Vec<RecordRef>,
     /// Backed up, on the server and unchanged.
     pub unchanged: usize,
     /// Records with no entry any more. No action: a file deleted locally
@@ -222,8 +237,14 @@ fn signature(size: u64, modified_ms: i64, key: &str) -> MoveSignature {
     (size, modified_ms, fold_name(file_name(&normalize_key(key))))
 }
 
+/// A key in the form the unseen rule compares when the raw key does not
+/// match: normalised (NFC, `\` as `/`) and folded (`fold_name`).
+fn fold_key(key: &str) -> String {
+    fold_name(&normalize_key(key))
+}
+
 /// Whether `key` is one of `unseen` or lies under one, comparing the keys as
-/// given (`plan_pass` decides when they are normalised first).
+/// given (`plan_pass` decides when they are folded first).
 fn under_unseen(key: &str, unseen: &HashSet<&str>) -> bool {
     if unseen.is_empty() {
         return false;
@@ -249,8 +270,13 @@ fn under_unseen(key: &str, unseen: &HashSet<&str>) -> bool {
 ///   elsewhere, because the walk cannot know whether it is still there (plan
 ///   Amendment 1, items 5-6). `""` stands for the whole folder. A record
 ///   matches by its raw key, or, when no entry has its exact key, by its
-///   normalised key (the exact-then-normalised rule of spec Amendment 5), so
-///   a legacy NFD record under an unseen NFC folder is covered too. A file
+///   folded key (`fold_name` of the normalised key: NFC and case; the
+///   exact-then-normalised rule of spec Amendment 5, review 4 #2), so a
+///   legacy NFD record under an unseen NFC folder, or a record under an
+///   unseen folder renamed only in case, is covered too. The fold applies on
+///   every platform (the planner knows none): on Linux, where `Photos` and
+///   `photos` are two folders, a record of one waits while the other is
+///   unseen, the safe side. A file
 ///   entry at or under an unseen raw key is not planned either (it waits for
 ///   a pass that sees its folder whole); entries match raw only, so an
 ///   unreadable NFD folder never hides its readable NFC twin. iOS passes an
@@ -283,13 +309,13 @@ pub fn plan_pass(
         .filter(|e| !e.is_dir && !under_unseen(&e.key, &unseen))
         .collect();
     files.sort_by(|a, b| a.key.cmp(&b.key));
-    let unseen_normalized: Vec<String> = unseen.iter().map(|key| normalize_key(key)).collect();
-    let unseen_normalized: HashSet<&str> = unseen_normalized.iter().map(String::as_str).collect();
+    let unseen_folded: Vec<String> = unseen.iter().map(|key| fold_key(key)).collect();
+    let unseen_folded: HashSet<&str> = unseen_folded.iter().map(String::as_str).collect();
     let file_keys: HashSet<&str> = files.iter().map(|f| f.key.as_str()).collect();
     let record_unseen = |r: &BackupRecord| {
         !unseen.is_empty()
             && (under_unseen(&r.key, &unseen)
-                || (!file_keys.contains(r.key.as_str()) && under_unseen(&normalize_key(&r.key), &unseen_normalized)))
+                || (!file_keys.contains(r.key.as_str()) && under_unseen(&fold_key(&r.key), &unseen_folded)))
     };
     let mut records: Vec<&BackupRecord> = records.iter().filter(|r| !record_unseen(r)).collect();
     records.sort_by(|a, b| (&a.key, a.remote_id).cmp(&(&b.key, b.remote_id)));
@@ -307,7 +333,10 @@ pub fn plan_pass(
         mark_removed_elsewhere: records
             .iter()
             .filter(|r| live_remote_complete && r.state == RecordState::BackedUp && !live(r))
-            .map(|r| r.key.clone())
+            .map(|r| RecordRef {
+                key: r.key.clone(),
+                remote_id: r.remote_id,
+            })
             .collect(),
         ..PassPlan::default()
     };
@@ -381,6 +410,14 @@ pub fn plan_pass(
                 }
             }
             Pairing::Unpaired(sig) => {
+                // An unlisted record with this signature may be the file's
+                // own: the match is not unique until a complete listing
+                // says, so the entry waits, whatever the live records say
+                // (review 4 #6).
+                if unknown_sources.contains(sig) {
+                    plan.deferred_unknown += 1;
+                    continue;
+                }
                 let source = match (source_count.get(sig).map(Vec::as_slice), target_count.get(sig)) {
                     (Some(&[r]), Some(1)) => Some(r),
                     _ => None,
@@ -394,7 +431,6 @@ pub fn plan_pass(
                             to_key: file.key.clone(),
                         });
                     }
-                    None if unknown_sources.contains(sig) => plan.deferred_unknown += 1,
                     None => wanted.push(PlannedUpload {
                         key: file.key.clone(),
                         size: file.size,
@@ -420,7 +456,7 @@ pub fn plan_pass(
             continue;
         }
         let fits = plan.deferred == 0
-            && plan.uploads.len() < budget.max_uploads
+            && plan.uploads.len() < budget.max_uploads.max(1)
             && (plan.uploads.is_empty() || bytes.saturating_add(upload.size) <= budget.max_bytes);
         if fits {
             bytes = bytes.saturating_add(upload.size);

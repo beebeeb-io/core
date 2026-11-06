@@ -42,6 +42,15 @@ pub const PROTECTED_FOLDER_ERROR: &str = "protected_folder";
 /// create a root.
 pub const BACKUPS_ROOT_UNCLAIMABLE_ERROR: &str = "backups_root_unclaimable";
 
+/// The header every request of a backup pass carries, with [`ORIGIN_BACKUP`]
+/// (spec Amendment 8, Guus 2026-11-06 19:33): a backup is written by its
+/// device's own backup and by nothing else. The server ignores it until
+/// phase 2, when it refuses a write in the backup tree that is not tagged.
+pub const ORIGIN_HEADER: &str = "X-Beebeeb-Origin";
+
+/// The [`ORIGIN_HEADER`] value of a backup pass's requests.
+pub const ORIGIN_BACKUP: &str = "backup";
+
 /// What a backup folder holds. The display name is the folder's name under
 /// `Backups/<device>/`, kept byte-for-byte from the names the clients already
 /// write.

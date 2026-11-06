@@ -1,109 +1,505 @@
 {
-  "description": "LD-0113 backup protection and skip rules (spec 2026-11-06-backup-from-source §4.2 rules 1, 7 and 8): the 4 x 3 mutation matrix (trash, delete, rename, move against the Backups root, a child and another row), a move into the root allowed, the never-backed-up names, library bundles (folders only), links and not-local entries with their precedence, and the layout path.",
-  "source": "mobile src/lib/protected-folders.ts (the delete and move words, byte-for-byte) + spec §4.2; written by test-vectors/tools/make_backup_protect_vectors.py (independent of core)",
+  "description": "LD-0113 backup protection and skip rules (spec 2026-11-06-backup-from-source §4.2 rules 1, 7 and 8; Amendments 7 and 8, lead 2026-11-06 20:01, Guus 20:04): the root name, its badge and the origin header; the server's root rule (6 mutations x {the root, a child, another row}, a move into the root allowed); the position of a row by its depth below the root and its name (a device's manifest), and which rows are hidden; the app rule and the drive rule (6 positions x 6 mutations each, the drive rule's own-active words and their precedence); the never-backed-up names, library bundles (folders only), links and not-local entries with their precedence; custom folder names; and the layout path.",
+  "source": "Guus 2026-11-06 17:49, 19:30, 19:33 and 20:04 (the rules, their words and the badge), lead 20:01 (the manifest) + mobile src/lib/protected-folders.ts (the delete and move words, byte-for-byte) + spec §4.2; written by test-vectors/tools/make_backup_protect_vectors.py (independent of core)",
   "cases": [
     {
-      "id": "protect_trash_root",
-      "kind": "mutation",
+      "id": "names_root_badge_and_origin",
+      "kind": "names",
+      "root_name": "Backups",
+      "badge": "Read-only",
+      "origin_header": "X-Beebeeb-Origin",
+      "origin_backup": "backup"
+    },
+    {
+      "id": "root_trash_root",
+      "kind": "root_mutation",
       "target": "root",
       "role": "backups_root",
       "mutation": "trash",
       "expect": "Backups is a system folder and can't be deleted."
     },
     {
-      "id": "protect_trash_child",
-      "kind": "mutation",
+      "id": "root_trash_child",
+      "kind": "root_mutation",
       "target": "child",
       "role": null,
       "mutation": "trash",
       "expect": "ok"
     },
     {
-      "id": "protect_trash_other",
-      "kind": "mutation",
+      "id": "root_trash_other",
+      "kind": "root_mutation",
       "target": "other",
       "role": null,
       "mutation": "trash",
       "expect": "ok"
     },
     {
-      "id": "protect_delete_root",
-      "kind": "mutation",
+      "id": "root_delete_root",
+      "kind": "root_mutation",
       "target": "root",
       "role": "backups_root",
       "mutation": "delete",
       "expect": "Backups is a system folder and can't be deleted."
     },
     {
-      "id": "protect_delete_child",
-      "kind": "mutation",
+      "id": "root_delete_child",
+      "kind": "root_mutation",
       "target": "child",
       "role": null,
       "mutation": "delete",
       "expect": "ok"
     },
     {
-      "id": "protect_delete_other",
-      "kind": "mutation",
+      "id": "root_delete_other",
+      "kind": "root_mutation",
       "target": "other",
       "role": null,
       "mutation": "delete",
       "expect": "ok"
     },
     {
-      "id": "protect_rename_root",
-      "kind": "mutation",
+      "id": "root_rename_root",
+      "kind": "root_mutation",
       "target": "root",
       "role": "backups_root",
       "mutation": "rename",
       "expect": "Backups is a system folder and can't be renamed."
     },
     {
-      "id": "protect_rename_child",
-      "kind": "mutation",
+      "id": "root_rename_child",
+      "kind": "root_mutation",
       "target": "child",
       "role": null,
       "mutation": "rename",
       "expect": "ok"
     },
     {
-      "id": "protect_rename_other",
-      "kind": "mutation",
+      "id": "root_rename_other",
+      "kind": "root_mutation",
       "target": "other",
       "role": null,
       "mutation": "rename",
       "expect": "ok"
     },
     {
-      "id": "protect_move_root",
-      "kind": "mutation",
+      "id": "root_move_root",
+      "kind": "root_mutation",
       "target": "root",
       "role": "backups_root",
       "mutation": "move",
       "expect": "Backups is a system folder and can't be moved."
     },
     {
-      "id": "protect_move_child",
-      "kind": "mutation",
+      "id": "root_move_child",
+      "kind": "root_mutation",
       "target": "child",
       "role": null,
       "mutation": "move",
       "expect": "ok"
     },
     {
-      "id": "protect_move_other",
-      "kind": "mutation",
+      "id": "root_move_other",
+      "kind": "root_mutation",
       "target": "other",
       "role": null,
       "mutation": "move",
       "expect": "ok"
     },
     {
-      "id": "protect_move_into_root_allowed",
-      "kind": "mutation",
+      "id": "root_create_root",
+      "kind": "root_mutation",
+      "target": "root",
+      "role": "backups_root",
+      "mutation": "create",
+      "expect": "ok"
+    },
+    {
+      "id": "root_create_child",
+      "kind": "root_mutation",
+      "target": "child",
+      "role": null,
+      "mutation": "create",
+      "expect": "ok"
+    },
+    {
+      "id": "root_create_other",
+      "kind": "root_mutation",
+      "target": "other",
+      "role": null,
+      "mutation": "create",
+      "expect": "ok"
+    },
+    {
+      "id": "root_write_root",
+      "kind": "root_mutation",
+      "target": "root",
+      "role": "backups_root",
+      "mutation": "write",
+      "expect": "ok"
+    },
+    {
+      "id": "root_write_child",
+      "kind": "root_mutation",
+      "target": "child",
+      "role": null,
+      "mutation": "write",
+      "expect": "ok"
+    },
+    {
+      "id": "root_write_other",
+      "kind": "root_mutation",
+      "target": "other",
+      "role": null,
+      "mutation": "write",
+      "expect": "ok"
+    },
+    {
+      "id": "root_move_into_root_allowed",
+      "kind": "root_mutation",
       "target": "an item moved into the root (the item has no role)",
       "role": null,
       "mutation": "move",
+      "expect": "ok"
+    },
+    {
+      "id": "position_at_depth_none",
+      "kind": "position",
+      "depth": null,
+      "name": "Pictures",
+      "expected": "outside",
+      "hidden": false
+    },
+    {
+      "id": "position_at_depth_none_manifest_name",
+      "kind": "position",
+      "depth": null,
+      "name": ".device.json",
+      "expected": "outside",
+      "hidden": false
+    },
+    {
+      "id": "position_at_depth_0",
+      "kind": "position",
+      "depth": 0,
+      "name": "Backups",
+      "expected": "root",
+      "hidden": false
+    },
+    {
+      "id": "position_at_depth_1",
+      "kind": "position",
+      "depth": 1,
+      "name": "GLegion",
+      "expected": "device_folder",
+      "hidden": false
+    },
+    {
+      "id": "position_at_depth_1_manifest_name",
+      "kind": "position",
+      "depth": 1,
+      "name": ".device.json",
+      "expected": "device_folder",
+      "hidden": false
+    },
+    {
+      "id": "position_at_depth_2",
+      "kind": "position",
+      "depth": 2,
+      "name": "Pictures",
+      "expected": "category_folder",
+      "hidden": false
+    },
+    {
+      "id": "position_at_depth_2_manifest",
+      "kind": "position",
+      "depth": 2,
+      "name": ".device.json",
+      "expected": "manifest",
+      "hidden": true
+    },
+    {
+      "id": "position_at_depth_2_manifest_name_other_case",
+      "kind": "position",
+      "depth": 2,
+      "name": ".Device.json",
+      "expected": "category_folder",
+      "hidden": false
+    },
+    {
+      "id": "position_at_depth_3",
+      "kind": "position",
+      "depth": 3,
+      "name": "beach.jpg",
+      "expected": "inside",
+      "hidden": false
+    },
+    {
+      "id": "position_at_depth_3_manifest_name",
+      "kind": "position",
+      "depth": 3,
+      "name": ".device.json",
+      "expected": "inside",
+      "hidden": false
+    },
+    {
+      "id": "position_at_depth_7",
+      "kind": "position",
+      "depth": 7,
+      "name": "beach.jpg",
+      "expected": "inside",
+      "hidden": false
+    },
+    {
+      "id": "app_trash_root",
+      "kind": "app_mutation",
+      "position": "root",
+      "mutation": "trash",
+      "expect": "Backups is a system folder and can't be deleted."
+    },
+    {
+      "id": "app_delete_root",
+      "kind": "app_mutation",
+      "position": "root",
+      "mutation": "delete",
+      "expect": "Backups is a system folder and can't be deleted."
+    },
+    {
+      "id": "app_rename_root",
+      "kind": "app_mutation",
+      "position": "root",
+      "mutation": "rename",
+      "expect": "Backups is a system folder and can't be renamed."
+    },
+    {
+      "id": "app_move_root",
+      "kind": "app_mutation",
+      "position": "root",
+      "mutation": "move",
+      "expect": "Backups is a system folder and can't be moved."
+    },
+    {
+      "id": "app_create_root",
+      "kind": "app_mutation",
+      "position": "root",
+      "mutation": "create",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_write_root",
+      "kind": "app_mutation",
+      "position": "root",
+      "mutation": "write",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_trash_device_folder",
+      "kind": "app_mutation",
+      "position": "device_folder",
+      "mutation": "trash",
+      "expect": "ok"
+    },
+    {
+      "id": "app_delete_device_folder",
+      "kind": "app_mutation",
+      "position": "device_folder",
+      "mutation": "delete",
+      "expect": "ok"
+    },
+    {
+      "id": "app_rename_device_folder",
+      "kind": "app_mutation",
+      "position": "device_folder",
+      "mutation": "rename",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_move_device_folder",
+      "kind": "app_mutation",
+      "position": "device_folder",
+      "mutation": "move",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_create_device_folder",
+      "kind": "app_mutation",
+      "position": "device_folder",
+      "mutation": "create",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_write_device_folder",
+      "kind": "app_mutation",
+      "position": "device_folder",
+      "mutation": "write",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_trash_manifest",
+      "kind": "app_mutation",
+      "position": "manifest",
+      "mutation": "trash",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_delete_manifest",
+      "kind": "app_mutation",
+      "position": "manifest",
+      "mutation": "delete",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_rename_manifest",
+      "kind": "app_mutation",
+      "position": "manifest",
+      "mutation": "rename",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_move_manifest",
+      "kind": "app_mutation",
+      "position": "manifest",
+      "mutation": "move",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_create_manifest",
+      "kind": "app_mutation",
+      "position": "manifest",
+      "mutation": "create",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_write_manifest",
+      "kind": "app_mutation",
+      "position": "manifest",
+      "mutation": "write",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_trash_category_folder",
+      "kind": "app_mutation",
+      "position": "category_folder",
+      "mutation": "trash",
+      "expect": "ok"
+    },
+    {
+      "id": "app_delete_category_folder",
+      "kind": "app_mutation",
+      "position": "category_folder",
+      "mutation": "delete",
+      "expect": "ok"
+    },
+    {
+      "id": "app_rename_category_folder",
+      "kind": "app_mutation",
+      "position": "category_folder",
+      "mutation": "rename",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_move_category_folder",
+      "kind": "app_mutation",
+      "position": "category_folder",
+      "mutation": "move",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_create_category_folder",
+      "kind": "app_mutation",
+      "position": "category_folder",
+      "mutation": "create",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_write_category_folder",
+      "kind": "app_mutation",
+      "position": "category_folder",
+      "mutation": "write",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_trash_inside",
+      "kind": "app_mutation",
+      "position": "inside",
+      "mutation": "trash",
+      "expect": "ok"
+    },
+    {
+      "id": "app_delete_inside",
+      "kind": "app_mutation",
+      "position": "inside",
+      "mutation": "delete",
+      "expect": "ok"
+    },
+    {
+      "id": "app_rename_inside",
+      "kind": "app_mutation",
+      "position": "inside",
+      "mutation": "rename",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_move_inside",
+      "kind": "app_mutation",
+      "position": "inside",
+      "mutation": "move",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_create_inside",
+      "kind": "app_mutation",
+      "position": "inside",
+      "mutation": "create",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_write_inside",
+      "kind": "app_mutation",
+      "position": "inside",
+      "mutation": "write",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "app_trash_outside",
+      "kind": "app_mutation",
+      "position": "outside",
+      "mutation": "trash",
+      "expect": "ok"
+    },
+    {
+      "id": "app_delete_outside",
+      "kind": "app_mutation",
+      "position": "outside",
+      "mutation": "delete",
+      "expect": "ok"
+    },
+    {
+      "id": "app_rename_outside",
+      "kind": "app_mutation",
+      "position": "outside",
+      "mutation": "rename",
+      "expect": "ok"
+    },
+    {
+      "id": "app_move_outside",
+      "kind": "app_mutation",
+      "position": "outside",
+      "mutation": "move",
+      "expect": "ok"
+    },
+    {
+      "id": "app_create_outside",
+      "kind": "app_mutation",
+      "position": "outside",
+      "mutation": "create",
+      "expect": "ok"
+    },
+    {
+      "id": "app_write_outside",
+      "kind": "app_mutation",
+      "position": "outside",
+      "mutation": "write",
       "expect": "ok"
     },
     {
@@ -528,6 +924,22 @@
       "expected": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé (2)"
     },
     {
+      "id": "custom_reserved_stem_at_the_byte_cap",
+      "kind": "custom_name",
+      "raw": "CON.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "taken": [],
+      "expected": "CON_.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "custom_reserved_stem_at_the_cap_never_shares_a_folder",
+      "kind": "custom_name",
+      "raw": "CON.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "taken": [
+        "CON_.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "expected": "CON_.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (2)"
+    },
+    {
       "id": "layout_rel_path_long_custom_name_keeps_its_suffix",
       "kind": "rel_path",
       "device": "GLegion",
@@ -546,146 +958,346 @@
     {
       "id": "drive_trash_root",
       "kind": "drive_mutation",
-      "is_root": true,
-      "under_root": false,
+      "position": "root",
       "own_active_source": null,
       "mutation": "trash",
       "expect": "Backups is a system folder and can't be deleted."
-    },
-    {
-      "id": "drive_trash_under_root",
-      "kind": "drive_mutation",
-      "is_root": false,
-      "under_root": true,
-      "own_active_source": null,
-      "mutation": "trash",
-      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete or move a backup."
-    },
-    {
-      "id": "drive_trash_own_active",
-      "kind": "drive_mutation",
-      "is_root": false,
-      "under_root": true,
-      "own_active_source": "C:\\Users\\guus\\Pictures\\beach.jpg",
-      "mutation": "trash",
-      "expect": "This is a backup of C:\\Users\\guus\\Pictures\\beach.jpg. Change the original instead."
-    },
-    {
-      "id": "drive_trash_outside",
-      "kind": "drive_mutation",
-      "is_root": false,
-      "under_root": false,
-      "own_active_source": null,
-      "mutation": "trash",
-      "expect": "ok"
     },
     {
       "id": "drive_delete_root",
       "kind": "drive_mutation",
-      "is_root": true,
-      "under_root": false,
+      "position": "root",
       "own_active_source": null,
       "mutation": "delete",
       "expect": "Backups is a system folder and can't be deleted."
     },
     {
-      "id": "drive_delete_under_root",
-      "kind": "drive_mutation",
-      "is_root": false,
-      "under_root": true,
-      "own_active_source": null,
-      "mutation": "delete",
-      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete or move a backup."
-    },
-    {
-      "id": "drive_delete_own_active",
-      "kind": "drive_mutation",
-      "is_root": false,
-      "under_root": true,
-      "own_active_source": "C:\\Users\\guus\\Pictures\\beach.jpg",
-      "mutation": "delete",
-      "expect": "This is a backup of C:\\Users\\guus\\Pictures\\beach.jpg. Change the original instead."
-    },
-    {
-      "id": "drive_delete_outside",
-      "kind": "drive_mutation",
-      "is_root": false,
-      "under_root": false,
-      "own_active_source": null,
-      "mutation": "delete",
-      "expect": "ok"
-    },
-    {
       "id": "drive_rename_root",
       "kind": "drive_mutation",
-      "is_root": true,
-      "under_root": false,
+      "position": "root",
       "own_active_source": null,
       "mutation": "rename",
       "expect": "Backups is a system folder and can't be renamed."
     },
     {
-      "id": "drive_rename_under_root",
-      "kind": "drive_mutation",
-      "is_root": false,
-      "under_root": true,
-      "own_active_source": null,
-      "mutation": "rename",
-      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete or move a backup."
-    },
-    {
-      "id": "drive_rename_own_active",
-      "kind": "drive_mutation",
-      "is_root": false,
-      "under_root": true,
-      "own_active_source": "C:\\Users\\guus\\Pictures\\beach.jpg",
-      "mutation": "rename",
-      "expect": "This is a backup of C:\\Users\\guus\\Pictures\\beach.jpg. Change the original instead."
-    },
-    {
-      "id": "drive_rename_outside",
-      "kind": "drive_mutation",
-      "is_root": false,
-      "under_root": false,
-      "own_active_source": null,
-      "mutation": "rename",
-      "expect": "ok"
-    },
-    {
       "id": "drive_move_root",
       "kind": "drive_mutation",
-      "is_root": true,
-      "under_root": false,
+      "position": "root",
       "own_active_source": null,
       "mutation": "move",
       "expect": "Backups is a system folder and can't be moved."
     },
     {
-      "id": "drive_move_under_root",
+      "id": "drive_create_root",
       "kind": "drive_mutation",
-      "is_root": false,
-      "under_root": true,
+      "position": "root",
+      "own_active_source": null,
+      "mutation": "create",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "drive_write_root",
+      "kind": "drive_mutation",
+      "position": "root",
+      "own_active_source": null,
+      "mutation": "write",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "drive_trash_device_folder",
+      "kind": "drive_mutation",
+      "position": "device_folder",
+      "own_active_source": null,
+      "mutation": "trash",
+      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete a backup."
+    },
+    {
+      "id": "drive_delete_device_folder",
+      "kind": "drive_mutation",
+      "position": "device_folder",
+      "own_active_source": null,
+      "mutation": "delete",
+      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete a backup."
+    },
+    {
+      "id": "drive_rename_device_folder",
+      "kind": "drive_mutation",
+      "position": "device_folder",
+      "own_active_source": null,
+      "mutation": "rename",
+      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete a backup."
+    },
+    {
+      "id": "drive_move_device_folder",
+      "kind": "drive_mutation",
+      "position": "device_folder",
       "own_active_source": null,
       "mutation": "move",
-      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete or move a backup."
+      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete a backup."
+    },
+    {
+      "id": "drive_create_device_folder",
+      "kind": "drive_mutation",
+      "position": "device_folder",
+      "own_active_source": null,
+      "mutation": "create",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "drive_write_device_folder",
+      "kind": "drive_mutation",
+      "position": "device_folder",
+      "own_active_source": null,
+      "mutation": "write",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "drive_trash_manifest",
+      "kind": "drive_mutation",
+      "position": "manifest",
+      "own_active_source": null,
+      "mutation": "trash",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "drive_delete_manifest",
+      "kind": "drive_mutation",
+      "position": "manifest",
+      "own_active_source": null,
+      "mutation": "delete",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "drive_rename_manifest",
+      "kind": "drive_mutation",
+      "position": "manifest",
+      "own_active_source": null,
+      "mutation": "rename",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "drive_move_manifest",
+      "kind": "drive_mutation",
+      "position": "manifest",
+      "own_active_source": null,
+      "mutation": "move",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "drive_create_manifest",
+      "kind": "drive_mutation",
+      "position": "manifest",
+      "own_active_source": null,
+      "mutation": "create",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "drive_write_manifest",
+      "kind": "drive_mutation",
+      "position": "manifest",
+      "own_active_source": null,
+      "mutation": "write",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "drive_trash_category_folder",
+      "kind": "drive_mutation",
+      "position": "category_folder",
+      "own_active_source": null,
+      "mutation": "trash",
+      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete a backup."
+    },
+    {
+      "id": "drive_delete_category_folder",
+      "kind": "drive_mutation",
+      "position": "category_folder",
+      "own_active_source": null,
+      "mutation": "delete",
+      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete a backup."
+    },
+    {
+      "id": "drive_rename_category_folder",
+      "kind": "drive_mutation",
+      "position": "category_folder",
+      "own_active_source": null,
+      "mutation": "rename",
+      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete a backup."
+    },
+    {
+      "id": "drive_move_category_folder",
+      "kind": "drive_mutation",
+      "position": "category_folder",
+      "own_active_source": null,
+      "mutation": "move",
+      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete a backup."
+    },
+    {
+      "id": "drive_create_category_folder",
+      "kind": "drive_mutation",
+      "position": "category_folder",
+      "own_active_source": null,
+      "mutation": "create",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "drive_write_category_folder",
+      "kind": "drive_mutation",
+      "position": "category_folder",
+      "own_active_source": null,
+      "mutation": "write",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "drive_trash_inside",
+      "kind": "drive_mutation",
+      "position": "inside",
+      "own_active_source": null,
+      "mutation": "trash",
+      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete a backup."
+    },
+    {
+      "id": "drive_delete_inside",
+      "kind": "drive_mutation",
+      "position": "inside",
+      "own_active_source": null,
+      "mutation": "delete",
+      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete a backup."
+    },
+    {
+      "id": "drive_rename_inside",
+      "kind": "drive_mutation",
+      "position": "inside",
+      "own_active_source": null,
+      "mutation": "rename",
+      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete a backup."
+    },
+    {
+      "id": "drive_move_inside",
+      "kind": "drive_mutation",
+      "position": "inside",
+      "own_active_source": null,
+      "mutation": "move",
+      "expect": "Backups are managed in the Beebeeb app. Open Beebeeb to delete a backup."
+    },
+    {
+      "id": "drive_create_inside",
+      "kind": "drive_mutation",
+      "position": "inside",
+      "own_active_source": null,
+      "mutation": "create",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "drive_write_inside",
+      "kind": "drive_mutation",
+      "position": "inside",
+      "own_active_source": null,
+      "mutation": "write",
+      "expect": "Backups are read-only: each device writes its own. Change the file on that device, or save a copy outside Backups."
+    },
+    {
+      "id": "drive_trash_outside",
+      "kind": "drive_mutation",
+      "position": "outside",
+      "own_active_source": null,
+      "mutation": "trash",
+      "expect": "ok"
+    },
+    {
+      "id": "drive_delete_outside",
+      "kind": "drive_mutation",
+      "position": "outside",
+      "own_active_source": null,
+      "mutation": "delete",
+      "expect": "ok"
+    },
+    {
+      "id": "drive_rename_outside",
+      "kind": "drive_mutation",
+      "position": "outside",
+      "own_active_source": null,
+      "mutation": "rename",
+      "expect": "ok"
+    },
+    {
+      "id": "drive_move_outside",
+      "kind": "drive_mutation",
+      "position": "outside",
+      "own_active_source": null,
+      "mutation": "move",
+      "expect": "ok"
+    },
+    {
+      "id": "drive_create_outside",
+      "kind": "drive_mutation",
+      "position": "outside",
+      "own_active_source": null,
+      "mutation": "create",
+      "expect": "ok"
+    },
+    {
+      "id": "drive_write_outside",
+      "kind": "drive_mutation",
+      "position": "outside",
+      "own_active_source": null,
+      "mutation": "write",
+      "expect": "ok"
+    },
+    {
+      "id": "drive_trash_own_active",
+      "kind": "drive_mutation",
+      "position": "inside",
+      "own_active_source": "C:\\Users\\guus\\Pictures\\beach.jpg",
+      "mutation": "trash",
+      "expect": "This is a backup of C:\\Users\\guus\\Pictures\\beach.jpg. Change the original instead."
+    },
+    {
+      "id": "drive_delete_own_active",
+      "kind": "drive_mutation",
+      "position": "inside",
+      "own_active_source": "C:\\Users\\guus\\Pictures\\beach.jpg",
+      "mutation": "delete",
+      "expect": "This is a backup of C:\\Users\\guus\\Pictures\\beach.jpg. Change the original instead."
+    },
+    {
+      "id": "drive_rename_own_active",
+      "kind": "drive_mutation",
+      "position": "inside",
+      "own_active_source": "C:\\Users\\guus\\Pictures\\beach.jpg",
+      "mutation": "rename",
+      "expect": "This is a backup of C:\\Users\\guus\\Pictures\\beach.jpg. Change the original instead."
     },
     {
       "id": "drive_move_own_active",
       "kind": "drive_mutation",
-      "is_root": false,
-      "under_root": true,
+      "position": "inside",
       "own_active_source": "C:\\Users\\guus\\Pictures\\beach.jpg",
       "mutation": "move",
       "expect": "This is a backup of C:\\Users\\guus\\Pictures\\beach.jpg. Change the original instead."
     },
     {
-      "id": "drive_move_outside",
+      "id": "drive_create_own_active",
       "kind": "drive_mutation",
-      "is_root": false,
-      "under_root": false,
-      "own_active_source": null,
-      "mutation": "move",
-      "expect": "ok"
+      "position": "inside",
+      "own_active_source": "C:\\Users\\guus\\Pictures\\beach.jpg",
+      "mutation": "create",
+      "expect": "This is a backup of C:\\Users\\guus\\Pictures\\beach.jpg. Change the original instead."
+    },
+    {
+      "id": "drive_write_own_active",
+      "kind": "drive_mutation",
+      "position": "inside",
+      "own_active_source": "C:\\Users\\guus\\Pictures\\beach.jpg",
+      "mutation": "write",
+      "expect": "This is a backup of C:\\Users\\guus\\Pictures\\beach.jpg. Change the original instead."
+    },
+    {
+      "id": "drive_trash_root_words_before_own_active",
+      "kind": "drive_mutation",
+      "position": "root",
+      "own_active_source": "C:\\Users\\guus\\Pictures\\beach.jpg",
+      "mutation": "trash",
+      "expect": "Backups is a system folder and can't be deleted."
     }
   ]
 }

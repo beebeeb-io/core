@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 
 use beebeeb_core::backup::{
-    BackupRecord, FolderPresence, PassBudget, PassPlan, RecordState, RemoteEntry, SourceEntry, UploadReason,
+    BackupRecord, FolderPresence, PassBudget, PassPlan, RecordRef, RecordState, RemoteEntry, SourceEntry, UploadReason,
     folder_presence, normalize_key, plan_pass, records_from_remote,
 };
 use serde_json::{Value, json};
@@ -75,7 +75,10 @@ fn plan_json(plan: &PassPlan) -> Value {
             "to_key": m.to_key,
         })).collect::<Vec<_>>(),
         "folders": plan.folders,
-        "mark_removed_elsewhere": plan.mark_removed_elsewhere,
+        "mark_removed_elsewhere": plan.mark_removed_elsewhere.iter().map(|m| json!({
+            "key": m.key,
+            "remote_id": m.remote_id.to_string(),
+        })).collect::<Vec<_>>(),
         "unchanged": plan.unchanged,
         "gone_locally": plan.gone_locally,
         "deferred": plan.deferred,
@@ -104,7 +107,7 @@ fn run_plan_case(case: &Value) -> Value {
 #[test]
 fn backup_plan_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 68, "every named backup_plan case is present");
+    assert_eq!(cases.len(), 71, "every named backup_plan case is present");
 
     let (mut plans, mut keys, mut presences, mut rebuilds) = (0, 0, 0, 0);
     for case in &cases {
@@ -166,7 +169,7 @@ fn backup_plan_cases_match_core() {
     );
     assert_eq!(
         (plans, keys, presences, rebuilds),
-        (49, 4, 5, 10),
+        (52, 4, 5, 10),
         "case counts per kind"
     );
 }
@@ -400,5 +403,11 @@ fn incomplete_listing_defers_unlisted_record_change() {
     assert_eq!(complete.uploads[0].reason, UploadReason::New);
     assert_eq!(complete.uploads[0].record_key.as_deref(), Some("a.jpg"));
     assert_eq!(complete.uploads[0].remote_id, None);
-    assert_eq!(complete.mark_removed_elsewhere, ["a.jpg"]);
+    assert_eq!(
+        complete.mark_removed_elsewhere,
+        [RecordRef {
+            key: "a.jpg".to_string(),
+            remote_id: record.remote_id
+        }]
+    );
 }

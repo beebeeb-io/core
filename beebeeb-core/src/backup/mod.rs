@@ -12,14 +12,15 @@
 //! - manifest: the encrypted `.device.json` in each device folder;
 //! - root and merge: which folder is the root, and folding legacy duplicate
 //!   roots into it;
-//! - protection: the Backups root is never trashed, deleted, renamed or moved;
+//! - protection: who may change what in the backup tree (the app, drive and
+//!   root rules, with their words);
 //! - skip: what is never backed up (OS junk, library bundles, links, files
 //!   whose bytes are not on this device);
 //! - plan and rebuild: what one pass uploads, moves or marks, and records
 //!   rebuilt from the server after a reinstall.
 //!
-//! The root is never located by path: it is the folder whose server row
-//! carries [`beebeeb_types::backup::SystemRole::BackupsRoot`].
+//! The root is never located by path or name: it is the folder whose server
+//! row carries [`beebeeb_types::backup::SystemRole::BackupsRoot`].
 
 mod device;
 mod layout;

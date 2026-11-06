@@ -1,11 +1,13 @@
 'use strict';
 // LD-0113: the backup rules the web client needs, through the real module.
-// The protection cases of test-vectors/consolidation/backup_protect.json go
-// through backupCheckMutation (the web's own run of the shared vectors);
-// backupProtectionMany is the one-crossing-per-listing form, where an unknown role
-// is protected (review #8); any other unknown string throws, never passes (plan
-// Amendment 1, item 3); backupParseManifest keeps
-// unknown fields. BB_VECTOR_PATH points the test at a mutated copy for a red run.
+// Every protection case of test-vectors/consolidation/backup_protect.json goes
+// through backupCheckRootMutation, backupCheckAppMutation (the web's own rule,
+// spec Amendment 8) and backupCheckDriveMutation (the web's own run of the
+// shared vectors); backupProtectionMany is the one-crossing-per-listing root
+// bit, where an unknown role is protected (review #8); any other unknown
+// string throws, never passes (plan Amendment 1, item 3); backupParseManifest
+// keeps unknown fields. BB_VECTOR_PATH points the test at a mutated copy for a
+// red run.
 const assert = require('node:assert/strict');
 const nodeTest = require('node:test');
 const path = require('node:path');
@@ -17,31 +19,50 @@ const protect = require(
 const device = require(path.join(__dirname, '../../test-vectors/consolidation/backup_device.json'));
 
 const DELETE_WORDS = "Backups is a system folder and can't be deleted.";
+const want = (c) => (c.expect === 'ok' ? undefined : c.expect);
 
-nodeTest('backupCheckMutation: the exact words, and undefined for an ordinary row', () => {
-  assert.equal(wasm.backupCheckMutation('backups_root', 'trash'), DELETE_WORDS);
-  assert.equal(wasm.backupCheckMutation(null, 'trash'), undefined);
-  assert.equal(wasm.backupCheckMutation(undefined, 'move'), undefined);
-  assert.equal(wasm.backupCheckMutation('', 'rename'), undefined);
+nodeTest('backupCheckRootMutation: the exact words, and undefined for an ordinary row', () => {
+  assert.equal(wasm.backupCheckRootMutation('backups_root', 'trash'), DELETE_WORDS);
+  assert.equal(wasm.backupCheckRootMutation('backups_root', 'create'), undefined);
+  assert.equal(wasm.backupCheckRootMutation(null, 'trash'), undefined);
+  assert.equal(wasm.backupCheckRootMutation(undefined, 'move'), undefined);
+  assert.equal(wasm.backupCheckRootMutation('', 'rename'), undefined);
 });
 
-nodeTest('backupCheckMutation agrees with every mutation case of the shared vector', () => {
-  const cases = protect.cases.filter((c) => c.kind === 'mutation');
-  assert.equal(cases.length, 13, 'the 4 x 3 matrix plus a move into the root');
+nodeTest('backupCheckRootMutation agrees with every root case of the shared vector', () => {
+  const cases = protect.cases.filter((c) => c.kind === 'root_mutation');
+  assert.equal(cases.length, 19, 'the 6 x 3 matrix plus a move into the root');
   for (const c of cases) {
-    const got = wasm.backupCheckMutation(c.role, c.mutation);
-    assert.equal(got, c.expect === 'ok' ? undefined : c.expect, c.id);
+    assert.equal(wasm.backupCheckRootMutation(c.role, c.mutation), want(c), c.id);
   }
 });
 
-nodeTest('backupCheckDriveMutation agrees with every drive case of the shared vector', () => {
-  const cases = protect.cases.filter((c) => c.kind === 'drive_mutation');
-  assert.equal(cases.length, 16, '4 mutations x {root, under root, own active, outside}');
-  for (const c of cases) {
-    const got = wasm.backupCheckDriveMutation(c.is_root, c.under_root, c.own_active_source, c.mutation);
-    assert.equal(got, c.expect === 'ok' ? undefined : c.expect, c.id);
+nodeTest('backupCheckAppMutation and backupCheckDriveMutation agree with every case of the shared vector', () => {
+  const app = protect.cases.filter((c) => c.kind === 'app_mutation');
+  assert.equal(app.length, 36, '6 positions x 6 mutations');
+  for (const c of app) {
+    assert.equal(wasm.backupCheckAppMutation(c.position, c.mutation), want(c), c.id);
   }
-  assert.throws(() => wasm.backupCheckDriveMutation(false, true, null, 'erase'), /unknown mutation/);
+  const drive = protect.cases.filter((c) => c.kind === 'drive_mutation');
+  assert.equal(drive.length, 43, '6 positions x 6 mutations, 6 own active, 1 precedence');
+  for (const c of drive) {
+    assert.equal(wasm.backupCheckDriveMutation(c.position, c.own_active_source, c.mutation), want(c), c.id);
+  }
+  assert.throws(() => wasm.backupCheckDriveMutation('inside', null, 'erase'), /unknown mutation/);
+  assert.throws(() => wasm.backupCheckAppMutation('under_root', 'write'), /unknown backup position/);
+  assert.throws(() => wasm.backupCheckDriveMutation('Inside', null, 'write'), /unknown backup position/);
+});
+
+nodeTest('backupPositionAtDepth, backupIsHiddenItem and backupRootBadge agree with the shared vector', () => {
+  const positions = protect.cases.filter((c) => c.kind === 'position');
+  assert.equal(positions.length, 11, '11 positions by depth and name');
+  for (const c of positions) {
+    assert.equal(wasm.backupPositionAtDepth(c.depth, c.name), c.expected, c.id);
+    assert.equal(wasm.backupIsHiddenItem(c.depth, c.name), c.hidden, c.id);
+  }
+  assert.equal(wasm.backupPositionAtDepth(undefined, 'Pictures'), 'outside');
+  const names = protect.cases.find((c) => c.kind === 'names');
+  assert.equal(wasm.backupRootBadge(), names.badge);
 });
 
 nodeTest('backupProtectionMany: one crossing per listing, 1 = protected', () => {
@@ -52,10 +73,11 @@ nodeTest('backupProtectionMany: one crossing per listing, 1 = protected', () => 
 
 nodeTest('an unknown mutation or role throws, never passes', () => {
   for (const bad of ['Trash', 'erase', '', 'delete ']) {
-    assert.throws(() => wasm.backupCheckMutation('backups_root', bad), /unknown mutation/, bad);
-    assert.throws(() => wasm.backupCheckMutation(null, bad), /unknown mutation/, bad);
+    assert.throws(() => wasm.backupCheckRootMutation('backups_root', bad), /unknown mutation/, bad);
+    assert.throws(() => wasm.backupCheckRootMutation(null, bad), /unknown mutation/, bad);
+    assert.throws(() => wasm.backupCheckAppMutation('inside', bad), /unknown mutation/, bad);
   }
-  assert.throws(() => wasm.backupCheckMutation('Backups', 'trash'), /unknown system role/);
+  assert.throws(() => wasm.backupCheckRootMutation('Backups', 'trash'), /unknown system role/);
   // A role this bundle does not know is protected, and the listing still renders.
   assert.deepEqual(Array.from(wasm.backupProtectionMany(['backups_root', 'photos_root', '', 'Backups'])), [1, 1, 0, 1]);
 });

@@ -1,14 +1,16 @@
-//! LD-0113 — backup protection and skip rules (spec §4.2 rules 1, 7, 8).
+//! LD-0113 — backup protection and skip rules (spec §4.2 rules 1, 7, 8;
+//! Amendments 7 and 8).
 //!
 //! Cases live in `test-vectors/consolidation/backup_protect.json`, written by an
 //! independent Python generator. Every client runs the same file through its own
 //! binding.
 
 use beebeeb_core::backup::{
-    EntryAttrs, Mutation, SkipReason, backup_rel_path, category_folder_name, check_drive_mutation, check_mutation,
-    custom_category_name, own_backup_refusal, skip_reason,
+    BackupPosition, EntryAttrs, MSG_BADGE, Mutation, Protected, ROOT_NAME, SkipReason, backup_rel_path,
+    category_folder_name, check_app_mutation, check_drive_mutation, check_root_mutation, custom_category_name,
+    is_hidden_backup_item, own_backup_refusal, skip_reason,
 };
-use beebeeb_types::backup::{Category, SystemRole};
+use beebeeb_types::backup::{Category, ORIGIN_BACKUP, ORIGIN_HEADER, SystemRole};
 use serde_json::Value;
 
 pub const CONCEPT: &str = "backup_protect";
@@ -18,6 +20,23 @@ fn role(case: &Value) -> Option<SystemRole> {
         Value::Null => None,
         Value::String(s) => Some(SystemRole::parse(s).unwrap_or_else(|| panic!("{}: unknown role {s}", case["id"]))),
         other => panic!("{}: role must be a string or null, got {other}", case["id"]),
+    }
+}
+
+fn mutation(case: &Value) -> Mutation {
+    Mutation::parse(case["mutation"].as_str().expect("mutation"))
+        .unwrap_or_else(|| panic!("{}: unknown mutation", case["id"]))
+}
+
+fn position(case: &Value) -> BackupPosition {
+    BackupPosition::parse(case["position"].as_str().expect("position"))
+        .unwrap_or_else(|| panic!("{}: unknown position", case["id"]))
+}
+
+fn words(result: Result<(), Protected>) -> String {
+    match result {
+        Ok(()) => "ok".to_string(),
+        Err(protected) => protected.message.to_string(),
     }
 }
 
@@ -31,20 +50,48 @@ fn reason_key(reason: Option<SkipReason>) -> Value {
 #[test]
 fn backup_protect_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 80, "every named backup_protect case is present");
+    assert_eq!(cases.len(), 163, "every named backup_protect case is present");
 
-    let (mut mutations, mut skips, mut layout, mut drives) = (0, 0, 0, 0);
+    let (mut roots, mut apps, mut drives, mut positions, mut names, mut skips, mut layout) = (0, 0, 0, 0, 0, 0, 0);
     for case in &cases {
         let id = case["id"].as_str().expect("case id");
         match case["kind"].as_str().expect("case kind") {
-            "mutation" => {
-                mutations += 1;
-                let m = Mutation::parse(case["mutation"].as_str().expect("mutation"))
-                    .unwrap_or_else(|| panic!("{id}: unknown mutation"));
-                let got = match check_mutation(role(case), m) {
-                    Ok(()) => "ok".to_string(),
-                    Err(protected) => protected.message.to_string(),
-                };
+            "names" => {
+                names += 1;
+                assert_eq!(ROOT_NAME, case["root_name"].as_str().expect("root_name"), "{id}");
+                assert_eq!(MSG_BADGE, case["badge"].as_str().expect("badge"), "{id}");
+                assert_eq!(
+                    ORIGIN_HEADER,
+                    case["origin_header"].as_str().expect("origin_header"),
+                    "{id}"
+                );
+                assert_eq!(
+                    ORIGIN_BACKUP,
+                    case["origin_backup"].as_str().expect("origin_backup"),
+                    "{id}"
+                );
+            }
+            "root_mutation" => {
+                roots += 1;
+                let got = words(check_root_mutation(role(case), mutation(case)));
+                assert_eq!(got, case["expect"].as_str().expect("expect"), "{id}");
+            }
+            "position" => {
+                positions += 1;
+                let depth = case["depth"].as_u64().map(|d| usize::try_from(d).expect("depth"));
+                let name = case["name"].as_str().expect("name");
+                let got = BackupPosition::at_depth(depth, name);
+                assert_eq!(got.as_str(), case["expected"].as_str().expect("expected"), "{id}");
+                assert_eq!(BackupPosition::parse(got.as_str()), Some(got), "{id}: round trip");
+                assert_eq!(
+                    is_hidden_backup_item(depth, name),
+                    case["hidden"].as_bool().expect("hidden"),
+                    "{id}: hidden"
+                );
+            }
+            "app_mutation" => {
+                apps += 1;
+                let got = words(check_app_mutation(position(case), mutation(case)));
                 assert_eq!(got, case["expect"].as_str().expect("expect"), "{id}");
             }
             "skip" => {
@@ -74,16 +121,11 @@ fn backup_protect_cases_match_core() {
             }
             "drive_mutation" => {
                 drives += 1;
-                let m = Mutation::parse(case["mutation"].as_str().expect("mutation")).expect("known mutation");
-                let got = match check_drive_mutation(
-                    case["is_root"].as_bool().expect("is_root"),
-                    case["under_root"].as_bool().expect("under_root"),
+                let got = words(check_drive_mutation(
+                    position(case),
                     case["own_active_source"].as_str(),
-                    m,
-                ) {
-                    Ok(()) => "ok".to_string(),
-                    Err(protected) => protected.message.to_string(),
-                };
+                    mutation(case),
+                ));
                 assert_eq!(got, case["expect"].as_str().expect("expect"), "{id}");
             }
             "custom_name" => {
@@ -107,12 +149,13 @@ fn backup_protect_cases_match_core() {
         }
     }
     println!(
-        "backup_protect: {} cases ({mutations} mutation, {drives} drive, {skips} skip, {layout} layout)",
+        "backup_protect: {} cases ({names} names, {roots} root, {positions} position, {apps} app, {drives} drive, \
+         {skips} skip, {layout} layout)",
         cases.len()
     );
     assert_eq!(
-        (mutations, drives, skips, layout),
-        (13, 16, 34, 17),
+        (names, roots, positions, apps, drives, skips, layout),
+        (1, 19, 11, 36, 43, 34, 19),
         "case counts per kind"
     );
 }

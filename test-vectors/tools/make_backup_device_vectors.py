@@ -60,6 +60,8 @@ name("name_only_space", " ", "Device")
 name("name_only_invisible", "​", "Device")
 name("name_nfd_becomes_nfc", "René's Mac", "René's Mac")
 name("name_long_is_cut_to_200_bytes", "a" * 300, "a" * 200)
+# Review 4 #4: the `_` a reserved stem gets fits inside the 200 bytes too: the tail is cut, never past 200.
+name("name_reserved_stem_at_the_byte_cap", "CON." + "a" * 196, "CON_." + "a" * 195)
 name("name_collision_other_id", "GLegion", "GLegion (a3f2)", [("GLegion", OTHER)])
 name("name_collision_manifest_less", "GLegion", "GLegion (a3f2)", [("GLegion", None)])
 name("name_collision_differs_only_in_case", "GLegion", "GLegion (a3f2)", [("glegion", OTHER)])

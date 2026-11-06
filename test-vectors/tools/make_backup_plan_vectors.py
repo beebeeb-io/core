@@ -35,6 +35,12 @@ def up(key, size=10, reason="new", record=None, rid=None):
             "remote_id": uid(rid) if rid is not None else None}
 
 
+def mark(key, rid):
+    """A record to mark removed elsewhere, as the pass read it (review 4 #3): the host marks it only while the
+    record at `key` still names `rid` (compare-and-set)."""
+    return {"key": key, "remote_id": uid(rid)}
+
+
 def plan(id_, entries, records, live, expect, budget=None, unseen=(), complete=True, held=()):
     full = {"uploads": [], "moves": [], "folders": [], "mark_removed_elsewhere": [], "unchanged": 0,
             "gone_locally": 0, "deferred": 0, "held": 0, "deferred_unknown": 0}
@@ -86,7 +92,10 @@ plan("plan_move_needs_the_same_name", [e("b.jpg")], [r("a.jpg", 1)], [1], {"uplo
 plan("plan_move_needs_the_same_mtime", [e("new/a.jpg", m=1001)], [r("old/a.jpg", 1)], [1],
      {"uploads": [up("new/a.jpg")], "folders": ["new"], "gone_locally": 1})
 plan("plan_move_needs_a_live_source", [e("new/a.jpg")], [r("old/a.jpg", 1)], [],
-     {"uploads": [up("new/a.jpg")], "folders": ["new"], "mark_removed_elsewhere": ["old/a.jpg"], "gone_locally": 1})
+     {"uploads": [up("new/a.jpg")], "folders": ["new"], "mark_removed_elsewhere": [mark("old/a.jpg", 1)], "gone_locally": 1})
+# Review 4 #7: a budget of 0 uploads counts as 1 (the first upload always fits), so a pass never stalls silently.
+plan("plan_budget_of_zero_uploads_counts_as_one", [e("a.jpg"), e("b.jpg")], [], [],
+     {"uploads": [up("a.jpg")], "deferred": 1}, {"max_uploads": 0, "max_bytes": 1000 * GIB})
 plan("plan_budget_of_two_with_three_new", [e("a.jpg"), e("b.jpg"), e("c.jpg")], [], [],
      {"uploads": [up("a.jpg"), up("b.jpg")], "deferred": 1}, {"max_uploads": 2, "max_bytes": 1000 * GIB})
 plan("plan_big_file_alone_is_planned", [e("film.mkv", size=4831838208)], [], [],
@@ -100,14 +109,14 @@ plan("plan_folders_are_deduplicated_parents_first", [e("b/c/x.jpg"), e("a/y.jpg"
 plan("plan_nfd_record_matches_nfc_entry", [e(unicodedata.normalize("NFC", "René.jpg"))],
      [r(unicodedata.normalize("NFD", "René.jpg"), 1)], [1], {"unchanged": 1})
 plan("removed_elsewhere_unchanged_plans_nothing", [e("a.jpg")], [r("a.jpg", 1)], [],
-     {"mark_removed_elsewhere": ["a.jpg"]})
+     {"mark_removed_elsewhere": [mark("a.jpg", 1)]})
 plan("removed_elsewhere_already_marked_and_unchanged", [e("a.jpg")], [r("a.jpg", 1, state="removed_elsewhere")], [], {})
 # Ruling A (Guus 2026-11-06): it stays deleted until it changes on the device, then it comes back as a NEW file,
 # never as a version of the trashed or purged remote file.
 plan("removed_elsewhere_then_changed_uploads", [e("a.jpg", m=9000)], [r("a.jpg", 1, state="removed_elsewhere")], [],
      {"uploads": [up("a.jpg", 10, "new", "a.jpg")]})
 plan("removed_elsewhere_noticed_and_changed", [e("a.jpg", size=12)], [r("a.jpg", 1)], [],
-     {"mark_removed_elsewhere": ["a.jpg"], "uploads": [up("a.jpg", 12, "new", "a.jpg")]})
+     {"mark_removed_elsewhere": [mark("a.jpg", 1)], "uploads": [up("a.jpg", 12, "new", "a.jpg")]})
 # Restored from Trash: the remote is live again, so the record is held again, whatever its state.
 plan("restored_from_trash_after_the_mark_is_unchanged", [e("a.jpg")], [r("a.jpg", 1, state="removed_elsewhere")], [1],
      {"unchanged": 1})
@@ -122,6 +131,10 @@ plan("partial_listing_marks_nothing_removed", [e("a.jpg"), e("b.jpg", m=2000)], 
      {"deferred_unknown": 1}, complete=False)
 plan("partial_listing_takes_no_move_source_from_an_unlisted_record", [e("new/a.jpg")], [r("old/a.jpg", 1)], [],
      {"deferred_unknown": 1, "gone_locally": 1}, complete=False)
+# Review 4 #6: an unlisted record with the same signature as a live one makes the match not unique, so the move
+# waits for a complete listing (the new entry may be the unlisted record's file).
+plan("partial_listing_an_unlisted_twin_source_makes_the_move_wait", [e("z/a.jpg")],
+     [r("x/a.jpg", 1), r("y/a.jpg", 2)], [1], {"deferred_unknown": 1, "gone_locally": 2}, complete=False)
 plan("partial_listing_listed_record_behaves_as_normal", [e("a.jpg", m=2000), e("c.jpg")], [r("a.jpg", 1)], [1],
      {"uploads": [up("a.jpg", 10, "changed", "a.jpg", 1), up("c.jpg")]}, complete=False)
 plan("partial_listing_still_counts_what_it_lists", [e("a.jpg"), e("b.jpg")], [r("a.jpg", 1), r("b.jpg", 2)], [1],
@@ -148,6 +161,10 @@ plan("unseen_nfd_key_covers_an_nfc_record_with_no_exact_entry", [], [r(unicodeda
 plan("unseen_nfd_twin_keeps_the_nfc_record_its_entry_has", [e(unicodedata.normalize("NFC", "René/x.jpg"))],
      [r(unicodedata.normalize("NFC", "René/x.jpg"), 1)], [1], {"unchanged": 1},
      unseen=[unicodedata.normalize("NFD", "René")])
+# Review 4 #2: the record matches by its folded key too (fold_name: NFC and case), so a record under a folder that
+# was renamed only in case and could not be read this pass is never gone and never a move source.
+plan("unseen_case_renamed_folder_covers_its_record", [e("Other/a.jpg")], [r("Photos/a.jpg", 1)], [1],
+     {"uploads": [up("Other/a.jpg")], "folders": ["Other"]}, unseen=["photos"])
 plan("unseen_nfd_twin_folder_hides_nothing_of_the_nfc_twin",
      [e(unicodedata.normalize("NFC", "René/a.jpg"))], [r(unicodedata.normalize("NFD", "René/b.jpg"), 2)], [2],
      {"uploads": [up(unicodedata.normalize("NFC", "René/a.jpg"))], "folders": [unicodedata.normalize("NFC", "René")]},

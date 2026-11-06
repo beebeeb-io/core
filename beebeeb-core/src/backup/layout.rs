@@ -5,6 +5,7 @@ use beebeeb_types::backup::Category;
 
 use super::device::{NAME_MAX_BYTES, clean_name};
 use super::fold_name;
+use crate::sync::conflict::prefix_within;
 
 /// The root folder's name. It identifies nothing: the root is the folder with
 /// the `backups_root` role.
@@ -48,20 +49,10 @@ pub fn custom_category_name(raw: &str, taken: &[&str]) -> String {
     let mut n = 2;
     while used.contains(&fold_name(&candidate)) {
         let suffix = format!(" ({n})");
-        candidate = format!("{}{suffix}", cut_to(&base, NAME_MAX_BYTES - suffix.len()));
+        candidate = format!("{}{suffix}", prefix_within(&base, NAME_MAX_BYTES - suffix.len()));
         n += 1;
     }
     candidate
-}
-
-/// The longest prefix of `name` of at most `max` bytes, cut at a character
-/// boundary.
-fn cut_to(name: &str, max: usize) -> &str {
-    let mut end = max.min(name.len());
-    while !name.is_char_boundary(end) {
-        end -= 1;
-    }
-    &name[..end]
 }
 
 /// `Backups/<device_folder>/<category folder>/<rel>`, with `/` between

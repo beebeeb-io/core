@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Mutex;
 
-use beebeeb_core::backup::{BackupRecord, FolderPresence, PassBudget, RecordState, RemoteEntry, SkipReason};
+use beebeeb_core::backup::{BackupRecord, FolderPresence, PassBudget, RecordRef, RecordState, RemoteEntry, SkipReason};
 use beebeeb_types::backup::Category;
 use uuid::Uuid;
 
@@ -41,6 +41,11 @@ struct State {
     on_ensure_folder: Option<Box<dyn Fn() + Send>>,
     /// `device_tree` leaves the category folder's id out (a broken host).
     omit_category_id: bool,
+    /// A finishing upload writes this record (replacing the one at its key)
+    /// right before the next `put_record` applies.
+    /// The records the host holds just before the next `put_record`: an
+    /// upload that finished after the pass read them.
+    records_before_put: Option<Vec<BackupRecord>>,
 }
 
 struct FakeHost(Mutex<State>);
@@ -212,21 +217,44 @@ impl BackupHost for FakeHost {
         Ok(records)
     }
 
-    async fn put_record(&self, _c: &Category, record: BackupRecord) -> Result<(), HostError> {
+    async fn put_record(&self, _c: &Category, expected: &RecordRef, record: BackupRecord) -> Result<bool, HostError> {
         let mut state = self.state();
         state.calls.push(format!("put_record {}", record.key));
+        if let Some(records) = state.records_before_put.take() {
+            state.records = records;
+        }
+        // Re-key the record the pass read, keeping its stored fields; or give
+        // the moved file its record when no record names it any more.
+        let stored = state
+            .records
+            .iter()
+            .find(|r| r.key == expected.key && r.remote_id == expected.remote_id)
+            .cloned();
+        let to_store = match stored {
+            Some(stored) => BackupRecord {
+                key: record.key,
+                state: record.state,
+                ..stored
+            },
+            None if !state.records.iter().any(|r| r.remote_id == expected.remote_id) => record,
+            None => return Ok(false),
+        };
         // Upsert by key; one key per remote file (plan Amendment 1).
         state
             .records
-            .retain(|r| r.key != record.key && r.remote_id != record.remote_id);
-        state.records.push(record);
-        Ok(())
+            .retain(|r| r.key != to_store.key && r.remote_id != to_store.remote_id);
+        state.records.push(to_store);
+        Ok(true)
     }
 
-    async fn mark_removed_elsewhere(&self, _c: &Category, keys: &[String]) -> Result<(), HostError> {
+    async fn mark_removed_elsewhere(&self, _c: &Category, records: &[RecordRef]) -> Result<(), HostError> {
         let mut state = self.state();
+        let keys: Vec<&str> = records.iter().map(|m| m.key.as_str()).collect();
         state.calls.push(format!("mark_removed_elsewhere {}", keys.join(",")));
-        for r in state.records.iter_mut().filter(|r| keys.contains(&r.key)) {
+        // Compare-and-set on (key, remote_id), BackedUp only.
+        for r in state.records.iter_mut().filter(|r| {
+            r.state == RecordState::BackedUp && records.iter().any(|m| m.key == r.key && m.remote_id == r.remote_id)
+        }) {
             r.state = RecordState::RemovedElsewhere;
         }
         Ok(())
@@ -827,4 +855,140 @@ async fn run_pass_error_before_any_change() {
     }
     let state = host.state();
     assert_eq!((&state.records, &state.files), (&records, &files));
+}
+
+/// Review 4 #3: a fresh record that a finishing upload wrote (a new remote
+/// file) after the pass read the records is never marked removed elsewhere:
+/// the mark is compare-and-set on the key and the remote id the pass read.
+#[tokio::test]
+async fn run_pass_never_marks_a_record_a_finishing_upload_rewrote() {
+    let src = TempDir::new("casmark");
+    let path = src.write("a.jpg", b"aa");
+    let host = FakeHost::new();
+    let old = host.backed_up("a.jpg", &path);
+    src.write("a.jpg", b"changed, and longer");
+    run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
+        .await
+        .expect("pass 1");
+    assert_eq!(host.calls("enqueue_upload"), ["enqueue_upload a.jpg"]);
+    {
+        let mut state = host.state();
+        state.files.remove(&old); // the old copy trashed on the web meanwhile
+        state.finish_after_next_records = true; // the upload lands as a new file during pass 2
+        state.calls.clear();
+    }
+
+    let report = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
+        .await
+        .expect("pass 2");
+    let state = host.state();
+    let record = state.records.iter().find(|r| r.key == "a.jpg").expect("record");
+    assert_ne!(record.remote_id, old, "the finished upload's record");
+    assert_eq!(
+        record.state,
+        RecordState::BackedUp,
+        "it names a live file: {:?}",
+        state.calls
+    );
+    assert_eq!(report.queued, 0, "{:?}", state.calls);
+}
+
+/// The record of a moved file, when an upload that finished at the old key
+/// after the pass read the records replaced that key's record with another
+/// remote file (review 4 #3, and the delta-4 self-review): the fresh record
+/// stays, and the moved file keeps a record at its new key, so the next pass
+/// plans nothing for it.
+#[tokio::test]
+async fn run_pass_move_keeps_a_record_for_the_moved_file_when_an_upload_rewrote_the_old_key() {
+    let src = TempDir::new("casput");
+    let old_path = src.write("old/b.jpg", b"bb");
+    let host = FakeHost::new();
+    let id = host.backed_up("old/b.jpg", &old_path);
+    std::fs::create_dir_all(src.path().join("new")).expect("mkdir");
+    std::fs::rename(&old_path, src.path().join("new/b.jpg")).expect("a move keeps the mtime");
+    let before = host.state().records[0].clone();
+    let fresh = BackupRecord {
+        key: "old/b.jpg".to_string(),
+        remote_id: Uuid::new_v4(),
+        uploaded_at_ms: before.uploaded_at_ms + 1,
+        ..before.clone()
+    };
+    host.state().records_before_put = Some(vec![fresh.clone()]);
+
+    let report = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
+        .await
+        .expect("pass");
+    assert_eq!((report.moved, report.deferred), (1, 0));
+    {
+        let state = host.state();
+        assert_eq!(state.files[&id].0, "new/b.jpg", "the server file moved");
+        let mut records = state.records.clone();
+        records.sort_by(|a, b| a.key.cmp(&b.key));
+        let moved = BackupRecord {
+            key: "new/b.jpg".to_string(),
+            ..before
+        };
+        assert_eq!(records, [moved, fresh], "{:?}", state.calls);
+        // The next pass sees new/b.jpg backed up.
+        drop(state);
+    }
+    host.state().calls.clear();
+    let next = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
+        .await
+        .expect("pass 2");
+    assert_eq!((next.queued, next.moved), (0, 0), "{:?}", host.state().calls);
+}
+
+/// The delta-4 self-review: a re-key keeps the fields an upload of a new
+/// version wrote after the pass read the records, never the pass's older
+/// copy (which would make the next pass upload the same bytes again).
+#[tokio::test]
+async fn run_pass_move_keeps_the_fields_a_finishing_upload_wrote() {
+    let src = TempDir::new("casfields");
+    let old_path = src.write("old/b.jpg", b"bb");
+    let host = FakeHost::new();
+    host.backed_up("old/b.jpg", &old_path);
+    std::fs::create_dir_all(src.path().join("new")).expect("mkdir");
+    std::fs::rename(&old_path, src.path().join("new/b.jpg")).expect("a move keeps the mtime");
+    let before = host.state().records[0].clone();
+    let fresh = BackupRecord {
+        uploaded_at_ms: before.uploaded_at_ms + 1000,
+        ..before.clone()
+    };
+    host.state().records_before_put = Some(vec![fresh.clone()]);
+
+    let report = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
+        .await
+        .expect("pass");
+    assert_eq!(report.moved, 1);
+    let state = host.state();
+    let moved = BackupRecord {
+        key: "new/b.jpg".to_string(),
+        ..fresh
+    };
+    assert_eq!(state.records, [moved], "{:?}", state.calls);
+}
+
+/// The re-key is left alone when another key's record names the remote file
+/// by now: the move counts as deferred, not moved.
+#[tokio::test]
+async fn run_pass_move_leaves_a_record_another_key_holds() {
+    let src = TempDir::new("casother");
+    let old_path = src.write("old/b.jpg", b"bb");
+    let host = FakeHost::new();
+    host.backed_up("old/b.jpg", &old_path);
+    std::fs::create_dir_all(src.path().join("new")).expect("mkdir");
+    std::fs::rename(&old_path, src.path().join("new/b.jpg")).expect("a move keeps the mtime");
+    let elsewhere = BackupRecord {
+        key: "other/b.jpg".to_string(),
+        ..host.state().records[0].clone()
+    };
+    host.state().records_before_put = Some(vec![elsewhere.clone()]);
+
+    let report = run_pass(&host, src.path(), &[], &Category::Pictures, BUDGET)
+        .await
+        .expect("pass");
+    assert_eq!((report.moved, report.deferred), (0, 1));
+    let state = host.state();
+    assert_eq!(state.records, [elsewhere], "{:?}", state.calls);
 }

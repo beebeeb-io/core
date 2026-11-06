@@ -60,7 +60,7 @@ fn key_sorted(json: &str) -> String {
 #[test]
 fn backup_device_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 56, "every named backup_device case is present");
+    assert_eq!(cases.len(), 57, "every named backup_device case is present");
 
     let (mut names, mut machine_ids, mut finds, mut manifests) = (0, 0, 0, 0);
     for case in &cases {
@@ -150,7 +150,7 @@ fn backup_device_cases_match_core() {
     );
     assert_eq!(
         (names, machine_ids, finds, manifests),
-        (27, 3, 14, 12),
+        (28, 3, 14, 12),
         "case counts per kind"
     );
 }
