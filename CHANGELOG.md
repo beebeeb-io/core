@@ -45,7 +45,8 @@ filesystem pass (`beebeeb-backup`). No v0.2.0 API changes. LD-0113, spec
     `records_from_remote` (exact key first, then the normalised key when unique), `normalize_key`,
     and the key helpers `file_name`, `parents` and `fold_name`;
   - custom folders: `custom_category_name` (safe like a device folder, never equal to a fixed
-    category or another custom folder: ` (2)`, ` (3)`) and `category_folder_name`.
+    category or another custom folder: ` (2)`, ` (3)`; at most 200 bytes with the suffix, the base
+    is cut, never the suffix) and `category_folder_name`.
 - **`beebeeb-backup`** (new crate, for desktop and the CLI): `walk_source(root, exclude)` (never
   opens a file, never follows a link, never descends into what is not local or into an excluded
   path such as the client's own sync root; attributes from the directory listing only; a folder is

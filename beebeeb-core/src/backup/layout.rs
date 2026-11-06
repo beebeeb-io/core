@@ -3,7 +3,7 @@
 
 use beebeeb_types::backup::Category;
 
-use super::device::clean_name;
+use super::device::{NAME_MAX_BYTES, clean_name};
 use super::fold_name;
 
 /// The root folder's name. It identifies nothing: the root is the folder with
@@ -18,8 +18,8 @@ const CUSTOM_FALLBACK_NAME: &str = "Folder";
 
 /// The server folder of a category under `Backups/<device>/`: a fixed
 /// category's display name, or a custom name made safe for one path component
-/// by the device-folder rule (idempotent, so a name from
-/// [`custom_category_name`] is unchanged). Clients name the category folder
+/// by the device-folder rule (a name from [`custom_category_name`] is
+/// unchanged). Clients name the category folder
 /// with this, never with the raw `Category::display_name`.
 pub fn category_folder_name(category: &Category) -> String {
     match category {
@@ -32,8 +32,11 @@ pub fn category_folder_name(category: &Category) -> String {
 /// folder's own name, made safe by the device-folder rule, and never equal
 /// (compared with `fold_name`) to a fixed category's folder or to one of
 /// `taken`, the device's other custom folder names: it gets ` (2)`, ` (3)`,
-/// ... The client stores the result as `Category::Custom(name)` when the
-/// folder is added, so the name never changes afterwards.
+/// ... The whole name, suffix included, is at most 200 UTF-8 bytes: the base
+/// is cut to make room, never the suffix, so [`category_folder_name`] gives
+/// the name back unchanged. The client stores the result as
+/// `Category::Custom(name)` when the folder is added, so the name never
+/// changes afterwards.
 pub fn custom_category_name(raw: &str, taken: &[&str]) -> String {
     let used: Vec<String> = Category::FIXED
         .iter()
@@ -44,10 +47,21 @@ pub fn custom_category_name(raw: &str, taken: &[&str]) -> String {
     let mut candidate = base.clone();
     let mut n = 2;
     while used.contains(&fold_name(&candidate)) {
-        candidate = format!("{base} ({n})");
+        let suffix = format!(" ({n})");
+        candidate = format!("{}{suffix}", cut_to(&base, NAME_MAX_BYTES - suffix.len()));
         n += 1;
     }
     candidate
+}
+
+/// The longest prefix of `name` of at most `max` bytes, cut at a character
+/// boundary.
+fn cut_to(name: &str, max: usize) -> &str {
+    let mut end = max.min(name.len());
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    &name[..end]
 }
 
 /// `Backups/<device_folder>/<category folder>/<rel>`, with `/` between

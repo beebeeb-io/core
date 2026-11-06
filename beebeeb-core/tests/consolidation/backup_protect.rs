@@ -5,8 +5,8 @@
 //! binding.
 
 use beebeeb_core::backup::{
-    EntryAttrs, Mutation, SkipReason, backup_rel_path, check_drive_mutation, check_mutation, custom_category_name,
-    own_backup_refusal, skip_reason,
+    EntryAttrs, Mutation, SkipReason, backup_rel_path, category_folder_name, check_drive_mutation, check_mutation,
+    custom_category_name, own_backup_refusal, skip_reason,
 };
 use beebeeb_types::backup::{Category, SystemRole};
 use serde_json::Value;
@@ -31,7 +31,7 @@ fn reason_key(reason: Option<SkipReason>) -> Value {
 #[test]
 fn backup_protect_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 76, "every named backup_protect case is present");
+    assert_eq!(cases.len(), 80, "every named backup_protect case is present");
 
     let (mut mutations, mut skips, mut layout, mut drives) = (0, 0, 0, 0);
     for case in &cases {
@@ -96,6 +96,12 @@ fn backup_protect_cases_match_core() {
                     .collect();
                 let got = custom_category_name(case["raw"].as_str().expect("raw"), &taken);
                 assert_eq!(got, case["expected"].as_str().expect("expected"), "{id}");
+                // The stored name is the server folder's name: cleaning it again changes nothing.
+                assert_eq!(
+                    category_folder_name(&Category::Custom(got.clone())),
+                    got,
+                    "{id}: category folder"
+                );
             }
             other => panic!("{id}: unknown kind `{other}`"),
         }
@@ -106,7 +112,7 @@ fn backup_protect_cases_match_core() {
     );
     assert_eq!(
         (mutations, drives, skips, layout),
-        (13, 16, 34, 13),
+        (13, 16, 34, 17),
         "case counts per kind"
     );
 }

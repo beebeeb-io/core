@@ -118,6 +118,22 @@ custom("custom_second_clash_counts_up", "Projects", "Projects (3)", ["Projects",
 custom("custom_separator_is_replaced", "a/b", "a_b")
 custom("custom_reserved_windows_name", "CON", "CON_")
 custom("custom_nothing_usable_is_folder", "", "Folder")
+# Delta 3 #1: a name is at most 200 UTF-8 bytes, suffix included. The base is cut to make room, never the suffix,
+# so two long names that share their first 200 bytes get two folders (the runner also checks that the category
+# folder of the stored name is the name itself).
+LONG = "a" * 200
+custom("custom_long_name_is_cut_to_200_bytes", LONG + "x" * 50, LONG)
+custom("custom_long_clash_keeps_its_suffix", LONG + "y" * 50, "a" * 196 + " (2)", [LONG])
+custom("custom_long_multibyte_clash_cuts_at_a_char_boundary", "é" * 120, "é" * 98 + " (2)",
+       ["é" * 100])
+cases.append({
+    "id": "layout_rel_path_long_custom_name_keeps_its_suffix",
+    "kind": "rel_path",
+    "device": "GLegion",
+    "category": "custom:" + "a" * 196 + " (2)",
+    "rel": "x.txt",
+    "expected": "Backups/GLegion/" + "a" * 196 + " (2)/x.txt",
+})
 cases.append({
     "id": "layout_rel_path_custom_name_is_safe",
     "kind": "rel_path",

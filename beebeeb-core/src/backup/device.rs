@@ -21,7 +21,7 @@ const FALLBACK_NAME: &str = "Device";
 
 /// The longest device name kept, in UTF-8 bytes, so a suffixed name still fits
 /// one path component.
-const NAME_MAX_BYTES: usize = 200;
+pub(super) const NAME_MAX_BYTES: usize = 200;
 
 /// Derive a desktop's device id from the OS's stable machine id (Windows
 /// `MachineGuid`, macOS `IOPlatformUUID`, Linux `/etc/machine-id`), so a
