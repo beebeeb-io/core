@@ -49,8 +49,9 @@ test-vectors/vectors.json + direct_*.json + tools/ (independent Python generator
 - **Chunk format:** v1 frames have no AAD; v2 binds position (STREAM). New files are written as v1 during the rollout (`WRITE_FORMAT`, task 1908); every reader reads both.
   Every content reader REQUIRES the pin (`ExpectedChunkFormat` from `decrypt_file_metadata[_with_key]`, never a server value); `V2` only from an EXISTING file's authenticated
   metadata, never for a NEW file. `finish()` is the integrity guard for completeness: call it and DISCARD all plaintext on any `Err`. The one exception is
-  core's `RangeSession` (over `RangeOpener`): it may release each frame once `RangeOpener` has authenticated it at the requested index, while its sink holds
-  one recorded version; 'whole', in-sync and agreed content still require `RangeSession::finish()`, and after any failure the sink is not reused until it is
+  core's `RangeSession` (in code `beebeeb_transfer::range_session`, over `RangeOpener`): it may release each frame once `RangeOpener` has authenticated it at
+  the requested index, while its sink holds one recorded version; 'whole', in-sync and agreed content still require the range session's only 'whole' result
+  (`range_session` → `RangeOutcome::Whole`; the contract's `RangeSession::finish()`), and after any failure the sink is not reused until it is
   verifiably empty. Every other reader keeps the whole-file rule. v1 frames carry no position, version or truncation binding, the same as the whole-file
   read. Invariants: `docs/agent-notes.md` (range reads I1–I9). Adoption checklist: `docs/agent-notes.md` → "Chunk format v2".
 - **Resume:** `resume_policy(stored, writing)` continues a session ONLY for `(V1Legacy, V1Legacy)`; otherwise abandon and restart from chunk 0 in a new session, never PUT into the old one.
@@ -90,7 +91,7 @@ The rules whose breakage costs data, a key, a credential or a user. One line eac
 - Passphrase NFC normalization never grows an unwiped secret buffer; core never seals a name its own opener refuses (`kdf::sanitize_actor_name`).
 - `kdf::open_legacy_child_key` refuses a 32-byte UTF-8 plaintext, so a name or label sealed under the same folder key can never be served as a child key.
 - Direct vectors: add rows in the generator, never in the JSON (`check-direct-vectors-generated.sh` fails on hand edits).
-- Never release plaintext before `finish()` outside `RangeSession`; `RangeSession` releases only `RangeOpener`-authenticated frames of one recorded version (`docs/agent-notes.md`, I1–I9).
+- Never release plaintext before `finish()` outside `RangeSession` (`beebeeb_transfer::range_session`); `RangeSession` releases only `RangeOpener`-authenticated frames of one recorded version (`docs/agent-notes.md`, I1–I9).
 
 ## How we work
 
