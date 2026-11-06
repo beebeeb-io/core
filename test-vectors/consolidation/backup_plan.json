@@ -1350,59 +1350,152 @@
       }
     },
     {
-      "id": "normalize_key_32",
+      "id": "unseen_root_covers_every_record",
+      "kind": "plan",
+      "entries": [],
+      "records": [
+        {
+          "key": "a.jpg",
+          "size": 10,
+          "modified_ms": 1000,
+          "remote_id": "00000001-0000-4000-8000-0000000000aa",
+          "uploaded_at_ms": 5000,
+          "state": "backed_up"
+        },
+        {
+          "key": "x/b.jpg",
+          "size": 10,
+          "modified_ms": 1000,
+          "remote_id": "00000002-0000-4000-8000-0000000000aa",
+          "uploaded_at_ms": 5000,
+          "state": "backed_up"
+        },
+        {
+          "key": "c.jpg",
+          "size": 10,
+          "modified_ms": 1000,
+          "remote_id": "00000003-0000-4000-8000-0000000000aa",
+          "uploaded_at_ms": 5000,
+          "state": "backed_up"
+        }
+      ],
+      "live_remote": [
+        "00000001-0000-4000-8000-0000000000aa",
+        "00000002-0000-4000-8000-0000000000aa"
+      ],
+      "unseen": [
+        ""
+      ],
+      "budget": {
+        "max_uploads": 1000,
+        "max_bytes": 1073741824000
+      },
+      "expect": {
+        "uploads": [],
+        "moves": [],
+        "folders": [],
+        "mark_removed_elsewhere": [],
+        "unchanged": 0,
+        "gone_locally": 0,
+        "deferred": 0
+      }
+    },
+    {
+      "id": "entry_under_unseen_is_not_planned",
+      "kind": "plan",
+      "entries": [
+        {
+          "key": "closed/a.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1000
+        },
+        {
+          "key": "b.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1000
+        }
+      ],
+      "records": [],
+      "live_remote": [],
+      "unseen": [
+        "closed"
+      ],
+      "budget": {
+        "max_uploads": 1000,
+        "max_bytes": 1073741824000
+      },
+      "expect": {
+        "uploads": [
+          {
+            "key": "b.jpg",
+            "size": 10,
+            "reason": "new"
+          }
+        ],
+        "moves": [],
+        "folders": [],
+        "mark_removed_elsewhere": [],
+        "unchanged": 0,
+        "gone_locally": 0,
+        "deferred": 0
+      }
+    },
+    {
+      "id": "normalize_key_34",
       "kind": "normalize_key",
       "raw": "a\\b\\c.jpg",
       "expected": "a/b/c.jpg"
     },
     {
-      "id": "normalize_key_33",
+      "id": "normalize_key_35",
       "kind": "normalize_key",
       "raw": "/a/b.jpg",
       "expected": "a/b.jpg"
     },
     {
-      "id": "normalize_key_34",
+      "id": "normalize_key_36",
       "kind": "normalize_key",
       "raw": "a/b.jpg",
       "expected": "a/b.jpg"
     },
     {
-      "id": "normalize_key_35",
+      "id": "normalize_key_37",
       "kind": "normalize_key",
       "raw": "René/x.jpg",
       "expected": "René/x.jpg"
     },
     {
-      "id": "presence_present_36",
+      "id": "presence_present_38",
       "kind": "presence",
       "device_folder_live": true,
       "category_folder_live": null,
       "expect": "present"
     },
     {
-      "id": "presence_present_37",
+      "id": "presence_present_39",
       "kind": "presence",
       "device_folder_live": true,
       "category_folder_live": true,
       "expect": "present"
     },
     {
-      "id": "presence_category_deleted_38",
+      "id": "presence_category_deleted_40",
       "kind": "presence",
       "device_folder_live": true,
       "category_folder_live": false,
       "expect": "category_deleted"
     },
     {
-      "id": "presence_device_deleted_39",
+      "id": "presence_device_deleted_41",
       "kind": "presence",
       "device_folder_live": false,
       "category_folder_live": true,
       "expect": "device_deleted"
     },
     {
-      "id": "presence_device_deleted_40",
+      "id": "presence_device_deleted_42",
       "kind": "presence",
       "device_folder_live": false,
       "category_folder_live": null,
@@ -1604,6 +1697,83 @@
           "key": "d",
           "is_dir": true,
           "size": 0,
+          "modified_ms": 1000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "rebuild_exact_key_before_normalized",
+      "kind": "rebuild",
+      "remote": [
+        {
+          "key": "a\\b.jpg",
+          "remote_id": "00000001-0000-4000-8000-0000000000aa",
+          "size": 10,
+          "uploaded_at_ms": 6000
+        },
+        {
+          "key": "a/b.jpg",
+          "remote_id": "00000002-0000-4000-8000-0000000000aa",
+          "size": 10,
+          "uploaded_at_ms": 5000
+        }
+      ],
+      "entries": [
+        {
+          "key": "a/b.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1000
+        },
+        {
+          "key": "a\\b.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1000
+        }
+      ],
+      "expect": [
+        {
+          "key": "a/b.jpg",
+          "size": 10,
+          "modified_ms": 1000,
+          "remote_id": "00000002-0000-4000-8000-0000000000aa",
+          "uploaded_at_ms": 5000,
+          "state": "backed_up"
+        },
+        {
+          "key": "a\\b.jpg",
+          "size": 10,
+          "modified_ms": 1000,
+          "remote_id": "00000001-0000-4000-8000-0000000000aa",
+          "uploaded_at_ms": 6000,
+          "state": "backed_up"
+        }
+      ]
+    },
+    {
+      "id": "rebuild_shared_normalized_key_is_not_guessed",
+      "kind": "rebuild",
+      "remote": [
+        {
+          "key": "a\\b.jpg",
+          "remote_id": "00000001-0000-4000-8000-0000000000aa",
+          "size": 10,
+          "uploaded_at_ms": 5000
+        }
+      ],
+      "entries": [
+        {
+          "key": "a/b.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1000
+        },
+        {
+          "key": "/a/b.jpg",
+          "is_dir": false,
+          "size": 10,
           "modified_ms": 1000
         }
       ],

@@ -95,6 +95,10 @@ plan("unseen_prefix_is_a_path_prefix_only", [], [r("closed-2/a.jpg", 1)], [1], {
      unseen=["closed"])
 plan("unseen_nfd_key_matches_nfc_record", [], [r("René/x.jpg", 1)], [1], {},
      unseen=[unicodedata.normalize("NFD", "René")])
+plan("unseen_root_covers_every_record", [], [r("a.jpg", 1), r("x/b.jpg", 2), r("c.jpg", 3)], [1, 2], {},
+     unseen=[""])
+plan("entry_under_unseen_is_not_planned", [e("closed/a.jpg"), e("b.jpg")], [], [],
+     {"uploads": [up("b.jpg")]}, unseen=["closed"])
 
 for raw, expected in [("a\\b\\c.jpg", "a/b/c.jpg"), ("/a/b.jpg", "a/b.jpg"), ("a/b.jpg", "a/b.jpg"),
                       ("René/x.jpg", "René/x.jpg")]:
@@ -125,6 +129,11 @@ rebuild("rebuild_nfd_remote_key_matches", [remote(unicodedata.normalize("NFD", "
 rebuild("rebuild_two_remote_copies_takes_the_newest", [remote("a.jpg", 1, up_ms=3000), remote("a.jpg", 2, up_ms=4000)],
         [e("a.jpg")], [r("a.jpg", 2, up=4000)])
 rebuild("rebuild_ignores_directories", [remote("d", 1)], [e("d", 0, 1000, True)], [])
+rebuild("rebuild_exact_key_before_normalized",
+        [remote("a\\b.jpg", 1, up_ms=6000), remote("a/b.jpg", 2, up_ms=5000)],
+        [e("a/b.jpg"), e("a\\b.jpg")], [r("a/b.jpg", 2, up=5000), r("a\\b.jpg", 1, up=6000)])
+rebuild("rebuild_shared_normalized_key_is_not_guessed", [remote("a\\b.jpg", 1)],
+        [e("a/b.jpg"), e("/a/b.jpg")], [])
 
 doc = {
     "description": "LD-0113 backup pass planner (spec 2026-11-06-backup-from-source §4.2 rules 9-11): new, changed "

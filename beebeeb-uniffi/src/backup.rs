@@ -380,7 +380,8 @@ pub fn backup_serialize_manifest(manifest: BackupDeviceManifest) -> Result<Strin
 
 #[derive(uniffi::Record)]
 pub struct BackupSourceEntry {
-    /// On iOS: the asset id.
+    /// A `/`-joined path; every `/` is a folder boundary. iOS passes the
+    /// asset id with each `/` replaced by `|` (`<uuid>|L0|001`).
     pub key: String,
     pub is_dir: bool,
     pub size: u64,

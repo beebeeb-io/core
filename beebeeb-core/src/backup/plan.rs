@@ -19,8 +19,11 @@ pub fn normalize_key(raw: &str) -> String {
 }
 
 /// One entry of the source folder, as the walk reports it. `key` is the
-/// `/`-joined path relative to the backed-up folder (on iOS: the asset id).
-/// Entries that are not local never reach the planner.
+/// `/`-joined path relative to the backed-up folder. Every `/` in a key is a
+/// folder boundary (the planner plans parent folders from them), so a key that
+/// is not a path encodes its own `/` first: an iOS asset id
+/// (`<uuid>/L0/001`) is passed with each `/` replaced by `|`. Entries that
+/// are not local never reach the planner.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceEntry {
     pub key: String,
@@ -187,8 +190,9 @@ fn under_unseen(key: &str, unseen: &HashSet<String>) -> bool {
     if unseen.is_empty() {
         return false;
     }
+    // `""` is the backed-up folder itself: nothing in it was seen.
     let key = normalize_key(key);
-    unseen.contains(&key) || parents(&key).any(|parent| unseen.contains(parent))
+    unseen.contains("") || unseen.contains(&key) || parents(&key).any(|parent| unseen.contains(parent))
 }
 
 /// Spec §4.2 rules 9 and 11. `live_remote` holds the ids of this category's
@@ -196,8 +200,11 @@ fn under_unseen(key: &str, unseen: &HashSet<String>) -> bool {
 /// not look at or into (a skipped folder or file, `WalkResult::unseen`): a
 /// record at or under one is left untouched, never gone, never a move source
 /// and never marked removed elsewhere, because the walk cannot know whether it
-/// is still there (plan Amendment 1, items 5-6). iOS passes an empty list. The
-/// result does not depend on the order of `entries` or `records`.
+/// is still there (plan Amendment 1, items 5-6). `""` stands for the whole
+/// folder. A file entry at or under an unseen key is not planned either (a
+/// walk never reports both; if one does, the entry waits for a pass that sees
+/// its folder whole). iOS passes an empty list. The result does not depend on
+/// the order of `entries` or `records`.
 pub fn plan_pass(
     entries: &[SourceEntry],
     records: &[BackupRecord],
@@ -205,12 +212,15 @@ pub fn plan_pass(
     unseen: &[String],
     budget: PassBudget,
 ) -> PassPlan {
-    let mut files: Vec<&SourceEntry> = entries.iter().filter(|e| !e.is_dir).collect();
-    files.sort_by(|a, b| a.key.cmp(&b.key));
     let unseen: HashSet<String> = unseen
         .iter()
         .map(|key| normalize_key(key).trim_end_matches('/').to_string())
         .collect();
+    let mut files: Vec<&SourceEntry> = entries
+        .iter()
+        .filter(|e| !e.is_dir && !under_unseen(&e.key, &unseen))
+        .collect();
+    files.sort_by(|a, b| a.key.cmp(&b.key));
     let mut records: Vec<&BackupRecord> = records.iter().filter(|r| !under_unseen(&r.key, &unseen)).collect();
     records.sort_by(|a, b| (&a.key, a.remote_id).cmp(&(&b.key, b.remote_id)));
 
