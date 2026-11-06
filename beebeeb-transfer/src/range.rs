@@ -29,7 +29,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::task::{Context, Poll as TaskPoll, Waker};
 use std::time::Duration;
 
-use beebeeb_core::chunk_stream::{ChunkFormat, ExpectedChunkFormat, RangeOpener, VERSION_ID_LEN};
+use beebeeb_core::chunk_stream::{ChunkFormat, ExpectedChunkFormat, RangeOpener, VERSION_ID_LEN, VersionCommitment};
 use beebeeb_core::direct_transfer::range::{
     PieceCutter, RangeBudget, RangeConfig, RangePlanner, RangePoll, RunSet, demand_chunks,
 };
@@ -68,6 +68,12 @@ pub struct RangeRequest {
     pub file_size: u64,
     /// The content pin from `decrypt_file_metadata[_with_key]` (I3).
     pub pin: ExpectedChunkFormat,
+    /// The version commitment from the same authenticated metadata (`NameMetadata::version`).
+    /// When present, frame 0 must be the committed upload, so an older one cannot be served.
+    pub version: Option<VersionCommitment>,
+    /// Plaintext chunk stride from authenticated metadata, when present. A geometry with any
+    /// other stride is refused before anything is released.
+    pub authenticated_chunk_size: Option<u64>,
     /// The geometry the caller already knows. Required to stream through the pinned API route.
     pub geometry: Option<Geometry>,
     /// The identity the caller recorded for this placeholder, if any (I4).
@@ -837,7 +843,13 @@ pub async fn range_session<I: DirectIo>(
         // The geometry is known from the first accepted window (or the caller): fix the opener.
         if opener.is_none() {
             if let (Some(g), Some(key)) = (planner.geometry(), file_key.take()) {
-                match RangeOpener::new(key, &req.file_id, req.pin, g, req.file_size) {
+                if req
+                    .authenticated_chunk_size
+                    .is_some_and(|stride| stride != g.chunk_size)
+                {
+                    return st.fail(RangeSessionError::SizeMismatch);
+                }
+                match RangeOpener::new(key, &req.file_id, req.pin, req.version, g, req.file_size) {
                     Ok(o) => opener = Some(o),
                     Err(_) => return st.fail(RangeSessionError::SizeMismatch),
                 }

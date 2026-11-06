@@ -35,3 +35,18 @@ python3 -I test-vectors/tools/make_backup_device_vectors.py test-vectors/consoli
 python3 -I test-vectors/tools/make_backup_root_vectors.py test-vectors/consolidation/backup_root.json
 python3 -I test-vectors/tools/make_backup_plan_vectors.py test-vectors/consolidation/backup_plan.json
 ```
+
+`check_version_metadata.py` independently derives the file/name subkeys, opens
+the protected metadata vector with Python `cryptography`, and checks the exact
+`version_id` / `version_counter` plaintext shape:
+
+```sh
+python3 test-vectors/tools/check_version_metadata.py test-vectors/vectors.json
+```
+
+`check_key_proof.py` independently derives both X25519 public keys, the shared
+secret, HKDF MAC key and complete HMAC transcript for the key-proof vector:
+
+```sh
+python3 test-vectors/tools/check_key_proof.py test-vectors/vectors.json
+```

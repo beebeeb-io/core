@@ -1,3 +1,9 @@
+//! Legacy desktop sync prototype.
+//!
+//! This crate is not a product sync authority and must not be shipped in a
+//! product. Product clients use `beebeeb_core::sync`; desktop will be rebuilt
+//! on that engine later.
+
 pub mod config;
 pub mod conflict;
 pub mod engine;

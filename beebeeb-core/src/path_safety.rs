@@ -22,9 +22,11 @@
 //! The pure naming rules build for wasm too; the filesystem part
 //! ([`ensure_contained`], [`safe_child`], [`safe_rel_join`]) is native-only.
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 use crate::invisible::is_display_invisible;
+use unicode_normalization::UnicodeNormalization;
 
 /// Which rule set to apply; see the module docs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +52,9 @@ impl std::error::Error for UnsafeName {}
 
 /// Longest single name a mainstream filesystem stores, in UTF-8 bytes.
 pub const MAX_COMPONENT_BYTES: usize = 255;
+/// Longest final name accepted by the safe publisher. Temporary siblings use
+/// an independent short name, so publication never shortens the valid range.
+pub const MAX_PUBLISH_COMPONENT_BYTES: usize = MAX_COMPONENT_BYTES;
 /// Longest relative path a mainstream filesystem stores, in bytes.
 pub const MAX_PATH_BYTES: usize = 4096;
 
@@ -243,6 +248,144 @@ pub fn archive_component(name: &str) -> Result<String, UnsafeName> {
     sanitize_component(name, Rules::Portable)
 }
 
+/// NFC and Unicode-lowercase key used to detect names that collide on common
+/// case-insensitive or normalization-insensitive filesystems.
+pub fn fold_key(name: &str) -> String {
+    name.nfc().flat_map(char::to_lowercase).collect()
+}
+
+/// Keep `name` when its folded key is free, otherwise add ` (n)` before the
+/// extension until it is unique. The returned name is always portable.
+pub fn deduplicate_component(name: &str, used: &mut BTreeSet<String>) -> Result<String, UnsafeName> {
+    check_component(name, Rules::Portable)?;
+    if used.insert(fold_key(name)) {
+        return Ok(name.to_owned());
+    }
+    let (stem, extension) = match name.rsplit_once('.') {
+        Some((stem, extension)) if !stem.is_empty() => (stem, format!(".{extension}")),
+        _ => (name, String::new()),
+    };
+    for number in 2u32..=10_000 {
+        let candidate = format!("{stem} ({number}){extension}");
+        check_component(&candidate, Rules::Portable)?;
+        if used.insert(fold_key(&candidate)) {
+            return Ok(candidate);
+        }
+    }
+    Err(UnsafeName("has too many colliding names"))
+}
+
+#[cfg(unix)]
+mod publish {
+    use super::*;
+    use rand::{RngCore, rngs::OsRng};
+    use rustix::fs::{self, AtFlags, Mode, OFlags};
+    use std::fs::File;
+    use std::io;
+    use std::path::Path;
+
+    /// An already-open trusted directory. All publication operations are
+    /// relative to this handle, so renaming or replacing an ancestor cannot
+    /// redirect the eventual file create.
+    #[derive(Debug)]
+    pub struct TrustedDirectory {
+        directory: File,
+    }
+
+    impl TrustedDirectory {
+        pub fn open(path: &Path) -> io::Result<Self> {
+            let fd = fs::open(
+                path,
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            )?;
+            Ok(Self { directory: fd.into() })
+        }
+
+        /// Create a restrictive, no-follow sibling temp file. Dropping the
+        /// pending publication removes it through the trusted directory handle.
+        pub fn begin_publish(&self, name: &str, rules: Rules) -> io::Result<(PendingPublish, File)> {
+            check_component(name, rules).map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+            if name.len() > MAX_PUBLISH_COMPONENT_BYTES {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("publish name is longer than {MAX_PUBLISH_COMPONENT_BYTES} bytes"),
+                ));
+            }
+            let mut random = [0u8; 16];
+            OsRng
+                .try_fill_bytes(&mut random)
+                .map_err(|error| io::Error::other(format!("generate temp suffix: {error}")))?;
+            let mut suffix = String::with_capacity(32);
+            for byte in random {
+                suffix.push_str(&format!("{byte:02x}"));
+            }
+            let temp_name = format!(".bbtmp-{suffix}");
+            let fd = fs::openat(
+                &self.directory,
+                temp_name.as_str(),
+                OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::RUSR | Mode::WUSR,
+            )?;
+            let file: File = fd.into();
+            let sync_file = file.try_clone()?;
+            let pending = PendingPublish {
+                directory: self.directory.try_clone()?,
+                sync_file,
+                temp_name,
+                target_name: name.to_owned(),
+                committed: false,
+            };
+            Ok((pending, file))
+        }
+
+        pub fn publish_bytes(&self, name: &str, rules: Rules, bytes: &[u8]) -> io::Result<()> {
+            use std::io::Write as _;
+            let (pending, mut file) = self.begin_publish(name, rules)?;
+            file.write_all(bytes)?;
+            drop(file);
+            pending.commit()
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct PendingPublish {
+        directory: File,
+        sync_file: File,
+        temp_name: String,
+        target_name: String,
+        committed: bool,
+    }
+
+    impl PendingPublish {
+        /// Flush file data, atomically replace the final directory entry, then
+        /// flush the directory entry itself.
+        pub fn commit(mut self) -> io::Result<()> {
+            self.sync_file.sync_all()?;
+            fs::renameat(
+                &self.directory,
+                self.temp_name.as_str(),
+                &self.directory,
+                self.target_name.as_str(),
+            )?;
+            self.directory.sync_all()?;
+            self.committed = true;
+            Ok(())
+        }
+    }
+
+    impl Drop for PendingPublish {
+        fn drop(&mut self) {
+            if !self.committed {
+                let _ = fs::unlinkat(&self.directory, self.temp_name.as_str(), AtFlags::empty());
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+pub use publish::{PendingPublish, TrustedDirectory};
+
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use super::*;
@@ -360,6 +503,7 @@ pub use native::{default_output_path, ensure_contained, safe_child, safe_rel_joi
 #[cfg(all(test, unix))]
 mod symlink_tests {
     use super::*;
+    use std::os::unix::fs::{MetadataExt, symlink};
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -423,5 +567,57 @@ mod symlink_tests {
         let error = safe_rel_join(&root, "dir/file.bin", Rules::Portable)
             .expect_err("a path resolving outside the root must be refused");
         assert!(error.contains("outside"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn safe_publish_replaces_a_symlink_without_following_it() {
+        let scratch = Scratch::new("publish-symlink");
+        let root = scratch.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = scratch.path().join("outside");
+        std::fs::write(&outside, b"outside").unwrap();
+        symlink(&outside, root.join("result")).unwrap();
+
+        let directory = TrustedDirectory::open(&root).unwrap();
+        directory.publish_bytes("result", Rules::Portable, b"inside").unwrap();
+
+        assert_eq!(std::fs::read(root.join("result")).unwrap(), b"inside");
+        assert_eq!(std::fs::read(&outside).unwrap(), b"outside");
+        assert_eq!(std::fs::metadata(root.join("result")).unwrap().mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    fn safe_publish_accepts_a_maximum_length_valid_component() {
+        let scratch = Scratch::new("publish-max-name");
+        let root = scratch.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        let name = "x".repeat(MAX_COMPONENT_BYTES);
+
+        TrustedDirectory::open(&root)
+            .unwrap()
+            .publish_bytes(&name, Rules::Host, b"valid")
+            .unwrap();
+
+        assert_eq!(std::fs::read(root.join(name)).unwrap(), b"valid");
+    }
+
+    #[test]
+    fn failed_publish_cleans_up_its_temp_file() {
+        let scratch = Scratch::new("publish-cleanup");
+        let root = scratch.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        let directory = TrustedDirectory::open(&root).unwrap();
+        let (pending, file) = directory.begin_publish("result", Rules::Portable).unwrap();
+        drop(file);
+        drop(pending);
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn folded_names_are_deduplicated() {
+        let mut used = BTreeSet::new();
+        assert_eq!(deduplicate_component("Café.txt", &mut used).unwrap(), "Café.txt");
+        assert_eq!(deduplicate_component("Café.TXT", &mut used).unwrap(), "Café (2).TXT");
+        assert_eq!(fold_key("Café.txt"), fold_key("Café.TXT"));
     }
 }

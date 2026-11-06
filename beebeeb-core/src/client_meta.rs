@@ -25,6 +25,8 @@ pub const ENVELOPE_PREFIX: &str = "bbcm1.";
 pub const AAD_DOMAIN: &[u8; 22] = b"beebeeb/client-meta/v1";
 /// HKDF-SHA256 `info` of the per-user client-metadata key.
 pub const CLIENT_META_KEY_INFO: &[u8; 26] = b"beebeeb/client-meta/v1/key";
+/// AAD domain for per-device, per-product settings.
+pub const SETTINGS_AAD_DOMAIN: &[u8] = b"beebeeb/client-settings/v1";
 
 const NONCE_LEN: usize = 12;
 const TAG_LEN: usize = 16;
@@ -37,7 +39,7 @@ const MAX_TEXT: usize = 1024;
 /// Longest accepted envelope string (`bbcm1.` + base64url of [`MAX_BODY`]).
 const MAX_ENVELOPE_CHARS: usize = 1452;
 
-/// The four client-metadata fields. Codes 5 and 6 stay reserved (task 1922 Q3:
+/// Client-metadata fields. Codes 5 and 6 stay reserved:
 /// `current_file` and `detail` are discarded, never sealed).
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -46,6 +48,10 @@ pub enum ClientMetaField {
     SessionName = 2,
     SessionLocalPath = 3,
     SessionRemotePath = 4,
+    /// Per-device, per-product settings serialized as a bounded JSON record.
+    DeviceSettings = 7,
+    /// A contact public-key pin synced as an encrypted record.
+    ContactKey = 8,
 }
 
 impl TryFrom<u8> for ClientMetaField {
@@ -57,9 +63,11 @@ impl TryFrom<u8> for ClientMetaField {
             2 => Self::SessionName,
             3 => Self::SessionLocalPath,
             4 => Self::SessionRemotePath,
+            7 => Self::DeviceSettings,
+            8 => Self::ContactKey,
             other => {
                 return Err(CoreError::InvalidInput(format!(
-                    "unknown client-meta field code {other} (codes 1-4 only)"
+                    "unknown client-meta field code {other}"
                 )));
             }
         })
@@ -126,6 +134,20 @@ impl ClientMetaKey {
             .iter()
             .map(|(record, device, field, envelope)| self.open(record, device.as_ref(), *field, envelope))
             .collect()
+    }
+
+    /// Seal settings with both the device and product authenticated.
+    pub fn seal_settings(&self, device_id: &Uuid, product: &str, plaintext: &str) -> Result<String, CoreError> {
+        let nonce = fresh_nonce()?;
+        let aad = settings_aad(device_id, product)?;
+        let payload = payload_for(plaintext)?;
+        seal_envelope(&self.key, &nonce, &payload, &aad)
+    }
+
+    /// Open settings only for the device and product they were sealed for.
+    pub fn open_settings(&self, device_id: &Uuid, product: &str, envelope: &str) -> Result<String, CoreError> {
+        let aad = settings_aad(device_id, product)?;
+        open_envelope(&self.key, envelope, &aad)
     }
 }
 
@@ -211,6 +233,25 @@ fn aad_for(record_key: &Uuid, device_key: Option<&Uuid>, field: ClientMetaField)
     );
     aad.extend_from_slice(device.as_bytes());
     aad.push(field as u8);
+    Ok(aad)
+}
+
+fn settings_aad(device_id: &Uuid, product: &str) -> Result<Vec<u8>, CoreError> {
+    if product.is_empty()
+        || product.len() > 128
+        || !product
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Err(CoreError::InvalidInput("invalid settings product identifier".into()));
+    }
+    let device = device_id.hyphenated().to_string();
+    let mut aad = Vec::with_capacity(SETTINGS_AAD_DOMAIN.len() + 4 + device.len() + 4 + product.len());
+    aad.extend_from_slice(SETTINGS_AAD_DOMAIN);
+    aad.extend_from_slice(&(device.len() as u32).to_be_bytes());
+    aad.extend_from_slice(device.as_bytes());
+    aad.extend_from_slice(&(product.len() as u32).to_be_bytes());
+    aad.extend_from_slice(product.as_bytes());
     Ok(aad)
 }
 
@@ -758,12 +799,14 @@ mod tests {
     }
 
     #[test]
-    fn field_codes_are_one_to_four_and_the_rest_is_invalid_input() {
+    fn field_codes_are_stable_and_reserved_values_are_invalid_input() {
         for (code, field) in [
             (1u8, ClientMetaField::DeviceHostname),
             (2, ClientMetaField::SessionName),
             (3, ClientMetaField::SessionLocalPath),
             (4, ClientMetaField::SessionRemotePath),
+            (7, ClientMetaField::DeviceSettings),
+            (8, ClientMetaField::ContactKey),
         ] {
             assert!(matches!(ClientMetaField::try_from(code), Ok(f) if f == field));
             assert_eq!(field as u8, code);

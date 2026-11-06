@@ -13,6 +13,7 @@
 //! ```rust
 //! use beebeeb_transfer::DownloadRequest;
 //! use beebeeb_core::direct_transfer::MemoryClass;
+//! use beebeeb_types::limits::MemoryBudget;
 //!
 //! let request = DownloadRequest {
 //!     api_base: "https://api.example.test".into(),
@@ -20,6 +21,8 @@
 //!     chunk_count: 3,
 //!     pinned_version: None,
 //!     memory: MemoryClass::Native,
+//!     budget: MemoryBudget::NATIVE,
+//!     authenticated_chunk_size: None,
 //!     kbps_limit: None,
 //!     forced_api: true,
 //!     allow_legacy_chunk0: false,
@@ -28,11 +31,17 @@
 //! assert!(request.forced_api);
 //! ```
 
+pub mod background;
 pub mod download;
 pub mod io;
 pub mod observer;
 pub mod range;
 pub mod shared;
+pub mod upload;
+
+pub(crate) const V2_CAPABILITIES_HEADER: &str = "x-beebeeb-capabilities";
+pub(crate) const V2_WRITE_CAPABILITIES: &str = "file-write-v2, version-metadata-v1";
+pub(crate) const DIRECT_V2_WRITE_CAPABILITIES: &str = "object-upload-v1, file-write-v2, version-metadata-v1";
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
@@ -42,8 +51,16 @@ mod range_tests;
 #[cfg(test)]
 mod tests;
 
+pub use background::{
+    BackgroundError, BackgroundFailure, BackgroundGrant, BackgroundRestartPlan, BackgroundRestore,
+    BackgroundUploadPlanner, CommitRequest, SignOutPlan, StageProgress, TransferFinished, TransferRequest,
+    UploadSourceIdentity,
+};
+#[cfg(unix)]
+pub use download::download_current_to_directory;
 pub use download::{
     AfterWriteCause, DownloadError, DownloadOutcome, DownloadRequest, DownloadStats, PlaintextSink, download,
+    download_current, download_historical,
 };
 pub use io::{ApiCall, ApiMethod, ApiReply, DirectIo, SignedUrl, StorageReply};
 pub use observer::{ChunkVia, Observer, TransferEvent, TransportKind, UseApiReason};
@@ -52,3 +69,7 @@ pub use range::{
     range_session,
 };
 pub use shared::{DirectShared, DirectStore, HealthSnapshot};
+pub use upload::{
+    UploadCommitment, UploadError, UploadFailureState, UploadOutcome, UploadSession, UploadStats, UploadTransport,
+    upload,
+};

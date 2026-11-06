@@ -5,6 +5,10 @@
 //! a single encrypted blob via the server relay. The server only sees ciphertext
 //! and two ephemeral public keys.
 //!
+//! The words authenticate only this file-transfer channel. They are not an
+//! account-key approval protocol and must never be used to move account keys;
+//! use [`crate::device_link`] for that purpose.
+//!
 //! ## Layout
 //!
 //! - [`crypto`]    — X25519 key exchange, HKDF transfer-key + SAS derivation

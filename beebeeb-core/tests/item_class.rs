@@ -6,9 +6,10 @@ use aes_gcm::{
     Aes256Gcm, KeyInit, Nonce,
     aead::{Aead, Payload},
 };
-use beebeeb_core::chunk_stream::ExpectedChunkFormat;
+use beebeeb_core::chunk_stream::{ExpectedChunkFormat, VersionCommitment};
 use beebeeb_core::encrypt::{
     decrypt_file_metadata_with_key, encrypt_chunk_raw, encrypt_name_for, encrypt_name_with_chunk_format,
+    encrypt_name_with_version,
 };
 use beebeeb_core::file_request::{seal_to_request, wrap_request_private};
 use beebeeb_core::item_id::{ItemClass, NewItemId, is_foreign_item_id, item_class};
@@ -65,7 +66,7 @@ fn split_chunk(frame: &[u8], index: u32) -> FirstChunk<'_> {
 fn l8_frame(master: &MasterKey, item_id: &str, key: &FileKey) -> Vec<u8> {
     let mut context = b"beebeeb-owner-file-key-v1".to_vec();
     context.extend_from_slice(item_id.as_bytes());
-    let raw_master = Zeroizing::new(master.to_bytes());
+    let raw_master = master.to_bytes();
     let mut derived = Zeroizing::new([0u8; 32]);
     Hkdf::<Sha256>::new(None, raw_master.as_ref())
         .expand(&context, derived.as_mut())
@@ -596,12 +597,14 @@ fn request_row_class_and_name_checks_precede_any_open() {
 fn request_row_carries_a_rename_target_unless_upper_repair() {
     // A string-convention name keeps its recorded pin and its derived name key.
     let fixture = request_fixture();
-    let name = encrypt_name_with_chunk_format(
+    let commitment = VersionCommitment::new([0x44; 12], 9).unwrap();
+    let name = encrypt_name_with_version(
         &fixture.master,
         &fixture.item_id,
         "upload.bin",
         None,
         ExpectedChunkFormat::V2,
+        commitment,
     )
     .unwrap();
     let row = fixture.resolve(&name).unwrap();
@@ -733,12 +736,14 @@ fn request_row_keys_new_derives_the_string_rename_target() {
 #[test]
 fn request_rename_seals_under_the_target_key_and_keeps_its_pin() {
     let fixture = request_fixture();
-    let name = encrypt_name_with_chunk_format(
+    let commitment = VersionCommitment::new([0x45; 12], 10).unwrap();
+    let name = encrypt_name_with_version(
         &fixture.master,
         &fixture.item_id,
         "upload.bin",
         None,
         ExpectedChunkFormat::V2,
+        commitment,
     )
     .unwrap();
     let row = fixture.resolve(&name).unwrap();
@@ -753,6 +758,8 @@ fn request_rename_seals_under_the_target_key_and_keeps_its_pin() {
     assert_eq!(meta.mime_type.as_deref(), Some("text/plain"));
     assert_eq!(meta.chunk_format, target.pin());
     assert_eq!(target.pin(), ExpectedChunkFormat::V2);
+    assert_eq!(target.version(), Some(commitment));
+    assert_eq!(meta.version, Some(commitment));
 }
 
 #[test]

@@ -229,6 +229,8 @@ fn request(size: u64) -> RangeRequest {
         object_version_id: VERSION.into(),
         file_size: size,
         pin: ExpectedChunkFormat::Unrecorded,
+        version: None,
+        authenticated_chunk_size: None,
         geometry: None,
         recorded: None,
         on_disk_bytes: 0,
@@ -503,6 +505,43 @@ async fn t8_a_v2_placeholder_recorded_for_another_upload_gets_nothing() {
             );
         }
     }
+}
+
+/// A protected range read serves only the upload its metadata commits to: an older upload of the
+/// same file, served whole and authentic, releases nothing. Mutant: the commitment not passed on.
+#[tokio::test]
+async fn a_committed_session_releases_nothing_of_another_upload() {
+    let fx = Arc::new(Fx::new(3 * STRIDE as usize, ChunkFormat::V2));
+    let current = Fx::new(3 * STRIDE as usize, ChunkFormat::V2);
+    let vid: [u8; 12] = current.frames[0][..12].try_into().unwrap();
+    let g = fx.geometry;
+    let io = ScriptedIo::new(handler(fx.clone(), g, fx.frames.clone(), |_| 200));
+    let control = RangeControl::new();
+    control.demand(1, 0, g.original_size);
+    let mut sink = Placeholder::sized(g.original_size);
+    let mut req = request(g.original_size);
+    req.pin = ExpectedChunkFormat::V2;
+    req.version = Some(beebeeb_core::chunk_stream::VersionCommitment::new(vid, 2).unwrap());
+    let (out, _) = run(&io, &RangeLessor::new(BIG), req, &control, &mut sink).await;
+    assert!(!matches!(out, Ok(RangeOutcome::Whole(_))), "{out:?}");
+    assert_eq!(sink.transfers, 0, "an uncommitted upload reached the placeholder");
+}
+
+/// The authenticated stride wins: a geometry with another stride releases nothing. Mutant: the
+/// stride check dropped.
+#[tokio::test]
+async fn a_geometry_against_the_authenticated_stride_releases_nothing() {
+    let fx = Arc::new(Fx::new(3 * STRIDE as usize, ChunkFormat::V2));
+    let g = fx.geometry;
+    let io = ScriptedIo::new(handler(fx.clone(), g, fx.frames.clone(), |_| 200));
+    let control = RangeControl::new();
+    control.demand(1, 0, g.original_size);
+    let mut sink = Placeholder::sized(g.original_size);
+    let mut req = request(g.original_size);
+    req.authenticated_chunk_size = Some(STRIDE * 2);
+    let (out, _) = run(&io, &RangeLessor::new(BIG), req, &control, &mut sink).await;
+    assert!(matches!(out, Err(RangeSessionError::SizeMismatch)), "{out:?}");
+    assert_eq!(sink.transfers, 0);
 }
 
 /// I6 (crypto review P2-2): a stride that is not a multiple of 4 KiB, released out of order, so

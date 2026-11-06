@@ -17,6 +17,7 @@ pub fn format_binary(bytes: i64) -> String {
 /// carrying a value that rounds up into the next unit (`999.6 KB` with one
 /// decimal prints `1.0 MB`). Counts below 1,000 always print as `N B`.
 #[wasm_bindgen(js_name = formatCompact)]
-pub fn format_compact(bytes: i64, decimals: u32) -> String {
-    beebeeb_types::format_compact(bytes, decimals as usize)
+pub fn format_compact(bytes: i64, decimals: u32) -> Result<String, JsError> {
+    let decimals = usize::try_from(decimals).map_err(|_| JsError::new("format precision does not fit usize"))?;
+    beebeeb_types::try_format_compact(bytes, decimals).map_err(|error| JsError::new(&error.to_string()))
 }

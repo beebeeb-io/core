@@ -202,11 +202,16 @@ impl PlanTable {
     /// A plan that cannot buy storage ignores a positive `extra_tb` (the old
     /// rule); `bonus_bytes` still applies.
     pub fn effective_quota(&self, extra_tb: i64, bonus_bytes: i64) -> i64 {
-        if !self.can_add_storage && extra_tb > 0 {
-            return (self.base_storage_bytes + bonus_bytes).min(MAX_TOTAL_STORAGE);
-        }
-        let total = self.base_storage_bytes + (extra_tb * ONE_TB) + bonus_bytes;
-        total.min(MAX_TOTAL_STORAGE)
+        let extra_tb = if self.can_add_storage {
+            extra_tb.clamp(0, self.max_extra_tb)
+        } else {
+            0
+        };
+        let bonus_bytes = bonus_bytes.clamp(0, MAX_TOTAL_STORAGE);
+        self.base_storage_bytes
+            .saturating_add(extra_tb.saturating_mul(ONE_TB))
+            .saturating_add(bonus_bytes)
+            .min(MAX_TOTAL_STORAGE)
     }
 
     /// Base price plus storage and user add-ons, in cents.
@@ -214,10 +219,19 @@ impl PlanTable {
     /// Only plans that can add users are billed for them, so passing
     /// `extra_users` to any other plan adds nothing.
     pub fn monthly_cost_cents(&self, extra_tb: i64, extra_users: i64) -> i64 {
-        let billable_users = if self.can_add_users { extra_users } else { 0 };
+        let extra_tb = if self.can_add_storage {
+            extra_tb.clamp(0, self.max_extra_tb)
+        } else {
+            0
+        };
+        let billable_users = if self.can_add_users {
+            extra_users.clamp(0, self.max_extra_users)
+        } else {
+            0
+        };
         self.monthly_base_cents
-            + (extra_tb * self.storage_addon_cents_per_tb)
-            + (billable_users * self.user_addon_cents)
+            .saturating_add(extra_tb.saturating_mul(self.storage_addon_cents_per_tb))
+            .saturating_add(billable_users.saturating_mul(self.user_addon_cents))
     }
 }
 
@@ -412,5 +426,27 @@ mod tests {
         assert!(!Plan::Basic.can_add_users());
         assert!(!Plan::Pro.can_add_users());
         assert!(Plan::Business.can_add_users());
+    }
+
+    #[test]
+    fn hostile_addons_are_clamped_before_arithmetic() {
+        assert_eq!(effective_quota(Plan::Pro, i64::MAX, i64::MAX), MAX_TOTAL_STORAGE);
+        assert_eq!(
+            monthly_cost_cents(Plan::Business, i64::MAX, i64::MAX),
+            BUSINESS_PRICE_CENTS
+                + Plan::Business.max_extra_tb() * STORAGE_ADDON_CENTS_PER_TB
+                + MAX_EXTRA_USERS_BUSINESS * USER_ADDON_CENTS
+        );
+        assert_eq!(effective_quota(Plan::Pro, i64::MIN, i64::MIN), PRO_QUOTA);
+    }
+
+    #[test]
+    fn production_maximum_paid_addons_are_not_reduced() {
+        assert_eq!(effective_quota(Plan::Pro, 98, 0), MAX_TOTAL_STORAGE);
+        assert_eq!(effective_quota(Plan::Business, 94, 0), MAX_TOTAL_STORAGE);
+        assert_eq!(
+            monthly_cost_cents(Plan::Business, 94, 49),
+            BUSINESS_PRICE_CENTS + 94 * STORAGE_ADDON_CENTS_PER_TB + 49 * USER_ADDON_CENTS
+        );
     }
 }

@@ -15,11 +15,9 @@ pub(crate) const RECOVERY_SALT: &[u8] = b"beebeeb-recovery-v1x";
 ///
 /// The recovery phrase IS the master secret. The 128 bits of entropy backing
 /// the mnemonic are fed through Argon2id to produce a 32-byte master key.
-/// This same key is then encrypted with the user's password for daily login.
-///
-/// The password never derives its own independent master key — it only wraps
-/// the recovery-phrase-derived key for convenience. If the user loses both
-/// their password and recovery phrase, the data is gone.
+/// Clients keep that key in their platform key store; the server has no copy
+/// encrypted with the password. The password authenticates account access but
+/// does not derive or wrap this recovery-phrase-derived key.
 pub fn generate_recovery_phrase() -> Result<(String, MasterKey), CoreError> {
     let mnemonic = Mnemonic::generate_in_with(&mut OsRng, bip39::Language::English, RECOVERY_WORD_COUNT)
         .map_err(|e| CoreError::Kdf(format!("mnemonic generation failed: {e}")))?;
@@ -39,6 +37,9 @@ pub fn generate_recovery_phrase() -> Result<(String, MasterKey), CoreError> {
 /// Returns [`CoreError::InvalidRecoveryPhrase`] if the phrase is malformed or
 /// has an invalid checksum.
 pub fn recover_from_phrase(phrase: &str) -> Result<MasterKey, CoreError> {
+    if count_words(phrase) != RECOVERY_WORD_COUNT {
+        return Err(CoreError::InvalidRecoveryPhrase);
+    }
     let mnemonic: Mnemonic = phrase.parse().map_err(|_| CoreError::InvalidRecoveryPhrase)?;
 
     // Same rationale as `generate_recovery_phrase`: this entropy is the master
@@ -173,6 +174,13 @@ mod tests {
             "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon",
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn valid_twenty_four_word_phrase_is_rejected() {
+        let phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art";
+        assert!(phrase.parse::<Mnemonic>().is_ok(), "fixture must be valid BIP39");
+        assert!(recover_from_phrase(phrase).is_err());
     }
 
     #[test]

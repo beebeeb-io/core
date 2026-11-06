@@ -23,6 +23,14 @@ if [[ "${1:-}" == "--debug" ]]; then
     CARGO_PROFILE_FLAG=""
 fi
 
+LIBRARY_FEATURE_ARGS=()
+GENERATOR_FEATURES="cli"
+if [[ "${BEEBEEB_LEGACY_BINDINGS:-0}" == "1" ]]; then
+    LIBRARY_FEATURE_ARGS=(--features legacy-bindings)
+    GENERATOR_FEATURES="cli,legacy-bindings"
+    echo "WARNING: building the default surface plus legacy-bindings for an old app"
+fi
+
 # ---------------------------------------------------------------------------
 # 1. Prerequisite checks
 # ---------------------------------------------------------------------------
@@ -58,7 +66,7 @@ cargo ndk \
     -t arm64-v8a \
     -t x86_64 \
     -o jniLibs \
-    build -p beebeeb-uniffi $CARGO_PROFILE_FLAG
+    build -p beebeeb-uniffi $CARGO_PROFILE_FLAG "${LIBRARY_FEATURE_ARGS[@]}"
 
 echo ""
 echo "Built .so files:"
@@ -70,7 +78,7 @@ find jniLibs -name "*.so" | sort
 
 echo ""
 echo "Building host library for Kotlin binding generation..."
-cargo build -p beebeeb-uniffi --features cli
+cargo build -p beebeeb-uniffi --features "$GENERATOR_FEATURES"
 
 # ---------------------------------------------------------------------------
 # 4. Generate Kotlin bindings
@@ -80,11 +88,11 @@ echo ""
 echo "Generating Kotlin bindings..."
 mkdir -p bindings/kotlin
 
-cargo run --bin uniffi-bindgen --features cli -- generate \
+cargo run -p beebeeb-uniffi --bin uniffi-bindgen --features "$GENERATOR_FEATURES" -- generate \
     --library target/debug/libbeebeeb_uniffi.dylib \
     --language kotlin \
     --out-dir bindings/kotlin/ 2>/dev/null || \
-cargo run --bin uniffi-bindgen --features cli -- generate \
+cargo run -p beebeeb-uniffi --bin uniffi-bindgen --features "$GENERATOR_FEATURES" -- generate \
     --library target/debug/libbeebeeb_uniffi.so \
     --language kotlin \
     --out-dir bindings/kotlin/

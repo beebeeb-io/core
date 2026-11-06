@@ -45,23 +45,24 @@
 //!   file id) has its own. See [`chunk_aad_v2`] and the crate-private
 //!   `StreamOpener` for the binding and the decrypt rules.
 //!
-//! [`ChunkEncryptor`] writes [`WRITE_FORMAT`] (still v1 during the read-only
-//! rollout phase). [`ChunkDecryptor`] reads both, but only under an
+//! [`ChunkEncryptor`] writes [`WRITE_FORMAT`] (v2). [`ChunkDecryptor`] reads
+//! both, but only under an
 //! [`ExpectedChunkFormat`] that the caller MUST take from the file's
 //! authenticated (encrypted) metadata via
 //! [`crate::encrypt::decrypt_file_metadata`]: a file whose metadata records v2
 //! opens ONLY as v2. Detection from frame 0 is used only for files whose
-//! metadata records no format (written before the v2 write switch).
+//! metadata records no format (written before protected metadata).
 //!
-//! A resumed upload asks [`ChunkEncryptor::resume_policy`] whether it may
-//! continue its old server session: a v2 upload never may (see
-//! [`SessionResume`]; restart = abandon the session or let its lease expire,
-//! then re-init — never the old session on a 409).
+//! A newly-created writer asks [`ChunkEncryptor::resume_policy`] whether it may
+//! continue an unrelated old server session. A persisted v2 upload can instead
+//! continue its exact version with
+//! [`ChunkEncryptor::resume_v2_from_reader_with_file_key`], after its caller has
+//! verified that the plaintext source is unchanged.
 //!
 //! A replace / new version of an existing file builds its writer with
 //! [`ChunkEncryptor::with_recorded_pin`] (the pin from the file's encrypted
-//! metadata): a v2-pinned file is written as v2 even while [`WRITE_FORMAT`] is
-//! v1, because the server keeps the v2 metadata on replace.
+//! metadata). Both recorded and legacy-unrecorded histories now produce a v2
+//! version; the latter retain the unrecorded history pin for old versions.
 //!
 //! ## Sync, reactor-agnostic
 //!
@@ -70,7 +71,7 @@
 //! `spawn_blocking`) and keep AES off the async reactor.
 
 use beebeeb_types::{ChunkPlan, ChunkProfile, ChunkStrategy, STORAGE_FORMAT_VERSION_V2, plan_chunks};
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use zeroize::Zeroizing;
 
 use crate::CoreError;
@@ -124,10 +125,9 @@ pub const MAX_CHUNK_SIZE: u64 = 256 * 1024 * 1024;
 // the upload's frame 0: client-generated, unique per upload, transmitted in
 // frame 0 itself and authenticated by every frame's tag (frame 0's own AAD
 // contains it too). A frame from another version carries another version id
-// in its AAD and fails. It is deliberately NOT stored in the file metadata:
-// the server keeps one metadata blob per file, not per version, so a
-// metadata-held id could not open older versions, and a pre-1908 client that
-// rewrites the metadata (rename) would drop it and make the file unreadable.
+// in its AAD and fails. Each version's encrypted metadata stores this id and a
+// monotonic counter; current reads require the frame-0 id to match, while old
+// reads use the selected historical version's own metadata.
 //
 // The AAD is never transmitted: the decryptor rebuilds it from what it already
 // knows (the file id it asked for, frame 0's nonce, the index it expects next).
@@ -186,13 +186,81 @@ impl ChunkFormat {
 
 /// The format [`ChunkEncryptor`] writes for every new file.
 ///
-/// **Read-only rollout phase (task 1908 review round 2, P2-1): still v1.** A
-/// client on this core reads v2 everywhere but keeps writing v1, because a v2
-/// file is unreadable by every client whose read path is not yet on this core
-/// (web `decrypt_chunk` loop, mobile video streamer / FileProvider, older
-/// builds). Flipping this to [`ChunkFormat::V2`] is a separate, gated core
-/// release once every client's read path is live — see task 1908.
-pub const WRITE_FORMAT: ChunkFormat = ChunkFormat::V1Legacy;
+/// v2 is the sole production write format. v1 remains readable for legacy
+/// versions but is available to writers only through test-only seams.
+pub const WRITE_FORMAT: ChunkFormat = ChunkFormat::V2;
+
+// New production writers must never silently return to the legacy format.
+// Legacy output remains available only through the test-only format override.
+const _: () = assert!(matches!(WRITE_FORMAT, ChunkFormat::V2));
+
+/// The authenticated identity of one file version.
+///
+/// `version_id` is the nonce of that version's frame 0. `counter` starts at one
+/// and increases for every replacement. Both values live inside the encrypted
+/// file metadata; metadata written before this type existed carries neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VersionCommitment {
+    /// Frame 0's v2 nonce.
+    pub version_id: [u8; VERSION_ID_LEN],
+    /// Monotonic per-file version number.
+    pub counter: u64,
+}
+
+/// Largest counter that every JSON client can represent exactly.
+pub const MAX_VERSION_COUNTER: u64 = (1u64 << 53) - 1;
+
+impl VersionCommitment {
+    /// Construct a commitment. Counters are one-based; zero is never written.
+    pub fn new(version_id: [u8; VERSION_ID_LEN], counter: u64) -> Result<Self, CoreError> {
+        if counter == 0 {
+            return Err(CoreError::InvalidInput("version counter must be positive".into()));
+        }
+        if counter > MAX_VERSION_COUNTER {
+            return Err(CoreError::InvalidInput(format!(
+                "version counter exceeds the cross-client maximum {MAX_VERSION_COUNTER}"
+            )));
+        }
+        Ok(Self { version_id, counter })
+    }
+
+    /// Construct the first commitment, or the successor of `previous`.
+    pub fn next(version_id: [u8; VERSION_ID_LEN], previous: Option<VersionCommitment>) -> Result<Self, CoreError> {
+        let counter = match previous {
+            None => 1,
+            Some(previous) => previous
+                .counter
+                .checked_add(1)
+                .ok_or_else(|| CoreError::InvalidInput("version counter overflow".into()))?,
+        };
+        Self::new(version_id, counter)
+    }
+}
+
+/// Result of comparing authenticated metadata with the store's remembered
+/// highest counter for the same file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VersionCounterStatus {
+    /// The store has not seen a protected version of this file before.
+    FirstSeen,
+    /// The counter equals the remembered highest value.
+    Current,
+    /// The counter is newer than the remembered highest value.
+    Advanced,
+    /// The counter is lower: warn that the server may have replayed metadata.
+    Rollback,
+}
+
+/// Pure store-side replay check. The caller persists a newly seen/advanced
+/// counter; this function performs no I/O and mutates no state.
+pub fn check_version_counter(counter: u64, remembered_highest: Option<u64>) -> VersionCounterStatus {
+    match remembered_highest {
+        None => VersionCounterStatus::FirstSeen,
+        Some(highest) if counter < highest => VersionCounterStatus::Rollback,
+        Some(highest) if counter == highest => VersionCounterStatus::Current,
+        Some(_) => VersionCounterStatus::Advanced,
+    }
+}
 
 /// What a file's **authenticated** (encrypted) metadata says about its chunk
 /// format — the mandatory input of every file-content reader (review round 2,
@@ -321,12 +389,9 @@ pub fn resume_policy(stored: Option<ChunkFormat>, writing: ChunkFormat) -> Sessi
 /// The chunk format a writer must use for an upload to a file whose encrypted
 /// metadata records `pin` (task 1908 review round 4, I-1).
 ///
-/// - [`ExpectedChunkFormat::V2`] → [`ChunkFormat::V2`], ALWAYS, also during the
-///   read-only phase. The server keeps a file's `name_encrypted` on replace, so
-///   a new version of a v2-pinned file is read under the v2 pin: written as v1
-///   it would complete and never open.
-/// - [`ExpectedChunkFormat::Unrecorded`] → [`WRITE_FORMAT`] (a new file id, or
-///   a file whose metadata records nothing; detection reads either format).
+/// - [`ExpectedChunkFormat::V2`] → [`ChunkFormat::V2`].
+/// - [`ExpectedChunkFormat::Unrecorded`] → [`WRITE_FORMAT`]. This retains the
+///   legacy history pin while ensuring the replacement itself is v2.
 ///
 /// Used by [`ChunkEncryptor::with_recorded_pin`] and, for the metadata seal,
 /// by `encrypt::encrypt_name_with_chunk_format` / `encrypt::encrypt_thumbnail_for`,
@@ -406,6 +471,29 @@ pub fn open_chunk(
     }
 }
 
+/// Random-access open checked against the matching metadata record.
+pub fn open_version_chunk(
+    file_key: &FileKey,
+    file_id: &str,
+    metadata: &crate::encrypt::NameMetadata,
+    index: u32,
+    is_last: bool,
+    frame: &[u8],
+) -> Result<Vec<u8>, CoreError> {
+    let committed = metadata
+        .version
+        .ok_or_else(|| CoreError::InvalidInput("random-access protected read requires a version commitment".into()))?;
+    open_chunk(
+        file_key,
+        file_id,
+        &committed.version_id,
+        index,
+        is_last,
+        ChunkFormat::V2,
+        frame,
+    )
+}
+
 /// Sequential STREAM-open state, shared by [`ChunkDecryptor`] (which owns its
 /// key) and the legacy borrowed-key disk helpers in `encrypt` / `file_encrypt`
 /// (which do not).
@@ -434,6 +522,8 @@ pub(crate) struct StreamOpener {
     next_index: u32,
     format: Option<ChunkFormat>,
     version_id: Option<[u8; VERSION_ID_LEN]>,
+    /// When present, frame 0 must carry this authenticated metadata value.
+    committed_version_id: Option<[u8; VERSION_ID_LEN]>,
     seen_last: bool,
 }
 
@@ -441,6 +531,15 @@ impl StreamOpener {
     /// `file_key` is the per-file key every later [`open_next`](Self::open_next)
     /// call passes (v1 frames open under it; v2 under its derived subkey).
     pub(crate) fn new(file_key: &FileKey, file_id: &str, expected: ExpectedChunkFormat) -> Self {
+        Self::with_version_commitment(file_key, file_id, expected, None)
+    }
+
+    pub(crate) fn with_version_commitment(
+        file_key: &FileKey,
+        file_id: &str,
+        expected: ExpectedChunkFormat,
+        commitment: Option<VersionCommitment>,
+    ) -> Self {
         Self {
             file_id: file_id.as_bytes().to_vec(),
             chunk_key: derive_chunk_key_v2(file_key),
@@ -448,6 +547,7 @@ impl StreamOpener {
             next_index: 0,
             format: None,
             version_id: None,
+            committed_version_id: commitment.map(|value| value.version_id),
             seen_last: false,
         }
     }
@@ -504,6 +604,14 @@ impl StreamOpener {
             (Some(ChunkFormat::V2), None) => return Err(CoreError::Decryption), // unreachable by construction
             (Some(ChunkFormat::V1Legacy), _) => (open_raw_with_aad(key, frame, &[])?, ChunkFormat::V1Legacy, false),
             // Frame 0.
+            (None, _) if self.committed_version_id.is_some() => {
+                let (pt, last, vid) = self.try_v2_frame0(frame).ok_or(CoreError::Decryption)?;
+                if Some(vid) != self.committed_version_id {
+                    return Err(CoreError::Decryption);
+                }
+                self.version_id = Some(vid);
+                (pt, ChunkFormat::V2, last)
+            }
             (None, _) => match self.expected {
                 // Rule 3: metadata says v2 — v2 or nothing. A no-AAD blob under
                 // the file key (name, thumbnail, a v1 frame) never gets here as v1.
@@ -661,6 +769,121 @@ impl ChunkEncryptor {
         reader: R,
     ) -> Result<Self, CoreError> {
         Self::with_explicit_chunk_size(file_key, file_id, file_size, chunk_size, Source::Pull(Box::new(reader)))
+    }
+
+    /// Continue the exact same v2 encryption after an interrupted process.
+    ///
+    /// `version_id` is the persisted nonce of frame 0 and `next_index` is the
+    /// first frame that was not already sealed. The reader is sought to the
+    /// matching plaintext offset by this constructor. Index zero is refused:
+    /// without a sealed frame 0 there is no version to resume, so callers must
+    /// start a fresh writer. The caller must compare a persisted source
+    /// identity before invoking this constructor; keys are deliberately not
+    /// part of the persisted resume state.
+    pub fn resume_v2_from_reader_with_file_key<R: Read + Seek + Send + 'static>(
+        file_key: FileKey,
+        file_id: &str,
+        version_id: [u8; VERSION_ID_LEN],
+        next_index: u32,
+        file_size: u64,
+        chunk_size_bytes: u64,
+        mut reader: R,
+    ) -> Result<Self, CoreError> {
+        check_explicit_chunk_size(chunk_size_bytes)?;
+        if next_index == 0 {
+            return Err(CoreError::InvalidInput(
+                "resuming v2 at index zero is not allowed; start a fresh version".into(),
+            ));
+        }
+
+        let chunk_count_u64 = if file_size == 0 {
+            1
+        } else {
+            (file_size / chunk_size_bytes)
+                .checked_add(u64::from(file_size % chunk_size_bytes != 0))
+                .ok_or_else(|| CoreError::InvalidInput("chunk count overflow".into()))?
+        };
+        let chunk_count: u32 = chunk_count_u64.try_into().map_err(|_| {
+            CoreError::InvalidInput(format!(
+                "chunk_count {chunk_count_u64} exceeds u32::MAX; file too large for this chunk size"
+            ))
+        })?;
+        if next_index > chunk_count {
+            return Err(CoreError::InvalidInput(format!(
+                "resume index {next_index} is outside the {chunk_count}-chunk plan"
+            )));
+        }
+
+        let plaintext_offset = if next_index == chunk_count {
+            file_size
+        } else {
+            u64::from(next_index)
+                .checked_mul(chunk_size_bytes)
+                .ok_or_else(|| CoreError::InvalidInput("resume plaintext offset overflow".into()))?
+        };
+        if plaintext_offset > file_size {
+            return Err(CoreError::InvalidInput(
+                "resume plaintext offset is outside the declared file".into(),
+            ));
+        }
+        let prefix_overhead = u64::from(next_index)
+            .checked_mul(CHUNK_OVERHEAD)
+            .ok_or_else(|| CoreError::InvalidInput("resume ciphertext prefix overflow".into()))?;
+        let running_ciphertext = plaintext_offset
+            .checked_add(prefix_overhead)
+            .ok_or_else(|| CoreError::InvalidInput("resume ciphertext prefix overflow".into()))?;
+        let total_overhead = u64::from(chunk_count)
+            .checked_mul(CHUNK_OVERHEAD)
+            .ok_or_else(|| CoreError::InvalidInput("ciphertext size overflow".into()))?;
+        file_size
+            .checked_add(total_overhead)
+            .ok_or_else(|| CoreError::InvalidInput("ciphertext size overflow".into()))?;
+
+        let positioned = reader
+            .seek(SeekFrom::Start(plaintext_offset))
+            .map_err(|e| CoreError::Io(format!("seek input to resume offset: {e}")))?;
+        if positioned != plaintext_offset {
+            return Err(CoreError::Io(format!(
+                "seek input returned offset {positioned}, expected {plaintext_offset}"
+            )));
+        }
+
+        let mut resumed = Self::with_explicit_chunk_size(
+            file_key,
+            file_id,
+            file_size,
+            chunk_size_bytes,
+            Source::Pull(Box::new(reader)),
+        )?;
+        resumed.format = ChunkFormat::V2;
+        resumed.version_id = Some(version_id);
+        resumed.next_index = next_index;
+        resumed.emitted_chunks = next_index;
+        resumed.running_plaintext = plaintext_offset;
+        resumed.running_ciphertext = running_ciphertext;
+        Ok(resumed)
+    }
+
+    /// Master-key counterpart of
+    /// [`resume_v2_from_reader_with_file_key`](Self::resume_v2_from_reader_with_file_key).
+    pub fn resume_v2_from_reader_with_chunk_size<R: Read + Seek + Send + 'static>(
+        mk: &MasterKey,
+        file_id: &str,
+        version_id: [u8; VERSION_ID_LEN],
+        next_index: u32,
+        file_size: u64,
+        chunk_size_bytes: u64,
+        reader: R,
+    ) -> Result<Self, CoreError> {
+        Self::resume_v2_from_reader_with_file_key(
+            derive_file_key(mk, file_id.as_bytes()),
+            file_id,
+            version_id,
+            next_index,
+            file_size,
+            chunk_size_bytes,
+            reader,
+        )
     }
 
     /// **Pull** constructor: the encryptor owns `reader` and pulls one chunk at
@@ -908,23 +1131,46 @@ impl ChunkEncryptor {
         self.format
     }
 
+    /// The v2 version id after frame 0 has been sealed.
+    pub fn version_id(&self) -> Option<[u8; VERSION_ID_LEN]> {
+        self.version_id
+    }
+
+    /// Build the metadata commitment for this upload after frame 0 has been
+    /// sealed. A replacement passes the commitment from the previous current
+    /// metadata so the counter increases exactly once.
+    pub fn version_commitment(&self, previous: Option<VersionCommitment>) -> Result<VersionCommitment, CoreError> {
+        self.version_commitment_after(previous.map(|version| version.counter))
+    }
+
+    /// Binding-friendly form of [`version_commitment`](Self::version_commitment):
+    /// only the previous counter is needed to compute the successor.
+    pub fn version_commitment_after(&self, previous_counter: Option<u64>) -> Result<VersionCommitment, CoreError> {
+        if self.format != ChunkFormat::V2 {
+            return Err(CoreError::InvalidInput(
+                "legacy content cannot carry a v2 version commitment".into(),
+            ));
+        }
+        let version_id = self
+            .version_id
+            .ok_or_else(|| CoreError::InvalidInput("seal frame 0 before recording its version commitment".into()))?;
+        let counter = match previous_counter {
+            None => 1,
+            Some(counter) => counter
+                .checked_add(1)
+                .ok_or_else(|| CoreError::InvalidInput("version counter overflow".into()))?,
+        };
+        VersionCommitment::new(version_id, counter)
+    }
+
     /// Write in the format the file's **recorded pin** requires
     /// ([`chunk_format_for_pin`]) — task 1908 review round 4, I-1. Every
     /// replace / new version of an existing file MUST build its encryptor this
     /// way, with `pin` = the `chunk_format` that
     /// [`crate::encrypt::decrypt_file_metadata`] returned for that file (never
-    /// a server field). A v2 pin forces v2 frames even while [`WRITE_FORMAT`]
-    /// is still v1; `Unrecorded` keeps [`WRITE_FORMAT`].
-    ///
-    /// **New-file rule (lead ruling 2026-10-17, round 5).** Pass `V2` ONLY
-    /// with the pin read from an EXISTING file's authenticated metadata. A
-    /// brand-new file id has no pin: use the plain constructor, which writes
-    /// [`WRITE_FORMAT`], and record [`ExpectedChunkFormat::recorded_for`] of
-    /// [`format`](Self::format). Never pass `V2` for a new file — before the
-    /// switch that would create a v2 file that clients not yet on this core
-    /// cannot read. Core cannot tell the two cases apart; it is a client rule
-    /// (adoption checklist in `CLAUDE.md`). Only before the first chunk, so a
-    /// file can never mix formats. Pair it with
+    /// a server field). Both pins now select v2 for new output; an unrecorded
+    /// pin remains meaningful when the file has legacy history. Only before
+    /// the first chunk, so a file can never mix formats. Pair it with
     /// `encrypt::encrypt_thumbnail_for(.., pin)`,
     /// `encrypt::encrypt_note_for(.., pin)` and, when the name is rewritten,
     /// `encrypt_name_with_chunk_format(.., pin)`.
@@ -1181,9 +1427,47 @@ impl ChunkDecryptor {
         chunk_size_bytes: u64,
         reader: R,
     ) -> Result<Self, CoreError> {
-        if chunk_size_bytes == 0 {
-            return Err(CoreError::InvalidInput("chunk_size_bytes must be positive".into()));
-        }
+        Self::from_reader_with_commitment(mk, file_id, expected, None, chunk_size_bytes, reader)
+    }
+
+    /// Pull-form current read using the current metadata record.
+    pub fn from_reader_for_current_version<R: Read + Send + 'static>(
+        mk: &MasterKey,
+        file_id: &str,
+        metadata: &crate::encrypt::NameMetadata,
+        chunk_size_bytes: u64,
+        reader: R,
+    ) -> Result<Self, CoreError> {
+        Self::from_reader_with_commitment(
+            mk,
+            file_id,
+            metadata.chunk_format,
+            metadata.version,
+            chunk_size_bytes,
+            reader,
+        )
+    }
+
+    /// Pull-form historical read using that historical version's metadata.
+    pub fn from_reader_for_historical_version<R: Read + Send + 'static>(
+        mk: &MasterKey,
+        file_id: &str,
+        metadata: &crate::encrypt::NameMetadata,
+        chunk_size_bytes: u64,
+        reader: R,
+    ) -> Result<Self, CoreError> {
+        Self::from_reader_for_current_version(mk, file_id, metadata, chunk_size_bytes, reader)
+    }
+
+    fn from_reader_with_commitment<R: Read + Send + 'static>(
+        mk: &MasterKey,
+        file_id: &str,
+        expected: ExpectedChunkFormat,
+        commitment: Option<VersionCommitment>,
+        chunk_size_bytes: u64,
+        reader: R,
+    ) -> Result<Self, CoreError> {
+        check_explicit_chunk_size(chunk_size_bytes)?;
         let chunk_size: usize = chunk_size_bytes
             .try_into()
             .map_err(|_| CoreError::InvalidInput(format!("chunk_size_bytes {chunk_size_bytes} exceeds usize range")))?;
@@ -1193,7 +1477,7 @@ impl ChunkDecryptor {
             .ok_or_else(|| CoreError::InvalidInput("chunk_size_bytes overflows frame length".into()))?;
 
         let file_key = derive_file_key(mk, file_id.as_bytes());
-        let opener = StreamOpener::new(&file_key, file_id, expected);
+        let opener = StreamOpener::with_version_commitment(&file_key, file_id, expected, commitment);
         Ok(Self {
             file_key,
             opener,
@@ -1209,12 +1493,56 @@ impl ChunkDecryptor {
         Self::for_push_with_file_key(derive_file_key(mk, file_id.as_bytes()), file_id, expected)
     }
 
+    /// Read the file currently named by `metadata`. Protected metadata forces
+    /// v2 and rejects frame 0 unless its version id matches. Older metadata is
+    /// still readable through the unprotected compatibility rule.
+    pub fn for_current_version(mk: &MasterKey, file_id: &str, metadata: &crate::encrypt::NameMetadata) -> Self {
+        Self::for_version_with_file_key(
+            derive_file_key(mk, file_id.as_bytes()),
+            file_id,
+            metadata.chunk_format,
+            metadata.version,
+        )
+    }
+
+    /// Read one historical version using that historical version's own sealed
+    /// metadata. This intentionally does not accept the current metadata.
+    pub fn for_historical_version(
+        mk: &MasterKey,
+        file_id: &str,
+        historical_metadata: &crate::encrypt::NameMetadata,
+    ) -> Self {
+        Self::for_version_with_file_key(
+            derive_file_key(mk, file_id.as_bytes()),
+            file_id,
+            historical_metadata.chunk_format,
+            historical_metadata.version,
+        )
+    }
+
     /// **Push** constructor from an already-derived/unwrapped [`FileKey`] — for
     /// callers that hold the file key but not the owner's master key (shared-link
     /// and share recipients, file-request content keys). `file_id` must be the
     /// id the file was uploaded under (it is bound into every v2 frame).
     pub fn for_push_with_file_key(file_key: FileKey, file_id: &str, expected: ExpectedChunkFormat) -> Self {
         let opener = StreamOpener::new(&file_key, file_id, expected);
+        Self {
+            file_key,
+            opener,
+            source: DecSource::Push,
+            buf: Zeroizing::new(Vec::new()),
+        }
+    }
+
+    /// Known-key counterpart used by current and historical readers after they
+    /// have opened the matching metadata record.
+    pub fn for_version_with_file_key(
+        file_key: FileKey,
+        file_id: &str,
+        expected: ExpectedChunkFormat,
+        commitment: Option<VersionCommitment>,
+    ) -> Self {
+        let opener = StreamOpener::with_version_commitment(&file_key, file_id, expected, commitment);
         Self {
             file_key,
             opener,
@@ -1814,12 +2142,10 @@ mod tests {
     }
 
     #[test]
-    fn default_output_opens_via_legacy_decrypt_chunk_raw_only_while_write_format_is_v1() {
-        // Task 1908: before 1908 this asserted that new frames open with the
-        // legacy no-AAD `decrypt_chunk_raw` ("wire format unchanged"). During
-        // the read-only rollout phase WRITE_FORMAT is still v1, so that holds;
-        // once it is v2 the legacy open MUST fail (downgrade resistance). Same
-        // layout and sizes either way; the shared decryptor reads both.
+    fn default_v2_output_does_not_open_via_legacy_decrypt_chunk_raw() {
+        // Production output must not open with the legacy no-AAD primitive.
+        // The frame layout and sizes are unchanged; the shared decryptor reads
+        // both formats.
         let m = mk();
         let data = pattern(9 * MIB);
         let (frames, _) = encrypt_all(&m, "legacy", &data, ChunkProfile::Desktop);
@@ -1870,18 +2196,12 @@ mod tests {
     }
 
     #[test]
-    fn write_format_is_v1_during_the_read_only_rollout_phase() {
-        // Task 1908 review round 2 (P2-1): clients on this core READ v2 but keep
-        // WRITING v1 until every client's read path is live. Flipping this is
-        // the gated switch recorded in task 1908 — change this test with it.
-        assert_eq!(WRITE_FORMAT, ChunkFormat::V1Legacy);
+    fn production_write_format_is_v2() {
+        assert_eq!(WRITE_FORMAT, ChunkFormat::V2);
         let m = mk();
         let enc = ChunkEncryptor::for_push(&m, "fmt", 10, ChunkProfile::Web).unwrap();
-        assert_eq!(enc.format(), ChunkFormat::V1Legacy);
-        assert_eq!(
-            ExpectedChunkFormat::recorded_for(enc.format()),
-            ExpectedChunkFormat::Unrecorded
-        );
+        assert_eq!(enc.format(), ChunkFormat::V2);
+        assert_eq!(ExpectedChunkFormat::recorded_for(enc.format()), ExpectedChunkFormat::V2);
     }
 }
 
@@ -2532,7 +2852,15 @@ mod review_round2_tests {
         // 1912.
         let m = mk();
         let id = "legacy-metadata-file";
-        let legacy_name = crate::encrypt::encrypt_name(&m, id, "old.txt", None).unwrap();
+        let legacy_name = crate::encrypt::encrypt_name_sealed(
+            &m,
+            id,
+            "old.txt",
+            None,
+            ExpectedChunkFormat::Unrecorded,
+            crate::encrypt::MetadataSeal::Legacy,
+        )
+        .unwrap();
         let meta = crate::encrypt::decrypt_name_metadata(&m, id, &legacy_name).unwrap();
         assert_eq!(meta.chunk_format, ExpectedChunkFormat::Unrecorded);
         let forged = vec![blob_frame(&legacy_name)];
@@ -2875,7 +3203,7 @@ mod review_round3_tests {
             "old.txt",
             None,
             ExpectedChunkFormat::Unrecorded,
-            MetadataSeal::Legacy,
+            crate::encrypt::MetadataSeal::Legacy,
         )
         .unwrap();
         let meta = decrypt_file_metadata(&m, id, &legacy).unwrap();
@@ -2935,24 +3263,22 @@ mod review_round3_tests {
     }
 
     #[test]
-    fn p1b_write_switch_keeps_legacy_sealing_during_the_read_only_phase() {
-        // Read-only rollout phase: what this core writes for v1 files must stay
-        // readable by clients NOT on this core (raw file key, no AAD).
-        assert_eq!(WRITE_FORMAT, ChunkFormat::V1Legacy);
-        assert_eq!(crate::encrypt::METADATA_SEAL_WRITE, MetadataSeal::Legacy);
+    fn p1b_write_switch_uses_v2_and_purpose_subkeys() {
+        assert_eq!(WRITE_FORMAT, ChunkFormat::V2);
+        assert_eq!(crate::encrypt::METADATA_SEAL_WRITE, MetadataSeal::Subkey);
         let m = mk();
-        let id = "read-only-phase";
+        let id = "v2-write-phase";
         let fk = derive_file_key(&m, id.as_bytes());
         let name = encrypt_name(&m, id, "n.txt", None).unwrap();
         let blob: beebeeb_types::EncryptedBlob = serde_json::from_str(&name).unwrap();
         assert!(
-            crate::encrypt::decrypt_metadata(&fk, &blob).is_ok(),
-            "old clients must read new v1 names"
+            crate::encrypt::decrypt_metadata(&fk, &blob).is_err(),
+            "new names must not open under the raw file key"
         );
         let thumb = encrypt_thumbnail(&fk, b"t").unwrap();
         assert!(
-            open_raw_with_aad(&fk, &thumb, &[]).is_ok(),
-            "old clients must read new thumbnails"
+            open_raw_with_aad(&fk, &thumb, &[]).is_err(),
+            "new thumbnails must not open under the raw file key"
         );
     }
 
@@ -3071,13 +3397,8 @@ mod review_round4_tests {
     // ── I-1: a replace / new version honours the file's recorded pin ────────
 
     #[test]
-    fn i1_probe_default_writer_under_a_v2_pin_is_unreadable_documented() {
-        // The reviewer's probe, kept as documentation of WHY the pin-aware
-        // writer exists: a file whose metadata records v2 (written after the
-        // switch) replaced by a client using the default writer (v1 during
-        // the read-only phase). The server keeps the v2 metadata on replace,
-        // so the new version is unreadable.
-        assert_eq!(WRITE_FORMAT, ChunkFormat::V1Legacy);
+    fn i1_default_writer_is_readable_under_a_v2_pin() {
+        assert_eq!(WRITE_FORMAT, ChunkFormat::V2);
         let m = mk();
         let id = "probe-v2-pinned";
         let name = encrypt_name_with_chunk_format(&m, id, "a.pdf", None, ExpectedChunkFormat::V2).unwrap();
@@ -3086,7 +3407,7 @@ mod review_round4_tests {
         let data = pattern(40, 1);
         let mut enc = ChunkEncryptor::for_push_with_chunk_size(&m, id, data.len() as u64, CS).unwrap();
         let frames = write(&mut enc, &data);
-        assert!(read(&m, id, pin, &frames).is_err());
+        assert_eq!(read(&m, id, pin, &frames).unwrap(), data);
     }
 
     #[test]
@@ -3104,11 +3425,7 @@ mod review_round4_tests {
             .unwrap()
             .with_recorded_pin(pin)
             .unwrap();
-        assert_eq!(
-            enc.format(),
-            ChunkFormat::V2,
-            "a v2-pinned file must be written as v2 even in the read-only phase"
-        );
+        assert_eq!(enc.format(), ChunkFormat::V2, "a v2-pinned file must be written as v2");
         let frames = write(&mut enc, &data);
         enc.finish().unwrap();
         // The server did not touch name_encrypted on replace: the metadata
@@ -3217,7 +3534,15 @@ mod review_round4_tests {
 
         // Control: a legacy (raw-key) name opens through decrypt_thumbnail's
         // legacy fallback — the residual again, and proof the frame is valid.
-        let legacy = crate::encrypt::encrypt_name(&m, id, "old.txt", None).unwrap();
+        let legacy = crate::encrypt::encrypt_name_sealed(
+            &m,
+            id,
+            "old.txt",
+            None,
+            ExpectedChunkFormat::Unrecorded,
+            MetadataSeal::Legacy,
+        )
+        .unwrap();
         assert!(decrypt_thumbnail(&fk, &envelope_as_frame(&legacy)).is_ok());
 
         let v2 = encrypt_name_with_chunk_format(&m, id, "a.pdf", None, ExpectedChunkFormat::V2).unwrap();
@@ -3436,12 +3761,10 @@ mod review_round5_tests {
         let fk = derive_file_key(&m, id.as_bytes());
         let name_shaped = r#"{"name":"evil.exe","mime_type":null,"chunk_format":2}"#;
 
-        // Control: the legacy raw-key note with the same text DOES open as a
-        // name (the pre-switch residual, decision 1912) — the wrapping is valid.
-        assert_eq!(
-            decrypt_name(&m, id, &web_raw_key_note(&fk, name_shaped)).unwrap(),
-            "evil.exe"
-        );
+        // A raw-key blob that claims a protected format is rejected even by
+        // the display-name reader; only unprotected legacy metadata may use
+        // the raw-key compatibility path.
+        assert!(decrypt_name(&m, id, &web_raw_key_note(&fk, name_shaped)).is_err());
 
         let note = encrypt_note_for(&fk, name_shaped, ExpectedChunkFormat::V2).unwrap();
         assert!(decrypt_file_metadata(&m, id, &note).is_err(), "decrypt_file_metadata");
@@ -3663,6 +3986,11 @@ mod review_round5_tests {
 mod write_shape_chunk_tests {
     #![allow(deprecated)]
     use super::*;
+    use std::io::Cursor;
+
+    fn resume_pattern(len: usize) -> Vec<u8> {
+        (0..len).map(|index| (index % 251) as u8).collect()
+    }
 
     /// Task 2275 L13: a new-item writer uses the derived key and id, so with
     /// the same nonces it emits the same frames as the derived constructor.
@@ -3741,5 +4069,136 @@ mod write_shape_chunk_tests {
         );
         enc.push_chunk(&[0x11; 10]).unwrap();
         enc.finish().unwrap();
+    }
+
+    #[test]
+    fn resumed_v2_pull_writer_roundtrips_after_kills_at_several_indexes() {
+        const ID: &str = "77777777-7777-4777-8777-777777777777";
+        const CHUNK_SIZE: u64 = 17;
+        let key_bytes = [0x42; 32];
+        let data = resume_pattern(91);
+
+        for next_index in [1, 2, 4, 6] {
+            let mut first = ChunkEncryptor::from_reader_with_file_key(
+                FileKey::from_bytes(key_bytes),
+                ID,
+                data.len() as u64,
+                CHUNK_SIZE,
+                Cursor::new(data.clone()),
+            )
+            .unwrap();
+            let mut frames = Vec::new();
+            for _ in 0..next_index {
+                frames.push(first.next_chunk().unwrap().unwrap());
+            }
+            let version_id = first.version_id().unwrap();
+            drop(first);
+
+            let mut resumed = ChunkEncryptor::resume_v2_from_reader_with_file_key(
+                FileKey::from_bytes(key_bytes),
+                ID,
+                version_id,
+                next_index,
+                data.len() as u64,
+                CHUNK_SIZE,
+                Cursor::new(data.clone()),
+            )
+            .unwrap();
+            assert_eq!(resumed.chunks_emitted(), next_index);
+            while let Some(frame) = resumed.next_chunk().unwrap() {
+                frames.push(frame);
+            }
+            let summary = resumed.finish().unwrap();
+            assert_eq!(summary.total_plaintext, data.len() as u64);
+
+            let commitment = VersionCommitment::new(version_id, 1).unwrap();
+            let mut decryptor = ChunkDecryptor::for_version_with_file_key(
+                FileKey::from_bytes(key_bytes),
+                ID,
+                ExpectedChunkFormat::V2,
+                Some(commitment),
+            );
+            let mut recovered = Vec::new();
+            for frame in frames {
+                recovered.extend_from_slice(&decryptor.push_frame(&frame.data).unwrap().data);
+            }
+            decryptor.finish().unwrap();
+            assert_eq!(recovered, data);
+        }
+    }
+
+    #[test]
+    fn resumed_v2_frames_remain_bound_to_the_original_version() {
+        const ID: &str = "88888888-8888-4888-8888-888888888888";
+        const CHUNK_SIZE: u64 = 16;
+        let key_bytes = [0x24; 32];
+        let data = resume_pattern(48);
+
+        let write = |seed: u8| {
+            let mut encryptor = ChunkEncryptor::from_reader_with_file_key(
+                FileKey::from_bytes(key_bytes),
+                ID,
+                data.len() as u64,
+                CHUNK_SIZE,
+                Cursor::new(data.clone()),
+            )
+            .unwrap()
+            .with_vector_nonces(vec![[seed; 12], [seed + 1; 12], [seed + 2; 12]])
+            .unwrap();
+            let first = encryptor.next_chunk().unwrap().unwrap();
+            let version_id = encryptor.version_id().unwrap();
+            drop(encryptor);
+            let mut resumed = ChunkEncryptor::resume_v2_from_reader_with_file_key(
+                FileKey::from_bytes(key_bytes),
+                ID,
+                version_id,
+                1,
+                data.len() as u64,
+                CHUNK_SIZE,
+                Cursor::new(data.clone()),
+            )
+            .unwrap();
+            let mut frames = vec![first];
+            while let Some(frame) = resumed.next_chunk().unwrap() {
+                frames.push(frame);
+            }
+            resumed.finish().unwrap();
+            (version_id, frames)
+        };
+
+        let (version_a, mut frames_a) = write(1);
+        let (_, frames_b) = write(11);
+        frames_a[1] = frames_b[1].clone();
+        let mut decryptor = ChunkDecryptor::for_version_with_file_key(
+            FileKey::from_bytes(key_bytes),
+            ID,
+            ExpectedChunkFormat::V2,
+            Some(VersionCommitment::new(version_a, 1).unwrap()),
+        );
+        decryptor.push_frame(&frames_a[0].data).unwrap();
+        assert!(decryptor.push_frame(&frames_a[1].data).is_err());
+    }
+
+    #[test]
+    fn resumed_v2_rejects_zero_and_hostile_geometry() {
+        const ID: &str = "99999999-9999-4999-8999-999999999999";
+        let make = |next_index, file_size, chunk_size| {
+            ChunkEncryptor::resume_v2_from_reader_with_file_key(
+                FileKey::from_bytes([7; 32]),
+                ID,
+                [3; 12],
+                next_index,
+                file_size,
+                chunk_size,
+                Cursor::new(Vec::<u8>::new()),
+            )
+        };
+        assert!(make(0, 40, 16).is_err());
+        make(3, 40, 16).unwrap().finish().unwrap();
+        assert!(make(4, 40, 16).is_err());
+        assert!(make(u32::MAX, 40, 16).is_err());
+        assert!(make(1, 40, 0).is_err());
+        assert!(make(1, 40, MAX_CHUNK_SIZE + 1).is_err());
+        assert!(make(1, u64::MAX, 1).is_err());
     }
 }

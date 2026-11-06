@@ -76,6 +76,8 @@ impl RequestContentReader {
 pub struct RequestRenameTarget {
     pub origin: String,
     pub pin: u8,
+    pub version_id: Option<Vec<u8>>,
+    pub version_counter: Option<u64>,
 }
 
 /// A request row with its seal and rename target (task 2275 §15). Carries a
@@ -147,10 +149,10 @@ impl MasterKeyHandle {
         })??;
         let chunk_format = row.name.chunk_format.as_u8();
         let content = Arc::new(RequestContentReader {
-            inner: beebeeb_core::request_content::RequestContentReader::new(
+            inner: beebeeb_core::request_content::RequestContentReader::for_metadata(
                 row.content_key,
                 item_id.clone(),
-                row.name.chunk_format,
+                &row.name,
             ),
         });
         Ok(ResolvedRequestRow {
@@ -163,6 +165,8 @@ impl MasterKeyHandle {
             rename_target: row.rename_target.map(|target| RequestRenameTarget {
                 origin: target.origin().as_str().to_string(),
                 pin: target.pin().as_u8(),
+                version_id: target.version().map(|version| version.version_id.to_vec()),
+                version_counter: target.version().map(|version| version.counter),
             }),
         })
     }
@@ -206,10 +210,10 @@ impl MasterKeyHandle {
         })??;
         let chunk_format = row.name.chunk_format.as_u8();
         let content = Arc::new(RequestContentReader {
-            inner: beebeeb_core::request_content::RequestContentReader::new(
+            inner: beebeeb_core::request_content::RequestContentReader::for_metadata(
                 row.content_key,
                 item_id.clone(),
-                row.name.chunk_format,
+                &row.name,
             ),
         });
         Ok(RequestRowKeys {
@@ -248,6 +252,32 @@ impl MasterKeyHandle {
         let pin = ExpectedChunkFormat::from_u8(pin)?;
         self.with_key(|mk| {
             beebeeb_core::rename::encrypt_name_for_request_rename(mk, &item_id, pin, &filename, mime_type.as_deref())
+        })?
+        .map_err(CryptoError::from)
+    }
+
+    /// Protected request-row rename. The version fields come from the
+    /// resolver's `RequestRenameTarget` and are preserved unchanged.
+    pub fn seal_request_rename_with_version(
+        &self,
+        item_id: String,
+        pin: u8,
+        version_id: Vec<u8>,
+        version_counter: u64,
+        filename: String,
+        mime_type: Option<String>,
+    ) -> Result<String, CryptoError> {
+        let pin = ExpectedChunkFormat::from_u8(pin)?;
+        let version = version_commitment_from_parts(version_id, version_counter)?;
+        self.with_key(|mk| {
+            beebeeb_core::rename::encrypt_name_for_request_rename_with_version(
+                mk,
+                &item_id,
+                pin,
+                Some(version),
+                &filename,
+                mime_type.as_deref(),
+            )
         })?
         .map_err(CryptoError::from)
     }

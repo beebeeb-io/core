@@ -162,14 +162,16 @@
       "expected_chunk_format": 2,
       "expected_mime_type": "application/pdf",
       "expected_name": "vector-v2.pdf",
+      "expected_version_counter": 7,
+      "expected_version_id_hex": "c0c0c0c0c0c0c0c0c0c0c0c0",
       "file_id": "1908f00d-0000-4000-8000-000000001943",
       "file_key_hex": "67c0a33edcb86f5dbf5fed78bb9b1cb7a34bf8f65c5c8ad54ec125455c8f16e7",
       "master_key_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
       "name": "metadata_v2_name",
-      "name_encrypted": "{\"cipher_suite\":\"V1Aes256Gcm\",\"nonce\":[90,90,90,90,90,90,90,90,90,90,90,90],\"ciphertext\":[93,205,168,131,111,246,42,144,61,127,212,252,15,50,96,62,141,77,4,69,83,20,192,197,3,12,137,77,176,170,1,215,175,222,82,69,70,9,91,220,233,125,139,111,248,41,204,66,53,198,231,61,213,26,153,162,23,201,7,60,121,30,239,124,161,166,174,173,179,224,138,31,175,25,222,21,49,45,40,171,100,121,158,11,200,17,24]}",
+      "name_encrypted": "{\"cipher_suite\":\"V1Aes256Gcm\",\"nonce\":[90,90,90,90,90,90,90,90,90,90,90,90],\"ciphertext\":[93,205,168,131,111,246,42,144,61,127,212,252,15,50,96,62,141,77,4,69,83,20,192,197,3,12,137,77,176,170,1,215,175,222,82,69,70,9,91,220,233,125,139,111,248,41,204,66,53,198,231,61,213,26,153,162,23,201,7,60,121,30,239,124,161,166,174,173,179,224,219,62,238,180,228,6,41,92,186,82,150,46,247,160,195,150,27,102,240,248,239,140,176,17,143,189,238,204,54,238,143,234,145,83,69,157,89,101,169,100,194,37,76,235,143,1,128,39,157,204,150,39,144,206,3,118,219,77,127,184,254,182,93,194,102,67,250,54,37,184,50,29,192,227,189,134,100]}",
       "name_key_hex": "f8d36aa66718d168a2095f3850484571c5f93073ac94d96f8c432cb4a8b3a077",
       "nonce_hex": "5a5a5a5a5a5a5a5a5a5a5a5a",
-      "note": "Fixed nonce for a known-answer test. Read with decrypt_file_metadata(master_key, file_id, name_encrypted): name subkey first; the pin it returns (V2) is what every content reader of the file must use."
+      "note": "Fixed nonce for a known-answer test. Read with decrypt_file_metadata(master_key, file_id, name_encrypted): name subkey first; the pin it returns (V2) is what every content reader of the file must use. version_id commits the current read to frame 0 and version_counter is compared with the store's remembered highest value."
     },
     {
       "expected_chunk_format": 2,
@@ -180,7 +182,7 @@
       "name_encrypted": "{\"cipher_suite\":\"V1Aes256Gcm\",\"nonce\":[91,91,91,91,91,91,91,91,91,91,91,91],\"ciphertext\":[24,177,248,51,73,209,186,96,92,54,131,69,222,152,150,18,159,237,98,112,132,176,228,33,232,215,71,89,203,80,186,73,69,174,11,20,252,117,135,79,236,122,169,163,43,202,16,223,181,53,120,54,218,224,48,215,62,234,180,251,52,147,93,9,133,68,101,117,161,39,126,203,196,115,84,79,239,95,246,177,238,34,243,196,72,188,7,33,153,186,66,52]}",
       "name_key_hex": "59de2c3db1e77891331d20ccdc81b5b050a21b8d620350abe6843f1c254eca80",
       "nonce_hex": "5b5b5b5b5b5b5b5b5b5b5b5b",
-      "note": "Fixed nonce for a known-answer test. Written by encrypt_name_for(file_key, name, mime, pin), the name writer for a key that is not derived from the master key (renames, file-request uploads). Read with decrypt_file_metadata_with_key(file_key, name_encrypted): pin 2 opens under the name subkey only; pin 0 opens under the raw file key while METADATA_SEAL_WRITE is Legacy (the read-only phase), and is subkey-sealed after the switch, when this vector is re-published.",
+      "note": "Fixed nonce for a known-answer test. Written by encrypt_name_for(file_key, name, mime, pin), the name writer for a key that is not derived from the master key (renames, file-request uploads). Read with decrypt_file_metadata_with_key(file_key, name_encrypted): pin 2 opens under the name subkey only; pin 0 is the frozen legacy raw-key fixture and remains read-only.",
       "pin": 2
     },
     {
@@ -192,7 +194,7 @@
       "name_encrypted": "{\"cipher_suite\":\"V1Aes256Gcm\",\"nonce\":[92,92,92,92,92,92,92,92,92,92,92,92],\"ciphertext\":[54,140,155,130,89,193,141,108,77,167,26,224,193,212,96,149,187,163,101,7,123,44,61,177,49,241,44,200,51,100,138,160,215,148,20,97,250,251,184,158,129,34,98,60,237,110,226,66,9,95,132,150,239,121,183,232,17,10,11,18,171,225,228,50,83,31,64,31,108,161,124,166,246,121,69]}",
       "name_key_hex": "59de2c3db1e77891331d20ccdc81b5b050a21b8d620350abe6843f1c254eca80",
       "nonce_hex": "5c5c5c5c5c5c5c5c5c5c5c5c",
-      "note": "Fixed nonce for a known-answer test. Written by encrypt_name_for(file_key, name, mime, pin), the name writer for a key that is not derived from the master key (renames, file-request uploads). Read with decrypt_file_metadata_with_key(file_key, name_encrypted): pin 2 opens under the name subkey only; pin 0 opens under the raw file key while METADATA_SEAL_WRITE is Legacy (the read-only phase), and is subkey-sealed after the switch, when this vector is re-published.",
+      "note": "Fixed nonce for a known-answer test. Written by encrypt_name_for(file_key, name, mime, pin), the name writer for a key that is not derived from the master key (renames, file-request uploads). Read with decrypt_file_metadata_with_key(file_key, name_encrypted): pin 2 opens under the name subkey only; pin 0 is the frozen legacy raw-key fixture and remains read-only.",
       "pin": 0
     },
     {
@@ -591,7 +593,22 @@
       "name_nonce_hex": "4142434445464748494a4b4c",
       "name_plaintext_hex": "7b226e616d65223a224d616d61222c226d696d655f74797065223a6e756c6c7d",
       "note": "L16d: a legacy unbound child frame is nonce || AES-256-GCM (no AAD). A 32-byte plaintext that is valid UTF-8 is not a key (L9 rule 1): open_legacy_child_key must refuse the name-shaped frame and open the real child key. Fixed nonces for this public test only."
+    },
+    {
+      "account_id_hex": "6163636f756e742d766563746f722d3138",
+      "account_public_hex": "546cd6033f521817d0ba0ae260545fc4ffcff246f7823447a2f04134a5353155",
+      "expected_response_hex": "bf35eba1d5e33857d08c35ea030c20d773b64d96a21e6cc21dbbf4be9904d396",
+      "key_info": "beebeeb/key-proof/mac-key/v1",
+      "master_key_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+      "name": "key_proof_session_v1",
+      "nonce_hex": "b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8",
+      "note": "Fixed public test inputs for X25519, HKDF-SHA256 and HMAC-SHA256. Production challenges draw a fresh private key and nonce and consume verifier state after one attempt.",
+      "purpose": "session",
+      "server_private_hex": "a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7",
+      "server_public_hex": "a095fa7b546caeb769c043147c9eb6929f6391f37ce0ea1516111e00fb461530",
+      "session_id_hex": "73657373696f6e2d766563746f722d3138",
+      "transcript_domain": "beebeeb/key-proof/transcript/v1"
     }
   ],
-  "version": 16
+  "version": 18
 }

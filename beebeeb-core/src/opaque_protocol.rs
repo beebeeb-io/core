@@ -9,6 +9,7 @@ use opaque_ke::{
     CredentialFinalization, CredentialRequest, CredentialResponse, RegistrationRequest, RegistrationResponse,
     RegistrationUpload, ServerLogin, ServerLoginParameters, ServerRegistration, ServerSetup,
 };
+use zeroize::Zeroizing;
 
 use crate::CoreError;
 
@@ -86,6 +87,11 @@ impl CipherSuite for BeebeebCsV0 {
     type KeyExchange = opaque_ke::TripleDh<opaque_ke::Ristretto255, sha2::Sha512>;
     type Ksf = opaque_ke::ksf::Identity;
 }
+
+/// Oldest KSF accepted by the normal login path.
+pub const MIN_KSF_VERSION: u32 = 1;
+/// KSF used for all new registrations.
+pub const CURRENT_KSF_VERSION: u32 = 1;
 
 pub fn create_server_setup() -> Vec<u8> {
     let mut rng = OsRng;
@@ -236,59 +242,67 @@ pub fn server_login_start_fake(
 
 pub struct ClientLoginFinishResult {
     pub message: Vec<u8>,
-    pub session_key: Vec<u8>,
-    pub export_key: Vec<u8>,
+    pub session_key: Zeroizing<Vec<u8>>,
+    pub export_key: Zeroizing<Vec<u8>>,
 }
 
-/// Finish OPAQUE client login, stretching the OPRF output with the KSF that
-/// matches the account's `opaque_ksf_version`:
+/// Finish a normal OPAQUE client login with the current Argon2id KSF.
 ///
-/// - `ksf_version == 0` → legacy [`BeebeebCsV0`] (`Identity` KSF, no stretch).
-/// - any other value    → current [`BeebeebCs`] (`Argon2idKsf`).
+/// A server-supplied version below [`MIN_KSF_VERSION`] or above
+/// [`CURRENT_KSF_VERSION`] is rejected before processing. Legacy v0 accounts
+/// use [`client_login_finish_legacy_upgrade`] from an explicit migration path;
+/// a normal login can therefore no longer be silently downgraded by the server.
 ///
-/// The caller obtains `ksf_version` from the login-start response (the server
-/// reads it from the user row). The KSF MUST match the suite the account's
-/// password file was registered under, otherwise the envelope fails to
-/// authenticate and finish returns an error (this is what makes a wrong-KSF
-/// attempt indistinguishable from a wrong password).
-///
-/// `client_state_bytes` always comes from [`client_login_start`] (v1), but the
-/// `ClientLogin` state is KSF-independent, so it deserializes cleanly under
-/// either suite here — proven by `v0_identity_ksf_login_roundtrip`.
 pub fn client_login_finish(
     client_state_bytes: &[u8],
     password: &[u8],
     credential_response_bytes: &[u8],
     ksf_version: u32,
 ) -> Result<ClientLoginFinishResult, CoreError> {
-    let mut rng = OsRng;
-    if ksf_version == 0 {
-        let state = ClientLogin::<BeebeebCsV0>::deserialize(client_state_bytes)
-            .map_err(|e| CoreError::Opaque(format!("invalid client login state: {e}")))?;
-        let response = CredentialResponse::deserialize(credential_response_bytes)
-            .map_err(|e| CoreError::Opaque(format!("invalid credential response: {e}")))?;
-        let result = state
-            .finish(&mut rng, password, response, ClientLoginFinishParameters::default())
-            .map_err(|e| CoreError::Opaque(format!("login finish failed (wrong password?): {e}")))?;
-        Ok(ClientLoginFinishResult {
-            message: result.message.serialize().to_vec(),
-            session_key: result.session_key.to_vec(),
-            export_key: result.export_key.to_vec(),
-        })
-    } else {
-        let state = ClientLogin::<BeebeebCs>::deserialize(client_state_bytes)
-            .map_err(|e| CoreError::Opaque(format!("invalid client login state: {e}")))?;
-        let response = CredentialResponse::deserialize(credential_response_bytes)
-            .map_err(|e| CoreError::Opaque(format!("invalid credential response: {e}")))?;
-        let result = state
-            .finish(&mut rng, password, response, ClientLoginFinishParameters::default())
-            .map_err(|e| CoreError::Opaque(format!("login finish failed (wrong password?): {e}")))?;
-        Ok(ClientLoginFinishResult {
-            message: result.message.serialize().to_vec(),
-            session_key: result.session_key.to_vec(),
-            export_key: result.export_key.to_vec(),
-        })
+    if !(MIN_KSF_VERSION..=CURRENT_KSF_VERSION).contains(&ksf_version) {
+        return Err(CoreError::Opaque(format!(
+            "unsupported OPAQUE KSF version {ksf_version}; normal login requires {CURRENT_KSF_VERSION}"
+        )));
     }
+    let mut rng = OsRng;
+    let state = ClientLogin::<BeebeebCs>::deserialize(client_state_bytes)
+        .map_err(|e| CoreError::Opaque(format!("invalid client login state: {e}")))?;
+    let response = CredentialResponse::deserialize(credential_response_bytes)
+        .map_err(|e| CoreError::Opaque(format!("invalid credential response: {e}")))?;
+    let result = state
+        .finish(&mut rng, password, response, ClientLoginFinishParameters::default())
+        .map_err(|e| CoreError::Opaque(format!("login finish failed (wrong password?): {e}")))?;
+    Ok(ClientLoginFinishResult {
+        message: result.message.serialize().to_vec(),
+        session_key: Zeroizing::new(result.session_key.to_vec()),
+        export_key: Zeroizing::new(result.export_key.to_vec()),
+    })
+}
+
+/// Finish one login for a known legacy v0 account so it can immediately
+/// re-register under [`CURRENT_KSF_VERSION`].
+///
+/// This deliberately has no server-supplied version argument. Callers must
+/// reach it only from trusted migration state, never because a login response
+/// claimed that the account is v0.
+pub fn client_login_finish_legacy_upgrade(
+    client_state_bytes: &[u8],
+    password: &[u8],
+    credential_response_bytes: &[u8],
+) -> Result<ClientLoginFinishResult, CoreError> {
+    let mut rng = OsRng;
+    let state = ClientLogin::<BeebeebCsV0>::deserialize(client_state_bytes)
+        .map_err(|e| CoreError::Opaque(format!("invalid client login state: {e}")))?;
+    let response = CredentialResponse::deserialize(credential_response_bytes)
+        .map_err(|e| CoreError::Opaque(format!("invalid credential response: {e}")))?;
+    let result = state
+        .finish(&mut rng, password, response, ClientLoginFinishParameters::default())
+        .map_err(|e| CoreError::Opaque(format!("legacy login finish failed (wrong password?): {e}")))?;
+    Ok(ClientLoginFinishResult {
+        message: result.message.serialize().to_vec(),
+        session_key: Zeroizing::new(result.session_key.to_vec()),
+        export_key: Zeroizing::new(result.export_key.to_vec()),
+    })
 }
 
 pub fn server_login_finish(
@@ -378,7 +392,7 @@ mod tests {
         let client_finish = client_login_finish(&login_start.state, password, &server_login.message, 1).unwrap();
         let server_session_key = server_login_finish(&server_login.state, &client_finish.message).unwrap();
 
-        assert_eq!(client_finish.session_key, server_session_key);
+        assert_eq!(&*client_finish.session_key, &server_session_key);
         assert!(!client_finish.export_key.is_empty());
     }
 
@@ -436,20 +450,22 @@ mod tests {
         let password_file = server_registration_finish_v0(&reg_upload);
 
         // Fresh login. client_login_start / server_login_start stay on the v1
-        // suite (BeebeebCs) exactly as in production — only the *finish* dispatches
-        // on ksf_version.
+        // suite (BeebeebCs) exactly as in production. Only the explicit legacy
+        // migration finish uses the v0 suite.
         let login_start = client_login_start(password).unwrap();
         let server_login = server_login_start(&server_setup, &password_file, &login_start.message, username).unwrap();
 
-        // Finish with ksf_version = 0 → deserialize state as BeebeebCsV0 and
-        // stretch with Identity, matching the v0 password file. Proves the
-        // v1-produced ClientLogin state is cross-deserializable under v0.
-        let client_finish = client_login_finish(&login_start.state, password, &server_login.message, 0).unwrap();
+        // Normal login rejects a server-requested downgrade. The explicit
+        // migration finish deserializes as BeebeebCsV0 and stretches with
+        // Identity, matching the v0 password file.
+        assert!(client_login_finish(&login_start.state, password, &server_login.message, 0).is_err());
+        let client_finish =
+            client_login_finish_legacy_upgrade(&login_start.state, password, &server_login.message).unwrap();
         let server_session_key = server_login_finish(&server_login.state, &client_finish.message).unwrap();
 
         // Round-trip: client and server derive the SAME session key, and an
         // export key is produced.
-        assert_eq!(client_finish.session_key, server_session_key);
+        assert_eq!(&*client_finish.session_key, &server_session_key);
         assert!(!client_finish.export_key.is_empty());
 
         // The dispatch is load-bearing: finishing the SAME v0 exchange under the

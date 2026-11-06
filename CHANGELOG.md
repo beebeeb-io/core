@@ -7,6 +7,165 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-06
+
+This is a breaking pre-1.0 release. The changes below are grouped by the people who must act.
+
+### Native application maintainers
+
+- Regenerate Swift and Kotlin bindings and update exhaustive switches. The default UniFFI surface now
+  starts at `NativeClientHandle` and its opaque service handles. Raw-key functions and constructors,
+  raw OPAQUE/recovery helpers, `upload_encrypted_file`, and `download_and_decrypt_file` are available
+  only through the default-off `legacy-bindings` feature. Existing apps may enable it temporarily;
+  new apps must not. Native WebP users must select `beebeeb-uniffi/webp-encode` explicitly.
+- Supply a stable app id to `ClientConfig::new`. Session tokens are stored per app as
+  `session.token.{app_id}` while the owner, master key, API URL, generation, and device identity are
+  shared. App sign-out removes one token; whole-device sign-out removes all app tokens and shared
+  state through `ServiceCoordinator`.
+- Whole-device sign-out (`ServiceCoordinator::sign_out_device`, `sign_out_whole_device`) now removes
+  the device on the server before account work stops, then sends a logout. A 401 on that logout
+  counts as done. `SignOutFailure::Session` now means a real server or local failure.
+- Native device registration sends the hardware identity as `client_key`, so two devices on one
+  platform get separate device entries. Apps on one device share one entry.
+- Recovery readiness comes from the server, never the device clock. `RecoveryAttempt::waits()` is
+  true only while the server reports `pending`; call `recovery_status` to see the wait end. This
+  needs a server that reports `ready`: against an older server a no-wait attempt stays waiting.
+- Adopt the locked sign-in order: password, then the configured authenticator, yields a locked
+  session. Complete one of device approval, passkey plus email code, or recovery key plus email code,
+  then finish account-key proof. Email tickets are submitted at proof finish, not during password
+  login. Signup is web-only. Account replacement requires an explicit replacement method and a
+  confirmed last-device warning.
+- Add the configured Keychain access-group entitlement to every iOS app and extension sharing a
+  session. Secrets use a non-synchronizing, this-device-only, after-first-unlock Keychain item.
+- Update transfer integration: factories no longer accept caller-supplied master keys, clocks, or
+  Wi-Fi/staging policy. Load the session into `NativeClientHandle`, persist the new upload-staging
+  setting, and pass `NetworkSignal`. `UploadError` and download failures add a context-handoff case;
+  hand work to the main app with a fresh sink.
+- Update backup, contacts, sync, and File Provider wrappers. Asset snapshots are paged; Rust records
+  backup completion; contact services fetch keys themselves; the coordinator takes the shared store;
+  sync exposes snapshot refresh and gap recovery; File Provider records can mark undecryptable names.
+- Local store schema 3 adds paused/cancelled transfers, and schema 4 keys cache entries by authenticated
+  file/version identity. Do not roll a database opened by this release back to an older binary. Old
+  staged-upload state restarts because planner state 3 includes a staged-prefix commitment.
+
+### Rust sync and conflict integrators
+
+- Replace `SyncEngine::load_snapshot` with `apply_complete_snapshot(CompleteSnapshot)` only for an
+  explicitly complete, cursor-bound answer. Use `observe_incomplete_snapshot` for partial listings;
+  it never deletes.
+- `apply_remote_op` now takes `RemoteOp` and returns `Result<Option<SyncEvent>, SyncEngineError>`.
+  `SyncOp` adds `user_seq`; persist `SyncPosition { seq_id, user_seq }`, and fetch a complete snapshot
+  after `SequenceGap`. Engine mutations return `Result` and roll back an in-memory change when saving
+  fails.
+- Implement `SyncStore::apply(&SyncStoreChanges)` as one atomic incremental transaction instead of
+  replacing all state with `save`. `TreeNode` adds `name_undecryptable`, and stored sync metadata adds
+  `change_anchor_floor`; initialize these fields in Rust literals. Old serialized state still reads.
+- Conflict input now uses `VersionInfo::authenticated_version`, never a server content hash.
+  Conflict deadlines return `Option<u64>`, and `keep_both_name` returns `Result` and requires a valid
+  `HH.MM` time.
+- `beebeeb-sync::SyncEngine::sync_once` now fails with `RemoteListingUnavailable`. Do not ship the
+  legacy desktop prototype; build product sync on `beebeeb_core::sync`.
+
+### Rust cryptography and authentication callers
+
+- Normal OPAQUE login accepts only KSF version 1. Version 0 is available only through
+  `client_login_finish_legacy_upgrade` after a trusted local migration decision; unknown versions
+  fail. Immediately re-register migrated accounts as version 1.
+- CLI-auth decryption accepts only the authenticated HKDF-derived ciphertext. Upgrade producers of the
+  old raw-secret format.
+- The passkey seal is a new 61-byte, versioned, account-and-credential-bound format. Existing 60-byte
+  web blobs require an explicit migration and reseal; never reinterpret them. Recovery phrases are
+  exactly 12 words.
+- `MasterKey::to_bytes`, `combine_folder_link_key`, `OpaqueEnvelope::to_bytes`, OPAQUE finish secrets,
+  and transfer shared secrets now use `Zeroizing` guards. The transfer helper is fallible and rejects
+  low-order keys. Generic SAS derivation is fallible and rejects output above 8,160 bytes.
+- Device-link QR sealing now takes the typed code and uses the new format. New-device PAKE starts by
+  consuming `NewDeviceLink`; approvers use `start_approver`. Replace the draft `beebeeb-api::proposed`
+  request/answer types, rename `second_factor_required` to `authenticator_required`, and handle the
+  exact locked-action allowlist.
+- Key-proof servers may export/import the 64-byte verifier state between requests. Keep it only in an
+  expiring secret store and never log it.
+
+### File-format, transfer, and storage integrators
+
+- New content is v2. Names, thumbnails, and notes use purpose subkeys. All uploaders must move only
+  after their readers support v2 and the purpose-specific metadata APIs; v1 remains readable.
+- Protected encrypted metadata adds `version_id` and `version_counter`, which must appear together.
+  `NameMetadata` adds `version`. Current-version readers must match frames to the authenticated
+  metadata commitment; use the historical-version path for history. Raw-key metadata claiming v2 is
+  rejected.
+- Production v2 upload resume always restarts: abandon the old session, initialize again, and upload
+  from chunk zero. `BackgroundUploadPlanner` constructors and restore now require authenticated file
+  geometry and source identity; version-1 planner blobs are non-resumable.
+- `DownloadRequest` requires a `MemoryBudget` and optional authenticated chunk size. `DownloadOutcome`
+  and `AfterWriteCause` add handoff, `ApiMethod` adds `Put`, and background transports should override
+  `DirectIo::storage_put_file`.
+- `TransferState` adds `Paused` and `Cancelled`. `TransferFinished` adds
+  `UploadTokenExpired { index }`; mint a fresh scoped token and requeue the staged ciphertext without
+  spending a retry.
+- `beebeeb_store::atomic_publish` is removed. Publish relative to a
+  `path_safety::TrustedDirectory` handle. The `store-test-helper` binary now requires the default-off
+  `test-support` feature, which product builds must not enable.
+- Range reads apply the same version rule as whole-file reads. `RangeOpener::new` takes the version
+  commitment from the authenticated metadata after the pin, and `RangeRequest` adds `version` and
+  `authenticated_chunk_size`. With a commitment, frame 0 opens only as that v2 upload, so an older
+  upload of the same file is refused; a geometry with another stride than the authenticated one
+  releases nothing.
+- `backup::plan_merge` returns `Result`: a clash whose keep-both time is not `HH.MM` refuses the whole
+  plan, because `keep_both_name` now validates the time. UniFFI `backup_plan_merge` reports it as
+  `InvalidInput`.
+
+### API, limits, and error consumers
+
+- `ServerError::details` is removed. Use the bounded typed accessors for retry delay, trial cap, limit,
+  and usage. New server fields require a typed accessor.
+- Archive preview now has a 256 MiB hard ceiling and a 32 MiB convenience budget. Search shards clamp
+  to 1 through 64 and typed search calls reject inputs over 4 KiB. A zero chunk count is invalid, and
+  helpers that materialize one entry per chunk stop at 1,000,000; use streaming for larger valid files.
+- Retry delays cap at 300 seconds. Invalid quota add-ons clamp to valid ranges with saturating
+  arithmetic. `format_compact` clamps precision to 2 and `try_format_compact` rejects higher values.
+- Direct `beebeeb-api` users must adopt typed onboarding/registration and recovery bodies, bearer
+  recovery authorization, optional device approver keys, unknown-safe optional two-factor state, and
+  the current device/login response models. `AuthError` adds fixed-label `InvalidAnswer` and
+  `InvalidTransition` variants.
+- `ClientMetaField` adds `DeviceSettings = 7` and `ContactKey = 8`; codes 5 and 6 remain reserved.
+  Sync `Op` literals add optional `device_id` and `created_at`.
+
+### Web and cross-client fixture maintainers
+
+- WASM `formatCompact` throws above precision 2; pass 0 through 2 and handle the exception. Rust's
+  infallible formatter clamps instead.
+- Regenerate bindings for the protected metadata fields and update the shared vector fixture to version
+  18, including the protected metadata and session key-proof vectors.
+
+### Added
+
+- `beebeeb-api`, `beebeeb-client`, and `beebeeb-store`, plus the native service-handle surface for
+  authentication, devices, files, sync, transfers, thumbnails, sharing, contacts, settings, search,
+  backup, File Provider, and coordinated sign-out.
+- Native file services can restore a historical version while publishing fresh protected metadata
+  with a rollback counter above every observed version. The API client now carries per-version
+  metadata through the restore route, and Swift/Kotlin receive the resulting counter.
+- Upload services support protected replacement uploads against an explicit base version. The new
+  content commitment advances the previous protected counter, enabling the live replace/restore
+  contract without falling back to v1 writes.
+
+### Fixed
+
+- Authenticated requests, including chunk requests, now advertise `file-write-v2` and
+  `version-metadata-v1` from the central request builder. A v2 file whose metadata predates version
+  commitments remains readable until this device has observed a protected counter; stripping the
+  commitment after that point is rejected as rollback.
+- Backup scans page, deduplicate, export and enqueue lazily with a 64-upload cap. Failed and cancelled
+  photo uploads retry at most three times, and successful completion is durable even when no backup
+  completion handler is alive during a background wake.
+- Durable uploads remove safe orphan ciphertext, count invalid saved state as a terminal attempt, keep
+  partial staging resumable, and can finish after the platform removes the plaintext export once all
+  chunks and the staged hash are committed.
+- First-session crash markers no longer block a different account. Account-replacing native installs
+  now require a one-shot authorization issued only after the service coordinator purges the old
+  account's queues, caches, manifest, store, secrets and platform-owned data.
+
 ## [0.2.1] - 2026-11-06
 
 Additive: backup rules (`beebeeb_core::backup`), the vocabulary (`beebeeb_types::backup`) and the

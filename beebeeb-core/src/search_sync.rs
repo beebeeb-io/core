@@ -11,6 +11,9 @@
 
 use std::collections::BTreeMap;
 
+use crate::CoreError;
+use beebeeb_types::limits::{MAX_SEARCH_MANIFEST_ENTRIES, MAX_SEARCH_SHARDS};
+
 /// A shard the holder has, with the version it last knows for that coordinate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShardRef {
@@ -62,6 +65,29 @@ pub struct SyncPlan {
 /// Coordinates present on both sides compare versions: local newer → PUT, remote
 /// newer → GET, equal → no action. Coordinates only local → PUT.
 pub fn diff_manifest(local: &[ShardRef], remote: &[ShardRef], local_is_authoritative: bool) -> SyncPlan {
+    try_diff_manifest(local, remote, local_is_authoritative).unwrap_or_default()
+}
+
+pub fn try_diff_manifest(
+    local: &[ShardRef],
+    remote: &[ShardRef],
+    local_is_authoritative: bool,
+) -> Result<SyncPlan, CoreError> {
+    if local.len() > MAX_SEARCH_MANIFEST_ENTRIES || remote.len() > MAX_SEARCH_MANIFEST_ENTRIES {
+        return Err(CoreError::InvalidInput(format!(
+            "search manifest exceeds the maximum {MAX_SEARCH_MANIFEST_ENTRIES} entries"
+        )));
+    }
+    if local
+        .iter()
+        .chain(remote)
+        .any(|shard| shard.bucket >= MAX_SEARCH_SHARDS)
+    {
+        return Err(CoreError::InvalidInput(format!(
+            "search manifest bucket exceeds the maximum {}",
+            MAX_SEARCH_SHARDS - 1
+        )));
+    }
     let local_map: BTreeMap<ShardCoord, i64> = local.iter().map(|s| (s.coord(), s.version)).collect();
     let remote_map: BTreeMap<ShardCoord, i64> = remote.iter().map(|s| (s.coord(), s.version)).collect();
 
@@ -90,7 +116,7 @@ pub fn diff_manifest(local: &[ShardRef], remote: &[ShardRef], local_is_authorita
     plan.to_put.sort_unstable();
     plan.to_get.sort_unstable();
     plan.to_delete.sort_unstable();
-    plan
+    Ok(plan)
 }
 
 #[cfg(test)]
@@ -108,6 +134,11 @@ mod tests {
     fn empty_both_sides_is_noop() {
         let p = diff_manifest(&[], &[], true);
         assert_eq!(p, SyncPlan::default());
+    }
+
+    #[test]
+    fn rejects_out_of_range_buckets() {
+        assert!(try_diff_manifest(&[r(MAX_SEARCH_SHARDS, 0, 1)], &[], false).is_err());
     }
 
     #[test]

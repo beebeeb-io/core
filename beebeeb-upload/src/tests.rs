@@ -142,3 +142,71 @@ async fn upload_client_rejects_missing_chunk_file() {
         other => panic!("expected IoError, got: {other}"),
     }
 }
+
+#[tokio::test]
+async fn default_upload_client_accepts_a_valid_mobile_cap_chunk_file() {
+    use std::io::Write as _;
+
+    let path = std::env::temp_dir().join(format!("beebeeb-mobile-cap-{}.enc", uuid::Uuid::new_v4()));
+    let mut file = std::fs::File::create(&path).unwrap();
+    file.write_all(&[0]).unwrap();
+    file.set_len(beebeeb_types::ChunkProfile::Mobile.static_cap() + 28)
+        .unwrap();
+    drop(file);
+
+    let client = crate::UploadClient::new("http://127.0.0.1:9", "test-token");
+    let inspected = client.inspect_chunk_files(&[path.to_string_lossy().into_owned()]).await;
+    let _ = std::fs::remove_file(path);
+
+    assert_eq!(
+        inspected.unwrap(),
+        (
+            1,
+            beebeeb_types::ChunkProfile::Mobile.static_cap() + 28,
+            beebeeb_types::ChunkProfile::Mobile.static_cap() + 28
+        )
+    );
+}
+
+#[tokio::test]
+async fn default_upload_client_does_not_cap_total_file_size_at_512_mib() {
+    let path = std::env::temp_dir().join(format!("beebeeb-large-total-{}.enc", uuid::Uuid::new_v4()));
+    let file = std::fs::File::create(&path).unwrap();
+    let chunk_size = beebeeb_types::ChunkProfile::Mobile.static_cap() + 28;
+    file.set_len(chunk_size).unwrap();
+    drop(file);
+
+    let paths = vec![path.to_string_lossy().into_owned(); 17];
+    let inspected = crate::UploadClient::new("http://127.0.0.1:9", "test-token")
+        .inspect_chunk_files(&paths)
+        .await;
+    let _ = std::fs::remove_file(path);
+
+    assert_eq!(inspected.unwrap(), (17, chunk_size * 17, chunk_size));
+    assert!(chunk_size * 17 > 512 * 1024 * 1024);
+}
+
+#[tokio::test]
+async fn extension_upload_limit_is_a_typed_handoff() {
+    let path = std::env::temp_dir().join(format!("beebeeb-extension-handoff-{}.enc", uuid::Uuid::new_v4()));
+    let file = std::fs::File::create(&path).unwrap();
+    let frame_size = beebeeb_types::ChunkProfile::Mobile.static_cap() + 28;
+    file.set_len(frame_size).unwrap();
+    drop(file);
+
+    let error = crate::UploadClient::new("http://127.0.0.1:9", "test-token")
+        .with_memory_budget(beebeeb_types::limits::MemoryBudget::MOBILE_EXTENSION)
+        .inspect_chunk_files(&[path.to_string_lossy().into_owned()])
+        .await
+        .unwrap_err();
+    let _ = std::fs::remove_file(path);
+
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "valid frame size {frame_size} exceeds this context's {}-byte limit; hand off to the main app",
+            beebeeb_types::limits::MemoryBudget::MOBILE_EXTENSION.download_frame_bytes
+        )
+    );
+    assert!(matches!(error, UploadError::TooLargeForContext { .. }));
+}

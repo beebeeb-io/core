@@ -1,0 +1,534 @@
+fn pending_link_detail(id: &str, session_id: &str, public_key: &[u8; 32]) -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({
+        "id": id,
+        "session_id": session_id,
+        "public_key": STANDARD.encode(public_key),
+        "device_name": "reported device",
+        "reported_by_device": true,
+        "status": "pending",
+        "expires_at": "2099-01-01T00:00:00Z",
+    }))
+    .unwrap()
+}
+
+fn approved_result(sealed: &beebeeb_core::device_link::SealedAccountKeyMaterial) -> Vec<u8> {
+    format!(
+        r#"{{"status":"approved","approver_public":"{}","nonce":"{}","ciphertext":"{}"}}"#,
+        STANDARD.encode(sealed.approver_public()),
+        STANDARD.encode(sealed.nonce()),
+        STANDARD.encode(sealed.ciphertext())
+    )
+    .into_bytes()
+}
+
+#[test]
+fn recovery_kit_requires_pdf_and_text_but_not_print() {
+    let mut signup = SignupService::new(
+        "person@example.test",
+        CeremonyConfig {
+            password_policy: PasswordPolicy::from_server(12),
+            email_verification_required: false,
+            verify_word_count: 3,
+            breach: BreachPolicy::NotRequired,
+        },
+    )
+    .unwrap();
+    let _kit = signup.begin_recovery_kit().unwrap();
+    signup.mark_recovery_output_saved(RecoveryKitOutput::Pdf);
+    assert!(matches!(
+        signup.acknowledge_recovery_kit(),
+        Err(AuthError::RecoveryKitIncomplete)
+    ));
+    signup.mark_recovery_output_saved(RecoveryKitOutput::Text);
+    signup.acknowledge_recovery_kit().unwrap();
+}
+
+#[test]
+fn passkey_key_cannot_be_supplied_before_the_email_step() {
+    let accepted = PasswordAccepted {
+        session_token: Zeroizing::new("token".into()),
+        canonical_email: "person@example.test".into(),
+        owner: "account".into(),
+        key_state: SessionKeyState::Locked,
+        legacy_upgrade_required: false,
+        factor_satisfied: false,
+        email_code_satisfied: false,
+        authenticator_required: false,
+        hardware_id: None,
+        hardware_identity_secret: None,
+    };
+    let mut unlock = NewDeviceUnlock::passkey(accepted).unwrap();
+
+    assert!(matches!(
+        unlock.provide_passkey(MasterKey::from_bytes([5; 32])),
+        Err(AuthError::InvalidTransition { .. })
+    ));
+}
+
+fn recorded_login_state(body: &str, legacy_upgrade_required: bool) -> Result<SignInChallenge, AuthError> {
+    let response = beebeeb_api::routes::auth::opaque_finish()
+        .parse(beebeeb_api::Answer::new(200, vec![], body.as_bytes().to_vec()))
+        .unwrap();
+    sign_in_state(
+        "person@example.test".into(),
+        response,
+        legacy_upgrade_required,
+        Some("00000000-0000-4000-8000-000000000001".into()),
+        false,
+    )
+}
+
+#[test]
+fn recorded_opaque_full_session_omits_the_factor_flag() {
+    let state = recorded_login_state(
+        r#"{"session_token":"opaque-session","user_id":"00000000-0000-4000-8000-000000000002","key_state":"locked"}"#,
+        false,
+    )
+    .unwrap();
+    assert!(matches!(state, SignInChallenge::PasswordAccepted(_)));
+
+    let state = recorded_login_state(r#"{"requires_2fa":true,"partial_token":"partial-session"}"#, false).unwrap();
+    assert!(matches!(state, SignInChallenge::TwoFactor(_)));
+
+    let malformed = [
+        r#"{"partial_token":"partial-session"}"#,
+        r#"{"requires_2fa":false,"partial_token":"partial-session"}"#,
+        r#"{"requires_2fa":true,"session_token":"full-session","user_id":"account"}"#,
+        r#"{"requires_2fa":true,"session_token":"full-session","partial_token":"partial-session","user_id":"account"}"#,
+        r#"{"session_token":"full-session","partial_token":"partial-session","user_id":"account"}"#,
+        r#"{}"#,
+    ];
+    for (index, body) in malformed.into_iter().enumerate() {
+        assert!(
+            matches!(
+                recorded_login_state(body, false),
+                Err(AuthError::InvalidAnswer {
+                    step: "OPAQUE login finish",
+                    field: "token combination",
+                })
+            ),
+            "malformed recorded answer {index} was not refused"
+        );
+    }
+}
+
+#[test]
+fn recorded_legacy_password_full_session_omits_the_factor_flag() {
+    let state = recorded_login_state(
+        r#"{"session_token":"legacy-session","user_id":"00000000-0000-4000-8000-000000000003","salt":"0123456789abcdef","key_state":"locked"}"#,
+        true,
+    )
+    .unwrap();
+    let SignInChallenge::PasswordAccepted(accepted) = state else {
+        panic!("recorded legacy full-session answer was not accepted")
+    };
+    assert!(accepted.legacy_upgrade_required());
+}
+
+#[test]
+fn recorded_passkey_full_session_omits_the_factor_flag() {
+    let state = recorded_login_state(
+        r#"{"session_token":"passkey-session","user_id":"00000000-0000-4000-8000-000000000004","salt":"0123456789abcdef","key_state":"locked"}"#,
+        false,
+    )
+    .unwrap();
+    assert!(matches!(state, SignInChallenge::PasswordAccepted(_)));
+}
+
+#[test]
+fn unlock_transition_errors_name_the_safe_step() {
+    let accepted = PasswordAccepted {
+        session_token: Zeroizing::new("token".into()),
+        canonical_email: "person@example.test".into(),
+        owner: "account".into(),
+        key_state: SessionKeyState::Locked,
+        legacy_upgrade_required: false,
+        factor_satisfied: false,
+        email_code_satisfied: false,
+        authenticator_required: true,
+        hardware_id: None,
+        hardware_identity_secret: None,
+    };
+
+    let error = NewDeviceUnlock::approval(accepted).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "new-device approval: authenticator factor was not satisfied"
+    );
+}
+
+#[tokio::test]
+async fn signup_email_uses_the_shared_unicode_canonical_form() {
+    let transport = Arc::new(ScriptedTransport::json(
+        202,
+        br#"{"message":"If that address can sign up, we've sent you a code."}"#.to_vec(),
+    ));
+    let client = Client::new(ClientConfig::for_tests(), transport.clone()).unwrap();
+    let signup = SignupService::new(
+        "  İNFO@EXAMPLE.TEST  ",
+        CeremonyConfig {
+            password_policy: PasswordPolicy::from_server(12),
+            email_verification_required: true,
+            verify_word_count: 3,
+            breach: BreachPolicy::NotRequired,
+        },
+    )
+    .unwrap();
+
+    client.start_signup_email(&signup).await.unwrap();
+
+    let request = transport.requests().pop().unwrap();
+    let body: serde_json::Value = serde_json::from_slice(request.body()).unwrap();
+    assert_eq!(body["email"], "i̇nfo@example.test");
+}
+
+#[tokio::test]
+async fn recovery_holder_token_is_bearer_and_ready_at_blocks_completion() {
+    let transport = Arc::new(ScriptedTransport::json(
+        200,
+        br#"{"status":"pending","ready_at":"2099-01-01T00:00:00Z","expires_at":"2099-01-08T00:00:00Z"}"#.to_vec(),
+    ));
+    let client = Client::new(ClientConfig::for_tests(), transport.clone()).unwrap();
+    let mut attempt =
+        crate::auth::RecoveryAttempt::from_parts_for_test("recovery-id", "holder-secret", None, RecoveryState::Pending);
+
+    assert_eq!(
+        client.recovery_status(&mut attempt).await.unwrap(),
+        RecoveryState::Pending
+    );
+    let status_request = transport.requests().pop().unwrap();
+    assert_eq!(status_request.header("Authorization"), Some("Bearer holder-secret"));
+    assert_eq!(status_request.header("X-Beebeeb-Expected-User"), None);
+
+    let request_count = transport.request_count();
+    assert!(matches!(
+        client
+            .complete_recovery(
+                &attempt,
+                "person@example.test",
+                RecoveryChanges {
+                    new_email: Some("new@example.test".into()),
+                    ..RecoveryChanges::default()
+                },
+            )
+            .await,
+        Err(AuthError::RecoveryWaiting { .. })
+    ));
+    assert_eq!(transport.request_count(), request_count);
+
+    let cancel = RecoveryCancelToken::from_alert("recovery-id", Zeroizing::new("cancel-secret".into())).unwrap();
+    assert!(!format!("{cancel:?}").contains("cancel-secret"));
+    transport.push_json(200, br#"{"ok":true}"#.to_vec());
+    client.cancel_recovery_with_token(cancel).await.unwrap();
+    let cancel_request = transport.requests().pop().unwrap();
+    let body: serde_json::Value = serde_json::from_slice(cancel_request.body()).unwrap();
+    assert_eq!(body["cancel_token"], "cancel-secret");
+    assert_eq!(cancel_request.header("Authorization"), None);
+}
+
+#[tokio::test]
+async fn a_device_clock_behind_the_server_does_not_block_a_ready_recovery() {
+    let transport = Arc::new(ScriptedTransport::json(
+        200,
+        br#"{"status":"ready","ready_at":"2099-01-01T00:00:00Z","expires_at":"2099-01-08T00:00:00Z"}"#.to_vec(),
+    ));
+    transport.push_json(
+        200,
+        br#"{"session_token":"session-token","user_id":"account-id","key_state":"proven"}"#.to_vec(),
+    );
+    let client = Client::new(ClientConfig::for_tests(), transport.clone()).unwrap();
+    let mut attempt =
+        crate::auth::RecoveryAttempt::from_parts_for_test("recovery-id", "holder-secret", None, RecoveryState::Pending);
+
+    assert_eq!(
+        client.recovery_status(&mut attempt).await.unwrap(),
+        RecoveryState::Ready
+    );
+    assert!(!attempt.waits(), "the server said ready, so the device must not show a wait");
+    client
+        .complete_recovery(
+            &attempt,
+            "person@example.test",
+            RecoveryChanges {
+                remove_authenticator: true,
+                ..RecoveryChanges::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(transport.request_count(), 2);
+}
+
+#[tokio::test]
+async fn a_device_clock_ahead_of_the_server_does_not_end_the_recovery_wait() {
+    let transport = Arc::new(ScriptedTransport::json(
+        200,
+        br#"{"status":"pending","ready_at":"2000-01-01T00:00:00Z","expires_at":"2099-01-08T00:00:00Z"}"#.to_vec(),
+    ));
+    let client = Client::new(ClientConfig::for_tests(), transport.clone()).unwrap();
+    let mut attempt =
+        crate::auth::RecoveryAttempt::from_parts_for_test("recovery-id", "holder-secret", None, RecoveryState::Pending);
+
+    assert_eq!(
+        client.recovery_status(&mut attempt).await.unwrap(),
+        RecoveryState::Pending
+    );
+    assert!(attempt.waits(), "the server said pending, so the device must show the wait");
+    let requests = transport.request_count();
+    assert!(matches!(
+        client
+            .complete_recovery(
+                &attempt,
+                "person@example.test",
+                RecoveryChanges {
+                    remove_authenticator: true,
+                    ..RecoveryChanges::default()
+                },
+            )
+            .await,
+        Err(AuthError::RecoveryWaiting { .. })
+    ));
+    assert_eq!(transport.request_count(), requests);
+}
+
+#[tokio::test]
+async fn recovery_completion_uses_holder_bearer_not_a_body_token() {
+    let transport = Arc::new(ScriptedTransport::json(
+        200,
+        br#"{"session_token":"session-token-secret","user_id":"account-id","key_state":"proven"}"#.to_vec(),
+    ));
+    let client = Client::new(ClientConfig::for_tests(), transport.clone()).unwrap();
+    let attempt =
+        crate::auth::RecoveryAttempt::from_parts_for_test("recovery-id", "holder-secret", None, RecoveryState::Ready);
+
+    let recovered = client
+        .complete_recovery(
+            &attempt,
+            "person@example.test",
+            RecoveryChanges {
+                remove_authenticator: true,
+                ..RecoveryChanges::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(recovered.owner(), "account-id");
+    assert!(!format!("{recovered:?}").contains("session-token-secret"));
+
+    let store = crate::MemorySecretStore::default();
+    assert!(
+        client
+            .install_recovered_session(
+                &recovered,
+                MasterKey::from_bytes([0x5a; 32]),
+                "http://not-loopback.example.test",
+                &store,
+            )
+            .is_err()
+    );
+    session("account-a", "token-a", 1).save(&store, "test-app").unwrap();
+    assert!(matches!(
+        client.install_recovered_session(
+            &recovered,
+            MasterKey::from_bytes([0x5a; 32]),
+            "http://localhost:8080",
+            &store,
+        ),
+        Err(AuthError::AnotherAccountOnDevice)
+    ));
+    assert!(
+        Session::load_for_user(&store, "account-a", "test-app")
+            .unwrap()
+            .is_some()
+    );
+    let installed = client
+        .install_recovered_session_replacing_account(
+            &recovered,
+            MasterKey::from_bytes([0x5a; 32]),
+            "http://localhost:8080",
+            &store,
+            crate::auth::AccountReplacement::authorized(),
+        )
+        .unwrap();
+    assert_eq!(installed.owner(), "account-id");
+    assert_eq!(
+        Session::load_for_user(&store, "account-id", "test-app")
+            .unwrap()
+            .unwrap()
+            .owner(),
+        "account-id"
+    );
+
+    let ownerless = crate::MemorySecretStore::default();
+    ownerless.set("session.master_key", &[1; 32]).unwrap();
+    assert!(
+        client
+            .install_recovered_session_replacing_account(
+                &recovered,
+                MasterKey::from_bytes([0x5a; 32]),
+                "http://localhost:8080",
+                &ownerless,
+                crate::auth::AccountReplacement::authorized(),
+            )
+            .is_ok()
+    );
+
+    let request = transport.requests().pop().unwrap();
+    assert_eq!(request.header("Authorization"), Some("Bearer holder-secret"));
+    assert_eq!(request.header("X-Beebeeb-Expected-User"), None);
+    let body: serde_json::Value = serde_json::from_slice(request.body()).unwrap();
+    assert!(body.get("recovery_token").is_none());
+}
+
+#[tokio::test]
+async fn recovery_authenticator_replacement_matches_the_server_payload() {
+    let transport = Arc::new(ScriptedTransport::json(
+        200,
+        br#"{"session_token":"session-token-secret","user_id":"account-id","key_state":"proven"}"#.to_vec(),
+    ));
+    let client = Client::new(ClientConfig::for_tests(), transport.clone()).unwrap();
+    let attempt =
+        crate::auth::RecoveryAttempt::from_parts_for_test("recovery-id", "holder-secret", None, RecoveryState::Ready);
+    let replacement = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
+
+    client
+        .complete_recovery(
+            &attempt,
+            "person@example.test",
+            RecoveryChanges {
+                new_authenticator: Some(Zeroizing::new(replacement.into())),
+                authenticator_code: Some("123456".into()),
+                ..RecoveryChanges::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let request = transport.requests().pop().unwrap();
+    let body: serde_json::Value = serde_json::from_slice(request.body()).unwrap();
+    assert_eq!(body["authenticator"]["action"], "replace");
+    assert_eq!(body["authenticator"]["secret"], replacement);
+    assert_eq!(body["authenticator"]["code"], "123456");
+    assert!(body.get("opaque_registration").is_none() || body["opaque_registration"].is_null());
+}
+
+#[tokio::test]
+async fn signing_out_this_app_preserves_another_apps_session_and_the_shared_key() {
+    let store = FailingWriteStore::default();
+    let mail = session("account-a", "mail-token", 1);
+    mail.save(&store, "mail").unwrap();
+    let drive = session("account-a", "drive-token", 1);
+    drive.save(&store, "drive").unwrap();
+
+    let transport = Arc::new(ScriptedTransport::json(200, br#"{"message":"logged out"}"#.to_vec()));
+    let client = Client::new(ClientConfig::new("test-client", "1", "mail"), transport).unwrap();
+    client.set_session(&mail).unwrap();
+    client.sign_out_this_app(&store).await.unwrap();
+
+    assert!(Session::load_for_user(&store, "account-a", "mail").unwrap().is_none());
+    assert!(Session::load_for_user(&store, "account-a", "drive").unwrap().is_some());
+    assert!(store.get("session.master_key").unwrap().is_some());
+    assert!(store.get("session.owner").unwrap().is_some());
+}
+
+#[test]
+fn whole_device_sign_out_removes_all_app_tokens_and_shared_session_material() {
+    let store = FailingWriteStore::default();
+    session("account-a", "mail-token", 1).save(&store, "mail").unwrap();
+    session("account-a", "drive-token", 1).save(&store, "drive").unwrap();
+
+    assert_eq!(Session::sign_out_device(&store).unwrap(), 2);
+
+    for name in [
+        "session.token.mail",
+        "session.token.drive",
+        "session.app_ids",
+        "session.api_url",
+        "session.master_key",
+        "session.owner",
+    ] {
+        assert!(
+            store.get(name).unwrap().is_none(),
+            "{name} survived whole-device sign-out"
+        );
+    }
+    assert_eq!(store.get("account.generation").unwrap().unwrap().as_slice(), b"2");
+}
+
+#[test]
+fn last_device_warning_counts_only_key_holders_and_fails_closed_for_unknown_current_device() {
+    let devices: beebeeb_api::routes::devices::Devices = serde_json::from_value(serde_json::json!({
+        "devices": [
+            {
+                "id": "current", "hostname": "", "platform": "ios", "last_seen": "", "created_at": "",
+                "holds_key": true
+            },
+            {
+                "id": "locked", "hostname": "", "platform": "web", "last_seen": "", "created_at": "",
+                "holds_key": false
+            }
+        ]
+    }))
+    .unwrap();
+
+    assert!(crate::devices::last_device_warning(&devices.devices, "current"));
+    assert!(crate::devices::last_device_warning(&devices.devices, "missing"));
+}
+
+fn session(owner: &str, token: &str, generation: u64) -> Session {
+    Session::from_parts_for_test("https://api.example", token, owner, [generation as u8; 32], generation).unwrap()
+}
+
+#[derive(Default)]
+struct FailingWriteStore {
+    values: Mutex<HashMap<String, Zeroizing<Vec<u8>>>>,
+    writes: Mutex<(usize, Option<usize>)>,
+    operations: Mutex<Vec<String>>,
+}
+
+impl FailingWriteStore {
+    fn fail_on_write(&self, position: usize) {
+        *self.writes.lock().unwrap() = (0, Some(position));
+        self.operations.lock().unwrap().clear();
+    }
+
+    fn allow_writes(&self) {
+        *self.writes.lock().unwrap() = (0, None);
+    }
+
+    fn operations(&self) -> Vec<String> {
+        self.operations.lock().unwrap().clone()
+    }
+}
+
+impl SecretStore for FailingWriteStore {
+    fn set(&self, name: &str, value: &[u8]) -> Result<(), SecretError> {
+        self.operations
+            .lock()
+            .map_err(|_| SecretError::Backend)?
+            .push(format!("set:{name}"));
+        let mut writes = self.writes.lock().map_err(|_| SecretError::Backend)?;
+        writes.0 += 1;
+        if writes.1 == Some(writes.0) {
+            return Err(SecretError::Backend);
+        }
+        self.values
+            .lock()
+            .map_err(|_| SecretError::Backend)?
+            .insert(name.to_owned(), Zeroizing::new(value.to_vec()));
+        Ok(())
+    }
+
+    fn get(&self, name: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretError> {
+        Ok(self.values.lock().map_err(|_| SecretError::Backend)?.get(name).cloned())
+    }
+
+    fn delete(&self, name: &str) -> Result<(), SecretError> {
+        self.operations
+            .lock()
+            .map_err(|_| SecretError::Backend)?
+            .push(format!("delete:{name}"));
+        self.values.lock().map_err(|_| SecretError::Backend)?.remove(name);
+        Ok(())
+    }
+}

@@ -5,6 +5,11 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::CoreError;
 use crate::kdf::MasterKey;
 
+/// Legacy 96-byte test-vector container.
+///
+/// This is not an OPAQUE protocol envelope and is not a server-stored or
+/// password-wrapped format. It remains public only because the published
+/// cross-platform vector pins its historical byte concatenation.
 pub struct OpaqueEnvelope {
     pub master_key: [u8; 32],
     pub x25519_private: [u8; 32],
@@ -20,8 +25,8 @@ impl Drop for OpaqueEnvelope {
 }
 
 impl OpaqueEnvelope {
-    pub fn to_bytes(&self) -> [u8; 96] {
-        let mut buf = [0u8; 96];
+    pub fn to_bytes(&self) -> Zeroizing<[u8; 96]> {
+        let mut buf = Zeroizing::new([0u8; 96]);
         buf[..32].copy_from_slice(&self.master_key);
         buf[32..64].copy_from_slice(&self.x25519_private);
         buf[64..96].copy_from_slice(&self.recovery_check);

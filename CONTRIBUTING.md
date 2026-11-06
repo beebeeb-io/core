@@ -1,53 +1,51 @@
 # Contributing to Beebeeb Core
 
-Thanks for your interest in contributing to the Beebeeb cryptography and sync library.
+Thank you for contributing. This workspace is security-sensitive and changes can affect every client.
 
-## Prerequisites
+## Setup
 
-- Rust 1.85+ (stable toolchain)
-- Git
-
-## Development setup
+Install Git, Python 3, and the Rust toolchain pinned by `rust-toolchain.toml`. The independent vector
+checks also need Python's `cryptography` package.
 
 ```sh
 git clone https://github.com/beebeeb-io/core.git
 cd core
-cargo test --workspace
+python3 -m pip install cryptography
+cargo test --workspace --locked
 ```
 
-All 53 tests across `beebeeb-core` and `beebeeb-sync` should pass.
+Do not hand-edit generated bindings or generated vector JSON. Change its source and regenerate it.
 
-## Code quality checks
+## Checks
 
-Run these before submitting a pull request:
+Run these before opening a pull request:
 
 ```sh
-cargo fmt -- --check
-cargo clippy --workspace -- -D warnings
-cargo test --workspace
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+bash scripts/check-test-vectors.sh
+bash scripts/check-no-legacy-writes.sh
+bash scripts/check-core-pins-documented.sh
 ```
 
-## Crypto changes
+CI additionally checks the WASM JavaScript surface, dependency advisories, dependency licenses and
+sources, and public added-line policy. Those dependency tools are installed by CI; contributors do not
+need to install them globally.
 
-This is a cryptography library. Changes to primitives, key derivation, or encryption flows require extra scrutiny and will go through an extended review cycle. Please open an issue to discuss the change before submitting a PR.
+## Security and compatibility changes
 
-## Pull request process
+Discuss changes to primitives, labels, AAD, key derivation, stored formats, wire formats, or binding
+exports before implementing them. A changed existing label is a migration, not a refactor. Add hostile
+input tests and independent known-answer vectors where appropriate.
 
-1. Fork the repository and create a feature branch from `main`.
-2. Make your changes, ensuring all checks above pass.
-3. Write or update tests for your changes.
-4. Open a pull request with a clear description of what and why.
+Compatibility readers are inventoried in [docs/legacy-formats.md](docs/legacy-formats.md); new code must
+not write those formats. Consumer responsibilities are in [docs/client-rules.md](docs/client-rules.md).
 
-## Contributor license
+## Pull requests
 
-Beebeeb does not require a separate Contributor License Agreement at this time.
-By opening a pull request, you confirm you have the right to submit the work and
-agree that it is licensed under AGPL-3.0-or-later.
+Keep changes focused, explain compatibility effects, add tests, and report which checks ran. Security
+issues must go to **security@beebeeb.io**, not a public issue.
 
-## Security
-
-If you discover a security vulnerability, **do not open a public issue**. Email [security@beebeeb.io](mailto:security@beebeeb.io) instead. See [SECURITY.md](SECURITY.md) for details.
-
-## License
-
-By contributing, you agree that your contributions will be licensed under the [AGPL-3.0-or-later](LICENSE).
+By contributing, you confirm you have the right to submit the work under
+[AGPL-3.0-or-later](LICENSE). No separate contributor license agreement is required.

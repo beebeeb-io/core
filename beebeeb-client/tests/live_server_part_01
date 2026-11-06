@@ -1,0 +1,753 @@
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn signup_with_recovery_key() -> TestResult {
+    let account = provision_account().await?;
+    assert!(account.recovery_words.len() >= 12);
+    assert!(!account.session.owner().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn password_signin_returns_a_typed_state() -> TestResult {
+    let account = provision_account().await?;
+    let (other, _) = live_client(&account.api_url)?;
+    let error = other
+        .sign_in(&account.email, Zeroizing::new(account.password.clone()), None)
+        .await
+        .expect_err("sign-in without a hardware identity unexpectedly created a session");
+    assert!(matches!(
+        error,
+        beebeeb_client::auth::AuthError::HardwareIdentityRequired
+    ));
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn two_factor_completion_installs_after_email_gated_key_proof() -> TestResult {
+    let account = provision_account().await?;
+    let enrollment = account
+        .client
+        .setup_authenticator()
+        .await
+        .map_err(|error| format!("2FA setup failed: {error}"))?;
+    account
+        .client
+        .enable_authenticator(totp_now(enrollment.secret())?)
+        .await
+        .map_err(|error| format!("2FA enable failed: {error}"))?;
+
+    let (other, app_id) = live_client(&account.api_url)?;
+    let store = MemorySecretStore::default();
+    let challenge = password_challenge_on_new_device(&account, &other, &store).await?;
+    let SignInChallenge::TwoFactor(challenge) = challenge else {
+        return Err("2FA-enabled account did not return a two-factor challenge".into());
+    };
+    let accepted = other
+        .submit_two_factor(challenge, totp_now(enrollment.secret())?)
+        .await
+        .map_err(|error| format!("correct TOTP did not complete sign-in: {error}"))?;
+    let mut unlock = NewDeviceUnlock::recovery(accepted)
+        .map_err(|error| format!("2FA completion did not return a locked session: {error}"))?;
+    authorize_unlock_email(&account, &other, &mut unlock).await?;
+    unlock.provide_recovery_key(MasterKey::from_bytes(*account.master_key.to_bytes()))?;
+    let installed = other
+        .install_new_device(unlock.into_ready()?, &account.api_url, &store)
+        .await
+        .map_err(|error| format!("2FA session failed email-ticket key proof: {error}"))?;
+    assert!(
+        Session::load_for_user(&store, installed.owner(), &app_id)?.is_some(),
+        "2FA and key proof did not persist the new-device session"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn new_device_installs_after_locked_session_email_gated_key_proof() -> TestResult {
+    let account = provision_account().await?;
+    let (other, app_id) = live_client(&account.api_url)?;
+    let store = MemorySecretStore::default();
+    let accepted = password_on_new_device(&account, &other, &store).await?;
+    let mut unlock = NewDeviceUnlock::recovery(accepted)?;
+    authorize_unlock_email(&account, &other, &mut unlock).await?;
+    unlock.provide_recovery_key(MasterKey::from_bytes(*account.master_key.to_bytes()))?;
+    let installed = other
+        .install_new_device(unlock.into_ready()?, &account.api_url, &store)
+        .await
+        .map_err(|error| format!("email-authorized new device failed key proof: {error}"))?;
+    assert!(
+        Session::load_for_user(&store, installed.owner(), &app_id)?.is_some(),
+        "email-authorized device did not persist its session"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn device_link_start_requires_an_authenticated_starter() -> TestResult {
+    let account = provision_account().await?;
+    let (new_device, _) = live_client(&account.api_url)?;
+    assert!(new_device.start_device_link("live second device".into()).await.is_err());
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn locked_key_proof_refuses_the_wrong_recovery_key() -> TestResult {
+    let account = provision_account().await?;
+    account
+        .client
+        .prove_session_key(&account.master_key)
+        .await
+        .map_err(|error| format!("known account key failed its server binding proof: {error}"))?;
+
+    let (other, _) = live_client(&account.api_url)?;
+    let store = MemorySecretStore::default();
+    let accepted = password_on_new_device(&account, &other, &store).await?;
+    let mut unlock = NewDeviceUnlock::recovery(accepted)?;
+    authorize_unlock_email(&account, &other, &mut unlock).await?;
+    unlock.provide_recovery_key(MasterKey::from_bytes([0x7d; 32]))?;
+    let result = other
+        .install_new_device(unlock.into_ready()?, &account.api_url, &store)
+        .await;
+    assert!(
+        result.is_err(),
+        "server accepted a key proof made with the wrong account key"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn qr_device_approval_transfers_the_account_key_between_two_clients() -> TestResult {
+    let account = provision_account().await?;
+    let (new_device, _) = live_client(&account.api_url)?;
+    let store = MemorySecretStore::default();
+    let accepted = password_on_new_device(&account, &new_device, &store).await?;
+    let mut pending = new_device
+        .start_device_link_for_sign_in(&accepted, "live QR device".into())
+        .await
+        .map_err(|error| format!("locked new device could not start QR link: {error}"))?;
+    let id = pending.id().to_owned();
+    let qr = pending.qr()?;
+    let code = pending.typed_code()?.to_owned();
+    account
+        .client
+        .approve_device_link(&id, &qr, &code)
+        .await
+        .map_err(|error| format!("existing client could not approve QR link: {error}"))?;
+    let DeviceLinkPoll::Approved(approved) = new_device.poll_device_link(&mut pending).await? else {
+        return Err("QR link did not become approved after approval response".into());
+    };
+    let beebeeb_client::devices::ApprovedDeviceLink {
+        material,
+        acknowledgement,
+    } = approved;
+    let mut unlock = NewDeviceUnlock::approval(accepted)?;
+    unlock.provide_approval(material)?;
+    new_device
+        .acknowledge_device_link(acknowledgement)
+        .await
+        .map_err(|error| format!("QR-approved device could not acknowledge the link before key proof: {error}"))?;
+    new_device
+        .install_new_device(unlock.into_ready()?, &account.api_url, &store)
+        .await
+        .map_err(|error| format!("QR-approved account key failed installation: {error}"))?;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn typed_device_approval_uses_the_client_session_id_between_two_clients() -> TestResult {
+    let account = provision_account().await?;
+    let (new_device, _) = live_client(&account.api_url)?;
+    let store = MemorySecretStore::default();
+    let accepted = password_on_new_device(&account, &new_device, &store).await?;
+    let pending = new_device
+        .start_device_link_for_sign_in(&accepted, "live typed device".into())
+        .await?;
+    let id = pending.id().to_owned();
+    let typed_code = pending.typed_code()?.to_owned();
+    let (new_side, new_message) = pending.begin_typed_path()?;
+    new_device
+        .send_device_link_pake(&id, beebeeb_api::proposed::DeviceLinkRole::NewDevice, &new_message)
+        .await?;
+    let (approver, approver_message) = account
+        .client
+        .begin_typed_device_approval(&id, &typed_code)
+        .await
+        .map_err(|error| format!("approver could not start typed PAKE from server session_id: {error}"))?;
+    account
+        .client
+        .send_device_link_pake(&id, beebeeb_api::proposed::DeviceLinkRole::Approver, &approver_message)
+        .await?;
+    let relayed_new = account
+        .client
+        .get_device_link_pake(&id, beebeeb_api::proposed::DeviceLinkRole::Approver)
+        .await?
+        .ok_or("server did not relay the new-device PAKE message")?;
+    let relayed_approver = new_device
+        .get_device_link_pake(&id, beebeeb_api::proposed::DeviceLinkRole::NewDevice)
+        .await?
+        .ok_or("server did not relay the approver PAKE message")?;
+    account.client.approve_typed_device_link(approver, &relayed_new).await?;
+    let mut receiver = new_side.finish(&relayed_approver)?;
+    let DeviceLinkPoll::Approved(approved) = new_device.poll_typed_device_link(&mut receiver).await? else {
+        return Err("typed link did not become approved after PAKE completion".into());
+    };
+    let beebeeb_client::devices::ApprovedDeviceLink {
+        material,
+        acknowledgement,
+    } = approved;
+    let mut unlock = NewDeviceUnlock::approval(accepted)?;
+    unlock.provide_approval(material)?;
+    new_device
+        .acknowledge_device_link(acknowledgement)
+        .await
+        .map_err(|error| format!("typed-approved device could not acknowledge the link before key proof: {error}"))?;
+    new_device
+        .install_new_device(unlock.into_ready()?, &account.api_url, &store)
+        .await
+        .map_err(|error| format!("typed-approved account key failed installation: {error}"))?;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn recovery_without_password_enters_the_waiting_state() -> TestResult {
+    let account = provision_account().await?;
+    let attempt = account
+        .client
+        .start_recovery(&account.email, &account.master_key, None)
+        .await?;
+    assert!(attempt.waits());
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn recovery_key_plus_password_has_no_wait_and_registers_a_new_password() -> TestResult {
+    let account = provision_account().await?;
+    let replacement = format!("Replacement-{}-Z7!", Uuid::new_v4());
+    let attempt = account
+        .client
+        .start_recovery_with_password(
+            &account.email,
+            Zeroizing::new(account.password.clone()),
+            &account.master_key,
+            None,
+        )
+        .await
+        .map_err(|error| format!("password proof could not start recovery: {error}"))?;
+    assert!(!attempt.waits(), "valid password proof still received the 72-hour wait");
+    let recovered = account
+        .client
+        .complete_recovery(
+            &attempt,
+            &account.email,
+            RecoveryChanges {
+                new_password: Some(Zeroizing::new(replacement)),
+                ..RecoveryChanges::default()
+            },
+        )
+        .await
+        .map_err(|error| format!("password-only recovery completion failed: {error}"))?;
+    account
+        .client
+        .install_recovered_session(
+            &recovered,
+            MasterKey::from_bytes(*account.master_key.to_bytes()),
+            &account.api_url,
+            &MemorySecretStore::default(),
+        )
+        .map_err(|error| format!("completed recovery session was not installable: {error}"))?;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn recovery_replaces_a_lost_authenticator() -> TestResult {
+    let account = provision_account().await?;
+    let original = account.client.setup_authenticator().await?;
+    account
+        .client
+        .enable_authenticator(totp_now(original.secret())?)
+        .await?;
+    let replacement_secret = RECOVERY_REPLACEMENT_SECRET;
+    let attempt = account
+        .client
+        .start_recovery_with_password(
+            &account.email,
+            Zeroizing::new(account.password.clone()),
+            &account.master_key,
+            None,
+        )
+        .await?;
+    account
+        .client
+        .complete_recovery(
+            &attempt,
+            &account.email,
+            RecoveryChanges {
+                new_authenticator: Some(Zeroizing::new(replacement_secret.into())),
+                authenticator_code: Some(totp_now(replacement_secret)?),
+                ..RecoveryChanges::default()
+            },
+        )
+        .await
+        .map_err(|error| format!("recovery could not replace the lost authenticator: {error}"))?;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn recovery_replaces_a_lost_email_address() -> TestResult {
+    let account = provision_account().await?;
+    let (_, mailpit_url) = live_urls()?;
+    let replacement_email = format!("replacement-{}@example.test", Uuid::new_v4());
+    let attempt = account
+        .client
+        .start_recovery_with_password(
+            &account.email,
+            Zeroizing::new(account.password.clone()),
+            &account.master_key,
+            None,
+        )
+        .await?;
+    let checkpoint = mail_checkpoint(&mailpit_url, &replacement_email, SIGNUP_CODE_SUBJECT).await?;
+    let staged = account
+        .client
+        .complete_recovery(
+            &attempt,
+            &account.email,
+            RecoveryChanges {
+                new_email: Some(replacement_email.clone()),
+                ..RecoveryChanges::default()
+            },
+        )
+        .await;
+    assert!(
+        matches!(
+            staged,
+            Err(beebeeb_client::auth::AuthError::RecoveryEmailVerificationRequired)
+        ),
+        "email replacement did not stop at the mailbox-verification stage"
+    );
+    let code = wait_for_mail_code(
+        &mailpit_url,
+        &replacement_email,
+        SIGNUP_CODE_SUBJECT,
+        account.email_code_length,
+        &checkpoint,
+    )
+    .await?;
+    account
+        .client
+        .complete_recovery(
+            &attempt,
+            &account.email,
+            RecoveryChanges {
+                new_password: Some(Zeroizing::new(account.password.clone())),
+                new_email: Some(replacement_email),
+                email_verification_code: Some(code),
+                ..RecoveryChanges::default()
+            },
+        )
+        .await
+        .map_err(|error| format!("verified replacement mailbox did not complete recovery: {error}"))?;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn missing_file_version_probe_is_side_effect_free() -> TestResult {
+    let account = provision_account().await?;
+    let versions = account
+        .client
+        .file_versions("00000000-0000-0000-0000-000000000000")
+        .await;
+    assert!(versions.is_err(), "the missing-file probe must not create state");
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn rename_move_trash_and_restore() -> TestResult {
+    let account = provision_account().await?;
+    let parent = account
+        .client
+        .create_folder(&account.session, "live parent", None)
+        .await?;
+    let child = account
+        .client
+        .create_folder(&account.session, "live child", Some(parent.id.clone()))
+        .await?;
+    let renamed = account
+        .client
+        .rename_entry(&account.session, child.wire(), "live renamed")
+        .await?;
+    let moved = account
+        .client
+        .move_entry(&account.session, renamed.wire(), None)
+        .await?;
+    account.client.trash_entry(moved.wire()).await?;
+    account.client.restore_entry(moved.wire()).await?;
+    let restored = account.client.get_file_record(&account.session, &moved.id).await?;
+    assert!(!restored.is_trashed, "restored entry remained marked as trashed");
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn upload_download_and_version_check_round_trip_plaintext() -> TestResult {
+    let account = provision_account().await?;
+    let root = tempfile::tempdir()?;
+    let plaintext = b"live upload/download/version contract";
+    let file_id = drive_upload(&account, &root, plaintext, 32 * 1024 * 1024, false).await?;
+    let record = account.client.get_file_record(&account.session, &file_id).await?;
+    account
+        .client
+        .rename_entry(&account.session, record.wire(), "live-renamed-upload.bin")
+        .await?;
+    assert_eq!(
+        account.client.get_file_record(&account.session, &file_id).await?.name,
+        "live-renamed-upload.bin"
+    );
+    let downloaded = download_uploaded_file(&account, &root, &file_id).await?;
+    assert_eq!(
+        downloaded, plaintext,
+        "downloaded plaintext did not match uploaded bytes"
+    );
+    let versions = account.client.file_versions(&file_id).await?;
+    assert_eq!(versions.file_id, file_id, "version route answered for a different file");
+    assert_eq!(
+        versions.versions.len(),
+        1,
+        "new upload did not have exactly one version"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn replace_restore_and_download_preserves_plaintext_and_counter() -> TestResult {
+    let account = provision_account().await?;
+    let root = tempfile::tempdir()?;
+    let first = b"first protected version";
+    let second = b"second protected version";
+    let file_id = drive_upload(&account, &root, first, 32 * 1024 * 1024, false).await?;
+    let before = account.client.file_versions(&file_id).await?;
+    let first_version = before
+        .versions
+        .iter()
+        .find(|version| version.version_number == before.current_version)
+        .ok_or("initial version listing omitted current version")?
+        .id
+        .clone();
+
+    let replaced = drive_replacement_upload(&account, &root, &file_id, second).await?;
+    assert_eq!(replaced, file_id);
+    assert_eq!(download_uploaded_file(&account, &root, &file_id).await?, second);
+
+    let counter_store = Mutex::new(Store::open_in_memory()?);
+    let restored = account
+        .client
+        .restore_version(&account.session, &counter_store, &file_id, &first_version)
+        .await?;
+    let counter = restored.counter.ok_or("protected restore omitted its counter")?;
+    assert_eq!(
+        counter_store.lock().unwrap().highest_file_version(&file_id)?,
+        Some(counter)
+    );
+    let current = account.client.get_file(&file_id).await?;
+    let metadata = decrypt_file_metadata(
+        &account.master_key,
+        &file_id,
+        current
+            .name_encrypted
+            .as_deref()
+            .ok_or("restored file omitted current metadata")?,
+    )?;
+    assert_eq!(metadata.version.map(|version| version.counter), Some(counter));
+    assert_eq!(download_uploaded_file(&account, &root, &file_id).await?, first);
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn resumed_upload_reopens_durable_state_and_finishes() -> TestResult {
+    let account = provision_account().await?;
+    let root = tempfile::tempdir()?;
+    let plaintext = vec![0x5au8; 10 * 1024 * 1024];
+    let file_id = drive_upload(&account, &root, &plaintext, 6 * 1024 * 1024, true).await?;
+    let downloaded = download_uploaded_file(&account, &root, &file_id).await?;
+    assert_eq!(
+        downloaded, plaintext,
+        "resumed upload did not preserve every plaintext byte"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn complete_snapshot_then_sse_event_and_catch_up() -> TestResult {
+    let account = provision_account().await?;
+    let mut engine = SyncEngine::new(format!("live-sync-{}", Uuid::new_v4()));
+    account
+        .client
+        .refresh_sync_snapshot(&account.session, &mut engine)
+        .await
+        .map_err(|error| format!("complete snapshot failed: {error}"))?;
+    let before = engine.position();
+    let stream =
+        account
+            .client
+            .foreground_sync_with_timeout(&account.session, &mut engine, 100, Duration::from_secs(15));
+    let mutation = async {
+        sleep(Duration::from_millis(500)).await;
+        account
+            .client
+            .create_folder(&account.session, "live SSE folder", None)
+            .await
+    };
+    let (stream_result, mutation_result) = tokio::join!(stream, mutation);
+    mutation_result.map_err(|error| format!("SSE trigger mutation failed: {error}"))?;
+    stream_result.map_err(|error| format!("SSE foreground batch/catch-up failed: {error}"))?;
+    account.client.catch_up_sync(&account.session, &mut engine, 100).await?;
+    assert!(
+        engine.position().seq_id > before.seq_id,
+        "snapshot cursor did not advance after the SSE-triggered mutation"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn new_account_has_no_share_links() -> TestResult {
+    let account = provision_account().await?;
+    assert!(account.client.my_share_links().await?.shares.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn share_create_public_download_and_revoke() -> TestResult {
+    let account = provision_account().await?;
+    let root = tempfile::tempdir()?;
+    let file_id = drive_upload(&account, &root, b"public-share-live", 32 * 1024 * 1024, false).await?;
+    let wrapped = STANDARD.encode([0x51u8; 60]);
+    let share = account
+        .client
+        .create_share_link(&file_id, &wrapped, Some(1), None)
+        .await
+        .map_err(|error| format!("share creation failed: {error}"))?;
+    let entry = account.client.get_file(&file_id).await?;
+    let versions = account.client.file_versions(&file_id).await?;
+    let version = versions
+        .versions
+        .iter()
+        .find(|version| version.version_number == versions.current_version)
+        .ok_or("share source omitted its current version")?;
+    let name_encrypted = entry
+        .name_encrypted
+        .as_deref()
+        .ok_or("share source omitted encrypted metadata")?;
+    let metadata = beebeeb_core::encrypt::decrypt_file_metadata(&account.master_key, &file_id, name_encrypted)?;
+    let file_key = derive_file_key(&account.master_key, file_id.as_bytes());
+    let plan = beebeeb_types::plan_chunks(entry.size_bytes, ChunkProfile::Mobile);
+    let (anonymous, _) = live_client(&account.api_url)?;
+    let anonymous = Arc::new(anonymous);
+    let downloads = DownloadService::new(
+        anonymous,
+        Arc::new(Mutex::new(Store::open_in_memory()?)),
+        root.path().join("anonymous-cache"),
+        64 * 1024 * 1024,
+        MemoryBudget::NATIVE,
+    )?;
+    let public_root = root.path().join("public");
+    std::fs::create_dir(&public_root)?;
+    let public_directory = beebeeb_core::path_safety::TrustedDirectory::open(&public_root)?;
+    let result = downloads
+        .share_view_download(
+            &share.token,
+            None,
+            &file_id,
+            &file_key,
+            &metadata,
+            version.chunk_count,
+            entry.size_bytes,
+            plan.chunk_size_bytes,
+            &public_directory,
+            "shared.bin",
+        )
+        .await
+        .map_err(|error| format!("public share download failed before revoke: {error}"))?;
+    assert_eq!(result, DownloadResult::Saved);
+    assert_eq!(std::fs::read(public_root.join("shared.bin"))?, b"public-share-live");
+    account
+        .client
+        .revoke_share_link(&share.id)
+        .await
+        .map_err(|error| format!("share revoke failed: {error}"))?;
+    assert!(
+        downloads
+            .share_view_download(
+                &share.token,
+                None,
+                &file_id,
+                &file_key,
+                &metadata,
+                version.chunk_count,
+                entry.size_bytes,
+                plan.chunk_size_bytes,
+                &public_directory,
+                "revoked.bin",
+            )
+            .await
+            .is_err(),
+        "revoked share remained publicly downloadable"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn system_service_enable_marks_its_folder_and_refuses_normal_mutation() -> TestResult {
+    let account = provision_account().await?;
+    let item = beebeeb_core::item_id::NewItemId::owner(&account.master_key)?;
+    let sealed_name = beebeeb_core::encrypt::encrypt_name_for_new_item(
+        &account.master_key,
+        &item,
+        "Mail backup",
+        None,
+        beebeeb_core::chunk_stream::ExpectedChunkFormat::Unrecorded,
+    )?;
+    let enabled = account
+        .client
+        .enable_system_service(Service::MailBackup, item.as_str().to_owned(), sealed_name, None)
+        .await
+        .map_err(|error| format!("mail-backup service enable failed: {error}"))?;
+    assert!(enabled.enabled, "service enable response did not report enabled");
+    let folder = account
+        .client
+        .get_file_record(&account.session, &enabled.folder_id)
+        .await?;
+    assert_eq!(
+        folder.managed_by.as_deref(),
+        Some(Service::MailBackup.as_str()),
+        "enabled service folder was not marked as managed"
+    );
+    let refused = account
+        .client
+        .rename_entry(&account.session, folder.wire(), "must be refused")
+        .await;
+    assert!(refused.is_err(), "ordinary rename mutated a service-managed folder");
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn signout_one_app() -> TestResult {
+    let account = provision_account().await?;
+    let token = stored_session_token(&account)?;
+    assert_eq!(account_status_for_token(&account, &token).await?, 200);
+    account.client.sign_out_this_app(&account.store).await?;
+    assert_eq!(
+        account_status_for_token(&account, &token).await?,
+        401,
+        "app sign-out left its session usable on the server"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn whole_device_signout_removes_server_device_and_local_session() -> TestResult {
+    let account = provision_account().await?;
+    let token = stored_session_token(&account)?;
+    assert_eq!(account_status_for_token(&account, &token).await?, 200);
+    let devices = account.client.list_devices().await?;
+    let device = devices
+        .devices
+        .first()
+        .ok_or("new account had no device row to sign out")?;
+    let generation = account
+        .client
+        .sign_out_whole_device(&device.id, true, &account.store)
+        .await
+        .map_err(|error| format!("whole-device sign-out failed: {error}"))?;
+    assert!(
+        generation > account.session.generation(),
+        "device sign-out did not advance local generation"
+    );
+    assert_eq!(
+        account_status_for_token(&account, &token).await?,
+        401,
+        "device sign-out left its session usable on the server"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
+async fn removing_another_device_ends_only_that_devices_session() -> TestResult {
+    let account = provision_account().await?;
+    let own_token = stored_session_token(&account)?;
+    let before: Vec<String> = account
+        .client
+        .list_devices()
+        .await?
+        .devices
+        .into_iter()
+        .map(|device| device.id)
+        .collect();
+
+    let (other, other_app) = live_client(&account.api_url)?;
+    let store = MemorySecretStore::default();
+    let accepted = password_on_new_device(&account, &other, &store).await?;
+    let mut unlock = NewDeviceUnlock::recovery(accepted)?;
+    authorize_unlock_email(&account, &other, &mut unlock).await?;
+    unlock.provide_recovery_key(MasterKey::from_bytes(*account.master_key.to_bytes()))?;
+    other
+        .install_new_device(unlock.into_ready()?, &account.api_url, &store)
+        .await?;
+    let other_token = store
+        .get(&format!("session.token.{other_app}"))?
+        .ok_or("second device session token was not stored")?;
+    let other_token = String::from_utf8(other_token.to_vec())?;
+    assert_eq!(account_status_for_token(&account, &other_token).await?, 200);
+
+    let devices = account.client.list_devices().await?.devices;
+    assert_eq!(devices.len(), 2, "two devices on one platform shared one entry");
+    let second = devices
+        .iter()
+        .find(|device| !before.contains(&device.id))
+        .ok_or("second device was not listed as its own entry")?;
+    account.client.remove_device(&second.id).await?;
+
+    assert_eq!(
+        account_status_for_token(&account, &other_token).await?,
+        401,
+        "removed device kept its session"
+    );
+    assert_eq!(
+        account_status_for_token(&account, &own_token).await?,
+        200,
+        "removing another device ended the remover's session"
+    );
+    assert_eq!(account.client.list_devices().await?.devices.len(), 1);
+    Ok(())
+}
+
+#[test]
+#[ignore = "documented manual DB step; sqlx is not cached in this workspace"]
+fn session_expiry_live_step_is_intentionally_manual() {
+    // The live process must expire only the just-created session:
+    // UPDATE sessions SET expires_at = NOW() - INTERVAL '1 second' WHERE id = $1;
+    // Then GET /api/v1/auth/me must fail and emit EngineEvent::SessionExpired.
+    // The hermetic session-expiry unit test covers the client behavior. This
+    // marker performs no network or DB mutation because this workspace has no
+    // cached sqlx package.
+}

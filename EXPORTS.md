@@ -1,10 +1,153 @@
-# beebeeb-wasm / uniffi exports — branch `feat/LD-0113-backup-rules`
+# Binding exports
+
+`beebeeb-wasm` is the JavaScript/WebAssembly surface. `beebeeb-uniffi` is the Swift and Kotlin surface.
+The Rust source annotations are authoritative; generated artifacts are build outputs and can vary by
+toolchain.
+
+## Compatibility policy
+
+The workspace is pre-1.0. Version `0.2.2` contains breaking API and binding changes. Consumers must pin
+one core revision, regenerate or replace generated bindings from that revision, and update call sites
+before moving the pin. Export counts are not an API guarantee.
+
+Prefer opaque handles and operation-specific readers or sealers. Request-row results use
+`RequestContentReader` and `WasmRequestContentReader`; they do not return the row's content key. A
+sequential decryptor is a single-consumer ordered cursor, so callers create a fresh decryptor for a new
+read sequence.
+
+## Default UniFFI surface
+
+Native applications start with `NativeClientHandle`. It owns the typed client, selected runtime and
+Rust Keychain backend; it never exposes the generic request executor or an account token. Its service
+objects are:
+
+| Area | Binding objects |
+| --- | --- |
+| Account | `AuthServiceHandle`, `AuthChallengeHandle`, `PasswordAcceptedHandle`, `DeviceServiceHandle`, opaque device-link/approval, recovery, signup and authenticator handles |
+| Files and sync | `FileServiceHandle`, `FilePageHandle`, `SyncServiceHandle`, `EventStreamHandle`, `FileProviderServiceHandle` |
+| Transfers | `UploadServiceHandle`, `DownloadServiceHandle`, `ThumbnailServiceHandle`, `BackupServiceHandle` |
+| Sharing and local data | `ShareServiceHandle`, `ContactServiceHandle`, `SearchServiceHandle`, `SettingsServiceHandle` |
+| Persistence | `StoreHandle` |
+| Lifecycle | `ServiceCoordinatorHandle`, one-shot `AccountReplacementHandle` |
+| Cryptographic operations | `MasterKeyHandle`, `FileKeyHandle`, `ChunkEncryptorHandle`, `ChunkDecryptorHandle`, `RequestContentReader`, item/write-target handles and purpose-specific sealers |
+
+App-facing values use records such as `FileData`, `UploadData`, `DownloadData`, `SearchResultData`,
+`DeviceSettingsData` and `EngineEventData`. Failures use `ServiceError` and existing purpose-specific
+binding errors. `DownloadData` has no caller-supplied version counter; downloads read the counter from
+authenticated encrypted metadata. Transfer runners take `NetworkSignal`, while Wi-Fi and upload staging limits
+come from `DeviceSettingsData`; transfer clocks stay inside Rust. Upload, download and thumbnail factories no longer
+take a `MasterKeyHandle`: all three resolve a generation-bound `SessionKey` from `NativeClientHandle` at operation
+time and reject results from a replaced session. `RuntimeProfile::Lightweight` selects the current-thread runtime for
+extensions.
+
+`SyncServiceHandle.refresh_snapshot()` performs first sync and `recover_gap(catch_up_limit)` rebases
+after a sequence gap. `FileProviderServiceHandle.changes_since` reports an expired anchor as the typed
+`ServiceError::AnchorExpired` case. `ServiceError` also preserves managed-by-service, quota (including
+limit and usage), cancellation, session-expired and retry-after cases instead of flattening them.
+
+Platform work crosses the callback interfaces `SecretStoreCallback`, `PasskeyPrompt`,
+`ImageCodecCallback`, `ChunkTransport`, `AssetSourceCallback`, `BackupManifestStoreCallback`,
+`DomainNotifierCallback`, `PlatformTransferCancellerCallback` and `AccountDataPurgerCallback`. Secret
+storage itself is performed by Rust; the secret-store callback authorizes access and receives no secret
+bytes.
+
+`AssetSourceCallback.snapshot(kind, cursor, limit)` is paged and returns `next_cursor`; its records do
+not contain eager export paths, and `export(kind, local_identifier)` is called only for assets selected
+for the bounded upload queue. Backup upload
+completion is recorded by Rust, so `BackupServiceHandle.upload_completed` is no longer exported.
+`ContactServiceHandle.observe` and `accept` fetch the contact public key in Rust and no longer accept
+key bytes from the application. `NativeClientHandle.service_coordinator` takes the shared `StoreHandle`
+so Rust wipes account rows before the platform removes directories and any still-open database file.
+
+`NativeClientHandle.sign_out_this_app` and `DeviceServiceHandle.sign_out_whole_device` both require a
+`ServiceCoordinatorHandle`. They stop account work, cancel platform transfers, clear service caches and
+the backup manifest, purge account directories, then remove session state in the required order. The
+whole-device form also enforces the last-device confirmation input.
+
+Account replacement first calls `NativeClientHandle.prepare_account_replacement`, which requires the
+last-device warning confirmation and the same cancellation and purge callbacks. It returns a one-shot
+`AccountReplacementHandle` only after coordinator cleanup succeeds; every `*_replacing_account`
+installer consumes that handle. A boolean alone can no longer replace an account. `FileServiceHandle`
+also exposes `restore_version(store, file_id, version_id)`, returning the fresh authenticated rollback
+counter when the restored file has protected version metadata.
+
+Device approval supports QR and typed-code paths with opaque one-shot state and a separate
+acknowledgement. Recovery, signup/recovery-kit output, authenticator enable/remove, password and email
+change, session revoke and account deletion are also service operations; no session token, account key
+or authenticator secret has a binding getter. `RuntimeProfile::Lightweight` plus the File Provider
+factory opens a targeted store-backed engine and does not load the whole tree.
+
+Signup methods exist so the web-declared client and contract tests can drive the shared ceremony;
+native client declarations receive the typed web-only refusal and URL. Stored sessions share the
+owner, master key, API URL, generation, and device identity, but keep one token per configured app id.
+App and whole-device sign-out therefore remain distinct coordinator operations.
+
+Password sign-in on a device returns a locked `PasswordAcceptedHandle` after any authenticator step;
+it has no retained-password or login-email-code retry state. The next path is QR/typed device approval,
+passkey plus an email code, or recovery key plus an email code. Every path finishes with account-key
+proof; the passkey and recovery paths submit their email ticket only at proof finish.
+`create_passkey_copy`, `open_with_passkey`, QR approval and
+typed approval take the account and key from `NativeClientHandle` instead of accepting caller-supplied
+values. Replacing another locally stored account uses the explicit `*_replacing_account` methods and
+the coordinator-issued replacement handle; the ordinary install methods return
+`AnotherAccountOnDevice` without consuming the accepted sign-in state.
+
+## Legacy UniFFI feature
+
+`legacy-bindings` is off by default and is the only feature that links `beebeeb-upload`. It retains the
+old comparison-app surface while that app migrates. The feature adds:
+
+- Raw-key records and free functions: `MasterKeyResult`, `RecoveryPhraseResult`, `OpaqueStartResult`,
+  `OpaqueLoginFinishResult`, `derive_master_key`, `derive_file_key`, `generate_recovery_phrase`,
+  `recover_from_phrase`, `opaque_registration_start`, `opaque_registration_finish`,
+  `opaque_login_start`, `opaque_login_finish`, `derive_x25519_private`, `derive_x25519_public`,
+  `x25519_shared_secret`, `derive_share_key`, `compute_recovery_check`, `folder_key_id`,
+  `derive_request_wrap_key`, `wrap_request_private`, `unwrap_request_private`, `seal_to_request` and
+  `open_request_upload`.
+- Generic raw-key operations: `encrypt_chunk`, `decrypt_chunk`, `decrypt_chunks_to_file`,
+  `decrypt_contiguous_to_file`, `encrypt_metadata`, `decrypt_metadata`, `encrypt_name`, `decrypt_name`,
+  `decrypt_name_with_mime`, `encrypt_blob`, `decrypt_blob`, `derive_sas_bytes`, `transfer_derive_key`,
+  `transfer_derive_sas_bytes` and `transfer_sas_to_words`.
+- Raw constructors/accessors: `MasterKeyHandle::from_keychain_bytes`,
+  `MasterKeyHandle::derive_x25519_private`, `MasterKeyHandle::export_for_keychain`,
+  `FileKeyHandle::from_key_bytes` and `ChunkDecryptorHandle::for_push_with_file_key`.
+- Token-based transfer wrappers: `upload_encrypted_file` and `download_and_decrypt_file`, including
+  their progress callbacks, result records and `UploadError`.
+
+New native code must not enable this feature. It calls the service handles and purpose-specific key
+handles instead.
+
+## WASM surface
+
+The web binding remains a browser-focused, I/O-free surface. Its exports cover file/name/version
+formats; push chunk sealers and readers; thumbnail, note and metadata sealers; sign-in and onboarding
+cryptography; device-link and key-proof state; request-row and owned-key resolution; API/retry/direct
+transfer descriptors; path/media/preview decisions; share-link formats; encrypted client metadata; and
+local search-index synchronization. The web host performs plain API transport.
+
+Existing browser byte-key entry points remain compatibility surface because browser storage is not yet
+handle-based. New device-security exports are `WasmNewDeviceLink`, `sealDeviceLink`,
+`answerSessionKeyProof` and the purpose-specific `apiDescriptor`; the approved account key stays in an
+opaque `WasmAccountKeyMaterial`. No native service uses the browser byte-key entry points, and new WASM
+exports must not return a raw key.
+
+## Verifying a release
+
+- Build native binding crates with `cargo build -p beebeeb-uniffi -p beebeeb-wasm`.
+- Regenerate Swift and Kotlin with the `uniffi-bindgen` commands in `build-ios.sh` and
+  `build-android.sh`; generated files are never hand-edited.
+- Build the web target with `wasm-pack build beebeeb-wasm --target web` and run
+  `beebeeb-wasm/js-tests/run.sh`.
+- Compare generated declarations and headers with the consumer-facing change notes. Do not infer
+  compatibility from an export count alone.
+
+## Backup rule exports (0.2.1)
 
 LD-0113 (backups from the real folder, a protected Backups root, backup rules
 in core). Base: tag `v0.2.0` (`3db0cc26f286`). Additive only: nothing in v0.2.0
 is renamed, retyped or removed.
 
-## WASM
+### WASM
 
 Counts are the `export function` / `export class` names in the generated
 `beebeeb_wasm.d.ts` (`wasm-pack build beebeeb-wasm --target web`), which is
@@ -32,7 +175,7 @@ Every unknown mutation, position or role string throws, except in
 the web UI. The web client keeps the row's `system_role` from the listing and
 passes it here.
 
-## UniFFI
+### UniFFI
 
 Counts are the `uniffi_beebeeb_uniffi_fn_*` and `uniffi_beebeeb_uniffi_checksum_*`
 symbols in the generated `beebeeb_uniffiFFI.h` (`uniffi-bindgen generate
@@ -71,7 +214,7 @@ Before this branch it was already behind v0.2.0's source (43 functions of
 v0.2.0 are missing from the committed header), so a regeneration also brings
 those in.
 
-## Rust (rustdoc JSON, private items included)
+### Rust (rustdoc JSON, private items included)
 
 `beebeeb_core` +211 items, `beebeeb_types` +33, `beebeeb_uniffi` +439 (the
 uniffi scaffolding behind the 16 exports), `beebeeb_wasm` +13; **0 removed and 0

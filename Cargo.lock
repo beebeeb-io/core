@@ -218,8 +218,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "beebeeb-api"
+version = "0.2.2"
+dependencies = [
+ "beebeeb-core",
+ "beebeeb-types",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "zeroize",
+]
+
+[[package]]
 name = "beebeeb-backup"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "beebeeb-core",
  "beebeeb-types",
@@ -229,8 +241,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "beebeeb-client"
+version = "0.2.2"
+dependencies = [
+ "base64",
+ "beebeeb-api",
+ "beebeeb-core",
+ "beebeeb-store",
+ "beebeeb-transfer",
+ "beebeeb-types",
+ "chrono",
+ "hmac",
+ "reqwest 0.12.28",
+ "security-framework",
+ "security-framework-sys",
+ "serde",
+ "serde_json",
+ "sha1",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "url",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "beebeeb-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -251,10 +289,12 @@ dependencies = [
  "rayon",
  "reed-solomon-erasure",
  "rusqlite",
+ "rustix",
  "serde",
  "serde_json",
  "sha1",
  "sha2",
+ "spake2",
  "subtle",
  "thiserror",
  "unicode-normalization",
@@ -267,8 +307,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "beebeeb-store"
+version = "0.2.2"
+dependencies = [
+ "beebeeb-core",
+ "chrono",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "beebeeb-sync"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "beebeeb-core",
  "beebeeb-types",
@@ -286,20 +339,23 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-transfer"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "beebeeb-core",
+ "beebeeb-types",
  "bytes",
  "futures-util",
  "reqwest 0.12.28",
+ "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "zeroize",
 ]
 
 [[package]]
 name = "beebeeb-types"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -307,9 +363,12 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-uniffi"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
+ "beebeeb-api",
+ "beebeeb-client",
  "beebeeb-core",
+ "beebeeb-store",
  "beebeeb-types",
  "beebeeb-upload",
  "serde_json",
@@ -337,9 +396,10 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-wasm"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64",
+ "beebeeb-api",
  "beebeeb-core",
  "beebeeb-types",
  "getrandom 0.2.17",
@@ -2317,9 +2377,11 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-rustls",
+ "hyper-tls",
  "hyper-util",
  "js-sys",
  "log",
+ "native-tls",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
@@ -2330,6 +2392,7 @@ dependencies = [
  "serde_urlencoded",
  "sync_wrapper",
  "tokio",
+ "tokio-native-tls",
  "tokio-rustls",
  "tower",
  "tower-http",
@@ -2817,6 +2880,18 @@ checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "spake2"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5482afe85a0b6ce956c945401598dbc527593c77ba51d0a87a586938b1b893a"
+dependencies = [
+ "curve25519-dalek",
+ "hkdf",
+ "rand_core 0.6.4",
+ "sha2",
 ]
 
 [[package]]

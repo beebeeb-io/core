@@ -1,4 +1,7 @@
-//! Upload protocol for Beebeeb E2E encrypted storage.
+//! Deprecated upload protocol for Beebeeb E2E encrypted storage.
+//!
+//! New clients use `beebeeb-transfer` through `beebeeb-client`. This crate is
+//! retained temporarily for compatibility and must not gain new callers.
 //!
 //! Handles the complete upload lifecycle:
 //! 1. Init session via `POST /api/v1/uploads/init`
@@ -97,6 +100,7 @@ pub struct UploadClient {
     api_url: String,
     token: String,
     http: reqwest::Client,
+    memory_budget: beebeeb_types::limits::MemoryBudget,
 }
 
 impl UploadClient {
@@ -114,7 +118,56 @@ impl UploadClient {
             api_url: api_url.trim_end_matches('/').to_string(),
             token: token.to_string(),
             http,
+            memory_budget: beebeeb_types::limits::MemoryBudget::MOBILE_APP,
         }
+    }
+
+    pub fn with_memory_budget(mut self, memory_budget: beebeeb_types::limits::MemoryBudget) -> Self {
+        self.memory_budget = memory_budget;
+        self
+    }
+
+    async fn inspect_chunk_files(&self, chunk_paths: &[String]) -> Result<(u32, u64, u64), UploadError> {
+        if chunk_paths.len() > beebeeb_types::limits::MAX_CHUNK_COUNT as usize {
+            return Err(UploadError::InvalidInput(format!(
+                "chunk path list exceeds the maximum {} entries",
+                beebeeb_types::limits::MAX_CHUNK_COUNT
+            )));
+        }
+        let total_chunks = u32::try_from(chunk_paths.len())
+            .map_err(|_| UploadError::InvalidInput("chunk path count does not fit u32".into()))?;
+        if total_chunks == 0 {
+            return Err(UploadError::InvalidInput("chunk_paths must not be empty".into()));
+        }
+
+        let mut total_ciphertext_bytes = 0u64;
+        let mut first_chunk_size = None;
+        for path in chunk_paths {
+            let meta = tokio::fs::metadata(path)
+                .await
+                .map_err(|e| UploadError::IoError(format!("failed to stat chunk file {path}: {e}")))?;
+            if meta.len() > beebeeb_types::limits::MAX_ENCRYPTED_FRAME_BYTES {
+                return Err(UploadError::InvalidInput(format!(
+                    "chunk file exceeds the storage-format maximum {} bytes",
+                    beebeeb_types::limits::MAX_ENCRYPTED_FRAME_BYTES
+                )));
+            }
+            if meta.len() > self.memory_budget.download_frame_bytes {
+                return Err(UploadError::TooLargeForContext {
+                    frame_size: meta.len(),
+                    context_limit: self.memory_budget.download_frame_bytes,
+                });
+            }
+            first_chunk_size.get_or_insert(meta.len());
+            total_ciphertext_bytes = total_ciphertext_bytes
+                .checked_add(meta.len())
+                .ok_or_else(|| UploadError::InvalidInput("total ciphertext size overflow".into()))?;
+        }
+        Ok((
+            total_chunks,
+            total_ciphertext_bytes,
+            first_chunk_size.unwrap_or_default(),
+        ))
     }
 
     /// Upload a set of already-encrypted chunk files to the server.
@@ -145,26 +198,7 @@ impl UploadClient {
         created_at: Option<&str>,
         callback: Option<&dyn UploadProgressCallback>,
     ) -> Result<UploadResult, UploadError> {
-        let total_chunks = chunk_paths.len() as u32;
-
-        if total_chunks == 0 {
-            return Err(UploadError::InvalidInput("chunk_paths must not be empty".into()));
-        }
-
-        // Compute total ciphertext size from the chunk files on disk.
-        let mut total_ciphertext_bytes: u64 = 0;
-        for path in chunk_paths {
-            let meta = tokio::fs::metadata(path)
-                .await
-                .map_err(|e| UploadError::IoError(format!("failed to stat chunk file {path}: {e}")))?;
-            total_ciphertext_bytes += meta.len();
-        }
-
-        // Determine chunk size from the first chunk file.
-        let first_chunk_size = tokio::fs::metadata(&chunk_paths[0])
-            .await
-            .map_err(|e| UploadError::IoError(format!("failed to stat first chunk file {}: {e}", &chunk_paths[0])))?
-            .len();
+        let (total_chunks, total_ciphertext_bytes, first_chunk_size) = self.inspect_chunk_files(chunk_paths).await?;
 
         // --- Step 1: Init upload session ---
         let init_resp = self
@@ -261,6 +295,7 @@ impl UploadClient {
                 .send()
                 .await
                 .map_err(|e| UploadError::Network(e.to_string()))?;
+            error::check_response_headers(&resp)?;
 
             let status = resp.status().as_u16();
 
@@ -269,18 +304,22 @@ impl UploadClient {
             }
 
             if status >= 500 {
-                let text = resp.text().await.unwrap_or_default();
-                return Err(UploadError::ServerError { status, message: text });
+                let error = error::read_server_error(resp).await;
+                return Err(UploadError::ServerError {
+                    status,
+                    message: error.message,
+                });
             }
 
             if status >= 400 {
-                let text = resp.text().await.unwrap_or_default();
-                return Err(UploadError::ClientError { status, message: text });
+                let error = error::read_server_error(resp).await;
+                return Err(UploadError::ClientError {
+                    status,
+                    message: error.message,
+                });
             }
 
-            resp.json::<InitUploadResponse>()
-                .await
-                .map_err(|e| UploadError::InvalidResponse(e.to_string()))
+            error::read_json::<InitUploadResponse>(resp).await
         })
         .await
     }
@@ -308,6 +347,7 @@ impl UploadClient {
                     .send()
                     .await
                     .map_err(|e| UploadError::Network(e.to_string()))?;
+                error::check_response_headers(&resp)?;
 
                 let status = resp.status().as_u16();
 
@@ -316,18 +356,22 @@ impl UploadClient {
                 }
 
                 if status >= 500 {
-                    let text = resp.text().await.unwrap_or_default();
-                    return Err(UploadError::ServerError { status, message: text });
+                    let error = error::read_server_error(resp).await;
+                    return Err(UploadError::ServerError {
+                        status,
+                        message: error.message,
+                    });
                 }
 
                 if status >= 400 {
-                    let text = resp.text().await.unwrap_or_default();
-                    return Err(UploadError::ClientError { status, message: text });
+                    let error = error::read_server_error(resp).await;
+                    return Err(UploadError::ClientError {
+                        status,
+                        message: error.message,
+                    });
                 }
 
-                resp.json::<ChunkUploadResponse>()
-                    .await
-                    .map_err(|e| UploadError::InvalidResponse(e.to_string()))
+                error::read_json::<ChunkUploadResponse>(resp).await
             }
         })
         .await
@@ -346,6 +390,7 @@ impl UploadClient {
                 .send()
                 .await
                 .map_err(|e| UploadError::Network(e.to_string()))?;
+            error::check_response_headers(&resp)?;
 
             let status = resp.status().as_u16();
 
@@ -354,18 +399,22 @@ impl UploadClient {
             }
 
             if status >= 500 {
-                let text = resp.text().await.unwrap_or_default();
-                return Err(UploadError::ServerError { status, message: text });
+                let error = error::read_server_error(resp).await;
+                return Err(UploadError::ServerError {
+                    status,
+                    message: error.message,
+                });
             }
 
             if status >= 400 {
-                let text = resp.text().await.unwrap_or_default();
-                return Err(UploadError::ClientError { status, message: text });
+                let error = error::read_server_error(resp).await;
+                return Err(UploadError::ClientError {
+                    status,
+                    message: error.message,
+                });
             }
 
-            resp.json::<CompleteUploadResponse>()
-                .await
-                .map_err(|e| UploadError::InvalidResponse(e.to_string()))
+            error::read_json::<CompleteUploadResponse>(resp).await
         })
         .await
     }
@@ -380,7 +429,7 @@ impl UploadClient {
             .headers()
             .get("Retry-After")
             .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<u64>().ok())
+            .and_then(beebeeb_core::retry::parse_retry_after)
             .unwrap_or(60);
 
         UploadError::RateLimited {
