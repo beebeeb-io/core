@@ -182,18 +182,36 @@ fn signature(size: u64, modified_ms: i64, key: &str) -> MoveSignature {
     (size, modified_ms, file_name(&normalize_key(key)).to_lowercase())
 }
 
+/// Whether `key` is one of `unseen` (normalised keys) or lies under one.
+fn under_unseen(key: &str, unseen: &HashSet<String>) -> bool {
+    if unseen.is_empty() {
+        return false;
+    }
+    let key = normalize_key(key);
+    unseen.contains(&key) || parents(&key).any(|parent| unseen.contains(parent))
+}
+
 /// Spec §4.2 rules 9 and 11. `live_remote` holds the ids of this category's
-/// files on the server now (not trashed). The result does not depend on the
-/// order of `entries` or `records`.
+/// files on the server now (not trashed). `unseen` holds the keys the walk did
+/// not look at or into (a skipped folder or file, `WalkResult::unseen`): a
+/// record at or under one is left untouched, never gone, never a move source
+/// and never marked removed elsewhere, because the walk cannot know whether it
+/// is still there (plan Amendment 1, items 5-6). iOS passes an empty list. The
+/// result does not depend on the order of `entries` or `records`.
 pub fn plan_pass(
     entries: &[SourceEntry],
     records: &[BackupRecord],
     live_remote: &HashSet<Uuid>,
+    unseen: &[String],
     budget: PassBudget,
 ) -> PassPlan {
     let mut files: Vec<&SourceEntry> = entries.iter().filter(|e| !e.is_dir).collect();
     files.sort_by(|a, b| a.key.cmp(&b.key));
-    let mut records: Vec<&BackupRecord> = records.iter().collect();
+    let unseen: HashSet<String> = unseen
+        .iter()
+        .map(|key| normalize_key(key).trim_end_matches('/').to_string())
+        .collect();
+    let mut records: Vec<&BackupRecord> = records.iter().filter(|r| !under_unseen(&r.key, &unseen)).collect();
     records.sort_by(|a, b| (&a.key, a.remote_id).cmp(&(&b.key, b.remote_id)));
 
     let paired = pair(&files, &records);

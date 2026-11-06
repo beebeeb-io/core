@@ -33,12 +33,13 @@ def up(key, size=10, reason="new"):
     return {"key": key, "size": size, "reason": reason}
 
 
-def plan(id_, entries, records, live, expect, budget=None):
+def plan(id_, entries, records, live, expect, budget=None, unseen=()):
     full = {"uploads": [], "moves": [], "folders": [], "mark_removed_elsewhere": [], "unchanged": 0,
             "gone_locally": 0, "deferred": 0}
     full.update(expect)
     cases.append({"id": id_, "kind": "plan", "entries": entries, "records": records,
-                  "live_remote": [uid(n) for n in live], "budget": budget or NO_LIMIT, "expect": full})
+                  "live_remote": [uid(n) for n in live], "unseen": list(unseen), "budget": budget or NO_LIMIT,
+                  "expect": full})
 
 
 plan("plan_new_file", [e("a.jpg")], [], [], {"uploads": [up("a.jpg")]})
@@ -82,6 +83,18 @@ plan("removed_elsewhere_then_changed_uploads", [e("a.jpg", m=9000)], [r("a.jpg",
 plan("removed_elsewhere_noticed_and_changed", [e("a.jpg", size=12)], [r("a.jpg", 1)], [],
      {"mark_removed_elsewhere": ["a.jpg"], "uploads": [up("a.jpg", 12, "changed")]})
 plan("restored_from_trash_before_the_pass_changes_nothing", [e("a.jpg")], [r("a.jpg", 1)], [1], {"unchanged": 1})
+# Plan Amendment 1, items 5-6: what the walk did not look into is not gone.
+plan("unreadable_folder_records_are_not_gone_or_move_sources", [e("open/a.jpg")], [r("closed/a.jpg", 1)], [1],
+     {"uploads": [up("open/a.jpg")], "folders": ["open"]}, unseen=["closed"])
+plan("notlocal_folder_records_are_not_move_sources", [e("Camera/IMG_1.jpg")], [r("OneDrive/IMG_1.jpg", 1)], [1],
+     {"uploads": [up("Camera/IMG_1.jpg")], "folders": ["Camera"]}, unseen=["OneDrive"])
+plan("unseen_records_are_not_marked_removed_elsewhere", [], [r("closed/x.jpg", 1)], [], {}, unseen=["closed"])
+plan("unseen_file_key_is_untouched", [], [r("cloud.jpg", 1)], [1], {}, unseen=["cloud.jpg"])
+plan("unseen_nested_folder_covers_its_subtree", [], [r("a/b/c/d.jpg", 1)], [1], {}, unseen=["a/b"])
+plan("unseen_prefix_is_a_path_prefix_only", [], [r("closed-2/a.jpg", 1)], [1], {"gone_locally": 1},
+     unseen=["closed"])
+plan("unseen_nfd_key_matches_nfc_record", [], [r("René/x.jpg", 1)], [1], {},
+     unseen=[unicodedata.normalize("NFD", "René")])
 
 for raw, expected in [("a\\b\\c.jpg", "a/b/c.jpg"), ("/a/b.jpg", "a/b.jpg"), ("a/b.jpg", "a/b.jpg"),
                       ("René/x.jpg", "René/x.jpg")]:
