@@ -134,6 +134,35 @@ pub enum Platform {
     Cli,
 }
 
+impl Platform {
+    /// Every platform, in declaration order.
+    pub const ALL: [Platform; 6] = [
+        Platform::Windows,
+        Platform::Macos,
+        Platform::Linux,
+        Platform::Ios,
+        Platform::Android,
+        Platform::Cli,
+    ];
+
+    /// The wire string (the serde form): `"windows"`, `"macos"`, ...
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Platform::Windows => "windows",
+            Platform::Macos => "macos",
+            Platform::Linux => "linux",
+            Platform::Ios => "ios",
+            Platform::Android => "android",
+            Platform::Cli => "cli",
+        }
+    }
+
+    /// Parse the exact wire string; anything else is `None`.
+    pub fn parse(s: &str) -> Option<Platform> {
+        Platform::ALL.into_iter().find(|p| p.as_str() == s)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +189,11 @@ mod tests {
     #[test]
     fn platform_serde_is_lowercase() {
         assert_eq!(serde_json::to_string(&Platform::Macos).unwrap(), "\"macos\"");
+        // as_str / parse are the serde form exactly.
+        for p in Platform::ALL {
+            assert_eq!(serde_json::to_string(&p).unwrap(), format!("\"{}\"", p.as_str()));
+            assert_eq!(Platform::parse(p.as_str()), Some(p));
+        }
+        assert_eq!(Platform::parse("Windows"), None);
     }
 }

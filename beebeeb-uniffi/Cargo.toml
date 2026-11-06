@@ -31,6 +31,9 @@ beebeeb-types = { path = "../beebeeb-types" }
 beebeeb-upload = { path = "../beebeeb-upload" }
 uniffi = { version = "0.31.1" }
 uuid = { version = "1" }
+# The device manifest's unknown fields cross the FFI as one JSON object string
+# (backup.rs, LD-0113).
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["rt"] }
 zeroize = { version = "1", features = ["derive"] }
