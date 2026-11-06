@@ -1,0 +1,16 @@
+[package]
+name = "beebeeb-backup"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "The backup filesystem pass shared by Beebeeb's desktop and CLI: walk a folder, plan with core's rules, hand uploads to the client (LD-0113)"
+authors.workspace = true
+
+[dependencies]
+beebeeb-core = { path = "../beebeeb-core" }
+beebeeb-types = { path = "../beebeeb-types" }
+tokio = { workspace = true }
+unicode-normalization = "0.1"
+uuid = { version = "1", features = ["v4"] }

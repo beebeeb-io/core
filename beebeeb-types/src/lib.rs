@@ -22,10 +22,12 @@
 //!
 //! # Modules
 //!
+//! - [`backup`] — the backup vocabulary: system role, categories, platforms
 //! - [`chunk`] — storage format versions and dynamic chunk planning
 //! - [`crypto`] — cipher suites, KDF parameters, and cryptographic constants
 //! - [`file`] — encrypted blob and chunk metadata types
 
+pub mod backup;
 pub mod chunk;
 pub mod crypto;
 pub mod file;

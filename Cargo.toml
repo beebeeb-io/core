@@ -6,6 +6,7 @@ members = [
     "beebeeb-sync",
     "beebeeb-upload",
     "beebeeb-transfer",
+    "beebeeb-backup",
     "beebeeb-wasm",
     "beebeeb-uniffi",
 ]

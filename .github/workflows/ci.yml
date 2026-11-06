@@ -62,6 +62,15 @@ jobs:
         if: always()
         run: bash test-vectors/tools/check-direct-range-vectors-generated.sh --self-test
 
+      # The backup vectors (LD-0113): four files, four generators, the same rule and gate.
+      - name: backup vectors match their generators
+        if: always()
+        run: bash test-vectors/tools/check-backup-vectors-generated.sh
+
+      - name: backup vector check can go red
+        if: always()
+        run: bash test-vectors/tools/check-backup-vectors-generated.sh --self-test
+
   test:
     name: Tests
     runs-on: ubuntu-latest

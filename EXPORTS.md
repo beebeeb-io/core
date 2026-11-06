@@ -1,93 +1,79 @@
-# beebeeb-wasm / uniffi exports — branch `feat/2326-request-row-shipped-seal`
+# beebeeb-wasm / uniffi exports — branch `feat/LD-0113-backup-rules`
 
-Task 2275 §15 + 2326 delta2 (request-row shipped seal). Base: core #65 head
-`2f5cd8a` (branch point; the generated WASM package at `5894fa4`, its parent,
-has the same 145 export names).
+LD-0113 (backups from the real folder, a protected Backups root, backup rules
+in core). Base: tag `v0.2.0` (`3db0cc26f286`). Additive only: nothing in v0.2.0
+is renamed, retyped or removed.
+
+## WASM
 
 Counts are the `export function` / `export class` names in the generated
-`beebeeb_wasm.d.ts`, which is what a bundler sees.
+`beebeeb_wasm.d.ts` (`wasm-pack build beebeeb-wasm --target web`), which is
+what a bundler sees: `grep -c "^export function\|^export class" beebeeb_wasm.d.ts`,
+and `comm` over the sorted names for the added and removed lists.
 
-- base: 145 names
-- head: 149 names
+- base (`v0.2.0`): 149 names
+- head: 157 names
 - **removed: 0**
-- **added: 4**
+- **added: 8** (the eight `backup*` names below)
 
-Added names:
+| Name | What |
+| --- | --- |
+| `backupCheckAppMutation(position, mutation)` | The app rule, the web's own (spec Amendment 8): core's words when `mutation` (`trash`, `delete`, `rename`, `move`, `create`, `write`) of a row at `position` (`root`, `device_folder`, `manifest`, `category_folder`, `inside`, `outside`; for `create`, the destination folder) is refused, else `undefined`. The root and a device's manifest refuse everything; under the root only trash and delete are allowed. |
+| `backupCheckDriveMutation(position, ownActiveSource, mutation)` | The drive rule (Explorer, Finder, the Files app), same words: the root's words, then the own-active-backup words, then "Backups are managed in the Beebeeb app…" or "Backups are read-only…" for anything at or under the root, else `undefined`. |
+| `backupCheckRootMutation(role, mutation)` | The server's root rule: the root's words for a trash / delete / rename / move of the `backups_root` row, else `undefined`. |
+| `backupPositionAtDepth(depth?, name)` | A row's position from its depth below the flagged root (`undefined`: not under it) and its name (`manifest` for a device folder's `.device.json`). |
+| `backupIsHiddenItem(depth?, name)` | `true` for a row no listing shows (a device folder's `.device.json`). |
+| `backupRootBadge()` | The badge shown on the Backups root, `"Read-only"`. |
+| `backupProtectionMany(roles: string[])` | One byte per listing row, 1 = the protected root (one crossing per listing). A role this build does not know is protected (1), never a throw. |
+| `backupParseManifest(json)` | A decrypted `.device.json` as a plain object; unknown fields kept. |
 
-| Name | Since | What |
-| --- | --- | --- |
-| `mintGuestItemId` | 2326 §15 | Mint a guest (F) item id with no master key |
-| `sealRequestRename` | 2326 §15 | Seal a request-row rename under the §15 string-derived key |
-| `previewableBatchFor` | core #65 merge | Per-platform preview table (`web` / `desktop` / `mobile`) |
-| `WasmRequestContentReader` | 2326 delta2 P2-2 | Request-row content reader: `fileId`, `chunkFormat`, `decryptor()`, `openFrame(...)` |
+Every unknown mutation, position or role string throws, except in
+`backupProtectionMany`. Dialog copy (the device-folder confirmation) stays in
+the web UI. The web client keeps the row's `system_role` from the listing and
+passes it here.
 
-Nothing was renamed or removed. The request-row content handle changed shape;
-`WasmChunkDecryptor`, `ChunkDecryptorHandle` and `FileKeyHandle` are untouched.
+## UniFFI
 
-## Changed result shapes
+Counts are the `uniffi_beebeeb_uniffi_fn_*` and `uniffi_beebeeb_uniffi_checksum_*`
+symbols in the generated `beebeeb_uniffiFFI.h` (`uniffi-bindgen generate
+--language swift` over the built library), base against head:
+`grep -c -E "uniffi_beebeeb_uniffi_(fn|checksum)_" beebeeb_uniffiFFI.h`, and `comm`
+over the sorted symbols.
 
-The request-row results no longer carry raw keys. Each row below is a change,
-not a removal; the exported function/class names are unchanged.
+- base (`v0.2.0`): 576 symbols
+- head: 608 symbols
+- **removed: 0**
+- **added: 32** (16 functions, each with its checksum)
 
-| Surface | Before | Replacement |
-| --- | --- | --- |
-| WASM `resolveRequestRow` result | `content: WasmChunkDecryptor`; before delta2 also `contentKey` / `nameKey` | `content: WasmRequestContentReader` (`fileId`, `chunkFormat`, `decryptor()`, `openFrame(versionId, index, isLast, format, frame)`); no key fields |
-| WASM `resolveRequestRow.renameTarget` | `{origin, pin, key}` | `{origin, pin}`; seal with `sealRequestRename(master, itemId, pin, filename, mimeType)` |
-| uniffi `RequestRowKeys` | `content: ChunkDecryptorHandle`; before delta2 also `content_key`, `name_key` | `content: RequestContentReader`; no key fields |
-| uniffi `resolve_request_row` | returned `RequestRowKeys.content: ChunkDecryptorHandle` | returns `RequestRowKeys.content: RequestContentReader` (same name, new shape) |
-| uniffi `resolve_request_row_detailed` | returned `ResolvedRequestRow.content: ChunkDecryptorHandle` | returns `ResolvedRequestRow.content: RequestContentReader` (same name, new shape) |
-| uniffi `ResolvedRequestRow` | `content: ChunkDecryptorHandle` | `content: RequestContentReader` |
-| uniffi `RequestRenameTarget` | `{origin, pin, key: FileKeyHandle}` | `{origin, pin}`; seal with `MasterKeyHandle::seal_request_rename` |
+| Function | What |
+| --- | --- |
+| `backup_check_app_mutation(position, mutation)` | `throws -> String?`: the app rule (the iOS app), the refusal words or none; `position` from `backup_position_at_depth`, for `create` the destination folder; the root and a device's manifest refuse everything |
+| `backup_check_drive_mutation(position, own_active_source, mutation)` | `throws -> String?`: the drive rule (Files app), same precedence as core |
+| `backup_check_root_mutation(role, mutation)` | `throws -> String?`: the server's root rule |
+| `backup_position_at_depth(depth, name)` | `"root"`, `"device_folder"`, `"manifest"` (a device folder's `.device.json`), `"category_folder"`, `"inside"` or `"outside"` (`depth` none) |
+| `backup_is_hidden_item(depth, name)` | `true` for a row no listing shows (the manifest) |
+| `backup_root_badge()` / `backup_root_name()` | `"Read-only"`, the badge shown on the Backups root; `"Backups"`, the name of a root made on `BackupRootPlan.Create` |
+| `backup_origin_header()` | `BackupHeader { name: "X-Beebeeb-Origin", value: "backup" }`, sent on every request of a backup pass |
+| `backup_skip_reason(name, is_dir, is_link, not_local)` | Why an entry is never backed up, or none |
+| `backup_resolve_root(candidates)` | `BackupRootPlan`: `Use`, `Claim { id, merge_from }`, `Create` |
+| `backup_plan_merge(survivor, duplicates, clash_label, hhmm)` | `[BackupMergeStep]` from flat listing rows; pass `hhmm` with a dot |
+| `backup_device_folder_name(raw, my_id, taken)` | The device folder name, with the device-id suffix on a collision; ids are strings (a UUID or an iOS legacy id) |
+| `backup_find_device_folder(me, candidates)` | `BackupDeviceFolderChoice`: `Existing`, `AdoptLegacy`, `Create { name }`; a manifest that does not parse is "unreadable" (not mine, not adoptable), never an error; a legacy non-UUID id matches `Existing` |
+| `backup_parse_manifest(json)` / `backup_serialize_manifest(manifest)` | `.device.json`; unknown fields cross as `other_json` (the manifest's, and each `BackupFolderState`'s own); only a document that is not a JSON object fails to parse |
+| `backup_plan_pass(entries, records, live_remote, live_remote_complete, unseen, held, max_uploads, max_bytes)` | `BackupPassPlan` with `held` and `deferred_unknown`; each upload carries `record_key` and, for `changed`, `remote_id`; `mark_removed_elsewhere` is `[BackupRecordRef]` (key and remote id): mark a record only while it still names that remote id; `max_uploads` 0 counts as 1 (iOS passes an empty `unseen` and asset ids with `/` replaced by `\|`) |
 
-`RequestContentReader` (uniffi) / `WasmRequestContentReader` (WASM) has no key
-getter; the key is zeroized when the reader drops, it is bound to the row's
-file id and chunk-format pin, `decryptor()` returns a fresh sequential
-decryptor per call, and `open_frame` / `openFrame` reads one frame by index.
+Every string the binding parses (mutation, position, role, platform, record
+state, id) that it does not know is `CryptoError.InvalidInput`, never a pass.
 
-## UniFFI additions and generated-binding shape (2326, request content)
+The committed `beebeeb-uniffi/bindings/` copy is regenerated by `build-ios.sh`
+/ `build-android.sh` on the platform rung; this branch does not commit it.
+Before this branch it was already behind v0.2.0's source (43 functions of
+v0.2.0 are missing from the committed header), so a regeneration also brings
+those in.
 
-The `cargo check` surface is not the whole story for UniFFI: the committed
-Kotlin/Swift bindings are generated from these annotations. This branch adds
-three items to the UniFFI surface (all additions; nothing removed):
+## Rust (rustdoc JSON, private items included)
 
-| uniffi item | Kind | What |
-| --- | --- | --- |
-| `RequestContentReader` | object | Request-row content reader: `file_id`, `chunk_format`, `decryptor()`, `open_frame(...)`; no key getter |
-| `MasterKeyHandle::seal_request_rename` | method | Seal a request-row rename under the §15 string-derived key |
-| `mint_guest_item_id` | function | Mint a guest (F) item id with no master key |
-
-The generated bindings must be regenerated for these three (`build-ios.sh` /
-`build-android.sh`); the in-tree Rust tests do not compile the Swift/Kotlin
-glue.
-
-One uniffi caller change (not an export change): the request-row readers used
-to be consumed as `content.push_frame(...)`; they are now
-`content.decryptor().push_frame(...)`, because every call returns a fresh
-sequential cursor. Callers that kept the old `ChunkDecryptorHandle`-shaped
-field still compile against the record but must follow the new call.
-
-The WASM counts above are unchanged by these docs: 145 base, 149 head,
-0 removed, 4 added.
-
-## Reconciliation of the changed-shape count
-
-The delta report said **4 changed** and the reviewer said **3**. Both are
-right about different sets:
-
-- 4 changed exported shapes = the WASM `resolveRequestRow` result plus the
-  three uniffi records (`RequestRowKeys`, `ResolvedRequestRow`,
-  `RequestRenameTarget`).
-- the reviewer's 3 = the uniffi records only (the same three).
-- the table above has 7 rows because it also lists `resolve_request_row`,
-  `resolve_request_row_detailed` and `resolveRequestRow.renameTarget`: those
-  are the same record changes seen at their entry points, plus the removed
-  `renameTarget.key` field. They are not additional exported names.
-
-The earlier delta report's "4 changed" counted the request-row records; no
-exported item was removed in either count.
-
-## Artifact
-
-The generated WASM package for the branch head is under
-`bb-gate-logs/fullspeed/core-wasm-pkg/<head-sha>/` (web target, release); its
-`EXPORTS.md` repeats these counts for that head.
+`beebeeb_core` +211 items, `beebeeb_types` +33, `beebeeb_uniffi` +439 (the
+uniffi scaffolding behind the 16 exports), `beebeeb_wasm` +13; **0 removed and 0
+changed** in all four (rustdoc JSON of `v0.2.0` and of this branch, pinned
+1.96.0, item paths compared). New crate: `beebeeb-backup`.
