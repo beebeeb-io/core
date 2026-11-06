@@ -15,7 +15,9 @@
 //!   only for a demanded chunk, at most once per demand (a paused player cannot keep a session
 //!   re-granting);
 //! - it holds at most [`storage_in_flight`]`(share, chunk_size)` chunks (C3) and runs at most
-//!   [`API_IN_FLIGHT`] pinned API fetches.
+//!   [`API_IN_FLIGHT`] pinned API fetches; chunk 0 starts before any other chunk and keeps its slot
+//!   and its booking until it is released, so a refetch of it never waits for room (see
+//!   [`RangePlanner::poll_with`]).
 //!
 //! It composes the whole-file planner's pure checks, never copies them: every window answer goes
 //! through the same `grant_check::check_window` (transport, file, pin, geometry, grants, method,
@@ -27,7 +29,8 @@
 //! `window.rs`'s rules stay binding for `DownloadPlanner`. For a range session they read:
 //! chunks are released in any order, each only once `RangeOpener` has authenticated it at the
 //! requested index; the reorder bound is the byte share (C3), not a consumed prefix; and nothing
-//! of the session is "whole" before `RangeSession::finish()` (core `docs/agent-notes.md`, range
+//! of the session is "whole" before its only "whole" result, `range_session` →
+//! `RangeOutcome::Whole` (the contract's `RangeSession::finish()`; core `docs/agent-notes.md`, range
 //! reads I1–I9).
 //!
 //! The driver loop, as in `window.rs`, with `released(index)` in place of `consumed(index)`:
@@ -183,6 +186,8 @@ enum Slot {
     Fetching {
         attempts: Attempts,
         via_api: bool,
+        /// Carried from the grant, so a failed fetch of an idle re-grant keeps its demand.
+        regranted_for: Option<u64>,
     },
     /// Arrived whole; waits for the caller to open and release it.
     Fetched {
@@ -266,6 +271,11 @@ pub struct RangePlanner {
     api_only: bool,
     storage_ok: bool,
     storage_given_up: bool,
+    /// Chunk 0 has started, and keeps its slot and the caller's booking until it is released
+    /// (or the caller hands every booking back, [`RangePlanner::bookings_returned`]).
+    zero_booked: bool,
+    /// The last poll had a fetch to start but no budget room (`may_fetch = false`).
+    waits_for_room: bool,
     verdict: Option<Verdict>,
     rng: u64,
 }
@@ -302,6 +312,8 @@ impl RangePlanner {
             api_only: false,
             storage_ok: false,
             storage_given_up: false,
+            zero_booked: false,
+            waits_for_room: false,
             verdict: None,
             rng,
         }
@@ -328,6 +340,23 @@ impl RangePlanner {
     /// already held is never cancelled.
     pub fn set_share(&mut self, share_bytes: u64) {
         self.cfg.share_bytes = share_bytes;
+    }
+
+    /// The caller gave every booking back (its lease, with nothing in flight or waiting to be
+    /// released): chunk 0's next start needs room again, like its first (see `poll_with`).
+    pub fn bookings_returned(&mut self) {
+        self.zero_booked = false;
+    }
+
+    /// The last poll had a fetch to start and only budget room was missing (`may_fetch = false`):
+    /// the caller waits for room, not for a demand, so it stays busy.
+    pub fn waits_for_room(&self) -> bool {
+        self.waits_for_room
+    }
+
+    /// The verdict the session ends with, once there is one (`poll` returns it as `Stop`).
+    pub fn verdict(&self) -> Option<&Verdict> {
+        self.verdict.as_ref()
     }
 
     pub fn geometry(&self) -> Option<Geometry> {
@@ -418,11 +447,13 @@ impl RangePlanner {
     /// Demand `id` has every byte it asked for. Read-ahead goes on.
     pub fn demand_met(&mut self, id: u64) {
         self.demands.retain(|d| d.id != id);
+        self.forget_regrants(|d| d == id);
     }
 
     /// Demand `id` was cancelled (`CANCEL_FETCH_DATA`). When no demand is left, read-ahead stops.
     pub fn cancel(&mut self, id: u64) {
         self.demands.retain(|d| d.id != id);
+        self.forget_regrants(|d| d == id);
         if self.demands.is_empty() {
             self.read_ahead = false;
         }
@@ -432,7 +463,24 @@ impl RangePlanner {
     /// outstanding still report as usual.
     pub fn requester_gone(&mut self) {
         self.demands.clear();
+        self.forget_regrants(|_| true);
         self.read_ahead = false;
+    }
+
+    /// A closed demand's re-grant marks go with it: a later demand that reuses its id is a new
+    /// demand, with its own one re-grant, and is never left waiting on a chunk nobody grants.
+    fn forget_regrants(&mut self, closed: impl Fn(u64) -> bool) {
+        for slot in self.slots.values_mut() {
+            if let Slot::NeedsGrant { regranted_for, .. }
+            | Slot::Granted { regranted_for, .. }
+            | Slot::Fetching { regranted_for, .. }
+            | Slot::Idle { regranted_for, .. } = slot
+            {
+                if regranted_for.is_some_and(&closed) {
+                    *regranted_for = None;
+                }
+            }
+        }
     }
 
     /// The chunks demand `id` needs (inclusive), once the geometry is known.
@@ -448,8 +496,17 @@ impl RangePlanner {
     }
 
     /// What to do now. `may_fetch = false` (the process budget has no room) starts no fetch but
-    /// still asks for windows. Each call that returns work records it as started.
+    /// still asks for windows, with one exception: chunk 0's refetch. Each call that returns work
+    /// records it as started.
+    ///
+    /// Chunk 0 keeps its slot and its booking from its first start until it is released: the
+    /// chunks after it cannot be released before it (I3), so its refetch must never wait for the
+    /// room they hold, even after the share shrank ([`RangePlanner::set_share`]). The caller keeps
+    /// chunk 0's booking until [`RangePlanner::released`]`(0)`, or gives every booking back with
+    /// its lease and says so ([`RangePlanner::bookings_returned`]). No later chunk starts before
+    /// chunk 0 has, so whatever waits for chunk 0, chunk 0 has room.
     pub fn poll_with(&mut self, now_ms: i64, may_fetch: bool) -> RangePoll {
+        self.waits_for_room = false;
         if let Some(verdict) = &self.verdict {
             return RangePoll::Stop(verdict.clone());
         }
@@ -486,10 +543,8 @@ impl RangePlanner {
                 return RangePoll::RequestWindow(request);
             }
         }
-        if may_fetch {
-            if let Some(work) = self.next_fetch(geometry) {
-                return work;
-            }
+        if let Some(work) = self.next_fetch(geometry, may_fetch) {
+            return work;
         }
         if !wanted && self.in_flight() == 0 && self.window.is_none() {
             return RangePoll::Idle;
@@ -623,8 +678,11 @@ impl RangePlanner {
         (count > 0).then(|| self.request(start, count, renewal))
     }
 
-    fn next_fetch(&mut self, geometry: Geometry) -> Option<RangePoll> {
-        if self.held() >= self.slots() as usize {
+    fn next_fetch(&mut self, geometry: Geometry, may_fetch: bool) -> Option<RangePoll> {
+        // Chunk 0's refetch runs on the slot and the booking it kept (see `poll_with`).
+        let zero_kept = self.zero_booked && !self.released.contains(0);
+        let slot_room = self.held() < self.slots() as usize;
+        if !slot_room && !zero_kept {
             return None;
         }
         let candidates = self.candidates(geometry, self.window_size() as usize);
@@ -649,14 +707,24 @@ impl RangePlanner {
             .filter(|(i, s)| **i != 0 && matches!(s, Slot::Fetching { .. } | Slot::Fetched { .. }))
             .count();
         let room_after_zero = !zero_open || held_after_zero + 2 <= self.slots() as usize;
-        let index = candidates.iter().map(|&(i, _)| i).find(|i| {
-            (*i == 0 || room_after_zero)
-                && match self.slots.get(i) {
-                    Some(Slot::Granted { .. }) => true,
-                    Some(Slot::ApiPending { .. }) => api_room,
-                    _ => false,
-                }
-        })?;
+        // No later chunk starts before chunk 0 has: whatever then waits for chunk 0 has a chunk 0
+        // with a slot and a booking of its own.
+        let later_ok = room_after_zero && (self.zero_booked || !zero_open);
+        let pick = |room: bool| {
+            candidates.iter().map(|&(i, _)| i).find(|i| {
+                (if *i == 0 { room || zero_kept } else { room && later_ok })
+                    && match self.slots.get(i) {
+                        Some(Slot::Granted { .. }) => true,
+                        Some(Slot::ApiPending { .. }) => api_room,
+                        _ => false,
+                    }
+            })
+        };
+        let picked = pick(may_fetch && slot_room);
+        // With no budget room, would a fetch have started? Then the caller waits for room.
+        let wanted = picked.is_none() && !may_fetch && slot_room && pick(true).is_some();
+        self.waits_for_room = wanted;
+        let index = picked?;
         let slot = self.slots.get_mut(&index)?;
         match std::mem::replace(
             slot,
@@ -664,18 +732,27 @@ impl RangePlanner {
                 attempts: Attempts::default(),
             },
         ) {
-            Slot::Granted { attempts, grant, .. } => {
+            Slot::Granted {
+                attempts,
+                grant,
+                regranted_for,
+                ..
+            } => {
                 *slot = Slot::Fetching {
                     attempts,
                     via_api: false,
+                    regranted_for,
                 };
+                self.zero_booked |= index == 0;
                 Some(RangePoll::Fetch { index, grant })
             }
             Slot::ApiPending { attempts } => {
                 *slot = Slot::Fetching {
                     attempts,
                     via_api: true,
+                    regranted_for: None,
                 };
+                self.zero_booked |= index == 0;
                 Some(RangePoll::FetchViaApi {
                     index,
                     object_version_id: self.pinned.clone(),
@@ -902,7 +979,7 @@ impl RangePlanner {
 
     /// Chunk `index` arrived whole (status and length checked). It waits to be opened.
     pub fn fetch_ok(&mut self, index: u32) -> Result<(), RangeError> {
-        let Some(Slot::Fetching { attempts, via_api }) = self.slots.get(&index) else {
+        let Some(Slot::Fetching { attempts, via_api, .. }) = self.slots.get(&index) else {
             return Err(RangeError::NotInFlight(index));
         };
         let (attempts, via_api) = (*attempts, *via_api);
@@ -916,10 +993,15 @@ impl RangePlanner {
     /// The storage fetch of chunk `index` failed: renewed with backoff, then the pinned API route
     /// (the renewal budget and the storage breaker of `DownloadPlanner::fetch_failed`).
     pub fn fetch_failed(&mut self, index: u32, now_ms: i64) -> Result<(), RangeError> {
-        let Some(Slot::Fetching { attempts, via_api }) = self.slots.get(&index) else {
+        let Some(Slot::Fetching {
+            attempts,
+            via_api,
+            regranted_for,
+        }) = self.slots.get(&index)
+        else {
             return Err(RangeError::NotInFlight(index));
         };
-        let (mut attempts, via_api) = (*attempts, *via_api);
+        let (mut attempts, via_api, regranted_for) = (*attempts, *via_api, *regranted_for);
         if via_api {
             return Err(RangeError::ApiRouteFailure(index));
         }
@@ -941,7 +1023,8 @@ impl RangePlanner {
                 Slot::NeedsGrant {
                     attempts,
                     not_before_ms: now_ms.saturating_add(delay),
-                    regranted_for: None,
+                    // An idle re-grant that failed is still that demand's one re-grant.
+                    regranted_for,
                 },
             );
         }

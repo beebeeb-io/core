@@ -1,6 +1,7 @@
-//! `RangeSession` (LD-0105, plan C2): one download per (file id, recorded version) that serves
-//! reads at any offset while it runs, releasing each chunk as soon as core's `RangeOpener` has
-//! authenticated it at the requested index (core `docs/agent-notes.md`, range reads I1–I9).
+//! `RangeSession` (the contract's name for [`range_session`]; LD-0105, plan C2): one download per
+//! (file id, recorded version) that serves reads at any offset while it runs, releasing each chunk
+//! as soon as core's `RangeOpener` has authenticated it at the requested index (core
+//! `docs/agent-notes.md`, range reads I1–I9).
 //!
 //! The rules are core's: `direct_transfer::range::RangePlanner` decides what to ask and fetch,
 //! `chunk_stream::RangeOpener` opens frames, `PieceCutter` cuts 4 KiB pieces, `RangeBudget` books
@@ -349,6 +350,19 @@ impl RangeLessor {
     }
 }
 
+/// Test seam: another session's lease and bytes, booked by the book's own rules.
+#[cfg(test)]
+impl RangeLessor {
+    pub(crate) fn lease_and_hold(&self, session: u64, len: u64) -> bool {
+        let mut s = self.lock();
+        s.book.lease(session) && (len == 0 || s.book.try_hold(session, len))
+    }
+
+    pub(crate) fn release_lease(&self, session: u64) {
+        self.give_back(session, 0, true);
+    }
+}
+
 enum Event {
     Window(crate::io::ApiReply),
     Storage {
@@ -446,6 +460,26 @@ fn whole(
         Ok(RangeOutcome::Whole(st.stats))
     } else {
         st.fail(RangeSessionError::Incomplete)
+    }
+}
+
+/// The planner's verdict as the session's end. `index` is the chunk a `Corrupt` verdict is for.
+fn stop(st: &mut State<'_>, verdict: Verdict, index: u32) -> Result<RangeOutcome, RangeSessionError> {
+    match verdict {
+        Verdict::ApiForFile => st.use_api(UseApiReason::ApiForFile),
+        Verdict::Restart => st.fail(RangeSessionError::FileChanged),
+        Verdict::Terminal(t) if t.status == 401 => st.fail(RangeSessionError::Unauthorized),
+        Verdict::Terminal(t) if t.status == 403 => st.fail(RangeSessionError::Forbidden),
+        Verdict::Terminal(_) => st.use_api(UseApiReason::ApiForFile),
+        Verdict::Corrupt => st.fail(RangeSessionError::Unauthentic { index }),
+    }
+}
+
+/// A fetch of `index` ended without a release: give its booking back, except chunk 0's, which it
+/// keeps until chunk 0 is released (its refetch runs on it; `RangePlanner::poll_with`).
+fn unbook(lessor: &RangeLessor, session: u64, booked: &mut BTreeMap<u32, u64>, index: u32) {
+    if index != 0 {
+        lessor.give_back(session, booked.remove(&index).unwrap_or(0), false);
     }
 }
 
@@ -579,15 +613,21 @@ pub async fn range_session<I: DirectIo>(
         let busy = planner.demands() > 0 || planner.reading_ahead() || !tasks.is_empty() || !ready.is_empty();
         if busy && !guard.leased {
             guard.leased = lessor.lease(session, &mailbox);
-        } else if !busy && guard.leased && booked.is_empty() {
+        } else if !busy && guard.leased {
+            // Nothing is out or waiting, so at most chunk 0's kept booking goes with the lease.
             lessor.give_back(session, 0, true);
             guard.leased = false;
+            booked.clear();
+            planner.bookings_returned();
         }
         if guard.leased {
             planner.set_share(lessor.share());
         }
 
         let mut nap: Option<Duration> = None;
+        // The planner had a fetch to start and only budget room was missing: the lessor wakes this
+        // session when some frees.
+        let mut short_of_room = false;
         if guard.leased {
             loop {
                 // Book one chunk's worth before the planner may start a fetch; settle it after.
@@ -596,13 +636,23 @@ pub async fn range_session<I: DirectIo>(
                     .map_or(0, |g| g.chunk_size + dt::wire::CHUNK_OVERHEAD);
                 let room = reserve > 0 && lessor.try_hold(session, reserve, &mailbox);
                 let poll = planner.poll_with(io.wall_ms(), room);
+                short_of_room = planner.waits_for_room();
                 let fetched = match &poll {
                     RangePoll::Fetch { index, .. } | RangePoll::FetchViaApi { index, .. } => Some(*index),
                     _ => None,
                 };
-                if room {
-                    match fetched {
-                        Some(index) => {
+                match fetched {
+                    // Chunk 0's refetch runs on the booking it kept since its first fetch (the
+                    // planner starts it even with no room, so the chunks waiting for it never
+                    // leave it without room).
+                    Some(index) if booked.contains_key(&index) => {
+                        if room {
+                            lessor.give_back(session, reserve, false);
+                        }
+                    }
+                    Some(index) => {
+                        debug_assert!(room, "chunk {index} started with no booking");
+                        if room {
                             let len = planner
                                 .geometry()
                                 .and_then(|g| g.chunk_length(index))
@@ -610,8 +660,9 @@ pub async fn range_session<I: DirectIo>(
                             lessor.give_back(session, reserve - len.min(reserve), false);
                             booked.insert(index, len.min(reserve));
                         }
-                        None => lessor.give_back(session, reserve, false),
                     }
+                    None if room => lessor.give_back(session, reserve, false),
+                    None => {}
                 }
                 match poll {
                     RangePoll::RequestWindow(request) => {
@@ -668,28 +719,26 @@ pub async fn range_session<I: DirectIo>(
                     }
                     RangePoll::Idle => break,
                     RangePoll::Done => return whole(&mut st, opener.as_ref(), &cutter, req.file_size),
-                    RangePoll::Stop(verdict) => {
-                        return match verdict {
-                            Verdict::ApiForFile => st.use_api(UseApiReason::ApiForFile),
-                            Verdict::Restart => st.fail(RangeSessionError::FileChanged),
-                            Verdict::Terminal(t) if t.status == 401 => st.fail(RangeSessionError::Unauthorized),
-                            Verdict::Terminal(t) if t.status == 403 => st.fail(RangeSessionError::Forbidden),
-                            Verdict::Terminal(_) => st.use_api(UseApiReason::ApiForFile),
-                            Verdict::Corrupt => st.fail(RangeSessionError::Unauthentic {
-                                index: last_unauthentic,
-                            }),
-                        };
-                    }
+                    RangePoll::Stop(verdict) => return stop(&mut st, verdict, last_unauthentic),
                 }
             }
         }
 
         // A paused session (no demand, nothing out, nothing scheduled: read-ahead stalled at aged-out
-        // grants or on budget) gives its lease back, so it never blocks a fifth session. A new
-        // demand takes one again.
-        if guard.leased && planner.demands() == 0 && tasks.is_empty() && ready.is_empty() && nap.is_none() {
+        // grants) gives its lease back, so it never blocks a fifth session. A new demand takes one
+        // again. Short of room it keeps the lease and stays on the lessor's wait list: it wakes when
+        // budget frees up, and read-ahead goes on to the whole file.
+        if guard.leased
+            && planner.demands() == 0
+            && tasks.is_empty()
+            && ready.is_empty()
+            && nap.is_none()
+            && !short_of_room
+        {
             lessor.give_back(session, 0, true);
             guard.leased = false;
+            booked.clear();
+            planner.bookings_returned();
         }
 
         // Wait for a reply, a command, a lessor kick or the planner's own deadline.
@@ -757,7 +806,7 @@ pub async fn range_session<I: DirectIo>(
                         ready.insert(index, body);
                     }
                     _ => {
-                        lessor.give_back(session, booked.remove(&index).unwrap_or(0), false);
+                        unbook(lessor, session, &mut booked, index);
                         if planner.fetch_failed(index, io.wall_ms()).is_err() {
                             return st.use_api(UseApiReason::ApiForFile);
                         }
@@ -777,7 +826,7 @@ pub async fn range_session<I: DirectIo>(
                 Pinned::Terminal(403) => return st.fail(RangeSessionError::Forbidden),
                 Pinned::Restart => return st.fail(RangeSessionError::FileChanged),
                 _ => {
-                    lessor.give_back(session, booked.remove(&index).unwrap_or(0), false);
+                    unbook(lessor, session, &mut booked, index);
                     if planner.api_fetch_failed(index).is_err() {
                         return st.use_api(UseApiReason::ApiForFile);
                     }
@@ -796,21 +845,25 @@ pub async fn range_session<I: DirectIo>(
         }
         let Some(o) = opener.as_mut() else { continue };
 
-        // Open and release what arrived: frame 0 first (I3), then any order.
-        let order: Vec<u32> = ready
-            .keys()
-            .copied()
-            .filter(|&i| i == 0 || o.format().is_some())
-            .collect();
+        // Open and release what arrived: frame 0 first (I3; the keys are in order), then, in the
+        // same pass, every frame that waited for it.
+        let order: Vec<u32> = ready.keys().copied().collect();
         for index in order {
+            if index != 0 && o.format().is_none() {
+                continue;
+            }
             let Some(frame) = ready.remove(&index) else { continue };
             let plain = match o.open(index, &frame) {
                 Ok(plain) => plain,
                 Err(_) => {
                     last_unauthentic = index;
-                    lessor.give_back(session, booked.remove(&index).unwrap_or(0), false);
+                    unbook(lessor, session, &mut booked, index);
                     if planner.chunk_unauthentic(index).is_err() {
                         return st.use_api(UseApiReason::ApiForFile);
+                    }
+                    // On a verdict (the second failure: Corrupt) nothing more is released (I5).
+                    if let Some(verdict) = planner.verdict() {
+                        return stop(&mut st, verdict.clone(), index);
                     }
                     continue;
                 }

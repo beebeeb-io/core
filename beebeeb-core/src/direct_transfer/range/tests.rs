@@ -472,3 +472,173 @@ fn a_regrant_window_that_fails_is_asked_again() {
         "the same re-grant, asked again"
     );
 }
+
+/// Delta review P1: chunk 0's storage GET fails while 15 later chunks wait for it (I3), then
+/// another session's lease shrinks this session's share to 8 slots. Chunk 0 is fetched again
+/// anyway, even with no budget room: it runs on the slot and the booking it kept. Otherwise
+/// nothing could ever be released, and the session would hang with its demands unanswered (I7).
+#[test]
+fn chunk_0_is_fetched_again_after_the_share_shrank_below_what_is_held() {
+    let chunk = STRIDE + CHUNK_OVERHEAD;
+    let (mut p, g) = started(16 * chunk, CHUNKS, (0, u64::MAX));
+    assert_eq!(p.slots(), 16);
+    let w = window(&mut p, T0, true);
+    assert_eq!(fetch(&mut p, T0), 0);
+    answer(&mut p, g, &w, T0);
+    for _ in 0..15 {
+        let index = fetch(&mut p, T0);
+        p.fetch_ok(index).unwrap();
+    }
+    assert_eq!(p.held(), 16);
+    p.fetch_failed(0, T0).unwrap();
+    p.set_share(8 * chunk);
+    assert_eq!((p.slots(), p.held()), (8, 15));
+    let mut now = T0;
+    for _ in 0..50 {
+        match p.poll_with(now, false) {
+            RangePoll::RequestWindow(r) => answer(&mut p, g, &r, now),
+            RangePoll::Fetch { index, .. } => {
+                assert_eq!(index, 0, "only chunk 0 runs on a kept booking");
+                return;
+            }
+            RangePoll::Wait { until_ms } => now = until_ms.unwrap_or(now + 1_000),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    panic!("chunk 0 was never fetched again: nothing can be released, the session hangs");
+}
+
+/// Delta review P1, the other half: no later chunk starts before chunk 0 has (here chunk 0's grant
+/// aged out unused while the later grants are still good), so chunks waiting for chunk 0 never
+/// hold room that chunk 0 then lacks.
+#[test]
+fn no_later_chunk_starts_before_chunk_0_has() {
+    let (mut p, g) = started(SHARE, CHUNKS, (5 * STRIDE, 10));
+    let w = window(&mut p, T0, false);
+    assert_eq!(w, req(5, 15, false));
+    answer(&mut p, g, &w, T0 + 60_000);
+    // Chunk 0's grant (from T0) is past its usable window; 5..19 (from T0 + 60 s) are not.
+    let later = T0 + 300_000 - RENEW_SKEW_MS;
+    assert_eq!(
+        window(&mut p, later, true),
+        req(0, 1, true),
+        "chunk 0 again, for the demand"
+    );
+    assert_eq!(
+        p.poll(later),
+        RangePoll::Wait { until_ms: None },
+        "chunk 5 waits for chunk 0"
+    );
+    answer(&mut p, g, &req(0, 1, true), later);
+    assert_eq!(fetch(&mut p, later), 0);
+    assert_eq!(fetch(&mut p, later), 5);
+}
+
+/// Delta review P3: a storage failure on an idle re-grant keeps its demand, so when the renewed
+/// grant ages out unused it spends a renewal instead of earning the demand a second free re-grant.
+#[test]
+fn a_failed_regrant_is_still_that_demands_one_regrant() {
+    let (mut p, g) = started(SHARE, CHUNKS, (5 * STRIDE, 10));
+    let w = window(&mut p, T0, false);
+    answer(&mut p, g, &w, T0);
+    let later = T0 + 300_000;
+    assert_eq!(
+        window(&mut p, later, false),
+        req(0, 1, true),
+        "chunk 0's re-grant for demand 1"
+    );
+    answer(&mut p, g, &req(0, 1, true), later);
+    assert_eq!(window(&mut p, later, true), req(5, 1, true));
+    assert_eq!(fetch(&mut p, later), 0);
+    p.fetch_failed(0, later).unwrap();
+    assert!(
+        matches!(
+            p.slots.get(&0),
+            Some(Slot::NeedsGrant {
+                regranted_for: Some(1),
+                ..
+            })
+        ),
+        "the failed re-grant keeps its demand: {:?}",
+        p.slots.get(&0)
+    );
+    answer(&mut p, g, &req(5, 1, true), later);
+    // The renewal after the backoff, then that grant ages out unused.
+    let mut now = later;
+    loop {
+        match p.poll_with(now, false) {
+            RangePoll::RequestWindow(r) => {
+                assert_eq!(r, req(0, 1, true));
+                answer(&mut p, g, &r, now);
+                break;
+            }
+            RangePoll::Wait { until_ms: Some(at) } => now = at,
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    now += 300_000;
+    assert_eq!(window(&mut p, now, false), req(0, 1, true));
+    assert!(
+        matches!(p.slots.get(&0), Some(Slot::NeedsGrant { attempts, .. }) if attempts.renewals == 2),
+        "the second age-out spent a renewal (one for the failure, one now): {:?}",
+        p.slots.get(&0)
+    );
+}
+
+/// Self-review: a closed demand's re-grant mark goes with it. A later demand that reuses the id
+/// gets its chunks granted again; before, `Idle { regranted_for: Some(id) }` made the planner
+/// skip them, and the demand was never answered (I7).
+#[test]
+fn a_demand_that_reuses_a_closed_id_is_granted_again() {
+    let (mut p, g) = started(SHARE, CHUNKS, (5 * STRIDE, 10));
+    let w = window(&mut p, T0, false);
+    answer(&mut p, g, &w, T0);
+    let later = T0 + 300_000;
+    assert_eq!(window(&mut p, later, false), req(0, 1, true));
+    answer(&mut p, g, &req(0, 1, true), later);
+    assert_eq!(window(&mut p, later, false), req(5, 1, true));
+    answer(&mut p, g, &req(5, 1, true), later);
+    p.demand_met(1);
+    // Both re-grants age out unused while no demand is open; then a new read comes in under the
+    // same id.
+    let again = later + 300_000;
+    assert_eq!(p.poll_with(again, false), RangePoll::Wait { until_ms: None });
+    assert!(
+        matches!(p.slots.get(&5), Some(Slot::Idle { .. })),
+        "{:?}",
+        p.slots.get(&5)
+    );
+    p.demand(1, 5 * STRIDE, 10).unwrap();
+    assert_eq!(
+        window(&mut p, again, false),
+        req(0, 1, true),
+        "chunk 0 for the new demand"
+    );
+    answer(&mut p, g, &req(0, 1, true), again);
+    assert_eq!(window(&mut p, again, false), req(5, 1, true), "and its own chunk");
+}
+
+/// Self-review: the planner says it waits for budget room only when a fetch could have started.
+/// A session whose read-ahead stalled at aged-out grants is not waiting for room (it gives its
+/// lease back); one with a granted chunk and no room is.
+#[test]
+fn waits_for_room_only_when_a_fetch_could_start() {
+    let (mut p, _) = started(SHARE, CHUNKS, (0, 10));
+    let _ = window(&mut p, T0, false);
+    assert_eq!(p.poll_with(T0, false), RangePoll::Wait { until_ms: None });
+    assert!(p.waits_for_room(), "chunk 0 is granted; only room is missing");
+    assert_eq!(fetch(&mut p, T0), 0);
+    assert!(!p.waits_for_room());
+
+    let (mut q, _) = started(SHARE, CHUNKS, (0, 10));
+    q.demand_met(1);
+    let later = T0 + 300_000;
+    assert!(matches!(
+        q.poll_with(later, false),
+        RangePoll::Wait { .. } | RangePoll::Idle
+    ));
+    assert!(
+        !q.waits_for_room(),
+        "read-ahead stalled at an aged-out grant: nothing could start"
+    );
+}

@@ -1,7 +1,10 @@
 //! `RangeSession` tests (LD-0105 plan C2, crypto review T6–T8), all on [`ScriptedIo`] with
 //! virtual clocks: no socket is opened.
 
+use std::future::Future;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, Waker};
 
 use beebeeb_core::chunk_stream::{ChunkEncryptor, ChunkFormat, ExpectedChunkFormat};
 use beebeeb_core::direct_transfer::range::RunSet;
@@ -18,7 +21,7 @@ use crate::range::{
     RangeControl, RangeIdentity, RangeLessor, RangeOutcome, RangeRequest, RangeSessionError, RangeSink, range_session,
 };
 use crate::shared::DirectShared;
-use crate::test_support::scripted::{Reply, Request, ScriptedIo};
+use crate::test_support::scripted::{Clock, Reply, Request, ScriptedIo};
 
 const FILE_ID: &str = "11111111-2222-4333-8444-555555555555";
 const VERSION: &str = "22222222-3333-4444-8555-666666666666";
@@ -259,6 +262,25 @@ async fn run(
 
 fn storage_gets(io: &ScriptedIo) -> usize {
     io.count(|r| matches!(r, Request::StorageGet { .. }))
+}
+
+/// Polls before a session counts as hung.
+const MAX_POLLS: usize = 20_000;
+
+/// Runs `fut` with no runtime, moving the scripted clock 1 ms per poll so delayed replies come due,
+/// and calls `each(n)` before poll `n`. A session that waits for something nothing will ever wake
+/// gives `None` after `MAX_POLLS` polls instead of hanging the test.
+fn drive<F: Future>(clock: &Clock, fut: F, mut each: impl FnMut(usize)) -> Option<F::Output> {
+    let mut fut = std::pin::pin!(fut);
+    let mut cx = Context::from_waker(Waker::noop());
+    for n in 0..MAX_POLLS {
+        each(n);
+        if let Poll::Ready(out) = fut.as_mut().poll(&mut cx) {
+            return Some(out);
+        }
+        clock.advance_mono(1);
+    }
+    None
 }
 
 #[tokio::test]
@@ -664,4 +686,155 @@ async fn a_resume_over_bytes_on_disk_never_reports_use_api() {
         "{out:?}"
     );
     assert_eq!(sink.failed, vec![1]);
+}
+
+/// Frames that arrive before frame 0 are released in frame 0's own pass (I3 only orders them).
+/// Before this fix they waited for the next reply; with every chunk already fetched none came, and
+/// the session hung with the file in memory.
+#[test]
+fn frames_that_arrive_before_frame_0_are_released_with_it() {
+    let fx = Arc::new(Fx::new(5 * STRIDE as usize, ChunkFormat::V1Legacy));
+    let g = fx.geometry;
+    let io = ScriptedIo::new(handler(fx.clone(), g, fx.frames.clone(), |_| 200)).with_storage_delay_for(0, 50);
+    let control = RangeControl::new();
+    control.demand(1, 0, g.original_size);
+    let mut sink = Placeholder::sized(g.original_size);
+    let lessor = RangeLessor::new(BIG);
+    let session = run(&io, &lessor, request(g.original_size), &control, &mut sink);
+    let Some((out, _)) = drive(&io.clock(), session, |_| {}) else {
+        panic!("the session hung: frames 1..4 arrived before frame 0 and were never released")
+    };
+    assert!(matches!(out, Ok(RangeOutcome::Whole(_))), "{out:?}");
+    assert_eq!(sink.buf, fx.plain);
+    assert_eq!(sink.offsets[0], 0, "frame 0 first (I3)");
+    assert_eq!(storage_gets(&io), 5, "no chunk fetched twice");
+}
+
+/// Delta review P1, end to end: chunk 0's first storage GET fails while frames 1..3 wait for it,
+/// and just then another session leases, halving this session's share below what it holds. Chunk
+/// 0's refetch runs on the booking it kept, every frame is released and the file ends whole.
+/// Before the fix chunk 0 had neither a slot nor budget room, so it was never fetched again and
+/// the session hung, holding its lease and its bytes.
+#[test]
+fn a_share_that_shrinks_while_chunk_0_is_fetched_again_does_not_hang() {
+    const OTHER: u64 = u64::MAX - 1;
+    let fx = Arc::new(Fx::new(6 * STRIDE as usize, ChunkFormat::V1Legacy));
+    let g = fx.geometry;
+    let chunk = STRIDE + 28;
+    // Four chunks of budget: alone, the session holds chunk 0 and frames 1..3.
+    let lessor = RangeLessor::new(4 * chunk);
+    let base = handler(fx.clone(), g, fx.frames.clone(), |_| 200);
+    let zero_gets = Arc::new(AtomicUsize::new(0));
+    let (other, gets) = (lessor.clone(), zero_gets.clone());
+    let io = ScriptedIo::new(move |req, wall, mono| match req {
+        Request::StorageGet { url, .. } if index_of(url) == 0 && gets.fetch_add(1, Ordering::SeqCst) == 0 => {
+            assert!(other.lease_and_hold(OTHER, 0), "another session leases");
+            Reply::Storage(StorageReply {
+                status: 503,
+                content_length: None,
+                body: None,
+            })
+        }
+        _ => base(req, wall, mono),
+    })
+    .with_storage_delay_for(0, 50);
+    let control = RangeControl::new();
+    control.demand(1, 0, g.original_size);
+    let mut sink = Placeholder::sized(g.original_size);
+    let session = run(&io, &lessor, request(g.original_size), &control, &mut sink);
+    let out = drive(&io.clock(), session, |_| {});
+    lessor.release_lease(OTHER);
+    let Some((out, _)) = out else {
+        panic!("the session hung: chunk 0 was never fetched again, frames 1..3 wait for it")
+    };
+    assert!(matches!(out, Ok(RangeOutcome::Whole(_))), "{out:?}");
+    assert_eq!(sink.buf, fx.plain);
+    assert_eq!(
+        zero_gets.load(Ordering::SeqCst),
+        2,
+        "chunk 0 fetched twice, every other chunk once"
+    );
+    assert_eq!(storage_gets(&io), 7);
+    let (peak_total, _) = lessor.peaks();
+    assert!(
+        peak_total <= 4 * chunk,
+        "the book never passed the budget: {peak_total}"
+    );
+}
+
+/// Delta review P2: once chunk 1 failed to open twice (from storage, then the pinned API copy), the
+/// session ends at once with that failure and releases nothing more (I5). A close posted while the
+/// API copy was on its way must not turn it into `Closed`, a sink the caller would not poison.
+#[test]
+fn a_corrupt_verdict_ends_the_session_at_once_even_with_a_close_posted() {
+    let fx = Arc::new(Fx::new(3 * STRIDE as usize, ChunkFormat::V1Legacy));
+    let g = fx.geometry;
+    let mut frames = fx.frames.clone();
+    let last = frames[1].len() - 1;
+    frames[1][last] ^= 1;
+    let control = RangeControl::new();
+    let base = handler(fx.clone(), g, frames, |_| 200);
+    let closer = control.clone();
+    let io = ScriptedIo::new(move |req, wall, mono| {
+        if matches!(req, Request::Api(call) if pinned_index(&call.path) == Some(1)) {
+            closer.close();
+        }
+        base(req, wall, mono)
+    });
+    control.demand(1, 0, g.original_size);
+    let mut sink = Placeholder::sized(g.original_size);
+    // One chunk of budget: chunk 0 is out before chunk 1 is judged.
+    let lessor = RangeLessor::new(STRIDE + 28);
+    let session = run(&io, &lessor, request(g.original_size), &control, &mut sink);
+    let (out, _) = drive(&io.clock(), session, |_| {}).expect("the session ends");
+    match out {
+        Err(RangeSessionError::DirectFailedAfterWrite {
+            transferred_bytes,
+            cause,
+        }) => {
+            assert_eq!(transferred_bytes, STRIDE);
+            assert!(
+                matches!(*cause, RangeSessionError::Unauthentic { index: 1 }),
+                "{cause:?}"
+            );
+        }
+        other => panic!("expected the failure after the write, got {other:?}"),
+    }
+    assert_eq!(sink.have.runs(), &[(0, STRIDE)], "nothing past chunk 0");
+    assert_eq!(sink.failed, vec![1]);
+}
+
+/// Crypto delta review P3-c: a session with only read-ahead left that finds no budget room keeps
+/// its lease and its place on the lessor's wait list, so read-ahead goes on to the whole file when
+/// the budget frees up. Before the fix it gave its lease back, which also took it off the wait
+/// list, and it never woke again.
+#[test]
+fn read_ahead_short_of_budget_resumes_when_the_budget_frees() {
+    const OTHER: u64 = u64::MAX - 2;
+    let fx = Arc::new(Fx::new(3 * STRIDE as usize, ChunkFormat::V1Legacy));
+    let g = fx.geometry;
+    let chunk = STRIDE + 28;
+    let lessor = RangeLessor::new(2 * chunk);
+    assert!(
+        lessor.lease_and_hold(OTHER, 2 * chunk),
+        "another session holds the whole budget"
+    );
+    let io = ScriptedIo::new(handler(fx.clone(), g, fx.frames.clone(), |_| 200));
+    let control = RangeControl::new();
+    // A demand past the end asks for nothing inside the file: it is met at once, read-ahead runs.
+    control.demand(1, g.original_size, 10);
+    let mut sink = Placeholder::sized(g.original_size);
+    let session = run(&io, &lessor, request(g.original_size), &control, &mut sink);
+    // The other session lets go only once this one has had to wait for room.
+    let out = drive(&io.clock(), session, |n| {
+        if n == 200 {
+            lessor.release_lease(OTHER);
+        }
+    });
+    let Some((out, _)) = out else {
+        panic!("read-ahead never resumed after the budget freed")
+    };
+    assert!(matches!(out, Ok(RangeOutcome::Whole(_))), "{out:?}");
+    assert_eq!(sink.met, vec![1]);
+    assert_eq!(sink.buf, fx.plain);
 }
