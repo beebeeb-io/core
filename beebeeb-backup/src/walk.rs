@@ -138,38 +138,70 @@ pub fn attrs_of(meta: &Metadata) -> EntryAttrs {
 ///   included, up into Backups. Each is absolute and without `..`; an empty,
 ///   relative or `..` path is an `InvalidInput` error, never "exclude
 ///   everything". They are compared with `root` component by component (a
-///   relative `root` is made absolute first, without touching the disk), and
-///   without case on Windows and macOS, so spell both from the same base. A
-///   `root` that itself lies inside an excluded path is refused by the client
-///   (desktop D4), not here; passed anyway, every entry is excluded and
-///   nothing is backed up.
+///   relative `root` is made absolute first), without case on Windows and
+///   macOS, and each as given and as resolved (links followed), so a linked
+///   root still meets a sync root spelled through its target. A `root` that
+///   itself lies inside an excluded path is refused by the client (desktop
+///   D4), not here; passed anyway, every entry is excluded and nothing is
+///   backed up.
 /// - Attributes come from the directory listing alone (plan Amendment 1, item
 ///   9): on Windows `DirEntry::metadata` is served from the `FindNextFileW`
 ///   data with no handle opened, so a not-local entry is known before anything
-///   touches it, and a folder that says not local is never listed.
+///   touches it, and a folder that says not local is never listed. That holds
+///   for `root` too: its own entry in its parent's listing (each hop of a
+///   linked root likewise) is read first, and a root that says not local is
+///   reported as one [`SkipReason::NotLocal`] skip at key `""` and never
+///   listed (delta 3 #4).
 pub fn walk_source(root: &Path, exclude: &[PathBuf]) -> io::Result<WalkResult> {
     walk_with_paths(root, exclude).map(|walk| walk.result)
 }
 
+/// How the walk reads an entry's attributes: from the path the listing gave
+/// and its listing metadata. [`attrs_of`] in production; a test marks a path
+/// not local, which Linux cannot.
+pub(crate) type AttrsOf<'a> = &'a dyn Fn(&Path, &Metadata) -> EntryAttrs;
+
 pub(crate) fn walk_with_paths(root: &Path, exclude: &[PathBuf]) -> io::Result<Walk> {
-    // The root itself may be a link (an XDG folder on another disk): it is the
-    // person's choice, so it is followed. Nothing inside it is.
-    if !std::fs::metadata(root)?.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotADirectory,
-            "the backed-up folder is not a folder",
-        ));
+    walk_with(root, exclude, &|_, meta| attrs_of(meta))
+}
+
+pub(crate) fn walk_with(root: &Path, exclude: &[PathBuf], attrs: AttrsOf<'_>) -> io::Result<Walk> {
+    check_excludes(exclude)?;
+    let root = std::path::absolute(root)?;
+    let not_a_folder = || io::Error::new(io::ErrorKind::NotADirectory, "the backed-up folder is not a folder");
+    // The root is read like every entry, before anything opens or lists it
+    // (plan Amendment 1, item 9; delta 3 #4). It may be a link (an XDG folder
+    // on another disk): it is the person's choice, so it is followed. Nothing
+    // inside it is.
+    match root_attrs(&root, attrs)? {
+        Some(own) if own.not_local => {
+            return Ok(Walk {
+                result: WalkResult {
+                    entries: Vec::new(),
+                    skipped: vec![(String::new(), SkipReason::NotLocal)],
+                },
+                paths: HashMap::new(),
+            });
+        }
+        Some(own) if !own.is_dir => return Err(not_a_folder()),
+        Some(_) => {}
+        // A drive or `/`, never a placeholder.
+        None if !std::fs::metadata(&root)?.is_dir() => return Err(not_a_folder()),
+        None => {}
     }
-    let excludes = Excludes::new(root, exclude, CASE_INSENSITIVE)?;
+    // Only now, the root being local, may the exclusion resolve it.
+    let excludes = Excludes::new(&root, exclude, CASE_INSENSITIVE)?;
     let mut walk = Walk {
         result: WalkResult::default(),
         paths: HashMap::new(),
     };
-    let mut seen: HashSet<String> = HashSet::new();
     // Each folder carries the excluded paths that still run through it.
     let mut stack: Vec<(PathBuf, String, usize, Vec<usize>)> =
-        vec![(root.to_path_buf(), String::new(), 0, excludes.everywhere())];
+        vec![(root.clone(), String::new(), 0, excludes.everywhere())];
     while let Some((dir, prefix, depth, through)) = stack.pop() {
+        // Every key starts with its folder's prefix, so two keys can only
+        // collide within one folder: the set lives for one listing (delta 3 #9).
+        let mut seen: HashSet<String> = HashSet::new();
         let listing = match list(&dir) {
             Ok(listing) => listing,
             // The backed-up folder itself, whole or partly unreadable: the
@@ -208,7 +240,7 @@ pub(crate) fn walk_with_paths(root: &Path, exclude: &[PathBuf]) -> io::Result<Wa
                     continue;
                 }
             };
-            let attrs = attrs_of(&meta);
+            let attrs = attrs(&path, &meta);
             // A skipped folder, a not-local one above all, is never listed.
             if let Some(reason) = skip_reason(&name, &attrs) {
                 walk.result.skipped.push((key, reason));
@@ -231,6 +263,60 @@ pub(crate) fn walk_with_paths(root: &Path, exclude: &[PathBuf]) -> io::Result<Wa
     walk.result.skipped.sort();
     walk.result.skipped.dedup();
     Ok(walk)
+}
+
+/// The links a linked root may pass through (Linux's own limit).
+const MAX_ROOT_LINKS: usize = 40;
+
+/// The backed-up folder's own attributes, read like every other entry's: from
+/// its entry in its parent's listing (on Windows the `FindNextFileW` data, so
+/// no handle is opened on it). A root that is a link is followed, each hop
+/// read the same way. A parent that cannot be listed (traverse-only) gives
+/// the hop's own metadata, not followed: on Linux and macOS that never
+/// fetches. `None` for a root with no parent (a drive or `/`), never a
+/// placeholder.
+fn root_attrs(root: &Path, attrs: AttrsOf<'_>) -> io::Result<Option<EntryAttrs>> {
+    let mut path = root.to_path_buf();
+    for _ in 0..=MAX_ROOT_LINKS {
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+            return Ok(None);
+        };
+        let (hop, meta) = match entry_in(parent, name) {
+            Ok(found) => found,
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => (path.clone(), std::fs::symlink_metadata(&path)?),
+            Err(e) => return Err(e),
+        };
+        let own = attrs(&hop, &meta);
+        if !own.is_link {
+            return Ok(Some(own));
+        }
+        // A relative target is relative to the link's own folder.
+        path = std::path::absolute(parent.join(std::fs::read_link(&hop)?))?;
+    }
+    Err(io::Error::other("the backed-up folder is a chain of too many links"))
+}
+
+/// `name`'s entry in the listing of `parent`, with its listing metadata: the
+/// exact name, else (Windows, macOS) the one that folds equal.
+fn entry_in(parent: &Path, name: &OsStr) -> io::Result<(PathBuf, Metadata)> {
+    let wanted = name_key(name, CASE_INSENSITIVE);
+    let mut folded = None;
+    for item in std::fs::read_dir(parent)? {
+        let item = item?;
+        if item.file_name() == name {
+            return Ok((item.path(), item.metadata()?));
+        }
+        if folded.is_none() && name_key(&item.file_name(), CASE_INSENSITIVE) == wanted {
+            folded = Some(item);
+        }
+    }
+    match folded {
+        Some(item) => Ok((item.path(), item.metadata()?)),
+        None => Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "the backed-up folder is not there",
+        )),
+    }
 }
 
 /// The whole listing of `dir`, or an error. A folder is listed completely or
@@ -352,20 +438,41 @@ pub(crate) struct Excludes {
 }
 
 impl Excludes {
+    /// The root and every excluded path are compared as given and as
+    /// resolved (`canonicalize`: links followed, when the path exists), each
+    /// spelling against each, so a root reached through a link still meets a
+    /// sync root spelled through the link's target, and the other way round
+    /// (delta 3 #5). The walk calls this only once the root is known local.
     pub(crate) fn new(root: &Path, exclude: &[PathBuf], case_insensitive: bool) -> io::Result<Excludes> {
         check_excludes(exclude)?;
-        let root_keys = path_keys(&std::path::absolute(root)?, case_insensitive);
+        let spellings = |path: &Path| {
+            let mut keys = vec![path_keys(path, case_insensitive)];
+            if let Ok(real) = std::fs::canonicalize(path) {
+                let real = path_keys(&real, case_insensitive);
+                if real != keys[0] {
+                    keys.push(real);
+                }
+            }
+            keys
+        };
+        let roots = spellings(&std::path::absolute(root)?);
         let mut excludes = Excludes {
             root_inside: false,
             below_root: Vec::new(),
             case_insensitive,
         };
         for path in exclude {
-            let keys = path_keys(path, case_insensitive);
-            if root_keys.starts_with(&keys) {
-                excludes.root_inside = true;
-            } else if keys.starts_with(&root_keys) {
-                excludes.below_root.push(keys[root_keys.len()..].to_vec());
+            for keys in spellings(path) {
+                for root_keys in &roots {
+                    if root_keys.starts_with(&keys) {
+                        excludes.root_inside = true;
+                    } else if keys.starts_with(root_keys) {
+                        let below = keys[root_keys.len()..].to_vec();
+                        if !excludes.below_root.contains(&below) {
+                            excludes.below_root.push(below);
+                        }
+                    }
+                }
             }
         }
         Ok(excludes)

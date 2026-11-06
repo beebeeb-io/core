@@ -51,7 +51,8 @@ filesystem pass (`beebeeb-backup`). No v0.2.0 API changes. LD-0113, spec
     category or another custom folder: ` (2)`, ` (3)`; at most 200 bytes with the suffix, the base
     is cut, never the suffix) and `category_folder_name`.
 - **`beebeeb-backup`** (new crate, for desktop and the CLI): `walk_source(root, exclude)` (never
-  opens a file, never follows a link, never descends into what is not local or into an excluded
+  opens a file, never follows a link, never descends into what is not local (the backed-up folder
+  itself included: a not-local root is one skip, never listed) or into an excluded
   path such as the client's own sync root; attributes from the directory listing only; a folder is
   listed whole or reported unreadable; depth cap 64), `fingerprint`, `attrs_of`, and
   `run_pass(host, root, exclude, category, budget)` over the `BackupHost` trait the client

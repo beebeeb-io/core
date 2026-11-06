@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use beebeeb_core::backup::SkipReason;
 
-use crate::walk::{Excludes, attrs_from_parts, collect_listing, is_within, walk_with_paths};
+use crate::walk::{Excludes, attrs_from_parts, attrs_of, collect_listing, is_within, walk_with, walk_with_paths};
 use crate::{MAX_DEPTH, fingerprint, walk_source};
 
 /// `run_pass` over a recording host.
@@ -355,4 +355,98 @@ fn walk_keys_are_the_names_on_linux() {
     dir.write("Rene\u{301}.txt", b"x");
     let walk = walk_with_paths(dir.path(), &[]).expect("walk");
     assert_eq!(keys(&walk.result), ["Rene\u{301}.txt"]);
+}
+
+/// Delta 3 #4 (plan Amendment 1, item 9): the not-local rule applies to the
+/// backed-up folder itself. Its attributes come from its parent's listing,
+/// like every entry's; a root that says not local is reported as one skip
+/// and never listed, so nothing in it is read (or fetched).
+#[test]
+fn walk_never_lists_a_root_that_is_not_local() {
+    let dir = TempDir::new("rootcloud");
+    dir.write("OneDrive/a.jpg", b"x");
+    dir.write("OneDrive/sub/b.jpg", b"y");
+    let root = dir.path().join("OneDrive");
+    let read = std::cell::RefCell::new(Vec::new());
+    let online_only = |path: &Path, meta: &std::fs::Metadata| {
+        read.borrow_mut().push(path.to_path_buf());
+        let mut attrs = attrs_of(meta);
+        attrs.not_local |= path == root;
+        attrs
+    };
+    let walk = walk_with(&root, &[], &online_only).expect("walk");
+    assert!(walk.result.entries.is_empty(), "{:?}", walk.result.entries);
+    assert_eq!(walk.result.skipped, [(String::new(), SkipReason::NotLocal)]);
+    assert!(walk.paths.is_empty());
+    assert_eq!(*read.borrow(), [root.clone()], "only the root's own entry was read");
+    // The same folder, local: listed as before.
+    let walk = walk_with(&root, &[], &|_, meta| attrs_of(meta)).expect("walk");
+    assert_eq!(keys(&walk.result), ["a.jpg", "sub", "sub/b.jpg"]);
+}
+
+/// A linked root is followed (the person's choice), and the folder it leads
+/// to is checked the same way.
+#[cfg(unix)]
+#[test]
+fn walk_never_lists_a_linked_root_whose_target_is_not_local() {
+    let dir = TempDir::new("rootlink");
+    dir.write("real/a.jpg", b"x");
+    let target = dir.path().join("real");
+    let root = dir.path().join("Pictures");
+    std::os::unix::fs::symlink(&target, &root).expect("symlink");
+    let online_only = |path: &Path, meta: &std::fs::Metadata| {
+        let mut attrs = attrs_of(meta);
+        attrs.not_local |= path == target;
+        attrs
+    };
+    let walk = walk_with(&root, &[], &online_only).expect("walk");
+    assert_eq!(walk.result.skipped, [(String::new(), SkipReason::NotLocal)]);
+    assert!(walk.result.entries.is_empty());
+    let walk = walk_with(&root, &[], &|_, meta| attrs_of(meta)).expect("walk");
+    assert_eq!(keys(&walk.result), ["a.jpg"]);
+}
+
+/// A root whose parent can be traversed but not listed still walks: its own
+/// metadata (not followed) stands in for the parent's listing.
+#[cfg(unix)]
+#[test]
+fn walk_a_root_whose_parent_cannot_be_listed() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new("traverse");
+    dir.write("locked/Pictures/a.jpg", b"x");
+    let locked = dir.path().join("locked");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o311)).expect("chmod");
+    let listable_anyway = std::fs::read_dir(&locked).is_ok();
+    let walk = walk_source(&locked.join("Pictures"), &[]);
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).expect("chmod back");
+    if listable_anyway {
+        eprintln!("walk_a_root_whose_parent_cannot_be_listed: permissions ignored (root); checked the walk only");
+    }
+    assert_eq!(keys(&walk.expect("walk")), ["a.jpg"]);
+}
+
+/// Delta 3 #5: a root reached through a link and an excluded path spelled
+/// through the link's target (or the other way round) still meet: both are
+/// compared as given and as resolved.
+#[cfg(unix)]
+#[test]
+fn walk_excludes_a_sync_root_through_a_linked_root() {
+    let dir = TempDir::new("linkexcl");
+    dir.write("data/Documents/report.pdf", b"x");
+    dir.write("data/Documents/Beebeeb/Backups/GLegion/report.pdf", b"x");
+    let real = dir.path().join("data/Documents");
+    let linked = dir.path().join("Documents");
+    std::os::unix::fs::symlink(&real, &linked).expect("symlink");
+
+    for (root, sync_root) in [(&linked, real.join("Beebeeb")), (&real, linked.join("Beebeeb"))] {
+        let result = walk_source(root, std::slice::from_ref(&sync_root)).expect("walk");
+        assert_eq!(
+            result.skipped,
+            [("Beebeeb".to_string(), SkipReason::Excluded)],
+            "{} excluding {}",
+            root.display(),
+            sync_root.display()
+        );
+        assert_eq!(keys(&result), ["report.pdf"]);
+    }
 }
