@@ -24922,7 +24922,7 @@ public object FfiConverterTypeBackupStopListing: FfiConverterRustBuffer<BackupSt
 /**
  * A backup that turns off: its category key and the reason
  * (`"backup_deleted"`, `"erase_request"`, `"account_lapsed"`,
- * `"inactive_cleanup"`, `"account_reset"`, `"unknown"`).
+ * `"inactive_cleanup"`, `"account_reset"`, `"unknown_removal"`, `"unknown"`).
  */
 data class BackupStopped (
     var `category`: kotlin.String

@@ -13257,7 +13257,7 @@ public func FfiConverterTypeBackupStopListing_lower(_ value: BackupStopListing) 
 /**
  * A backup that turns off: its category key and the reason
  * (`"backup_deleted"`, `"erase_request"`, `"account_lapsed"`,
- * `"inactive_cleanup"`, `"account_reset"`, `"unknown"`).
+ * `"inactive_cleanup"`, `"account_reset"`, `"unknown_removal"`, `"unknown"`).
  */
 public struct BackupStopped: Equatable, Hashable {
     public var category: String
