@@ -1,0 +1,21 @@
+# Read by `cargo audit` (the CI job "Dependency advisories, licenses & sources").
+# An advisory is listed here only when no fix exists without a semver-major
+# upgrade of a direct dependency. Each entry says why it is ignored and what
+# removes it. Never add an id without that.
+[advisories]
+ignore = [
+  # crypto-bigint 0.5.5, through p256 0.13 (the P-256 ECDH of the CLI login
+  # handshake, beebeeb-core/src/cli_auth.rs; the key pair is generated per login).
+  # Operations meant to be constant-time can branch on secret data. Fixed only in
+  # crypto-bigint 0.7.6, which needs p256 0.14: a breaking upgrade of a crypto
+  # dependency. Removed by that upgrade.
+  "RUSTSEC-2026-0387",
+  # zip 8.6.0: four advisories, all in archive extraction (ZipArchive::extract,
+  # ZipStreamReader::extract). Core only writes archives (ZipWriter in
+  # beebeeb-core/src/zip.rs) and never extracts one; its tests read entries back
+  # with by_name. Fixed only in zip 9. Removed by the zip 9 upgrade.
+  "RUSTSEC-2026-0367",
+  "RUSTSEC-2026-0368",
+  "RUSTSEC-2026-0369",
+  "RUSTSEC-2026-0429",
+]
