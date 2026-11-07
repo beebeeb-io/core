@@ -29,6 +29,21 @@ pub enum DestinationKind {
     ChooseFolder,
 }
 
+impl DestinationKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            DestinationKind::NextTo => "next_to",
+            DestinationKind::ChooseFolder => "choose_folder",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        [DestinationKind::NextTo, DestinationKind::ChooseFolder]
+            .into_iter()
+            .find(|kind| kind.as_str() == text)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct PreviewInput<'a> {
     pub archive_name: &'a str,
@@ -58,6 +73,23 @@ pub enum ActionKind {
     OpenFolder,
     MoveToTrash,
     Cancel,
+}
+
+impl ActionKind {
+    /// The binding string (the same as its serde name).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ActionKind::Extract => "extract",
+            ActionKind::ExtractTo => "extract_to",
+            ActionKind::ExtractSelected => "extract_selected",
+            ActionKind::Download => "download",
+            ActionKind::Open => "open",
+            ActionKind::Stop => "stop",
+            ActionKind::OpenFolder => "open_folder",
+            ActionKind::MoveToTrash => "move_to_trash",
+            ActionKind::Cancel => "cancel",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -90,6 +122,20 @@ pub enum PreviewState {
     Extracting,
     Finished,
     Refused,
+}
+
+impl PreviewState {
+    /// The binding string (`wrong` of `NeedsPassword` is separate).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            PreviewState::Reading => "reading",
+            PreviewState::Listed => "listed",
+            PreviewState::NeedsPassword { .. } => "needs_password",
+            PreviewState::Extracting => "extracting",
+            PreviewState::Finished => "finished",
+            PreviewState::Refused => "refused",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

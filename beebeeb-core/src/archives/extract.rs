@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use super::detect::ArchiveFormat;
 use super::limits::{MAX_ENTRIES, MAX_EXTRACTION_BYTES};
 use super::listing::Locator;
-use super::model::{EntryKind, SkipReason};
+use super::model::{ArchiveListing, EntryKind, SkipReason};
 use super::password::ArchivePassword;
 use super::plan::{ExtractionPlan, NodeKind, PlanTarget, PlannedNode};
 use super::session::{ArchiveSession, EntryDecoder, PieceStep, tar_entry, tgz_piece};
@@ -34,11 +34,47 @@ pub enum FailReason {
     AccountBlocked,
 }
 
+impl FailReason {
+    pub const ALL: [FailReason; 5] = [
+        FailReason::StorageFull,
+        FailReason::Network,
+        FailReason::Damaged,
+        FailReason::Changed,
+        FailReason::AccountBlocked,
+    ];
+
+    /// The binding string.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            FailReason::StorageFull => "storage_full",
+            FailReason::Network => "network",
+            FailReason::Damaged => "damaged",
+            FailReason::Changed => "changed",
+            FailReason::AccountBlocked => "account_blocked",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|reason| reason.as_str() == text)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExtractOutcome {
     Done,
     Stopped,
     Failed(FailReason),
+}
+
+impl ExtractOutcome {
+    /// The binding string (the reason of `Failed` is separate).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ExtractOutcome::Done => "done",
+            ExtractOutcome::Stopped => "stopped",
+            ExtractOutcome::Failed(_) => "failed",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -244,6 +280,16 @@ impl<S: ByteSource> Extraction<S> {
             Some(Locator::Tar { data_offset, .. }) => *data_offset,
             _ => u64::from(entry),
         }
+    }
+
+    /// The listing being extracted (for the preview while it runs).
+    pub fn listing(&self) -> Option<&ArchiveListing> {
+        self.session.listing()
+    }
+
+    /// The plan being extracted.
+    pub fn plan(&self) -> &ExtractionPlan {
+        &self.plan
     }
 
     pub fn source_mut(&mut self) -> &mut S {

@@ -295,6 +295,16 @@ impl<S: ByteSource> ArchiveSession<S> {
         Ok(EntryReader { session: self, decoder })
     }
 
+    /// [`Self::entry_reader`] without the borrow: the stream holds the
+    /// entry's decoder (and any key it derived) and reads through the
+    /// session given to each `next_piece`, so a push driver can keep it
+    /// between calls. Use it with the session that made it.
+    pub fn entry_stream(&self, index: u32, password: Option<&ArchivePassword>) -> Result<EntryStream, ArchiveRefusal> {
+        Ok(EntryStream {
+            decoder: self.decoder(index, password)?,
+        })
+    }
+
     /// Whether `password` opens entry `index`, without reading its data.
     /// Listing never needs a password (zip protects contents, not names);
     /// this is asked only when a protected entry is touched.
@@ -517,6 +527,18 @@ pub(crate) fn tgz_piece<S: ByteSource + ?Sized>(
         DataEvent::Data(piece) => PieceStep::Data(piece),
         DataEvent::DataEnd => PieceStep::Verified,
     })
+}
+
+/// Reads one entry's plaintext through a session it does not hold; see
+/// [`ArchiveSession::entry_stream`].
+pub struct EntryStream {
+    decoder: EntryDecoder,
+}
+
+impl EntryStream {
+    pub fn next_piece<S: ByteSource>(&mut self, session: &mut ArchiveSession<S>) -> PieceStep {
+        self.decoder.next_piece(&mut session.source)
+    }
 }
 
 /// Reads one entry's plaintext; see [`ArchiveSession::entry_reader`].

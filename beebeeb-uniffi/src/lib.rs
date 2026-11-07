@@ -13,12 +13,14 @@ use beebeeb_types::{CipherSuite, EncryptedBlob};
 
 uniffi::setup_scaffolding!();
 mod account_services;
+mod archives;
 mod backup;
 mod platform_services;
 mod request_seal;
 mod services;
 
 pub use account_services::*;
+pub use archives::*;
 pub use platform_services::*;
 pub use services::*;
 #[cfg(test)]

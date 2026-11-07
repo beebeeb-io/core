@@ -50,3 +50,6 @@ pub const ZIP_TAIL_WINDOW: u64 = 65_557 + 20 + 56;
 pub const NATIVE_STAGING_AHEAD_BYTES: u64 = GIB;
 /// Web drivers stop stepping while this many staged entries wait.
 pub const BROWSER_STAGED_ENTRIES: usize = 2;
+/// What a push driver's `SuppliedBytes` holds at most (§8): the central
+/// directory and two download frames.
+pub const MAX_SUPPLIED_BYTES: u64 = MAX_CENTRAL_DIRECTORY_BYTES + 2 * crate::download::MAX_FRAME_SIZE as u64;

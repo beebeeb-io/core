@@ -45,6 +45,34 @@ impl SkipReason {
             SkipReason::Unsupported(_) => "unsupported",
         }
     }
+
+    /// The method's name or what the entry is, for `Method` and
+    /// `Unsupported`.
+    pub fn detail(&self) -> Option<&str> {
+        match self {
+            SkipReason::Method(detail) | SkipReason::Unsupported(detail) => Some(detail),
+            _ => None,
+        }
+    }
+
+    /// The reason from its binding string and detail; `None` for an
+    /// unknown string.
+    pub fn parse(reason: &str, detail: Option<&str>) -> Option<Self> {
+        Some(match reason {
+            "link" => SkipReason::Link,
+            "device" => SkipReason::Device,
+            "outside_folder" => SkipReason::OutsideFolder,
+            "unusable_name" => SkipReason::UnusableName,
+            "method" => SkipReason::Method(detail?.to_string()),
+            "too_large" => SkipReason::TooLarge,
+            "bomb" => SkipReason::Bomb,
+            "mac_resource" => SkipReason::MacResource,
+            "corrupt" => SkipReason::Corrupt,
+            "other_password" => SkipReason::OtherPassword,
+            "unsupported" => SkipReason::Unsupported(detail?.to_string()),
+            _ => return None,
+        })
+    }
 }
 
 /// Why a whole archive is refused before anything is listed.
@@ -171,6 +199,16 @@ pub enum Protection {
     None,
     Some,
     All,
+}
+
+impl Protection {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Protection::None => "none",
+            Protection::Some => "some",
+            Protection::All => "all",
+        }
+    }
 }
 
 /// What an archive holds, as core lists it.

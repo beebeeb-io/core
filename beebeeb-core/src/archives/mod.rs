@@ -48,6 +48,6 @@ pub use preview::{
     ActionKind, ArchivePreviewModel, DestinationKind, ListingState, PreviewAction, PreviewInput, PreviewRow,
     PreviewState, archive_preview,
 };
-pub use session::{ArchiveSession, EntryReader, PieceStep, SessionStep};
+pub use session::{ArchiveSession, EntryReader, EntryStream, PieceStep, SessionStep};
 pub use source::{ByteRange, ByteSource, ReadSeekSource, SourceError, SuppliedBytes};
 pub use words::{ArchiveKey, ArchiveText, archive_text};

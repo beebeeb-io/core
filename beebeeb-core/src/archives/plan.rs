@@ -54,6 +54,15 @@ pub enum NodeKind {
     File,
 }
 
+impl NodeKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            NodeKind::Folder => "folder",
+            NodeKind::File => "file",
+        }
+    }
+}
+
 /// A folder or file the extraction creates. `parent: None` is the folder
 /// the archive is in.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,6 +119,19 @@ pub enum PlanRefusal {
 }
 
 impl PlanRefusal {
+    /// The binding string.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            PlanRefusal::TooMany => "too_many",
+            PlanRefusal::TooLarge { .. } => "too_large",
+            PlanRefusal::Quota { .. } => "quota",
+            PlanRefusal::DeviceSpace { .. } => "device_space",
+            PlanRefusal::Backups => "backups",
+            PlanRefusal::ReadOnlyFolder => "read_only_folder",
+            PlanRefusal::Empty => "empty",
+        }
+    }
+
     /// The refusal's words (spec §9).
     pub fn text(&self) -> ArchiveText {
         match self {
