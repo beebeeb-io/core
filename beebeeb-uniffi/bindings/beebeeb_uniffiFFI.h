@@ -3003,6 +3003,26 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_sha256(RustBuffer data, RustCallStatus 
 RustBuffer uniffi_beebeeb_uniffi_fn_func_storage_format_si(int64_t bytes, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ARCHIVE_COUNT_LABEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ARCHIVE_COUNT_LABEL
+RustBuffer uniffi_beebeeb_uniffi_fn_func_archive_count_label(uint64_t n, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ARCHIVE_LIST
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ARCHIVE_LIST
+RustBuffer uniffi_beebeeb_uniffi_fn_func_archive_list(RustBuffer bytes, RustBuffer platform, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ARCHIVE_SIZE_LABEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ARCHIVE_SIZE_LABEL
+RustBuffer uniffi_beebeeb_uniffi_fn_func_archive_size_label(uint64_t bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ARCHIVE_TEXT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_ARCHIVE_TEXT
+RustBuffer uniffi_beebeeb_uniffi_fn_func_archive_text(RustBuffer key, RustBuffer args, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_CHECK_APP_MUTATION
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_CHECK_APP_MUTATION
 RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_check_app_mutation(RustBuffer position, RustBuffer mutation, RustCallStatus *_Nonnull out_status
@@ -3684,6 +3704,30 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_sha256(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_STORAGE_FORMAT_SI
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_STORAGE_FORMAT_SI
 uint16_t uniffi_beebeeb_uniffi_checksum_func_storage_format_si(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ARCHIVE_COUNT_LABEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ARCHIVE_COUNT_LABEL
+uint16_t uniffi_beebeeb_uniffi_checksum_func_archive_count_label(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ARCHIVE_LIST
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ARCHIVE_LIST
+uint16_t uniffi_beebeeb_uniffi_checksum_func_archive_list(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ARCHIVE_SIZE_LABEL
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ARCHIVE_SIZE_LABEL
+uint16_t uniffi_beebeeb_uniffi_checksum_func_archive_size_label(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ARCHIVE_TEXT
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_ARCHIVE_TEXT
+uint16_t uniffi_beebeeb_uniffi_checksum_func_archive_text(void
     
 );
 #endif

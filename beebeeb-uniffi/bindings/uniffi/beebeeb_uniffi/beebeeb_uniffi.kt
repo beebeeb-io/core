@@ -988,6 +988,14 @@ external fun uniffi_beebeeb_uniffi_checksum_func_sha256(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_storage_format_si(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_archive_count_label(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_archive_list(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_archive_size_label(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_archive_text(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_backup_check_app_mutation(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_backup_check_drive_mutation(
@@ -2816,6 +2824,14 @@ external fun uniffi_beebeeb_uniffi_fn_func_sha256(`data`: RustBuffer.ByValue,uni
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_storage_format_si(`bytes`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_archive_count_label(`n`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_archive_list(`bytes`: RustBuffer.ByValue,`platform`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_archive_size_label(`bytes`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_archive_text(`key`: RustBuffer.ByValue,`args`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_backup_check_app_mutation(`position`: RustBuffer.ByValue,`mutation`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_backup_check_drive_mutation(`position`: RustBuffer.ByValue,`ownActiveSource`: RustBuffer.ByValue,`mutation`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -3129,6 +3145,18 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_storage_format_si() != 41780.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_archive_count_label() != 23591.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_archive_list() != 39407.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_archive_size_label() != 14767.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_archive_text() != 37560.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_check_app_mutation() != 42972.toShort()) {
@@ -23562,6 +23590,86 @@ public object FfiConverterTypeAccountSessionData: FfiConverterRustBuffer<Account
 
 
 
+data class ArchiveEntry (
+    var `index`: kotlin.UInt
+    , 
+    /**
+     * The decoded name as shown, control characters made visible.
+     */
+    var `displayPath`: kotlin.String
+    , 
+    /**
+     * The path extraction writes; `None` when the entry is skipped for its
+     * name.
+     */
+    var `path`: kotlin.String?
+    , 
+    var `kind`: ArchiveEntryKind
+    , 
+    var `size`: kotlin.ULong
+    , 
+    var `compressedSize`: kotlin.ULong
+    , 
+    var `cipher`: ArchiveCipher
+    , 
+    var `modified`: ArchiveTime?
+    , 
+    var `skip`: ArchiveSkipReason?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveEntry: FfiConverterRustBuffer<ArchiveEntry> {
+    override fun read(buf: ByteBuffer): ArchiveEntry {
+        return ArchiveEntry(
+            FfiConverterUInt.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterTypeArchiveEntryKind.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterTypeArchiveCipher.read(buf),
+            FfiConverterOptionalTypeArchiveTime.read(buf),
+            FfiConverterOptionalTypeArchiveSkipReason.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveEntry) = (
+            FfiConverterUInt.allocationSize(value.`index`) +
+            FfiConverterString.allocationSize(value.`displayPath`) +
+            FfiConverterOptionalString.allocationSize(value.`path`) +
+            FfiConverterTypeArchiveEntryKind.allocationSize(value.`kind`) +
+            FfiConverterULong.allocationSize(value.`size`) +
+            FfiConverterULong.allocationSize(value.`compressedSize`) +
+            FfiConverterTypeArchiveCipher.allocationSize(value.`cipher`) +
+            FfiConverterOptionalTypeArchiveTime.allocationSize(value.`modified`) +
+            FfiConverterOptionalTypeArchiveSkipReason.allocationSize(value.`skip`)
+    )
+
+    override fun write(value: ArchiveEntry, buf: ByteBuffer) {
+            FfiConverterUInt.write(value.`index`, buf)
+            FfiConverterString.write(value.`displayPath`, buf)
+            FfiConverterOptionalString.write(value.`path`, buf)
+            FfiConverterTypeArchiveEntryKind.write(value.`kind`, buf)
+            FfiConverterULong.write(value.`size`, buf)
+            FfiConverterULong.write(value.`compressedSize`, buf)
+            FfiConverterTypeArchiveCipher.write(value.`cipher`, buf)
+            FfiConverterOptionalTypeArchiveTime.write(value.`modified`, buf)
+            FfiConverterOptionalTypeArchiveSkipReason.write(value.`skip`, buf)
+    }
+}
+
+
+
 /**
  * A single entry inside an archive (TAR, GZ, TGZ).
  */
@@ -23603,6 +23711,484 @@ public object FfiConverterTypeArchiveEntryDto: FfiConverterRustBuffer<ArchiveEnt
             FfiConverterString.write(value.`name`, buf)
             FfiConverterULong.write(value.`size`, buf)
             FfiConverterBoolean.write(value.`isDirectory`, buf)
+    }
+}
+
+
+
+data class ArchiveListing (
+    var `format`: ArchiveFormat
+    , 
+    var `entries`: List<ArchiveEntry>
+    , 
+    var `totals`: ArchiveTotals
+    , 
+    var `protection`: ArchiveProtection
+    , 
+    var `usesZipcrypto`: kotlin.Boolean
+    , 
+    /**
+     * `false` when a tgz or gz listing stopped at the platform's scan limit.
+     */
+    var `complete`: kotlin.Boolean
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveListing: FfiConverterRustBuffer<ArchiveListing> {
+    override fun read(buf: ByteBuffer): ArchiveListing {
+        return ArchiveListing(
+            FfiConverterTypeArchiveFormat.read(buf),
+            FfiConverterSequenceTypeArchiveEntry.read(buf),
+            FfiConverterTypeArchiveTotals.read(buf),
+            FfiConverterTypeArchiveProtection.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveListing) = (
+            FfiConverterTypeArchiveFormat.allocationSize(value.`format`) +
+            FfiConverterSequenceTypeArchiveEntry.allocationSize(value.`entries`) +
+            FfiConverterTypeArchiveTotals.allocationSize(value.`totals`) +
+            FfiConverterTypeArchiveProtection.allocationSize(value.`protection`) +
+            FfiConverterBoolean.allocationSize(value.`usesZipcrypto`) +
+            FfiConverterBoolean.allocationSize(value.`complete`)
+    )
+
+    override fun write(value: ArchiveListing, buf: ByteBuffer) {
+            FfiConverterTypeArchiveFormat.write(value.`format`, buf)
+            FfiConverterSequenceTypeArchiveEntry.write(value.`entries`, buf)
+            FfiConverterTypeArchiveTotals.write(value.`totals`, buf)
+            FfiConverterTypeArchiveProtection.write(value.`protection`, buf)
+            FfiConverterBoolean.write(value.`usesZipcrypto`, buf)
+            FfiConverterBoolean.write(value.`complete`, buf)
+    }
+}
+
+
+
+data class ArchivePreviewAction (
+    var `kind`: ArchiveActionKind
+    , 
+    var `label`: ArchiveText
+    , 
+    var `enabled`: kotlin.Boolean
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchivePreviewAction: FfiConverterRustBuffer<ArchivePreviewAction> {
+    override fun read(buf: ByteBuffer): ArchivePreviewAction {
+        return ArchivePreviewAction(
+            FfiConverterTypeArchiveActionKind.read(buf),
+            FfiConverterTypeArchiveText.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchivePreviewAction) = (
+            FfiConverterTypeArchiveActionKind.allocationSize(value.`kind`) +
+            FfiConverterTypeArchiveText.allocationSize(value.`label`) +
+            FfiConverterBoolean.allocationSize(value.`enabled`)
+    )
+
+    override fun write(value: ArchivePreviewAction, buf: ByteBuffer) {
+            FfiConverterTypeArchiveActionKind.write(value.`kind`, buf)
+            FfiConverterTypeArchiveText.write(value.`label`, buf)
+            FfiConverterBoolean.write(value.`enabled`, buf)
+    }
+}
+
+
+
+/**
+ * What the archive screen shows: core decides every word, row and action.
+ */
+data class ArchivePreviewModel (
+    var `state`: ArchivePreviewState
+    , 
+    var `title`: kotlin.String
+    , 
+    var `kindLabel`: ArchiveText?
+    , 
+    var `summary`: ArchiveText?
+    , 
+    var `notices`: List<ArchiveText>
+    , 
+    var `path`: List<kotlin.String>
+    , 
+    var `rows`: List<ArchivePreviewRow>
+    , 
+    var `actions`: List<ArchivePreviewAction>
+    , 
+    var `selectionActions`: List<ArchivePreviewAction>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchivePreviewModel: FfiConverterRustBuffer<ArchivePreviewModel> {
+    override fun read(buf: ByteBuffer): ArchivePreviewModel {
+        return ArchivePreviewModel(
+            FfiConverterTypeArchivePreviewState.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalTypeArchiveText.read(buf),
+            FfiConverterOptionalTypeArchiveText.read(buf),
+            FfiConverterSequenceTypeArchiveText.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterSequenceTypeArchivePreviewRow.read(buf),
+            FfiConverterSequenceTypeArchivePreviewAction.read(buf),
+            FfiConverterSequenceTypeArchivePreviewAction.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchivePreviewModel) = (
+            FfiConverterTypeArchivePreviewState.allocationSize(value.`state`) +
+            FfiConverterString.allocationSize(value.`title`) +
+            FfiConverterOptionalTypeArchiveText.allocationSize(value.`kindLabel`) +
+            FfiConverterOptionalTypeArchiveText.allocationSize(value.`summary`) +
+            FfiConverterSequenceTypeArchiveText.allocationSize(value.`notices`) +
+            FfiConverterSequenceString.allocationSize(value.`path`) +
+            FfiConverterSequenceTypeArchivePreviewRow.allocationSize(value.`rows`) +
+            FfiConverterSequenceTypeArchivePreviewAction.allocationSize(value.`actions`) +
+            FfiConverterSequenceTypeArchivePreviewAction.allocationSize(value.`selectionActions`)
+    )
+
+    override fun write(value: ArchivePreviewModel, buf: ByteBuffer) {
+            FfiConverterTypeArchivePreviewState.write(value.`state`, buf)
+            FfiConverterString.write(value.`title`, buf)
+            FfiConverterOptionalTypeArchiveText.write(value.`kindLabel`, buf)
+            FfiConverterOptionalTypeArchiveText.write(value.`summary`, buf)
+            FfiConverterSequenceTypeArchiveText.write(value.`notices`, buf)
+            FfiConverterSequenceString.write(value.`path`, buf)
+            FfiConverterSequenceTypeArchivePreviewRow.write(value.`rows`, buf)
+            FfiConverterSequenceTypeArchivePreviewAction.write(value.`actions`, buf)
+            FfiConverterSequenceTypeArchivePreviewAction.write(value.`selectionActions`, buf)
+    }
+}
+
+
+
+data class ArchivePreviewRow (
+    var `name`: kotlin.String
+    , 
+    var `kind`: ArchiveEntryKind
+    , 
+    /**
+     * The listing entry it shows (`None` for a folder made of other
+     * entries' paths, or a summary row).
+     */
+    var `entry`: kotlin.UInt?
+    , 
+    var `sizeLabel`: kotlin.String?
+    , 
+    var `modified`: ArchiveTime?
+    , 
+    /**
+     * Protected by a password.
+     */
+    var `locked`: kotlin.Boolean
+    , 
+    var `note`: ArchiveText?
+    , 
+    var `actions`: List<ArchiveActionKind>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchivePreviewRow: FfiConverterRustBuffer<ArchivePreviewRow> {
+    override fun read(buf: ByteBuffer): ArchivePreviewRow {
+        return ArchivePreviewRow(
+            FfiConverterString.read(buf),
+            FfiConverterTypeArchiveEntryKind.read(buf),
+            FfiConverterOptionalUInt.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalTypeArchiveTime.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalTypeArchiveText.read(buf),
+            FfiConverterSequenceTypeArchiveActionKind.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchivePreviewRow) = (
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterTypeArchiveEntryKind.allocationSize(value.`kind`) +
+            FfiConverterOptionalUInt.allocationSize(value.`entry`) +
+            FfiConverterOptionalString.allocationSize(value.`sizeLabel`) +
+            FfiConverterOptionalTypeArchiveTime.allocationSize(value.`modified`) +
+            FfiConverterBoolean.allocationSize(value.`locked`) +
+            FfiConverterOptionalTypeArchiveText.allocationSize(value.`note`) +
+            FfiConverterSequenceTypeArchiveActionKind.allocationSize(value.`actions`)
+    )
+
+    override fun write(value: ArchivePreviewRow, buf: ByteBuffer) {
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterTypeArchiveEntryKind.write(value.`kind`, buf)
+            FfiConverterOptionalUInt.write(value.`entry`, buf)
+            FfiConverterOptionalString.write(value.`sizeLabel`, buf)
+            FfiConverterOptionalTypeArchiveTime.write(value.`modified`, buf)
+            FfiConverterBoolean.write(value.`locked`, buf)
+            FfiConverterOptionalTypeArchiveText.write(value.`note`, buf)
+            FfiConverterSequenceTypeArchiveActionKind.write(value.`actions`, buf)
+    }
+}
+
+
+
+/**
+ * An entry saved under another name.
+ */
+data class ArchiveRenamedEntry (
+    var `path`: kotlin.String
+    , 
+    var `name`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveRenamedEntry: FfiConverterRustBuffer<ArchiveRenamedEntry> {
+    override fun read(buf: ByteBuffer): ArchiveRenamedEntry {
+        return ArchiveRenamedEntry(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveRenamedEntry) = (
+            FfiConverterString.allocationSize(value.`path`) +
+            FfiConverterString.allocationSize(value.`name`)
+    )
+
+    override fun write(value: ArchiveRenamedEntry, buf: ByteBuffer) {
+            FfiConverterString.write(value.`path`, buf)
+            FfiConverterString.write(value.`name`, buf)
+    }
+}
+
+
+
+/**
+ * An entry not extracted (its shown path), and why.
+ */
+data class ArchiveSkippedEntry (
+    var `path`: kotlin.String
+    , 
+    var `reason`: ArchiveSkipReason
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveSkippedEntry: FfiConverterRustBuffer<ArchiveSkippedEntry> {
+    override fun read(buf: ByteBuffer): ArchiveSkippedEntry {
+        return ArchiveSkippedEntry(
+            FfiConverterString.read(buf),
+            FfiConverterTypeArchiveSkipReason.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveSkippedEntry) = (
+            FfiConverterString.allocationSize(value.`path`) +
+            FfiConverterTypeArchiveSkipReason.allocationSize(value.`reason`)
+    )
+
+    override fun write(value: ArchiveSkippedEntry, buf: ByteBuffer) {
+            FfiConverterString.write(value.`path`, buf)
+            FfiConverterTypeArchiveSkipReason.write(value.`reason`, buf)
+    }
+}
+
+
+
+/**
+ * Core's words: a stable key, the English text, and the unsubstituted
+ * arguments for an i18n layer.
+ */
+data class ArchiveText (
+    var `key`: kotlin.String
+    , 
+    var `text`: kotlin.String
+    , 
+    var `args`: List<ArchiveTextArg>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveText: FfiConverterRustBuffer<ArchiveText> {
+    override fun read(buf: ByteBuffer): ArchiveText {
+        return ArchiveText(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceTypeArchiveTextArg.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveText) = (
+            FfiConverterString.allocationSize(value.`key`) +
+            FfiConverterString.allocationSize(value.`text`) +
+            FfiConverterSequenceTypeArchiveTextArg.allocationSize(value.`args`)
+    )
+
+    override fun write(value: ArchiveText, buf: ByteBuffer) {
+            FfiConverterString.write(value.`key`, buf)
+            FfiConverterString.write(value.`text`, buf)
+            FfiConverterSequenceTypeArchiveTextArg.write(value.`args`, buf)
+    }
+}
+
+
+
+/**
+ * One argument of a word, already formatted (`files` = `"1,234"`).
+ */
+data class ArchiveTextArg (
+    var `name`: kotlin.String
+    , 
+    var `value`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveTextArg: FfiConverterRustBuffer<ArchiveTextArg> {
+    override fun read(buf: ByteBuffer): ArchiveTextArg {
+        return ArchiveTextArg(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveTextArg) = (
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`value`)
+    )
+
+    override fun write(value: ArchiveTextArg, buf: ByteBuffer) {
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterString.write(value.`value`, buf)
+    }
+}
+
+
+
+data class ArchiveTotals (
+    var `files`: kotlin.UInt
+    , 
+    var `folders`: kotlin.UInt
+    , 
+    var `bytes`: kotlin.ULong
+    , 
+    var `compressedBytes`: kotlin.ULong
+    , 
+    var `skipped`: kotlin.UInt
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveTotals: FfiConverterRustBuffer<ArchiveTotals> {
+    override fun read(buf: ByteBuffer): ArchiveTotals {
+        return ArchiveTotals(
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveTotals) = (
+            FfiConverterUInt.allocationSize(value.`files`) +
+            FfiConverterUInt.allocationSize(value.`folders`) +
+            FfiConverterULong.allocationSize(value.`bytes`) +
+            FfiConverterULong.allocationSize(value.`compressedBytes`) +
+            FfiConverterUInt.allocationSize(value.`skipped`)
+    )
+
+    override fun write(value: ArchiveTotals, buf: ByteBuffer) {
+            FfiConverterUInt.write(value.`files`, buf)
+            FfiConverterUInt.write(value.`folders`, buf)
+            FfiConverterULong.write(value.`bytes`, buf)
+            FfiConverterULong.write(value.`compressedBytes`, buf)
+            FfiConverterUInt.write(value.`skipped`, buf)
     }
 }
 
@@ -26695,6 +27281,132 @@ public object FfiConverterTypeEngineEventData: FfiConverterRustBuffer<EngineEven
 
 
 
+data class ExtractProgress (
+    /**
+     * Files whose upload finished.
+     */
+    var `filesDone`: kotlin.UInt
+    , 
+    var `filesTotal`: kotlin.UInt
+    , 
+    /**
+     * Plaintext bytes decoded so far.
+     */
+    var `bytesDone`: kotlin.ULong
+    , 
+    var `bytesTotal`: kotlin.ULong
+    , 
+    /**
+     * The file being extracted now.
+     */
+    var `current`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeExtractProgress: FfiConverterRustBuffer<ExtractProgress> {
+    override fun read(buf: ByteBuffer): ExtractProgress {
+        return ExtractProgress(
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ExtractProgress) = (
+            FfiConverterUInt.allocationSize(value.`filesDone`) +
+            FfiConverterUInt.allocationSize(value.`filesTotal`) +
+            FfiConverterULong.allocationSize(value.`bytesDone`) +
+            FfiConverterULong.allocationSize(value.`bytesTotal`) +
+            FfiConverterString.allocationSize(value.`current`)
+    )
+
+    override fun write(value: ExtractProgress, buf: ByteBuffer) {
+            FfiConverterUInt.write(value.`filesDone`, buf)
+            FfiConverterUInt.write(value.`filesTotal`, buf)
+            FfiConverterULong.write(value.`bytesDone`, buf)
+            FfiConverterULong.write(value.`bytesTotal`, buf)
+            FfiConverterString.write(value.`current`, buf)
+    }
+}
+
+
+
+data class ExtractSummary (
+    var `outcome`: ExtractOutcome
+    , 
+    /**
+     * The destination folder's (or the one file's) final name.
+     */
+    var `targetName`: kotlin.String
+    , 
+    /**
+     * Files whose upload finished: exactly what is in the folder.
+     */
+    var `filesDone`: kotlin.UInt
+    , 
+    var `filesTotal`: kotlin.UInt
+    , 
+    var `skipped`: List<ArchiveSkippedEntry>
+    , 
+    var `renamed`: List<ArchiveRenamedEntry>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeExtractSummary: FfiConverterRustBuffer<ExtractSummary> {
+    override fun read(buf: ByteBuffer): ExtractSummary {
+        return ExtractSummary(
+            FfiConverterTypeExtractOutcome.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterSequenceTypeArchiveSkippedEntry.read(buf),
+            FfiConverterSequenceTypeArchiveRenamedEntry.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ExtractSummary) = (
+            FfiConverterTypeExtractOutcome.allocationSize(value.`outcome`) +
+            FfiConverterString.allocationSize(value.`targetName`) +
+            FfiConverterUInt.allocationSize(value.`filesDone`) +
+            FfiConverterUInt.allocationSize(value.`filesTotal`) +
+            FfiConverterSequenceTypeArchiveSkippedEntry.allocationSize(value.`skipped`) +
+            FfiConverterSequenceTypeArchiveRenamedEntry.allocationSize(value.`renamed`)
+    )
+
+    override fun write(value: ExtractSummary, buf: ByteBuffer) {
+            FfiConverterTypeExtractOutcome.write(value.`outcome`, buf)
+            FfiConverterString.write(value.`targetName`, buf)
+            FfiConverterUInt.write(value.`filesDone`, buf)
+            FfiConverterUInt.write(value.`filesTotal`, buf)
+            FfiConverterSequenceTypeArchiveSkippedEntry.write(value.`skipped`, buf)
+            FfiConverterSequenceTypeArchiveRenamedEntry.write(value.`renamed`, buf)
+    }
+}
+
+
+
 data class FileData (
     var `id`: kotlin.String
     , 
@@ -28596,6 +29308,960 @@ public object FfiConverterTypeWrappedRequestPrivate: FfiConverterRustBuffer<Wrap
             FfiConverterByteArray.write(value.`nonce`, buf)
     }
 }
+
+
+
+
+enum class ArchiveActionKind {
+    
+    EXTRACT,
+    EXTRACT_TO,
+    EXTRACT_SELECTED,
+    DOWNLOAD,
+    OPEN,
+    STOP,
+    OPEN_FOLDER,
+    MOVE_TO_TRASH,
+    CANCEL;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveActionKind: FfiConverterRustBuffer<ArchiveActionKind> {
+    override fun read(buf: ByteBuffer) = try {
+        ArchiveActionKind.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: ArchiveActionKind) = 4UL
+
+    override fun write(value: ArchiveActionKind, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+sealed class ArchiveCipher {
+    
+    object None : ArchiveCipher()
+    
+    
+    object ZipCrypto : ArchiveCipher()
+    
+    
+    /**
+     * WinZip AES: 128, 192 or 256 bits; AE-1 or AE-2.
+     */
+    data class Aes(
+        val `bits`: kotlin.UShort, 
+        val `ae`: kotlin.UByte) : ArchiveCipher()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveCipher : FfiConverterRustBuffer<ArchiveCipher>{
+    override fun read(buf: ByteBuffer): ArchiveCipher {
+        return when(buf.getInt()) {
+            1 -> ArchiveCipher.None
+            2 -> ArchiveCipher.ZipCrypto
+            3 -> ArchiveCipher.Aes(
+                FfiConverterUShort.read(buf),
+                FfiConverterUByte.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: ArchiveCipher) = when(value) {
+        is ArchiveCipher.None -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveCipher.ZipCrypto -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveCipher.Aes -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterUShort.allocationSize(value.`bits`)
+                + FfiConverterUByte.allocationSize(value.`ae`)
+            )
+        }
+    }
+
+    override fun write(value: ArchiveCipher, buf: ByteBuffer) {
+        when(value) {
+            is ArchiveCipher.None -> {
+                buf.putInt(1)
+                Unit
+            }
+            is ArchiveCipher.ZipCrypto -> {
+                buf.putInt(2)
+                Unit
+            }
+            is ArchiveCipher.Aes -> {
+                buf.putInt(3)
+                FfiConverterUShort.write(value.`bits`, buf)
+                FfiConverterUByte.write(value.`ae`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
+enum class ArchiveEntryKind {
+    
+    FILE,
+    FOLDER,
+    SYMLINK,
+    HARD_LINK,
+    DEVICE,
+    OTHER;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveEntryKind: FfiConverterRustBuffer<ArchiveEntryKind> {
+    override fun read(buf: ByteBuffer) = try {
+        ArchiveEntryKind.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: ArchiveEntryKind) = 4UL
+
+    override fun write(value: ArchiveEntryKind, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class ArchiveFormat {
+    
+    ZIP,
+    TAR,
+    TGZ,
+    GZ;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveFormat: FfiConverterRustBuffer<ArchiveFormat> {
+    override fun read(buf: ByteBuffer) = try {
+        ArchiveFormat.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: ArchiveFormat) = 4UL
+
+    override fun write(value: ArchiveFormat, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+sealed class ArchiveListResult {
+    
+    data class Listed(
+        val `listing`: uniffi.beebeeb_uniffi.ArchiveListing) : ArchiveListResult()
+        
+    {
+        
+
+        companion object
+    }
+    
+    data class Refused(
+        val `refusal`: uniffi.beebeeb_uniffi.ArchiveRefusal, 
+        val `text`: uniffi.beebeeb_uniffi.ArchiveText) : ArchiveListResult()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveListResult : FfiConverterRustBuffer<ArchiveListResult>{
+    override fun read(buf: ByteBuffer): ArchiveListResult {
+        return when(buf.getInt()) {
+            1 -> ArchiveListResult.Listed(
+                FfiConverterTypeArchiveListing.read(buf),
+                )
+            2 -> ArchiveListResult.Refused(
+                FfiConverterTypeArchiveRefusal.read(buf),
+                FfiConverterTypeArchiveText.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: ArchiveListResult) = when(value) {
+        is ArchiveListResult.Listed -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeArchiveListing.allocationSize(value.`listing`)
+            )
+        }
+        is ArchiveListResult.Refused -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeArchiveRefusal.allocationSize(value.`refusal`)
+                + FfiConverterTypeArchiveText.allocationSize(value.`text`)
+            )
+        }
+    }
+
+    override fun write(value: ArchiveListResult, buf: ByteBuffer) {
+        when(value) {
+            is ArchiveListResult.Listed -> {
+                buf.putInt(1)
+                FfiConverterTypeArchiveListing.write(value.`listing`, buf)
+                Unit
+            }
+            is ArchiveListResult.Refused -> {
+                buf.putInt(2)
+                FfiConverterTypeArchiveRefusal.write(value.`refusal`, buf)
+                FfiConverterTypeArchiveText.write(value.`text`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+sealed class ArchivePreviewState {
+    
+    object Reading : ArchivePreviewState()
+    
+    
+    object Listed : ArchivePreviewState()
+    
+    
+    data class NeedsPassword(
+        val `wrong`: kotlin.Boolean) : ArchivePreviewState()
+        
+    {
+        
+
+        companion object
+    }
+    
+    object Extracting : ArchivePreviewState()
+    
+    
+    object Finished : ArchivePreviewState()
+    
+    
+    object Refused : ArchivePreviewState()
+    
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchivePreviewState : FfiConverterRustBuffer<ArchivePreviewState>{
+    override fun read(buf: ByteBuffer): ArchivePreviewState {
+        return when(buf.getInt()) {
+            1 -> ArchivePreviewState.Reading
+            2 -> ArchivePreviewState.Listed
+            3 -> ArchivePreviewState.NeedsPassword(
+                FfiConverterBoolean.read(buf),
+                )
+            4 -> ArchivePreviewState.Extracting
+            5 -> ArchivePreviewState.Finished
+            6 -> ArchivePreviewState.Refused
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: ArchivePreviewState) = when(value) {
+        is ArchivePreviewState.Reading -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchivePreviewState.Listed -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchivePreviewState.NeedsPassword -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterBoolean.allocationSize(value.`wrong`)
+            )
+        }
+        is ArchivePreviewState.Extracting -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchivePreviewState.Finished -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchivePreviewState.Refused -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+    }
+
+    override fun write(value: ArchivePreviewState, buf: ByteBuffer) {
+        when(value) {
+            is ArchivePreviewState.Reading -> {
+                buf.putInt(1)
+                Unit
+            }
+            is ArchivePreviewState.Listed -> {
+                buf.putInt(2)
+                Unit
+            }
+            is ArchivePreviewState.NeedsPassword -> {
+                buf.putInt(3)
+                FfiConverterBoolean.write(value.`wrong`, buf)
+                Unit
+            }
+            is ArchivePreviewState.Extracting -> {
+                buf.putInt(4)
+                Unit
+            }
+            is ArchivePreviewState.Finished -> {
+                buf.putInt(5)
+                Unit
+            }
+            is ArchivePreviewState.Refused -> {
+                buf.putInt(6)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
+enum class ArchiveProtection {
+    
+    NONE,
+    SOME,
+    ALL;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveProtection: FfiConverterRustBuffer<ArchiveProtection> {
+    override fun read(buf: ByteBuffer) = try {
+        ArchiveProtection.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: ArchiveProtection) = 4UL
+
+    override fun write(value: ArchiveProtection, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * Why a whole archive is refused; `format` is the binding name of a
+ * foreign one (`"rar"`, `"7z"`, `"xz"`, `"zstd"`, `"bzip2"`).
+ */
+sealed class ArchiveRefusal {
+    
+    object NotAnArchive : ArchiveRefusal()
+    
+    
+    data class Foreign(
+        val `format`: kotlin.String) : ArchiveRefusal()
+        
+    {
+        
+
+        companion object
+    }
+    
+    object SelfExtracting : ArchiveRefusal()
+    
+    
+    object Spanned : ArchiveRefusal()
+    
+    
+    object StrongEncryption : ArchiveRefusal()
+    
+    
+    object Damaged : ArchiveRefusal()
+    
+    
+    object Truncated : ArchiveRefusal()
+    
+    
+    object TooMany : ArchiveRefusal()
+    
+    
+    object Bomb : ArchiveRefusal()
+    
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveRefusal : FfiConverterRustBuffer<ArchiveRefusal>{
+    override fun read(buf: ByteBuffer): ArchiveRefusal {
+        return when(buf.getInt()) {
+            1 -> ArchiveRefusal.NotAnArchive
+            2 -> ArchiveRefusal.Foreign(
+                FfiConverterString.read(buf),
+                )
+            3 -> ArchiveRefusal.SelfExtracting
+            4 -> ArchiveRefusal.Spanned
+            5 -> ArchiveRefusal.StrongEncryption
+            6 -> ArchiveRefusal.Damaged
+            7 -> ArchiveRefusal.Truncated
+            8 -> ArchiveRefusal.TooMany
+            9 -> ArchiveRefusal.Bomb
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: ArchiveRefusal) = when(value) {
+        is ArchiveRefusal.NotAnArchive -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveRefusal.Foreign -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`format`)
+            )
+        }
+        is ArchiveRefusal.SelfExtracting -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveRefusal.Spanned -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveRefusal.StrongEncryption -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveRefusal.Damaged -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveRefusal.Truncated -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveRefusal.TooMany -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveRefusal.Bomb -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+    }
+
+    override fun write(value: ArchiveRefusal, buf: ByteBuffer) {
+        when(value) {
+            is ArchiveRefusal.NotAnArchive -> {
+                buf.putInt(1)
+                Unit
+            }
+            is ArchiveRefusal.Foreign -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`format`, buf)
+                Unit
+            }
+            is ArchiveRefusal.SelfExtracting -> {
+                buf.putInt(3)
+                Unit
+            }
+            is ArchiveRefusal.Spanned -> {
+                buf.putInt(4)
+                Unit
+            }
+            is ArchiveRefusal.StrongEncryption -> {
+                buf.putInt(5)
+                Unit
+            }
+            is ArchiveRefusal.Damaged -> {
+                buf.putInt(6)
+                Unit
+            }
+            is ArchiveRefusal.Truncated -> {
+                buf.putInt(7)
+                Unit
+            }
+            is ArchiveRefusal.TooMany -> {
+                buf.putInt(8)
+                Unit
+            }
+            is ArchiveRefusal.Bomb -> {
+                buf.putInt(9)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+/**
+ * Why an entry is listed but not extracted.
+ */
+sealed class ArchiveSkipReason {
+    
+    object Link : ArchiveSkipReason()
+    
+    
+    object Device : ArchiveSkipReason()
+    
+    
+    object OutsideFolder : ArchiveSkipReason()
+    
+    
+    object UnusableName : ArchiveSkipReason()
+    
+    
+    data class Method(
+        val `name`: kotlin.String) : ArchiveSkipReason()
+        
+    {
+        
+
+        companion object
+    }
+    
+    object TooLarge : ArchiveSkipReason()
+    
+    
+    object Bomb : ArchiveSkipReason()
+    
+    
+    object MacResource : ArchiveSkipReason()
+    
+    
+    object Corrupt : ArchiveSkipReason()
+    
+    
+    object OtherPassword : ArchiveSkipReason()
+    
+    
+    data class Unsupported(
+        val `what`: kotlin.String) : ArchiveSkipReason()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveSkipReason : FfiConverterRustBuffer<ArchiveSkipReason>{
+    override fun read(buf: ByteBuffer): ArchiveSkipReason {
+        return when(buf.getInt()) {
+            1 -> ArchiveSkipReason.Link
+            2 -> ArchiveSkipReason.Device
+            3 -> ArchiveSkipReason.OutsideFolder
+            4 -> ArchiveSkipReason.UnusableName
+            5 -> ArchiveSkipReason.Method(
+                FfiConverterString.read(buf),
+                )
+            6 -> ArchiveSkipReason.TooLarge
+            7 -> ArchiveSkipReason.Bomb
+            8 -> ArchiveSkipReason.MacResource
+            9 -> ArchiveSkipReason.Corrupt
+            10 -> ArchiveSkipReason.OtherPassword
+            11 -> ArchiveSkipReason.Unsupported(
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: ArchiveSkipReason) = when(value) {
+        is ArchiveSkipReason.Link -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveSkipReason.Device -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveSkipReason.OutsideFolder -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveSkipReason.UnusableName -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveSkipReason.Method -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`name`)
+            )
+        }
+        is ArchiveSkipReason.TooLarge -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveSkipReason.Bomb -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveSkipReason.MacResource -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveSkipReason.Corrupt -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveSkipReason.OtherPassword -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveSkipReason.Unsupported -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`what`)
+            )
+        }
+    }
+
+    override fun write(value: ArchiveSkipReason, buf: ByteBuffer) {
+        when(value) {
+            is ArchiveSkipReason.Link -> {
+                buf.putInt(1)
+                Unit
+            }
+            is ArchiveSkipReason.Device -> {
+                buf.putInt(2)
+                Unit
+            }
+            is ArchiveSkipReason.OutsideFolder -> {
+                buf.putInt(3)
+                Unit
+            }
+            is ArchiveSkipReason.UnusableName -> {
+                buf.putInt(4)
+                Unit
+            }
+            is ArchiveSkipReason.Method -> {
+                buf.putInt(5)
+                FfiConverterString.write(value.`name`, buf)
+                Unit
+            }
+            is ArchiveSkipReason.TooLarge -> {
+                buf.putInt(6)
+                Unit
+            }
+            is ArchiveSkipReason.Bomb -> {
+                buf.putInt(7)
+                Unit
+            }
+            is ArchiveSkipReason.MacResource -> {
+                buf.putInt(8)
+                Unit
+            }
+            is ArchiveSkipReason.Corrupt -> {
+                buf.putInt(9)
+                Unit
+            }
+            is ArchiveSkipReason.OtherPassword -> {
+                buf.putInt(10)
+                Unit
+            }
+            is ArchiveSkipReason.Unsupported -> {
+                buf.putInt(11)
+                FfiConverterString.write(value.`what`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+/**
+ * When an entry was last modified: an absolute time, or a zone-less DOS
+ * time shown as wall time.
+ */
+sealed class ArchiveTime {
+    
+    data class Utc(
+        val `unixMs`: kotlin.Long) : ArchiveTime()
+        
+    {
+        
+
+        companion object
+    }
+    
+    data class Local(
+        val `year`: kotlin.UShort, 
+        val `month`: kotlin.UByte, 
+        val `day`: kotlin.UByte, 
+        val `hour`: kotlin.UByte, 
+        val `minute`: kotlin.UByte, 
+        val `second`: kotlin.UByte) : ArchiveTime()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveTime : FfiConverterRustBuffer<ArchiveTime>{
+    override fun read(buf: ByteBuffer): ArchiveTime {
+        return when(buf.getInt()) {
+            1 -> ArchiveTime.Utc(
+                FfiConverterLong.read(buf),
+                )
+            2 -> ArchiveTime.Local(
+                FfiConverterUShort.read(buf),
+                FfiConverterUByte.read(buf),
+                FfiConverterUByte.read(buf),
+                FfiConverterUByte.read(buf),
+                FfiConverterUByte.read(buf),
+                FfiConverterUByte.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: ArchiveTime) = when(value) {
+        is ArchiveTime.Utc -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterLong.allocationSize(value.`unixMs`)
+            )
+        }
+        is ArchiveTime.Local -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterUShort.allocationSize(value.`year`)
+                + FfiConverterUByte.allocationSize(value.`month`)
+                + FfiConverterUByte.allocationSize(value.`day`)
+                + FfiConverterUByte.allocationSize(value.`hour`)
+                + FfiConverterUByte.allocationSize(value.`minute`)
+                + FfiConverterUByte.allocationSize(value.`second`)
+            )
+        }
+    }
+
+    override fun write(value: ArchiveTime, buf: ByteBuffer) {
+        when(value) {
+            is ArchiveTime.Utc -> {
+                buf.putInt(1)
+                FfiConverterLong.write(value.`unixMs`, buf)
+                Unit
+            }
+            is ArchiveTime.Local -> {
+                buf.putInt(2)
+                FfiConverterUShort.write(value.`year`, buf)
+                FfiConverterUByte.write(value.`month`, buf)
+                FfiConverterUByte.write(value.`day`, buf)
+                FfiConverterUByte.write(value.`hour`, buf)
+                FfiConverterUByte.write(value.`minute`, buf)
+                FfiConverterUByte.write(value.`second`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
 
 
 
@@ -30932,6 +32598,130 @@ public object FfiConverterTypeDirectWindowAnswerDto : FfiConverterRustBuffer<Dir
 
 
 
+enum class ExtractFailReason {
+    
+    STORAGE_FULL,
+    NETWORK,
+    DAMAGED,
+    CHANGED,
+    ACCOUNT_BLOCKED;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeExtractFailReason: FfiConverterRustBuffer<ExtractFailReason> {
+    override fun read(buf: ByteBuffer) = try {
+        ExtractFailReason.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: ExtractFailReason) = 4UL
+
+    override fun write(value: ExtractFailReason, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+sealed class ExtractOutcome {
+    
+    object Done : ExtractOutcome()
+    
+    
+    object Stopped : ExtractOutcome()
+    
+    
+    data class Failed(
+        val `reason`: uniffi.beebeeb_uniffi.ExtractFailReason) : ExtractOutcome()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeExtractOutcome : FfiConverterRustBuffer<ExtractOutcome>{
+    override fun read(buf: ByteBuffer): ExtractOutcome {
+        return when(buf.getInt()) {
+            1 -> ExtractOutcome.Done
+            2 -> ExtractOutcome.Stopped
+            3 -> ExtractOutcome.Failed(
+                FfiConverterTypeExtractFailReason.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: ExtractOutcome) = when(value) {
+        is ExtractOutcome.Done -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ExtractOutcome.Stopped -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ExtractOutcome.Failed -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeExtractFailReason.allocationSize(value.`reason`)
+            )
+        }
+    }
+
+    override fun write(value: ExtractOutcome, buf: ByteBuffer) {
+        when(value) {
+            is ExtractOutcome.Done -> {
+                buf.putInt(1)
+                Unit
+            }
+            is ExtractOutcome.Stopped -> {
+                buf.putInt(2)
+                Unit
+            }
+            is ExtractOutcome.Failed -> {
+                buf.putInt(3)
+                FfiConverterTypeExtractFailReason.write(value.`reason`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
 enum class NetworkSignal {
     
     OFFLINE,
@@ -33068,6 +34858,38 @@ public object FfiConverterOptionalTypeWriteTargetHandle: FfiConverterRustBuffer<
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeArchiveText: FfiConverterRustBuffer<ArchiveText?> {
+    override fun read(buf: ByteBuffer): ArchiveText? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeArchiveText.read(buf)
+    }
+
+    override fun allocationSize(value: ArchiveText?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeArchiveText.allocationSize(value)
+        }
+    }
+
+    override fun write(value: ArchiveText?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeArchiveText.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeAssetSnapshotData: FfiConverterRustBuffer<AssetSnapshotData?> {
     override fun read(buf: ByteBuffer): AssetSnapshotData? {
         if (buf.get().toInt() == 0) {
@@ -33484,6 +35306,70 @@ public object FfiConverterOptionalTypeRequestRenameTarget: FfiConverterRustBuffe
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeArchiveSkipReason: FfiConverterRustBuffer<ArchiveSkipReason?> {
+    override fun read(buf: ByteBuffer): ArchiveSkipReason? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeArchiveSkipReason.read(buf)
+    }
+
+    override fun allocationSize(value: ArchiveSkipReason?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeArchiveSkipReason.allocationSize(value)
+        }
+    }
+
+    override fun write(value: ArchiveSkipReason?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeArchiveSkipReason.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeArchiveTime: FfiConverterRustBuffer<ArchiveTime?> {
+    override fun read(buf: ByteBuffer): ArchiveTime? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeArchiveTime.read(buf)
+    }
+
+    override fun allocationSize(value: ArchiveTime?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeArchiveTime.allocationSize(value)
+        }
+    }
+
+    override fun write(value: ArchiveTime?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeArchiveTime.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeFileProgressCallback: FfiConverterRustBuffer<FileProgressCallback?> {
     override fun read(buf: ByteBuffer): FileProgressCallback? {
         if (buf.get().toInt() == 0) {
@@ -33696,6 +35582,34 @@ public object FfiConverterSequenceTypeAccountSessionData: FfiConverterRustBuffer
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeArchiveEntry: FfiConverterRustBuffer<List<ArchiveEntry>> {
+    override fun read(buf: ByteBuffer): List<ArchiveEntry> {
+        val len = buf.getInt()
+        return List<ArchiveEntry>(len) {
+            FfiConverterTypeArchiveEntry.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ArchiveEntry>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeArchiveEntry.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ArchiveEntry>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeArchiveEntry.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeArchiveEntryDto: FfiConverterRustBuffer<List<ArchiveEntryDto>> {
     override fun read(buf: ByteBuffer): List<ArchiveEntryDto> {
         val len = buf.getInt()
@@ -33714,6 +35628,174 @@ public object FfiConverterSequenceTypeArchiveEntryDto: FfiConverterRustBuffer<Li
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeArchiveEntryDto.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeArchivePreviewAction: FfiConverterRustBuffer<List<ArchivePreviewAction>> {
+    override fun read(buf: ByteBuffer): List<ArchivePreviewAction> {
+        val len = buf.getInt()
+        return List<ArchivePreviewAction>(len) {
+            FfiConverterTypeArchivePreviewAction.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ArchivePreviewAction>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeArchivePreviewAction.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ArchivePreviewAction>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeArchivePreviewAction.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeArchivePreviewRow: FfiConverterRustBuffer<List<ArchivePreviewRow>> {
+    override fun read(buf: ByteBuffer): List<ArchivePreviewRow> {
+        val len = buf.getInt()
+        return List<ArchivePreviewRow>(len) {
+            FfiConverterTypeArchivePreviewRow.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ArchivePreviewRow>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeArchivePreviewRow.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ArchivePreviewRow>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeArchivePreviewRow.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeArchiveRenamedEntry: FfiConverterRustBuffer<List<ArchiveRenamedEntry>> {
+    override fun read(buf: ByteBuffer): List<ArchiveRenamedEntry> {
+        val len = buf.getInt()
+        return List<ArchiveRenamedEntry>(len) {
+            FfiConverterTypeArchiveRenamedEntry.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ArchiveRenamedEntry>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeArchiveRenamedEntry.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ArchiveRenamedEntry>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeArchiveRenamedEntry.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeArchiveSkippedEntry: FfiConverterRustBuffer<List<ArchiveSkippedEntry>> {
+    override fun read(buf: ByteBuffer): List<ArchiveSkippedEntry> {
+        val len = buf.getInt()
+        return List<ArchiveSkippedEntry>(len) {
+            FfiConverterTypeArchiveSkippedEntry.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ArchiveSkippedEntry>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeArchiveSkippedEntry.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ArchiveSkippedEntry>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeArchiveSkippedEntry.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeArchiveText: FfiConverterRustBuffer<List<ArchiveText>> {
+    override fun read(buf: ByteBuffer): List<ArchiveText> {
+        val len = buf.getInt()
+        return List<ArchiveText>(len) {
+            FfiConverterTypeArchiveText.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ArchiveText>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeArchiveText.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ArchiveText>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeArchiveText.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeArchiveTextArg: FfiConverterRustBuffer<List<ArchiveTextArg>> {
+    override fun read(buf: ByteBuffer): List<ArchiveTextArg> {
+        val len = buf.getInt()
+        return List<ArchiveTextArg>(len) {
+            FfiConverterTypeArchiveTextArg.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ArchiveTextArg>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeArchiveTextArg.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ArchiveTextArg>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeArchiveTextArg.write(it, buf)
         }
     }
 }
@@ -34760,6 +36842,34 @@ public object FfiConverterSequenceTypeUploadData: FfiConverterRustBuffer<List<Up
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeArchiveActionKind: FfiConverterRustBuffer<List<ArchiveActionKind>> {
+    override fun read(buf: ByteBuffer): List<ArchiveActionKind> {
+        val len = buf.getInt()
+        return List<ArchiveActionKind>(len) {
+            FfiConverterTypeArchiveActionKind.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ArchiveActionKind>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeArchiveActionKind.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ArchiveActionKind>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeArchiveActionKind.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeBackupMergeStep: FfiConverterRustBuffer<List<BackupMergeStep>> {
     override fun read(buf: ByteBuffer): List<BackupMergeStep> {
         val len = buf.getInt()
@@ -35552,6 +37662,62 @@ public typealias FfiConverterTypeSecretString = FfiConverterString
     UniffiLib.uniffi_beebeeb_uniffi_fn_func_storage_format_si(
     
         FfiConverterLong.lower(`bytes`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * A count as the archive words show it (`1,234`).
+         */ fun `archiveCountLabel`(`n`: kotlin.ULong): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_archive_count_label(
+    
+        FfiConverterULong.lower(`n`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * List an archive already in memory (the vectors, a small attachment) on
+         * `platform` (`"native"`, `"browser"` or `"mobile_app"`). A large archive
+         * is listed by the archive service's range reads, never through this.
+         */
+    @Throws(CryptoException::class) fun `archiveList`(`bytes`: kotlin.ByteArray, `platform`: kotlin.String): ArchiveListResult {
+            return FfiConverterTypeArchiveListResult.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_archive_list(
+    
+        FfiConverterByteArray.lower(`bytes`),FfiConverterString.lower(`platform`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * A size as the archive words show it (`3.4 MB`).
+         */ fun `archiveSizeLabel`(`bytes`: kotlin.ULong): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_archive_size_label(
+    
+        FfiConverterULong.lower(`bytes`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Core's words for `key` (`"extract_done"`, ...) with `args`.
+         */
+    @Throws(CryptoException::class) fun `archiveText`(`key`: kotlin.String, `args`: List<ArchiveTextArg>): ArchiveText {
+            return FfiConverterTypeArchiveText.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_archive_text(
+    
+        FfiConverterString.lower(`key`),FfiConverterSequenceTypeArchiveTextArg.lower(`args`),_status)
 }
     )
     }
