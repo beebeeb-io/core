@@ -10,7 +10,7 @@ use beebeeb_client::auth::{
 };
 use beebeeb_client::devices::{
     AccountKeyMaterial, ApprovedDeviceLink, DeviceLinkAcknowledgement, DeviceLinkPoll, DeviceLinkQr,
-    PendingNewDeviceLink, PendingTypedApproval, PendingTypedLink, PendingTypedReceiver,
+    PendingNewDeviceLink, PendingTypedApproval, PendingTypedReceiver,
 };
 use beebeeb_core::kdf::MasterKey;
 use beebeeb_core::onboarding::{BreachPolicy, CeremonyConfig, PasswordPolicy};
@@ -30,25 +30,10 @@ fn unavailable() -> ServiceError {
     ServiceError::new(ServiceErrorKind::Unavailable)
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct DeviceLinkQrData {
-    pub session_id: Vec<u8>,
-    pub fingerprint: Vec<u8>,
-}
-
-impl From<DeviceLinkQr> for DeviceLinkQrData {
-    fn from(value: DeviceLinkQr) -> Self {
-        Self {
-            session_id: value.session_id().to_vec(),
-            fingerprint: value.fingerprint().to_vec(),
-        }
-    }
-}
-
-fn device_link_qr(value: DeviceLinkQrData) -> Result<DeviceLinkQr, ServiceError> {
-    let session_id: [u8; 16] = value.session_id.try_into().map_err(|_| invalid())?;
-    let fingerprint: [u8; 32] = value.fingerprint.try_into().map_err(|_| invalid())?;
-    Ok(DeviceLinkQr::from_parts(session_id, fingerprint))
+/// Core parses the raw text the camera scanned; Swift and Kotlin never pass
+/// session or fingerprint bytes.
+fn scanned_device_link_qr(scanned_qr: &str) -> Result<DeviceLinkQr, ServiceError> {
+    DeviceLinkQr::parse(scanned_qr).map_err(|_| invalid())
 }
 
 #[derive(uniffi::Object)]
@@ -68,14 +53,26 @@ impl DeviceLinkHandle {
         self.expires_at.clone()
     }
 
-    pub fn qr(&self) -> Result<DeviceLinkQrData, ServiceError> {
+    /// The text to render as this link's QR.
+    pub fn qr_payload(&self) -> Result<String, ServiceError> {
         self.state
             .lock()
             .map_err(|_| unavailable())?
             .as_ref()
             .ok_or_else(invalid)?
-            .qr()
-            .map(Into::into)
+            .qr_payload()
+            .map_err(|_| invalid())
+    }
+
+    /// The canonical device name this link reported.
+    pub fn device_name(&self) -> Result<String, ServiceError> {
+        self.state
+            .lock()
+            .map_err(|_| unavailable())?
+            .as_ref()
+            .ok_or_else(invalid)?
+            .device_name()
+            .map(ToOwned::to_owned)
             .map_err(|_| invalid())
     }
 
@@ -90,51 +87,34 @@ impl DeviceLinkHandle {
             .map_err(|_| invalid())
     }
 
-    pub fn begin_typed_path(&self) -> Result<TypedDeviceLinkStartData, ServiceError> {
+    /// Typed-code path: answer the approver's message (from
+    /// `typed_approval_message`). Consumes the link. Send the returned
+    /// `outbound_message` with `send_typed_new_device_message`, then poll with
+    /// `poll_typed_device_link`.
+    pub fn answer_typed_path(&self, approver_message: Vec<u8>) -> Result<TypedDeviceLinkAnswerData, ServiceError> {
         let pending = self
             .state
             .lock()
             .map_err(|_| unavailable())?
             .take()
             .ok_or_else(invalid)?;
-        let (pending, outbound_message) = pending.begin_typed_path().map_err(|_| invalid())?;
-        Ok(TypedDeviceLinkStartData {
-            handle: Arc::new(TypedDeviceLinkHandle {
-                state: Mutex::new(Some(pending)),
+        let (receiver, outbound_message) = pending.answer_typed_path(&approver_message).map_err(|_| invalid())?;
+        Ok(TypedDeviceLinkAnswerData {
+            handle: Arc::new(TypedDeviceReceiverHandle {
+                state: Mutex::new(Some(receiver)),
             }),
             outbound_message,
         })
     }
 }
 
-#[derive(Debug, uniffi::Object)]
-pub struct TypedDeviceLinkHandle {
-    state: Mutex<Option<PendingTypedLink>>,
-}
-
-#[uniffi::export]
-impl TypedDeviceLinkHandle {
-    pub fn finish(&self, peer_message: Vec<u8>) -> Result<Arc<TypedDeviceReceiverHandle>, ServiceError> {
-        let pending = self
-            .state
-            .lock()
-            .map_err(|_| unavailable())?
-            .take()
-            .ok_or_else(invalid)?;
-        let receiver = pending.finish(&peer_message).map_err(|_| invalid())?;
-        Ok(Arc::new(TypedDeviceReceiverHandle {
-            state: Mutex::new(Some(receiver)),
-        }))
-    }
-}
-
 #[derive(Debug, uniffi::Record)]
-pub struct TypedDeviceLinkStartData {
-    pub handle: Arc<TypedDeviceLinkHandle>,
+pub struct TypedDeviceLinkAnswerData {
+    pub handle: Arc<TypedDeviceReceiverHandle>,
     pub outbound_message: Vec<u8>,
 }
 
-#[derive(uniffi::Object)]
+#[derive(Debug, uniffi::Object)]
 pub struct TypedDeviceReceiverHandle {
     state: Mutex<Option<PendingTypedReceiver>>,
 }
@@ -144,10 +124,13 @@ pub struct TypedDeviceApprovalHandle {
     state: Mutex<Option<PendingTypedApproval>>,
 }
 
+/// The approver's start of a typed-code attempt. Show `device_name` while the
+/// person types: the new device's confirmation proves it reported that name.
 #[derive(Debug, uniffi::Record)]
 pub struct TypedDeviceApprovalStartData {
     pub handle: Arc<TypedDeviceApprovalHandle>,
     pub outbound_message: Vec<u8>,
+    pub device_name: String,
 }
 
 #[derive(Debug, uniffi::Object)]
@@ -285,19 +268,14 @@ impl DeviceServiceHandle {
             .map_err(map_client_error)
     }
 
-    pub fn approve_device_link(
-        &self,
-        id: String,
-        qr: DeviceLinkQrData,
-        typed_code: String,
-    ) -> Result<(), ServiceError> {
+    /// QR path. `scanned_qr` is the raw text the camera read from the new
+    /// device's screen. Without a camera use the typed-code path: the code
+    /// gives no protection against a substituted key on this one.
+    pub fn approve_device_link(&self, id: String, scanned_qr: String, typed_code: String) -> Result<(), ServiceError> {
+        let qr = scanned_device_link_qr(&scanned_qr)?;
         self.root
             .runtime
-            .block_on(
-                self.root
-                    .client
-                    .approve_device_link(&id, &device_link_qr(qr)?, &typed_code),
-            )
+            .block_on(self.root.client.approve_device_link(&id, &qr, &typed_code))
             .map_err(map_client_error)
     }
 
@@ -312,6 +290,7 @@ impl DeviceServiceHandle {
             .block_on(self.root.client.begin_typed_device_approval(&id, &typed_code))
             .map_err(|_| invalid())?;
         Ok(TypedDeviceApprovalStartData {
+            device_name: approval.device_name().to_owned(),
             handle: Arc::new(TypedDeviceApprovalHandle {
                 state: Mutex::new(Some(approval)),
             }),
@@ -319,6 +298,9 @@ impl DeviceServiceHandle {
         })
     }
 
+    /// Check the new device's answer and only then seal and send the account
+    /// key. A wrong code or a changed device name is
+    /// `ServiceError::Authentication`; the link is then denied.
     pub fn approve_typed_device_link(
         &self,
         approval: &TypedDeviceApprovalHandle,

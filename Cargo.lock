@@ -285,6 +285,7 @@ dependencies = [
  "bip39",
  "blake3",
  "chrono",
+ "curve25519-dalek",
  "flate2",
  "hex",
  "hkdf 0.12.4",

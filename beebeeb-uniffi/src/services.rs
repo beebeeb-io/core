@@ -172,6 +172,18 @@ pub(crate) fn map_client_error(error: impl std::error::Error + 'static) -> Servi
                 _ => {}
             }
         }
+        if let Some(device) = current.downcast_ref::<beebeeb_client::devices::DeviceError>() {
+            match device {
+                beebeeb_client::devices::DeviceError::ConfirmationFailed => return ServiceError::Authentication,
+                beebeeb_client::devices::DeviceError::Crypto => return ServiceError::Crypto,
+                beebeeb_client::devices::DeviceError::MalformedAnswer => return ServiceError::InvalidInput,
+                beebeeb_client::devices::DeviceError::Client(client) => {
+                    current = client;
+                    continue;
+                }
+                _ => {}
+            }
+        }
         if let Some(beebeeb_client::backup::BackupError::NotInBackups) =
             current.downcast_ref::<beebeeb_client::backup::BackupError>()
         {

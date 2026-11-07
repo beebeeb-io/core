@@ -275,19 +275,43 @@ const LABELS: &[Label] = &[
         "device_link::PAKE_IDENTITY_DOMAIN",
         device_link::PAKE_IDENTITY_DOMAIN,
         Slot::ProtocolContext,
-        "SPAKE2 symmetric identity; || link session id",
+        "SPAKE2 A/B identities; || link session id || role byte",
+    ),
+    label(
+        "device_link::PAKE_ADA_DOMAIN",
+        device_link::PAKE_ADA_DOMAIN,
+        Slot::Salt,
+        "SHA-256 domain prefix of the salted device-facts hash (ADa)",
+    ),
+    label(
+        "device_link::PAKE_TRANSCRIPT_DOMAIN",
+        device_link::PAKE_TRANSCRIPT_DOMAIN,
+        Slot::Salt,
+        "SHA-256 domain prefix of the typed-code transcript hash (the HKDF salt)",
+    ),
+    label(
+        "device_link::PAKE_CONFIRM_NEW_DEVICE_INFO",
+        device_link::PAKE_CONFIRM_NEW_DEVICE_INFO,
+        Slot::Info,
+        "SPAKE2 output, salt = transcript hash; the new device's confirmation key",
+    ),
+    label(
+        "device_link::PAKE_CONFIRM_APPROVER_INFO",
+        device_link::PAKE_CONFIRM_APPROVER_INFO,
+        Slot::Info,
+        "SPAKE2 output, salt = transcript hash; the approver's confirmation key",
     ),
     label(
         "device_link::PAKE_KEY_INFO",
         device_link::PAKE_KEY_INFO,
         Slot::Info,
-        "SPAKE2 shared output",
+        "SPAKE2 output, salt = transcript hash; the payload key",
     ),
     label(
         "device_link::PAKE_AAD_DOMAIN",
         device_link::PAKE_AAD_DOMAIN,
         Slot::Aad,
-        "AAD under the typed-code channel key",
+        "AAD under the typed-code payload key; || session id || direction byte",
     ),
     // key proof
     label(
@@ -406,7 +430,7 @@ const CROSS_SLOT_PREFIX_PAIRS: &[(&str, &str, &str)] = &[
     (
         "device_link::PAKE_AAD_DOMAIN",
         "device_link::PAKE_KEY_INFO",
-        "the domain is AES-GCM associated data under the typed-code channel key; the longer label is only the HKDF \
+        "the domain is AES-GCM associated data under the typed-code payload key; the longer label is only the HKDF \
          info that derives that key from the SPAKE2 output",
     ),
 ];
@@ -430,7 +454,7 @@ fn find(name: &str) -> &'static Label {
 
 #[test]
 fn every_label_is_distinct_and_no_id_carrying_info_is_a_prefix_of_another_info() {
-    assert_eq!(LABELS.len(), 48, "a label was added or removed: review the slot rules");
+    assert_eq!(LABELS.len(), 52, "a label was added or removed: review the slot rules");
     for (i, a) in LABELS.iter().enumerate() {
         assert!(!a.with.is_empty());
         for b in &LABELS[i + 1..] {
