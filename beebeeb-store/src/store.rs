@@ -11,6 +11,35 @@ use std::{
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Create `path` (and missing parents) owner-only on Unix.
+fn create_private_dir_all(path: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(path)
+}
+
+/// Create the file owner-only if it is missing, and tighten an existing one to
+/// `0600`. Elsewhere the platform's own protection applies (crate docs).
+fn restrict_to_owner(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|error| io_error(path, error))?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|error| io_error(path, error))?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
 /// A blocking connection to one account's database for one product.
 ///
 /// Each call finishes its transaction before returning. There are no callback
@@ -22,15 +51,30 @@ pub struct Store {
 
 impl Store {
     /// Opens or creates a database at a caller-selected account/product path.
+    ///
+    /// The database holds plaintext (see the crate documentation). On Unix it
+    /// is created owner-only (`0600`, and `0700` for directories this call
+    /// creates); SQLite gives its `-wal` and `-shm` sidecars the database's
+    /// mode, and an existing database and sidecars are tightened to `0600`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         if path.as_os_str().is_empty() {
             return Err(StoreError::InvalidValue("database path must not be empty"));
         }
         if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
-            std::fs::create_dir_all(parent).map_err(|error| io_error(parent, error))?;
+            create_private_dir_all(parent).map_err(|error| io_error(parent, error))?;
         }
-        Self::finish_open(Connection::open(path)?, Some(path.to_owned()))
+        restrict_to_owner(path)?;
+        let store = Self::finish_open(Connection::open(path)?, Some(path.to_owned()))?;
+        for sidecar in ["-wal", "-shm"] {
+            let mut name = path.as_os_str().to_owned();
+            name.push(sidecar);
+            let sidecar = PathBuf::from(name);
+            if sidecar.exists() {
+                restrict_to_owner(&sidecar)?;
+            }
+        }
+        Ok(store)
     }
 
     /// Opens an isolated in-memory store, primarily for tests.

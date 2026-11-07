@@ -219,3 +219,34 @@ fn sync_store_applies_only_the_changed_node_in_a_large_tree() {
 
     assert_eq!(store.load().unwrap(), after);
 }
+
+/// Core #74 crypto review, P3: the plaintext cache is owner-only on Unix: a new
+/// database and the sidecars SQLite creates for it are `0600`, the directory
+/// this call creates is `0700`, and an existing world-readable database is
+/// tightened on open.
+#[cfg(unix)]
+#[test]
+fn the_plaintext_database_and_its_sidecars_are_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("account").join("drive.sqlite");
+    let mut store = beebeeb_store::Store::open(&path).unwrap();
+    store.observe_file_version("file", 3).unwrap();
+    assert_eq!(mode(path.parent().unwrap()), 0o700);
+    for file in [
+        path.clone(),
+        path.with_extension("sqlite-wal"),
+        path.with_extension("sqlite-shm"),
+    ] {
+        assert!(file.exists(), "{} missing", file.display());
+        assert_eq!(mode(&file), 0o600, "{}", file.display());
+    }
+    drop(store);
+
+    let existing = dir.path().join("old.sqlite");
+    beebeeb_store::Store::open(&existing).unwrap();
+    std::fs::set_permissions(&existing, std::fs::Permissions::from_mode(0o644)).unwrap();
+    beebeeb_store::Store::open(&existing).unwrap();
+    assert_eq!(mode(&existing), 0o600);
+}
