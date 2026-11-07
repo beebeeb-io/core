@@ -313,7 +313,7 @@ const LABELS: &[Label] = &[
         "contact_keys::SAFETY_NUMBER_DOMAIN",
         contact_keys::SAFETY_NUMBER_DOMAIN,
         Slot::Salt,
-        "SHA-256 domain prefix over ordered contact-key fingerprints",
+        "SHA-512 prefix of each party's safety-number input (email, then key)",
     ),
     // opaque (inline literals)
     label(

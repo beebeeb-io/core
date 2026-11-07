@@ -50,3 +50,12 @@ secret, HKDF MAC key and complete HMAC transcript for the key-proof vector:
 ```sh
 python3 test-vectors/tools/check_key_proof.py test-vectors/vectors.json
 ```
+
+`make_safety_number_vectors.py` independently writes `test-vectors/safety_number.json`, the contact safety numbers
+(relayed-key pinning design D1 and D2: the email trimmed and lower-cased, then 5200 SHA-512 rounds with the key
+appended, as Signal does), with `hashlib` only. `contact_keys`' own test runs every row against core, and
+`scripts/check-test-vectors.sh` regenerates the file and fails on any byte that differs:
+
+```sh
+python3 -I test-vectors/tools/make_safety_number_vectors.py test-vectors/safety_number.json
+```

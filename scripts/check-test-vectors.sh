@@ -32,4 +32,7 @@ cmp test-vectors/direct_upload.json "$vector_tmp/test-vectors/direct_upload.json
 python3 "$vector_tmp/test-vectors/tools/make_direct_upload_pipeline_vectors.py"
 cmp test-vectors/direct_upload_pipeline.json "$vector_tmp/test-vectors/direct_upload_pipeline.json"
 
+python3 "$vector_tmp/test-vectors/tools/make_safety_number_vectors.py" "$vector_tmp/test-vectors/safety_number.json"
+cmp test-vectors/safety_number.json "$vector_tmp/test-vectors/safety_number.json"
+
 echo "all test-vector Python tools passed; generated files are unchanged"

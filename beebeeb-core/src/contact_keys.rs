@@ -1,10 +1,16 @@
 //! Pure contact-key fingerprints, safety numbers, and pin comparisons.
 
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, Sha512};
 use subtle::ConstantTimeEq;
 
+use crate::CoreError;
+
 pub(crate) const KEY_FINGERPRINT_DOMAIN: &[u8] = b"beebeeb/contact-key/fingerprint/v1";
-pub(crate) const SAFETY_NUMBER_DOMAIN: &[u8] = b"beebeeb/contact-key/safety-number/v1";
+/// Prefix of each party's safety-number input (relayed-key pinning design, D2).
+pub(crate) const SAFETY_NUMBER_DOMAIN: &[u8] = b"beebeeb-safety-number-v1";
+/// SHA-512 rounds per party, as in Signal: each try at grinding a key whose
+/// number matches costs this many hashes.
+pub const SAFETY_NUMBER_ROUNDS: u32 = 5200;
 
 /// The result of comparing a presented contact-key fingerprint with a pin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,19 +31,57 @@ pub fn key_fingerprint(public_key: &[u8]) -> [u8; 32] {
     hash.finalize().into()
 }
 
-/// Derive a symmetric safety number for two public keys.
+/// An account email in the server's stored form: trim, then Unicode lower case.
 ///
-/// Ordering is canonical, so both contacts display the same value regardless
-/// of which key is local. The returned bytes are display material, not a key.
-pub fn safety_number(a: &[u8], b: &[u8]) -> [u8; 32] {
-    let a = key_fingerprint(a);
-    let b = key_fingerprint(b);
-    let (first, second) = if a <= b { (&a, &b) } else { (&b, &a) };
-    let mut hash = Sha256::new();
-    hash.update(SAFETY_NUMBER_DOMAIN);
-    hash.update(first);
-    hash.update(second);
-    hash.finalize().into()
+/// No IDNA and no provider rewriting, so two addresses the server keeps apart
+/// as two accounts stay apart here too.
+pub fn normalize_email(raw: &str) -> String {
+    raw.trim().to_lowercase()
+}
+
+/// Derive the safety number two contacts compare out of band.
+///
+/// Each email is normalized first ([`normalize_email`]). Per party, the input
+/// is `"beebeeb-safety-number-v1" || u32_be(len(email)) || email || public_key`;
+/// it is hashed [`SAFETY_NUMBER_ROUNDS`] times as `h = SHA-512(h || public_key)`,
+/// and the first 30 bytes of the result, as six 5-byte chunks each taken as
+/// `u40_be mod 100000`, give 30 digits. The two parties' digits are sorted and
+/// joined, so both sides get the same 60 digits, shown as 12 groups of 5.
+///
+/// Only public data goes in; the digits are display material, not a key. An
+/// email longer than `u32::MAX` bytes is `InvalidInput`.
+pub fn safety_number(
+    email_a: &str,
+    public_key_a: &[u8; 32],
+    email_b: &str,
+    public_key_b: &[u8; 32],
+) -> Result<String, CoreError> {
+    let a = safety_number_half(email_a, public_key_a)?;
+    let b = safety_number_half(email_b, public_key_b)?;
+    Ok(if a <= b { a + &b } else { b + &a })
+}
+
+fn safety_number_half(email: &str, public_key: &[u8; 32]) -> Result<String, CoreError> {
+    let email = normalize_email(email);
+    let length =
+        u32::try_from(email.len()).map_err(|_| CoreError::InvalidInput("safety number: email is too long".into()))?;
+    let mut input = Vec::with_capacity(SAFETY_NUMBER_DOMAIN.len() + 4 + email.len() + public_key.len());
+    input.extend_from_slice(SAFETY_NUMBER_DOMAIN);
+    input.extend_from_slice(&length.to_be_bytes());
+    input.extend_from_slice(email.as_bytes());
+    input.extend_from_slice(public_key);
+    // Signal's iteration: every round hashes the previous value with the key
+    // appended, starting from the input itself.
+    let mut hash = Sha512::new().chain_update(&input).chain_update(public_key).finalize();
+    for _ in 1..SAFETY_NUMBER_ROUNDS {
+        hash = Sha512::new().chain_update(hash).chain_update(public_key).finalize();
+    }
+    let mut digits = String::with_capacity(30);
+    for chunk in hash[..30].chunks_exact(5) {
+        let value = chunk.iter().fold(0u64, |value, byte| (value << 8) | u64::from(*byte));
+        digits.push_str(&format!("{:05}", value % 100_000));
+    }
+    Ok(digits)
 }
 
 /// Compare a presented fingerprint with an optional remembered pin.
@@ -56,12 +100,71 @@ pub fn check_pin(remembered: Option<&[u8; 32]>, presented: &[u8; 32]) -> PinChec
 mod tests {
     use super::*;
 
+    #[derive(serde::Deserialize)]
+    struct SafetyNumberVectors {
+        domain: String,
+        rounds: u32,
+        vectors: Vec<SafetyNumberVector>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct SafetyNumberVector {
+        name: String,
+        email_a: String,
+        public_key_a_hex: String,
+        email_b: String,
+        public_key_b_hex: String,
+        party_a: String,
+        party_b: String,
+        safety_number: String,
+    }
+
+    fn key(hex_text: &str) -> [u8; 32] {
+        hex::decode(hex_text).unwrap().try_into().unwrap()
+    }
+
     #[test]
-    fn safety_number_is_symmetric_and_pin_checks_are_pure() {
+    fn safety_number_matches_the_independent_vectors() {
+        let doc: SafetyNumberVectors =
+            serde_json::from_str(include_str!("../../test-vectors/safety_number.json")).unwrap();
+        assert_eq!(doc.domain.as_bytes(), SAFETY_NUMBER_DOMAIN);
+        assert_eq!(doc.rounds, SAFETY_NUMBER_ROUNDS);
+        assert_eq!(doc.vectors.len(), 6);
+        for row in &doc.vectors {
+            let (a, b) = (key(&row.public_key_a_hex), key(&row.public_key_b_hex));
+            assert_eq!(
+                safety_number_half(&row.email_a, &a).unwrap(),
+                row.party_a,
+                "{}: party a",
+                row.name
+            );
+            assert_eq!(
+                safety_number_half(&row.email_b, &b).unwrap(),
+                row.party_b,
+                "{}: party b",
+                row.name
+            );
+            let number = safety_number(&row.email_a, &a, &row.email_b, &b).unwrap();
+            assert_eq!(number, row.safety_number, "{}: pair", row.name);
+            assert_eq!(
+                safety_number(&row.email_b, &b, &row.email_a, &a).unwrap(),
+                number,
+                "{}: both sides see the same number",
+                row.name
+            );
+            assert_eq!(number.len(), 60);
+            assert!(number.bytes().all(|digit| digit.is_ascii_digit()));
+        }
+        let by_name = |name: &str| &doc.vectors.iter().find(|row| row.name == name).unwrap().safety_number;
+        assert_eq!(by_name("typed_forms_normalize"), by_name("ascii"));
+        assert_ne!(by_name("other_email_same_key"), by_name("ascii"));
+        assert_ne!(by_name("other_key_same_email"), by_name("ascii"));
+    }
+
+    #[test]
+    fn pin_checks_are_pure() {
         let alice = [1u8; 32];
         let bob = [2u8; 32];
-        assert_eq!(safety_number(&alice, &bob), safety_number(&bob, &alice));
-
         let fingerprint = key_fingerprint(&alice);
         assert_eq!(check_pin(None, &fingerprint), PinCheck::New);
         assert_eq!(check_pin(Some(&fingerprint), &fingerprint), PinCheck::Unchanged);

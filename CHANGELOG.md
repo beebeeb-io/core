@@ -85,6 +85,10 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   exact locked-action allowlist.
 - Key-proof servers may export/import the 64-byte verifier state between requests. Keep it only in an
   expiring secret store and never log it.
+- `contact_keys::safety_number` now takes both parties' emails and keys and returns the 60-digit
+  number (12 groups of 5) that web and the apps show: per party, the trimmed, lower-cased email and the
+  key are hashed with 5200 SHA-512 rounds. `contact_keys::normalize_email` is the email form it uses.
+  The vectors are `test-vectors/safety_number.json`, written by an independent Python generator.
 
 ### File-format, transfer, and storage integrators
 
