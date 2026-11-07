@@ -105,7 +105,8 @@ fn advanced_account_and_platform_services_are_opaque_handles() {
     let platform = include_str!("../src/platform_services.rs");
     for symbol in [
         "DeviceLinkHandle",
-        "TypedDeviceLinkHandle",
+        "TypedDeviceApprovalHandle",
+        "TypedDeviceReceiverHandle",
         "DeviceApprovalHandle",
         "RecoveryAttemptHandle",
         "SignupServiceHandle",
