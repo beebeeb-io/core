@@ -265,12 +265,11 @@ impl FileServiceHandle {
         let session = self.root.session()?;
         self.root
             .runtime
-            .block_on(self.root.client.restore_version(
-                &session,
-                &store.store,
-                &file_id,
-                &version_id,
-            ))
+            .block_on(
+                self.root
+                    .client
+                    .restore_version(&session, &store.store, &file_id, &version_id),
+            )
             .map(|result| result.counter)
             .map_err(map_client_error)
     }

@@ -62,7 +62,10 @@ async fn a_device_clock_behind_the_server_does_not_block_a_ready_recovery() {
         client.recovery_status(&mut attempt).await.unwrap(),
         RecoveryState::Ready
     );
-    assert!(!attempt.waits(), "the server said ready, so the device must not show a wait");
+    assert!(
+        !attempt.waits(),
+        "the server said ready, so the device must not show a wait"
+    );
     client
         .complete_recovery(
             &attempt,
@@ -91,7 +94,10 @@ async fn a_device_clock_ahead_of_the_server_does_not_end_the_recovery_wait() {
         client.recovery_status(&mut attempt).await.unwrap(),
         RecoveryState::Pending
     );
-    assert!(attempt.waits(), "the server said pending, so the device must show the wait");
+    assert!(
+        attempt.waits(),
+        "the server said pending, so the device must show the wait"
+    );
     let requests = transport.request_count();
     assert!(matches!(
         client

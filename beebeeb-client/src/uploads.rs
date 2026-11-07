@@ -229,7 +229,6 @@ struct RestartIntent {
     delete_files: Vec<PathBuf>,
 }
 
-
 pub struct UploadService {
     client: Arc<Client>,
     store: Arc<Mutex<Store>>,
@@ -237,7 +236,6 @@ pub struct UploadService {
     events: broadcast::Sender<UploadEvent>,
     completion_handler: Mutex<Option<Arc<dyn UploadCompletionHandler>>>,
 }
-
 
 fn source_identity(path: &Path) -> Result<UploadSourceIdentity, UploadServiceError> {
     let metadata = std::fs::metadata(path).map_err(|_| UploadServiceError::Source)?;

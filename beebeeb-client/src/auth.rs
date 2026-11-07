@@ -415,7 +415,6 @@ pub(crate) fn sign_in_state(
     }))
 }
 
-
 fn decode_key_proof_challenge(value: &proposed::KeyProofChallenge) -> Result<CoreKeyProofChallenge, AuthError> {
     let nonce = decode_fixed_no_pad::<32>(&value.nonce).map_err(|_| AuthError::InvalidAnswer {
         step: "key-proof start",
