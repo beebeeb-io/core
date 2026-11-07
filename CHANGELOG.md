@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-07
+
 Additive on v0.2.2: the first pass's baseline and the pass gate when the notices could not be read (LD-0121, spec
 `2026-11-06-backup-from-source-design.md` Amendment 12c, Guus 2026-11-07 20:45). No v0.2.2 API is renamed,
 retyped or removed.
