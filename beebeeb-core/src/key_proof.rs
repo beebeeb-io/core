@@ -93,10 +93,19 @@ pub fn create_challenge() -> Result<(KeyProofChallenge, KeyProofVerifier), CoreE
         .try_fill_bytes(&mut *private)
         .and_then(|_| rand::rngs::OsRng.try_fill_bytes(&mut nonce))
         .map_err(|e| CoreError::Encryption(format!("OS randomness unavailable: {e}")))?;
-    challenge_from_parts(*private, nonce)
+    challenge_from_parts(private, nonce)
 }
 
 /// Answer a challenge from an opaque master-key handle.
+///
+/// **A hashed-DH oracle, by design.** The server picks `server_public`, so a
+/// hostile server learns `HMAC(HKDF(X25519(account_private, server_public)),
+/// transcript)` for a point of its choice. That reveals nothing usable: the
+/// shared secret only ever enters HKDF under `KEY_INFO` and then an HMAC over
+/// a domain-separated transcript, never a raw DH output, and no other
+/// derivation in core uses the account X25519 key with that info string.
+/// Small-order and other non-contributory points are refused. Core #74 crypto
+/// review, P3.
 pub fn answer_challenge(
     master_key: &MasterKey,
     binding: KeyProofBinding<'_>,
@@ -138,7 +147,7 @@ impl KeyProofVerifier {
         let state: &[u8; SERIALIZED_VERIFIER_LEN] = state
             .try_into()
             .map_err(|_| CoreError::InvalidInput("invalid key-proof verifier state length".into()))?;
-        let mut private = [0u8; 32];
+        let mut private = Zeroizing::new([0u8; 32]);
         private.copy_from_slice(&state[..32]);
         let mut nonce = [0u8; NONCE_LEN];
         nonce.copy_from_slice(&state[32..]);
@@ -181,15 +190,16 @@ impl KeyProofVerifier {
         server_private: [u8; 32],
         nonce: [u8; NONCE_LEN],
     ) -> Result<(KeyProofChallenge, Self), CoreError> {
-        challenge_from_parts(server_private, nonce)
+        challenge_from_parts(Zeroizing::new(server_private), nonce)
     }
 }
 
+/// Takes the private key already `Zeroizing`, so no caller keeps an unwiped
+/// stack copy of it.
 fn challenge_from_parts(
-    server_private: [u8; 32],
+    server_private: Zeroizing<[u8; 32]>,
     nonce: [u8; NONCE_LEN],
 ) -> Result<(KeyProofChallenge, KeyProofVerifier), CoreError> {
-    let server_private = Zeroizing::new(server_private);
     let server_secret = StaticSecret::from(*server_private);
     let server_public = PublicKey::from(&server_secret).to_bytes();
     if server_public == [0u8; 32] {

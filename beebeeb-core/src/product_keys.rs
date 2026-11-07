@@ -69,4 +69,22 @@ mod tests {
             derive_product_key(&master, Product::Pass).unwrap().as_bytes()
         );
     }
+
+    /// Known answers computed outside Rust (core #74 crypto review, P3), with
+    /// Python's `hmac`/`hashlib` as RFC 5869 HKDF-SHA256, no salt:
+    /// `hkdf(ikm=bytes([7])*32, info=b"beebeeb/product/pass/v1", L=32)`, and
+    /// the same for `chat`. A changed label or derivation fails here.
+    #[test]
+    fn product_subkeys_match_the_known_answers() {
+        let master = MasterKey::from_bytes([7u8; 32]);
+        let hex = |key: ProductKey| key.as_bytes().iter().map(|b| format!("{b:02x}")).collect::<String>();
+        assert_eq!(
+            hex(derive_product_key(&master, Product::Pass).unwrap()),
+            "c92036abc16bf2d550a6a140f8c2b5c2eacb0fe7b5f686c3adc75f17f1cd8cc8"
+        );
+        assert_eq!(
+            hex(derive_product_key(&master, Product::Chat).unwrap()),
+            "982ab04e45602d584d3e9b958286d25993d84e965f123f866a9582e349ad7cad"
+        );
+    }
 }
