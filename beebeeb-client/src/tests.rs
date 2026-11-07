@@ -184,7 +184,7 @@ fn process_death_restore_abandons_when_the_plaintext_source_changed() {
         modified_unix_ms: 1,
         content_hash: None,
     };
-    let planner =
+    let mut planner =
         BackgroundUploadPlanner::new("upload", "session", "file", directory.path(), 1024, 4, 1, original).unwrap();
     let changed = UploadSourceIdentity {
         size_bytes: 4,

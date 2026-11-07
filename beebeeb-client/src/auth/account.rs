@@ -9,7 +9,7 @@ impl Client {
             )
             .await?;
         Ok(AuthenticatorEnrollment {
-            secret: Zeroizing::new(answer.secret),
+            secret: answer.secret,
             qr_uri: answer.qr_uri,
         })
     }
@@ -54,7 +54,7 @@ impl Client {
 
 pub struct AuthenticatorEnrollment {
     secret: Zeroizing<String>,
-    qr_uri: Option<String>,
+    qr_uri: Option<Zeroizing<String>>,
 }
 
 struct ConfirmationToken {
@@ -227,7 +227,7 @@ impl AuthenticatorEnrollment {
     }
 
     pub fn qr_uri(&self) -> Option<&str> {
-        self.qr_uri.as_deref()
+        self.qr_uri.as_deref().map(String::as_str)
     }
 }
 

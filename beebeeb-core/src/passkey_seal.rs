@@ -70,7 +70,11 @@ impl PasskeySealedMasterKey {
     }
 }
 
-fn context(account_id: &[u8], credential_id: &[u8]) -> Result<Vec<u8>, CoreError> {
+/// AES-GCM associated data: `domain ‖ version ‖ u32_be(len) ‖ account ‖
+/// u32_be(len) ‖ credential`. The wire version byte is inside the AAD (crypto
+/// review, P3), so a later format cannot reuse a version-1 blob under
+/// another version byte. No 61-byte blob had shipped when this was added.
+fn context(version: u8, account_id: &[u8], credential_id: &[u8]) -> Result<Vec<u8>, CoreError> {
     if account_id.is_empty() || credential_id.is_empty() {
         return Err(CoreError::InvalidInput(
             "account id and credential id must not be empty".into(),
@@ -87,12 +91,13 @@ fn context(account_id: &[u8], credential_id: &[u8]) -> Result<Vec<u8>, CoreError
         u32::try_from(credential_id.len()).map_err(|_| CoreError::InvalidInput("credential id is too long".into()))?;
     let capacity = PASSKEY_SEAL_AAD_DOMAIN
         .len()
-        .checked_add(8)
+        .checked_add(9)
         .and_then(|n| n.checked_add(account_id.len()))
         .and_then(|n| n.checked_add(credential_id.len()))
         .ok_or_else(|| CoreError::InvalidInput("passkey-seal context is too long".into()))?;
     let mut aad = Vec::with_capacity(capacity);
     aad.extend_from_slice(PASSKEY_SEAL_AAD_DOMAIN);
+    aad.push(version);
     aad.extend_from_slice(&account_len.to_be_bytes());
     aad.extend_from_slice(account_id);
     aad.extend_from_slice(&credential_len.to_be_bytes());
@@ -122,7 +127,7 @@ pub fn seal_master_key(
     credential_id: &[u8],
 ) -> Result<PasskeySealedMasterKey, CoreError> {
     let key = wrapping_key(prf_output)?;
-    let aad = context(account_id, credential_id)?;
+    let aad = context(WIRE_VERSION, account_id, credential_id)?;
     let mut nonce = [0u8; NONCE_LEN];
     rand::rngs::OsRng
         .try_fill_bytes(&mut nonce)
@@ -149,7 +154,7 @@ pub fn open_master_key(
     credential_id: &[u8],
 ) -> Result<MasterKey, CoreError> {
     let key = wrapping_key(prf_output)?;
-    let aad = context(account_id, credential_id)?;
+    let aad = context(WIRE_VERSION, account_id, credential_id)?;
     let cipher = Aes256Gcm::new_from_slice(&*key).map_err(|_| CoreError::Decryption)?;
     let mut plaintext = Zeroizing::new(
         cipher
@@ -188,5 +193,31 @@ mod tests {
         let wire = sealed.to_bytes();
         assert_eq!(PasskeySealedMasterKey::from_bytes(&wire).unwrap(), sealed);
         assert!(PasskeySealedMasterKey::from_bytes(&wire[1..]).is_err());
+    }
+
+    #[test]
+    fn the_wire_version_is_inside_the_associated_data() {
+        let master = MasterKey::from_bytes([9u8; 32]);
+        let prf = [3u8; 32];
+        let sealed = seal_master_key(&master, &prf, b"account-a", b"credential-a").unwrap();
+        let cipher = Aes256Gcm::new_from_slice(&*wrapping_key(&prf).unwrap()).unwrap();
+        let open_with = |aad: &[u8]| {
+            cipher.decrypt(
+                Nonce::from_slice(&sealed.nonce),
+                Payload {
+                    msg: &sealed.ciphertext,
+                    aad,
+                },
+            )
+        };
+        let versioned = context(WIRE_VERSION, b"account-a", b"credential-a").unwrap();
+        assert!(open_with(&versioned).is_ok());
+        let mut unversioned = versioned.clone();
+        unversioned.remove(PASSKEY_SEAL_AAD_DOMAIN.len());
+        assert!(
+            open_with(&unversioned).is_err(),
+            "the version byte must be authenticated"
+        );
+        assert!(open_with(&context(2, b"account-a", b"credential-a").unwrap()).is_err());
     }
 }

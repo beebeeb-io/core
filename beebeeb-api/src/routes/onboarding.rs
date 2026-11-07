@@ -110,32 +110,36 @@ pub struct OnboardingFallback {
     pub url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct EmailStart {
     pub email: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pilot_key: Option<String>,
 }
+crate::redacted_debug!(EmailStart; show: [email]; hide: [pilot_key]);
 #[derive(Debug, Clone, Deserialize)]
 pub struct EmailStartResponse {
     pub message: String,
 }
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct EmailVerify {
     pub email: String,
     pub code: String,
 }
-#[derive(Debug, Clone, Deserialize)]
+crate::redacted_debug!(EmailVerify; show: [email]; hide: [code]);
+#[derive(Clone, Deserialize)]
 pub struct SignupTicket {
     pub signup_ticket: String,
 }
-#[derive(Debug, Clone, Serialize)]
+crate::redacted_debug!(SignupTicket; show: []; hide: [signup_ticket]);
+#[derive(Clone, Serialize)]
 pub struct RegistrationStart {
     pub email: String,
     pub signup_ticket: String,
     pub client_message: String,
 }
-#[derive(Debug, Clone, Serialize)]
+crate::redacted_debug!(RegistrationStart; show: [email, client_message]; hide: [signup_ticket]);
+#[derive(Clone, Serialize)]
 pub struct RegistrationFinish {
     pub email: String,
     pub client_message: String,
@@ -145,6 +149,7 @@ pub struct RegistrationFinish {
     pub signup_ticket: String,
     pub terms_version: String,
 }
+crate::redacted_debug!(RegistrationFinish; show: [email, client_message, hardware_id, x25519_public_key, recovery_check, terms_version]; hide: [signup_ticket]);
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RegistrationStartResponse {

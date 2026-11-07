@@ -2,7 +2,16 @@
 //!
 //! A caller supplies a distinct database path for every account and product.
 //! The database is deliberately not encrypted: decrypted names and other local
-//! metadata are stored as plaintext. On Apple platforms, the caller must put
+//! metadata are stored as plaintext. In plain words, a reader of the file sees
+//! every cached file and folder name (`nodes.decrypted_name`), MIME types,
+//! sizes and the tree shape; a writer can also reset the trust-on-first-use
+//! state that is kept here without authentication, the pinned contact keys
+//! (`contact_keys`) and the per-file version high-water marks (`file_versions`)
+//! that detect a server rollback. Keys and session tokens are never stored
+//! here. [`Store::open`] creates the file owner-only (`0600`) on Unix,
+//! including Android; the platform rules below cover the rest.
+//!
+//! On Apple platforms, the caller must put
 //! the database and decrypted cache files in a container protected with
 //! `NSFileProtectionCompleteUntilFirstUserAuthentication`, and must keep the
 //! database, its `-wal` and `-shm` sidecars, caches, and thumbnails out of

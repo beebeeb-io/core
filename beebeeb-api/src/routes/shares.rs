@@ -1,5 +1,6 @@
 use crate::{Endpoint, Method, RawEndpoint, request::component};
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Create {
@@ -12,7 +13,7 @@ pub struct Create {
     pub passphrase_hash: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct CreateLink {
     pub file_id: String,
     pub share_type: String,
@@ -22,15 +23,16 @@ pub struct CreateLink {
     #[serde(default)]
     pub max_opens: Option<i32>,
     #[serde(default)]
-    pub passphrase: Option<String>,
+    pub passphrase: Option<Zeroizing<String>>,
     #[serde(default)]
-    pub token: Option<String>,
+    pub token: Option<Zeroizing<String>>,
     #[serde(default)]
     pub owner_wrapped_key: Option<String>,
     #[serde(default)]
     pub owner_wrapped_token: Option<String>,
 }
-#[derive(Debug, Clone, Deserialize)]
+crate::redacted_debug!(CreateLink; show: [file_id, share_type, wrapped_file_key, expires_in_hours, max_opens, owner_wrapped_key, owner_wrapped_token]; hide: [passphrase, token]);
+#[derive(Clone, Deserialize)]
 pub struct Share {
     pub id: String,
     pub token: String,
@@ -41,6 +43,7 @@ pub struct Share {
     #[serde(flatten)]
     pub extra: super::ExtraFields,
 }
+crate::redacted_debug!(Share; show: [id, file_id, expires_at, extra]; hide: [token]);
 #[derive(Debug, Clone, Deserialize)]
 pub struct List {
     #[serde(default)]
@@ -51,7 +54,7 @@ pub struct RevokeResponse {
     #[serde(default)]
     pub message: Option<String>,
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct ChunkManifest {
     pub chunk_count: u32,
     pub size_bytes: u64,
@@ -59,6 +62,7 @@ pub struct ChunkManifest {
     pub download_token: String,
     pub download_token_expires_at: String,
 }
+crate::redacted_debug!(ChunkManifest; show: [chunk_count, size_bytes, chunks, download_token_expires_at]; hide: [download_token]);
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChunkDescription {
     pub index: u32,

@@ -176,3 +176,31 @@ fn non_success_uses_core_server_error_parser() {
         other => panic!("unexpected error: {other:?}"),
     }
 }
+
+/// Crypto review, P2-6: header values are redacted unless allow-listed,
+/// so the session cookie a sign-in answer sets never reaches a log.
+#[test]
+fn header_values_are_redacted_unless_allow_listed() {
+    let answer = Answer::new(
+        200,
+        vec![
+            beebeeb_api::Header::new("Set-Cookie", "bb_session=secret-cookie-value; HttpOnly"),
+            beebeeb_api::Header::new("Location", "https://storage.example/obj?X-Signature=secret-signature"),
+            beebeeb_api::Header::new("X-New-Server-Header", "secret-new-value"),
+            beebeeb_api::Header::new("Content-Type", "application/json"),
+            beebeeb_api::Header::new("Retry-After", "30"),
+        ],
+        b"{}".to_vec(),
+    );
+    let debug = format!("{answer:?}");
+    for secret in ["secret-cookie-value", "secret-signature", "secret-new-value"] {
+        assert!(!debug.contains(secret), "{secret} leaked: {debug}");
+    }
+    assert!(debug.contains("application/json"));
+    assert!(debug.contains("\"30\""));
+    assert_eq!(
+        debug.matches("[REDACTED]").count(),
+        3,
+        "the three headers outside the allow-list: {debug}"
+    );
+}

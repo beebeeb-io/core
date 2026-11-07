@@ -37,7 +37,7 @@ pub struct Session {
     #[serde(flatten)]
     pub extra: super::ExtraFields,
 }
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Register {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_key: Option<String>,
@@ -55,6 +55,7 @@ pub struct Register {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reported_name: Option<String>,
 }
+crate::redacted_debug!(Register; show: [client_key, hostname_encrypted, hostname, platform, bb_version, hardware_id, reported_name]; hide: [push_token]);
 #[derive(Debug, Clone, Serialize)]
 pub struct CreateSession {
     pub device_id: String,

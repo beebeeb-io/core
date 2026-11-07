@@ -10,6 +10,17 @@ fn default_expected() -> u8 {
     ExpectedChunkFormat::recorded_for(beebeeb_core::chunk_stream::WRITE_FORMAT).as_u8()
 }
 
+/// A metadata record with this format pin and no version commitment.
+fn pin(chunk_format: u8) -> NameMetadataDto {
+    NameMetadataDto {
+        name: "file".into(),
+        mime_type: None,
+        chunk_format,
+        version_id: None,
+        version_counter: None,
+    }
+}
+
 #[test]
 fn push_roundtrip_via_handles() {
     let mk = mk_handle();
@@ -26,7 +37,7 @@ fn push_roundtrip_via_handles() {
     assert_eq!(summary.chunk_count, 1);
     assert_eq!(summary.total_plaintext, data.len() as u64);
 
-    let dec = ChunkDecryptorHandle::for_push(&mk, file_id, default_expected()).unwrap();
+    let dec = ChunkDecryptorHandle::for_push(&mk, file_id, pin(default_expected())).unwrap();
     let out = dec.push_frame(frame.data).unwrap();
     assert_eq!(out.index, 0);
     assert_eq!(out.data, data);
@@ -64,11 +75,11 @@ fn handle_rejects_reorder_and_truncation() {
 
     for expected in [0u8, 2] {
         // Out of order: chunk 1 pushed first.
-        let dec = ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into(), expected).unwrap();
+        let dec = ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into(), pin(expected)).unwrap();
         assert!(dec.push_frame(frames[1].clone()).is_err());
 
         // Truncated: only chunk 0, then finish.
-        let dec = ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into(), expected).unwrap();
+        let dec = ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into(), pin(expected)).unwrap();
         dec.push_frame(frames[0].clone()).unwrap();
         assert!(
             dec.finish().is_err(),
@@ -77,7 +88,7 @@ fn handle_rejects_reorder_and_truncation() {
     }
     // Unknown expected-format codes are refused, not treated as "detect".
     for bad in [1u8, 3] {
-        assert!(ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into(), bad).is_err());
+        assert!(ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into(), pin(bad)).is_err());
     }
 }
 
@@ -94,7 +105,7 @@ fn handle_v2_pin_refuses_name_blob_as_frame0() {
     assert_eq!((meta.name.as_str(), meta.chunk_format), ("a.pdf", 2));
     let blob = parse_name_blob(&ne);
     let forged = [blob.nonce, blob.ciphertext].concat();
-    let dec = ChunkDecryptorHandle::for_push(&mk, id.into(), meta.chunk_format).unwrap();
+    let dec = ChunkDecryptorHandle::for_push(&mk, id.into(), pin(meta.chunk_format)).unwrap();
     assert!(dec.push_frame(forged).is_err());
     // A name written without a format reads back as 0 (unrecorded).
     let legacy = mk.encrypt_name(id.into(), "a.pdf".into(), None).unwrap();
@@ -152,15 +163,15 @@ fn handle_replace_of_a_v2_pinned_file_uses_the_recorded_pin() {
     let name = mk
         .encrypt_name_with_chunk_format(id.into(), "a.pdf".into(), None, 2)
         .unwrap();
-    let pin = mk.decrypt_file_metadata(id.into(), name).unwrap().chunk_format;
-    assert_eq!(pin, 2);
+    let recorded = mk.decrypt_file_metadata(id.into(), name).unwrap();
+    assert_eq!(recorded.chunk_format, 2);
     let data = b"replaced content of a v2-pinned file".to_vec();
     let enc = ChunkEncryptorHandle::for_push(&mk, id.into(), data.len() as u64, "mobile".into()).unwrap();
-    enc.apply_recorded_pin(pin).unwrap();
+    enc.apply_recorded_pin(recorded.chunk_format).unwrap();
     assert_eq!(enc.chunk_format().unwrap(), 2, "a v2-pinned file must be written as v2");
     let frame = enc.push_chunk(data.clone()).unwrap();
     enc.finish().unwrap();
-    let dec = ChunkDecryptorHandle::for_push(&mk, id.into(), pin).unwrap();
+    let dec = ChunkDecryptorHandle::for_push(&mk, id.into(), recorded).unwrap();
     assert_eq!(dec.push_frame(frame.data).unwrap().data, data);
     dec.finish().unwrap();
 
@@ -323,8 +334,8 @@ fn handle_with_file_key_and_random_access_frame_open() {
 
     // File-key decryptors (share recipient path): raw bytes and handle.
     for dec in [
-        ChunkDecryptorHandle::for_push_with_file_key(fk_bytes.clone(), "ffi-fk".into(), 2).unwrap(),
-        ChunkDecryptorHandle::for_push_with_file_key_handle(&fk, "ffi-fk".into(), 2).unwrap(),
+        ChunkDecryptorHandle::for_push_with_file_key(fk_bytes.clone(), "ffi-fk".into(), pin(2)).unwrap(),
+        ChunkDecryptorHandle::for_push_with_file_key_handle(&fk, "ffi-fk".into(), pin(2)).unwrap(),
     ] {
         let mut out = Vec::new();
         for f in &frames {
@@ -336,7 +347,7 @@ fn handle_with_file_key_and_random_access_frame_open() {
     }
 
     // Wrong file id with the right key fails.
-    let dec = ChunkDecryptorHandle::for_push_with_file_key_handle(&fk, "other".into(), 2).unwrap();
+    let dec = ChunkDecryptorHandle::for_push_with_file_key_handle(&fk, "other".into(), pin(2)).unwrap();
     assert!(dec.push_frame(frames[0].clone()).is_err());
 
     // Random access: right position + version opens; wrong position, last
@@ -435,7 +446,7 @@ fn wrong_key_decrypt_errors() {
     let enc = ChunkEncryptorHandle::for_push(&mk, "secret".into(), 5, "mobile".into()).unwrap();
     let frame = enc.push_chunk(b"hello".to_vec()).unwrap();
     let wrong = MasterKeyHandle::from_keychain_bytes(vec![9u8; 32]).unwrap();
-    let dec = ChunkDecryptorHandle::for_push(&wrong, "secret".into(), default_expected()).unwrap();
+    let dec = ChunkDecryptorHandle::for_push(&wrong, "secret".into(), pin(default_expected())).unwrap();
     assert!(dec.push_frame(frame.data).is_err());
 }
 
@@ -477,7 +488,7 @@ fn pull_file_roundtrip_via_handles() {
     let dec = ChunkDecryptorHandle::from_file(
         &mk,
         "pullfile".into(),
-        default_expected(),
+        pin(default_expected()),
         chunk_size,
         enc_path.to_string_lossy().into_owned(),
     )
@@ -489,4 +500,71 @@ fn pull_file_roundtrip_via_handles() {
     assert_eq!(recovered, content);
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Crypto review, P2-4: every decryptor constructor takes the record
+/// `decrypt_file_metadata` returned and enforces its version commitment, so an
+/// older complete upload of the same file is refused, through the master key
+/// and through a key handle alike.
+#[test]
+fn decryptors_from_metadata_refuse_another_upload_of_the_same_file() {
+    let mk = mk_handle();
+    let id = "ffi-replay";
+    let data = b"forty bytes of content for the replay ok".to_vec();
+    let upload = || {
+        let enc = ChunkEncryptorHandle::for_push(&mk, id.into(), data.len() as u64, "mobile".into()).unwrap();
+        let frame = enc.push_chunk(data.clone()).unwrap().data;
+        let version = enc.version_commitment(None).unwrap();
+        enc.finish().unwrap();
+        (frame, version)
+    };
+    let (older, _) = upload();
+    let (current, version) = upload();
+    let sealed = mk
+        .encrypt_name_with_version(
+            id.into(),
+            "a.txt".into(),
+            None,
+            2,
+            version.version_id,
+            version.version_counter,
+        )
+        .unwrap();
+    let file_key = FileKeyHandle::new(kdf::derive_file_key(
+        &kdf::MasterKey::from_bytes([7u8; 32]),
+        id.as_bytes(),
+    ));
+    let owner_record = || mk.decrypt_file_metadata(id.into(), sealed.clone()).unwrap();
+    let key_record = || file_key.decrypt_file_metadata(sealed.clone()).unwrap();
+    assert_eq!(owner_record().version_counter, Some(1));
+
+    let decryptors = || {
+        let record = key_record();
+        [
+            ChunkDecryptorHandle::for_push(&mk, id.into(), owner_record()).unwrap(),
+            ChunkDecryptorHandle::for_push_with_file_key_handle(&file_key, id.into(), key_record()).unwrap(),
+            ChunkDecryptorHandle::for_version_with_file_key_handle(
+                &file_key,
+                id.into(),
+                record.chunk_format,
+                record.version_id,
+                record.version_counter,
+            )
+            .unwrap(),
+        ]
+    };
+    for dec in decryptors() {
+        assert_eq!(dec.push_frame(current.clone()).unwrap().data, data);
+    }
+    for dec in decryptors() {
+        assert!(
+            dec.push_frame(older.clone()).is_err(),
+            "an older upload opened under the record"
+        );
+    }
+    assert!(
+        ChunkDecryptorHandle::for_version_with_file_key_handle(&file_key, id.into(), 2, key_record().version_id, None)
+            .is_err(),
+        "half a commitment is refused"
+    );
 }

@@ -65,13 +65,14 @@ pub struct SubmitResult {
     #[serde(default)]
     pub rejected: Vec<Rejected>,
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct StreamToken {
     #[serde(alias = "stream_token")]
     pub token: String,
     #[serde(default)]
     pub expires_at: Option<String>,
 }
+crate::redacted_debug!(StreamToken; show: [expires_at]; hide: [token]);
 
 pub fn snapshot() -> Endpoint<(), Snapshot> {
     Endpoint::new(Method::Get, "/api/v1/sync/snapshot", false).limits(0, 32 * 1024 * 1024)

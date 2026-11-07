@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use zeroize::{Zeroize, Zeroizing};
 
-use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor, ChunkFormat, ExpectedChunkFormat, SessionResume};
+use beebeeb_core::chunk_stream::{ChunkEncryptor, ChunkFormat, ExpectedChunkFormat, SessionResume};
 use beebeeb_core::client_meta;
 use beebeeb_core::constellation;
 use beebeeb_core::encrypt;
@@ -15,13 +15,19 @@ uniffi::setup_scaffolding!();
 mod account_services;
 mod archives;
 mod backup;
+mod chunk_decryptor;
+mod contacts;
 mod platform_services;
 mod request_seal;
+mod secret_types;
 mod services;
 
 pub use account_services::*;
 pub use archives::*;
+pub use chunk_decryptor::*;
+pub use contacts::*;
 pub use platform_services::*;
+pub use secret_types::*;
 pub use services::*;
 #[cfg(test)]
 mod folder_link_2237c {
@@ -2870,203 +2876,6 @@ impl ChunkEncryptorHandle {
     }
 }
 
-/// Stateful streaming decryptor handle. Single-consumer (see module note).
-#[derive(uniffi::Object)]
-pub struct ChunkDecryptorHandle {
-    inner: Mutex<Option<ChunkDecryptor>>,
-}
-
-impl ChunkDecryptorHandle {
-    fn with_inner<T, F: FnOnce(&mut ChunkDecryptor) -> T>(&self, f: F) -> Result<T, CryptoError> {
-        let mut guard = self.inner.lock().unwrap();
-        let dec = guard.as_mut().ok_or(CryptoError::InvalidInput {
-            detail: "chunk decryptor handle has been cleared".into(),
-        })?;
-        Ok(f(dec))
-    }
-
-    #[cfg(all(test, not(feature = "legacy-bindings")))]
-    fn for_push_with_file_key(
-        file_key: Vec<u8>,
-        file_id: String,
-        expected_chunk_format: u8,
-    ) -> Result<Arc<Self>, CryptoError> {
-        let file_key = Zeroizing::new(file_key);
-        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
-        let fk = file_key_from_slice(&file_key)?;
-        let dec = ChunkDecryptor::for_push_with_file_key(fk, &file_id, expected);
-        Ok(Arc::new(Self {
-            inner: Mutex::new(Some(dec)),
-        }))
-    }
-}
-
-#[uniffi::export]
-impl ChunkDecryptorHandle {
-    /// PULL constructor: stream-decrypt an encrypted file from disk.
-    /// `chunk_size_bytes` is the PLAINTEXT chunk size used at encryption (the wire
-    /// frame is `nonce(12) + chunk_size + tag(16)`). Errors if it is 0.
-    ///
-    /// `expected_chunk_format` (task 1908) comes from the file's encrypted
-    /// metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
-    #[uniffi::constructor]
-    pub fn from_file(
-        master_key: &MasterKeyHandle,
-        file_id: String,
-        expected_chunk_format: u8,
-        chunk_size_bytes: u64,
-        input_path: String,
-    ) -> Result<Arc<Self>, CryptoError> {
-        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
-        let file = std::fs::File::open(std::path::Path::new(&input_path)).map_err(|e| CryptoError::Io {
-            detail: format!("open input: {e}"),
-        })?;
-        let buf_cap = (chunk_size_bytes as usize)
-            .saturating_add(28)
-            .clamp(8 * 1024, 8 * 1024 * 1024);
-        let reader = std::io::BufReader::with_capacity(buf_cap, file);
-        let dec = master_key
-            .with_key(|mk| ChunkDecryptor::from_reader(mk, &file_id, expected, chunk_size_bytes, reader))??;
-        Ok(Arc::new(Self {
-            inner: Mutex::new(Some(dec)),
-        }))
-    }
-
-    /// PUSH constructor: the caller feeds wire frames via
-    /// [`push_frame`](Self::push_frame). Each frame is self-describing, so no chunk
-    /// size is needed.
-    ///
-    /// `expected_chunk_format` (task 1908) comes from the file's encrypted
-    /// metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
-    #[uniffi::constructor]
-    pub fn for_push(
-        master_key: &MasterKeyHandle,
-        file_id: String,
-        expected_chunk_format: u8,
-    ) -> Result<Arc<Self>, CryptoError> {
-        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
-        let dec = master_key.with_key(|mk| ChunkDecryptor::for_push(mk, &file_id, expected))?;
-        Ok(Arc::new(Self {
-            inner: Mutex::new(Some(dec)),
-        }))
-    }
-
-    /// Current/historical protected read. Pass the fields from the matching
-    /// `NameMetadataDto`; omit both only for unprotected legacy metadata.
-    #[uniffi::constructor]
-    pub fn for_version(
-        master_key: &MasterKeyHandle,
-        file_id: String,
-        expected_chunk_format: u8,
-        version_id: Option<Vec<u8>>,
-        version_counter: Option<u64>,
-    ) -> Result<Arc<Self>, CryptoError> {
-        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
-        let version = match (version_id, version_counter) {
-            (None, None) => None,
-            (Some(version_id), Some(counter)) => Some(version_commitment_from_parts(version_id, counter)?),
-            _ => {
-                return Err(CryptoError::InvalidInput {
-                    detail: "version_id and version_counter must be supplied together".into(),
-                });
-            }
-        };
-        let file_key = master_key.with_key(|mk| kdf::derive_file_key(mk, file_id.as_bytes()))?;
-        let dec = ChunkDecryptor::for_version_with_file_key(file_key, &file_id, expected, version);
-        Ok(Arc::new(Self {
-            inner: Mutex::new(Some(dec)),
-        }))
-    }
-
-    /// PUSH constructor from a [`FileKeyHandle`] — for callers that hold the
-    /// file key but not the owner's master key (share / shared-link recipients).
-    /// Preferred over [`for_push_with_file_key`](Self::for_push_with_file_key):
-    /// the raw key never reaches Swift/Kotlin. `file_id` must be the id the file
-    /// was uploaded under (bound into every v2 frame).
-    #[uniffi::constructor]
-    pub fn for_push_with_file_key_handle(
-        file_key: &FileKeyHandle,
-        file_id: String,
-        expected_chunk_format: u8,
-    ) -> Result<Arc<Self>, CryptoError> {
-        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
-        // Copy into a fresh zeroize-on-drop key owned by the decryptor
-        // (`FileKey::from_bytes` wipes its by-value input).
-        let fk = file_key.with_key(|fk| kdf::FileKey::from_bytes(*fk.as_bytes()))?;
-        let dec = ChunkDecryptor::for_push_with_file_key(fk, &file_id, expected);
-        Ok(Arc::new(Self {
-            inner: Mutex::new(Some(dec)),
-        }))
-    }
-
-    /// The file's chunk format (1 = v1 legacy, 2 = v2) once chunk 0 has been
-    /// opened; `None` before.
-    pub fn chunk_format(&self) -> Result<Option<u8>, CryptoError> {
-        self.with_inner(|d| d.format().map(ChunkFormat::as_u8))
-    }
-
-    /// v2: the upload's version id (chunk 0's 12-byte nonce) once chunk 0 has
-    /// authenticated — what a seeking reader passes to
-    /// `FileKeyHandle.decrypt_chunk_frame`. `None` before chunk 0 and for v1.
-    pub fn version_id(&self) -> Result<Option<Vec<u8>>, CryptoError> {
-        self.with_inner(|d| d.version_id().map(|v| v.to_vec()))
-    }
-
-    /// End-of-stream check, consuming the decryptor. MUST be called after the
-    /// last pushed frame: it fails if no frame was pushed or if a v2 file ended
-    /// before its last chunk (truncation). Treat an `Err` as a failed download
-    /// and discard the plaintext. The pull form runs the same check at EOF.
-    pub fn finish(&self) -> Result<ChunkDecryptorSummaryDto, CryptoError> {
-        let mut guard = self.inner.lock().unwrap();
-        let dec = guard.take().ok_or(CryptoError::InvalidInput {
-            detail: "chunk decryptor handle has been finished or cleared".into(),
-        })?;
-        let summary = dec.finish().map_err(CryptoError::from)?;
-        Ok(ChunkDecryptorSummaryDto {
-            chunk_count: summary.chunk_count,
-            format: summary.format.as_u8(),
-        })
-    }
-
-    /// PULL: emit the next decrypted chunk, or `None` at clean EOF.
-    pub fn next_chunk(&self) -> Result<Option<DecryptedChunkDto>, CryptoError> {
-        let chunk = self.with_inner(|d| d.next_chunk())??;
-        Ok(chunk.map(|c| DecryptedChunkDto {
-            index: c.index,
-            data: c.data,
-        }))
-    }
-
-    /// PUSH: decrypt one caller-provided wire frame (`nonce || ciphertext || tag`).
-    pub fn push_frame(&self, frame: Vec<u8>) -> Result<DecryptedChunkDto, CryptoError> {
-        let chunk = self.with_inner(|d| d.push_frame(&frame))??;
-        Ok(DecryptedChunkDto {
-            index: chunk.index,
-            data: chunk.data,
-        })
-    }
-}
-
-#[cfg(feature = "legacy-bindings")]
-#[uniffi::export]
-impl ChunkDecryptorHandle {
-    /// Compatibility constructor for hosts that still hold a raw shared key.
-    #[uniffi::constructor]
-    pub fn for_push_with_file_key(
-        file_key: Vec<u8>,
-        file_id: String,
-        expected_chunk_format: u8,
-    ) -> Result<Arc<Self>, CryptoError> {
-        let file_key = Zeroizing::new(file_key);
-        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
-        let fk = file_key_from_slice(&file_key)?;
-        let dec = ChunkDecryptor::for_push_with_file_key(fk, &file_id, expected);
-        Ok(Arc::new(Self {
-            inner: Mutex::new(Some(dec)),
-        }))
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Streaming handle smoke tests (in-process — exercises the Send+Sync stateful
 // path). Verifies the Rust handle logic + roundtrip; NOT a real on-device upload.
@@ -3959,11 +3768,21 @@ pub struct ConstellationFrameDto {
     pub ring_phase: f32,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Clone, uniffi::Record)]
 pub struct ConstellationSessionInitDto {
     pub payload: ConstellationPayloadDto,
     pub confirm_code: String,
     pub ephemeral_private: Vec<u8>,
+}
+
+impl std::fmt::Debug for ConstellationSessionInitDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConstellationSessionInitDto")
+            .field("payload", &self.payload)
+            .field("confirm_code", &"[REDACTED]")
+            .field("ephemeral_private", &"[REDACTED]")
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, uniffi::Record)]

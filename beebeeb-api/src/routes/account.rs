@@ -1,5 +1,6 @@
 use crate::{Endpoint, Method, request::component};
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 #[derive(Clone, Serialize)]
 pub struct ChangePassword {
@@ -17,25 +18,28 @@ pub struct TotpSetupRequest {
     #[serde(default)]
     pub confirm_token: Option<String>,
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct TotpSetup {
-    pub secret: String,
+    pub secret: Zeroizing<String>,
+    /// The `otpauth://` URI, which carries the secret.
     #[serde(default)]
-    pub qr_uri: Option<String>,
+    pub qr_uri: Option<Zeroizing<String>>,
     #[serde(default)]
-    pub backup_codes: Vec<String>,
+    pub backup_codes: Zeroizing<Vec<String>>,
 }
+crate::redacted_debug!(TotpSetup; show: []; hide: [secret, qr_uri, backup_codes]);
 #[derive(Debug, Clone, Deserialize)]
 pub struct TotpChangeResponse {
     pub message: String,
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct DataExport {
     pub id: String,
     pub status: String,
     #[serde(default)]
     pub download_url: Option<String>,
 }
+crate::redacted_debug!(DataExport; show: [id, status]; hide: [download_url]);
 #[derive(Clone, Serialize)]
 pub struct DeleteRequest {
     pub password: String,

@@ -753,7 +753,8 @@ async fn qr_device_approval_transfers_the_account_key_between_two_clients() -> T
         .await
         .map_err(|error| format!("locked new device could not start QR link: {error}"))?;
     let id = pending.id().to_owned();
-    let qr = pending.qr()?;
+    // The approver gets the QR only from scanned text.
+    let qr = beebeeb_client::devices::DeviceLinkQr::parse(&pending.qr_payload()?)?;
     let code = pending.typed_code()?.to_owned();
     account
         .client
@@ -792,30 +793,34 @@ async fn typed_device_approval_uses_the_client_session_id_between_two_clients() 
         .await?;
     let id = pending.id().to_owned();
     let typed_code = pending.typed_code()?.to_owned();
-    let (new_side, new_message) = pending.begin_typed_path()?;
-    new_device
-        .send_device_link_pake(&id, beebeeb_api::proposed::DeviceLinkRole::NewDevice, &new_message)
-        .await?;
+    // Relay order: the approver speaks first, the new device answers with its
+    // confirmation, and the approver checks it before sealing.
     let (approver, approver_message) = account
         .client
         .begin_typed_device_approval(&id, &typed_code)
         .await
         .map_err(|error| format!("approver could not start typed PAKE from server session_id: {error}"))?;
+    if approver.device_name() != "live typed device" {
+        return Err("the relay did not return the canonical device name".into());
+    }
     account
         .client
         .send_device_link_pake(&id, beebeeb_api::proposed::DeviceLinkRole::Approver, &approver_message)
+        .await?;
+    let relayed_approver = new_device
+        .get_device_link_pake(&id, beebeeb_api::proposed::DeviceLinkRole::NewDevice)
+        .await?
+        .ok_or("server did not relay the approver PAKE message")?;
+    let (mut receiver, new_message) = pending.answer_typed_path(&relayed_approver)?;
+    new_device
+        .send_device_link_pake(&id, beebeeb_api::proposed::DeviceLinkRole::NewDevice, &new_message)
         .await?;
     let relayed_new = account
         .client
         .get_device_link_pake(&id, beebeeb_api::proposed::DeviceLinkRole::Approver)
         .await?
         .ok_or("server did not relay the new-device PAKE message")?;
-    let relayed_approver = new_device
-        .get_device_link_pake(&id, beebeeb_api::proposed::DeviceLinkRole::NewDevice)
-        .await?
-        .ok_or("server did not relay the approver PAKE message")?;
     account.client.approve_typed_device_link(approver, &relayed_new).await?;
-    let mut receiver = new_side.finish(&relayed_approver)?;
     let DeviceLinkPoll::Approved(approved) = new_device.poll_typed_device_link(&mut receiver).await? else {
         return Err("typed link did not become approved after PAKE completion".into());
     };
@@ -914,7 +919,7 @@ async fn recovery_replaces_a_lost_authenticator() -> TestResult {
             &account.email,
             RecoveryChanges {
                 new_authenticator: Some(Zeroizing::new(replacement_secret.into())),
-                authenticator_code: Some(totp_now(replacement_secret)?),
+                authenticator_code: Some(Zeroizing::new(totp_now(replacement_secret)?)),
                 ..RecoveryChanges::default()
             },
         )
@@ -973,7 +978,7 @@ async fn recovery_replaces_a_lost_email_address() -> TestResult {
             RecoveryChanges {
                 new_password: Some(Zeroizing::new(account.password.clone())),
                 new_email: Some(replacement_email),
-                email_verification_code: Some(code),
+                email_verification_code: Some(Zeroizing::new(code)),
                 ..RecoveryChanges::default()
             },
         )

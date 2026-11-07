@@ -53,8 +53,18 @@ impl UploadService {
             if metadata.chunk_format != ExpectedChunkFormat::V2 {
                 return Err(UploadServiceError::Encryption);
             }
-            replacement.previous_version_counter =
-                Some(metadata.version.ok_or(UploadServiceError::Encryption)?.counter);
+            // The new version is max(remembered, served) + 1: the metadata
+            // comes from the server, which could serve an older record and make
+            // this version reuse a counter already seen (crypto
+            // review, P3).
+            let served = metadata.version.ok_or(UploadServiceError::Encryption)?.counter;
+            let remembered = self
+                .store
+                .lock()
+                .map_err(|_| UploadServiceError::State)?
+                .highest_file_version(&replacement.file_id)
+                .map_err(|_| UploadServiceError::State)?;
+            replacement.previous_version_counter = Some(remembered.map_or(served, |highest| highest.max(served)));
         }
         let source_identity = source_identity(&request.source_path)?;
         let item_id = request

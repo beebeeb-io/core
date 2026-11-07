@@ -1,6 +1,7 @@
 use beebeeb_api::routes::{file_requests, folder_links, invites, shares};
 
 use crate::{Client, ClientError};
+use zeroize::Zeroizing;
 
 pub const DEFAULT_LINK_EXPIRY_HOURS: i64 = 30 * 24;
 
@@ -30,7 +31,7 @@ impl Client {
                 wrapped_file_key: wrapped_file_key.to_string(),
                 expires_in_hours: Some(expires_in_hours.unwrap_or(DEFAULT_LINK_EXPIRY_HOURS)),
                 max_opens: None,
-                passphrase,
+                passphrase: passphrase.map(Zeroizing::new),
                 token: None,
                 owner_wrapped_key: None,
                 owner_wrapped_token: None,

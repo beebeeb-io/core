@@ -68,6 +68,28 @@
       "public_key_a_hex": "0000000000000000000000000000000000000000000000000000000000000000",
       "public_key_b_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
       "safety_number": "026528907658805297918584834178158939819019987613064612124331"
+    },
+    {
+      "email_a": "\u0085alice@example.test\u00a0",
+      "email_b": "\u3000bob@example.test\u2028",
+      "name": "nel_and_nbsp_are_trimmed",
+      "note": "U+0085, U+00A0, U+3000 and U+2028 are Unicode White_Space, which str::trim strips: equals the ascii row",
+      "party_a": "192536614756334218385608659831",
+      "party_b": "485180034289198771452241879267",
+      "public_key_a_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "public_key_b_hex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "safety_number": "192536614756334218385608659831485180034289198771452241879267"
+    },
+    {
+      "email_a": "\ufeffalice@example.test",
+      "email_b": "bob@example.test",
+      "name": "bom_is_kept",
+      "note": "U+FEFF is not White_Space: str::trim keeps it (JavaScript's trim would not), so this differs from ascii",
+      "party_a": "623316269494279655442120005677",
+      "party_b": "485180034289198771452241879267",
+      "public_key_a_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "public_key_b_hex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "safety_number": "485180034289198771452241879267623316269494279655442120005677"
     }
   ]
 }

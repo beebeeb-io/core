@@ -111,9 +111,9 @@ impl std::fmt::Debug for RecoveryCancelToken {
 pub struct RecoveryChanges {
     pub new_password: Option<Zeroizing<String>>,
     pub new_email: Option<String>,
-    pub email_verification_code: Option<String>,
+    pub email_verification_code: Option<Zeroizing<String>>,
     pub new_authenticator: Option<Zeroizing<String>>,
-    pub authenticator_code: Option<String>,
+    pub authenticator_code: Option<Zeroizing<String>>,
     pub remove_authenticator: bool,
 }
 
@@ -300,7 +300,7 @@ impl Client {
                 (Some(secret), Some(code)) => Some(proposed::AuthenticatorChange {
                     action: "replace".into(),
                     secret: Some(secret.to_string()),
-                    code: Some(code),
+                    code: Some(code.to_string()),
                 }),
                 (None, None) => None,
                 _ => return Err(AuthError::MalformedAnswer),
@@ -312,7 +312,7 @@ impl Client {
                 &proposed::RecoveryComplete {
                     opaque_registration,
                     new_email,
-                    email_verification_code: changes.email_verification_code,
+                    email_verification_code: changes.email_verification_code.map(|code| code.to_string()),
                     authenticator,
                 },
                 &attempt.token,

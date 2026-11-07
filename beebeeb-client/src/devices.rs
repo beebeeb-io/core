@@ -8,8 +8,8 @@ use zeroize::Zeroizing;
 use crate::{Client, ClientError, SecretStore, Session, auth::PasswordAccepted};
 
 pub use beebeeb_core::device_link::{
-    AccountKeyMaterial, DeviceLinkQr, NewDeviceLink, PakeSealedAccountKeyMaterial, SealedAccountKeyMaterial,
-    TypedCodeChannel, TypedCodePake,
+    AccountKeyMaterial, ConfirmedTypedApproval, DeviceLinkQr, NewDeviceLink, PakeSealedAccountKeyMaterial,
+    SealedAccountKeyMaterial, TypedCodeApprover, TypedCodeReceiver, canonical_device_name,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -20,6 +20,11 @@ pub enum DeviceError {
     Crypto,
     #[error("the device-link answer is malformed")]
     MalformedAnswer,
+    /// The approver checked the new device's confirmation and it failed: the
+    /// typed code did not match, or the device's reported details were changed
+    /// on the way. Show it as a failed attempt; the link has been denied.
+    #[error("the code did not match, or the device's details were changed on the way")]
+    ConfirmationFailed,
     #[error("the device link is no longer pending")]
     NotPending,
     #[error("signing out the last device requires explicit confirmation")]
@@ -63,6 +68,22 @@ impl PendingNewDeviceLink {
         self.link.as_ref().map(NewDeviceLink::qr).ok_or(DeviceError::NotPending)
     }
 
+    /// The text to render as the QR ([`DeviceLinkQr::payload`]).
+    pub fn qr_payload(&self) -> Result<String, DeviceError> {
+        self.link
+            .as_ref()
+            .map(NewDeviceLink::qr_payload)
+            .ok_or(DeviceError::NotPending)
+    }
+
+    /// The canonical name this link reported to the relay.
+    pub fn device_name(&self) -> Result<&str, DeviceError> {
+        self.link
+            .as_ref()
+            .map(NewDeviceLink::device_name)
+            .ok_or(DeviceError::NotPending)
+    }
+
     pub fn typed_code(&self) -> Result<&str, DeviceError> {
         self.link
             .as_ref()
@@ -70,79 +91,72 @@ impl PendingNewDeviceLink {
             .ok_or(DeviceError::NotPending)
     }
 
-    pub fn begin_typed_path(mut self) -> Result<(PendingTypedLink, Vec<u8>), DeviceError> {
+    /// Typed-code path: answer the approver's one message (relayed under role
+    /// `approver`). Consumes the link; relay the returned message under role
+    /// `new_device`, then poll with [`Client::poll_typed_device_link`].
+    pub fn answer_typed_path(
+        mut self,
+        approver_message: &[u8],
+    ) -> Result<(PendingTypedReceiver, Vec<u8>), DeviceError> {
         let link = self.link.take().ok_or(DeviceError::NotPending)?;
-        let session_id = *link.qr().session_id();
-        let (pake, outbound) = link.start_pake()?;
+        let (receiver, outbound) = link.answer_typed_code(approver_message).map_err(|error| match error {
+            CoreError::InvalidInput(_) => DeviceError::MalformedAnswer,
+            _ => DeviceError::Crypto,
+        })?;
         Ok((
-            PendingTypedLink {
+            PendingTypedReceiver {
                 id: self.id,
-                session_id,
-                pake,
+                receiver: Some(receiver),
             },
             outbound,
         ))
     }
 }
 
-pub struct PendingTypedLink {
-    id: String,
-    session_id: [u8; 16],
-    pake: TypedCodePake,
-}
-
-impl std::fmt::Debug for PendingTypedLink {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PendingTypedLink")
-            .field("id", &self.id)
-            .field("pake", &"[REDACTED]")
-            .finish()
-    }
-}
-
-impl PendingTypedLink {
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    pub fn finish(self, peer_message: &[u8]) -> Result<PendingTypedReceiver, DeviceError> {
-        Ok(PendingTypedReceiver {
-            id: self.id,
-            session_id: self.session_id,
-            channel: Some(self.pake.finish(peer_message)?),
-        })
-    }
-}
-
 pub struct PendingTypedReceiver {
     id: String,
-    session_id: [u8; 16],
-    channel: Option<TypedCodeChannel>,
+    receiver: Option<TypedCodeReceiver>,
 }
 
 impl std::fmt::Debug for PendingTypedReceiver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PendingTypedReceiver")
             .field("id", &self.id)
-            .field("session_id", &self.session_id)
-            .field("channel", &self.channel.as_ref().map(|_| "[REDACTED]"))
+            .field("receiver", &self.receiver.as_ref().map(|_| "[REDACTED]"))
             .finish()
+    }
+}
+
+impl PendingTypedReceiver {
+    pub fn id(&self) -> &str {
+        &self.id
     }
 }
 
 pub struct PendingTypedApproval {
     id: String,
-    session_id: [u8; 16],
-    pake: TypedCodePake,
+    approver: TypedCodeApprover,
 }
 
 impl std::fmt::Debug for PendingTypedApproval {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PendingTypedApproval")
             .field("id", &self.id)
-            .field("session_id", &self.session_id)
-            .field("pake", &"[REDACTED]")
+            .field("approver", &self.approver)
             .finish()
+    }
+}
+
+impl PendingTypedApproval {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// The device name to show the person while they type. The new device's
+    /// confirmation proves it reported exactly this name; a relay that changed
+    /// it makes [`Client::approve_typed_device_link`] fail.
+    pub fn device_name(&self) -> &str {
+        self.approver.device_name()
     }
 }
 
@@ -190,18 +204,20 @@ impl Client {
     }
 
     pub async fn start_device_link(&self, device_name: String) -> Result<PendingNewDeviceLink, DeviceError> {
-        if device_name.trim().is_empty() {
-            return Err(DeviceError::MalformedAnswer);
-        }
         let id = uuid::Uuid::new_v4();
-        let link = NewDeviceLink::generate(*id.as_bytes())?;
+        // The canonical name is what goes to the relay and what the typed-code
+        // confirmation binds; a name with nothing visible is refused.
+        let link = NewDeviceLink::generate(*id.as_bytes(), &device_name).map_err(|error| match error {
+            CoreError::InvalidInput(_) => DeviceError::MalformedAnswer,
+            _ => DeviceError::Crypto,
+        })?;
         let answer = self
             .execute(
                 &proposed::start_device_link(),
                 &proposed::DeviceLinkStart {
                     session_id: STANDARD.encode(id.as_bytes()),
                     public_key: STANDARD.encode(link.public_key()),
-                    device_name,
+                    device_name: link.device_name().to_owned(),
                     hardware_id: None,
                 },
             )
@@ -242,8 +258,7 @@ impl Client {
                     nonce,
                     ciphertext,
                 )?;
-                let code = link.typed_code().to_owned();
-                let material = link.open(&code, sealed)?;
+                let material = link.open(sealed)?;
                 Ok(DeviceLinkPoll::Approved(ApprovedDeviceLink {
                     material,
                     acknowledgement: DeviceLinkAcknowledgement { id: pending.id.clone() },
@@ -265,6 +280,9 @@ impl Client {
             .map_err(Into::into)
     }
 
+    /// QR path. `qr` must be [`DeviceLinkQr::parse`] of text scanned from the
+    /// new device's screen; without a camera, use the typed-code path, because
+    /// the code alone gives no protection against a substituted key here.
     pub async fn approve_device_link(&self, id: &str, qr: &DeviceLinkQr, typed_code: &str) -> Result<(), DeviceError> {
         let session_key = self.session_key()?;
         let detail = self
@@ -299,6 +317,10 @@ impl Client {
         .map_err(Into::into)
     }
 
+    /// Typed-code path, approver side: start the one attempt for link `id`.
+    /// Relay the returned message under role `approver`, wait for the new
+    /// device's answer (role `new_device`), then call
+    /// [`Self::approve_typed_device_link`].
     pub async fn begin_typed_device_approval(
         &self,
         id: &str,
@@ -309,29 +331,47 @@ impl Client {
             return Err(DeviceError::NotPending);
         }
         let session_id = decode_fixed::<16>(Some(&detail.session_id))?;
-        let (pake, outbound) = TypedCodePake::start_approver(typed_code, &session_id)?;
+        let (approver, outbound) =
+            TypedCodeApprover::start(typed_code, &session_id, &detail.device_name).map_err(|error| match error {
+                CoreError::InvalidInput(_) => DeviceError::MalformedAnswer,
+                _ => DeviceError::Crypto,
+            })?;
         Ok((
             PendingTypedApproval {
                 id: id.to_owned(),
-                session_id,
-                pake,
+                approver,
             },
             outbound,
         ))
     }
 
+    /// Check the new device's confirmation, and only then seal the master key
+    /// and relay it. A failed check denies the link (so the new device sees it
+    /// end) and returns [`DeviceError::ConfirmationFailed`] for a wrong code or
+    /// changed device details, [`DeviceError::MalformedAnswer`] for a message
+    /// that is not a typed-code answer.
     pub async fn approve_typed_device_link(
         &self,
         approval: PendingTypedApproval,
         new_device_message: &[u8],
     ) -> Result<(), DeviceError> {
+        let PendingTypedApproval { id, approver } = approval;
+        let confirmed = match approver.confirm(new_device_message) {
+            Ok(confirmed) => confirmed,
+            Err(error) => {
+                let _ = self.deny_device_link(&id).await;
+                return Err(match error {
+                    CoreError::Decryption => DeviceError::ConfirmationFailed,
+                    _ => DeviceError::MalformedAnswer,
+                });
+            }
+        };
         let session_key = self.session_key()?;
         let key_bytes = Zeroizing::new(*session_key.master_key().to_bytes());
         let material = AccountKeyMaterial::from_master_key(MasterKey::from_bytes(*key_bytes));
-        let channel = approval.pake.finish(new_device_message)?;
-        let sealed = channel.seal(approval.session_id, material)?;
+        let sealed = confirmed.seal(material)?;
         self.execute_for_generation(
-            &proposed::approve_device_link(&approval.id),
+            &proposed::approve_device_link(&id),
             &proposed::DeviceLinkApproval {
                 approver_public: None,
                 nonce: STANDARD.encode(sealed.nonce()),
@@ -348,7 +388,7 @@ impl Client {
         &self,
         pending: &mut PendingTypedReceiver,
     ) -> Result<DeviceLinkPoll, DeviceError> {
-        if pending.channel.is_none() {
+        if pending.receiver.is_none() {
             return Err(DeviceError::NotPending);
         }
         let answer = self.execute(&proposed::device_link_result(&pending.id), &()).await?;
@@ -358,14 +398,14 @@ impl Client {
             proposed::DeviceLinkStatus::Expired => Ok(DeviceLinkPoll::Expired),
             proposed::DeviceLinkStatus::Acked => Err(DeviceError::NotPending),
             proposed::DeviceLinkStatus::Approved => {
-                let channel = pending.channel.take().ok_or(DeviceError::NotPending)?;
+                let receiver = pending.receiver.take().ok_or(DeviceError::NotPending)?;
                 if answer.approver_public.is_some() {
                     return Err(DeviceError::MalformedAnswer);
                 }
                 let nonce = decode_fixed::<12>(answer.nonce.as_deref())?;
                 let ciphertext = decode_vec(answer.ciphertext.as_deref())?;
-                let sealed = PakeSealedAccountKeyMaterial::from_parts(pending.session_id, nonce, ciphertext)?;
-                let material = channel.open(sealed)?;
+                let sealed = PakeSealedAccountKeyMaterial::from_parts(nonce, ciphertext)?;
+                let material = receiver.open(sealed)?;
                 Ok(DeviceLinkPoll::Approved(ApprovedDeviceLink {
                     material,
                     acknowledgement: DeviceLinkAcknowledgement { id: pending.id.clone() },

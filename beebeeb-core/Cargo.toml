@@ -35,9 +35,15 @@ x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
 # crypto-bigint 0.7 (RUSTSEC-2026-0387); `getrandom` supplies `Generate::generate()`
 # (the OS CSPRNG) now that `SecretKey::random` takes a rand_core 0.10 RNG.
 p256 = { version = "0.14", features = ["ecdh", "getrandom"] }
-# Symmetric SPAKE2 for the camera-less device-link path. The relay sees only
-# one-shot PAKE messages and never receives a password verifier.
+# SPAKE2 (asymmetric A/B roles: new device = A, approver = B) for the
+# camera-less device-link path. The relay sees only one-shot PAKE messages and
+# never receives a password verifier. spake2 0.4 does not wipe its copy of the
+# code or its scalars: the residual is recorded in device_link.rs.
 spake2 = "0.4"
+# The same curve25519-dalek spake2 and x25519-dalek already lock: the device
+# link refuses a small-order or non-canonical peer SPAKE2 element before the
+# exchange. No new package.
+curve25519-dalek = { version = "4.1", default-features = false, features = ["zeroize"] }
 reed-solomon-erasure = "6"
 serde.workspace = true
 serde_json.workspace = true

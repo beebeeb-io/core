@@ -47,20 +47,28 @@ Formats and keys:
   cross-client migration, never a refactor. A new derivation gets a new info string (`v2`); never change
   an existing one, never reinterpret existing bytes. Every label is listed in `label_table_tests.rs`.
 - Writers record the format they wrote; never drop a recorded 2; an unknown recorded value is an error,
-  never a fallback to detection. A new version of a file whose metadata records no format keeps that
-  unrecorded pin and is written as v2 (`chunk_format_for_pin`).
+  never a fallback to detection. Never record `chunk_format: 2` on a file id with v1 history: its new
+  versions are v2 under the kept unrecorded pin (`chunk_format_for_pin`) and MUST carry the version
+  commitment. A replacement's counter is above both the served record's and the store's high-water mark.
 - v2 frames never use the raw file key (key separation); `version_id` is frame 0's random 96-bit nonce.
 - File-content readers take the format and version commitment from authenticated metadata
   (`decrypt_file_metadata[_with_key]`, never `decrypt_name_metadata`, never a server field), pass
   `chunk_format` on, and prefer `version_id()` over re-reading chunk 0's first 12 bytes. They finish
   authentication before publishing plaintext: call `finish()` and discard all plaintext on any `Err`.
+  Every binding decryptor takes that decrypted record (`WasmChunkDecryptor`, `ChunkDecryptorHandle`) or
+  its fields (`for_version*`); a missing record or half a commitment is refused.
   The one exception is `beebeeb_transfer::range_session`: it releases only frames that `RangeOpener`
   authenticated at the requested index, for one recorded version, and only its `RangeOutcome::Whole`
   result means whole content; after any failure its sink is not reused until it is verifiably empty.
   Its invariants I1 to I9 are in [docs/agent-notes.md](docs/agent-notes.md).
 - Resume: `resume_policy` continues a stored session only for `(V1Legacy, V1Legacy)`. Otherwise the
   client MUST first `POST /api/v1/files/{id}/upload/abandon` and restart from chunk 0 in a new session;
-  never PUT into the old session again, never fall back to it.
+  never PUT into the old session again, never fall back to it. The one exception is a v2 upload
+  continuing itself: `beebeeb_transfer::background` resumes its own persisted session, same `version_id`
+  and counter, from the next unstaged chunk (`resume_encryptor`) only when the restored state holds the
+  whole commitment, the source identity matches and `staged_plaintext_matches`; anything else is
+  `AbandonAndRestart`. A staged frame reaches the OS only after the state naming it was persisted
+  (`to_bytes`), so a re-staged index never has a second frame on the server.
 - Generic no-AAD `encrypt_chunk`/`decrypt_chunk` stays for key wraps, search shards and v1 content, never
   to seal a name, thumbnail or note under a per-file key. Notes are written with
   `encrypt_note_for(file_key, text, pin)` and read with `decrypt_note`, never with
@@ -81,7 +89,9 @@ Formats and keys:
 - `ClientMetaKey`: the derived key is never exported (a `FileKey` would also fit `encrypt_chunk`);
   `current_file`/`detail` are discarded from S1, never sealed.
 - Contact safety numbers come only from `contact_keys::safety_number`, the one format web and the apps
-  show; its vectors are `test-vectors/safety_number.json`.
+  show (`safetyNumber`, `safety_number`); its vectors are `test-vectors/safety_number.json`. Emails go
+  through `normalize_email` (Rust `str::trim`, then lower case), never a client's own: JavaScript's
+  `trim` strips U+FEFF and keeps U+0085, so it would give a different number.
 
 Secrets, input and bindings:
 
@@ -101,6 +111,19 @@ Secrets, input and bindings:
   `derive_request_wrap_key`, `recover_from_phrase`, `derive_share_key`, `derive_x25519_private`,
   `x25519_shared_secret`, `transfer_derive_key` and `MasterKeyHandle::export_for_keychain`: a migration
   target, not precedent. A handle is an ordered cursor driven from one sequence.
+- Device link: the QR path takes only the scanned text (`DeviceLinkQr::parse`), never session or
+  fingerprint bytes from a host or the server; on that path the typed code gives no protection against
+  a substituted key. The typed-code path is SPAKE2 with key confirmation bound to the session, a fresh
+  salt and the canonical device name (`canonical_device_name`): the approver checks the new device's
+  tag before it seals anything and denies the link when it fails; the new device checks the approver's
+  tag before it opens. spake2 0.4 keeps unwiped copies of the code and its scalars (a recorded
+  residual, in `device_link.rs`). Device-link labels change only as a new `v3`, never in place.
+- Records that hold a secret redact it in `Debug` (`redacted_debug!` in `beebeeb-api`, `SecretString`
+  / `SecretBytes` across UniFFI); a secret a person types or copies is also `Zeroizing`. A header value
+  prints only when its name is in `DEBUG_VISIBLE_HEADERS`.
+- The local store (`beebeeb-store`) caches decrypted names, MIME types, sizes and the tree in plaintext
+  and holds no key or token; on Unix the database and its `-wal`/`-shm` are 0600. The Apple
+  data-protection class is the app's to set.
 - Native sign-in policy stays in `beebeeb-client`: password and any authenticator produce a locked
   session, then device approval or a passkey/recovery key plus email code supplies the account key,
   and key proof completes installation. Signup is web-only.

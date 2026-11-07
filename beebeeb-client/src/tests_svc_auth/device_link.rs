@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn hostile_device_fingerprint_is_rejected_before_approval_is_sent() {
-    let new_device = beebeeb_core::device_link::NewDeviceLink::generate([4; 16]).unwrap();
+    let new_device = beebeeb_core::device_link::NewDeviceLink::generate([4; 16], "reported").unwrap();
     let qr = new_device.qr();
     let transport = Arc::new(ScriptedTransport::json(
         200,
@@ -77,53 +77,33 @@ async fn approved_device_link_cannot_be_opened_twice() {
     ));
 }
 
-#[tokio::test]
-async fn typed_only_device_link_uses_the_existing_result_shape_once() {
+/// The typed-code exchange in relay order: the approver speaks first, the new
+/// device answers with its confirmation, and the approver checks it before it
+/// seals anything.
+async fn typed_exchange(
+    approver_code: Option<&str>,
+    relayed_device_name: &str,
+) -> (
+    Client,
+    Arc<ScriptedTransport>,
+    Result<(), DeviceError>,
+    crate::devices::PendingTypedReceiver,
+) {
     let (client, transport, pending, public_key) = started_link().await;
     let id = pending.id().to_owned();
-    let code = pending.typed_code().unwrap().to_owned();
+    let code = approver_code.map_or_else(|| pending.typed_code().unwrap().to_owned(), str::to_owned);
     let session_id = STANDARD.encode(pending.qr().unwrap().session_id());
-    let (new_device, new_device_message) = pending.begin_typed_path().unwrap();
 
-    transport.push_json(200, br#"{"ok":true}"#.to_vec());
-    client
-        .send_device_link_pake(
-            &id,
-            beebeeb_api::proposed::DeviceLinkRole::NewDevice,
-            &new_device_message,
-        )
-        .await
-        .unwrap();
-    transport.push_json(200, pending_link_detail(&id, &session_id, &public_key));
+    transport.push_json(200, link_detail(&id, &session_id, &public_key, relayed_device_name));
     let (approver, approver_message) = client.begin_typed_device_approval(&id, &code).await.unwrap();
+    assert_eq!(approver.device_name(), relayed_device_name);
     transport.push_json(200, br#"{"ok":true}"#.to_vec());
     client
         .send_device_link_pake(&id, beebeeb_api::proposed::DeviceLinkRole::Approver, &approver_message)
         .await
         .unwrap();
-    transport.push_json(
-        200,
-        serde_json::to_vec(&serde_json::json!({
-            "status": "ready",
-            "message": STANDARD.encode(&new_device_message),
-        }))
-        .unwrap(),
-    );
-    let relayed_new_device_message = client
-        .get_device_link_pake(&id, beebeeb_api::proposed::DeviceLinkRole::Approver)
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(transport.requests().last().unwrap().path().ends_with("?role=approver"));
 
-    transport.push_json(
-        200,
-        serde_json::to_vec(&serde_json::json!({
-            "status": "ready",
-            "message": STANDARD.encode(&approver_message),
-        }))
-        .unwrap(),
-    );
+    transport.push_json(200, pake_ready(&approver_message));
     let relayed_approver_message = client
         .get_device_link_pake(&id, beebeeb_api::proposed::DeviceLinkRole::NewDevice)
         .await
@@ -137,17 +117,43 @@ async fn typed_only_device_link_uses_the_existing_result_shape_once() {
             .path()
             .ends_with("?role=new_device")
     );
-
+    let (receiver, new_device_message) = pending.answer_typed_path(&relayed_approver_message).unwrap();
     transport.push_json(200, br#"{"ok":true}"#.to_vec());
     client
-        .approve_typed_device_link(approver, &relayed_new_device_message)
+        .send_device_link_pake(
+            &id,
+            beebeeb_api::proposed::DeviceLinkRole::NewDevice,
+            &new_device_message,
+        )
         .await
         .unwrap();
+
+    transport.push_json(200, pake_ready(&new_device_message));
+    let relayed_new_device_message = client
+        .get_device_link_pake(&id, beebeeb_api::proposed::DeviceLinkRole::Approver)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(transport.requests().last().unwrap().path().ends_with("?role=approver"));
+
+    transport.push_json(200, br#"{"ok":true}"#.to_vec());
+    let approved = client
+        .approve_typed_device_link(approver, &relayed_new_device_message)
+        .await;
+    (client, transport, approved, receiver)
+}
+
+#[tokio::test]
+async fn typed_device_link_confirms_before_sealing_and_opens_once() {
+    let (client, transport, approved, mut receiver) = typed_exchange(None, "reported device").await;
+    approved.unwrap();
     let approval = transport.requests().pop().unwrap();
+    assert!(approval.path().ends_with("/approve"));
     let approval: serde_json::Value = serde_json::from_slice(approval.body()).unwrap();
     assert!(approval.get("approver_public").is_none());
+    let ciphertext = STANDARD.decode(approval["ciphertext"].as_str().unwrap()).unwrap();
+    assert_eq!(ciphertext.len(), 80, "the approver's tag and the sealed key");
 
-    let mut receiver = new_device.finish(&relayed_approver_message).unwrap();
     transport.push_json(
         200,
         serde_json::to_vec(&serde_json::json!({
@@ -157,13 +163,79 @@ async fn typed_only_device_link_uses_the_existing_result_shape_once() {
         }))
         .unwrap(),
     );
-    assert!(matches!(
-        client.poll_typed_device_link(&mut receiver).await.unwrap(),
-        DeviceLinkPoll::Approved(_)
-    ));
+    match client.poll_typed_device_link(&mut receiver).await.unwrap() {
+        DeviceLinkPoll::Approved(approved) => {
+            assert_eq!(*approved.material.into_master_key().to_bytes(), [7u8; 32]);
+        }
+        other => panic!("expected an approval, got {other:?}"),
+    }
     assert!(matches!(
         client.poll_typed_device_link(&mut receiver).await,
         Err(DeviceError::NotPending)
+    ));
+}
+
+#[tokio::test]
+async fn approver_sees_a_wrong_code_and_seals_nothing() {
+    // "22222222" is a valid code; a generated code equals it with probability
+    // 2^-40, so this is the wrong code.
+    let (_, transport, approved, _) = typed_exchange(Some("2222-2222"), "reported device").await;
+    assert!(matches!(approved, Err(DeviceError::ConfirmationFailed)));
+    let requests = transport.requests();
+    assert!(requests.last().unwrap().path().ends_with("/deny"));
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.path().ends_with("/approve"))
+            .count(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn approver_sees_a_device_name_the_relay_rewrote() {
+    let (_, transport, approved, _) = typed_exchange(None, "Attacker's phone").await;
+    assert!(matches!(approved, Err(DeviceError::ConfirmationFailed)));
+    assert!(transport.requests().last().unwrap().path().ends_with("/deny"));
+}
+
+#[tokio::test]
+async fn approver_refuses_a_non_canonical_relayed_name_before_any_message() {
+    let (client, transport, pending, public_key) = started_link().await;
+    let id = pending.id().to_owned();
+    let code = pending.typed_code().unwrap().to_owned();
+    let session_id = STANDARD.encode(pending.qr().unwrap().session_id());
+    transport.push_json(
+        200,
+        link_detail(&id, &session_id, &public_key, "reported\u{202E}device"),
+    );
+    let before = transport.request_count();
+    assert!(matches!(
+        client.begin_typed_device_approval(&id, &code).await,
+        Err(DeviceError::MalformedAnswer)
+    ));
+    assert_eq!(transport.request_count(), before + 1);
+}
+
+#[tokio::test]
+async fn new_device_sends_its_canonical_name() {
+    let transport = Arc::new(ScriptedTransport::json(
+        200,
+        br#"{"expires_at":"2099-01-01T00:00:00Z"}"#.to_vec(),
+    ));
+    let client = Client::new(ClientConfig::for_tests(), transport.clone()).unwrap();
+    client.set_authentication("token", "account").unwrap();
+    let pending = client
+        .start_device_link("  reported\u{200B} device\n".into())
+        .await
+        .unwrap();
+    assert_eq!(pending.device_name().unwrap(), "reported device");
+    let request = transport.requests().pop().unwrap();
+    let value: serde_json::Value = serde_json::from_slice(request.body()).unwrap();
+    assert_eq!(value["device_name"], "reported device");
+    assert!(matches!(
+        client.start_device_link(" \u{200B} ".into()).await,
+        Err(DeviceError::MalformedAnswer)
     ));
 }
 
@@ -192,17 +264,16 @@ async fn device_link_result_shape_must_match_the_selected_path() {
     let id = typed_link.id().to_owned();
     let code = typed_link.typed_code().unwrap().to_owned();
     let session_id = STANDARD.encode(typed_link.qr().unwrap().session_id());
-    let (new_device, _) = typed_link.begin_typed_path().unwrap();
-    typed_transport.push_json(200, pending_link_detail(&id, &session_id, &public_key));
+    typed_transport.push_json(200, link_detail(&id, &session_id, &public_key, "reported device"));
     let (_approver, approver_message) = typed_client.begin_typed_device_approval(&id, &code).await.unwrap();
-    let mut typed_pending = new_device.finish(&approver_message).unwrap();
+    let (mut typed_pending, _) = typed_link.answer_typed_path(&approver_message).unwrap();
     typed_transport.push_json(
         200,
         serde_json::to_vec(&serde_json::json!({
             "status": "approved",
             "approver_public": STANDARD.encode([0u8; 32]),
             "nonce": STANDARD.encode([0u8; 12]),
-            "ciphertext": STANDARD.encode([0u8; 48]),
+            "ciphertext": STANDARD.encode([0u8; 80]),
         }))
         .unwrap(),
     );
@@ -240,12 +311,12 @@ async fn started_link() -> (
     (client, transport, pending, public.try_into().unwrap())
 }
 
-fn pending_link_detail(id: &str, session_id: &str, public_key: &[u8; 32]) -> Vec<u8> {
+fn link_detail(id: &str, session_id: &str, public_key: &[u8; 32], device_name: &str) -> Vec<u8> {
     serde_json::to_vec(&serde_json::json!({
         "id": id,
         "session_id": session_id,
         "public_key": STANDARD.encode(public_key),
-        "device_name": "reported device",
+        "device_name": device_name,
         "reported_by_device": true,
         "status": "pending",
         "expires_at": "2099-01-01T00:00:00Z",
@@ -261,4 +332,12 @@ fn approved_result(sealed: &beebeeb_core::device_link::SealedAccountKeyMaterial)
         STANDARD.encode(sealed.ciphertext())
     )
     .into_bytes()
+}
+
+fn pake_ready(message: &[u8]) -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({
+        "status": "ready",
+        "message": STANDARD.encode(message),
+    }))
+    .unwrap()
 }
