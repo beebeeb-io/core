@@ -298,6 +298,11 @@ impl<I: TarInput> TarWalker<I> {
         }
     }
 
+    /// Real entries returned so far.
+    pub(crate) fn ordinals(&self) -> u32 {
+        self.ordinal
+    }
+
     /// The next real entry, skipping whatever is left of the current one.
     pub(crate) fn next_entry<S: ByteSource + ?Sized>(&mut self, source: &mut S) -> Result<TarEvent, Halt> {
         loop {

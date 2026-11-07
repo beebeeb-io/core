@@ -646,7 +646,7 @@ impl ZipDecoder {
     /// Read the local header and open the cipher. `Ok(None)` once the
     /// body can be read; `Ok(Some(step))` when the entry ends first
     /// (corrupt, wrong password).
-    fn open<S: ByteSource + ?Sized>(&mut self, source: &mut S) -> Result<Option<PieceStep>, Miss> {
+    pub(crate) fn open<S: ByteSource + ?Sized>(&mut self, source: &mut S) -> Result<Option<PieceStep>, Miss> {
         loop {
             match &mut self.state {
                 DecState::Body(_) => return Ok(None),

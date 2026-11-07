@@ -495,6 +495,9 @@ pub struct RawZip {
     pub disk: u16,
     pub entries_override: Option<u64>,
     pub cd_size_override: Option<u64>,
+    /// The central directory's order, as indexes into `entries` (default:
+    /// the local headers' order).
+    pub cd_order: Option<Vec<usize>>,
 }
 
 fn le16(out: &mut Vec<u8>, v: u16) {
@@ -540,7 +543,11 @@ impl RawZip {
             out.extend_from_slice(&e.data);
         }
         let cd_start = (out.len() - self.prefix.len()) as u64;
-        for (e, offset) in self.entries.iter().zip(offsets) {
+        let order: Vec<usize> = self
+            .cd_order
+            .clone()
+            .unwrap_or_else(|| (0..self.entries.len()).collect());
+        for (e, offset) in order.iter().map(|&i| (&self.entries[i], offsets[i])) {
             let compressed = e.compressed.unwrap_or(e.data.len() as u64);
             let offset = e.header_offset.unwrap_or(offset);
             let mut extra = e.cd_extra.clone();

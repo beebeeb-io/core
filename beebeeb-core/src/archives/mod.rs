@@ -10,6 +10,7 @@
 //! extension only decides whether the preview and Extract are offered.
 
 pub mod detect;
+pub mod extract;
 mod gzip;
 mod inflate;
 pub mod limits;
@@ -28,6 +29,9 @@ mod zip;
 mod zipcrypto;
 
 pub use detect::{ArchiveFormat, Detection, ForeignFormat, detect, detect_gzip_inner};
+pub use extract::{
+    ArchiveIdentity, ExtractOutcome, ExtractProgress, ExtractStep, ExtractSummary, Extraction, FailReason,
+};
 pub use model::{
     ArchiveEntry, ArchiveListing, ArchiveRefusal, ArchiveTime, ArchiveTotals, EntryCipher, EntryKind, Protection,
     SkipReason,

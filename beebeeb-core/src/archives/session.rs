@@ -47,6 +47,8 @@ pub struct ArchiveSession<S: ByteSource> {
     builder: ListingBuilder,
     listing: Option<ArchiveListing>,
     locators: Vec<Locator>,
+    /// Tar headers the listing walked (every ordinal below it is listed).
+    tar_ordinals: u32,
     /// The last demand and how often it came back unanswered in a row.
     last_need: Option<ByteRange>,
     repeats: u32,
@@ -61,6 +63,7 @@ impl<S: ByteSource> ArchiveSession<S> {
             builder: ListingBuilder::default(),
             listing: None,
             locators: Vec::new(),
+            tar_ordinals: 0,
             last_need: None,
             repeats: 0,
         }
@@ -216,8 +219,14 @@ impl<S: ByteSource> ArchiveSession<S> {
                     let (entry, locator) = tar_entry(&header);
                     self.builder.push(entry, locator).map_err(Halt::Refused)?;
                 }
-                Ok(TarEvent::End) => return self.finish_listing(ArchiveFormat::TarGzip, true),
-                Err(Halt::Limit) => return self.finish_listing(ArchiveFormat::TarGzip, false),
+                Ok(TarEvent::End) => {
+                    self.tar_ordinals = walker.ordinals();
+                    return self.finish_listing(ArchiveFormat::TarGzip, true);
+                }
+                Err(Halt::Limit) => {
+                    self.tar_ordinals = walker.ordinals();
+                    return self.finish_listing(ArchiveFormat::TarGzip, false);
+                }
                 Err(halt) => return Err(halt),
             }
         }
@@ -305,6 +314,15 @@ impl<S: ByteSource> ArchiveSession<S> {
         }
     }
 
+    pub(crate) fn locator(&self, index: u32) -> Option<&Locator> {
+        self.locators.get(index as usize)
+    }
+
+    /// How many tar headers the listing walked.
+    pub(crate) fn tar_ordinals_listed(&self) -> u32 {
+        self.tar_ordinals
+    }
+
     pub(crate) fn decoder(
         &self,
         index: u32,
@@ -337,7 +355,7 @@ impl<S: ByteSource> ArchiveSession<S> {
 }
 
 /// The listing entry for a tar header.
-fn tar_entry(header: &TarHeader) -> (ArchiveEntry, Locator) {
+pub(crate) fn tar_entry(header: &TarHeader) -> (ArchiveEntry, Locator) {
     let (kind, type_skip) = match header.typeflag {
         b'0' | 0 | b'7' if header.name.ends_with('/') => (EntryKind::Folder, None),
         b'0' | 0 | b'7' => (EntryKind::File, None),
@@ -423,6 +441,21 @@ pub(crate) enum EntryDecoder {
 }
 
 impl EntryDecoder {
+    /// Open the entry before its first byte (a zip's local header and
+    /// encryption header): `None` when it can be read, else the step that
+    /// ends or delays it.
+    pub(crate) fn open<S: ByteSource + ?Sized>(&mut self, source: &mut S) -> Option<PieceStep> {
+        let EntryDecoder::Zip(decoder) = self else {
+            return None;
+        };
+        match decoder.open(source) {
+            Ok(step) => step,
+            Err(Miss::Need(range)) => Some(PieceStep::NeedBytes(range)),
+            Err(Miss::Io(e)) => Some(PieceStep::Io(e)),
+            Err(Miss::Truncated) => Some(PieceStep::Corrupt),
+        }
+    }
+
     pub(crate) fn next_piece<S: ByteSource + ?Sized>(&mut self, source: &mut S) -> PieceStep {
         let step = match self {
             EntryDecoder::Done => return PieceStep::Verified,
@@ -467,7 +500,7 @@ impl EntryDecoder {
     }
 }
 
-fn tgz_piece<S: ByteSource + ?Sized>(
+pub(crate) fn tgz_piece<S: ByteSource + ?Sized>(
     walker: &mut TarWalker<GzInput>,
     ordinal: u32,
     found: &mut bool,
