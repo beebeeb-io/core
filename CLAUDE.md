@@ -1,7 +1,7 @@
 # beebeeb core
 
 This public Rust workspace is the cryptographic and protocol trust anchor for Beebeeb clients. The
-workspace version is `0.2.2` and the license is AGPL-3.0-or-later.
+workspace version is `0.3.0` and the license is AGPL-3.0-or-later.
 
 ## Commands
 
