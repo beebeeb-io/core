@@ -48,6 +48,12 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   file/version identity. Do not roll a database opened by this release back to an older binary. Old
   staged-upload state restarts because planner state 3 includes a staged-prefix commitment.
 
+- `BackupConfigurationData` no longer has `managed_by`. Pass this device's folder under the Backups
+  root (a device or category folder); the backup service checks its place below the row whose
+  `system_role` is `backups_root` before it queues anything and refuses any other folder
+  (`invalid_input`). `ServiceError::Protected { message }` (kind `protected`) carries core's words when
+  a change under Backups is refused; show the message as it is.
+
 ### Rust sync and conflict integrators
 
 - Replace `SyncEngine::load_snapshot` with `apply_complete_snapshot(CompleteSnapshot)` only for an
@@ -159,9 +165,16 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 - Native requests declare `file-write-v2` and `version-metadata-v1` exactly where the server checks
   them: upload init, chunk, heartbeat and complete, and the direct upload grant and commit
   (`file-write-v2`), and file update and sync submit (`version-metadata-v1`). The request builder
-  attaches the header only to routes flagged `Endpoint::capabilities`, never to every request. A v2 file whose metadata predates version
-  commitments remains readable until this device has observed a protected counter; stripping the
-  commitment after that point is rejected as rollback.
+  attaches the header only to routes flagged `Endpoint::capabilities`, never to every request. A v2
+  file whose metadata predates version commitments remains readable until this device has observed a
+  protected counter; stripping the commitment after that point is rejected as rollback.
+- The file, upload and File Provider services ask core's Backups rules before every change: the row's
+  own role first (`check_root_mutation`), then the app rule (`check_app_mutation`) in the app and the
+  drive rule (`check_drive_mutation`) in the File Provider. A row's position is its depth below the
+  row whose `system_role` is `backups_root`, read through its parents. Refusals are
+  `FileServiceError::Protected` and `UploadServiceError::Protected`, with core's words. `BackupFolder`
+  replaces `ManagedBackupFolder` and `BackupError::NotInBackups` replaces `UnmanagedFolder`. The
+  backup pass's own uploads are not checked: it is the one writer the rules protect the tree for.
 - Backup scans page, deduplicate, export and enqueue lazily with a 64-upload cap. Failed and cancelled
   photo uploads retry at most three times, and successful completion is durable even when no backup
   completion handler is alive during a background wake.

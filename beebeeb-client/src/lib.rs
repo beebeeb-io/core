@@ -1,5 +1,7 @@
 //! Native client orchestration shared by Beebeeb applications.
 
+#[cfg(any(feature = "files", feature = "store"))]
+mod backup_guard;
 mod chunk_transport;
 mod client;
 mod events;
@@ -69,6 +71,8 @@ pub mod test_support;
 mod tests;
 #[cfg(test)]
 mod tests_svc_auth;
+#[cfg(test)]
+mod tests_svc_backups;
 #[cfg(test)]
 mod tests_svc_data;
 #[cfg(test)]

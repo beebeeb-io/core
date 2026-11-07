@@ -10,8 +10,8 @@ use beebeeb_client::{
     auth::AccountReplacement,
     backup::{
         Asset, AssetKind, AssetSnapshot, AssetSource, AssetSourceError, BackupAssetChange, BackupBatch,
-        BackupConfiguration, BackupCopyState, BackupEvent, BackupManifestRecord, BackupManifestStore,
-        BackupManifestStoreError, BackupService, ManagedBackupFolder,
+        BackupConfiguration, BackupCopyState, BackupEvent, BackupFolder, BackupManifestRecord, BackupManifestStore,
+        BackupManifestStoreError, BackupService,
     },
     file_provider::{
         DomainNotifier, DomainNotifierError, FileProviderChanges, FileProviderItem, FileProviderOutcome,
@@ -218,22 +218,16 @@ impl BackupManifestStore for BackupManifestStoreAdapter {
     }
 }
 
+/// `folder_id` is this device's folder under the Backups root (a device or
+/// category folder); the service checks that before it queues anything.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct BackupConfigurationData {
     pub folder_id: String,
-    pub managed_by: String,
     pub wifi_only: bool,
 }
 
 fn backup_configuration(value: BackupConfigurationData) -> Result<BackupConfiguration, ServiceError> {
-    BackupConfiguration::new(
-        ManagedBackupFolder {
-            id: value.folder_id,
-            managed_by: value.managed_by,
-        },
-        value.wifi_only,
-    )
-    .map_err(|_| invalid())
+    BackupConfiguration::new(BackupFolder { id: value.folder_id }, value.wifi_only).map_err(|_| invalid())
 }
 
 #[derive(Debug, Clone, uniffi::Record)]

@@ -45,6 +45,8 @@ async fn replacement_upload_initializes_against_the_current_protected_version() 
         200,
         br#"{"token":"scoped-token","upload_session_id":"session","expires_at":"2099-01-01T00:00:00Z"}"#.to_vec(),
     );
+    // The Backups check reads the file first: a top-level file, outside the tree.
+    transport.respond_next_json(200, format!(r#"{{"id":"{file_id}","parent_id":null}}"#).into_bytes());
     let client = Arc::new(Client::new(ClientConfig::for_tests(), transport.clone()).unwrap());
     let service = UploadService::new_for_test(
         client,
@@ -118,6 +120,8 @@ async fn upgrade_required_completion_is_typed_and_terminal_on_first_answer() {
         426,
         br#"{"error":"client_upgrade_required","secret":"must-not-escape"}"#.to_vec(),
     );
+    // The Backups check reads the file first: a top-level file, outside the tree.
+    transport.respond_next_json(200, format!(r#"{{"id":"{file_id}","parent_id":null}}"#).into_bytes());
     let client = Arc::new(Client::new(ClientConfig::for_tests(), transport).unwrap());
     let store = Arc::new(Mutex::new(Store::open_in_memory().unwrap()));
     let service = UploadService::new_for_test(

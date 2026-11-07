@@ -1,4 +1,5 @@
 use beebeeb_api::routes::files::{self as api, FileEntry, ListResponse};
+use beebeeb_core::backup::{Mutation, Protected};
 use beebeeb_core::system_folders::{SYSTEM_FOLDER_MANAGED_CODE, SYSTEM_FOLDER_MANAGED_MESSAGE};
 #[cfg(feature = "store")]
 use beebeeb_core::{
@@ -10,7 +11,10 @@ use serde_json::Value;
 #[cfg(feature = "store")]
 use std::sync::Mutex;
 
-use crate::{Client, ClientError, Session};
+use crate::{
+    Client, ClientError, Session,
+    backup_guard::{GuardError, Rule},
+};
 
 pub const FILE_LIST_PAGE_CAP: u16 = 500;
 
@@ -73,6 +77,10 @@ pub enum FileServiceError {
     Crypto(#[from] beebeeb_core::CoreError),
     #[error("{message}")]
     ManagedByService { code: &'static str, message: &'static str },
+    /// Core's Backups rule refused the change; the words are core's (backup
+    /// spec Amendments 6 to 8).
+    #[error("{0}")]
+    Protected(Protected),
     #[error("the server returned an invalid file record")]
     InvalidRecord,
     #[error("the server returned a different id for a newly-created folder")]
@@ -198,6 +206,7 @@ impl Client {
         name: &str,
         parent_id: Option<String>,
     ) -> Result<FileRecord, FileServiceError> {
+        self.check_backup_create_in(parent_id.as_deref()).await?;
         let (item, name_encrypted) = session.seal_new_folder(name)?;
         let request = api::CreateFolder {
             name_encrypted,
@@ -217,7 +226,18 @@ impl Client {
         entry: &FileEntry,
         new_name: &str,
     ) -> Result<FileRecord, FileServiceError> {
+        self.rename_entry_under(Rule::App, session, entry, new_name).await
+    }
+
+    pub(crate) async fn rename_entry_under(
+        &self,
+        rule: Rule,
+        session: &Session,
+        entry: &FileEntry,
+        new_name: &str,
+    ) -> Result<FileRecord, FileServiceError> {
         refuse_managed(entry)?;
+        self.check_backup_mutation(rule, &entry.id, Mutation::Rename).await?;
         let current = entry.name_encrypted.as_deref().ok_or(FileServiceError::InvalidRecord)?;
         let name_encrypted = session.seal_rename(&entry.id, current, new_name)?;
         let updated = self
@@ -239,7 +259,21 @@ impl Client {
         entry: &FileEntry,
         parent_id: Option<String>,
     ) -> Result<FileRecord, FileServiceError> {
+        self.move_entry_under(Rule::App, session, entry, parent_id).await
+    }
+
+    /// A move is checked twice: the row that moves, and its destination as a
+    /// new item there.
+    pub(crate) async fn move_entry_under(
+        &self,
+        rule: Rule,
+        session: &Session,
+        entry: &FileEntry,
+        parent_id: Option<String>,
+    ) -> Result<FileRecord, FileServiceError> {
         refuse_managed(entry)?;
+        self.check_backup_mutation(rule, &entry.id, Mutation::Move).await?;
+        self.check_backup_create_in(parent_id.as_deref()).await?;
         let updated = self
             .execute(
                 &api::update(&entry.id),
@@ -258,7 +292,12 @@ impl Client {
     }
 
     pub async fn trash_entry(&self, entry: &FileEntry) -> Result<(), FileServiceError> {
+        self.trash_entry_under(Rule::App, entry).await
+    }
+
+    pub(crate) async fn trash_entry_under(&self, rule: Rule, entry: &FileEntry) -> Result<(), FileServiceError> {
         refuse_managed(entry)?;
+        self.check_backup_mutation(rule, &entry.id, Mutation::Trash).await?;
         self.trash_file(&entry.id).await.map_err(map_client_error)?;
         Ok(())
     }
@@ -266,6 +305,10 @@ impl Client {
     pub async fn trash_entries(&self, entries: &[FileEntry]) -> Result<BulkFileResult, FileServiceError> {
         for entry in entries {
             refuse_managed(entry)?;
+        }
+        for entry in entries {
+            self.check_backup_mutation(Rule::App, &entry.id, Mutation::Trash)
+                .await?;
         }
         let value: Value = self
             .execute(
@@ -295,6 +338,8 @@ impl Client {
 
     pub async fn delete_entry_forever(&self, entry: &FileEntry) -> Result<(), FileServiceError> {
         refuse_managed(entry)?;
+        self.check_backup_mutation(Rule::App, &entry.id, Mutation::DeletePermanently)
+            .await?;
         self.delete_file_forever(&entry.id).await.map_err(map_client_error)?;
         Ok(())
     }
@@ -302,6 +347,10 @@ impl Client {
     pub async fn delete_entries_forever(&self, entries: &[FileEntry]) -> Result<BulkFileResult, FileServiceError> {
         for entry in entries {
             refuse_managed(entry)?;
+        }
+        for entry in entries {
+            self.check_backup_mutation(Rule::App, &entry.id, Mutation::DeletePermanently)
+                .await?;
         }
         let value: Value = self
             .execute(
@@ -332,6 +381,9 @@ impl Client {
     ) -> Result<VersionRestoreResult, FileServiceError> {
         let current_entry = self.get_file(file_id).await?;
         refuse_managed(&current_entry)?;
+        // A restored version is new content of the file.
+        self.check_backup_row(Rule::App, &current_entry, Mutation::Write)
+            .await?;
         let current_encrypted = current_entry
             .name_encrypted
             .as_deref()
@@ -448,6 +500,17 @@ fn refuse_managed(entry: &FileEntry) -> Result<(), FileServiceError> {
         });
     }
     Ok(())
+}
+
+impl From<GuardError> for FileServiceError {
+    fn from(error: GuardError) -> Self {
+        match error {
+            GuardError::Refused(protected) => Self::Protected(protected),
+            // A parent loop or an over-deep tree is a broken server answer.
+            GuardError::Unknown => Self::InvalidRecord,
+            GuardError::Client(error) => map_client_error(error),
+        }
+    }
 }
 
 fn map_client_error(error: ClientError) -> FileServiceError {

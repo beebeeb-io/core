@@ -23,7 +23,7 @@ use crate::{
     Client, ClientConfig, EngineEvent, Session, StreamLimits,
     backup::{
         Asset, AssetKind, AssetSnapshot, AssetSource, AssetSourceError, BackupConfiguration, BackupCopyState,
-        BackupError, BackupManifest, BackupService, ManagedBackupFolder, MemoryBackupManifestStore,
+        BackupError, BackupFolder, BackupManifest, BackupService, MemoryBackupManifestStore,
     },
     downloads::{DownloadFile, DownloadService},
     file_provider::{DomainNotifier, DomainNotifierError, FileProviderService, ItemWorkState},
@@ -124,7 +124,9 @@ async fn backup_pages_a_hundred_thousand_assets_and_duplicate_checks() {
     assert_eq!(batch.queued, 0);
     assert!(!batch.snapshot_complete);
     assert_eq!(source.calls.load(Ordering::Relaxed), 1);
-    assert_eq!(transport.request_count(), 1);
+    // Three reads place the backup folder in the Backups tree (once per
+    // service), then one duplicate check.
+    assert_eq!(transport.request_count(), 4);
     assert!(uploads.list().unwrap().is_empty());
 }
 
@@ -140,11 +142,24 @@ fn backup_manifest_reopens_through_the_platform_persistence_seam() {
     assert_eq!(reopened.file_id("photo").as_deref(), Some("remote"));
 }
 
+/// The rows the backup service reads once to place its folder: a category
+/// folder, its device folder, and the flagged Backups root.
+fn answer_backup_folder_check(transport: &ScriptedTransport) {
+    for row in [
+        serde_json::json!({"id": "backups-root", "parent_id": null, "is_folder": true, "system_role": "backups_root"}),
+        serde_json::json!({"id": "device-folder", "parent_id": "backups-root", "is_folder": true}),
+        serde_json::json!({"id": "backup-folder", "parent_id": "device-folder", "is_folder": true}),
+    ] {
+        transport.respond_next_json(200, serde_json::to_vec(&row).unwrap());
+    }
+}
+
 fn backup_service(
     transport: ScriptedTransport,
     source: Arc<dyn AssetSource>,
     root: &std::path::Path,
 ) -> (BackupService, Arc<UploadService>) {
+    answer_backup_folder_check(&transport);
     let client = authenticated_client(transport);
     let uploads = Arc::new(
         UploadService::new_for_test(
@@ -156,9 +171,8 @@ fn backup_service(
         .unwrap(),
     );
     let config = BackupConfiguration::new(
-        ManagedBackupFolder {
+        BackupFolder {
             id: "backup-folder".into(),
-            managed_by: "photo_backup".into(),
         },
         true,
     )
@@ -265,7 +279,8 @@ async fn queued_backup_asset_is_not_enqueued_again() {
 
     assert_eq!(second.queued, 0);
     assert_eq!(uploads.list().unwrap().len(), 1);
-    assert_eq!(transport.request_count(), 1);
+    // The folder is placed once (three reads) for both batches.
+    assert_eq!(transport.request_count(), 4);
 }
 
 #[tokio::test]
@@ -387,9 +402,8 @@ async fn completion_without_a_handler_is_durable_and_applied_by_a_later_backup_s
         Arc::clone(&uploads),
         Arc::new(Source::default()),
         BackupConfiguration::new(
-            ManagedBackupFolder {
+            BackupFolder {
                 id: "backup-folder".into(),
-                managed_by: "photo_backup".into(),
             },
             true,
         )
@@ -729,6 +743,11 @@ impl crate::Transport for FileApiTransport {
                 (beebeeb_api::Method::Delete, _) => {
                     serde_json::json!({"message": "moved to trash", "trashed_count": 1})
                 }
+                // The Backups check reads the row: a top-level row outside
+                // the Backups tree.
+                (beebeeb_api::Method::Get, path) if path.starts_with("/api/v1/files/") => {
+                    serde_json::json!({"id": path.trim_start_matches("/api/v1/files/"), "parent_id": null})
+                }
                 _ => panic!("unexpected file request"),
             };
             Ok(Answer::new(
@@ -788,6 +807,15 @@ struct SyncSubmitTransport;
 impl crate::Transport for SyncSubmitTransport {
     fn send<'a>(&'a self, request: beebeeb_api::Request, _limit: usize) -> crate::TransportFuture<'a> {
         Box::pin(async move {
+            if request.method() == beebeeb_api::Method::Get {
+                // The Backups check reads the row first: outside the tree.
+                let id = request.path().trim_start_matches("/api/v1/files/");
+                return Ok(Answer::new(
+                    200,
+                    vec![Header::new("Content-Type", "application/json")],
+                    serde_json::to_vec(&serde_json::json!({"id": id, "parent_id": null})).unwrap(),
+                ));
+            }
             assert_eq!(request.path(), "/api/v1/sync/ops");
             let body: serde_json::Value = serde_json::from_slice(request.body()).unwrap();
             let client_op_id = body["ops"][0]["client_op_id"].as_str().unwrap();
@@ -1116,14 +1144,7 @@ async fn coordinator_purges_everything_even_when_platform_cancellation_fails() {
             Arc::clone(&client),
             Arc::clone(&uploads),
             backup_source,
-            BackupConfiguration::new(
-                ManagedBackupFolder {
-                    id: "managed".into(),
-                    managed_by: "photo_backup".into(),
-                },
-                true,
-            )
-            .unwrap(),
+            BackupConfiguration::new(BackupFolder { id: "managed".into() }, true).unwrap(),
         )
         .unwrap(),
     );
@@ -1212,14 +1233,7 @@ fn sign_out_coordinator(client: Arc<Client>, root: &std::path::Path) -> ServiceC
             Arc::clone(&client),
             Arc::clone(&uploads),
             Arc::new(Source::default()),
-            BackupConfiguration::new(
-                ManagedBackupFolder {
-                    id: "managed".into(),
-                    managed_by: "photo_backup".into(),
-                },
-                true,
-            )
-            .unwrap(),
+            BackupConfiguration::new(BackupFolder { id: "managed".into() }, true).unwrap(),
         )
         .unwrap(),
     );

@@ -8,6 +8,23 @@ impl UploadService {
         session_key: &crate::SessionKey,
         now_ms: i64,
     ) -> Result<BackgroundUploadPlanner, UploadServiceError> {
+        // Every upload but the backup pass's own asks core's Backups rule
+        // first: a new file is a create in its folder, a new version is a
+        // write to the file.
+        if record.backup_local_identifier.is_none() {
+            match &record.replacement {
+                Some(replacement) => {
+                    self.client
+                        .check_backup_mutation(
+                            crate::backup_guard::Rule::App,
+                            &replacement.file_id,
+                            beebeeb_core::backup::Mutation::Write,
+                        )
+                        .await?
+                }
+                None => self.client.check_backup_create_in(record.parent_id.as_deref()).await?,
+            }
+        }
         let preliminary_name = if let Some(replacement) = &record.replacement {
             replacement.current_version_metadata_encrypted.clone()
         } else {

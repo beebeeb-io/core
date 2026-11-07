@@ -173,8 +173,23 @@ pub enum UploadServiceError {
     Encryption,
     #[error("the upload is not in an active state")]
     NotActive,
+    /// Core's Backups rule refused the upload; the words are core's (backup
+    /// spec Amendment 8). Nothing was sent.
+    #[error("{0}")]
+    Protected(beebeeb_core::backup::Protected),
     #[error(transparent)]
     Client(#[from] ClientError),
+}
+
+impl From<crate::backup_guard::GuardError> for UploadServiceError {
+    fn from(error: crate::backup_guard::GuardError) -> Self {
+        match error {
+            crate::backup_guard::GuardError::Refused(protected) => Self::Protected(protected),
+            // Where the destination is cannot be told: nothing is sent.
+            crate::backup_guard::GuardError::Unknown => Self::State,
+            crate::backup_guard::GuardError::Client(error) => Self::Client(error),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

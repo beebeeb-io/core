@@ -23894,10 +23894,12 @@ public object FfiConverterTypeBackupBatchData: FfiConverterRustBuffer<BackupBatc
 
 
 
+/**
+ * `folder_id` is this device's folder under the Backups root (a device or
+ * category folder); the service checks that before it queues anything.
+ */
 data class BackupConfigurationData (
     var `folderId`: kotlin.String
-    , 
-    var `managedBy`: kotlin.String
     , 
     var `wifiOnly`: kotlin.Boolean
     
@@ -23917,20 +23919,17 @@ public object FfiConverterTypeBackupConfigurationData: FfiConverterRustBuffer<Ba
     override fun read(buf: ByteBuffer): BackupConfigurationData {
         return BackupConfigurationData(
             FfiConverterString.read(buf),
-            FfiConverterString.read(buf),
             FfiConverterBoolean.read(buf),
         )
     }
 
     override fun allocationSize(value: BackupConfigurationData) = (
             FfiConverterString.allocationSize(value.`folderId`) +
-            FfiConverterString.allocationSize(value.`managedBy`) +
             FfiConverterBoolean.allocationSize(value.`wifiOnly`)
     )
 
     override fun write(value: BackupConfigurationData, buf: ByteBuffer) {
             FfiConverterString.write(value.`folderId`, buf)
-            FfiConverterString.write(value.`managedBy`, buf)
             FfiConverterBoolean.write(value.`wifiOnly`, buf)
     }
 }
@@ -31347,6 +31346,18 @@ sealed class ServiceException: kotlin.Exception() {
             get() = ""
     }
     
+    /**
+     * Core's Backups rule refused the change. `message` is core's words, to
+     * be shown as they are (backup spec Amendments 6 to 8).
+     */
+    class Protected(
+        
+        val `message`: kotlin.String
+        ) : ServiceException() {
+        override val message
+            get() = "message=${ `message` }"
+    }
+    
     class Quota(
         
         val `limitBytes`: kotlin.ULong?, 
@@ -31416,17 +31427,20 @@ public object FfiConverterTypeServiceError : FfiConverterRustBuffer<ServiceExcep
             6 -> ServiceException.Crypto()
             7 -> ServiceException.Cancelled()
             8 -> ServiceException.ManagedByService()
-            9 -> ServiceException.Quota(
+            9 -> ServiceException.Protected(
+                FfiConverterString.read(buf),
+                )
+            10 -> ServiceException.Quota(
                 FfiConverterOptionalULong.read(buf),
                 FfiConverterOptionalULong.read(buf),
                 )
-            10 -> ServiceException.SessionExpired()
-            11 -> ServiceException.RetryAfter(
+            11 -> ServiceException.SessionExpired()
+            12 -> ServiceException.RetryAfter(
                 FfiConverterULong.read(buf),
                 )
-            12 -> ServiceException.AnchorExpired()
-            13 -> ServiceException.AnotherAccountOnDevice()
-            14 -> ServiceException.Unavailable()
+            13 -> ServiceException.AnchorExpired()
+            14 -> ServiceException.AnotherAccountOnDevice()
+            15 -> ServiceException.Unavailable()
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
     }
@@ -31464,6 +31478,11 @@ public object FfiConverterTypeServiceError : FfiConverterRustBuffer<ServiceExcep
             is ServiceException.ManagedByService -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
+            )
+            is ServiceException.Protected -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`message`)
             )
             is ServiceException.Quota -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
@@ -31529,31 +31548,36 @@ public object FfiConverterTypeServiceError : FfiConverterRustBuffer<ServiceExcep
                 buf.putInt(8)
                 Unit
             }
-            is ServiceException.Quota -> {
+            is ServiceException.Protected -> {
                 buf.putInt(9)
+                FfiConverterString.write(value.`message`, buf)
+                Unit
+            }
+            is ServiceException.Quota -> {
+                buf.putInt(10)
                 FfiConverterOptionalULong.write(value.`limitBytes`, buf)
                 FfiConverterOptionalULong.write(value.`usedBytes`, buf)
                 Unit
             }
             is ServiceException.SessionExpired -> {
-                buf.putInt(10)
+                buf.putInt(11)
                 Unit
             }
             is ServiceException.RetryAfter -> {
-                buf.putInt(11)
+                buf.putInt(12)
                 FfiConverterULong.write(value.`seconds`, buf)
                 Unit
             }
             is ServiceException.AnchorExpired -> {
-                buf.putInt(12)
-                Unit
-            }
-            is ServiceException.AnotherAccountOnDevice -> {
                 buf.putInt(13)
                 Unit
             }
-            is ServiceException.Unavailable -> {
+            is ServiceException.AnotherAccountOnDevice -> {
                 buf.putInt(14)
+                Unit
+            }
+            is ServiceException.Unavailable -> {
+                buf.putInt(15)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -31574,6 +31598,7 @@ enum class ServiceErrorKind {
     CRYPTO,
     CANCELLED,
     MANAGED_BY_SERVICE,
+    PROTECTED,
     QUOTA,
     SESSION_EXPIRED,
     RETRY_AFTER,

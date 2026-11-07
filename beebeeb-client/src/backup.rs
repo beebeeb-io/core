@@ -82,22 +82,25 @@ pub trait AssetSource: Send + Sync {
     }
 }
 
+/// The folder this device's backups are written into: a device folder, or a
+/// category folder inside it, under the account's Backups root. The root is
+/// the row whose `system_role` is `backups_root` (backup spec §4.2 rule 5);
+/// [`BackupService`] checks that the folder is there before it queues anything.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ManagedBackupFolder {
+pub struct BackupFolder {
     pub id: String,
-    pub managed_by: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackupConfiguration {
-    pub folder: ManagedBackupFolder,
+    pub folder: BackupFolder,
     pub wifi_only: bool,
 }
 
 impl BackupConfiguration {
-    pub fn new(folder: ManagedBackupFolder, wifi_only: bool) -> Result<Self, BackupError> {
-        if folder.id.is_empty() || folder.managed_by.is_empty() {
-            return Err(BackupError::UnmanagedFolder);
+    pub fn new(folder: BackupFolder, wifi_only: bool) -> Result<Self, BackupError> {
+        if folder.id.is_empty() {
+            return Err(BackupError::NotInBackups);
         }
         Ok(Self { folder, wifi_only })
     }
@@ -307,8 +310,10 @@ pub enum BackupError {
     State,
     #[error(transparent)]
     ManifestStore(#[from] BackupManifestStoreError),
-    #[error("the backup folder is not managed by a service")]
-    UnmanagedFolder,
+    #[error("the backup folder is not a device folder inside the Backups folder")]
+    NotInBackups,
+    #[error("the Backups folder could not be checked")]
+    Client(#[from] crate::ClientError),
     #[error("the asset source failed")]
     AssetSource(#[from] AssetSourceError),
     #[error("the asset snapshot exceeded the batch limit")]
@@ -328,6 +333,8 @@ pub struct BackupService {
     uploads: Arc<UploadService>,
     source: Arc<dyn AssetSource>,
     configuration: Mutex<BackupConfiguration>,
+    /// The folder id whose place in the Backups tree has been checked.
+    checked_folder: Mutex<Option<String>>,
     manifest: BackupManifest,
     pages: Mutex<BTreeMap<AssetKind, BackupPageState>>,
     events: broadcast::Sender<BackupEvent>,
@@ -353,6 +360,7 @@ impl BackupService {
             uploads,
             source,
             configuration: Mutex::new(configuration),
+            checked_folder: Mutex::new(None),
             manifest: BackupManifest::default(),
             pages: Mutex::new(BTreeMap::new()),
             events,
@@ -374,6 +382,7 @@ impl BackupService {
             uploads,
             source,
             configuration: Mutex::new(configuration),
+            checked_folder: Mutex::new(None),
             manifest: BackupManifest::open(manifest_store)?,
             pages: Mutex::new(BTreeMap::new()),
             events,
@@ -393,6 +402,27 @@ impl BackupService {
 
     pub fn configure(&self, configuration: BackupConfiguration) -> Result<(), BackupError> {
         *self.configuration.lock().map_err(|_| BackupError::State)? = configuration;
+        *self.checked_folder.lock().map_err(|_| BackupError::State)? = None;
+        Ok(())
+    }
+
+    /// A backup is written only into this device's part of the Backups tree:
+    /// a device folder or deeper below the row whose `system_role` is
+    /// `backups_root`. Anything else (outside the tree, or the root itself)
+    /// queues nothing. Checked once per configured folder.
+    async fn check_backup_folder(&self, folder: &BackupFolder) -> Result<(), BackupError> {
+        if self.checked_folder.lock().map_err(|_| BackupError::State)?.as_deref() == Some(folder.id.as_str()) {
+            return Ok(());
+        }
+        let depth = match self.client.backup_depth(&folder.id).await {
+            Ok(depth) => depth,
+            Err(crate::backup_guard::GuardError::Client(error)) => return Err(error.into()),
+            Err(_) => return Err(BackupError::NotInBackups),
+        };
+        if depth.is_none_or(|depth| depth < 1) {
+            return Err(BackupError::NotInBackups);
+        }
+        *self.checked_folder.lock().map_err(|_| BackupError::State)? = Some(folder.id.clone());
         Ok(())
     }
 
@@ -449,6 +479,7 @@ impl BackupService {
             let _ = self.events.send(BackupEvent::BatchFinished(batch.clone()));
             return Ok(batch);
         }
+        self.check_backup_folder(&configuration.folder).await?;
         let cursor = self
             .pages
             .lock()

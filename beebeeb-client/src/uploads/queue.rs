@@ -235,7 +235,9 @@ impl UploadService {
                         self.mark_upgrade_required(transfer.id, now_ms)?;
                     } else if matches!(
                         error,
-                        UploadServiceError::QuotaFull | UploadServiceError::HostileChunkPlan
+                        UploadServiceError::QuotaFull
+                            | UploadServiceError::HostileChunkPlan
+                            | UploadServiceError::Protected(_)
                     ) {
                         self.store
                             .lock()

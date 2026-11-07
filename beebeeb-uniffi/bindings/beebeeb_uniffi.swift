@@ -11931,16 +11931,18 @@ public func FfiConverterTypeBackupBatchData_lower(_ value: BackupBatchData) -> R
 }
 
 
+/**
+ * `folder_id` is this device's folder under the Backups root (a device or
+ * category folder); the service checks that before it queues anything.
+ */
 public struct BackupConfigurationData: Equatable, Hashable {
     public var folderId: String
-    public var managedBy: String
     public var wifiOnly: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(folderId: String, managedBy: String, wifiOnly: Bool) {
+    public init(folderId: String, wifiOnly: Bool) {
         self.folderId = folderId
-        self.managedBy = managedBy
         self.wifiOnly = wifiOnly
     }
 
@@ -11961,14 +11963,12 @@ public struct FfiConverterTypeBackupConfigurationData: FfiConverterRustBuffer {
         return
             try BackupConfigurationData(
                 folderId: FfiConverterString.read(from: &buf), 
-                managedBy: FfiConverterString.read(from: &buf), 
                 wifiOnly: FfiConverterBool.read(from: &buf)
         )
     }
 
     public static func write(_ value: BackupConfigurationData, into buf: inout [UInt8]) {
         FfiConverterString.write(value.folderId, into: &buf)
-        FfiConverterString.write(value.managedBy, into: &buf)
         FfiConverterBool.write(value.wifiOnly, into: &buf)
     }
 }
@@ -20618,6 +20618,12 @@ public enum ServiceError: Swift.Error, Equatable, Hashable, Foundation.Localized
     case Crypto
     case Cancelled
     case ManagedByService
+    /**
+     * Core's Backups rule refused the change. `message` is core's words, to
+     * be shown as they are (backup spec Amendments 6 to 8).
+     */
+    case Protected(message: String
+    )
     case Quota(limitBytes: UInt64?, usedBytes: UInt64?
     )
     case SessionExpired
@@ -20663,17 +20669,20 @@ public struct FfiConverterTypeServiceError: FfiConverterRustBuffer {
         case 6: return .Crypto
         case 7: return .Cancelled
         case 8: return .ManagedByService
-        case 9: return .Quota(
+        case 9: return .Protected(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 10: return .Quota(
             limitBytes: try FfiConverterOptionUInt64.read(from: &buf), 
             usedBytes: try FfiConverterOptionUInt64.read(from: &buf)
             )
-        case 10: return .SessionExpired
-        case 11: return .RetryAfter(
+        case 11: return .SessionExpired
+        case 12: return .RetryAfter(
             seconds: try FfiConverterUInt64.read(from: &buf)
             )
-        case 12: return .AnchorExpired
-        case 13: return .AnotherAccountOnDevice
-        case 14: return .Unavailable
+        case 13: return .AnchorExpired
+        case 14: return .AnotherAccountOnDevice
+        case 15: return .Unavailable
 
          default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -20718,31 +20727,36 @@ public struct FfiConverterTypeServiceError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(8))
         
         
-        case let .Quota(limitBytes,usedBytes):
+        case let .Protected(message):
             writeInt(&buf, Int32(9))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .Quota(limitBytes,usedBytes):
+            writeInt(&buf, Int32(10))
             FfiConverterOptionUInt64.write(limitBytes, into: &buf)
             FfiConverterOptionUInt64.write(usedBytes, into: &buf)
             
         
         case .SessionExpired:
-            writeInt(&buf, Int32(10))
+            writeInt(&buf, Int32(11))
         
         
         case let .RetryAfter(seconds):
-            writeInt(&buf, Int32(11))
+            writeInt(&buf, Int32(12))
             FfiConverterUInt64.write(seconds, into: &buf)
             
         
         case .AnchorExpired:
-            writeInt(&buf, Int32(12))
-        
-        
-        case .AnotherAccountOnDevice:
             writeInt(&buf, Int32(13))
         
         
-        case .Unavailable:
+        case .AnotherAccountOnDevice:
             writeInt(&buf, Int32(14))
+        
+        
+        case .Unavailable:
+            writeInt(&buf, Int32(15))
         
         }
     }
@@ -20776,6 +20790,7 @@ public enum ServiceErrorKind: Equatable, Hashable {
     case crypto
     case cancelled
     case managedByService
+    case protected
     case quota
     case sessionExpired
     case retryAfter
@@ -20819,17 +20834,19 @@ public struct FfiConverterTypeServiceErrorKind: FfiConverterRustBuffer {
         
         case 8: return .managedByService
         
-        case 9: return .quota
+        case 9: return .protected
         
-        case 10: return .sessionExpired
+        case 10: return .quota
         
-        case 11: return .retryAfter
+        case 11: return .sessionExpired
         
-        case 12: return .anchorExpired
+        case 12: return .retryAfter
         
-        case 13: return .anotherAccountOnDevice
+        case 13: return .anchorExpired
         
-        case 14: return .unavailable
+        case 14: return .anotherAccountOnDevice
+        
+        case 15: return .unavailable
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -20871,28 +20888,32 @@ public struct FfiConverterTypeServiceErrorKind: FfiConverterRustBuffer {
             writeInt(&buf, Int32(8))
         
         
-        case .quota:
+        case .protected:
             writeInt(&buf, Int32(9))
         
         
-        case .sessionExpired:
+        case .quota:
             writeInt(&buf, Int32(10))
         
         
-        case .retryAfter:
+        case .sessionExpired:
             writeInt(&buf, Int32(11))
         
         
-        case .anchorExpired:
+        case .retryAfter:
             writeInt(&buf, Int32(12))
         
         
-        case .anotherAccountOnDevice:
+        case .anchorExpired:
             writeInt(&buf, Int32(13))
         
         
-        case .unavailable:
+        case .anotherAccountOnDevice:
             writeInt(&buf, Int32(14))
+        
+        
+        case .unavailable:
+            writeInt(&buf, Int32(15))
         
         }
     }

@@ -57,6 +57,7 @@ pub enum ServiceErrorKind {
     Crypto,
     Cancelled,
     ManagedByService,
+    Protected,
     Quota,
     SessionExpired,
     RetryAfter,
@@ -76,6 +77,7 @@ impl ServiceErrorKind {
             Self::Crypto => "crypto",
             Self::Cancelled => "cancelled",
             Self::ManagedByService => "managed_by_service",
+            Self::Protected => "protected",
             Self::Quota => "quota",
             Self::SessionExpired => "session_expired",
             Self::RetryAfter => "retry_after",
@@ -104,6 +106,10 @@ pub enum ServiceError {
     Cancelled,
     #[error("this item is managed by a service")]
     ManagedByService,
+    /// Core's Backups rule refused the change. `message` is core's words, to
+    /// be shown as they are (backup spec Amendments 6 to 8).
+    #[error("{message}")]
+    Protected { message: String },
     #[error("the account storage quota was exceeded")]
     Quota {
         limit_bytes: Option<u64>,
@@ -132,6 +138,7 @@ impl ServiceError {
             ServiceErrorKind::Crypto => Self::Crypto,
             ServiceErrorKind::Cancelled => Self::Cancelled,
             ServiceErrorKind::ManagedByService => Self::ManagedByService,
+            ServiceErrorKind::Protected => Self::Protected { message: String::new() },
             ServiceErrorKind::Quota => Self::Quota {
                 limit_bytes: None,
                 used_bytes: None,
@@ -152,10 +159,30 @@ impl ServiceError {
 pub(crate) fn map_client_error(error: impl std::error::Error + 'static) -> ServiceError {
     let mut current: &(dyn std::error::Error + 'static) = &error;
     loop {
-        if let Some(file) = current.downcast_ref::<beebeeb_client::files::FileServiceError>()
-            && matches!(file, beebeeb_client::files::FileServiceError::ManagedByService { .. })
+        if let Some(file) = current.downcast_ref::<beebeeb_client::files::FileServiceError>() {
+            match file {
+                beebeeb_client::files::FileServiceError::ManagedByService { .. } => {
+                    return ServiceError::ManagedByService;
+                }
+                beebeeb_client::files::FileServiceError::Protected(protected) => {
+                    return ServiceError::Protected {
+                        message: protected.message.to_string(),
+                    };
+                }
+                _ => {}
+            }
+        }
+        if let Some(beebeeb_client::backup::BackupError::NotInBackups) =
+            current.downcast_ref::<beebeeb_client::backup::BackupError>()
         {
-            return ServiceError::ManagedByService;
+            return ServiceError::InvalidInput;
+        }
+        if let Some(beebeeb_client::uploads::UploadServiceError::Protected(protected)) =
+            current.downcast_ref::<beebeeb_client::uploads::UploadServiceError>()
+        {
+            return ServiceError::Protected {
+                message: protected.message.to_string(),
+            };
         }
         if let Some(sync) = current.downcast_ref::<beebeeb_core::sync::SyncEngineError>()
             && matches!(sync, beebeeb_core::sync::SyncEngineError::AnchorExpired { .. })

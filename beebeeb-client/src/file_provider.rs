@@ -4,6 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use beebeeb_core::backup::Mutation;
 use beebeeb_core::sync::{RemoteOp, SyncEngine, SyncEngineError, SyncOp, TreeNode};
 use beebeeb_types::{ChunkProfile, limits::MemoryBudget, plan_chunks};
 use serde_json::json;
@@ -11,6 +12,7 @@ use uuid::Uuid;
 
 use crate::{
     Client, Session,
+    backup_guard::Rule,
     downloads::{DownloadFile, DownloadResult, DownloadService, DownloadServiceError},
     files::{FileRecord, FileServiceError},
     uploads::{UploadRequest, UploadService, UploadServiceError},
@@ -327,13 +329,15 @@ impl FileProviderService {
                 .ok_or(FileProviderError::NotFound)?;
             let mut entry = wire_entry(&node);
             let mut result = None;
+            // The Files app is a drive surface: core's drive rule, under which
+            // nothing at or under the Backups root changes.
             if let Some(name) = new_name {
-                let record = client.rename_entry(session, &entry, name).await?;
+                let record = client.rename_entry_under(Rule::Drive, session, &entry, name).await?;
                 entry = record.wire().clone();
                 result = Some(record);
             }
             if let Some(parent) = new_parent {
-                result = Some(client.move_entry(session, &entry, parent).await?);
+                result = Some(client.move_entry_under(Rule::Drive, session, &entry, parent).await?);
             }
             result.ok_or(FileProviderError::State)
         }
@@ -350,7 +354,10 @@ impl FileProviderService {
                 .map_err(|_| FileProviderError::State)?
                 .lookup_node(id)?
                 .ok_or(FileProviderError::NotFound)?;
-            client.trash_entry(&wire_entry(&node)).await.map_err(Into::into)
+            client
+                .trash_entry_under(Rule::Drive, &wire_entry(&node))
+                .await
+                .map_err(Into::into)
         }
         .await;
         self.finish_item_work(id, result)
@@ -361,6 +368,19 @@ impl FileProviderService {
     pub async fn delete_local(&self, client: &Client, id: Uuid) -> Result<(), FileProviderError> {
         self.set_state(id, ItemWorkState::Running)?;
         let result = async {
+            if self
+                .engine
+                .lock()
+                .map_err(|_| FileProviderError::State)?
+                .lookup_node(id)?
+                .is_none()
+            {
+                return Err(FileProviderError::NotFound);
+            }
+            client
+                .check_backup_mutation(Rule::Drive, &id.to_string(), Mutation::Trash)
+                .await
+                .map_err(FileServiceError::from)?;
             let (pending, device_id) = {
                 let mut engine = self.engine.lock().map_err(|_| FileProviderError::State)?;
                 if engine.lookup_node(id)?.is_none() {
