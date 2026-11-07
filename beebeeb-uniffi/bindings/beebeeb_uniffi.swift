@@ -1955,17 +1955,15 @@ open class ChunkDecryptorHandle: ChunkDecryptorHandleProtocol, @unchecked Sendab
     /**
      * PUSH constructor: the caller feeds wire frames via
      * [`push_frame`](Self::push_frame). Each frame is self-describing, so no chunk
-     * size is needed.
-     *
-     * `expected_chunk_format` (task 1908) comes from the file's encrypted
-     * metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
+     * size is needed. `metadata` is the version's `NameMetadataDto` from
+     * `decrypt_file_metadata`; its commitment is enforced when present.
      */
-public static func forPush(masterKey: MasterKeyHandle, fileId: String, expectedChunkFormat: UInt8)throws  -> ChunkDecryptorHandle  {
+public static func forPush(masterKey: MasterKeyHandle, fileId: String, metadata: NameMetadataDto)throws  -> ChunkDecryptorHandle  {
     return try  FfiConverterTypeChunkDecryptorHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_push(
         FfiConverterTypeMasterKeyHandle_lower(masterKey),
         FfiConverterString.lower(fileId),
-        FfiConverterUInt8.lower(expectedChunkFormat),$0
+        FfiConverterTypeNameMetadataDto_lower(metadata),$0
     )
 })
 }
@@ -1973,16 +1971,16 @@ public static func forPush(masterKey: MasterKeyHandle, fileId: String, expectedC
     /**
      * PUSH constructor from a [`FileKeyHandle`] — for callers that hold the
      * file key but not the owner's master key (share / shared-link recipients).
-     * Preferred over [`for_push_with_file_key`](Self::for_push_with_file_key):
-     * the raw key never reaches Swift/Kotlin. `file_id` must be the id the file
-     * was uploaded under (bound into every v2 frame).
+     * The raw key never reaches Swift/Kotlin. `file_id` must be the id the file
+     * was uploaded under (bound into every v2 frame); `metadata` is what
+     * `decrypt_file_metadata_with_key` returned, its commitment enforced.
      */
-public static func forPushWithFileKeyHandle(fileKey: FileKeyHandle, fileId: String, expectedChunkFormat: UInt8)throws  -> ChunkDecryptorHandle  {
+public static func forPushWithFileKeyHandle(fileKey: FileKeyHandle, fileId: String, metadata: NameMetadataDto)throws  -> ChunkDecryptorHandle  {
     return try  FfiConverterTypeChunkDecryptorHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_push_with_file_key_handle(
         FfiConverterTypeFileKeyHandle_lower(fileKey),
         FfiConverterString.lower(fileId),
-        FfiConverterUInt8.lower(expectedChunkFormat),$0
+        FfiConverterTypeNameMetadataDto_lower(metadata),$0
     )
 })
 }
@@ -2004,19 +2002,37 @@ public static func forVersion(masterKey: MasterKeyHandle, fileId: String, expect
 }
     
     /**
+     * [`for_version`](Self::for_version) for key-handle holders (share and
+     * shared-link recipients): the fields of that version's own decrypted
+     * metadata record; omit both only for unprotected legacy metadata.
+     */
+public static func forVersionWithFileKeyHandle(fileKey: FileKeyHandle, fileId: String, expectedChunkFormat: UInt8, versionId: Data?, versionCounter: UInt64?)throws  -> ChunkDecryptorHandle  {
+    return try  FfiConverterTypeChunkDecryptorHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_version_with_file_key_handle(
+        FfiConverterTypeFileKeyHandle_lower(fileKey),
+        FfiConverterString.lower(fileId),
+        FfiConverterUInt8.lower(expectedChunkFormat),
+        FfiConverterOptionData.lower(versionId),
+        FfiConverterOptionUInt64.lower(versionCounter),$0
+    )
+})
+}
+    
+    /**
      * PULL constructor: stream-decrypt an encrypted file from disk.
      * `chunk_size_bytes` is the PLAINTEXT chunk size used at encryption (the wire
      * frame is `nonce(12) + chunk_size + tag(16)`). Errors if it is 0.
      *
-     * `expected_chunk_format` (task 1908) comes from the file's encrypted
-     * metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
+     * `metadata` is the `NameMetadataDto` `decrypt_file_metadata` returned for
+     * the version on disk: its `chunk_format`, and its version commitment,
+     * which frame 0 must match when the record carries one.
      */
-public static func fromFile(masterKey: MasterKeyHandle, fileId: String, expectedChunkFormat: UInt8, chunkSizeBytes: UInt64, inputPath: String)throws  -> ChunkDecryptorHandle  {
+public static func fromFile(masterKey: MasterKeyHandle, fileId: String, metadata: NameMetadataDto, chunkSizeBytes: UInt64, inputPath: String)throws  -> ChunkDecryptorHandle  {
     return try  FfiConverterTypeChunkDecryptorHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_from_file(
         FfiConverterTypeMasterKeyHandle_lower(masterKey),
         FfiConverterString.lower(fileId),
-        FfiConverterUInt8.lower(expectedChunkFormat),
+        FfiConverterTypeNameMetadataDto_lower(metadata),
         FfiConverterUInt64.lower(chunkSizeBytes),
         FfiConverterString.lower(inputPath),$0
     )
@@ -2938,13 +2954,27 @@ public func FfiConverterTypeDeviceApprovalHandle_lower(_ value: DeviceApprovalHa
 
 public protocol DeviceLinkHandleProtocol: AnyObject, Sendable {
     
-    func beginTypedPath() throws  -> TypedDeviceLinkStartData
+    /**
+     * Typed-code path: answer the approver's message (from
+     * `typed_approval_message`). Consumes the link. Send the returned
+     * `outbound_message` with `send_typed_new_device_message`, then poll with
+     * `poll_typed_device_link`.
+     */
+    func answerTypedPath(approverMessage: Data) throws  -> TypedDeviceLinkAnswerData
+    
+    /**
+     * The canonical device name this link reported.
+     */
+    func deviceName() throws  -> String
     
     func expiresAt()  -> String
     
     func id()  -> String
     
-    func qr() throws  -> DeviceLinkQrData
+    /**
+     * The text to render as this link's QR.
+     */
+    func qrPayload() throws  -> String
     
     func typedCode() throws  -> String
     
@@ -3002,9 +3032,27 @@ open class DeviceLinkHandle: DeviceLinkHandleProtocol, @unchecked Sendable {
     
 
     
-open func beginTypedPath()throws  -> TypedDeviceLinkStartData  {
-    return try  FfiConverterTypeTypedDeviceLinkStartData_lift(try rustCallWithError(FfiConverterTypeServiceError_lift) {
-    uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_begin_typed_path(
+    /**
+     * Typed-code path: answer the approver's message (from
+     * `typed_approval_message`). Consumes the link. Send the returned
+     * `outbound_message` with `send_typed_new_device_message`, then poll with
+     * `poll_typed_device_link`.
+     */
+open func answerTypedPath(approverMessage: Data)throws  -> TypedDeviceLinkAnswerData  {
+    return try  FfiConverterTypeTypedDeviceLinkAnswerData_lift(try rustCallWithError(FfiConverterTypeServiceError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_answer_typed_path(
+            self.uniffiCloneHandle(),
+        FfiConverterData.lower(approverMessage),$0
+    )
+})
+}
+    
+    /**
+     * The canonical device name this link reported.
+     */
+open func deviceName()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeServiceError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_device_name(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -3026,9 +3074,12 @@ open func id() -> String  {
 })
 }
     
-open func qr()throws  -> DeviceLinkQrData  {
-    return try  FfiConverterTypeDeviceLinkQrData_lift(try rustCallWithError(FfiConverterTypeServiceError_lift) {
-    uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_qr(
+    /**
+     * The text to render as this link's QR.
+     */
+open func qrPayload()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeServiceError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_qr_payload(
             self.uniffiCloneHandle(),$0
     )
 })
@@ -3096,8 +3147,18 @@ public protocol DeviceServiceHandleProtocol: AnyObject, Sendable {
     
     func acknowledgeDeviceLink(approval: DeviceApprovalHandle) throws 
     
-    func approveDeviceLink(id: String, qr: DeviceLinkQrData, typedCode: String) throws 
+    /**
+     * QR path. `scanned_qr` is the raw text the camera read from the new
+     * device's screen. Without a camera use the typed-code path: the code
+     * gives no protection against a substituted key on this one.
+     */
+    func approveDeviceLink(id: String, scannedQr: String, typedCode: String) throws 
     
+    /**
+     * Check the new device's answer and only then seal and send the account
+     * key. A wrong code or a changed device name is
+     * `ServiceError::Authentication`; the link is then denied.
+     */
     func approveTypedDeviceLink(approval: TypedDeviceApprovalHandle, newDeviceMessage: Data) throws 
     
     func beginTypedDeviceApproval(id: String, typedCode: String) throws  -> TypedDeviceApprovalStartData
@@ -3194,16 +3255,26 @@ open func acknowledgeDeviceLink(approval: DeviceApprovalHandle)throws   {try rus
 }
 }
     
-open func approveDeviceLink(id: String, qr: DeviceLinkQrData, typedCode: String)throws   {try rustCallWithError(FfiConverterTypeServiceError_lift) {
+    /**
+     * QR path. `scanned_qr` is the raw text the camera read from the new
+     * device's screen. Without a camera use the typed-code path: the code
+     * gives no protection against a substituted key on this one.
+     */
+open func approveDeviceLink(id: String, scannedQr: String, typedCode: String)throws   {try rustCallWithError(FfiConverterTypeServiceError_lift) {
     uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_approve_device_link(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),
-        FfiConverterTypeDeviceLinkQrData_lower(qr),
+        FfiConverterString.lower(scannedQr),
         FfiConverterString.lower(typedCode),$0
     )
 }
 }
     
+    /**
+     * Check the new device's answer and only then seal and send the account
+     * key. A wrong code or a changed device name is
+     * `ServiceError::Authentication`; the link is then denied.
+     */
 open func approveTypedDeviceLink(approval: TypedDeviceApprovalHandle, newDeviceMessage: Data)throws   {try rustCallWithError(FfiConverterTypeServiceError_lift) {
     uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_approve_typed_device_link(
             self.uniffiCloneHandle(),
@@ -10933,123 +11004,6 @@ public func FfiConverterTypeTypedDeviceApprovalHandle_lower(_ value: TypedDevice
 
 
 
-public protocol TypedDeviceLinkHandleProtocol: AnyObject, Sendable {
-    
-    func finish(peerMessage: Data) throws  -> TypedDeviceReceiverHandle
-    
-}
-open class TypedDeviceLinkHandle: TypedDeviceLinkHandleProtocol, @unchecked Sendable {
-    fileprivate let handle: UInt64
-
-    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public struct NoHandle {
-        public init() {}
-    }
-
-    // TODO: We'd like this to be `private` but for Swifty reasons,
-    // we can't implement `FfiConverter` without making this `required` and we can't
-    // make it `required` without making it `public`.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    required public init(unsafeFromHandle handle: UInt64) {
-        self.handle = handle
-    }
-
-    // This constructor can be used to instantiate a fake object.
-    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
-    //
-    // - Warning:
-    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public init(noHandle: NoHandle) {
-        self.handle = 0
-    }
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_typeddevicelinkhandle(self.handle, $0) }
-    }
-    // No primary constructor declared for this class.
-
-    deinit {
-        if handle == 0 {
-            // Mock objects have handle=0 don't try to free them
-            return
-        }
-
-        try! rustCall { uniffi_beebeeb_uniffi_fn_free_typeddevicelinkhandle(handle, $0) }
-    }
-
-    
-
-    
-open func finish(peerMessage: Data)throws  -> TypedDeviceReceiverHandle  {
-    return try  FfiConverterTypeTypedDeviceReceiverHandle_lift(try rustCallWithError(FfiConverterTypeServiceError_lift) {
-    uniffi_beebeeb_uniffi_fn_method_typeddevicelinkhandle_finish(
-            self.uniffiCloneHandle(),
-        FfiConverterData.lower(peerMessage),$0
-    )
-})
-}
-    
-
-    
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeTypedDeviceLinkHandle: FfiConverter {
-    typealias FfiType = UInt64
-    typealias SwiftType = TypedDeviceLinkHandle
-
-    public static func lift(_ handle: UInt64) throws -> TypedDeviceLinkHandle {
-        return TypedDeviceLinkHandle(unsafeFromHandle: handle)
-    }
-
-    public static func lower(_ value: TypedDeviceLinkHandle) -> UInt64 {
-        return value.uniffiCloneHandle()
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TypedDeviceLinkHandle {
-        let handle: UInt64 = try readInt(&buf)
-        return try lift(handle)
-    }
-
-    public static func write(_ value: TypedDeviceLinkHandle, into buf: inout [UInt8]) {
-        writeInt(&buf, lower(value))
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeTypedDeviceLinkHandle_lift(_ handle: UInt64) throws -> TypedDeviceLinkHandle {
-    return try FfiConverterTypeTypedDeviceLinkHandle.lift(handle)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeTypedDeviceLinkHandle_lower(_ value: TypedDeviceLinkHandle) -> UInt64 {
-    return FfiConverterTypeTypedDeviceLinkHandle.lower(value)
-}
-
-
-
-
-
-
 public protocol TypedDeviceReceiverHandleProtocol: AnyObject, Sendable {
     
 }
@@ -14517,60 +14471,6 @@ public func FfiConverterTypeDeviceLinkPollData_lower(_ value: DeviceLinkPollData
 }
 
 
-public struct DeviceLinkQrData: Equatable, Hashable {
-    public var sessionId: Data
-    public var fingerprint: Data
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(sessionId: Data, fingerprint: Data) {
-        self.sessionId = sessionId
-        self.fingerprint = fingerprint
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension DeviceLinkQrData: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeDeviceLinkQrData: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DeviceLinkQrData {
-        return
-            try DeviceLinkQrData(
-                sessionId: FfiConverterData.read(from: &buf), 
-                fingerprint: FfiConverterData.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: DeviceLinkQrData, into buf: inout [UInt8]) {
-        FfiConverterData.write(value.sessionId, into: &buf)
-        FfiConverterData.write(value.fingerprint, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeDeviceLinkQrData_lift(_ buf: RustBuffer) throws -> DeviceLinkQrData {
-    return try FfiConverterTypeDeviceLinkQrData.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeDeviceLinkQrData_lower(_ value: DeviceLinkQrData) -> RustBuffer {
-    return FfiConverterTypeDeviceLinkQrData.lower(value)
-}
-
-
 public struct DeviceSettingsData: Equatable, Hashable {
     public var cacheBytes: UInt64
     public var thumbnailBytes: UInt64
@@ -16348,14 +16248,19 @@ public func FfiConverterTypeOwnerFileKey_lower(_ value: OwnerFileKey) -> RustBuf
 }
 
 
+/**
+ * What the platform passkey prompt returned. `prf_output` is key material: a
+ * [`SecretBytes`](crate::SecretBytes) (plain `Data` / `ByteArray` to Swift and
+ * Kotlin), wiped on drop and redacted in `Debug`.
+ */
 public struct PasskeyPromptResult: Equatable, Hashable {
     public var credentialId: String
-    public var prfOutput: Data
+    public var prfOutput: SecretBytes
     public var userVerified: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(credentialId: String, prfOutput: Data, userVerified: Bool) {
+    public init(credentialId: String, prfOutput: SecretBytes, userVerified: Bool) {
         self.credentialId = credentialId
         self.prfOutput = prfOutput
         self.userVerified = userVerified
@@ -16378,14 +16283,14 @@ public struct FfiConverterTypePasskeyPromptResult: FfiConverterRustBuffer {
         return
             try PasskeyPromptResult(
                 credentialId: FfiConverterString.read(from: &buf), 
-                prfOutput: FfiConverterData.read(from: &buf), 
+                prfOutput: FfiConverterTypeSecretBytes.read(from: &buf), 
                 userVerified: FfiConverterBool.read(from: &buf)
         )
     }
 
     public static func write(_ value: PasskeyPromptResult, into buf: inout [UInt8]) {
         FfiConverterString.write(value.credentialId, into: &buf)
-        FfiConverterData.write(value.prfOutput, into: &buf)
+        FfiConverterTypeSecretBytes.write(value.prfOutput, into: &buf)
         FfiConverterBool.write(value.userVerified, into: &buf)
     }
 }
@@ -16564,17 +16469,21 @@ public func FfiConverterTypePendingDeviceLinkData_lower(_ value: PendingDeviceLi
 }
 
 
+/**
+ * The changes a recovery applies. The secret fields are [`SecretString`]s
+ * (plain strings to Swift and Kotlin): wiped on drop, redacted in `Debug`.
+ */
 public struct RecoveryChangesData: Equatable, Hashable {
-    public var newPassword: String?
+    public var newPassword: SecretString?
     public var newEmail: String?
-    public var emailVerificationCode: String?
-    public var newAuthenticator: String?
-    public var authenticatorCode: String?
+    public var emailVerificationCode: SecretString?
+    public var newAuthenticator: SecretString?
+    public var authenticatorCode: SecretString?
     public var removeAuthenticator: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(newPassword: String?, newEmail: String?, emailVerificationCode: String?, newAuthenticator: String?, authenticatorCode: String?, removeAuthenticator: Bool) {
+    public init(newPassword: SecretString?, newEmail: String?, emailVerificationCode: SecretString?, newAuthenticator: SecretString?, authenticatorCode: SecretString?, removeAuthenticator: Bool) {
         self.newPassword = newPassword
         self.newEmail = newEmail
         self.emailVerificationCode = emailVerificationCode
@@ -16599,21 +16508,21 @@ public struct FfiConverterTypeRecoveryChangesData: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RecoveryChangesData {
         return
             try RecoveryChangesData(
-                newPassword: FfiConverterOptionString.read(from: &buf), 
+                newPassword: FfiConverterOptionTypeSecretString.read(from: &buf), 
                 newEmail: FfiConverterOptionString.read(from: &buf), 
-                emailVerificationCode: FfiConverterOptionString.read(from: &buf), 
-                newAuthenticator: FfiConverterOptionString.read(from: &buf), 
-                authenticatorCode: FfiConverterOptionString.read(from: &buf), 
+                emailVerificationCode: FfiConverterOptionTypeSecretString.read(from: &buf), 
+                newAuthenticator: FfiConverterOptionTypeSecretString.read(from: &buf), 
+                authenticatorCode: FfiConverterOptionTypeSecretString.read(from: &buf), 
                 removeAuthenticator: FfiConverterBool.read(from: &buf)
         )
     }
 
     public static func write(_ value: RecoveryChangesData, into buf: inout [UInt8]) {
-        FfiConverterOptionString.write(value.newPassword, into: &buf)
+        FfiConverterOptionTypeSecretString.write(value.newPassword, into: &buf)
         FfiConverterOptionString.write(value.newEmail, into: &buf)
-        FfiConverterOptionString.write(value.emailVerificationCode, into: &buf)
-        FfiConverterOptionString.write(value.newAuthenticator, into: &buf)
-        FfiConverterOptionString.write(value.authenticatorCode, into: &buf)
+        FfiConverterOptionTypeSecretString.write(value.emailVerificationCode, into: &buf)
+        FfiConverterOptionTypeSecretString.write(value.newAuthenticator, into: &buf)
+        FfiConverterOptionTypeSecretString.write(value.authenticatorCode, into: &buf)
         FfiConverterBool.write(value.removeAuthenticator, into: &buf)
     }
 }
@@ -17691,15 +17600,21 @@ public func FfiConverterTypeThumbnailEnqueueData_lower(_ value: ThumbnailEnqueue
 }
 
 
+/**
+ * The approver's start of a typed-code attempt. Show `device_name` while the
+ * person types: the new device's confirmation proves it reported that name.
+ */
 public struct TypedDeviceApprovalStartData {
     public var handle: TypedDeviceApprovalHandle
     public var outboundMessage: Data
+    public var deviceName: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(handle: TypedDeviceApprovalHandle, outboundMessage: Data) {
+    public init(handle: TypedDeviceApprovalHandle, outboundMessage: Data, deviceName: String) {
         self.handle = handle
         self.outboundMessage = outboundMessage
+        self.deviceName = deviceName
     }
 
     
@@ -17719,13 +17634,15 @@ public struct FfiConverterTypeTypedDeviceApprovalStartData: FfiConverterRustBuff
         return
             try TypedDeviceApprovalStartData(
                 handle: FfiConverterTypeTypedDeviceApprovalHandle.read(from: &buf), 
-                outboundMessage: FfiConverterData.read(from: &buf)
+                outboundMessage: FfiConverterData.read(from: &buf), 
+                deviceName: FfiConverterString.read(from: &buf)
         )
     }
 
     public static func write(_ value: TypedDeviceApprovalStartData, into buf: inout [UInt8]) {
         FfiConverterTypeTypedDeviceApprovalHandle.write(value.handle, into: &buf)
         FfiConverterData.write(value.outboundMessage, into: &buf)
+        FfiConverterString.write(value.deviceName, into: &buf)
     }
 }
 
@@ -17745,13 +17662,13 @@ public func FfiConverterTypeTypedDeviceApprovalStartData_lower(_ value: TypedDev
 }
 
 
-public struct TypedDeviceLinkStartData {
-    public var handle: TypedDeviceLinkHandle
+public struct TypedDeviceLinkAnswerData {
+    public var handle: TypedDeviceReceiverHandle
     public var outboundMessage: Data
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(handle: TypedDeviceLinkHandle, outboundMessage: Data) {
+    public init(handle: TypedDeviceReceiverHandle, outboundMessage: Data) {
         self.handle = handle
         self.outboundMessage = outboundMessage
     }
@@ -17762,23 +17679,23 @@ public struct TypedDeviceLinkStartData {
 }
 
 #if compiler(>=6)
-extension TypedDeviceLinkStartData: Sendable {}
+extension TypedDeviceLinkAnswerData: Sendable {}
 #endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeTypedDeviceLinkStartData: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TypedDeviceLinkStartData {
+public struct FfiConverterTypeTypedDeviceLinkAnswerData: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TypedDeviceLinkAnswerData {
         return
-            try TypedDeviceLinkStartData(
-                handle: FfiConverterTypeTypedDeviceLinkHandle.read(from: &buf), 
+            try TypedDeviceLinkAnswerData(
+                handle: FfiConverterTypeTypedDeviceReceiverHandle.read(from: &buf), 
                 outboundMessage: FfiConverterData.read(from: &buf)
         )
     }
 
-    public static func write(_ value: TypedDeviceLinkStartData, into buf: inout [UInt8]) {
-        FfiConverterTypeTypedDeviceLinkHandle.write(value.handle, into: &buf)
+    public static func write(_ value: TypedDeviceLinkAnswerData, into buf: inout [UInt8]) {
+        FfiConverterTypeTypedDeviceReceiverHandle.write(value.handle, into: &buf)
         FfiConverterData.write(value.outboundMessage, into: &buf)
     }
 }
@@ -17787,15 +17704,15 @@ public struct FfiConverterTypeTypedDeviceLinkStartData: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeTypedDeviceLinkStartData_lift(_ buf: RustBuffer) throws -> TypedDeviceLinkStartData {
-    return try FfiConverterTypeTypedDeviceLinkStartData.lift(buf)
+public func FfiConverterTypeTypedDeviceLinkAnswerData_lift(_ buf: RustBuffer) throws -> TypedDeviceLinkAnswerData {
+    return try FfiConverterTypeTypedDeviceLinkAnswerData.lift(buf)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeTypedDeviceLinkStartData_lower(_ value: TypedDeviceLinkStartData) -> RustBuffer {
-    return FfiConverterTypeTypedDeviceLinkStartData.lower(value)
+public func FfiConverterTypeTypedDeviceLinkAnswerData_lower(_ value: TypedDeviceLinkAnswerData) -> RustBuffer {
+    return FfiConverterTypeTypedDeviceLinkAnswerData.lower(value)
 }
 
 
@@ -23659,6 +23576,30 @@ fileprivate struct FfiConverterOptionSequenceTypeBackupManifestRecordData: FfiCo
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeSecretString: FfiConverterRustBuffer {
+    typealias SwiftType = SecretString?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeSecretString.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeSecretString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceUInt32: FfiConverterRustBuffer {
     typealias SwiftType = [UInt32]
 
@@ -24780,6 +24721,94 @@ fileprivate struct FfiConverterSequenceSequenceTypeBackupMergeEntry: FfiConverte
         return seq
     }
 }
+
+
+/**
+ * Typealias from the type name used in the UDL file to the builtin type.  This
+ * is needed because the UDL type name is used in function/method signatures.
+ */
+public typealias SecretBytes = Data
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSecretBytes: FfiConverter {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SecretBytes {
+        return try FfiConverterData.read(from: &buf)
+    }
+
+    public static func write(_ value: SecretBytes, into buf: inout [UInt8]) {
+        return FfiConverterData.write(value, into: &buf)
+    }
+
+    public static func lift(_ value: RustBuffer) throws -> SecretBytes {
+        return try FfiConverterData.lift(value)
+    }
+
+    public static func lower(_ value: SecretBytes) -> RustBuffer {
+        return FfiConverterData.lower(value)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSecretBytes_lift(_ value: RustBuffer) throws -> SecretBytes {
+    return try FfiConverterTypeSecretBytes.lift(value)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSecretBytes_lower(_ value: SecretBytes) -> RustBuffer {
+    return FfiConverterTypeSecretBytes.lower(value)
+}
+
+
+
+/**
+ * Typealias from the type name used in the UDL file to the builtin type.  This
+ * is needed because the UDL type name is used in function/method signatures.
+ */
+public typealias SecretString = String
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSecretString: FfiConverter {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SecretString {
+        return try FfiConverterString.read(from: &buf)
+    }
+
+    public static func write(_ value: SecretString, into buf: inout [UInt8]) {
+        return FfiConverterString.write(value, into: &buf)
+    }
+
+    public static func lift(_ value: RustBuffer) throws -> SecretString {
+        return try FfiConverterString.lift(value)
+    }
+
+    public static func lower(_ value: SecretString) -> RustBuffer {
+        return FfiConverterString.lower(value)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSecretString_lift(_ value: RustBuffer) throws -> SecretString {
+    return try FfiConverterTypeSecretString.lift(value)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSecretString_lower(_ value: SecretString) -> RustBuffer {
+    return FfiConverterTypeSecretString.lower(value)
+}
+
 /**
  * Whether the app may let the user continue with this password. `Breached`
  * and `CheckFailedBlocked` stop it. Kept in core so apps do not re-derive it.
@@ -25575,6 +25604,32 @@ public func backupStopWords(reason: String, device: String, folder: String)throw
 })
 }
 /**
+ * An account email in the server's stored form (Rust `str::trim`, then
+ * Unicode lower case). Use it for every email that names a contact or a pin.
+ */
+public func normalizeEmail(raw: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_normalize_email(
+        FfiConverterString.lower(raw),$0
+    )
+})
+}
+/**
+ * The 60-digit safety number two contacts compare (12 groups of 5, joined).
+ * Each email is normalised by core first; keys are the contacts' 32-byte
+ * X25519 public keys. The same on both sides whatever the argument order.
+ */
+public func safetyNumber(emailA: String, publicKeyA: Data, emailB: String, publicKeyB: Data)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_safety_number(
+        FfiConverterString.lower(emailA),
+        FfiConverterData.lower(publicKeyA),
+        FfiConverterString.lower(emailB),
+        FfiConverterData.lower(publicKeyB),$0
+    )
+})
+}
+/**
  * Mint a guest (F) item id with NO master key (task 2275 §15). The anonymous
  * uploader path uses this; the id is a canonical RFC 9562 UUID v8.
  */
@@ -25804,6 +25859,12 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_backup_stop_words() != 39803) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_func_normalize_email() != 54107) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_safety_number() != 44018) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_func_mint_guest_item_id() != 8655) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -25811,21 +25872,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_breachcheckhandle_prefix() != 34418) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_chunk_format() != 50766) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_finish() != 43578) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_next_chunk() != 20032) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_push_frame() != 40122) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_version_id() != 23865) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_chunkencryptorhandle_apply_recorded_pin() != 41181) {
@@ -26278,7 +26324,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_authenticatorenrollmenthandle_qr_uri() != 5370) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_begin_typed_path() != 19570) {
+    if (uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_answer_typed_path() != 60622) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_device_name() != 61779) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_expires_at() != 43668) {
@@ -26287,7 +26336,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_id() != 9109) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_qr() != 55816) {
+    if (uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_qr_payload() != 15525) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_typed_code() != 60442) {
@@ -26374,7 +26423,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_verify_email() != 62146) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_typeddevicelinkhandle_finish() != 3712) {
+    if (uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_chunk_format() != 28015) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_finish() != 14433) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_next_chunk() != 48412) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_push_frame() != 44661) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_version_id() != 33210) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_backupeventstreamhandle_next() != 41001) {
@@ -26431,7 +26492,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_chunk_format() != 45751) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_decryptor() != 44887) {
+    if (uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_decryptor() != 53293) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_file_id() != 37501) {
@@ -26656,10 +26717,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_acknowledge_device_link() != 20880) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_approve_device_link() != 55625) {
+    if (uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_approve_device_link() != 42861) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_approve_typed_device_link() != 1130) {
+    if (uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_approve_typed_device_link() != 3275) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_begin_typed_device_approval() != 33167) {
@@ -26773,18 +26834,6 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_constructor_breachcheckhandle_new() != 51691) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push() != 49279) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push_with_file_key_handle() != 50643) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version() != 26388) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_from_file() != 38225) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_beebeeb_uniffi_checksum_constructor_chunkencryptorhandle_for_push() != 9385) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -26840,6 +26889,21 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_signupceremonyhandle_new() != 22479) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push() != 14552) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push_with_file_key_handle() != 18199) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version() != 872) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version_with_file_key_handle() != 35155) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_from_file() != 54716) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_nativeclienthandle_new() != 1687) {

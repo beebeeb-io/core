@@ -1028,21 +1028,15 @@ external fun uniffi_beebeeb_uniffi_checksum_func_backup_stop(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_backup_stop_words(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_normalize_email(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_safety_number(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_mint_guest_item_id(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_breachcheckhandle_evaluate(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_breachcheckhandle_prefix(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_chunk_format(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_finish(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_next_chunk(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_push_frame(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_version_id(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_chunkencryptorhandle_apply_recorded_pin(
 ): Short
@@ -1344,13 +1338,15 @@ external fun uniffi_beebeeb_uniffi_checksum_method_authenticatorenrollmenthandle
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_authenticatorenrollmenthandle_qr_uri(
 ): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_begin_typed_path(
+external fun uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_answer_typed_path(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_device_name(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_expires_at(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_id(
 ): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_qr(
+external fun uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_qr_payload(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_typed_code(
 ): Short
@@ -1408,7 +1404,15 @@ external fun uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_step(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_verify_email(
 ): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_typeddevicelinkhandle_finish(
+external fun uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_chunk_format(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_finish(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_next_chunk(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_push_frame(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_version_id(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_backupeventstreamhandle_next(
 ): Short
@@ -1674,14 +1678,6 @@ external fun uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_run_next(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_breachcheckhandle_new(
 ): Short
-external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push_with_file_key_handle(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_from_file(
-): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkencryptorhandle_for_push(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkencryptorhandle_for_push_for_new_item(
@@ -1719,6 +1715,16 @@ external fun uniffi_beebeeb_uniffi_checksum_constructor_searchindexhandle_from_e
 external fun uniffi_beebeeb_uniffi_checksum_constructor_searchindexhandle_new(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_signupceremonyhandle_new(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push_with_file_key_handle(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version_with_file_key_handle(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_from_file(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_nativeclienthandle_new(
 ): Short
@@ -1795,28 +1801,6 @@ external fun uniffi_beebeeb_uniffi_fn_constructor_breachcheckhandle_new(`passwor
 external fun uniffi_beebeeb_uniffi_fn_method_breachcheckhandle_evaluate(`ptr`: Long,`requestedPrefix`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,`failOpen`: Byte,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_breachcheckhandle_prefix(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_clone_chunkdecryptorhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_free_chunkdecryptorhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_push(`masterKey`: Long,`fileId`: RustBuffer.ByValue,`expectedChunkFormat`: Byte,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_push_with_file_key_handle(`fileKey`: Long,`fileId`: RustBuffer.ByValue,`expectedChunkFormat`: Byte,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_version(`masterKey`: Long,`fileId`: RustBuffer.ByValue,`expectedChunkFormat`: Byte,`versionId`: RustBuffer.ByValue,`versionCounter`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_from_file(`masterKey`: Long,`fileId`: RustBuffer.ByValue,`expectedChunkFormat`: Byte,`chunkSizeBytes`: Long,`inputPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_method_chunkdecryptorhandle_chunk_format(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_chunkdecryptorhandle_finish(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_chunkdecryptorhandle_next_chunk(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_chunkdecryptorhandle_push_frame(`ptr`: Long,`frame`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_chunkdecryptorhandle_version_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_clone_chunkencryptorhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
@@ -2228,13 +2212,15 @@ external fun uniffi_beebeeb_uniffi_fn_clone_devicelinkhandle(`handle`: Long,unif
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_devicelinkhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_begin_typed_path(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_answer_typed_path(`ptr`: Long,`approverMessage`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_device_name(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_expires_at(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_qr(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_qr_payload(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_typed_code(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -2312,16 +2298,34 @@ external fun uniffi_beebeeb_uniffi_fn_clone_typeddeviceapprovalhandle(`handle`: 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_typeddeviceapprovalhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-external fun uniffi_beebeeb_uniffi_fn_clone_typeddevicelinkhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_free_typeddevicelinkhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_typeddevicelinkhandle_finish(`ptr`: Long,`peerMessage`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Long
 external fun uniffi_beebeeb_uniffi_fn_clone_typeddevicereceiverhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_typeddevicereceiverhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_beebeeb_uniffi_fn_clone_chunkdecryptorhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_chunkdecryptorhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_push(`masterKey`: Long,`fileId`: RustBuffer.ByValue,`metadata`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_push_with_file_key_handle(`fileKey`: Long,`fileId`: RustBuffer.ByValue,`metadata`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_version(`masterKey`: Long,`fileId`: RustBuffer.ByValue,`expectedChunkFormat`: Byte,`versionId`: RustBuffer.ByValue,`versionCounter`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_version_with_file_key_handle(`fileKey`: Long,`fileId`: RustBuffer.ByValue,`expectedChunkFormat`: Byte,`versionId`: RustBuffer.ByValue,`versionCounter`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_from_file(`masterKey`: Long,`fileId`: RustBuffer.ByValue,`metadata`: RustBuffer.ByValue,`chunkSizeBytes`: Long,`inputPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_chunkdecryptorhandle_chunk_format(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_chunkdecryptorhandle_finish(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_chunkdecryptorhandle_next_chunk(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_chunkdecryptorhandle_push_frame(`ptr`: Long,`frame`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_chunkdecryptorhandle_version_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_clone_accountreplacementhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_accountreplacementhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -2590,7 +2594,7 @@ external fun uniffi_beebeeb_uniffi_fn_free_deviceservicehandle(`handle`: Long,un
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_acknowledge_device_link(`ptr`: Long,`approval`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_approve_device_link(`ptr`: Long,`id`: RustBuffer.ByValue,`qr`: RustBuffer.ByValue,`typedCode`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_approve_device_link(`ptr`: Long,`id`: RustBuffer.ByValue,`scannedQr`: RustBuffer.ByValue,`typedCode`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_approve_typed_device_link(`ptr`: Long,`approval`: Long,`newDeviceMessage`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -2845,6 +2849,10 @@ external fun uniffi_beebeeb_uniffi_fn_func_backup_notice_reason(`kind`: RustBuff
 external fun uniffi_beebeeb_uniffi_fn_func_backup_stop(`notices`: RustBuffer.ByValue,`lastPassAtMs`: Long,`listing`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_backup_stop_words(`reason`: RustBuffer.ByValue,`device`: RustBuffer.ByValue,`folder`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_normalize_email(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_safety_number(`emailA`: RustBuffer.ByValue,`publicKeyA`: RustBuffer.ByValue,`emailB`: RustBuffer.ByValue,`publicKeyB`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_mint_guest_item_id(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -3171,6 +3179,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_stop_words() != 39803.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_normalize_email() != 54107.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_safety_number() != 44018.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_mint_guest_item_id() != 8655.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -3178,21 +3192,6 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_breachcheckhandle_prefix() != 34418.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_chunk_format() != 50766.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_finish() != 43578.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_next_chunk() != 20032.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_push_frame() != 40122.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_version_id() != 23865.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_chunkencryptorhandle_apply_recorded_pin() != 41181.toShort()) {
@@ -3645,7 +3644,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_authenticatorenrollmenthandle_qr_uri() != 5370.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_begin_typed_path() != 19570.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_answer_typed_path() != 60622.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_device_name() != 61779.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_expires_at() != 43668.toShort()) {
@@ -3654,7 +3656,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_id() != 9109.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_qr() != 55816.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_qr_payload() != 15525.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_devicelinkhandle_typed_code() != 60442.toShort()) {
@@ -3741,7 +3743,19 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_verify_email() != 62146.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_typeddevicelinkhandle_finish() != 3712.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_chunk_format() != 28015.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_finish() != 14433.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_next_chunk() != 48412.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_push_frame() != 44661.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_version_id() != 33210.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_backupeventstreamhandle_next() != 41001.toShort()) {
@@ -3798,7 +3812,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_chunk_format() != 45751.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_decryptor() != 44887.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_decryptor() != 53293.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_file_id() != 37501.toShort()) {
@@ -4023,10 +4037,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_acknowledge_device_link() != 20880.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_approve_device_link() != 55625.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_approve_device_link() != 42861.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_approve_typed_device_link() != 1130.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_approve_typed_device_link() != 3275.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_begin_typed_device_approval() != 33167.toShort()) {
@@ -4140,18 +4154,6 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_breachcheckhandle_new() != 51691.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push() != 49279.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push_with_file_key_handle() != 50643.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version() != 26388.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_from_file() != 38225.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkencryptorhandle_for_push() != 9385.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -4207,6 +4209,21 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_signupceremonyhandle_new() != 22479.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push() != 14552.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push_with_file_key_handle() != 18199.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version() != 872.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version_with_file_key_handle() != 35155.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_from_file() != 54716.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_nativeclienthandle_new() != 1687.toShort()) {
@@ -7349,17 +7366,15 @@ open class ChunkDecryptorHandle: Disposable, AutoCloseable, ChunkDecryptorHandle
     /**
      * PUSH constructor: the caller feeds wire frames via
      * [`push_frame`](Self::push_frame). Each frame is self-describing, so no chunk
-     * size is needed.
-     *
-     * `expected_chunk_format` (task 1908) comes from the file's encrypted
-     * metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
+     * size is needed. `metadata` is the version's `NameMetadataDto` from
+     * `decrypt_file_metadata`; its commitment is enforced when present.
      */
-    @Throws(CryptoException::class) fun `forPush`(`masterKey`: MasterKeyHandle, `fileId`: kotlin.String, `expectedChunkFormat`: kotlin.UByte): ChunkDecryptorHandle {
+    @Throws(CryptoException::class) fun `forPush`(`masterKey`: MasterKeyHandle, `fileId`: kotlin.String, `metadata`: NameMetadataDto): ChunkDecryptorHandle {
             return FfiConverterTypeChunkDecryptorHandle.lift(
     uniffiRustCallWithError(CryptoException) { _status ->
     UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_push(
     
-        FfiConverterTypeMasterKeyHandle.lower(`masterKey`),FfiConverterString.lower(`fileId`),FfiConverterUByte.lower(`expectedChunkFormat`),_status)
+        FfiConverterTypeMasterKeyHandle.lower(`masterKey`),FfiConverterString.lower(`fileId`),FfiConverterTypeNameMetadataDto.lower(`metadata`),_status)
 }
     )
     }
@@ -7369,16 +7384,16 @@ open class ChunkDecryptorHandle: Disposable, AutoCloseable, ChunkDecryptorHandle
     /**
      * PUSH constructor from a [`FileKeyHandle`] — for callers that hold the
      * file key but not the owner's master key (share / shared-link recipients).
-     * Preferred over [`for_push_with_file_key`](Self::for_push_with_file_key):
-     * the raw key never reaches Swift/Kotlin. `file_id` must be the id the file
-     * was uploaded under (bound into every v2 frame).
+     * The raw key never reaches Swift/Kotlin. `file_id` must be the id the file
+     * was uploaded under (bound into every v2 frame); `metadata` is what
+     * `decrypt_file_metadata_with_key` returned, its commitment enforced.
      */
-    @Throws(CryptoException::class) fun `forPushWithFileKeyHandle`(`fileKey`: FileKeyHandle, `fileId`: kotlin.String, `expectedChunkFormat`: kotlin.UByte): ChunkDecryptorHandle {
+    @Throws(CryptoException::class) fun `forPushWithFileKeyHandle`(`fileKey`: FileKeyHandle, `fileId`: kotlin.String, `metadata`: NameMetadataDto): ChunkDecryptorHandle {
             return FfiConverterTypeChunkDecryptorHandle.lift(
     uniffiRustCallWithError(CryptoException) { _status ->
     UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_push_with_file_key_handle(
     
-        FfiConverterTypeFileKeyHandle.lower(`fileKey`),FfiConverterString.lower(`fileId`),FfiConverterUByte.lower(`expectedChunkFormat`),_status)
+        FfiConverterTypeFileKeyHandle.lower(`fileKey`),FfiConverterString.lower(`fileId`),FfiConverterTypeNameMetadataDto.lower(`metadata`),_status)
 }
     )
     }
@@ -7402,19 +7417,37 @@ open class ChunkDecryptorHandle: Disposable, AutoCloseable, ChunkDecryptorHandle
 
         
     /**
+     * [`for_version`](Self::for_version) for key-handle holders (share and
+     * shared-link recipients): the fields of that version's own decrypted
+     * metadata record; omit both only for unprotected legacy metadata.
+     */
+    @Throws(CryptoException::class) fun `forVersionWithFileKeyHandle`(`fileKey`: FileKeyHandle, `fileId`: kotlin.String, `expectedChunkFormat`: kotlin.UByte, `versionId`: kotlin.ByteArray?, `versionCounter`: kotlin.ULong?): ChunkDecryptorHandle {
+            return FfiConverterTypeChunkDecryptorHandle.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_for_version_with_file_key_handle(
+    
+        FfiConverterTypeFileKeyHandle.lower(`fileKey`),FfiConverterString.lower(`fileId`),FfiConverterUByte.lower(`expectedChunkFormat`),FfiConverterOptionalByteArray.lower(`versionId`),FfiConverterOptionalULong.lower(`versionCounter`),_status)
+}
+    )
+    }
+    
+
+        
+    /**
      * PULL constructor: stream-decrypt an encrypted file from disk.
      * `chunk_size_bytes` is the PLAINTEXT chunk size used at encryption (the wire
      * frame is `nonce(12) + chunk_size + tag(16)`). Errors if it is 0.
      *
-     * `expected_chunk_format` (task 1908) comes from the file's encrypted
-     * metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
+     * `metadata` is the `NameMetadataDto` `decrypt_file_metadata` returned for
+     * the version on disk: its `chunk_format`, and its version commitment,
+     * which frame 0 must match when the record carries one.
      */
-    @Throws(CryptoException::class) fun `fromFile`(`masterKey`: MasterKeyHandle, `fileId`: kotlin.String, `expectedChunkFormat`: kotlin.UByte, `chunkSizeBytes`: kotlin.ULong, `inputPath`: kotlin.String): ChunkDecryptorHandle {
+    @Throws(CryptoException::class) fun `fromFile`(`masterKey`: MasterKeyHandle, `fileId`: kotlin.String, `metadata`: NameMetadataDto, `chunkSizeBytes`: kotlin.ULong, `inputPath`: kotlin.String): ChunkDecryptorHandle {
             return FfiConverterTypeChunkDecryptorHandle.lift(
     uniffiRustCallWithError(CryptoException) { _status ->
     UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_chunkdecryptorhandle_from_file(
     
-        FfiConverterTypeMasterKeyHandle.lower(`masterKey`),FfiConverterString.lower(`fileId`),FfiConverterUByte.lower(`expectedChunkFormat`),FfiConverterULong.lower(`chunkSizeBytes`),FfiConverterString.lower(`inputPath`),_status)
+        FfiConverterTypeMasterKeyHandle.lower(`masterKey`),FfiConverterString.lower(`fileId`),FfiConverterTypeNameMetadataDto.lower(`metadata`),FfiConverterULong.lower(`chunkSizeBytes`),FfiConverterString.lower(`inputPath`),_status)
 }
     )
     }
@@ -8955,13 +8988,27 @@ public object FfiConverterTypeDeviceApprovalHandle: FfiConverter<DeviceApprovalH
 
 public interface DeviceLinkHandleInterface {
     
-    fun `beginTypedPath`(): TypedDeviceLinkStartData
+    /**
+     * Typed-code path: answer the approver's message (from
+     * `typed_approval_message`). Consumes the link. Send the returned
+     * `outbound_message` with `send_typed_new_device_message`, then poll with
+     * `poll_typed_device_link`.
+     */
+    fun `answerTypedPath`(`approverMessage`: kotlin.ByteArray): TypedDeviceLinkAnswerData
+    
+    /**
+     * The canonical device name this link reported.
+     */
+    fun `deviceName`(): kotlin.String
     
     fun `expiresAt`(): kotlin.String
     
     fun `id`(): kotlin.String
     
-    fun `qr`(): DeviceLinkQrData
+    /**
+     * The text to render as this link's QR.
+     */
+    fun `qrPayload`(): kotlin.String
     
     fun `typedCode`(): kotlin.String
     
@@ -9065,11 +9112,34 @@ open class DeviceLinkHandle: Disposable, AutoCloseable, DeviceLinkHandleInterfac
     }
 
     
-    @Throws(ServiceException::class)override fun `beginTypedPath`(): TypedDeviceLinkStartData {
-            return FfiConverterTypeTypedDeviceLinkStartData.lift(
+    /**
+     * Typed-code path: answer the approver's message (from
+     * `typed_approval_message`). Consumes the link. Send the returned
+     * `outbound_message` with `send_typed_new_device_message`, then poll with
+     * `poll_typed_device_link`.
+     */
+    @Throws(ServiceException::class)override fun `answerTypedPath`(`approverMessage`: kotlin.ByteArray): TypedDeviceLinkAnswerData {
+            return FfiConverterTypeTypedDeviceLinkAnswerData.lift(
     callWithHandle {
     uniffiRustCallWithError(ServiceException) { _status ->
-    UniffiLib.uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_begin_typed_path(
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_answer_typed_path(
+        it,
+        FfiConverterByteArray.lower(`approverMessage`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The canonical device name this link reported.
+     */
+    @Throws(ServiceException::class)override fun `deviceName`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ServiceException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_device_name(
         it,
         _status)
 }
@@ -9105,11 +9175,14 @@ open class DeviceLinkHandle: Disposable, AutoCloseable, DeviceLinkHandleInterfac
     
 
     
-    @Throws(ServiceException::class)override fun `qr`(): DeviceLinkQrData {
-            return FfiConverterTypeDeviceLinkQrData.lift(
+    /**
+     * The text to render as this link's QR.
+     */
+    @Throws(ServiceException::class)override fun `qrPayload`(): kotlin.String {
+            return FfiConverterString.lift(
     callWithHandle {
     uniffiRustCallWithError(ServiceException) { _status ->
-    UniffiLib.uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_qr(
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_devicelinkhandle_qr_payload(
         it,
         _status)
 }
@@ -9270,8 +9343,18 @@ public interface DeviceServiceHandleInterface {
     
     fun `acknowledgeDeviceLink`(`approval`: DeviceApprovalHandle)
     
-    fun `approveDeviceLink`(`id`: kotlin.String, `qr`: DeviceLinkQrData, `typedCode`: kotlin.String)
+    /**
+     * QR path. `scanned_qr` is the raw text the camera read from the new
+     * device's screen. Without a camera use the typed-code path: the code
+     * gives no protection against a substituted key on this one.
+     */
+    fun `approveDeviceLink`(`id`: kotlin.String, `scannedQr`: kotlin.String, `typedCode`: kotlin.String)
     
+    /**
+     * Check the new device's answer and only then seal and send the account
+     * key. A wrong code or a changed device name is
+     * `ServiceError::Authentication`; the link is then denied.
+     */
     fun `approveTypedDeviceLink`(`approval`: TypedDeviceApprovalHandle, `newDeviceMessage`: kotlin.ByteArray)
     
     fun `beginTypedDeviceApproval`(`id`: kotlin.String, `typedCode`: kotlin.String): TypedDeviceApprovalStartData
@@ -9419,19 +9502,29 @@ open class DeviceServiceHandle: Disposable, AutoCloseable, DeviceServiceHandleIn
     
 
     
-    @Throws(ServiceException::class)override fun `approveDeviceLink`(`id`: kotlin.String, `qr`: DeviceLinkQrData, `typedCode`: kotlin.String)
+    /**
+     * QR path. `scanned_qr` is the raw text the camera read from the new
+     * device's screen. Without a camera use the typed-code path: the code
+     * gives no protection against a substituted key on this one.
+     */
+    @Throws(ServiceException::class)override fun `approveDeviceLink`(`id`: kotlin.String, `scannedQr`: kotlin.String, `typedCode`: kotlin.String)
         = 
     callWithHandle {
     uniffiRustCallWithError(ServiceException) { _status ->
     UniffiLib.uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_approve_device_link(
         it,
-        FfiConverterString.lower(`id`),FfiConverterTypeDeviceLinkQrData.lower(`qr`),FfiConverterString.lower(`typedCode`),_status)
+        FfiConverterString.lower(`id`),FfiConverterString.lower(`scannedQr`),FfiConverterString.lower(`typedCode`),_status)
 }
     }
     
     
 
     
+    /**
+     * Check the new device's answer and only then seal and send the account
+     * key. A wrong code or a changed device name is
+     * `ServiceError::Authentication`; the link is then denied.
+     */
     @Throws(ServiceException::class)override fun `approveTypedDeviceLink`(`approval`: TypedDeviceApprovalHandle, `newDeviceMessage`: kotlin.ByteArray)
         = 
     callWithHandle {
@@ -22518,257 +22611,6 @@ public object FfiConverterTypeTypedDeviceApprovalHandle: FfiConverter<TypedDevic
 //
 
 
-public interface TypedDeviceLinkHandleInterface {
-    
-    fun `finish`(`peerMessage`: kotlin.ByteArray): TypedDeviceReceiverHandle
-    
-    companion object
-}
-
-open class TypedDeviceLinkHandle: Disposable, AutoCloseable, TypedDeviceLinkHandleInterface
-{
-
-    @Suppress("UNUSED_PARAMETER")
-    /**
-     * @suppress
-     */
-    constructor(withHandle: UniffiWithHandle, handle: Long) {
-        this.handle = handle
-        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
-    }
-
-    /**
-     * @suppress
-     *
-     * This constructor can be used to instantiate a fake object. Only used for tests. Any
-     * attempt to actually use an object constructed this way will fail as there is no
-     * connected Rust object.
-     */
-    @Suppress("UNUSED_PARAMETER")
-    constructor(noHandle: NoHandle) {
-        this.handle = 0
-        this.cleanable = null
-    }
-
-    protected val handle: Long
-    protected val cleanable: UniffiCleaner.Cleanable?
-
-    private val wasDestroyed = AtomicBoolean(false)
-    private val callCounter = AtomicLong(1)
-
-    override fun destroy() {
-        // Only allow a single call to this method.
-        // TODO: maybe we should log a warning if called more than once?
-        if (this.wasDestroyed.compareAndSet(false, true)) {
-            // This decrement always matches the initial count of 1 given at creation time.
-            if (this.callCounter.decrementAndGet() == 0L) {
-                cleanable?.clean()
-            }
-        }
-    }
-
-    @Synchronized
-    override fun close() {
-        this.destroy()
-    }
-
-    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
-        // Check and increment the call counter, to keep the object alive.
-        // This needs a compare-and-set retry loop in case of concurrent updates.
-        do {
-            val c = this.callCounter.get()
-            if (c == 0L) {
-                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
-            }
-            if (c == Long.MAX_VALUE) {
-                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
-            }
-        } while (! this.callCounter.compareAndSet(c, c + 1L))
-        // Now we can safely do the method call without the handle being freed concurrently.
-        try {
-            return block(this.uniffiCloneHandle())
-        } finally {
-            // This decrement always matches the increment we performed above.
-            if (this.callCounter.decrementAndGet() == 0L) {
-                cleanable?.clean()
-            }
-        }
-    }
-
-    // Use a static inner class instead of a closure so as not to accidentally
-    // capture `this` as part of the cleanable's action.
-    private class UniffiCleanAction(private val handle: Long) : Runnable {
-        override fun run() {
-            if (handle == 0.toLong()) {
-                // Fake object created with `NoHandle`, don't try to free.
-                return;
-            }
-            uniffiRustCall { status ->
-                UniffiLib.uniffi_beebeeb_uniffi_fn_free_typeddevicelinkhandle(handle, status)
-            }
-        }
-    }
-
-    /**
-     * @suppress
-     */
-    fun uniffiCloneHandle(): Long {
-        if (handle == 0.toLong()) {
-            throw InternalException("uniffiCloneHandle() called on NoHandle object");
-        }
-        return uniffiRustCall() { status ->
-            UniffiLib.uniffi_beebeeb_uniffi_fn_clone_typeddevicelinkhandle(handle, status)
-        }
-    }
-
-    
-    @Throws(ServiceException::class)override fun `finish`(`peerMessage`: kotlin.ByteArray): TypedDeviceReceiverHandle {
-            return FfiConverterTypeTypedDeviceReceiverHandle.lift(
-    callWithHandle {
-    uniffiRustCallWithError(ServiceException) { _status ->
-    UniffiLib.uniffi_beebeeb_uniffi_fn_method_typeddevicelinkhandle_finish(
-        it,
-        FfiConverterByteArray.lower(`peerMessage`),_status)
-}
-    }
-    )
-    }
-    
-
-    
-
-    
-
-
-    
-    
-    /**
-     * @suppress
-     */
-    companion object
-    
-}
-
-
-/**
- * @suppress
- */
-public object FfiConverterTypeTypedDeviceLinkHandle: FfiConverter<TypedDeviceLinkHandle, Long> {
-    override fun lower(value: TypedDeviceLinkHandle): Long {
-        return value.uniffiCloneHandle()
-    }
-
-    override fun lift(value: Long): TypedDeviceLinkHandle {
-        return TypedDeviceLinkHandle(UniffiWithHandle, value)
-    }
-
-    override fun read(buf: ByteBuffer): TypedDeviceLinkHandle {
-        return lift(buf.getLong())
-    }
-
-    override fun allocationSize(value: TypedDeviceLinkHandle) = 8UL
-
-    override fun write(value: TypedDeviceLinkHandle, buf: ByteBuffer) {
-        buf.putLong(lower(value))
-    }
-}
-
-
-// This template implements a class for working with a Rust struct via a handle
-// to the live Rust struct on the other side of the FFI.
-//
-// There's some subtlety here, because we have to be careful not to operate on a Rust
-// struct after it has been dropped, and because we must expose a public API for freeing
-// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
-//
-//   * Each instance holds an opaque handle to the underlying Rust struct.
-//     Method calls need to read this handle from the object's state and pass it in to
-//     the Rust FFI.
-//
-//   * When an instance is no longer needed, its handle should be passed to a
-//     special destructor function provided by the Rust FFI, which will drop the
-//     underlying Rust struct.
-//
-//   * Given an instance, calling code is expected to call the special
-//     `destroy` method in order to free it after use, either by calling it explicitly
-//     or by using a higher-level helper like the `use` method. Failing to do so risks
-//     leaking the underlying Rust struct.
-//
-//   * We can't assume that calling code will do the right thing, and must be prepared
-//     to handle Kotlin method calls executing concurrently with or even after a call to
-//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
-//
-//   * We must never allow Rust code to operate on the underlying Rust struct after
-//     the destructor has been called, and must never call the destructor more than once.
-//     Doing so may trigger memory unsafety.
-//
-//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
-//     is implemented to call the destructor when the Kotlin object becomes unreachable.
-//     This is done in a background thread. This is not a panacea, and client code should be aware that
-//      1. the thread may starve if some there are objects that have poorly performing
-//     `drop` methods or do significant work in their `drop` methods.
-//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
-//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
-//
-// If we try to implement this with mutual exclusion on access to the handle, there is the
-// possibility of a race between a method call and a concurrent call to `destroy`:
-//
-//    * Thread A starts a method call, reads the value of the handle, but is interrupted
-//      before it can pass the handle over the FFI to Rust.
-//    * Thread B calls `destroy` and frees the underlying Rust struct.
-//    * Thread A resumes, passing the already-read handle value to Rust and triggering
-//      a use-after-free.
-//
-// One possible solution would be to use a `ReadWriteLock`, with each method call taking
-// a read lock (and thus allowed to run concurrently) and the special `destroy` method
-// taking a write lock (and thus blocking on live method calls). However, we aim not to
-// generate methods with any hidden blocking semantics, and a `destroy` method that might
-// block if called incorrectly seems to meet that bar.
-//
-// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
-// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
-// has been called. These are updated according to the following rules:
-//
-//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
-//      The initial value for the flag is false.
-//
-//    * At the start of each method call, we atomically check the counter.
-//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
-//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
-//
-//    * At the end of each method call, we atomically decrement and check the counter.
-//      If it has reached zero then we destroy the underlying Rust struct.
-//
-//    * When `destroy` is called, we atomically flip the flag from false to true.
-//      If the flag was already true we silently fail.
-//      Otherwise we atomically decrement and check the counter.
-//      If it has reached zero then we destroy the underlying Rust struct.
-//
-// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
-// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
-//
-// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
-// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
-// of the underlying Rust code.
-//
-// This makes a cleaner a better alternative to _not_ calling `destroy()` as
-// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
-// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
-// thread may be starved, and the app will leak memory.
-//
-// In this case, `destroy`ing manually may be a better solution.
-//
-// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
-// with Rust peers are reclaimed:
-//
-// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
-// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
-// 3. The memory is reclaimed when the process terminates.
-//
-// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
-//
-
-
 public interface TypedDeviceReceiverHandleInterface {
     
     companion object
@@ -25892,44 +25734,6 @@ public object FfiConverterTypeDeviceLinkPollData: FfiConverterRustBuffer<DeviceL
 
 
 
-data class DeviceLinkQrData (
-    var `sessionId`: kotlin.ByteArray
-    , 
-    var `fingerprint`: kotlin.ByteArray
-    
-){
-    
-
-    
-
-    
-    companion object
-}
-
-/**
- * @suppress
- */
-public object FfiConverterTypeDeviceLinkQrData: FfiConverterRustBuffer<DeviceLinkQrData> {
-    override fun read(buf: ByteBuffer): DeviceLinkQrData {
-        return DeviceLinkQrData(
-            FfiConverterByteArray.read(buf),
-            FfiConverterByteArray.read(buf),
-        )
-    }
-
-    override fun allocationSize(value: DeviceLinkQrData) = (
-            FfiConverterByteArray.allocationSize(value.`sessionId`) +
-            FfiConverterByteArray.allocationSize(value.`fingerprint`)
-    )
-
-    override fun write(value: DeviceLinkQrData, buf: ByteBuffer) {
-            FfiConverterByteArray.write(value.`sessionId`, buf)
-            FfiConverterByteArray.write(value.`fingerprint`, buf)
-    }
-}
-
-
-
 data class DeviceSettingsData (
     var `cacheBytes`: kotlin.ULong
     , 
@@ -27374,10 +27178,15 @@ public object FfiConverterTypeOwnerFileKey: FfiConverterRustBuffer<OwnerFileKey>
 
 
 
+/**
+ * What the platform passkey prompt returned. `prf_output` is key material: a
+ * [`SecretBytes`](crate::SecretBytes) (plain `Data` / `ByteArray` to Swift and
+ * Kotlin), wiped on drop and redacted in `Debug`.
+ */
 data class PasskeyPromptResult (
     var `credentialId`: kotlin.String
     , 
-    var `prfOutput`: kotlin.ByteArray
+    var `prfOutput`: SecretBytes
     , 
     var `userVerified`: kotlin.Boolean
     
@@ -27397,20 +27206,20 @@ public object FfiConverterTypePasskeyPromptResult: FfiConverterRustBuffer<Passke
     override fun read(buf: ByteBuffer): PasskeyPromptResult {
         return PasskeyPromptResult(
             FfiConverterString.read(buf),
-            FfiConverterByteArray.read(buf),
+            FfiConverterTypeSecretBytes.read(buf),
             FfiConverterBoolean.read(buf),
         )
     }
 
     override fun allocationSize(value: PasskeyPromptResult) = (
             FfiConverterString.allocationSize(value.`credentialId`) +
-            FfiConverterByteArray.allocationSize(value.`prfOutput`) +
+            FfiConverterTypeSecretBytes.allocationSize(value.`prfOutput`) +
             FfiConverterBoolean.allocationSize(value.`userVerified`)
     )
 
     override fun write(value: PasskeyPromptResult, buf: ByteBuffer) {
             FfiConverterString.write(value.`credentialId`, buf)
-            FfiConverterByteArray.write(value.`prfOutput`, buf)
+            FfiConverterTypeSecretBytes.write(value.`prfOutput`, buf)
             FfiConverterBoolean.write(value.`userVerified`, buf)
     }
 }
@@ -27550,16 +27359,20 @@ public object FfiConverterTypePendingDeviceLinkData: FfiConverterRustBuffer<Pend
 
 
 
+/**
+ * The changes a recovery applies. The secret fields are [`SecretString`]s
+ * (plain strings to Swift and Kotlin): wiped on drop, redacted in `Debug`.
+ */
 data class RecoveryChangesData (
-    var `newPassword`: kotlin.String?
+    var `newPassword`: SecretString?
     , 
     var `newEmail`: kotlin.String?
     , 
-    var `emailVerificationCode`: kotlin.String?
+    var `emailVerificationCode`: SecretString?
     , 
-    var `newAuthenticator`: kotlin.String?
+    var `newAuthenticator`: SecretString?
     , 
-    var `authenticatorCode`: kotlin.String?
+    var `authenticatorCode`: SecretString?
     , 
     var `removeAuthenticator`: kotlin.Boolean
     
@@ -27578,30 +27391,30 @@ data class RecoveryChangesData (
 public object FfiConverterTypeRecoveryChangesData: FfiConverterRustBuffer<RecoveryChangesData> {
     override fun read(buf: ByteBuffer): RecoveryChangesData {
         return RecoveryChangesData(
+            FfiConverterOptionalTypeSecretString.read(buf),
             FfiConverterOptionalString.read(buf),
-            FfiConverterOptionalString.read(buf),
-            FfiConverterOptionalString.read(buf),
-            FfiConverterOptionalString.read(buf),
-            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalTypeSecretString.read(buf),
+            FfiConverterOptionalTypeSecretString.read(buf),
+            FfiConverterOptionalTypeSecretString.read(buf),
             FfiConverterBoolean.read(buf),
         )
     }
 
     override fun allocationSize(value: RecoveryChangesData) = (
-            FfiConverterOptionalString.allocationSize(value.`newPassword`) +
+            FfiConverterOptionalTypeSecretString.allocationSize(value.`newPassword`) +
             FfiConverterOptionalString.allocationSize(value.`newEmail`) +
-            FfiConverterOptionalString.allocationSize(value.`emailVerificationCode`) +
-            FfiConverterOptionalString.allocationSize(value.`newAuthenticator`) +
-            FfiConverterOptionalString.allocationSize(value.`authenticatorCode`) +
+            FfiConverterOptionalTypeSecretString.allocationSize(value.`emailVerificationCode`) +
+            FfiConverterOptionalTypeSecretString.allocationSize(value.`newAuthenticator`) +
+            FfiConverterOptionalTypeSecretString.allocationSize(value.`authenticatorCode`) +
             FfiConverterBoolean.allocationSize(value.`removeAuthenticator`)
     )
 
     override fun write(value: RecoveryChangesData, buf: ByteBuffer) {
-            FfiConverterOptionalString.write(value.`newPassword`, buf)
+            FfiConverterOptionalTypeSecretString.write(value.`newPassword`, buf)
             FfiConverterOptionalString.write(value.`newEmail`, buf)
-            FfiConverterOptionalString.write(value.`emailVerificationCode`, buf)
-            FfiConverterOptionalString.write(value.`newAuthenticator`, buf)
-            FfiConverterOptionalString.write(value.`authenticatorCode`, buf)
+            FfiConverterOptionalTypeSecretString.write(value.`emailVerificationCode`, buf)
+            FfiConverterOptionalTypeSecretString.write(value.`newAuthenticator`, buf)
+            FfiConverterOptionalTypeSecretString.write(value.`authenticatorCode`, buf)
             FfiConverterBoolean.write(value.`removeAuthenticator`, buf)
     }
 }
@@ -28472,10 +28285,16 @@ public object FfiConverterTypeThumbnailEnqueueData: FfiConverterRustBuffer<Thumb
 
 
 
+/**
+ * The approver's start of a typed-code attempt. Show `device_name` while the
+ * person types: the new device's confirmation proves it reported that name.
+ */
 data class TypedDeviceApprovalStartData (
     var `handle`: TypedDeviceApprovalHandle
     , 
     var `outboundMessage`: kotlin.ByteArray
+    , 
+    var `deviceName`: kotlin.String
     
 ): Disposable{
     
@@ -28488,7 +28307,8 @@ data class TypedDeviceApprovalStartData (
         
     Disposable.destroy(
         this.`handle`,
-        this.`outboundMessage`
+        this.`outboundMessage`,
+        this.`deviceName`
     )
     }
     
@@ -28503,24 +28323,27 @@ public object FfiConverterTypeTypedDeviceApprovalStartData: FfiConverterRustBuff
         return TypedDeviceApprovalStartData(
             FfiConverterTypeTypedDeviceApprovalHandle.read(buf),
             FfiConverterByteArray.read(buf),
+            FfiConverterString.read(buf),
         )
     }
 
     override fun allocationSize(value: TypedDeviceApprovalStartData) = (
             FfiConverterTypeTypedDeviceApprovalHandle.allocationSize(value.`handle`) +
-            FfiConverterByteArray.allocationSize(value.`outboundMessage`)
+            FfiConverterByteArray.allocationSize(value.`outboundMessage`) +
+            FfiConverterString.allocationSize(value.`deviceName`)
     )
 
     override fun write(value: TypedDeviceApprovalStartData, buf: ByteBuffer) {
             FfiConverterTypeTypedDeviceApprovalHandle.write(value.`handle`, buf)
             FfiConverterByteArray.write(value.`outboundMessage`, buf)
+            FfiConverterString.write(value.`deviceName`, buf)
     }
 }
 
 
 
-data class TypedDeviceLinkStartData (
-    var `handle`: TypedDeviceLinkHandle
+data class TypedDeviceLinkAnswerData (
+    var `handle`: TypedDeviceReceiverHandle
     , 
     var `outboundMessage`: kotlin.ByteArray
     
@@ -28545,21 +28368,21 @@ data class TypedDeviceLinkStartData (
 /**
  * @suppress
  */
-public object FfiConverterTypeTypedDeviceLinkStartData: FfiConverterRustBuffer<TypedDeviceLinkStartData> {
-    override fun read(buf: ByteBuffer): TypedDeviceLinkStartData {
-        return TypedDeviceLinkStartData(
-            FfiConverterTypeTypedDeviceLinkHandle.read(buf),
+public object FfiConverterTypeTypedDeviceLinkAnswerData: FfiConverterRustBuffer<TypedDeviceLinkAnswerData> {
+    override fun read(buf: ByteBuffer): TypedDeviceLinkAnswerData {
+        return TypedDeviceLinkAnswerData(
+            FfiConverterTypeTypedDeviceReceiverHandle.read(buf),
             FfiConverterByteArray.read(buf),
         )
     }
 
-    override fun allocationSize(value: TypedDeviceLinkStartData) = (
-            FfiConverterTypeTypedDeviceLinkHandle.allocationSize(value.`handle`) +
+    override fun allocationSize(value: TypedDeviceLinkAnswerData) = (
+            FfiConverterTypeTypedDeviceReceiverHandle.allocationSize(value.`handle`) +
             FfiConverterByteArray.allocationSize(value.`outboundMessage`)
     )
 
-    override fun write(value: TypedDeviceLinkStartData, buf: ByteBuffer) {
-            FfiConverterTypeTypedDeviceLinkHandle.write(value.`handle`, buf)
+    override fun write(value: TypedDeviceLinkAnswerData, buf: ByteBuffer) {
+            FfiConverterTypeTypedDeviceReceiverHandle.write(value.`handle`, buf)
             FfiConverterByteArray.write(value.`outboundMessage`, buf)
     }
 }
@@ -33650,6 +33473,38 @@ public object FfiConverterOptionalSequenceTypeBackupManifestRecordData: FfiConve
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeSecretString: FfiConverterRustBuffer<SecretString?> {
+    override fun read(buf: ByteBuffer): SecretString? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeSecretString.read(buf)
+    }
+
+    override fun allocationSize(value: SecretString?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeSecretString.allocationSize(value)
+        }
+    }
+
+    override fun write(value: SecretString?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeSecretString.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceUInt: FfiConverterRustBuffer<List<kotlin.UInt>> {
     override fun read(buf: ByteBuffer): List<kotlin.UInt> {
         val len = buf.getInt()
@@ -34903,6 +34758,26 @@ public object FfiConverterSequenceSequenceTypeBackupMergeEntry: FfiConverterRust
         }
     }
 }
+
+
+
+/**
+ * Typealias from the type name used in the UDL file to the builtin type.  This
+ * is needed because the UDL type name is used in function/method signatures.
+ * It's also what we have an external type that references a custom type.
+ */
+public typealias SecretBytes = kotlin.ByteArray
+public typealias FfiConverterTypeSecretBytes = FfiConverterByteArray
+
+
+
+/**
+ * Typealias from the type name used in the UDL file to the builtin type.  This
+ * is needed because the UDL type name is used in function/method signatures.
+ * It's also what we have an external type that references a custom type.
+ */
+public typealias SecretString = kotlin.String
+public typealias FfiConverterTypeSecretString = FfiConverterString
         /**
          * Whether the app may let the user continue with this password. `Breached`
          * and `CheckFailedBlocked` stop it. Kept in core so apps do not re-derive it.
@@ -35865,6 +35740,36 @@ public object FfiConverterSequenceSequenceTypeBackupMergeEntry: FfiConverterRust
     UniffiLib.uniffi_beebeeb_uniffi_fn_func_backup_stop_words(
     
         FfiConverterString.lower(`reason`),FfiConverterString.lower(`device`),FfiConverterString.lower(`folder`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * An account email in the server's stored form (Rust `str::trim`, then
+         * Unicode lower case). Use it for every email that names a contact or a pin.
+         */ fun `normalizeEmail`(`raw`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_normalize_email(
+    
+        FfiConverterString.lower(`raw`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The 60-digit safety number two contacts compare (12 groups of 5, joined).
+         * Each email is normalised by core first; keys are the contacts' 32-byte
+         * X25519 public keys. The same on both sides whatever the argument order.
+         */
+    @Throws(CryptoException::class) fun `safetyNumber`(`emailA`: kotlin.String, `publicKeyA`: kotlin.ByteArray, `emailB`: kotlin.String, `publicKeyB`: kotlin.ByteArray): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_safety_number(
+    
+        FfiConverterString.lower(`emailA`),FfiConverterByteArray.lower(`publicKeyA`),FfiConverterString.lower(`emailB`),FfiConverterByteArray.lower(`publicKeyB`),_status)
 }
     )
     }
