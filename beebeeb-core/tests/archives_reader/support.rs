@@ -667,3 +667,50 @@ pub fn read_entry_with<S: ByteSource>(
     }
     panic!("the reader never finished");
 }
+
+// ---------------------------------------------------------------- fixtures
+
+/// The public test password of `test-vectors/archives/` (see
+/// `make_archive_password_fixtures.sh`). It protects nothing.
+pub const TEST_PASSWORD: &str = "beebeeb-test-password";
+/// The second fixture password (`two-passwords.zip`'s other entry).
+pub const OTHER_TEST_PASSWORD: &str = "other-test-password";
+/// The CP437 fixture's password as a person types it.
+pub const CP437_TEST_PASSWORD: &str = "caf\u{e9}-test";
+
+/// `secret.txt` in every password fixture.
+pub fn fixture_secret() -> Vec<u8> {
+    b"The protected test file.\n".repeat(40)
+}
+
+pub fn fixture(name: &str) -> Vec<u8> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../test-vectors/archives")
+        .join(name);
+    std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+/// The same archive as WinZip AE-1: vendor version 1 in every AES extra
+/// field, and the real CRC-32 in the local and central headers.
+pub fn to_ae1(mut bytes: Vec<u8>, crc: u32) -> Vec<u8> {
+    let mut at = 0;
+    while let Some(i) = bytes[at..].windows(6).position(|w| w == b"\x01\x99\x07\x00\x02\x00") {
+        let i = at + i;
+        bytes[i + 4] = 1;
+        at = i + 6;
+    }
+    bytes[14..18].copy_from_slice(&crc.to_le_bytes());
+    let cd = bytes
+        .windows(4)
+        .rposition(|w| w == b"PK\x01\x02")
+        .expect("a central record");
+    bytes[cd + 16..cd + 20].copy_from_slice(&crc.to_le_bytes());
+    bytes
+}
+
+/// Where the first entry's data starts (after its local header).
+pub fn first_data_start(bytes: &[u8]) -> usize {
+    let n = u16::from_le_bytes([bytes[26], bytes[27]]) as usize;
+    let m = u16::from_le_bytes([bytes[28], bytes[29]]) as usize;
+    30 + n + m
+}

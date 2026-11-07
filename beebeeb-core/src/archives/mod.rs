@@ -32,7 +32,7 @@ pub use model::{
     SkipReason,
 };
 pub use names::{EntryPath, RawName, decode_name, display_name, entry_path};
-pub use password::ArchivePassword;
+pub use password::{ArchivePassword, PasswordStep};
 pub use platform::ArchivePlatform;
 pub use session::{ArchiveSession, EntryReader, PieceStep, SessionStep};
 pub use source::{ByteRange, ByteSource, ReadSeekSource, SourceError, SuppliedBytes};

@@ -596,17 +596,26 @@ struct Body {
 /// One zip entry's decoder.
 pub(crate) struct ZipDecoder {
     loc: ZipLocator,
-    password: Option<Zeroizing<Vec<u8>>>,
+    /// The password's encodings to try, in order (UTF-8, then CP437).
+    passwords: Vec<Zeroizing<Vec<u8>>>,
     state: DecState,
 }
 
 impl ZipDecoder {
-    pub(crate) fn new(loc: ZipLocator, password: Option<Zeroizing<Vec<u8>>>) -> Self {
+    pub(crate) fn new(loc: ZipLocator, passwords: Vec<Zeroizing<Vec<u8>>>) -> Self {
         Self {
             loc,
-            password,
+            passwords,
             state: DecState::Local,
         }
+    }
+
+    /// Whether the password opens this entry's encryption header: `true`
+    /// once the cipher is open (or the local header cannot even be read,
+    /// which the read itself reports as corrupt), `false` when no encoding
+    /// passes the quick check.
+    pub(crate) fn check<S: ByteSource + ?Sized>(&mut self, source: &mut S) -> Result<bool, Miss> {
+        Ok(!matches!(self.open(source)?, Some(PieceStep::WrongPassword)))
     }
 
     pub(crate) fn next_piece<S: ByteSource + ?Sized>(&mut self, source: &mut S) -> PieceStep {
@@ -619,27 +628,41 @@ impl ZipDecoder {
         };
         if !matches!(step, PieceStep::Data(_)) {
             self.state = DecState::Done;
-            self.password = None;
+            self.passwords.clear();
         }
         step
     }
 
     fn advance<S: ByteSource + ?Sized>(&mut self, source: &mut S) -> Result<PieceStep, Miss> {
+        if let Some(step) = self.open(source)? {
+            return Ok(step);
+        }
+        match &mut self.state {
+            DecState::Body(body) => body.next(source, &self.loc),
+            _ => Ok(PieceStep::Corrupt),
+        }
+    }
+
+    /// Read the local header and open the cipher. `Ok(None)` once the
+    /// body can be read; `Ok(Some(step))` when the entry ends first
+    /// (corrupt, wrong password).
+    fn open<S: ByteSource + ?Sized>(&mut self, source: &mut S) -> Result<Option<PieceStep>, Miss> {
         loop {
             match &mut self.state {
-                DecState::Done => return Ok(PieceStep::Verified),
+                DecState::Body(_) => return Ok(None),
+                DecState::Done => return Ok(Some(PieceStep::Verified)),
                 DecState::Local => {
                     let at = self.loc.header_offset;
                     let fixed = read_exact_at(source, ByteRange::new(at, at + 30))?;
                     let (n, m) = (u64::from(u16_at(&fixed, 26)), u64::from(u16_at(&fixed, 28)));
                     let names = read_exact_at(source, ByteRange::new(at + 30, at + 30 + n))?;
                     if !self.local_agrees(&fixed, &names) {
-                        return Ok(PieceStep::Corrupt);
+                        return Ok(Some(PieceStep::Corrupt));
                     }
                     let data_start = at + 30 + n + m;
                     match data_start.checked_add(self.loc.compressed_size) {
                         Some(end) if end <= self.loc.limit => {}
-                        _ => return Ok(PieceStep::Corrupt),
+                        _ => return Ok(Some(PieceStep::Corrupt)),
                     }
                     self.state = DecState::CryptoHeader { data_start };
                 }
@@ -647,10 +670,9 @@ impl ZipDecoder {
                     let data_start = *data_start;
                     match self.open_crypto(source, data_start)? {
                         Ok(body) => self.state = DecState::Body(Box::new(body)),
-                        Err(step) => return Ok(step),
+                        Err(step) => return Ok(Some(step)),
                     }
                 }
-                DecState::Body(body) => return body.next(source, &self.loc),
             }
         }
     }
@@ -690,9 +712,6 @@ impl ZipDecoder {
         let (crypto, pos, end) = match loc.cipher {
             EntryCipher::None => (Decryption::None, data_start, data_end),
             EntryCipher::ZipCrypto => {
-                let Some(password) = self.password.as_deref() else {
-                    return Ok(Err(PieceStep::WrongPassword));
-                };
                 if loc.compressed_size < 12 {
                     return Ok(Err(PieceStep::Corrupt));
                 }
@@ -704,15 +723,16 @@ impl ZipDecoder {
                 } else {
                     (loc.crc32 >> 24) as u8
                 };
-                match zipcrypto::open_header(password, &fixed, check) {
+                match self
+                    .passwords
+                    .iter()
+                    .find_map(|p| zipcrypto::open_header(p, &fixed, check))
+                {
                     Some(keys) => (Decryption::Zip(keys), data_start + 12, data_end),
                     None => return Ok(Err(PieceStep::WrongPassword)),
                 }
             }
             EntryCipher::Aes { bits, .. } => {
-                let Some(password) = self.password.as_deref() else {
-                    return Ok(Err(PieceStep::WrongPassword));
-                };
                 let Some(salt_len) = winzip_aes::salt_len(bits) else {
                     return Ok(Err(PieceStep::Corrupt));
                 };
@@ -722,7 +742,12 @@ impl ZipDecoder {
                 }
                 let head = read_exact_at(source, ByteRange::new(data_start, data_start + salt_len as u64 + 2))?;
                 let verifier = [head[salt_len], head[salt_len + 1]];
-                match winzip_aes::open(password, bits, &head[..salt_len], verifier) {
+                let salt = &head[..salt_len];
+                match self
+                    .passwords
+                    .iter()
+                    .find_map(|p| winzip_aes::open(p, bits, salt, verifier))
+                {
                     Some(aes) => (
                         Decryption::Aes(Box::new(aes)),
                         data_start + salt_len as u64 + 2,

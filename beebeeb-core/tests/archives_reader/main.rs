@@ -5,6 +5,7 @@
 
 mod detect;
 mod names;
+mod password;
 mod support;
 mod tar;
 mod zip;

@@ -10,9 +10,9 @@ use super::limits::{DETECT_HEAD_BYTES, MAX_PARSE_RESTARTS, PIECE_BYTES, ZIP_TAIL
 use super::listing::{ListingBuilder, Locator};
 use super::model::{ArchiveEntry, ArchiveListing, ArchiveRefusal, ArchiveTime, EntryCipher, EntryKind, SkipReason};
 use super::names::{RawName, decode_name, display_name, entry_path};
-use super::password::ArchivePassword;
+use super::password::{ArchivePassword, PasswordStep};
 use super::platform::ArchivePlatform;
-use super::source::{ByteRange, ByteSource, read_exact_at};
+use super::source::{ByteRange, ByteSource, Miss, read_exact_at};
 use super::tar::{DataEvent, GzInput, Halt, RandomInput, TarEvent, TarHeader, TarInput, TarWalker};
 use super::zip::{ZipDecoder, ZipLister};
 
@@ -286,6 +286,25 @@ impl<S: ByteSource> ArchiveSession<S> {
         Ok(EntryReader { session: self, decoder })
     }
 
+    /// Whether `password` opens entry `index`, without reading its data.
+    /// Listing never needs a password (zip protects contents, not names);
+    /// this is asked only when a protected entry is touched.
+    pub fn check_password(&mut self, index: u32, password: &ArchivePassword) -> PasswordStep {
+        let Some(Locator::Zip(locator)) = self.locators.get(index as usize) else {
+            return PasswordStep::NotNeeded;
+        };
+        if !locator.cipher.is_encrypted() {
+            return PasswordStep::NotNeeded;
+        }
+        let mut decoder = ZipDecoder::new((**locator).clone(), password.candidates());
+        match decoder.check(&mut self.source) {
+            Ok(true) => PasswordStep::Accepted,
+            Ok(false) => PasswordStep::Wrong,
+            Err(Miss::Need(range)) => PasswordStep::NeedBytes(range),
+            Err(Miss::Truncated | Miss::Io(_)) => PasswordStep::Accepted,
+        }
+    }
+
     pub(crate) fn decoder(
         &self,
         index: u32,
@@ -310,7 +329,7 @@ impl<S: ByteSource> ArchiveSession<S> {
             },
             (ArchiveFormat::Zip, Locator::Zip(locator)) => EntryDecoder::Zip(Box::new(ZipDecoder::new(
                 (**locator).clone(),
-                password.map(ArchivePassword::utf8),
+                password.map(ArchivePassword::candidates).unwrap_or_default(),
             ))),
             _ => return Err(ArchiveRefusal::Damaged),
         })

@@ -198,3 +198,18 @@ pub(crate) fn decode_cp437(bytes: &[u8]) -> String {
         })
         .collect()
 }
+
+/// Text as CP437 bytes (wiped when dropped: a password passes through
+/// here), or `None` when a character has no CP437 byte.
+pub(crate) fn encode_cp437(text: &str) -> Option<zeroize::Zeroizing<Vec<u8>>> {
+    let mut out = zeroize::Zeroizing::new(Vec::with_capacity(text.len()));
+    for c in text.chars() {
+        let byte = if c.is_ascii() {
+            c as u8
+        } else {
+            0x80 + CP437_HIGH.iter().position(|&h| h == c)? as u8
+        };
+        out.push(byte);
+    }
+    Some(out)
+}
