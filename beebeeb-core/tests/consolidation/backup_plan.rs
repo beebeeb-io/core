@@ -10,10 +10,11 @@
 use std::collections::HashSet;
 
 use beebeeb_core::backup::{
-    BackupRecord, FolderPresence, MSG_BACK_UP_AGAIN, PassBudget, PassPlan, REBUILD_FLOOR_MS, RebuildClock,
-    ReceivedNotice, RecordRef, RecordState, RemoteEntry, SourceEntry, StopFolder, StopListing, StoppedBackup,
-    UploadReason, backup_stop, backup_stop_words, folder_presence, normalize_key, parse_backup_notice, plan_pass,
-    rebuild_clock_from_date, records_from_remote, records_from_remote_with_clock,
+    BackupPassGate, BackupRecord, FolderPresence, MSG_BACK_UP_AGAIN, MSG_STOP_CHECK_FAILED, PassBudget, PassPlan,
+    REBUILD_FLOOR_MS, RebuildClock, ReceivedNotice, RecordRef, RecordState, RemoteEntry, SourceEntry, StopFolder,
+    StopListing, StoppedBackup, UploadReason, backup_pass_gate, backup_stop, backup_stop_words, first_pass_baseline,
+    folder_presence, normalize_key, parse_backup_notice, plan_pass, rebuild_clock_from_date, records_from_remote,
+    records_from_remote_with_clock,
 };
 use beebeeb_types::backup::{BackupNotice, BackupStopReason, Category};
 use serde_json::{Value, json};
@@ -112,10 +113,11 @@ fn run_plan_case(case: &Value) -> Value {
 #[test]
 fn backup_plan_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 117, "every named backup_plan case is present");
+    assert_eq!(cases.len(), 128, "every named backup_plan case is present");
 
     let (mut plans, mut keys, mut presences, mut rebuilds) = (0, 0, 0, 0);
     let (mut stops, mut notices, mut words, mut actions) = (0, 0, 0, 0);
+    let (mut baselines, mut gates, mut check_failed) = (0, 0, 0);
     for case in &cases {
         let id = case["id"].as_str().expect("case id");
         match case["kind"].as_str().expect("case kind") {
@@ -202,12 +204,36 @@ fn backup_plan_cases_match_core() {
                 actions += 1;
                 assert_eq!(MSG_BACK_UP_AGAIN, s(&case["expect"]), "{id}");
             }
+            "baseline" => {
+                baselines += 1;
+                let got = first_pass_baseline(case["setup_at_ms"].as_i64(), case["legacy_last_backup_ms"].as_i64());
+                assert_eq!(got, case["expect"].as_i64().expect("expect"), "{id}");
+            }
+            "gate" => {
+                gates += 1;
+                let notices = received(case);
+                let fetched = case["notices_fetch_ok"].as_bool().expect("notices_fetch_ok");
+                let got = match backup_pass_gate(
+                    fetched.then_some(notices.as_slice()),
+                    case["last_pass_at_ms"].as_i64().expect("last_pass_at_ms"),
+                    &stop_listing(&case["listing"]),
+                ) {
+                    BackupPassGate::Run { stopped } => json!({"outcome": "run", "stopped": stopped_json(&stopped)}),
+                    BackupPassGate::CheckFailed => json!({"outcome": "check_failed"}),
+                };
+                assert_eq!(got, case["expect"], "{id}");
+            }
+            "check_failed_words" => {
+                check_failed += 1;
+                assert_eq!(MSG_STOP_CHECK_FAILED, s(&case["expect"]), "{id}");
+            }
             other => panic!("{id}: unknown kind `{other}`"),
         }
     }
     println!(
         "backup_plan: {} cases ({plans} plan, {keys} normalize_key, {presences} presence, {rebuilds} rebuild, \
-         {stops} stop, {notices} notice, {words} stop_words, {actions} stop_action)",
+         {stops} stop, {notices} notice, {words} stop_words, {actions} stop_action, {baselines} baseline, \
+         {gates} gate, {check_failed} check_failed_words)",
         cases.len()
     );
     assert_eq!(
@@ -220,6 +246,7 @@ fn backup_plan_cases_match_core() {
         (22, 10, 7, 1),
         "stop case counts per kind"
     );
+    assert_eq!((baselines, gates, check_failed), (5, 5, 1), "12c case counts per kind");
 }
 
 /// The notices of a stop case, read the way a client reads its rows.
@@ -892,5 +919,71 @@ fn stop_files_removed_unknown_reason_uses_the_removed_words() {
             backup_stop_words(s.reason, "GLegion", s.category.display_name()),
             "Your files were removed, so backups are off."
         );
+    }
+}
+
+// ── Amendment 12c: the first pass's baseline and the pass gate ────────────
+
+/// A fresh setup (a reinstall, or backups turned on for the first time): the
+/// moment backups were turned on. A notice from before it does not apply.
+#[test]
+fn first_pass_baseline_fresh_setup_uses_the_setup_time() {
+    let setup = LAST + 3_600_000;
+    assert_eq!(first_pass_baseline(Some(setup), None), setup);
+    let older = [files_removed(BackupStopReason::EraseRequest, setup - 1)];
+    assert_eq!(
+        backup_stop(&older, first_pass_baseline(Some(setup), None), &two_backups(true, true)),
+        []
+    );
+}
+
+/// An upgraded device: the old engine's last backup, which also wins over the
+/// setup time (the new engine's first start). A notice written in between,
+/// which the old engine never read, stops the backup: an emptied account never
+/// fills up again.
+#[test]
+fn first_pass_baseline_upgraded_device_uses_the_old_engines_last_backup() {
+    let legacy = LAST - 86_400_000;
+    let setup = LAST + 3_600_000;
+    assert_eq!(first_pass_baseline(None, Some(legacy)), legacy);
+    assert_eq!(first_pass_baseline(Some(setup), Some(legacy)), legacy);
+    assert_eq!(
+        first_pass_baseline(Some(legacy), Some(setup)),
+        legacy,
+        "the earlier, whichever it is"
+    );
+    let missed = [files_removed(BackupStopReason::AccountLapsed, legacy + 1)];
+    let got = backup_stop(
+        &missed,
+        first_pass_baseline(Some(setup), Some(legacy)),
+        &two_backups(true, true),
+    );
+    assert_eq!(got.len(), 2, "both backups stop: {got:?}");
+}
+
+/// Neither known: 0, so any removal notice stops the backup.
+#[test]
+fn first_pass_baseline_unknown_is_zero_so_any_notice_stops() {
+    assert_eq!(first_pass_baseline(None, None), 0);
+    let any = [files_removed(BackupStopReason::InactiveCleanup, 1)];
+    assert_eq!(
+        backup_stop(&any, first_pass_baseline(None, None), &two_backups(true, true)).len(),
+        2
+    );
+}
+
+/// The notices could not be read: skip the pass (upload nothing, stop
+/// nothing), say "Couldn't check — will retry.", retry next pass.
+#[test]
+fn pass_gate_check_failed_uploads_nothing_and_stops_nothing() {
+    assert_eq!(
+        backup_pass_gate(None, LAST, &two_backups(false, false)),
+        BackupPassGate::CheckFailed
+    );
+    assert_eq!(MSG_STOP_CHECK_FAILED, "Couldn't check \u{2014} will retry.");
+    // With the notices read, the same listing stops both backups.
+    match backup_pass_gate(Some(&[]), LAST, &two_backups(false, false)) {
+        BackupPassGate::Run { stopped } => assert_eq!(stopped.len(), 2),
+        other => panic!("{other:?}"),
     }
 }

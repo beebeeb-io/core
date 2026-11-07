@@ -11,9 +11,9 @@
 //! shows both notification types with core's words; a notification row is
 //! read leniently, like the server's own new types.
 use beebeeb_core::backup::{
-    BackupPosition, MSG_BACK_UP_AGAIN, MSG_BADGE, Mutation, ReceivedNotice, StopFolder, StopListing,
-    check_app_mutation, check_drive_mutation, check_root_mutation, is_hidden_backup_item, parse_backup_notice,
-    parse_manifest,
+    BackupPassGate, BackupPosition, MSG_BACK_UP_AGAIN, MSG_BADGE, MSG_STOP_CHECK_FAILED, Mutation, ReceivedNotice,
+    StopFolder, StopListing, StoppedBackup, check_app_mutation, check_drive_mutation, check_root_mutation,
+    first_pass_baseline, is_hidden_backup_item, parse_backup_notice, parse_manifest,
 };
 use beebeeb_types::backup::{BackupStopReason, Category, SystemRole};
 use serde::{Deserialize, Serialize};
@@ -229,14 +229,31 @@ fn parse_stop_reason(reason: &str) -> Result<BackupStopReason, JsError> {
 /// id that is not a UUID throws.
 #[wasm_bindgen(js_name = backupStop)]
 pub fn backup_stop(notices: JsValue, last_pass_at_ms: f64, listing: JsValue) -> Result<JsValue, JsError> {
-    let last_pass_at_ms = whole_ms(&serde_json::Value::from(last_pass_at_ms))
-        .ok_or_else(|| JsError::new("lastPassAtMs is not a whole number of milliseconds"))?;
+    let last_pass_at_ms = last_pass(last_pass_at_ms)?;
+    let notices = notices_from_js(notices)?;
+    let listing = listing_from_js(listing)?;
+    to_js(&stopped_js(beebeeb_core::backup::backup_stop(
+        &notices,
+        last_pass_at_ms,
+        &listing,
+    )))
+}
+
+fn last_pass(last_pass_at_ms: f64) -> Result<i64, JsError> {
+    whole_ms(&serde_json::Value::from(last_pass_at_ms))
+        .ok_or_else(|| JsError::new("lastPassAtMs is not a whole number of milliseconds"))
+}
+
+fn notices_from_js(notices: JsValue) -> Result<Vec<ReceivedNotice>, JsError> {
     let rows: Vec<serde_json::Value> =
         serde_wasm_bindgen::from_value(notices).map_err(|e| JsError::new(&format!("invalid notices: {e}")))?;
+    backup_notices(&rows)
+}
+
+fn listing_from_js(listing: JsValue) -> Result<StopListing, JsError> {
     let listing: StopListingJs =
         serde_wasm_bindgen::from_value(listing).map_err(|e| JsError::new(&format!("invalid listing: {e}")))?;
-    let notices = backup_notices(&rows)?;
-    let listing = StopListing {
+    Ok(StopListing {
         device_folder_id: parse_uuid("device_folder_id", &listing.device_folder_id)?,
         device_folder_live: listing.device_folder_live,
         folders: listing
@@ -254,15 +271,21 @@ pub fn backup_stop(notices: JsValue, last_pass_at_ms: f64, listing: JsValue) -> 
                 })
             })
             .collect::<Result<Vec<_>, JsError>>()?,
-    };
-    let stopped: Vec<StoppedJs> = beebeeb_core::backup::backup_stop(&notices, last_pass_at_ms, &listing)
+    })
+}
+
+fn stopped_js(stopped: Vec<StoppedBackup>) -> Vec<StoppedJs> {
+    stopped
         .into_iter()
         .map(|s| StoppedJs {
             category: s.category.key(),
             reason: s.reason.as_str(),
         })
-        .collect();
-    stopped
+        .collect()
+}
+
+fn to_js<T: Serialize>(value: &T) -> Result<JsValue, JsError> {
+    value
         .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
         .map_err(|e| JsError::new(&e.to_string()))
 }
@@ -294,4 +317,76 @@ pub fn backup_stop_words(reason: &str, device: &str, folder: &str) -> Result<Str
 #[wasm_bindgen(js_name = backupAgainAction)]
 pub fn backup_again_action() -> String {
     MSG_BACK_UP_AGAIN.to_string()
+}
+
+// ── The first pass and a failed notice check (spec Amendment 12c) ─────────
+
+/// The outcome of `backupPassGate`.
+#[derive(Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+enum PassGateJs {
+    Run { stopped: Vec<StoppedJs> },
+    CheckFailed,
+}
+
+/// The `lastPassAtMs` of a device with none under this engine yet (spec
+/// Amendment 12c): `setupAtMs`, the moment backups were set up on this device,
+/// or `legacyLastBackupMs`, an upgraded device's last successful backup under
+/// the old engine; with both, the earlier; with neither, 0 (any removal notice
+/// stops the backup). Both on the server's clock; a value that is not a whole
+/// number of milliseconds throws.
+#[wasm_bindgen(js_name = backupFirstPassBaseline)]
+pub fn backup_first_pass_baseline(
+    setup_at_ms: Option<f64>,
+    legacy_last_backup_ms: Option<f64>,
+) -> Result<f64, JsError> {
+    let whole = |field: &str, v: Option<f64>| {
+        v.map(|v| {
+            whole_ms(&serde_json::Value::from(v))
+                .ok_or_else(|| JsError::new(&format!("{field} is not a whole number of milliseconds")))
+        })
+        .transpose()
+    };
+    Ok(first_pass_baseline(
+        whole("setupAtMs", setup_at_ms)?,
+        whole("legacyLastBackupMs", legacy_last_backup_ms)?,
+    ) as f64)
+}
+
+/// What one pass does before it uploads anything (spec Amendments 12, 12c):
+/// `{outcome: "run", stopped: [{category, reason}]}` when the notices were
+/// read (as `backupStop`), or `{outcome: "check_failed"}` when
+/// `noticesFetchOk` is false (a server or network error, or a page missing):
+/// upload nothing, turn nothing off, show `backupCheckFailedWords()`, retry at
+/// the next scheduled pass, and keep `lastPassAtMs` where it was. `notices`
+/// is not read when the fetch failed.
+#[wasm_bindgen(js_name = backupPassGate)]
+pub fn backup_pass_gate(
+    notices_fetch_ok: bool,
+    notices: JsValue,
+    last_pass_at_ms: f64,
+    listing: JsValue,
+) -> Result<JsValue, JsError> {
+    let last_pass_at_ms = last_pass(last_pass_at_ms)?;
+    let listing = listing_from_js(listing)?;
+    let notices = if notices_fetch_ok {
+        Some(notices_from_js(notices)?)
+    } else {
+        None
+    };
+    to_js(
+        &match beebeeb_core::backup::backup_pass_gate(notices.as_deref(), last_pass_at_ms, &listing) {
+            BackupPassGate::Run { stopped } => PassGateJs::Run {
+                stopped: stopped_js(stopped),
+            },
+            BackupPassGate::CheckFailed => PassGateJs::CheckFailed,
+        },
+    )
+}
+
+/// The words when the notices could not be read: "Couldn't check — will
+/// retry."
+#[wasm_bindgen(js_name = backupCheckFailedWords)]
+pub fn backup_check_failed_words() -> String {
+    MSG_STOP_CHECK_FAILED.to_string()
 }

@@ -382,6 +382,46 @@ for reason, words in [
                   "folder": "Pictures", "expect": words})
 cases.append({"id": "stop_action_back_up_again", "kind": "stop_action", "expect": "Back up again"})
 
+# Amendment 12c (Guus 2026-11-07 20:45). The first pass of a device with no last_pass_at under the new engine uses a
+# baseline: the moment backups were set up on this device, or an upgraded device's last successful backup under the
+# old mirror engine; with both known the EARLIER (a later baseline hides more notices, and the earlier never lets an
+# emptied account fill up again: on an upgraded device the old engine's last backup, before the new engine's first
+# start); with neither, 0, so any removal notice stops the backup.
+SETUP = LAST + 3_600_000
+LEGACY = LAST - 86_400_000
+
+
+def baseline(id_, setup, legacy, expect):
+    cases.append({"id": id_, "kind": "baseline", "setup_at_ms": setup, "legacy_last_backup_ms": legacy,
+                  "expect": expect})
+
+
+baseline("baseline_fresh_setup_uses_the_setup_time", SETUP, None, SETUP)
+baseline("baseline_upgraded_device_uses_the_old_engines_last_backup", None, LEGACY, LEGACY)
+baseline("baseline_both_known_the_old_engines_earlier_backup_wins", SETUP, LEGACY, LEGACY)
+baseline("baseline_both_known_the_earlier_wins_whichever_it_is", LEGACY, SETUP, LEGACY)
+baseline("baseline_neither_known_is_zero", None, None, 0)
+
+
+# The pass gate: when the notices could not be read (a server or network error), the pass uploads nothing, turns
+# nothing off and retries at the next scheduled pass ("Skip the pass, retry later"); otherwise it is backup_stop.
+def gate(id_, fetch_ok, notices, listing_, expect, last=LAST):
+    cases.append({"id": id_, "kind": "gate", "notices_fetch_ok": fetch_ok, "notices": notices,
+                  "last_pass_at_ms": last, "listing": listing_, "expect": expect})
+
+
+gate("gate_notices_read_runs_backup_stop", True, [removed("erase_request", LAST + 1)], listing(),
+     {"outcome": "run", "stopped": both("erase_request")})
+gate("gate_notices_read_nothing_to_stop_runs", True, [], listing(), {"outcome": "run", "stopped": []})
+gate("gate_check_failed_uploads_nothing_and_stops_nothing", False, [], listing(), {"outcome": "check_failed"})
+gate("gate_check_failed_ignores_a_folder_gone_too", False, [], listing(pics=False), {"outcome": "check_failed"})
+# The first pass of an upgraded device: a removal notice written after the old engine's last backup, but before the
+# new engine was started, stops the backup (baseline = the old engine's last backup, not the setup time).
+gate("gate_first_pass_upgraded_device_catches_a_notice_the_old_engine_missed", True,
+     [removed("account_lapsed", LEGACY + 1)], listing(), {"outcome": "run", "stopped": both("account_lapsed")},
+     last=LEGACY)
+cases.append({"id": "check_failed_words", "kind": "check_failed_words", "expect": "Couldn't check \u2014 will retry."})
+
 doc = {
     "description": "LD-0113 backup pass planner (spec 2026-11-06-backup-from-source §4.2 rules 9-11): new, changed "
     "(size or mtime), unchanged, gone (stays in the backup), unique moves (same size, mtime and case-folded name, "
@@ -389,8 +429,9 @@ doc = {
     "removed elsewhere (stays deleted until it changes), folder presence, key normalisation, and rebuilding records "
     "from the remote tree (uploaded after the last change by the device clock's measured offset and margin, or the "
     "one-sided 10-minute floor when no offset is known: LD-0123), and why a backup stops with its words (spec "
-    "Amendments 12, 12a and 12b, LD-0121).",
-    "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\") + LD-0123 + Amendments 12/12a/12b (LD-0121); written by "
+    "Amendments 12, 12a, 12b and 12c, LD-0121): the first pass's baseline and the pass gate when the notices could "
+    "not be read.",
+    "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\") + LD-0123 + Amendments 12/12a/12b/12c (LD-0121); written by "
     "test-vectors/tools/make_backup_plan_vectors.py (independent of core)",
     "cases": cases,
 }

@@ -1,4 +1,4 @@
-//! Why a backup stops, and its words (spec Amendments 12 and 12a, LD-0121;
+//! Why a backup stops, and its words (spec Amendments 12, 12a, 12b and 12c, LD-0121;
 //! Guus, 2026-11-06: "Stop, say why, offer Back up again").
 //!
 //! When the account's files are removed (the person's own "Erase all files",
@@ -221,4 +221,72 @@ pub fn backup_stop(notices: &[ReceivedNotice], last_pass_at_ms: i64, listing: &S
         .collect();
     stopped.sort_by_key(|s| s.category.key());
     stopped
+}
+
+// ── The first pass and a failed notice check (spec Amendment 12c) ─────────
+
+/// The words a device shows when it could not read the notices (spec
+/// Amendment 12c, Guus 2026-11-07 20:45: "Skip the pass, retry later"). The
+/// backup is not off: the pass is skipped and the next one checks again.
+pub const MSG_STOP_CHECK_FAILED: &str = "Couldn't check \u{2014} will retry.";
+
+/// The `last_pass_at_ms` of a device that has none under this engine yet
+/// (spec Amendment 12c: "When backups were set up"). Only notices newer than
+/// it stop its backups. Both inputs are on the server's clock, like
+/// `last_pass_at_ms` (a device clock that runs ahead would hide a notice):
+///
+/// - `setup_at_ms`: the moment backups were turned on on this device (a fresh
+///   setup or a reinstall). Turning them on is the person's choice, so older
+///   notices do not apply.
+/// - `legacy_last_backup_ms`: an upgraded device's last successful backup
+///   under the old mirror engine (desktop 0.8.22 or earlier). The old engine
+///   never read the notices, so one written after that backup still counts.
+///
+/// With both known the EARLIER wins: a later baseline hides more notices, and
+/// the earlier one never lets an emptied account fill up again. On an upgraded
+/// device that is the old engine's last backup, since "set up" there is the
+/// new engine's first start, after any notice the old engine missed. With
+/// neither known it is 0, so any removal notice stops the backup and offers
+/// "Back up again". A client passes
+/// `last_pass_at_ms.unwrap_or_else(|| first_pass_baseline(..))` to
+/// [`backup_pass_gate`].
+pub fn first_pass_baseline(setup_at_ms: Option<i64>, legacy_last_backup_ms: Option<i64>) -> i64 {
+    match (setup_at_ms, legacy_last_backup_ms) {
+        (Some(setup), Some(legacy)) => setup.min(legacy),
+        (Some(at), None) | (None, Some(at)) => at,
+        (None, None) => 0,
+    }
+}
+
+/// What one pass does before it uploads anything (spec Amendments 12 and
+/// 12c).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BackupPassGate {
+    /// The notices were read. `stopped` (from [`backup_stop`]) turn off and
+    /// show their words; every other listed backup runs its pass, and the
+    /// client records this pass's start as its next `last_pass_at_ms`.
+    Run { stopped: Vec<StoppedBackup> },
+    /// The notices could not be read (a server or network error, or any page
+    /// of them missing): the pass uploads nothing and turns nothing off, the
+    /// device shows [`MSG_STOP_CHECK_FAILED`], and the next scheduled pass
+    /// retries. `last_pass_at_ms` stays where it was: a skipped pass is not a
+    /// pass, so a notice it could not read still counts next time.
+    CheckFailed,
+}
+
+/// Decide a pass: `notices` is `None` when they could not be read completely,
+/// else every backup notice since the last pass (as for [`backup_stop`]).
+/// Without them the pass cannot know whether the account was emptied, so it
+/// is skipped ([`BackupPassGate::CheckFailed`]) rather than run.
+pub fn backup_pass_gate(
+    notices: Option<&[ReceivedNotice]>,
+    last_pass_at_ms: i64,
+    listing: &StopListing,
+) -> BackupPassGate {
+    match notices {
+        Some(notices) => BackupPassGate::Run {
+            stopped: backup_stop(notices, last_pass_at_ms, listing),
+        },
+        None => BackupPassGate::CheckFailed,
+    }
 }
