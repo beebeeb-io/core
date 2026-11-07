@@ -388,3 +388,57 @@ members left out), `v0.2.2` against this branch, pinned 1.96.0:
 | `beebeeb_uniffi` | 73 | 0 | 0 |
 | `beebeeb_wasm` | 33 | 0 | 0 |
 | `beebeeb_backup` | 0 | 0 | 0 |
+
+## Archive exports (0.3.0)
+
+List, preview and extract zip, tar, tgz and gz (spec `2026-11-07-core-archives-design.md` §5, §8, §9).
+Additive only. Every rule is core's (`beebeeb_core::archives`); the bindings convert.
+
+### WASM
+
+Counts are the `export function` / `export class` names in the generated `beebeeb_wasm.d.ts`
+(`wasm-pack build beebeeb-wasm --dev --no-opt`); this branch changes no other WASM source, so the base is
+the head minus the names below.
+
+- base: 177 names
+- head: 183 names
+- **removed: 0**
+- **added: 6**
+
+| Name | What |
+| --- | --- |
+| `new WasmArchiveSession(len, platform)` | A push session for an archive of `len` (bigint) bytes on `"native"`, `"browser"` or `"mobile_app"`. `step()` → `{kind: "need_bytes", start, end}` (answer with `supply(offset, bytes)`, then step again), `{kind: "listed"}`, `{kind: "refused", refusal, format, text}` or `{kind: "io", message}`. `releaseBefore(offset)`; `listing()` → `{format, entries, totals, protection, uses_zipcrypto, complete}`; `checkPassword(index, password)` → `need_bytes` / `accepted` / `wrong` / `not_needed`; `preview(input)` and `previewWithPlan(input, plan)` → the screen model; `plan(request)` → a `WasmExtractionPlan` or `{kind: "refused", refusal, text}`; `startExtraction(identity, plan, password?)` → a `WasmArchiveExtraction` (the session moves into it; later calls throw); `openEntry(index, password?)` → `need_bytes` / `{kind: "bytes", bytes}` (after its check passed) / `corrupt` / `wrong` / `skipped` / `too_large` / `io`. |
+| `WasmExtractionPlan` | Core's plan, opaque, so the run uses it unedited: `kind` (`"planned"`), `view()` → `{target, nodes, skipped, renamed, totals, notices}`. |
+| `WasmArchiveExtraction` | `step()` → `need_bytes`, `need_password`, `create_folder`, `file_begin`, `file_data` (`bytes`: a `Uint8Array`, not yet verified), `file_end` (verified: upload it), `file_skipped`, `progress` (with its `text`), `waiting` or `finished` (outcome, reason, counts, skipped, renamed, `text`). Reports: `supply`, `releaseBefore`, `folderCreated(node, id)`, `folderNameTaken(node)`, `uploadFinished(node, ok)`, `identitySeen({file_id, object_version_id})`, `runFailed(reason)`, `supplyPassword(password)`, `cancel()`; `preview(input)` while it runs and after. |
+| `archiveText(key, args)` | Core's words: `{key, text, args}`; an unknown key throws. |
+| `archiveCountLabel(n)` | `1,234`. |
+| `archiveSizeLabel(bytes)` | `3.4 MB` (core's compact formatter, one decimal). |
+
+Every 64-bit number crosses as a `bigint` and an absent field is `null`. A password becomes core's
+zeroizing `ArchivePassword` as it enters. An unknown platform, word, destination, backup position,
+selection or fail reason throws. `beebeeb-wasm/js-tests/archives.test.cjs` runs every fixture, word,
+count and size of `test-vectors/archives_v1.json` through the module.
+
+### UniFFI
+
+Counts are the `uniffi_beebeeb_uniffi_fn_*` and `uniffi_beebeeb_uniffi_checksum_*` symbols in the
+regenerated `beebeeb_uniffiFFI.h`, base (this branch's merge base header) against head, `comm` over
+the sorted symbols.
+
+- base: 974 symbols
+- head: 982 symbols
+- **removed: 0**
+- **added: 8** (4 functions, each with its checksum)
+
+| Function | What |
+| --- | --- |
+| `archive_text(key, args: [ArchiveTextArg])` | `throws -> ArchiveText` (`key`, `text`, `args`); an unknown key is `InvalidInput` |
+| `archive_count_label(n)` / `archive_size_label(bytes)` | the count and size as the words show them |
+| `archive_list(bytes, platform)` | `throws -> ArchiveListResult` (`listed { listing }` or `refused { refusal, text }`) for an archive already in memory (the vectors, a small attachment); a large archive is listed by range reads in the archive service |
+
+Records and enums mirror core field for field: `ArchivePreviewModel` (`ArchivePreviewState`,
+`ArchivePreviewRow`, `ArchivePreviewAction`, `ArchiveActionKind`), `ArchiveListing` (`ArchiveEntry`,
+`ArchiveEntryKind`, `ArchiveCipher`, `ArchiveTime`, `ArchiveSkipReason`, `ArchiveTotals`,
+`ArchiveProtection`, `ArchiveFormat`), `ArchiveRefusal`, `ExtractProgress`, `ExtractSummary`
+(`ExtractOutcome`, `ExtractFailReason`, `ArchiveSkippedEntry`, `ArchiveRenamedEntry`) and `ArchiveText`.
+The archive service handle (preview, plan and extraction over range reads) follows separately.
