@@ -1,5 +1,3 @@
-#[cfg(test)]
-mod tests {
     use super::*;
     use serde_json::json;
     use std::{
@@ -619,4 +617,3 @@ mod tests {
         assert_eq!(engine.lookup_node(target).unwrap().unwrap().name, "renamed.txt");
         assert_eq!(rows_read.load(Ordering::Relaxed), 2);
     }
-}

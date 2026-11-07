@@ -1,5 +1,3 @@
-#[cfg(test)]
-mod tests {
     use super::*;
     use beebeeb_core::chunk_stream::{ChunkDecryptor, ExpectedChunkFormat};
     use beebeeb_core::kdf::FileKey;
@@ -420,4 +418,3 @@ mod tests {
         };
         assert!(!orphan.exists());
     }
-}

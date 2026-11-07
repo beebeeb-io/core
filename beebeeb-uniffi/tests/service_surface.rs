@@ -3,8 +3,12 @@ use beebeeb_uniffi::{RuntimeProfile, ServiceErrorKind};
 fn services_source() -> String {
     [
         include_str!("../src/services.rs"),
-        include_str!("../src/services_impl_part_00"),
-        include_str!("../src/services_impl_part_01"),
+        include_str!("../src/services/auth.rs"),
+        include_str!("../src/services/client.rs"),
+        include_str!("../src/services/files.rs"),
+        include_str!("../src/services/settings.rs"),
+        include_str!("../src/services/sharing.rs"),
+        include_str!("../src/services/transfers.rs"),
     ]
     .concat()
 }
