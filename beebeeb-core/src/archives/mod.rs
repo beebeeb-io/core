@@ -20,6 +20,7 @@ pub mod names;
 pub mod password;
 pub mod plan;
 pub mod platform;
+pub mod preview;
 pub mod session;
 pub mod source;
 mod tar;
@@ -43,6 +44,10 @@ pub use plan::{
     destination_stem, plan_extraction,
 };
 pub use platform::ArchivePlatform;
+pub use preview::{
+    ActionKind, ArchivePreviewModel, DestinationKind, ListingState, PreviewAction, PreviewInput, PreviewRow,
+    PreviewState, archive_preview,
+};
 pub use session::{ArchiveSession, EntryReader, PieceStep, SessionStep};
 pub use source::{ByteRange, ByteSource, ReadSeekSource, SourceError, SuppliedBytes};
 pub use words::{ArchiveKey, ArchiveText, archive_text};
