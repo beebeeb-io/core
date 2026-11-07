@@ -71,6 +71,16 @@ jobs:
         if: always()
         run: bash test-vectors/tools/check-backup-vectors-generated.sh --self-test
 
+      # The CLI-auth handshake known answers (task 2378) are Rust constants, not JSON: the independent
+      # pure-Python generator must agree with every one of them, and its check must be able to go red.
+      - name: cli-auth vectors match their generator
+        if: always()
+        run: python3 -I test-vectors/tools/make_cli_auth_vectors.py --check beebeeb-core/tests/cli_auth_vectors.rs
+
+      - name: cli-auth vector check can go red
+        if: always()
+        run: python3 -I test-vectors/tools/make_cli_auth_vectors.py --self-test beebeeb-core/tests/cli_auth_vectors.rs
+
   test:
     name: Tests
     runs-on: ubuntu-latest

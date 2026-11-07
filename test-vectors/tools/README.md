@@ -35,3 +35,14 @@ python3 -I test-vectors/tools/make_backup_device_vectors.py test-vectors/consoli
 python3 -I test-vectors/tools/make_backup_root_vectors.py test-vectors/consolidation/backup_root.json
 python3 -I test-vectors/tools/make_backup_plan_vectors.py test-vectors/consolidation/backup_plan.json
 ```
+
+`make_cli_auth_vectors.py` (task 2378) independently generates the CLI-auth handshake known answers (P-256 public keys,
+the ECDH X-coordinate, the HKDF-SHA256 key) in pure Python: affine P-256 arithmetic and the standard library's HMAC, no
+Rust and no third-party crypto. They are Rust constants in `beebeeb-core/tests/cli_auth_vectors.rs`, not JSON, so the
+check compares the constants by name instead of rewriting a file (CI, with `--self-test`):
+
+```sh
+python3 -I test-vectors/tools/make_cli_auth_vectors.py                 # prints the constants
+python3 -I test-vectors/tools/make_cli_auth_vectors.py --check beebeeb-core/tests/cli_auth_vectors.rs
+python3 -I test-vectors/tools/make_cli_auth_vectors.py --self-test beebeeb-core/tests/cli_auth_vectors.rs
+```

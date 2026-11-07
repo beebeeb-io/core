@@ -15,7 +15,8 @@
 use aes_gcm::aead::Aead;
 use aes_gcm::aead::generic_array::GenericArray;
 use aes_gcm::{Aes256Gcm, KeyInit};
-use beebeeb_core::cli_auth::{decrypt_cli_payload, derive_cli_auth_key};
+use beebeeb_core::CoreError;
+use beebeeb_core::cli_auth::{CliEphemeralKey, decrypt_cli_payload, derive_cli_auth_key};
 use p256::SecretKey;
 use p256::elliptic_curve::sec1::ToSec1Point;
 
@@ -32,6 +33,18 @@ const EXPECTED_AES_KEY_HEX: &str = "8bd295090ce8a6412b831704b601b55d60ba3cae056f
 // The raw 32-byte ECDH shared secret (X-coordinate). The legacy v0.4 web app used
 // THIS directly as the AES key (no HKDF). Pinned so the raw-fallback path is covered.
 const EXPECTED_SHARED_HEX: &str = "ccfc261f58193c98ca4ad4a53bbac6f0ee29bc4d48438090446908622ca79af6";
+
+// Task 2378: the SEC1 public keys on the wire, pinned so a point-encoding drift fails
+// here and not in a live `bb login`. These and every constant above are checked
+// against the independent pure-Python generator (no Rust, no third-party crypto):
+//   python3 -I test-vectors/tools/make_cli_auth_vectors.py --check beebeeb-core/tests/cli_auth_vectors.rs
+// Uncompressed (`0x04 || X || Y`), what the CLI sends and WebCrypto's raw export gives.
+const EXPECTED_CLI_PUB_HEX: &str = "040217e617f0b6443928278f96999e69a23a4f2c152bdf6d6cdf66e5b80282d4ed194a7debcb97712d2dda3ca85aa8765a56f45fc758599652f2897c65306e5794";
+const EXPECTED_BROWSER_PUB_HEX: &str = "04d65a93977caa3d1b081852ff57a79e465f1660577304baead505dd3a48589cf350185e895372df6221ea3a137557e473fddb6755f05bd507c3c533fce9c91285";
+// The browser key in SEC1 compressed form (`0x02|0x03 || X`): `shared_secret` accepts it.
+const BROWSER_PUB_COMPRESSED_HEX: &str = "03d65a93977caa3d1b081852ff57a79e465f1660577304baead505dd3a48589cf3";
+// A compressed encoding whose X (= 1) has no point on P-256: must be refused.
+const OFF_CURVE_COMPRESSED_HEX: &str = "020000000000000000000000000000000000000000000000000000000000000001";
 
 fn hex32(s: &str) -> [u8; 32] {
     let v = hex::decode(s).unwrap();
@@ -118,6 +131,79 @@ fn full_browser_to_cli_roundtrip_raw_fallback() {
     // The core decrypt tries HKDF first, then falls back to the raw secret.
     let recovered = decrypt_cli_payload(&shared, &nonce, &ct).unwrap();
     assert_eq!(recovered, plaintext);
+}
+
+fn cli_key(priv_hex: &str) -> CliEphemeralKey {
+    CliEphemeralKey::from_secret_bytes(&hex32(priv_hex)).unwrap()
+}
+
+#[test]
+fn public_keys_match_fixed_vectors() {
+    // The production type and the bare p256 primitive both give the pinned SEC1 bytes.
+    assert_eq!(
+        hex::encode(cli_key(CLI_PRIV_HEX).public_key_bytes()),
+        EXPECTED_CLI_PUB_HEX,
+        "CLI public key encoding drifted — the browser could no longer read it."
+    );
+    assert_eq!(hex::encode(pub_sec1(CLI_PRIV_HEX)), EXPECTED_CLI_PUB_HEX);
+    assert_eq!(
+        hex::encode(cli_key(BROWSER_PRIV_HEX).public_key_bytes()),
+        EXPECTED_BROWSER_PUB_HEX,
+        "browser-side public key encoding drifted."
+    );
+    assert_eq!(hex::encode(pub_sec1(BROWSER_PRIV_HEX)), EXPECTED_BROWSER_PUB_HEX);
+}
+
+#[test]
+fn cli_shared_secret_from_pinned_browser_key() {
+    // The CLI's production path, fed the pinned browser bytes, reaches the pinned secret.
+    let shared = cli_key(CLI_PRIV_HEX)
+        .shared_secret(&hex::decode(EXPECTED_BROWSER_PUB_HEX).unwrap())
+        .unwrap();
+    assert_eq!(hex::encode(*shared), EXPECTED_SHARED_HEX);
+}
+
+#[test]
+fn compressed_browser_key_is_accepted_and_agrees() {
+    // `shared_secret` documents "compressed or uncompressed"; the compressed form of the
+    // same point must give the same secret (the behaviour p256 0.13 had).
+    let shared = cli_key(CLI_PRIV_HEX)
+        .shared_secret(&hex::decode(BROWSER_PUB_COMPRESSED_HEX).unwrap())
+        .unwrap();
+    assert_eq!(hex::encode(*shared), EXPECTED_SHARED_HEX);
+}
+
+#[test]
+fn invalid_browser_public_keys_are_rejected() {
+    let uncompressed = hex::decode(EXPECTED_BROWSER_PUB_HEX).unwrap();
+    let mut too_long = uncompressed.clone();
+    too_long.push(0x00);
+    let cases: [(&str, Vec<u8>); 6] = [
+        ("identity point (SEC1 0x00)", vec![0x00]),
+        (
+            "off-curve compressed point",
+            hex::decode(OFF_CURVE_COMPRESSED_HEX).unwrap(),
+        ),
+        (
+            "wrong length: uncompressed minus its last byte",
+            uncompressed[..64].to_vec(),
+        ),
+        ("wrong length: uncompressed plus one byte", too_long),
+        (
+            "wrong length: compressed tag, uncompressed body",
+            [&[0x02], &uncompressed[1..]].concat(),
+        ),
+        ("empty", Vec::new()),
+    ];
+    let cli = cli_key(CLI_PRIV_HEX);
+    for (what, bytes) in cases {
+        // Match instead of unwrap_err: the Ok side holds a shared secret, never printed.
+        match cli.shared_secret(&bytes) {
+            Err(CoreError::InvalidInput(_)) => {}
+            Err(other) => panic!("{what}: expected InvalidInput, got {other:?}"),
+            Ok(_) => panic!("{what}: must be rejected"),
+        }
+    }
 }
 
 /// Regenerate the pinned constants. Run with:

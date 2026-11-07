@@ -48,7 +48,7 @@ use aes_gcm::{Aes256Gcm, KeyInit};
 use hkdf::Hkdf;
 use p256::elliptic_curve::Generate;
 use p256::elliptic_curve::sec1::ToSec1Point;
-use p256::{PublicKey, SecretKey};
+use p256::{NonZeroScalar, PublicKey, SecretKey};
 use sha2::Sha256;
 use zeroize::Zeroizing;
 
@@ -76,9 +76,11 @@ impl CliEphemeralKey {
     /// This is the production path — `bb login` mints a one-shot keypair per attempt.
     /// The scalar comes from `getrandom`'s system RNG (`elliptic_curve::Generate`);
     /// like `rand`'s `OsRng` before it, an OS RNG failure panics rather than
-    /// returning a weak key.
+    /// returning a weak key. It is drawn as a `NonZeroScalar` (rejection sampling
+    /// excludes zero), as p256 0.13's `SecretKey::random` did; 0.14's
+    /// `SecretKey::generate` samples `[0, n)` and would not exclude it.
     pub fn generate() -> Self {
-        Self::from_secret(SecretKey::generate())
+        Self::from_secret(SecretKey::from(NonZeroScalar::generate()))
     }
 
     /// Construct from a fixed 32-byte private scalar.
