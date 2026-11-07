@@ -188,8 +188,20 @@ def remote(key, rid, size=10, up_ms=5000):
     return {"key": key, "remote_id": uid(rid), "size": size, "uploaded_at_ms": up_ms}
 
 
-def rebuild(id_, remotes, entries, expect):
-    cases.append({"id": id_, "kind": "rebuild", "remote": remotes, "entries": entries, "expect": expect})
+# The clock of a rebuild (LD-0123): offset_ms = server_now - device_now (None: not known), margin_ms its uncertainty.
+# A copy counts only when uploaded_at_ms > modified_ms + offset_ms + margin_ms; with no offset known the offset is 0
+# and the margin is at least the one-sided 10-minute floor. EXACT: offset 0, margin 0, the v0.2.1 "strictly after"
+# rule, which the cases below that are about keys and sizes keep.
+FLOOR_MS = 10 * 60 * 1000
+EXACT = {"offset_ms": 0, "margin_ms": 0}
+UNKNOWN = {"offset_ms": None, "margin_ms": 0}
+HOUR = 3600 * 1000
+T = 1_762_430_400_000  # the server's clock at the upload in the clock cases
+
+
+def rebuild(id_, remotes, entries, expect, clock=None):
+    cases.append({"id": id_, "kind": "rebuild", "remote": remotes, "entries": entries,
+                  "clock": clock or EXACT, "expect": expect})
 
 
 rebuild("rebuild_uploaded_after_the_change_is_backed_up", [remote("a.jpg", 1, up_ms=5000)], [e("a.jpg", m=1000)],
@@ -208,14 +220,42 @@ rebuild("rebuild_exact_key_before_normalized",
         [e("a/b.jpg"), e("a\\b.jpg")], [r("a/b.jpg", 2, up=5000), r("a\\b.jpg", 1, up=6000)])
 rebuild("rebuild_shared_normalized_key_is_not_guessed", [remote("a\\b.jpg", 1)],
         [e("a/b.jpg"), e("/a/b.jpg")], [])
+# LD-0123. The device clock runs 1 h behind and says so through the offset. The file was edited, same size, 20 minutes
+# AFTER the upload; its device mtime reads 40 minutes before the upload. "Uploaded after the mtime" alone would mark it
+# backed up and the edit would never be uploaded. With the offset it is uploaded again.
+rebuild("rebuild_device_clock_behind_same_size_edit_uploads_again", [remote("a.jpg", 1, up_ms=T)],
+        [e("a.jpg", m=T + 20 * 60 * 1000 - HOUR)], [], {"offset_ms": HOUR, "margin_ms": 2_500})
+# The device clock runs 1 h ahead: a copy made 30 minutes after the edit reads as made before the mtime. With no offset
+# known it is uploaded once more (the floor is one-sided: it never lowers the bar); with the offset it is backed up.
+rebuild("rebuild_device_clock_ahead_uploads_once_more_only", [remote("a.jpg", 1, up_ms=T)],
+        [e("a.jpg", m=T - 30 * 60 * 1000 + HOUR)], [], UNKNOWN)
+rebuild("rebuild_device_clock_ahead_offset_known_marks_backed_up", [remote("a.jpg", 1, up_ms=T)],
+        [e("a.jpg", m=T - 30 * 60 * 1000 + HOUR)], [r("a.jpg", 1, m=T - 30 * 60 * 1000 + HOUR, up=T)],
+        {"offset_ms": -HOUR, "margin_ms": 2_500})
+# A small measured offset inside the margin: a copy made after mtime + offset + margin is backed up; one made exactly
+# at that sum is not (strictly later), and nor is one made inside the margin.
+rebuild("rebuild_offset_measured_within_margin_marks_backed_up",
+        [remote("a.jpg", 1, up_ms=T + 3_801), remote("b.jpg", 2, up_ms=T + 3_800), remote("c.jpg", 3, up_ms=T + 3_000)],
+        [e("a.jpg", m=T), e("b.jpg", m=T), e("c.jpg", m=T)], [r("a.jpg", 1, m=T, up=T + 3_801)],
+        {"offset_ms": 1_500, "margin_ms": 2_300})
+# No offset known: the floor. Uploaded 10 minutes after the mtime is not enough; 1 ms more is.
+rebuild("rebuild_no_offset_known_uses_ten_minute_floor",
+        [remote("a.jpg", 1, up_ms=T + FLOOR_MS), remote("b.jpg", 2, up_ms=T + FLOOR_MS + 1)],
+        [e("a.jpg", m=T), e("b.jpg", m=T)], [r("b.jpg", 2, m=T, up=T + FLOOR_MS + 1)], UNKNOWN)
+# With no offset known a margin wider than the floor still counts: the floor is a minimum.
+rebuild("rebuild_no_offset_known_wider_margin_wins_over_the_floor",
+        [remote("a.jpg", 1, up_ms=T + 15 * 60 * 1000), remote("b.jpg", 2, up_ms=T + 20 * 60 * 1000 + 1)],
+        [e("a.jpg", m=T), e("b.jpg", m=T)], [r("b.jpg", 2, m=T, up=T + 20 * 60 * 1000 + 1)],
+        {"offset_ms": None, "margin_ms": 20 * 60 * 1000})
 
 doc = {
     "description": "LD-0113 backup pass planner (spec 2026-11-06-backup-from-source §4.2 rules 9-11): new, changed "
     "(size or mtime), unchanged, gone (stays in the backup), unique moves (same size, mtime and case-folded name, "
     "unique both ways), the per-pass budget (a prefix; the first upload always fits), parent folders parents-first, "
     "removed elsewhere (stays deleted until it changes), folder presence, key normalisation, and rebuilding records "
-    "from the remote tree (uploaded strictly after the last change).",
-    "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\"); written by "
+    "from the remote tree (uploaded after the last change by the device clock's measured offset and margin, or the "
+    "one-sided 10-minute floor when no offset is known: LD-0123).",
+    "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\") + LD-0123; written by "
     "test-vectors/tools/make_backup_plan_vectors.py (independent of core)",
     "cases": cases,
 }

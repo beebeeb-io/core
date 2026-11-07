@@ -1,6 +1,6 @@
 {
-  "description": "LD-0113 backup pass planner (spec 2026-11-06-backup-from-source §4.2 rules 9-11): new, changed (size or mtime), unchanged, gone (stays in the backup), unique moves (same size, mtime and case-folded name, unique both ways), the per-pass budget (a prefix; the first upload always fits), parent folders parents-first, removed elsewhere (stays deleted until it changes), folder presence, key normalisation, and rebuilding records from the remote tree (uploaded strictly after the last change).",
-  "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\"); written by test-vectors/tools/make_backup_plan_vectors.py (independent of core)",
+  "description": "LD-0113 backup pass planner (spec 2026-11-06-backup-from-source §4.2 rules 9-11): new, changed (size or mtime), unchanged, gone (stays in the backup), unique moves (same size, mtime and case-folded name, unique both ways), the per-pass budget (a prefix; the first upload always fits), parent folders parents-first, removed elsewhere (stays deleted until it changes), folder presence, key normalisation, and rebuilding records from the remote tree (uploaded after the last change by the device clock's measured offset and margin, or the one-sided 10-minute floor when no offset is known: LD-0123).",
+  "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\") + LD-0123; written by test-vectors/tools/make_backup_plan_vectors.py (independent of core)",
   "cases": [
     {
       "id": "plan_new_file",
@@ -2653,6 +2653,10 @@
           "modified_ms": 1000
         }
       ],
+      "clock": {
+        "offset_ms": 0,
+        "margin_ms": 0
+      },
       "expect": [
         {
           "key": "a.jpg",
@@ -2683,6 +2687,10 @@
           "modified_ms": 1000
         }
       ],
+      "clock": {
+        "offset_ms": 0,
+        "margin_ms": 0
+      },
       "expect": []
     },
     {
@@ -2704,6 +2712,10 @@
           "modified_ms": 1000
         }
       ],
+      "clock": {
+        "offset_ms": 0,
+        "margin_ms": 0
+      },
       "expect": []
     },
     {
@@ -2725,6 +2737,10 @@
           "modified_ms": 1000
         }
       ],
+      "clock": {
+        "offset_ms": 0,
+        "margin_ms": 0
+      },
       "expect": []
     },
     {
@@ -2746,6 +2762,10 @@
           "modified_ms": 1000
         }
       ],
+      "clock": {
+        "offset_ms": 0,
+        "margin_ms": 0
+      },
       "expect": []
     },
     {
@@ -2767,6 +2787,10 @@
           "modified_ms": 1000
         }
       ],
+      "clock": {
+        "offset_ms": 0,
+        "margin_ms": 0
+      },
       "expect": [
         {
           "key": "René.jpg",
@@ -2803,6 +2827,10 @@
           "modified_ms": 1000
         }
       ],
+      "clock": {
+        "offset_ms": 0,
+        "margin_ms": 0
+      },
       "expect": [
         {
           "key": "a.jpg",
@@ -2833,6 +2861,10 @@
           "modified_ms": 1000
         }
       ],
+      "clock": {
+        "offset_ms": 0,
+        "margin_ms": 0
+      },
       "expect": []
     },
     {
@@ -2866,6 +2898,10 @@
           "modified_ms": 1000
         }
       ],
+      "clock": {
+        "offset_ms": 0,
+        "margin_ms": 0
+      },
       "expect": [
         {
           "key": "a/b.jpg",
@@ -2910,7 +2946,245 @@
           "modified_ms": 1000
         }
       ],
+      "clock": {
+        "offset_ms": 0,
+        "margin_ms": 0
+      },
       "expect": []
+    },
+    {
+      "id": "rebuild_device_clock_behind_same_size_edit_uploads_again",
+      "kind": "rebuild",
+      "remote": [
+        {
+          "key": "a.jpg",
+          "remote_id": "00000001-0000-4000-8000-0000000000aa",
+          "size": 10,
+          "uploaded_at_ms": 1762430400000
+        }
+      ],
+      "entries": [
+        {
+          "key": "a.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1762428000000
+        }
+      ],
+      "clock": {
+        "offset_ms": 3600000,
+        "margin_ms": 2500
+      },
+      "expect": []
+    },
+    {
+      "id": "rebuild_device_clock_ahead_uploads_once_more_only",
+      "kind": "rebuild",
+      "remote": [
+        {
+          "key": "a.jpg",
+          "remote_id": "00000001-0000-4000-8000-0000000000aa",
+          "size": 10,
+          "uploaded_at_ms": 1762430400000
+        }
+      ],
+      "entries": [
+        {
+          "key": "a.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1762432200000
+        }
+      ],
+      "clock": {
+        "offset_ms": null,
+        "margin_ms": 0
+      },
+      "expect": []
+    },
+    {
+      "id": "rebuild_device_clock_ahead_offset_known_marks_backed_up",
+      "kind": "rebuild",
+      "remote": [
+        {
+          "key": "a.jpg",
+          "remote_id": "00000001-0000-4000-8000-0000000000aa",
+          "size": 10,
+          "uploaded_at_ms": 1762430400000
+        }
+      ],
+      "entries": [
+        {
+          "key": "a.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1762432200000
+        }
+      ],
+      "clock": {
+        "offset_ms": -3600000,
+        "margin_ms": 2500
+      },
+      "expect": [
+        {
+          "key": "a.jpg",
+          "size": 10,
+          "modified_ms": 1762432200000,
+          "remote_id": "00000001-0000-4000-8000-0000000000aa",
+          "uploaded_at_ms": 1762430400000,
+          "state": "backed_up"
+        }
+      ]
+    },
+    {
+      "id": "rebuild_offset_measured_within_margin_marks_backed_up",
+      "kind": "rebuild",
+      "remote": [
+        {
+          "key": "a.jpg",
+          "remote_id": "00000001-0000-4000-8000-0000000000aa",
+          "size": 10,
+          "uploaded_at_ms": 1762430403801
+        },
+        {
+          "key": "b.jpg",
+          "remote_id": "00000002-0000-4000-8000-0000000000aa",
+          "size": 10,
+          "uploaded_at_ms": 1762430403800
+        },
+        {
+          "key": "c.jpg",
+          "remote_id": "00000003-0000-4000-8000-0000000000aa",
+          "size": 10,
+          "uploaded_at_ms": 1762430403000
+        }
+      ],
+      "entries": [
+        {
+          "key": "a.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1762430400000
+        },
+        {
+          "key": "b.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1762430400000
+        },
+        {
+          "key": "c.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1762430400000
+        }
+      ],
+      "clock": {
+        "offset_ms": 1500,
+        "margin_ms": 2300
+      },
+      "expect": [
+        {
+          "key": "a.jpg",
+          "size": 10,
+          "modified_ms": 1762430400000,
+          "remote_id": "00000001-0000-4000-8000-0000000000aa",
+          "uploaded_at_ms": 1762430403801,
+          "state": "backed_up"
+        }
+      ]
+    },
+    {
+      "id": "rebuild_no_offset_known_uses_ten_minute_floor",
+      "kind": "rebuild",
+      "remote": [
+        {
+          "key": "a.jpg",
+          "remote_id": "00000001-0000-4000-8000-0000000000aa",
+          "size": 10,
+          "uploaded_at_ms": 1762431000000
+        },
+        {
+          "key": "b.jpg",
+          "remote_id": "00000002-0000-4000-8000-0000000000aa",
+          "size": 10,
+          "uploaded_at_ms": 1762431000001
+        }
+      ],
+      "entries": [
+        {
+          "key": "a.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1762430400000
+        },
+        {
+          "key": "b.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1762430400000
+        }
+      ],
+      "clock": {
+        "offset_ms": null,
+        "margin_ms": 0
+      },
+      "expect": [
+        {
+          "key": "b.jpg",
+          "size": 10,
+          "modified_ms": 1762430400000,
+          "remote_id": "00000002-0000-4000-8000-0000000000aa",
+          "uploaded_at_ms": 1762431000001,
+          "state": "backed_up"
+        }
+      ]
+    },
+    {
+      "id": "rebuild_no_offset_known_wider_margin_wins_over_the_floor",
+      "kind": "rebuild",
+      "remote": [
+        {
+          "key": "a.jpg",
+          "remote_id": "00000001-0000-4000-8000-0000000000aa",
+          "size": 10,
+          "uploaded_at_ms": 1762431300000
+        },
+        {
+          "key": "b.jpg",
+          "remote_id": "00000002-0000-4000-8000-0000000000aa",
+          "size": 10,
+          "uploaded_at_ms": 1762431600001
+        }
+      ],
+      "entries": [
+        {
+          "key": "a.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1762430400000
+        },
+        {
+          "key": "b.jpg",
+          "is_dir": false,
+          "size": 10,
+          "modified_ms": 1762430400000
+        }
+      ],
+      "clock": {
+        "offset_ms": null,
+        "margin_ms": 1200000
+      },
+      "expect": [
+        {
+          "key": "b.jpg",
+          "size": 10,
+          "modified_ms": 1762430400000,
+          "remote_id": "00000002-0000-4000-8000-0000000000aa",
+          "uploaded_at_ms": 1762431600001,
+          "state": "backed_up"
+        }
+      ]
     }
   ]
 }
