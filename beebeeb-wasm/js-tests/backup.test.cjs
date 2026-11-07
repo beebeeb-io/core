@@ -98,3 +98,43 @@ nodeTest('backupParseManifest: the real iOS manifest and unknown fields come bac
 
   assert.throws(() => wasm.backupParseManifest('[1, 2]'), /device manifest/);
 });
+
+// LD-0121: why a backup stops and its words (spec Amendment 12), the web's own run of every stop, notice and words
+// case of test-vectors/consolidation/backup_plan.json (BB_PLAN_VECTOR_PATH points at a mutated copy for a red run).
+const plan = require(
+  process.env.BB_PLAN_VECTOR_PATH || path.join(__dirname, '../../test-vectors/consolidation/backup_plan.json'),
+);
+
+nodeTest('backupStop agrees with every stop case of the shared vector', () => {
+  const cases = plan.cases.filter((c) => c.kind === 'stop');
+  assert.equal(cases.length, 19, 'the six cases Amendment 12 names and thirteen more');
+  for (const c of cases) {
+    assert.deepEqual(wasm.backupStop(c.notices, c.last_pass_at_ms, c.listing), c.expect, c.id);
+  }
+});
+
+nodeTest('backupNoticeReason, backupStopWords and backupAgainAction agree with the shared vector', () => {
+  const notices = plan.cases.filter((c) => c.kind === 'notice');
+  assert.equal(notices.length, 9);
+  for (const c of notices) {
+    assert.equal(wasm.backupNoticeReason(c.type, c.data), c.expect === null ? undefined : c.expect.reason, c.id);
+  }
+  const words = plan.cases.filter((c) => c.kind === 'stop_words');
+  assert.equal(words.length, 6, 'one line per reason');
+  for (const c of words) {
+    assert.equal(wasm.backupStopWords(c.reason, c.device, c.folder), c.expect, c.id);
+  }
+  assert.equal(wasm.backupAgainAction(), plan.cases.find((c) => c.kind === 'stop_action').expect);
+});
+
+nodeTest('backupStop and backupStopWords throw on what they do not know', () => {
+  const listing = { device_folder_id: 'GLegion', device_folder_live: true, folders: [] };
+  assert.throws(() => wasm.backupStop([], 0, listing), /device_folder_id is not a UUID/);
+  const dev = '00000064-0000-4000-8000-0000000000aa';
+  const bad = { device_folder_id: dev, device_folder_live: true, folders: [{ category: 'Pictures' }] };
+  assert.throws(() => wasm.backupStop([], 0, bad), /unknown category key/);
+  assert.throws(() => wasm.backupStop([], 1.5, { ...listing, device_folder_id: dev }), /lastPassAtMs/);
+  for (const reason of ['Unknown', 'erased_request', '']) {
+    assert.throws(() => wasm.backupStopWords(reason, 'GLegion', 'Pictures'), /unknown backup stop reason/, reason);
+  }
+});

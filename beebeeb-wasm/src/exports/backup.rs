@@ -7,12 +7,17 @@
 //! role string throws, never passes (plan Amendment 1, item 3), except in the
 //! per-row protection bit, where an unknown role is protected (review #8): a
 //! role the server adds later must never break an older bundle's listing.
+//! Why a backup stops and its words (spec Amendment 12, LD-0121): the web
+//! shows both notification types with core's words; a notification row is
+//! read leniently, like the server's own new types.
 use beebeeb_core::backup::{
-    BackupPosition, MSG_BADGE, Mutation, check_app_mutation, check_drive_mutation, check_root_mutation,
-    is_hidden_backup_item, parse_manifest,
+    BackupPosition, MSG_BACK_UP_AGAIN, MSG_BADGE, Mutation, ReceivedNotice, StopFolder, StopListing,
+    check_app_mutation, check_drive_mutation, check_root_mutation, is_hidden_backup_item, parse_backup_notice,
+    parse_manifest,
 };
-use beebeeb_types::backup::SystemRole;
-use serde::Serialize;
+use beebeeb_types::backup::{BackupStopReason, Category, SystemRole};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 
 /// `null`, `undefined` or `""` is no role; `"backups_root"` is the root.
@@ -142,4 +147,136 @@ pub fn backup_parse_manifest(json: &str) -> Result<JsValue, JsError> {
     manifest
         .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
         .map_err(|e| JsError::new(&e.to_string()))
+}
+
+// ── Why a backup stops (spec Amendment 12, LD-0121) ───────────────────────
+
+/// A `notifications` row as the API lists it.
+#[derive(Deserialize)]
+struct NoticeRowJs {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    data: serde_json::Value,
+    created_at_ms: i64,
+}
+
+#[derive(Deserialize)]
+struct StopFolderJs {
+    category: String,
+    #[serde(default)]
+    category_folder_id: Option<String>,
+    #[serde(default)]
+    category_folder_live: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct StopListingJs {
+    device_folder_id: String,
+    device_folder_live: bool,
+    folders: Vec<StopFolderJs>,
+}
+
+#[derive(Serialize)]
+struct StoppedJs {
+    category: String,
+    reason: &'static str,
+}
+
+fn parse_uuid(field: &str, s: &str) -> Result<Uuid, JsError> {
+    Uuid::parse_str(s).map_err(|_| JsError::new(&format!("{field} is not a UUID")))
+}
+
+fn parse_stop_reason(reason: &str) -> Result<BackupStopReason, JsError> {
+    BackupStopReason::parse(reason).ok_or_else(|| JsError::new("unknown backup stop reason"))
+}
+
+/// Which backups turn off on this pass, and why (spec Amendment 12, steps
+/// 1-4): `[{category, reason}]` in category key order, empty when nothing
+/// changes. `notices`: the `notifications` rows (`{type, data,
+/// created_at_ms}`); a row of another type is skipped. `lastPassAtMs`: on the
+/// server's clock, when this device's previous pass started, or when the
+/// person last turned a backup on or chose "Back up again" since. `listing`:
+/// `{device_folder_id, device_folder_live, folders: [{category,
+/// category_folder_id, category_folder_live}]}`. An unknown category key or an
+/// id that is not a UUID throws.
+#[wasm_bindgen(js_name = backupStop)]
+pub fn backup_stop(notices: JsValue, last_pass_at_ms: f64, listing: JsValue) -> Result<JsValue, JsError> {
+    if !(last_pass_at_ms.is_finite()
+        && last_pass_at_ms.fract() == 0.0
+        && last_pass_at_ms.abs() <= 9_007_199_254_740_991.0)
+    {
+        return Err(JsError::new("lastPassAtMs is not a whole number of milliseconds"));
+    }
+    let rows: Vec<NoticeRowJs> =
+        serde_wasm_bindgen::from_value(notices).map_err(|e| JsError::new(&format!("invalid notices: {e}")))?;
+    let listing: StopListingJs =
+        serde_wasm_bindgen::from_value(listing).map_err(|e| JsError::new(&format!("invalid listing: {e}")))?;
+    let notices: Vec<ReceivedNotice> = rows
+        .iter()
+        .filter_map(|row| {
+            parse_backup_notice(&row.kind, &row.data).map(|notice| ReceivedNotice {
+                notice,
+                created_at_ms: row.created_at_ms,
+            })
+        })
+        .collect();
+    let listing = StopListing {
+        device_folder_id: parse_uuid("device_folder_id", &listing.device_folder_id)?,
+        device_folder_live: listing.device_folder_live,
+        folders: listing
+            .folders
+            .iter()
+            .map(|f| {
+                Ok(StopFolder {
+                    category: Category::from_key(&f.category).ok_or_else(|| JsError::new("unknown category key"))?,
+                    category_folder_id: f
+                        .category_folder_id
+                        .as_deref()
+                        .map(|id| parse_uuid("category_folder_id", id))
+                        .transpose()?,
+                    category_folder_live: f.category_folder_live,
+                })
+            })
+            .collect::<Result<Vec<_>, JsError>>()?,
+    };
+    let stopped: Vec<StoppedJs> = beebeeb_core::backup::backup_stop(&notices, last_pass_at_ms as i64, &listing)
+        .into_iter()
+        .map(|s| StoppedJs {
+            category: s.category.key(),
+            reason: s.reason.as_str(),
+        })
+        .collect();
+    stopped
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// The reason a `notifications` row (`type`, `data`) gives, or `undefined` for
+/// a row that is not a backup notice: to show the notification with
+/// `backupStopWords`. A removal whose reason this build does not know is
+/// `"unknown"`.
+#[wasm_bindgen(js_name = backupNoticeReason)]
+pub fn backup_notice_reason(kind: &str, data: JsValue) -> Option<String> {
+    let data: serde_json::Value = serde_wasm_bindgen::from_value(data).unwrap_or(serde_json::Value::Null);
+    parse_backup_notice(kind, &data).map(|n| n.reason().as_str().to_string())
+}
+
+/// The words a stopped backup shows (spec Amendment 12), followed by the
+/// action `backupAgainAction()`. `device` is the device's name and `folder`
+/// the folder's display name; the four account-wide reasons name neither. An
+/// unknown reason throws.
+#[wasm_bindgen(js_name = backupStopWords)]
+pub fn backup_stop_words(reason: &str, device: &str, folder: &str) -> Result<String, JsError> {
+    Ok(beebeeb_core::backup::backup_stop_words(
+        parse_stop_reason(reason)?,
+        device,
+        folder,
+    ))
+}
+
+/// The action every stopped backup offers: `"Back up again"`.
+#[wasm_bindgen(js_name = backupAgainAction)]
+pub fn backup_again_action() -> String {
+    MSG_BACK_UP_AGAIN.to_string()
 }

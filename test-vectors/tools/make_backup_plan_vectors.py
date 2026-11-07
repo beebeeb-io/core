@@ -248,14 +248,137 @@ rebuild("rebuild_no_offset_known_wider_margin_wins_over_the_floor",
         [e("a.jpg", m=T), e("b.jpg", m=T)], [r("b.jpg", 2, m=T, up=T + 20 * 60 * 1000 + 1)],
         {"offset_ms": None, "margin_ms": 20 * 60 * 1000})
 
+# Why a backup stops (spec Amendments 12 and 12a, LD-0121; Guus 2026-11-06: "Stop, say why, offer Back up again").
+# A notice counts only when the server wrote it after the device's last pass (created_at_ms > last_pass_at_ms, both
+# on the server's clock). 1. a files_removed notice turns EVERY listed backup off with its reason (the newest wins),
+# even when the folders are there; 2. otherwise, per backup, a backup_deleted notice naming the device folder (no
+# category id) or the backup's category folder turns it off as backup_deleted; 3. otherwise a device or category
+# folder trashed or gone with no notice turns it off as unknown; 4. otherwise nothing changes. The result is in
+# category key order. Notices are the rows as the server writes them: type, data, created_at_ms.
+DEV, PICS, DOCS = uid(100), uid(101), uid(102)
+OTHER_DEV, OTHER_CAT = uid(200), uid(201)
+LAST = 1_762_430_400_000
+
+
+def fold(category, fid, live):
+    return {"category": category, "category_folder_id": fid, "category_folder_live": live}
+
+
+def listing(device_live=True, pics=True, docs=True):
+    return {"device_folder_id": DEV, "device_folder_live": device_live,
+            "folders": [fold("pictures", PICS, pics), fold("documents", DOCS, docs)]}
+
+
+def removed(reason, at):
+    return {"type": "files_removed", "data": {"reason": reason}, "created_at_ms": at}
+
+
+def deleted(device, category=None, at=LAST + 1):
+    data = {"device_folder_id": device}
+    if category is not None:
+        data["category_folder_id"] = category
+    return {"type": "backup_deleted", "data": data, "created_at_ms": at}
+
+
+def off(category, reason):
+    return {"category": category, "reason": reason}
+
+
+def both(reason):
+    return [off("documents", reason), off("pictures", reason)]
+
+
+def stop(id_, notices, listing_, expect, last=LAST):
+    cases.append({"id": id_, "kind": "stop", "notices": notices, "last_pass_at_ms": last, "listing": listing_,
+                  "expect": expect})
+
+
+# The six cases Amendment 12 names.
+stop("stop_files_erased_turns_all_folders_off", [removed("erase_request", LAST + 1)], listing(), both("erase_request"))
+stop("stop_account_lapsed_with_folders_present_turns_all_off", [removed("account_lapsed", LAST + 60_000)], listing(),
+     both("account_lapsed"))
+stop("stop_backup_deleted_category_turns_one_off", [deleted(DEV, PICS)], listing(pics=False),
+     [off("pictures", "backup_deleted")])
+stop("stop_folder_gone_without_notice_uses_unknown_words", [], listing(pics=False), [off("pictures", "unknown")])
+stop("stop_notice_older_than_last_pass_ignored", [removed("erase_request", LAST - 1), deleted(DEV, PICS, LAST - 5)],
+     listing(), [])
+stop("stop_restored_before_pass_no_notice_no_change", [], listing(), [])
+# Step 2 for the whole device; step 3 for the device folder.
+stop("stop_backup_deleted_device_folder_turns_all_off", [deleted(DEV)], listing(device_live=False),
+     both("backup_deleted"))
+stop("stop_device_folder_gone_without_notice_turns_all_off", [], listing(device_live=False), both("unknown"))
+# Step 1 comes first; with several files_removed notices the newest wins (Amendment 12a: a later grace cycle writes a
+# new notice).
+stop("stop_files_removed_wins_over_backup_deleted", [deleted(DEV, PICS, LAST + 5), removed("inactive_cleanup", LAST + 1)],
+     listing(pics=False), both("inactive_cleanup"))
+stop("stop_newest_files_removed_notice_wins", [removed("account_lapsed", LAST + 2), removed("erase_request", LAST + 1)],
+     listing(), both("account_lapsed"))
+stop("stop_notice_at_the_last_pass_is_not_newer", [removed("erase_request", LAST)], listing(), [])
+# The accepted edge: rows 7 and 9 trash, and a person who restores everything still sees the backups stop, because the
+# notice exists. A backup_deleted notice likewise wins over a restore (step 2 does not look at the listing).
+stop("stop_restored_after_reset_still_stops_with_the_notice", [removed("account_reset", LAST + 1)], listing(),
+     both("account_reset"))
+stop("stop_restored_category_with_a_notice_still_stops", [deleted(DEV, PICS)], listing(),
+     [off("pictures", "backup_deleted")])
+# Steps 2 and 3 are per backup: a notice about one folder never hides another folder that is gone without one.
+stop("stop_one_folder_named_another_gone_silently", [deleted(DEV, PICS)], listing(pics=False, docs=False),
+     [off("documents", "unknown"), off("pictures", "backup_deleted")])
+stop("stop_backup_deleted_for_another_device_ignored", [deleted(OTHER_DEV), deleted(OTHER_DEV, OTHER_CAT)], listing(), [])
+# A files_removed notice whose reason this version does not know still stops (stop and say why), with the unknown
+# words; a row of any other type is not a backup notice.
+stop("stop_files_removed_unknown_reason_still_stops",
+     [{"type": "files_removed", "data": {"reason": "billing_v2"}, "created_at_ms": LAST + 1}], listing(), both("unknown"))
+stop("stop_other_notice_types_are_ignored",
+     [{"type": "share_received", "data": {"reason": "erase_request"}, "created_at_ms": LAST + 1}], listing(), [])
+# A malformed category id names no folder: it never reads as the whole device.
+stop("stop_malformed_category_id_never_reads_as_the_device",
+     [{"type": "backup_deleted", "data": {"device_folder_id": DEV, "category_folder_id": 42}, "created_at_ms": LAST + 1}],
+     listing(), [])
+# A first backup whose category folder was never created is present.
+stop("stop_first_backup_without_a_category_folder_stays_on", [],
+     {"device_folder_id": DEV, "device_folder_live": True, "folders": [fold("camera_roll", None, None)]}, [])
+
+
+def notice(id_, type_, data, expect):
+    cases.append({"id": id_, "kind": "notice", "type": type_, "data": data, "expect": expect})
+
+
+for reason in ["erase_request", "account_lapsed", "inactive_cleanup", "account_reset"]:
+    notice(f"notice_files_removed_{reason}", "files_removed", {"reason": reason},
+           {"type": "files_removed", "reason": reason})
+notice("notice_files_removed_with_a_non_removal_reason_is_unknown", "files_removed", {"reason": "backup_deleted"},
+       {"type": "files_removed", "reason": "unknown"})
+notice("notice_files_removed_without_a_reason_is_unknown", "files_removed", {}, {"type": "files_removed",
+                                                                                  "reason": "unknown"})
+notice("notice_files_removed_with_null_data_is_unknown", "files_removed", None, {"type": "files_removed",
+                                                                                   "reason": "unknown"})
+notice("notice_backup_deleted", "backup_deleted", {"device_folder_id": DEV, "category_folder_id": PICS},
+       {"type": "backup_deleted", "reason": "backup_deleted"})
+notice("notice_other_type_is_not_a_backup_notice", "share_received", {"reason": "erase_request"}, None)
+
+# Core's words (spec Amendment 12's table: the lead's drafts, for Guus's per-item look, G6), each followed by the
+# action "Back up again".
+for reason, words in [
+    ("backup_deleted", "GLegion's backup of Pictures was deleted from another device."),
+    ("erase_request", "Your files were erased, so backups are off."),
+    ("account_lapsed", "Your files were removed after the account lapsed, so backups are off."),
+    ("inactive_cleanup", "Your files were removed because the account was inactive, so backups are off."),
+    ("account_reset", "Your files were removed when the account was reset, so backups are off."),
+    ("unknown", "GLegion's backup of Pictures was deleted, so it is off."),
+]:
+    cases.append({"id": f"stop_words_{reason}", "kind": "stop_words", "reason": reason, "device": "GLegion",
+                  "folder": "Pictures", "expect": words})
+cases.append({"id": "stop_action_back_up_again", "kind": "stop_action", "expect": "Back up again"})
+
 doc = {
     "description": "LD-0113 backup pass planner (spec 2026-11-06-backup-from-source §4.2 rules 9-11): new, changed "
     "(size or mtime), unchanged, gone (stays in the backup), unique moves (same size, mtime and case-folded name, "
     "unique both ways), the per-pass budget (a prefix; the first upload always fits), parent folders parents-first, "
     "removed elsewhere (stays deleted until it changes), folder presence, key normalisation, and rebuilding records "
     "from the remote tree (uploaded after the last change by the device clock's measured offset and margin, or the "
-    "one-sided 10-minute floor when no offset is known: LD-0123).",
-    "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\") + LD-0123; written by "
+    "one-sided 10-minute floor when no offset is known: LD-0123), and why a backup stops with its words (spec "
+    "Amendments 12 and 12a, LD-0121).",
+    "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\") + LD-0123 + Amendments 12/12a (LD-0121); written by "
     "test-vectors/tools/make_backup_plan_vectors.py (independent of core)",
     "cases": cases,
 }

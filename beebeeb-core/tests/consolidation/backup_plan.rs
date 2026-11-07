@@ -1,6 +1,7 @@
 //! LD-0113 — the backup pass planner, removed-elsewhere, folder presence and
 //! rebuilding records (spec §4.2 rules 9-11), with the rebuild's clock rule
-//! (LD-0123).
+//! (LD-0123), and why a backup stops with its words (spec Amendments 12 and
+//! 12a, LD-0121).
 //!
 //! Cases live in `test-vectors/consolidation/backup_plan.json`, written by
 //! `test-vectors/tools/make_backup_plan_vectors.py`. The two Review Focus tests
@@ -9,10 +10,12 @@
 use std::collections::HashSet;
 
 use beebeeb_core::backup::{
-    BackupRecord, FolderPresence, PassBudget, PassPlan, REBUILD_FLOOR_MS, RebuildClock, RecordRef, RecordState,
-    RemoteEntry, SourceEntry, UploadReason, folder_presence, normalize_key, plan_pass, rebuild_clock_from_date,
-    records_from_remote, records_from_remote_with_clock,
+    BackupRecord, FolderPresence, MSG_BACK_UP_AGAIN, PassBudget, PassPlan, REBUILD_FLOOR_MS, RebuildClock,
+    ReceivedNotice, RecordRef, RecordState, RemoteEntry, SourceEntry, StopFolder, StopListing, StoppedBackup,
+    UploadReason, backup_stop, backup_stop_words, folder_presence, normalize_key, parse_backup_notice, plan_pass,
+    rebuild_clock_from_date, records_from_remote, records_from_remote_with_clock,
 };
+use beebeeb_types::backup::{BackupNotice, BackupStopReason, Category};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -109,9 +112,10 @@ fn run_plan_case(case: &Value) -> Value {
 #[test]
 fn backup_plan_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 77, "every named backup_plan case is present");
+    assert_eq!(cases.len(), 112, "every named backup_plan case is present");
 
     let (mut plans, mut keys, mut presences, mut rebuilds) = (0, 0, 0, 0);
+    let (mut stops, mut notices, mut words, mut actions) = (0, 0, 0, 0);
     for case in &cases {
         let id = case["id"].as_str().expect("case id");
         match case["kind"].as_str().expect("case kind") {
@@ -170,11 +174,40 @@ fn backup_plan_cases_match_core() {
                     .collect();
                 assert_eq!(Value::Array(got), case["expect"], "{id}");
             }
+            "stop" => {
+                stops += 1;
+                assert_eq!(run_stop_case(case), case["expect"], "{id}");
+                // The answer does not depend on the order of the notices.
+                let mut reversed = case.clone();
+                reversed["notices"].as_array_mut().expect("array").reverse();
+                assert_eq!(run_stop_case(&reversed), case["expect"], "{id}: reversed notices");
+            }
+            "notice" => {
+                notices += 1;
+                let got = parse_backup_notice(case["type"].as_str().unwrap(), &case["data"])
+                    .map(|n| json!({"type": n.kind(), "reason": n.reason().as_str()}));
+                assert_eq!(got.unwrap_or(Value::Null), case["expect"], "{id}");
+            }
+            "stop_words" => {
+                words += 1;
+                let reason = BackupStopReason::parse(case["reason"].as_str().unwrap()).expect("reason");
+                let got = backup_stop_words(
+                    reason,
+                    case["device"].as_str().unwrap(),
+                    case["folder"].as_str().unwrap(),
+                );
+                assert_eq!(got, s(&case["expect"]), "{id}");
+            }
+            "stop_action" => {
+                actions += 1;
+                assert_eq!(MSG_BACK_UP_AGAIN, s(&case["expect"]), "{id}");
+            }
             other => panic!("{id}: unknown kind `{other}`"),
         }
     }
     println!(
-        "backup_plan: {} cases ({plans} plan, {keys} normalize_key, {presences} presence, {rebuilds} rebuild)",
+        "backup_plan: {} cases ({plans} plan, {keys} normalize_key, {presences} presence, {rebuilds} rebuild, \
+         {stops} stop, {notices} notice, {words} stop_words, {actions} stop_action)",
         cases.len()
     );
     assert_eq!(
@@ -182,6 +215,57 @@ fn backup_plan_cases_match_core() {
         (52, 4, 5, 16),
         "case counts per kind"
     );
+    assert_eq!(
+        (stops, notices, words, actions),
+        (19, 9, 6, 1),
+        "stop case counts per kind"
+    );
+}
+
+/// The notices of a stop case, read the way a client reads its rows.
+fn received(case: &Value) -> Vec<ReceivedNotice> {
+    case["notices"]
+        .as_array()
+        .expect("notices")
+        .iter()
+        .filter_map(|n| {
+            parse_backup_notice(n["type"].as_str().expect("type"), &n["data"]).map(|notice| ReceivedNotice {
+                notice,
+                created_at_ms: n["created_at_ms"].as_i64().expect("created_at_ms"),
+            })
+        })
+        .collect()
+}
+
+fn stop_listing(v: &Value) -> StopListing {
+    StopListing {
+        device_folder_id: uuid(&v["device_folder_id"]),
+        device_folder_live: v["device_folder_live"].as_bool().expect("device_folder_live"),
+        folders: list(&v["folders"], |f| StopFolder {
+            category: Category::from_key(f["category"].as_str().expect("category")).expect("category key"),
+            category_folder_id: f["category_folder_id"]
+                .as_str()
+                .map(|id| Uuid::parse_str(id).expect("uuid")),
+            category_folder_live: f["category_folder_live"].as_bool(),
+        }),
+    }
+}
+
+fn stopped_json(stopped: &[StoppedBackup]) -> Value {
+    Value::Array(
+        stopped
+            .iter()
+            .map(|s| json!({"category": s.category.key(), "reason": s.reason.as_str()}))
+            .collect(),
+    )
+}
+
+fn run_stop_case(case: &Value) -> Value {
+    stopped_json(&backup_stop(
+        &received(case),
+        case["last_pass_at_ms"].as_i64().expect("last_pass_at_ms"),
+        &stop_listing(&case["listing"]),
+    ))
 }
 
 /// The v0.2.1 rule, "uploaded strictly after the last change": offset 0,
@@ -620,4 +704,155 @@ fn rebuild_clock_failures_and_extremes_lean_toward_uploading() {
             }
         }
     }
+}
+
+// ── LD-0121: why a backup stops (spec Amendment 12, steps 1-4) ────────────
+
+const LAST: i64 = 1_762_430_400_000;
+
+fn dev() -> Uuid {
+    Uuid::from_u128(100)
+}
+
+fn pictures_folder() -> Uuid {
+    Uuid::from_u128(101)
+}
+
+/// Pictures and Documents backed up from this device; `pictures_live` and the
+/// device folder as the listing shows them.
+fn two_backups(device_live: bool, pictures_live: bool) -> StopListing {
+    StopListing {
+        device_folder_id: dev(),
+        device_folder_live: device_live,
+        folders: vec![
+            StopFolder {
+                category: Category::Pictures,
+                category_folder_id: Some(pictures_folder()),
+                category_folder_live: Some(pictures_live),
+            },
+            StopFolder {
+                category: Category::Documents,
+                category_folder_id: Some(Uuid::from_u128(102)),
+                category_folder_live: Some(true),
+            },
+        ],
+    }
+}
+
+fn files_removed(reason: BackupStopReason, created_at_ms: i64) -> ReceivedNotice {
+    ReceivedNotice {
+        notice: BackupNotice::FilesRemoved { reason },
+        created_at_ms,
+    }
+}
+
+fn backup_deleted(category: Option<Uuid>, created_at_ms: i64) -> ReceivedNotice {
+    ReceivedNotice {
+        notice: BackupNotice::BackupDeleted {
+            device_folder_id: dev().to_string(),
+            category_folder_id: category.map(|id| id.to_string()),
+        },
+        created_at_ms,
+    }
+}
+
+fn stopped(pairs: &[(Category, BackupStopReason)]) -> Vec<StoppedBackup> {
+    pairs
+        .iter()
+        .map(|(category, reason)| StoppedBackup {
+            category: category.clone(),
+            reason: *reason,
+        })
+        .collect()
+}
+
+/// Step 1: "Erase all files" turns every backup of this device off.
+#[test]
+fn stop_files_erased_turns_all_folders_off() {
+    let got = backup_stop(
+        &[files_removed(BackupStopReason::EraseRequest, LAST + 1)],
+        LAST,
+        &two_backups(true, true),
+    );
+    assert_eq!(
+        got,
+        stopped(&[
+            (Category::Documents, BackupStopReason::EraseRequest),
+            (Category::Pictures, BackupStopReason::EraseRequest),
+        ])
+    );
+    assert_eq!(
+        backup_stop_words(got[0].reason, "GLegion", "Documents"),
+        "Your files were erased, so backups are off."
+    );
+}
+
+/// Step 1 holds when the folders are still there: the grace clock removes
+/// files, not folders, and a backup with holes it never refills is a silent
+/// loss.
+#[test]
+fn stop_account_lapsed_with_folders_present_turns_all_off() {
+    let got = backup_stop(
+        &[files_removed(BackupStopReason::AccountLapsed, LAST + 60_000)],
+        LAST,
+        &two_backups(true, true),
+    );
+    assert_eq!(got.len(), 2);
+    assert!(
+        got.iter().all(|s| s.reason == BackupStopReason::AccountLapsed),
+        "{got:?}"
+    );
+}
+
+/// Step 2: a step-up delete of one category folder from another device turns
+/// that one backup off with the rule-11 words.
+#[test]
+fn stop_backup_deleted_category_turns_one_off() {
+    let got = backup_stop(
+        &[backup_deleted(Some(pictures_folder()), LAST + 1)],
+        LAST,
+        &two_backups(true, false),
+    );
+    assert_eq!(got, stopped(&[(Category::Pictures, BackupStopReason::BackupDeleted)]));
+    assert_eq!(
+        backup_stop_words(got[0].reason, "GLegion", Category::Pictures.display_name()),
+        "GLegion's backup of Pictures was deleted from another device."
+    );
+}
+
+/// Step 3: a folder gone with no notice (dismissed, or the device was offline)
+/// turns off with the vaguer words.
+#[test]
+fn stop_folder_gone_without_notice_uses_unknown_words() {
+    let got = backup_stop(&[], LAST, &two_backups(true, false));
+    assert_eq!(got, stopped(&[(Category::Pictures, BackupStopReason::Unknown)]));
+    assert_eq!(
+        backup_stop_words(got[0].reason, "GLegion", "Pictures"),
+        "GLegion's backup of Pictures was deleted, so it is off."
+    );
+}
+
+/// Only a notice written after the last pass counts: one the device already
+/// acted on (or one from before the person chose "Back up again") never stops
+/// it again.
+#[test]
+fn stop_notice_older_than_last_pass_ignored() {
+    let old = [
+        files_removed(BackupStopReason::EraseRequest, LAST - 1),
+        backup_deleted(Some(pictures_folder()), LAST - 5),
+        files_removed(BackupStopReason::AccountReset, LAST),
+    ];
+    assert_eq!(backup_stop(&old, LAST, &two_backups(true, true)), []);
+}
+
+/// Step 4: a folder restored from Trash before the pass, with no notice,
+/// changes nothing.
+#[test]
+fn stop_restored_before_pass_no_notice_no_change() {
+    assert_eq!(backup_stop(&[], LAST, &two_backups(true, true)), []);
+    // With the notice it does stop (the accepted edge of Amendment 12).
+    assert_eq!(
+        backup_stop(&[backup_deleted(None, LAST + 1)], LAST, &two_backups(true, true)).len(),
+        2
+    );
 }
