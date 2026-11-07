@@ -1,5 +1,7 @@
 //! LD-0113 — the backup pass planner, removed-elsewhere, folder presence and
-//! rebuilding records (spec §4.2 rules 9-11).
+//! rebuilding records (spec §4.2 rules 9-11), with the rebuild's clock rule
+//! (LD-0123), and why a backup stops with its words (spec Amendments 12 and
+//! 12a, LD-0121).
 //!
 //! Cases live in `test-vectors/consolidation/backup_plan.json`, written by
 //! `test-vectors/tools/make_backup_plan_vectors.py`. The two Review Focus tests
@@ -8,9 +10,12 @@
 use std::collections::HashSet;
 
 use beebeeb_core::backup::{
-    BackupRecord, FolderPresence, PassBudget, PassPlan, RecordRef, RecordState, RemoteEntry, SourceEntry, UploadReason,
-    folder_presence, normalize_key, plan_pass, records_from_remote,
+    BackupRecord, FolderPresence, MSG_BACK_UP_AGAIN, PassBudget, PassPlan, REBUILD_FLOOR_MS, RebuildClock,
+    ReceivedNotice, RecordRef, RecordState, RemoteEntry, SourceEntry, StopFolder, StopListing, StoppedBackup,
+    UploadReason, backup_stop, backup_stop_words, folder_presence, normalize_key, parse_backup_notice, plan_pass,
+    rebuild_clock_from_date, records_from_remote, records_from_remote_with_clock,
 };
+use beebeeb_types::backup::{BackupNotice, BackupStopReason, Category};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -107,9 +112,10 @@ fn run_plan_case(case: &Value) -> Value {
 #[test]
 fn backup_plan_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 71, "every named backup_plan case is present");
+    assert_eq!(cases.len(), 114, "every named backup_plan case is present");
 
     let (mut plans, mut keys, mut presences, mut rebuilds) = (0, 0, 0, 0);
+    let (mut stops, mut notices, mut words, mut actions) = (0, 0, 0, 0);
     for case in &cases {
         let id = case["id"].as_str().expect("case id");
         match case["kind"].as_str().expect("case kind") {
@@ -154,25 +160,120 @@ fn backup_plan_cases_match_core() {
                     size: v["size"].as_u64().unwrap(),
                     uploaded_at_ms: v["uploaded_at_ms"].as_i64().unwrap(),
                 });
-                let got: Vec<Value> = records_from_remote(&remote, &list(&case["entries"], entry))
+                let clock = RebuildClock {
+                    offset_ms: case["clock"]["offset_ms"].as_i64(),
+                    margin_ms: case["clock"]["margin_ms"].as_u64().expect("margin_ms"),
+                };
+                assert!(
+                    clock.offset_ms.is_some() || case["clock"]["offset_ms"].is_null(),
+                    "{id}: offset_ms is an integer or null"
+                );
+                let got: Vec<Value> = records_from_remote_with_clock(&remote, &list(&case["entries"], entry), clock)
                     .iter()
                     .map(record_json)
                     .collect();
                 assert_eq!(Value::Array(got), case["expect"], "{id}");
             }
+            "stop" => {
+                stops += 1;
+                assert_eq!(run_stop_case(case), case["expect"], "{id}");
+                // The answer does not depend on the order of the notices.
+                let mut reversed = case.clone();
+                reversed["notices"].as_array_mut().expect("array").reverse();
+                assert_eq!(run_stop_case(&reversed), case["expect"], "{id}: reversed notices");
+            }
+            "notice" => {
+                notices += 1;
+                let got = parse_backup_notice(case["type"].as_str().unwrap(), &case["data"])
+                    .map(|n| json!({"type": n.kind(), "reason": n.reason().as_str()}));
+                assert_eq!(got.unwrap_or(Value::Null), case["expect"], "{id}");
+            }
+            "stop_words" => {
+                words += 1;
+                let reason = BackupStopReason::parse(case["reason"].as_str().unwrap()).expect("reason");
+                let got = backup_stop_words(
+                    reason,
+                    case["device"].as_str().unwrap(),
+                    case["folder"].as_str().unwrap(),
+                );
+                assert_eq!(got, s(&case["expect"]), "{id}");
+            }
+            "stop_action" => {
+                actions += 1;
+                assert_eq!(MSG_BACK_UP_AGAIN, s(&case["expect"]), "{id}");
+            }
             other => panic!("{id}: unknown kind `{other}`"),
         }
     }
     println!(
-        "backup_plan: {} cases ({plans} plan, {keys} normalize_key, {presences} presence, {rebuilds} rebuild)",
+        "backup_plan: {} cases ({plans} plan, {keys} normalize_key, {presences} presence, {rebuilds} rebuild, \
+         {stops} stop, {notices} notice, {words} stop_words, {actions} stop_action)",
         cases.len()
     );
     assert_eq!(
         (plans, keys, presences, rebuilds),
-        (52, 4, 5, 10),
+        (52, 4, 5, 16),
         "case counts per kind"
     );
+    assert_eq!(
+        (stops, notices, words, actions),
+        (21, 9, 6, 1),
+        "stop case counts per kind"
+    );
 }
+
+/// The notices of a stop case, read the way a client reads its rows.
+fn received(case: &Value) -> Vec<ReceivedNotice> {
+    case["notices"]
+        .as_array()
+        .expect("notices")
+        .iter()
+        .filter_map(|n| {
+            parse_backup_notice(n["type"].as_str().expect("type"), &n["data"]).map(|notice| ReceivedNotice {
+                notice,
+                created_at_ms: n["created_at_ms"].as_i64().expect("created_at_ms"),
+            })
+        })
+        .collect()
+}
+
+fn stop_listing(v: &Value) -> StopListing {
+    StopListing {
+        device_folder_id: uuid(&v["device_folder_id"]),
+        device_folder_live: v["device_folder_live"].as_bool().expect("device_folder_live"),
+        folders: list(&v["folders"], |f| StopFolder {
+            category: Category::from_key(f["category"].as_str().expect("category")).expect("category key"),
+            category_folder_id: f["category_folder_id"]
+                .as_str()
+                .map(|id| Uuid::parse_str(id).expect("uuid")),
+            category_folder_live: f["category_folder_live"].as_bool(),
+        }),
+    }
+}
+
+fn stopped_json(stopped: &[StoppedBackup]) -> Value {
+    Value::Array(
+        stopped
+            .iter()
+            .map(|s| json!({"category": s.category.key(), "reason": s.reason.as_str()}))
+            .collect(),
+    )
+}
+
+fn run_stop_case(case: &Value) -> Value {
+    stopped_json(&backup_stop(
+        &received(case),
+        case["last_pass_at_ms"].as_i64().expect("last_pass_at_ms"),
+        &stop_listing(&case["listing"]),
+    ))
+}
+
+/// The v0.2.1 rule, "uploaded strictly after the last change": offset 0,
+/// margin 0.
+const EXACT: RebuildClock = RebuildClock {
+    offset_ms: Some(0),
+    margin_ms: 0,
+};
 
 const UNLIMITED: PassBudget = PassBudget {
     max_uploads: usize::MAX,
@@ -277,7 +378,7 @@ fn plan_and_rebuild_handle_negative_future_and_coarse_mtimes() {
                 size: 7,
                 uploaded_at_ms,
             }];
-            let records = records_from_remote(&remote, &[file("a.jpg", 7, m)]);
+            let records = records_from_remote_with_clock(&remote, &[file("a.jpg", 7, m)], EXACT);
             if uploaded_at_ms > m {
                 assert_eq!(records.len(), 1, "modified {m}, uploaded {uploaded_at_ms}");
                 assert_eq!(records[0].modified_ms, m);
@@ -409,5 +510,349 @@ fn incomplete_listing_defers_unlisted_record_change() {
             key: "a.jpg".to_string(),
             remote_id: record.remote_id
         }]
+    );
+}
+
+// ── LD-0123: the rebuild's clock rule ─────────────────────────────────────
+
+const HOUR: i64 = 3_600_000;
+const MINUTE: i64 = 60_000;
+/// The server's clock at the upload.
+const T: i64 = 1_762_430_400_000;
+
+fn remote(key: &str, n: u128, size: u64, uploaded_at_ms: i64) -> RemoteEntry {
+    RemoteEntry {
+        key: key.to_string(),
+        remote_id: Uuid::from_u128(n),
+        size,
+        uploaded_at_ms,
+    }
+}
+
+fn marked(records: &[BackupRecord]) -> Vec<&str> {
+    records.iter().map(|r| r.key.as_str()).collect()
+}
+
+/// A device clock 1 h behind: an edit made 20 minutes after the upload (same
+/// size) has an mtime 40 minutes before it. Without the offset the copy looks
+/// newer than the edit and the edit is never uploaded.
+#[test]
+fn rebuild_device_clock_behind_same_size_edit_uploads_again() {
+    let edited = file("report.docx", 4_096, T + 20 * MINUTE - HOUR);
+    let copy = [remote("report.docx", 1, 4_096, T)];
+    let clock = RebuildClock {
+        offset_ms: Some(HOUR),
+        margin_ms: 2_500,
+    };
+    let records = records_from_remote_with_clock(&copy, std::slice::from_ref(&edited), clock);
+    assert!(
+        records.is_empty(),
+        "a same-size edit after the upload was marked: {records:?}"
+    );
+    // With no offset known only the floor guards: it covers a clock up to 10
+    // minutes behind (here 9, the edit 1 minute after the upload), through the
+    // v0.2.1 entry point too. A clock further behind needs the measured offset.
+    let nine_behind = file("report.docx", 4_096, T + MINUTE - 9 * MINUTE);
+    assert!(records_from_remote(&copy, std::slice::from_ref(&nine_behind)).is_empty());
+    // An edit made long enough before the upload is backed up.
+    let older = file("report.docx", 4_096, T - 2 * HOUR);
+    assert_eq!(
+        marked(&records_from_remote_with_clock(&copy, &[older], clock)),
+        ["report.docx"]
+    );
+}
+
+/// A device clock 1 h ahead: a copy made 30 minutes after the edit reads as
+/// made before the mtime. With no offset known the file uploads once more,
+/// and once that upload has a record the planner leaves it alone: once more,
+/// never a loop. With the offset measured it is backed up at once.
+#[test]
+fn rebuild_device_clock_ahead_uploads_once_more_only() {
+    let entry = file("IMG_1.jpg", 9, T - 30 * MINUTE + HOUR);
+    let copy = [remote("IMG_1.jpg", 1, 9, T)];
+    let rebuilt = records_from_remote_with_clock(&copy, std::slice::from_ref(&entry), RebuildClock::UNKNOWN);
+    assert!(rebuilt.is_empty());
+    let live: HashSet<Uuid> = [Uuid::from_u128(1)].into_iter().collect();
+    let first = plan_pass(std::slice::from_ref(&entry), &rebuilt, &live, true, &[], &[], UNLIMITED);
+    assert_eq!(first.uploads.len(), 1, "uploaded once more");
+    assert_eq!(first.uploads[0].reason, UploadReason::New);
+    // The host writes the record when that upload completes.
+    let uploaded = BackupRecord {
+        key: entry.key.clone(),
+        size: entry.size,
+        modified_ms: entry.modified_ms,
+        remote_id: Uuid::from_u128(2),
+        uploaded_at_ms: T + 5 * MINUTE,
+        state: RecordState::BackedUp,
+    };
+    let live: HashSet<Uuid> = [Uuid::from_u128(1), Uuid::from_u128(2)].into_iter().collect();
+    let next = plan_pass(
+        std::slice::from_ref(&entry),
+        &[uploaded],
+        &live,
+        true,
+        &[],
+        &[],
+        UNLIMITED,
+    );
+    assert_eq!((next.uploads.len(), next.unchanged), (0, 1), "only once: {next:?}");
+    // With the offset measured, the copy is backed up without an upload.
+    let measured = RebuildClock {
+        offset_ms: Some(-HOUR),
+        margin_ms: 2_500,
+    };
+    assert_eq!(
+        marked(&records_from_remote_with_clock(&copy, &[entry], measured)),
+        ["IMG_1.jpg"]
+    );
+}
+
+/// A small measured offset (the device 1.5 s behind) and its margin: backed up
+/// only when uploaded after `mtime + offset + margin`, strictly.
+#[test]
+fn rebuild_offset_measured_within_margin_marks_backed_up() {
+    let clock = RebuildClock {
+        offset_ms: Some(1_500),
+        margin_ms: 2_300,
+    };
+    let copies = [
+        remote("a.jpg", 1, 7, T + 3_801),
+        remote("b.jpg", 2, 7, T + 3_800),
+        remote("c.jpg", 3, 7, T + 3_000),
+    ];
+    let entries = [file("a.jpg", 7, T), file("b.jpg", 7, T), file("c.jpg", 7, T)];
+    let records = records_from_remote_with_clock(&copies, &entries, clock);
+    assert_eq!(marked(&records), ["a.jpg"]);
+    assert_eq!(records[0].remote_id, Uuid::from_u128(1));
+    // The helper measures such a clock from a listing response: the header's
+    // whole second, sent 200 ms before the device's midpoint.
+    let measured = rebuild_clock_from_date(
+        Some("Thu, 06 Nov 2025 12:00:01 GMT"),
+        1_762_430_398_400,
+        1_762_430_398_800,
+    );
+    assert_eq!(
+        measured,
+        RebuildClock {
+            offset_ms: Some(1_762_430_401_000 - 1_762_430_398_600),
+            margin_ms: 2_400,
+        }
+    );
+}
+
+/// No offset known: a copy counts only when uploaded more than 10 minutes
+/// after the mtime. The floor is a minimum, so a wider margin still counts.
+#[test]
+fn rebuild_no_offset_known_uses_ten_minute_floor() {
+    let floor = REBUILD_FLOOR_MS as i64;
+    assert_eq!(floor, 10 * MINUTE);
+    let copies = [remote("a.jpg", 1, 7, T + floor), remote("b.jpg", 2, 7, T + floor + 1)];
+    let entries = [file("a.jpg", 7, T), file("b.jpg", 7, T)];
+    assert_eq!(
+        marked(&records_from_remote_with_clock(
+            &copies,
+            &entries,
+            RebuildClock::UNKNOWN
+        )),
+        ["b.jpg"]
+    );
+    // The v0.2.1 entry point is the same rule with no offset known.
+    assert_eq!(marked(&records_from_remote(&copies, &entries)), ["b.jpg"]);
+    let wide = RebuildClock {
+        offset_ms: None,
+        margin_ms: 20 * MINUTE as u64,
+    };
+    assert!(records_from_remote_with_clock(&copies, &entries, wide).is_empty());
+}
+
+/// Every failure of the measurement leans toward uploading again: no header,
+/// one that does not parse, or a response "received" before it was sent gives
+/// the unknown clock, where the floor applies. Extreme values never panic and
+/// never mark a copy the exact inequality would not.
+#[test]
+fn rebuild_clock_failures_and_extremes_lean_toward_uploading() {
+    for (date, sent, received) in [
+        (None, 0, 10),
+        (Some(""), 0, 10),
+        (Some("yesterday"), 0, 10),
+        (Some("Thu, 06 Nov 2025 12:00:01 GMT"), 10, 9),
+    ] {
+        assert_eq!(
+            rebuild_clock_from_date(date, sent, received),
+            RebuildClock::UNKNOWN,
+            "{date:?}"
+        );
+    }
+    let huge = rebuild_clock_from_date(Some("Thu, 06 Nov 2025 12:00:01 GMT"), i64::MIN, i64::MAX);
+    assert_eq!(huge.margin_ms, u64::MAX, "a round trip past u64 saturates the margin");
+    let values = [i64::MIN, -1, 0, 1, i64::MAX];
+    for &offset in &values {
+        for margin in [0, 1, u64::MAX] {
+            let clock = RebuildClock {
+                offset_ms: Some(offset),
+                margin_ms: margin,
+            };
+            for &uploaded in &values {
+                for &modified in &values {
+                    let want = i128::from(uploaded) > i128::from(modified) + i128::from(offset) + i128::from(margin);
+                    assert_eq!(
+                        clock.copy_is_newer(uploaded, modified),
+                        want,
+                        "{offset} {margin} {uploaded} {modified}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+// ── LD-0121: why a backup stops (spec Amendment 12, steps 1-4) ────────────
+
+const LAST: i64 = 1_762_430_400_000;
+
+fn dev() -> Uuid {
+    Uuid::from_u128(100)
+}
+
+fn pictures_folder() -> Uuid {
+    Uuid::from_u128(101)
+}
+
+/// Pictures and Documents backed up from this device; `pictures_live` and the
+/// device folder as the listing shows them.
+fn two_backups(device_live: bool, pictures_live: bool) -> StopListing {
+    StopListing {
+        device_folder_id: dev(),
+        device_folder_live: device_live,
+        folders: vec![
+            StopFolder {
+                category: Category::Pictures,
+                category_folder_id: Some(pictures_folder()),
+                category_folder_live: Some(pictures_live),
+            },
+            StopFolder {
+                category: Category::Documents,
+                category_folder_id: Some(Uuid::from_u128(102)),
+                category_folder_live: Some(true),
+            },
+        ],
+    }
+}
+
+fn files_removed(reason: BackupStopReason, created_at_ms: i64) -> ReceivedNotice {
+    ReceivedNotice {
+        notice: BackupNotice::FilesRemoved { reason },
+        created_at_ms,
+    }
+}
+
+fn backup_deleted(category: Option<Uuid>, created_at_ms: i64) -> ReceivedNotice {
+    ReceivedNotice {
+        notice: BackupNotice::BackupDeleted {
+            device_folder_id: dev().to_string(),
+            category_folder_id: category.map(|id| id.to_string()),
+        },
+        created_at_ms,
+    }
+}
+
+fn stopped(pairs: &[(Category, BackupStopReason)]) -> Vec<StoppedBackup> {
+    pairs
+        .iter()
+        .map(|(category, reason)| StoppedBackup {
+            category: category.clone(),
+            reason: *reason,
+        })
+        .collect()
+}
+
+/// Step 1: "Erase all files" turns every backup of this device off.
+#[test]
+fn stop_files_erased_turns_all_folders_off() {
+    let got = backup_stop(
+        &[files_removed(BackupStopReason::EraseRequest, LAST + 1)],
+        LAST,
+        &two_backups(true, true),
+    );
+    assert_eq!(
+        got,
+        stopped(&[
+            (Category::Documents, BackupStopReason::EraseRequest),
+            (Category::Pictures, BackupStopReason::EraseRequest),
+        ])
+    );
+    assert_eq!(
+        backup_stop_words(got[0].reason, "GLegion", "Documents"),
+        "Your files were erased, so backups are off."
+    );
+}
+
+/// Step 1 holds when the folders are still there: the grace clock removes
+/// files, not folders, and a backup with holes it never refills is a silent
+/// loss.
+#[test]
+fn stop_account_lapsed_with_folders_present_turns_all_off() {
+    let got = backup_stop(
+        &[files_removed(BackupStopReason::AccountLapsed, LAST + 60_000)],
+        LAST,
+        &two_backups(true, true),
+    );
+    assert_eq!(got.len(), 2);
+    assert!(
+        got.iter().all(|s| s.reason == BackupStopReason::AccountLapsed),
+        "{got:?}"
+    );
+}
+
+/// Step 2: a step-up delete of one category folder from another device turns
+/// that one backup off with the rule-11 words.
+#[test]
+fn stop_backup_deleted_category_turns_one_off() {
+    let got = backup_stop(
+        &[backup_deleted(Some(pictures_folder()), LAST + 1)],
+        LAST,
+        &two_backups(true, false),
+    );
+    assert_eq!(got, stopped(&[(Category::Pictures, BackupStopReason::BackupDeleted)]));
+    assert_eq!(
+        backup_stop_words(got[0].reason, "GLegion", Category::Pictures.display_name()),
+        "GLegion's backup of Pictures was deleted from another device."
+    );
+}
+
+/// Step 3: a folder gone with no notice (dismissed, or the device was offline)
+/// turns off with the vaguer words.
+#[test]
+fn stop_folder_gone_without_notice_uses_unknown_words() {
+    let got = backup_stop(&[], LAST, &two_backups(true, false));
+    assert_eq!(got, stopped(&[(Category::Pictures, BackupStopReason::Unknown)]));
+    assert_eq!(
+        backup_stop_words(got[0].reason, "GLegion", "Pictures"),
+        "GLegion's backup of Pictures was deleted, so it is off."
+    );
+}
+
+/// Only a notice written after the last pass counts: one the device already
+/// acted on (or one from before the person chose "Back up again") never stops
+/// it again.
+#[test]
+fn stop_notice_older_than_last_pass_ignored() {
+    let old = [
+        files_removed(BackupStopReason::EraseRequest, LAST - 1),
+        backup_deleted(Some(pictures_folder()), LAST - 5),
+        files_removed(BackupStopReason::AccountReset, LAST),
+    ];
+    assert_eq!(backup_stop(&old, LAST, &two_backups(true, true)), []);
+}
+
+/// Step 4: a folder restored from Trash before the pass, with no notice,
+/// changes nothing.
+#[test]
+fn stop_restored_before_pass_no_notice_no_change() {
+    assert_eq!(backup_stop(&[], LAST, &two_backups(true, true)), []);
+    // With the notice it does stop (the accepted edge of Amendment 12).
+    assert_eq!(
+        backup_stop(&[backup_deleted(None, LAST + 1)], LAST, &two_backups(true, true)).len(),
+        2
     );
 }

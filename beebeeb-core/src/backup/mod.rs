@@ -17,7 +17,10 @@
 //! - skip: what is never backed up (OS junk, library bundles, links, files
 //!   whose bytes are not on this device);
 //! - plan and rebuild: what one pass uploads, moves or marks, and records
-//!   rebuilt from the server after a reinstall.
+//!   rebuilt from the server after a reinstall (with the device clock's
+//!   offset, LD-0123);
+//! - stop: which backups turn off when the account's files were removed or a
+//!   backup was deleted, and the words they show (spec Amendment 12).
 //!
 //! The root is never located by path or name: it is the folder whose server
 //! row carries [`beebeeb_types::backup::SystemRole::BackupsRoot`].
@@ -31,6 +34,7 @@ mod protect;
 mod rebuild;
 mod root;
 mod skip;
+mod stop;
 
 pub use device::*;
 pub use layout::*;
@@ -41,6 +45,7 @@ pub use protect::*;
 pub use rebuild::*;
 pub use root::*;
 pub use skip::*;
+pub use stop::*;
 
 /// Names compare as a case-insensitive filesystem would show them: two
 /// siblings that differ only in case or normalisation collide in a drive. The
