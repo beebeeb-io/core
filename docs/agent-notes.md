@@ -312,6 +312,23 @@ A range session serves reads at any offset while the download runs (desktop Wind
 
 **Decision (core lane, 2026-11-05): ranges live in `beebeeb-transfer`, the whole-file download stays where it is.** The modular split (§16.2 row 10) names `beebeeb-upload::download` as the owner of the download move, but the L2 driver that exists for direct transfers is `beebeeb-transfer`, and the range session needs its `DirectIo` seam, discovery cache and pinned-route policy. So `range_session` and `RangeLessor` go in `beebeeb-transfer`, and the whole-file `beebeeb-upload::download` keeps row 10.
 
+## Archives (`archives/`)
+
+List, preview and extract zip, tar, tgz and gz (`2026-11-07-core-archives-design.md`). `ArchiveSession` is
+sans-I/O over a `ByteSource`: native sources block (`ReadSeekSource`); push drivers (web) answer
+`NeedBytes` through `SuppliedBytes`, at most `MAX_SUPPLIED_BYTES`, and every step is atomic, so a miss is
+retried, never half-applied. Detection is by magic bytes, never the extension. Zip entries are decoded by
+core's own push pipeline (raw inflate, CRC-32, WinZip AES on `aes`/`hmac`/`sha1`, ZipCrypto) because zip 9's
+readers borrow the archive and collapse duplicate names; zip 9 is the writer and the tests' reference
+reader. Names go through `archives::names` (design §6.1); the planner numbers clashes with
+`name_clash::numbered_name`; `Extraction` hands a file over (`FileEnd`) only after it verified, and binds
+the run to one archive version. The preview model and every word (`ArchiveText`, 63 keys) are core's.
+Vectors: `test-vectors/archives_v1.json` and the fixtures in `test-vectors/archives/`, written by
+`gen_archives_v1.py` (no zlib: deflate is one fixed-Huffman block) and guarded byte for byte by
+`check-archives-vectors-generated.sh`; the password fixtures come from 7-Zip and Info-ZIP. Bindings:
+`WasmArchiveSession` / `WasmArchiveExtraction` (`archives.test.cjs` runs every vector row) and the UniFFI
+records in `beebeeb-uniffi/src/archives.rs`.
+
 ## Security invariants
 
 - MasterKey and FileKey are NOT Clone — prevents accidental key copies in memory

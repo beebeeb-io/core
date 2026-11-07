@@ -21,9 +21,7 @@ mod platform_services;
 mod request_seal;
 mod secret_types;
 mod services;
-
 pub use account_services::*;
-pub use archives::*;
 pub use chunk_decryptor::*;
 pub use contacts::*;
 pub use platform_services::*;
