@@ -120,9 +120,12 @@ Transfers:
 
 Generated files, backups and this public repo:
 
-- Generated bindings and vector JSON are generated, not hand-edited. The direct, range, backup and
-  safety-number vectors each have a drift guard that fails on a hand edit: add rows in the generator,
-  never in the JSON.
+- Generated bindings and vector JSON are generated, not hand-edited. The direct, range, backup,
+  safety-number and name-clash vectors, and the case-folding table, each have a drift guard that fails
+  on a hand edit: add rows in the generator, never in the JSON.
+- Two names clash when their `name_tag::normalize_for_tag` forms are equal, never by lower case alone.
+  A clash's second name comes from `name_clash` (`numbered_name` in a prompt, `drive_conflict_name` in
+  the drive) and from the incoming name only, never from the existing item's.
 - Backups: the root is the `backups_root` row, never a name or a path; a backup is written only by its
   device's own pass (the app and drive rules refuse every other create, write, rename and move under
   the root, and every change to a device's `.device.json`; the pass never goes through them); the pass
@@ -132,6 +135,10 @@ Generated files, backups and this public repo:
   does or no record names that remote file (compare-and-set); only a complete remote listing marks
   anything removed elsewhere, and a removed file that changes comes back as a new file, never a
   version of the deleted one. Details are in [docs/agent-notes.md](docs/agent-notes.md).
+- Backups, rebuild and stop: a rebuilt record needs `uploaded_at > modified + offset + margin` (a
+  10-minute floor with no offset), never "uploaded after the device's mtime" alone; `backup_stop`'s
+  `last_pass_at` is on the server's clock, never the device's; a stopped backup never fills the account
+  up again by itself.
 - Design files live in the workspace; never copy them into this public repo (a snapshot once published
   a false external-audit claim, and the claims guard fails on those strings).
 

@@ -31,8 +31,10 @@ opaque-ke = { version = "4.0.1", features = ["ristretto255", "argon2"] }
 x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
 # P-256 ECDH for the CLI device-authorization handshake (cli_auth.rs). Matches the
 # CLI's prior `p256` dep and the web client's WebCrypto P-256 ECDH so the wire format
-# is identical across clients.
-p256 = { version = "0.13", features = ["ecdh"] }
+# is identical across clients. 0.14 (task 2378) moves the curve arithmetic onto
+# crypto-bigint 0.7 (RUSTSEC-2026-0387); `getrandom` supplies `Generate::generate()`
+# (the OS CSPRNG) now that `SecretKey::random` takes a rand_core 0.10 RNG.
+p256 = { version = "0.14", features = ["ecdh", "getrandom"] }
 # Symmetric SPAKE2 for the camera-less device-link path. The relay sees only
 # one-shot PAKE messages and never receives a password verifier.
 spake2 = "0.4"

@@ -4,10 +4,10 @@
 # removes it. Never add an id without that.
 [advisories]
 ignore = [
-  # crypto-bigint 0.5.5, through p256 0.13 (the P-256 ECDH of the CLI login
-  # handshake, beebeeb-core/src/cli_auth.rs; the key pair is generated per login).
-  # Operations meant to be constant-time can branch on secret data. Fixed only in
-  # crypto-bigint 0.7.6, which needs p256 0.14: a breaking upgrade of a crypto
-  # dependency. Removed by that upgrade.
+  # crypto-bigint 0.5.5, now only through opaque-ke 4.0.1 -> elliptic-curve
+  # 0.13.8. The CLI-login ECDH moved to p256 0.14 (crypto-bigint 0.7), which the
+  # advisory's fix needs. Core's OPAQUE suites are Ristretto255 and compile none
+  # of elliptic-curve 0.13's arithmetic, but cargo audit still lists the crate.
+  # No published opaque-ke moves off it. Removed when one does.
   "RUSTSEC-2026-0387",
 ]

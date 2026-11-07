@@ -12517,6 +12517,89 @@ public func FfiConverterTypeBackupMergeEntry_lower(_ value: BackupMergeEntry) ->
 }
 
 
+/**
+ * One `notifications` row as the server lists it.
+ */
+public struct BackupNoticeRow: Equatable, Hashable {
+    /**
+     * The row's `type` (`"files_removed"`, `"backup_deleted"`, or any other
+     * type, which is skipped).
+     */
+    public var kind: String
+    /**
+     * The row's `data`, as JSON text. Text that does not parse reads as
+     * `null`.
+     */
+    public var dataJson: String
+    /**
+     * The row's `created_at`, in milliseconds since the epoch (server clock).
+     */
+    public var createdAtMs: Int64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The row's `type` (`"files_removed"`, `"backup_deleted"`, or any other
+         * type, which is skipped).
+         */kind: String, 
+        /**
+         * The row's `data`, as JSON text. Text that does not parse reads as
+         * `null`.
+         */dataJson: String, 
+        /**
+         * The row's `created_at`, in milliseconds since the epoch (server clock).
+         */createdAtMs: Int64) {
+        self.kind = kind
+        self.dataJson = dataJson
+        self.createdAtMs = createdAtMs
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension BackupNoticeRow: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBackupNoticeRow: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BackupNoticeRow {
+        return
+            try BackupNoticeRow(
+                kind: FfiConverterString.read(from: &buf), 
+                dataJson: FfiConverterString.read(from: &buf), 
+                createdAtMs: FfiConverterInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BackupNoticeRow, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.kind, into: &buf)
+        FfiConverterString.write(value.dataJson, into: &buf)
+        FfiConverterInt64.write(value.createdAtMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupNoticeRow_lift(_ buf: RustBuffer) throws -> BackupNoticeRow {
+    return try FfiConverterTypeBackupNoticeRow.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupNoticeRow_lower(_ value: BackupNoticeRow) -> RustBuffer {
+    return FfiConverterTypeBackupNoticeRow.lower(value)
+}
+
+
 public struct BackupPassPlan: Equatable, Hashable {
     public var uploads: [BackupPlannedUpload]
     public var moves: [BackupPlannedMove]
@@ -13021,6 +13104,212 @@ public func FfiConverterTypeBackupSourceEntry_lift(_ buf: RustBuffer) throws -> 
 #endif
 public func FfiConverterTypeBackupSourceEntry_lower(_ value: BackupSourceEntry) -> RustBuffer {
     return FfiConverterTypeBackupSourceEntry.lower(value)
+}
+
+
+/**
+ * One backup turned on on this device, as the listing shows it.
+ */
+public struct BackupStopFolder: Equatable, Hashable {
+    /**
+     * A category key (`"camera_roll"`, `"custom:<name>"`, ...).
+     */
+    public var category: String
+    /**
+     * `None` when the category folder was never created (a first backup).
+     */
+    public var categoryFolderId: String?
+    /**
+     * `Some(false)` only when the category folder existed and is now trashed
+     * or gone.
+     */
+    public var categoryFolderLive: Bool?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * A category key (`"camera_roll"`, `"custom:<name>"`, ...).
+         */category: String, 
+        /**
+         * `None` when the category folder was never created (a first backup).
+         */categoryFolderId: String?, 
+        /**
+         * `Some(false)` only when the category folder existed and is now trashed
+         * or gone.
+         */categoryFolderLive: Bool?) {
+        self.category = category
+        self.categoryFolderId = categoryFolderId
+        self.categoryFolderLive = categoryFolderLive
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension BackupStopFolder: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBackupStopFolder: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BackupStopFolder {
+        return
+            try BackupStopFolder(
+                category: FfiConverterString.read(from: &buf), 
+                categoryFolderId: FfiConverterOptionString.read(from: &buf), 
+                categoryFolderLive: FfiConverterOptionBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BackupStopFolder, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.category, into: &buf)
+        FfiConverterOptionString.write(value.categoryFolderId, into: &buf)
+        FfiConverterOptionBool.write(value.categoryFolderLive, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupStopFolder_lift(_ buf: RustBuffer) throws -> BackupStopFolder {
+    return try FfiConverterTypeBackupStopFolder.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupStopFolder_lower(_ value: BackupStopFolder) -> RustBuffer {
+    return FfiConverterTypeBackupStopFolder.lower(value)
+}
+
+
+public struct BackupStopListing: Equatable, Hashable {
+    public var deviceFolderId: String
+    /**
+     * `false` only when this device's folder existed and is now trashed or
+     * gone.
+     */
+    public var deviceFolderLive: Bool
+    public var folders: [BackupStopFolder]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(deviceFolderId: String, 
+        /**
+         * `false` only when this device's folder existed and is now trashed or
+         * gone.
+         */deviceFolderLive: Bool, folders: [BackupStopFolder]) {
+        self.deviceFolderId = deviceFolderId
+        self.deviceFolderLive = deviceFolderLive
+        self.folders = folders
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension BackupStopListing: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBackupStopListing: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BackupStopListing {
+        return
+            try BackupStopListing(
+                deviceFolderId: FfiConverterString.read(from: &buf), 
+                deviceFolderLive: FfiConverterBool.read(from: &buf), 
+                folders: FfiConverterSequenceTypeBackupStopFolder.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BackupStopListing, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.deviceFolderId, into: &buf)
+        FfiConverterBool.write(value.deviceFolderLive, into: &buf)
+        FfiConverterSequenceTypeBackupStopFolder.write(value.folders, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupStopListing_lift(_ buf: RustBuffer) throws -> BackupStopListing {
+    return try FfiConverterTypeBackupStopListing.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupStopListing_lower(_ value: BackupStopListing) -> RustBuffer {
+    return FfiConverterTypeBackupStopListing.lower(value)
+}
+
+
+/**
+ * A backup that turns off: its category key and the reason
+ * (`"backup_deleted"`, `"erase_request"`, `"account_lapsed"`,
+ * `"inactive_cleanup"`, `"account_reset"`, `"unknown_removal"`, `"unknown"`).
+ */
+public struct BackupStopped: Equatable, Hashable {
+    public var category: String
+    public var reason: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(category: String, reason: String) {
+        self.category = category
+        self.reason = reason
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension BackupStopped: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBackupStopped: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BackupStopped {
+        return
+            try BackupStopped(
+                category: FfiConverterString.read(from: &buf), 
+                reason: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BackupStopped, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.category, into: &buf)
+        FfiConverterString.write(value.reason, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupStopped_lift(_ buf: RustBuffer) throws -> BackupStopped {
+    return try FfiConverterTypeBackupStopped.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupStopped_lower(_ value: BackupStopped) -> RustBuffer {
+    return FfiConverterTypeBackupStopped.lower(value)
 }
 
 
@@ -22818,6 +23107,30 @@ fileprivate struct FfiConverterOptionInt64: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionBool: FfiConverterRustBuffer {
+    typealias SwiftType = Bool?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterBool.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterBool.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
     typealias SwiftType = String?
 
@@ -23596,6 +23909,31 @@ fileprivate struct FfiConverterSequenceTypeBackupMergeEntry: FfiConverterRustBuf
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeBackupNoticeRow: FfiConverterRustBuffer {
+    typealias SwiftType = [BackupNoticeRow]
+
+    public static func write(_ value: [BackupNoticeRow], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeBackupNoticeRow.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [BackupNoticeRow] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [BackupNoticeRow]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeBackupNoticeRow.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeBackupPlannedMove: FfiConverterRustBuffer {
     typealias SwiftType = [BackupPlannedMove]
 
@@ -23738,6 +24076,56 @@ fileprivate struct FfiConverterSequenceTypeBackupSourceEntry: FfiConverterRustBu
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeBackupSourceEntry.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeBackupStopFolder: FfiConverterRustBuffer {
+    typealias SwiftType = [BackupStopFolder]
+
+    public static func write(_ value: [BackupStopFolder], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeBackupStopFolder.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [BackupStopFolder] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [BackupStopFolder]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeBackupStopFolder.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeBackupStopped: FfiConverterRustBuffer {
+    typealias SwiftType = [BackupStopped]
+
+    public static func write(_ value: [BackupStopped], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeBackupStopped.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [BackupStopped] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [BackupStopped]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeBackupStopped.read(from: &buf))
         }
         return seq
     }
@@ -25133,6 +25521,60 @@ public func backupSkipReason(name: String, isDir: Bool, isLink: Bool, notLocal: 
 })
 }
 /**
+ * The action every stopped backup offers: `"Back up again"`.
+ */
+public func backupAgainAction() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_backup_again_action($0
+    )
+})
+}
+/**
+ * The reason a `notifications` row gives, or `None` for a row that is not a
+ * backup notice: for showing the notification itself with
+ * `backup_stop_words`.
+ */
+public func backupNoticeReason(kind: String, dataJson: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_backup_notice_reason(
+        FfiConverterString.lower(kind),
+        FfiConverterString.lower(dataJson),$0
+    )
+})
+}
+/**
+ * Which backups turn off on this pass, and why (spec Amendment 12, steps
+ * 1-4). `last_pass_at_ms` is on the server's clock, like the notices: when
+ * this device's previous pass of these backups started, or when the person
+ * last turned a backup on or chose "Back up again" since. Empty means nothing
+ * changes. An unknown category key or an id that is not a UUID in the listing
+ * is `InvalidInput`.
+ */
+public func backupStop(notices: [BackupNoticeRow], lastPassAtMs: Int64, listing: BackupStopListing)throws  -> [BackupStopped]  {
+    return try  FfiConverterSequenceTypeBackupStopped.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_backup_stop(
+        FfiConverterSequenceTypeBackupNoticeRow.lower(notices),
+        FfiConverterInt64.lower(lastPassAtMs),
+        FfiConverterTypeBackupStopListing_lower(listing),$0
+    )
+})
+}
+/**
+ * The words a stopped backup shows (spec Amendment 12), followed by the
+ * action `backup_again_action()`. `device` is this device's name and
+ * `folder` the folder's display name; the four account-wide reasons name
+ * neither.
+ */
+public func backupStopWords(reason: String, device: String, folder: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_backup_stop_words(
+        FfiConverterString.lower(reason),
+        FfiConverterString.lower(device),
+        FfiConverterString.lower(folder),$0
+    )
+})
+}
+/**
  * Mint a guest (F) item id with NO master key (task 2275 §15). The anonymous
  * uploader path uses this; the id is a canonical RFC 9562 UUID v8.
  */
@@ -25348,6 +25790,18 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_backup_skip_reason() != 2820) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_backup_again_action() != 13263) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_backup_notice_reason() != 40118) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_backup_stop() != 43581) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_backup_stop_words() != 39803) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_mint_guest_item_id() != 8655) {

@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Additive on v0.2.1: the rebuild's clock rule (LD-0123) and why a backup stops (LD-0121, spec
+`2026-11-06-backup-from-source-design.md` Amendments 12, 12a and 12b). No v0.2.1 API is renamed, retyped or
+removed. The version is the lead's call at release.
+
+### Added
+
+- **`beebeeb_core::backup`, rebuild (LD-0123)**: `RebuildClock { offset_ms, margin_ms }` with
+  `RebuildClock::UNKNOWN` and `copy_is_newer`; `records_from_remote_with_clock(remote, entries, clock)`:
+  a copy counts only when `uploaded_at_ms > modified_ms + offset_ms + margin_ms`, with no offset known
+  the one-sided 10-minute floor (`REBUILD_FLOOR_MS`); `rebuild_clock_from_date(date_header, sent_at_ms,
+  received_at_ms)` measures the offset from a listing response's `Date` header (margin
+  `REBUILD_MARGIN_BASE_MS` 2 s + the round trip; any failure gives the unknown clock).
+- **`beebeeb_types::backup` (LD-0121)**: `BackupStopReason` (`backup_deleted`, `erase_request`,
+  `account_lapsed`, `inactive_cleanup`, `account_reset`, `unknown_removal`, `unknown`), `NOTICE_FILES_REMOVED`,
+  `NOTICE_BACKUP_DELETED`, and `BackupNotice` (the `notifications` row's `type` and `data`, ids only).
+- **`beebeeb_core::backup`, stop (LD-0121)**: `backup_stop(notices, last_pass_at_ms, listing)` (Amendment
+  12's steps 1-4: a newer `files_removed` notice turns every backup off, folders present or not; else per
+  backup a `backup_deleted` notice naming this device's folder (and, for a category, its folder); else a
+  folder gone with no notice, `unknown`; else nothing),
+  `parse_backup_notice`, `ReceivedNotice`, `StopListing`, `StopFolder`, `StoppedBackup`, and the words:
+  `backup_stop_words(reason, device, folder)`, `MSG_STOP_ERASE_REQUEST`, `MSG_STOP_ACCOUNT_LAPSED`,
+  `MSG_STOP_INACTIVE_CLEANUP`, `MSG_STOP_ACCOUNT_RESET`, `MSG_STOP_UNKNOWN_REMOVAL`, `MSG_BACK_UP_AGAIN`
+  ("Back up again"): Amendment 12's six lines as drafted are final (Guus 2026-11-07 19:04, G6).
+- **The seventh line (LD-0121, spec Amendment 12b)**: a `files_removed` notice whose reason this build does
+  not recognise (a future reason, or none) stops every backup as `BackupStopReason::UnknownRemoval`
+  (`"unknown_removal"`) with `MSG_STOP_UNKNOWN_REMOVAL`, "Your files were removed, so backups are off.",
+  never the `unknown` row's "was deleted" words; `parse_backup_notice`, `BackupNotice::reason` and the uniffi
+  and wasm `backup_notice_reason` / `backupNoticeReason` give `unknown_removal` for it.
+- **Bindings**: uniffi `backup_stop`, `backup_notice_reason`, `backup_stop_words`, `backup_again_action`
+  (4); wasm `backupStop`, `backupNoticeReason`, `backupStopWords`, `backupAgainAction` (4).
+- **Vectors**: `backup_plan.json` 71 → 117 cases (+6 rebuild clock, 22 stop, 10 notice, 7 words, 1
+  action); every rebuild case now carries its clock.
+
+### Changed
+
+- `records_from_remote(remote, entries)` (signature unchanged) now applies `RebuildClock::UNKNOWN`: with no
+  offset known a copy must be more than 10 minutes newer than the entry's mtime. Desktop main already calls
+  it (its rebuild after a reinstall or the G4 adoption, pinned at v0.2.1): after a pin bump, and until desktop
+  passes a measured clock to `records_from_remote_with_clock`, a rebuild uploads again every copy made within
+  10 minutes of its file's last change (the safe direction, but a re-upload of most auto-backed-up files).
+
+### Security
+
+- **`p256` 0.13 → 0.14** (task 2378, RUSTSEC-2026-0387): the CLI-login ECDH (`cli_auth`) now runs on
+  `elliptic-curve` 0.14.3 / `crypto-bigint` 0.7.10, which removes the secret-dependent branches the
+  advisory lists. Wire format unchanged: the SEC1 encodings, the ECDH X-coordinate and the HKDF key are
+  byte-identical (`tests/cli_auth_vectors.rs` passes with its constants untouched, and now also pins both
+  public keys, checked against the independent pure-Python generator `test-vectors/tools/make_cli_auth_vectors.py`).
+  `CliEphemeralKey::generate()` keeps 0.13's non-zero scalar (`NonZeroScalar::generate()`, rejection
+  sampling). `crypto-bigint` 0.5.5 stays in `Cargo.lock` through `opaque-ke` 4.0.1 → `voprf` 0.5.0 →
+  `elliptic-curve` 0.13.8 (no published `opaque-ke`, 4.1.0-pre.2 included, moves off it); core's OPAQUE
+  suites are Ristretto255 and compile none of its arithmetic, but `cargo audit` still lists the advisory
+  until `opaque-ke` moves.
+- `beebeeb-wasm` adds `getrandom` 0.4 with `wasm_js`: p256 0.14 draws its randomness through it.
+
 ## [0.2.2] - 2026-11-06
 
 This is a breaking pre-1.0 release. The changes below are grouped by the people who must act.
@@ -76,7 +131,10 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 - `ConflictPolicy::DEFAULT` keeps both at once: a diverged file resolves to `AutoKeepBoth` when it is
   detected, whatever the clocks say, and its `deadline` is `None`. `NeedsUser` and a deadline come only
   from a policy with a non-zero `auto_resolve_after_secs`, so `conflict_state` reports `auto_keep_both`
-  with no `decision_deadline`.
+  with no `decision_deadline`. `ConflictPolicy::DRIVE` names that policy, and `DEFAULT` is it.
+- Name the drive's copy with `name_clash::drive_conflict_name`, for a name race and a sync conflict alike:
+  `report (conflict, <device>).pdf`, then ` (2)`, ` (3)`. `keep_both_name` (`({device}, HH.MM)`) is
+  unchanged and is no longer a drive name; the backup merge plan still uses it.
 - `beebeeb-sync::SyncEngine::sync_once` now fails with `RemoteListingUnavailable`. Do not ship the
   legacy desktop prototype; build product sync on `beebeeb_core::sync`.
 
@@ -158,6 +216,12 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 
 ### Added
 
+- `beebeeb_core::name_clash`: `ItemKind`, `TakenNames`, `numbered_name` ("Keep both": `report (2).pdf`,
+  then `(3)`), `numbered_candidates` and `drive_conflict_name`. Names clash when their normalised forms
+  are equal, and a candidate is cut so that the whole name fits in 255 bytes.
+- `beebeeb_core::name_tag::normalize_for_tag`: `NFKC(simple_casefold(NFKC(name)))`, with simple case
+  folding (statuses C and S) at Unicode 17.0.0; an empty name or one over 1024 bytes is refused
+  (`NormalizeError`). Vectors: `test-vectors/name_clash_v1.json`, from an independent Python generator.
 - `beebeeb-api`, `beebeeb-client`, and `beebeeb-store`, plus the native service-handle surface for
   authentication, devices, files, sync, transfers, thumbnails, sharing, contacts, settings, search,
   backup, File Provider, and coordinated sign-out.

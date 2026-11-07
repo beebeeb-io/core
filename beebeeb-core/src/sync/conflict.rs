@@ -137,10 +137,14 @@ pub struct ConflictPolicy {
 }
 
 impl ConflictPolicy {
-    /// The shipped policy: keep both at once, with no question and no deadline.
-    pub const DEFAULT: Self = Self {
+    /// The drive's policy: keep both at once, with no question and no deadline.
+    /// The copy is named with [`crate::name_clash::drive_conflict_name`].
+    pub const DRIVE: Self = Self {
         auto_resolve_after_secs: 0,
     };
+
+    /// The shipped policy: the drive's.
+    pub const DEFAULT: Self = Self::DRIVE;
 
     /// Seconds-since-epoch deadline for a conflict detected at `detected_at`.
     /// `None` when the policy does not wait, or when the deadline overflows.
@@ -231,18 +235,12 @@ pub fn with_suffix(name: &str, suffix: &str) -> String {
 /// not reach the file name. A value [`crate::path_safety::sanitize_component`]
 /// refuses outright falls back to the literal `device` rather than failing the
 /// Keep Both copy.
-fn safe_device(device: &str) -> String {
+pub(crate) fn safe_device(device: &str) -> String {
     crate::path_safety::sanitize_component(device, crate::path_safety::Rules::Portable)
         .unwrap_or_else(|_| "device".to_string())
 }
 
-/// The name of the "Keep Both" copy: `{stem} ({device}, HH.MM){ext}`, then
-/// `{stem} ({device}, HH.MM) 2{ext}`, ` 3`, ... until it is not in `taken`
-/// (the parent's names, lowercased).
-///
-/// The time uses a dot, not a colon: a `:` in a Mac file name shows as `/` in
-/// Finder. The device is cut to [`KEEP_BOTH_DEVICE_MAX_BYTES`] first, so the
-/// suffix always leaves the stem room.
+/// A [`keep_both_name`] time that is not `HH.MM`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InvalidKeepBothTime;
 
@@ -273,6 +271,17 @@ fn validate_hhmm(hhmm: &str) -> Result<(), InvalidKeepBothTime> {
     Ok(())
 }
 
+/// The name of the "Keep Both" copy: `{stem} ({device}, HH.MM){ext}`, then
+/// `{stem} ({device}, HH.MM) 2{ext}`, ` 3`, ... until it is not in `taken`
+/// (the parent's names, lowercased).
+///
+/// No drive path uses it: a name race and a sync conflict in the drive both
+/// name the copy with [`crate::name_clash::drive_conflict_name`]. It stays for
+/// the backup merge plan ([`crate::backup::plan_merge`]).
+///
+/// The time uses a dot, not a colon: a `:` in a Mac file name shows as `/` in
+/// Finder. The device is cut to [`KEEP_BOTH_DEVICE_MAX_BYTES`] first, so the
+/// suffix always leaves the stem room.
 pub fn keep_both_name(
     original: &str,
     device: &str,

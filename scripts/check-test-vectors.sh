@@ -35,4 +35,10 @@ cmp test-vectors/direct_upload_pipeline.json "$vector_tmp/test-vectors/direct_up
 python3 "$vector_tmp/test-vectors/tools/make_safety_number_vectors.py" "$vector_tmp/test-vectors/safety_number.json"
 cmp test-vectors/safety_number.json "$vector_tmp/test-vectors/safety_number.json"
 
+python3 "$vector_tmp/test-vectors/tools/gen_name_clash_v1.py" "$vector_tmp/test-vectors/name_clash_v1.json"
+cmp test-vectors/name_clash_v1.json "$vector_tmp/test-vectors/name_clash_v1.json"
+
+python3 "$vector_tmp/test-vectors/tools/gen_case_fold_table.py" "$vector_tmp/case_fold.rs"
+cmp beebeeb-core/src/name_tag/case_fold.rs "$vector_tmp/case_fold.rs"
+
 echo "all test-vector Python tools passed; generated files are unchanged"

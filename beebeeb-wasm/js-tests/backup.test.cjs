@@ -98,3 +98,62 @@ nodeTest('backupParseManifest: the real iOS manifest and unknown fields come bac
 
   assert.throws(() => wasm.backupParseManifest('[1, 2]'), /device manifest/);
 });
+
+// LD-0121: why a backup stops and its words (spec Amendment 12), the web's own run of every stop, notice and words
+// case of test-vectors/consolidation/backup_plan.json (BB_PLAN_VECTOR_PATH points at a mutated copy for a red run).
+const plan = require(
+  process.env.BB_PLAN_VECTOR_PATH || path.join(__dirname, '../../test-vectors/consolidation/backup_plan.json'),
+);
+
+nodeTest('backupStop agrees with every stop case of the shared vector', () => {
+  const cases = plan.cases.filter((c) => c.kind === 'stop');
+  assert.equal(cases.length, 22, 'the six cases Amendment 12 names and sixteen more');
+  for (const c of cases) {
+    assert.deepEqual(wasm.backupStop(c.notices, c.last_pass_at_ms, c.listing), c.expect, c.id);
+  }
+});
+
+nodeTest('backupNoticeReason, backupStopWords and backupAgainAction agree with the shared vector', () => {
+  const notices = plan.cases.filter((c) => c.kind === 'notice');
+  assert.equal(notices.length, 10);
+  for (const c of notices) {
+    assert.equal(wasm.backupNoticeReason(c.type, c.data), c.expect === null ? undefined : c.expect.reason, c.id);
+  }
+  const words = plan.cases.filter((c) => c.kind === 'stop_words');
+  assert.equal(words.length, 7, 'one line per reason');
+  for (const c of words) {
+    assert.equal(wasm.backupStopWords(c.reason, c.device, c.folder), c.expect, c.id);
+  }
+  assert.equal(wasm.backupAgainAction(), plan.cases.find((c) => c.kind === 'stop_action').expect);
+});
+
+nodeTest('backupStop and backupStopWords throw on what they do not know', () => {
+  const listing = { device_folder_id: 'GLegion', device_folder_live: true, folders: [] };
+  assert.throws(() => wasm.backupStop([], 0, listing), /device_folder_id is not a UUID/);
+  const dev = '00000064-0000-4000-8000-0000000000aa';
+  const bad = { device_folder_id: dev, device_folder_live: true, folders: [{ category: 'Pictures' }] };
+  assert.throws(() => wasm.backupStop([], 0, bad), /unknown category key/);
+  assert.throws(() => wasm.backupStop([], 1.5, { ...listing, device_folder_id: dev }), /lastPassAtMs/);
+  for (const reason of ['Unknown', 'erased_request', '']) {
+    assert.throws(() => wasm.backupStopWords(reason, 'GLegion', 'Pictures'), /unknown backup stop reason/, reason);
+  }
+});
+
+nodeTest('backupStop skips rows that are not backup notices, whatever their shape', () => {
+  const dev = '00000064-0000-4000-8000-0000000000aa';
+  const pics = '00000065-0000-4000-8000-0000000000aa';
+  const listing = {
+    device_folder_id: dev,
+    device_folder_live: true,
+    folders: [{ category: 'pictures', category_folder_id: pics, category_folder_live: true }],
+  };
+  const erased = { type: 'files_removed', data: { reason: 'erase_request' }, created_at_ms: 1762430400001 };
+  const odd = [{ type: 'share_received' }, { data: {} }, { type: 'share_received', created_at_ms: 'yesterday' }, null];
+  assert.deepEqual(wasm.backupStop([...odd, erased], 1762430400000, listing), [
+    { category: 'pictures', reason: 'erase_request' },
+  ]);
+  for (const created_at_ms of [undefined, null, 1.5, '2026-11-06T21:30:00Z']) {
+    const row = { type: 'files_removed', data: { reason: 'erase_request' }, created_at_ms };
+    assert.throws(() => wasm.backupStop([row], 0, listing), /no whole created_at_ms/, String(created_at_ms));
+  }
+});

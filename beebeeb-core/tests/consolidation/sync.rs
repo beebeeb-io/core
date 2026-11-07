@@ -129,6 +129,8 @@ fn sync_cases_match_core() {
     }
 
     assert_eq!((conflicts, deadlines, outcomes, names), (7, 3, 4, 7));
+    // The drive keeps both at once, and the shipped policy is the drive's.
+    assert_eq!(ConflictPolicy::DEFAULT, ConflictPolicy::DRIVE);
     for required in [
         "sync_both_directions_diverge",
         "sync_24h_due",

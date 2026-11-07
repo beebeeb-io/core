@@ -3091,6 +3091,27 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_serialize_manifest(RustBuffer ma
 RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_skip_reason(RustBuffer name, int8_t is_dir, int8_t is_link, int8_t not_local, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_AGAIN_ACTION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_AGAIN_ACTION
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_again_action(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_NOTICE_REASON
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_NOTICE_REASON
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_notice_reason(RustBuffer kind, RustBuffer data_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_STOP
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_STOP
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_stop(RustBuffer notices, int64_t last_pass_at_ms, RustBuffer listing, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_STOP_WORDS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_STOP_WORDS
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_stop_words(RustBuffer reason, RustBuffer device, RustBuffer folder, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_MINT_GUEST_ITEM_ID
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_MINT_GUEST_ITEM_ID
 RustBuffer uniffi_beebeeb_uniffi_fn_func_mint_guest_item_id(RustCallStatus *_Nonnull out_status
@@ -3738,6 +3759,30 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_serialize_manifest(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_SKIP_REASON
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_SKIP_REASON
 uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_skip_reason(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_AGAIN_ACTION
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_AGAIN_ACTION
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_again_action(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_NOTICE_REASON
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_NOTICE_REASON
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_notice_reason(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_STOP
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_STOP
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_stop(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_STOP_WORDS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_STOP_WORDS
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_stop_words(void
     
 );
 #endif

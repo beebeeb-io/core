@@ -59,3 +59,26 @@ appended, as Signal does), with `hashlib` only. `contact_keys`' own test runs ev
 ```sh
 python3 -I test-vectors/tools/make_safety_number_vectors.py test-vectors/safety_number.json
 ```
+
+`gen_name_clash_v1.py` writes `test-vectors/name_clash_v1.json`: numbered names (`report (2).pdf`), drive conflict
+names (`report (conflict, <device>).pdf`) and the normalised form that decides when two names clash. It uses only
+`unicodedata` and the simple case folding (statuses C and S) of `ucd/CaseFolding-17.0.0.txt`, never Python's full
+`str.casefold`. `gen_case_fold_table.py` writes core's folding table, `beebeeb-core/src/name_tag/case_fold.rs`, from the
+same Unicode file, at the version `unicode-normalization` pins. `scripts/check-test-vectors.sh` regenerates both and
+fails on a difference.
+
+```sh
+python3 -I test-vectors/tools/gen_name_clash_v1.py test-vectors/name_clash_v1.json
+python3 -I test-vectors/tools/gen_case_fold_table.py beebeeb-core/src/name_tag/case_fold.rs
+```
+
+`make_cli_auth_vectors.py` (task 2378) independently generates the CLI-auth handshake known answers (P-256 public keys,
+the ECDH X-coordinate, the HKDF-SHA256 key) in pure Python: affine P-256 arithmetic and the standard library's HMAC, no
+Rust and no third-party crypto. They are Rust constants in `beebeeb-core/tests/cli_auth_vectors.rs`, not JSON, so the
+check compares the constants by name instead of rewriting a file (CI, with `--self-test`):
+
+```sh
+python3 -I test-vectors/tools/make_cli_auth_vectors.py                 # prints the constants
+python3 -I test-vectors/tools/make_cli_auth_vectors.py --check beebeeb-core/tests/cli_auth_vectors.rs
+python3 -I test-vectors/tools/make_cli_auth_vectors.py --self-test beebeeb-core/tests/cli_auth_vectors.rs
+```

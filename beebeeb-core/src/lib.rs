@@ -29,6 +29,8 @@ pub mod key_proof;
 mod label_table_tests;
 pub mod media;
 pub mod metadata_wire;
+pub mod name_clash;
+pub mod name_tag;
 pub mod onboarding;
 pub mod opaque;
 pub mod opaque_protocol;
