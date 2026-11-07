@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **`p256` 0.13 → 0.14** (task 2378, RUSTSEC-2026-0387): the CLI-login ECDH (`cli_auth`) now runs on
+  `elliptic-curve` 0.14.3 / `crypto-bigint` 0.7.10, which removes the secret-dependent branches the
+  advisory lists. Wire format unchanged: the SEC1 encodings, the ECDH X-coordinate and the HKDF key are
+  byte-identical (`tests/cli_auth_vectors.rs` passes with its constants untouched). `crypto-bigint`
+  0.5.5 stays in `Cargo.lock` through `opaque-ke` 4.0.1 → `voprf` 0.5.0 → `elliptic-curve` 0.13.8 (no
+  published `opaque-ke`, 4.1.0-pre.2 included, moves off it); core's OPAQUE suites are Ristretto255 and
+  compile none of its arithmetic, but `cargo audit` still lists the advisory until `opaque-ke` moves.
+- `beebeeb-wasm` adds `getrandom` 0.4 with `wasm_js`: p256 0.14 draws its randomness through it.
+
 ## [0.2.1] - 2026-11-06
 
 Additive: backup rules (`beebeeb_core::backup`), the vocabulary (`beebeeb_types::backup`) and the

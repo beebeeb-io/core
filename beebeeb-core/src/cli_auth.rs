@@ -46,9 +46,9 @@ use aes_gcm::aead::Aead;
 use aes_gcm::aead::generic_array::GenericArray;
 use aes_gcm::{Aes256Gcm, KeyInit};
 use hkdf::Hkdf;
-use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::elliptic_curve::Generate;
+use p256::elliptic_curve::sec1::ToSec1Point;
 use p256::{PublicKey, SecretKey};
-use rand::rngs::OsRng;
 use sha2::Sha256;
 use zeroize::Zeroizing;
 
@@ -74,8 +74,11 @@ impl CliEphemeralKey {
     /// Generate a fresh ephemeral P-256 keypair using the OS CSPRNG.
     ///
     /// This is the production path — `bb login` mints a one-shot keypair per attempt.
+    /// The scalar comes from `getrandom`'s system RNG (`elliptic_curve::Generate`);
+    /// like `rand`'s `OsRng` before it, an OS RNG failure panics rather than
+    /// returning a weak key.
     pub fn generate() -> Self {
-        Self::from_secret(SecretKey::random(&mut OsRng))
+        Self::from_secret(SecretKey::generate())
     }
 
     /// Construct from a fixed 32-byte private scalar.
@@ -91,7 +94,7 @@ impl CliEphemeralKey {
     }
 
     fn from_secret(secret: SecretKey) -> Self {
-        let public_uncompressed = secret.public_key().to_encoded_point(false).as_bytes().to_vec();
+        let public_uncompressed = secret.public_key().to_sec1_point(false).as_bytes().to_vec();
         Self {
             secret,
             public_uncompressed,
@@ -190,16 +193,14 @@ mod tests {
     use aes_gcm::aead::generic_array::GenericArray;
     use aes_gcm::{Aes256Gcm, KeyInit};
     use p256::ecdh::EphemeralSecret;
-    use p256::elliptic_curve::sec1::ToEncodedPoint;
-    use rand::rngs::OsRng;
 
     /// Simulate the BROWSER side: generate an ephemeral keypair, ECDH against the
     /// CLI's public key, derive the AES key (HKDF or raw), and AES-256-GCM encrypt.
     /// Returns `(browser_public_uncompressed, nonce, ciphertext)`.
     fn browser_encrypt(cli_public: &[u8], plaintext: &[u8], use_hkdf: bool) -> (Vec<u8>, [u8; 12], Vec<u8>) {
         let cli_pub = PublicKey::from_sec1_bytes(cli_public).unwrap();
-        let browser_secret = EphemeralSecret::random(&mut OsRng);
-        let browser_public = browser_secret.public_key().to_encoded_point(false).as_bytes().to_vec();
+        let browser_secret = EphemeralSecret::generate();
+        let browser_public = browser_secret.public_key().to_sec1_point(false).as_bytes().to_vec();
 
         let shared = browser_secret.diffie_hellman(&cli_pub);
         let mut shared_bytes = [0u8; 32];
@@ -241,8 +242,8 @@ mod tests {
     #[test]
     fn both_sides_derive_the_same_shared_secret() {
         let cli = CliEphemeralKey::generate();
-        let browser_secret = EphemeralSecret::random(&mut OsRng);
-        let browser_public = browser_secret.public_key().to_encoded_point(false).as_bytes().to_vec();
+        let browser_secret = EphemeralSecret::generate();
+        let browser_public = browser_secret.public_key().to_sec1_point(false).as_bytes().to_vec();
 
         let cli_pub = PublicKey::from_sec1_bytes(cli.public_key_bytes()).unwrap();
         let browser_shared = browser_secret.diffie_hellman(&cli_pub);

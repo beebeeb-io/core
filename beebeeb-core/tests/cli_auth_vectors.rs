@@ -17,7 +17,7 @@ use aes_gcm::aead::generic_array::GenericArray;
 use aes_gcm::{Aes256Gcm, KeyInit};
 use beebeeb_core::cli_auth::{decrypt_cli_payload, derive_cli_auth_key};
 use p256::SecretKey;
-use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::elliptic_curve::sec1::ToSec1Point;
 
 // A fixed CLI ephemeral private scalar (32 bytes). NOT a real OsRng output — a fixed
 // value so every binding reproduces the same ECDH + HKDF.
@@ -51,7 +51,7 @@ fn ecdh_x(priv_hex: &str, peer_pub_sec1: &[u8]) -> [u8; 32] {
 
 fn pub_sec1(priv_hex: &str) -> Vec<u8> {
     let sk = SecretKey::from_slice(&hex::decode(priv_hex).unwrap()).unwrap();
-    sk.public_key().to_encoded_point(false).as_bytes().to_vec()
+    sk.public_key().to_sec1_point(false).as_bytes().to_vec()
 }
 
 #[test]
