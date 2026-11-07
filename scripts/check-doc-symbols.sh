@@ -4,11 +4,12 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
+# must_exist <file>... <symbol>: the symbol appears in at least one of the files.
 must_exist() {
-  local file=$1
-  local symbol=$2
-  if ! rg -q --fixed-strings "$symbol" "$file"; then
-    echo "documented code name not found: $symbol ($file)" >&2
+  local symbol=${!#}
+  local files=("${@:1:$#-1}")
+  if ! rg -q --fixed-strings "$symbol" "${files[@]}"; then
+    echo "documented code name not found: $symbol (${files[*]})" >&2
     exit 1
   fi
 }
@@ -17,7 +18,7 @@ for symbol in \
   'ChunkFormat::V1Legacy' 'ExpectedChunkFormat::Unrecorded' 'resume_policy' \
   'WRITE_FORMAT' 'VersionCommitment' 'pub fn with_format' \
   'production_write_format_is_v2' 'p1b_write_switch_uses_v2_and_purpose_subkeys'; do
-  must_exist beebeeb-core/src/chunk_stream.rs "$symbol"
+  must_exist beebeeb-core/src/chunk_stream.rs beebeeb-core/src/chunk_stream/tests.rs "$symbol"
 done
 
 must_exist beebeeb-core/src/key_proof.rs 'KeyProofVerifier'
