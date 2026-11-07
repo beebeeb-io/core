@@ -19,7 +19,7 @@ over the sorted names for the added and removed lists.
 
 | Name | What |
 | --- | --- |
-| `backupStop(notices, lastPassAtMs, listing)` | Which backups turn off on this pass, and why (Amendment 12, steps 1-4): `[{category, reason}]` in category key order, `[]` when nothing changes. `notices`: the `notifications` rows `{type, data, created_at_ms}` (another type is skipped); `lastPassAtMs`: on the server's clock; `listing`: `{device_folder_id, device_folder_live, folders: [{category, category_folder_id, category_folder_live}]}`. An unknown category key, an id that is not a UUID, or a `lastPassAtMs` that is not a whole number throws. |
+| `backupStop(notices, lastPassAtMs, listing)` | Which backups turn off on this pass, and why (Amendment 12, steps 1-4): `[{category, reason}]` in category key order, `[]` when nothing changes. `notices`: the `notifications` rows `{type, data, created_at_ms}` (a row that is not a backup notice is skipped whatever its shape; a backup notice without a whole `created_at_ms` throws); `lastPassAtMs`: on the server's clock; `listing`: `{device_folder_id, device_folder_live, folders: [{category, category_folder_id, category_folder_live}]}`. An unknown category key, an id that is not a UUID, or a `lastPassAtMs` that is not a whole number throws. |
 | `backupNoticeReason(type, data)` | The reason a `notifications` row gives (`"erase_request"`, ..., `"backup_deleted"`; `"unknown"` for a removal whose reason this build does not know), or `undefined` for a row that is not a backup notice. |
 | `backupStopWords(reason, device, folder)` | Core's words for a stopped backup (the six lines of Amendment 12, as drafted); an unknown reason throws. |
 | `backupAgainAction()` | `"Back up again"`. |
@@ -63,7 +63,7 @@ blanket and auto-trait impl members skipped:
 | `beebeeb_core` | 186 | 0 | 1 (private) |
 | `beebeeb_types` | 84 | 0 | 0 |
 | `beebeeb_uniffi` | 242 | 0 | 0 |
-| `beebeeb_wasm` | 108 | 0 | 0 |
+| `beebeeb_wasm` | 85 | 0 | 0 |
 | `beebeeb_backup` | 0 | 0 | 0 |
 
 The one changed item is the private helper `backup::rebuild::newest_copy`,

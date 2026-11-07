@@ -19,15 +19,19 @@ use super::plan::{BackupRecord, RecordState, SourceEntry, normalize_key};
 /// With no offset known, a copy counts only when it was uploaded more than
 /// this long after the entry last changed (10 minutes, LD-0123). It is
 /// one-sided: it covers a device clock up to 10 minutes behind and never
-/// lowers the bar for one that runs ahead (such a device uploads a recent
-/// edit once more, nothing worse). A clock further behind is covered only by
-/// a measured offset, so a client measures one whenever it has a listing
-/// response ([`rebuild_clock_from_date`]).
+/// lowers the bar for one that runs ahead. Its cost falls on every device, a
+/// correct clock included: a copy made within 10 minutes of its file's last
+/// change (an auto-backup usually is) is uploaded again after a rebuild with
+/// no offset. A clock further behind is covered only by a measured offset. So
+/// a client measures one whenever it lists ([`rebuild_clock_from_date`]) and
+/// passes it to [`records_from_remote_with_clock`].
 pub const REBUILD_FLOOR_MS: u64 = 10 * 60 * 1000;
 
 /// The fixed part of a measured margin: an HTTP `Date` header has whole
 /// seconds, so the server's clock is known to within one second, and one more
 /// second is slack. [`rebuild_clock_from_date`] adds the request's round trip.
+/// It assumes the node that writes `Date` and the one that stamped
+/// `uploaded_at_ms` agree to within that slack second (NTP-synced servers).
 pub const REBUILD_MARGIN_BASE_MS: u64 = 2_000;
 
 /// How the device's clock relates to the server's, for
@@ -39,6 +43,11 @@ pub const REBUILD_MARGIN_BASE_MS: u64 = 2_000;
 /// as 0 and the margin is at least [`REBUILD_FLOOR_MS`]. Build one with
 /// [`rebuild_clock_from_date`] from a listing response; a hand-built clock
 /// carries its own margin (the rule adds nothing to a measured one).
+///
+/// The offset is measured now. It describes the device clock at the listing,
+/// not when each `modified_ms` was stamped: a clock that was behind when a
+/// file changed and has been corrected since is not covered (a sealed source
+/// mtime, decision LD-0122, would be).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RebuildClock {
     /// `server_now - device_now` in milliseconds, measured from a listing
@@ -115,8 +124,10 @@ pub struct RemoteEntry {
 /// [`records_from_remote_with_clock`] with [`RebuildClock::UNKNOWN`]: no
 /// offset is known, so a copy counts only when it was uploaded more than
 /// [`REBUILD_FLOOR_MS`] after the entry last changed (LD-0123). Kept for the
-/// v0.2.1 signature; a caller that has a listing response passes its clock
-/// to [`records_from_remote_with_clock`] instead.
+/// v0.2.1 signature. Through it, every copy made within 10 minutes of its
+/// file's last change is uploaded again after a rebuild; a caller that has a
+/// listing response passes its measured clock to
+/// [`records_from_remote_with_clock`] instead.
 pub fn records_from_remote(remote: &[RemoteEntry], entries: &[SourceEntry]) -> Vec<BackupRecord> {
     records_from_remote_with_clock(remote, entries, RebuildClock::UNKNOWN)
 }

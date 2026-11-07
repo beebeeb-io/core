@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn uniffi_backup_stop_matches_every_stop_case() {
         let cases = of_kind("stop");
-        assert_eq!(cases.len(), 19);
+        assert_eq!(cases.len(), 21);
         for case in &cases {
             let notices = case["notices"]
                 .as_array()

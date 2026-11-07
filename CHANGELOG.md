@@ -24,20 +24,24 @@ removed. The version is the lead's call at release.
   `NOTICE_BACKUP_DELETED`, and `BackupNotice` (the `notifications` row's `type` and `data`, ids only).
 - **`beebeeb_core::backup`, stop (LD-0121)**: `backup_stop(notices, last_pass_at_ms, listing)` (Amendment
   12's steps 1-4: a newer `files_removed` notice turns every backup off, folders present or not; else per
-  backup a `backup_deleted` notice naming it; else a folder gone with no notice, `unknown`; else nothing),
+  backup a `backup_deleted` notice naming this device's folder (and, for a category, its folder); else a
+  folder gone with no notice, `unknown`; else nothing),
   `parse_backup_notice`, `ReceivedNotice`, `StopListing`, `StopFolder`, `StoppedBackup`, and the words:
   `backup_stop_words(reason, device, folder)`, `MSG_STOP_ERASE_REQUEST`, `MSG_STOP_ACCOUNT_LAPSED`,
   `MSG_STOP_INACTIVE_CLEANUP`, `MSG_STOP_ACCOUNT_RESET`, `MSG_BACK_UP_AGAIN` ("Back up again"), as drafted
   in Amendment 12, awaiting Guus's per-item look (G6).
 - **Bindings**: uniffi `backup_stop`, `backup_notice_reason`, `backup_stop_words`, `backup_again_action`
   (4); wasm `backupStop`, `backupNoticeReason`, `backupStopWords`, `backupAgainAction` (4).
-- **Vectors**: `backup_plan.json` 71 → 112 cases (+6 rebuild clock, 19 stop, 9 notice, 6 words, 1
+- **Vectors**: `backup_plan.json` 71 → 114 cases (+6 rebuild clock, 21 stop, 9 notice, 6 words, 1
   action); every rebuild case now carries its clock.
 
 ### Changed
 
 - `records_from_remote(remote, entries)` (signature unchanged) now applies `RebuildClock::UNKNOWN`: with no
-  offset known a copy must be more than 10 minutes newer than the entry's mtime. No client called it yet.
+  offset known a copy must be more than 10 minutes newer than the entry's mtime. Desktop main already calls
+  it (its rebuild after a reinstall or the G4 adoption, pinned at v0.2.1): after a pin bump, and until desktop
+  passes a measured clock to `records_from_remote_with_clock`, a rebuild uploads again every copy made within
+  10 minutes of its file's last change (the safe direction, but a re-upload of most auto-backed-up files).
 
 ## [0.2.1] - 2026-11-06
 

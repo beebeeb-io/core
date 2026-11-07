@@ -3749,6 +3749,75 @@
       "expect": []
     },
     {
+      "id": "stop_category_notice_with_another_device_folder_ignored",
+      "kind": "stop",
+      "notices": [
+        {
+          "type": "backup_deleted",
+          "data": {
+            "device_folder_id": "000000c8-0000-4000-8000-0000000000aa",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa"
+          },
+          "created_at_ms": 1762430400001
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": []
+    },
+    {
+      "id": "stop_category_notice_with_another_device_folder_gone_is_unknown",
+      "kind": "stop",
+      "notices": [
+        {
+          "type": "backup_deleted",
+          "data": {
+            "device_folder_id": "000000c8-0000-4000-8000-0000000000aa",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa"
+          },
+          "created_at_ms": 1762430400001
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": false
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": [
+        {
+          "category": "pictures",
+          "reason": "unknown"
+        }
+      ]
+    },
+    {
       "id": "stop_files_removed_unknown_reason_still_stops",
       "kind": "stop",
       "notices": [

@@ -251,8 +251,8 @@ rebuild("rebuild_no_offset_known_wider_margin_wins_over_the_floor",
 # Why a backup stops (spec Amendments 12 and 12a, LD-0121; Guus 2026-11-06: "Stop, say why, offer Back up again").
 # A notice counts only when the server wrote it after the device's last pass (created_at_ms > last_pass_at_ms, both
 # on the server's clock). 1. a files_removed notice turns EVERY listed backup off with its reason (the newest wins),
-# even when the folders are there; 2. otherwise, per backup, a backup_deleted notice naming the device folder (no
-# category id) or the backup's category folder turns it off as backup_deleted; 3. otherwise a device or category
+# even when the folders are there; 2. otherwise, per backup, a backup_deleted notice naming this device's folder, with
+# no category id or with the backup's category folder, turns it off as backup_deleted; 3. otherwise a device or category
 # folder trashed or gone with no notice turns it off as unknown; 4. otherwise nothing changes. The result is in
 # category key order. Notices are the rows as the server writes them: type, data, created_at_ms.
 DEV, PICS, DOCS = uid(100), uid(101), uid(102)
@@ -324,6 +324,11 @@ stop("stop_restored_category_with_a_notice_still_stops", [deleted(DEV, PICS)], l
 stop("stop_one_folder_named_another_gone_silently", [deleted(DEV, PICS)], listing(pics=False, docs=False),
      [off("documents", "unknown"), off("pictures", "backup_deleted")])
 stop("stop_backup_deleted_for_another_device_ignored", [deleted(OTHER_DEV), deleted(OTHER_DEV, OTHER_CAT)], listing(), [])
+# A category notice counts only when it names this device's folder too (review): with another device's folder id it
+# names nothing here (its words would name the wrong device); a folder that is really gone still stops at step 3.
+stop("stop_category_notice_with_another_device_folder_ignored", [deleted(OTHER_DEV, PICS)], listing(), [])
+stop("stop_category_notice_with_another_device_folder_gone_is_unknown", [deleted(OTHER_DEV, PICS)],
+     listing(pics=False), [off("pictures", "unknown")])
 # A files_removed notice whose reason this version does not know still stops (stop and say why), with the unknown
 # words; a row of any other type is not a backup notice.
 stop("stop_files_removed_unknown_reason_still_stops",

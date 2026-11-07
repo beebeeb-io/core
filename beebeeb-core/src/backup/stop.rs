@@ -144,8 +144,10 @@ pub struct StoppedBackup {
 ///    files, not folders). With several, the newest wins (Amendment 12a);
 ///    on a tie, the reason whose wire string sorts first.
 /// 2. Otherwise, for each backup: a `backup_deleted` notice that names this
-///    device's folder (no category id) or this backup's category folder turns
-///    it off as `BackupDeleted`.
+///    device's folder, with no category id or with this backup's category
+///    folder, turns it off as `BackupDeleted`. A notice whose device folder is
+///    another device's (or does not parse) counts for nothing here; a folder
+///    that is really gone still stops at step 3.
 /// 3. Otherwise, a device or category folder that is trashed or gone with no
 ///    notice turns it off as `Unknown` (the person dismissed the notice before
 ///    the device saw it, or the device was offline a long time).
@@ -174,9 +176,14 @@ pub fn backup_stop(notices: &[ReceivedNotice], last_pass_at_ms: i64, listing: &S
             category_folder_id,
         } = &n.notice
         {
+            // Only a notice about this device's folder counts; a category
+            // notice must name both this device's folder and the category's.
+            if Uuid::parse_str(device_folder_id).ok() != Some(listing.device_folder_id) {
+                continue;
+            }
             match category_folder_id {
                 Some(category) => categories_deleted.extend(Uuid::parse_str(category).ok()),
-                None => device_deleted |= Uuid::parse_str(device_folder_id).ok() == Some(listing.device_folder_id),
+                None => device_deleted = true,
             }
         }
     }

@@ -112,7 +112,7 @@ fn run_plan_case(case: &Value) -> Value {
 #[test]
 fn backup_plan_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 112, "every named backup_plan case is present");
+    assert_eq!(cases.len(), 114, "every named backup_plan case is present");
 
     let (mut plans, mut keys, mut presences, mut rebuilds) = (0, 0, 0, 0);
     let (mut stops, mut notices, mut words, mut actions) = (0, 0, 0, 0);
@@ -217,7 +217,7 @@ fn backup_plan_cases_match_core() {
     );
     assert_eq!(
         (stops, notices, words, actions),
-        (19, 9, 6, 1),
+        (21, 9, 6, 1),
         "stop case counts per kind"
     );
 }

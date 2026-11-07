@@ -151,16 +151,6 @@ pub fn backup_parse_manifest(json: &str) -> Result<JsValue, JsError> {
 
 // ── Why a backup stops (spec Amendment 12, LD-0121) ───────────────────────
 
-/// A `notifications` row as the API lists it.
-#[derive(Deserialize)]
-struct NoticeRowJs {
-    #[serde(rename = "type")]
-    kind: String,
-    #[serde(default)]
-    data: serde_json::Value,
-    created_at_ms: i64,
-}
-
 #[derive(Deserialize)]
 struct StopFolderJs {
     category: String,
@@ -183,6 +173,42 @@ struct StoppedJs {
     reason: &'static str,
 }
 
+/// The largest integer a JS number holds exactly (`Number.MAX_SAFE_INTEGER`).
+const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+
+/// A whole number of milliseconds from a JS number (an integer, or a float
+/// with no fraction within the safe range), else `None`.
+fn whole_ms(value: &serde_json::Value) -> Option<i64> {
+    value.as_i64().or_else(|| {
+        value
+            .as_f64()
+            .filter(|f| f.is_finite() && f.fract() == 0.0 && f.abs() <= MAX_SAFE_INTEGER)
+            .map(|f| f as i64)
+    })
+}
+
+/// The backup notices among `rows`, read leniently: a row that is not a backup
+/// notice is skipped whatever its shape (no `type`, no time, another type). A
+/// backup notice without a whole `created_at_ms` throws: the call cannot place
+/// it before or after the last pass, and guessing either way is wrong.
+fn backup_notices(rows: &[serde_json::Value]) -> Result<Vec<ReceivedNotice>, JsError> {
+    let mut notices = Vec::new();
+    for row in rows {
+        let Some(kind) = row.get("type").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(notice) = parse_backup_notice(kind, row.get("data").unwrap_or(&serde_json::Value::Null)) else {
+            continue;
+        };
+        let created_at_ms = row
+            .get("created_at_ms")
+            .and_then(whole_ms)
+            .ok_or_else(|| JsError::new("a backup notice row has no whole created_at_ms"))?;
+        notices.push(ReceivedNotice { notice, created_at_ms });
+    }
+    Ok(notices)
+}
+
 fn parse_uuid(field: &str, s: &str) -> Result<Uuid, JsError> {
     Uuid::parse_str(s).map_err(|_| JsError::new(&format!("{field} is not a UUID")))
 }
@@ -194,7 +220,8 @@ fn parse_stop_reason(reason: &str) -> Result<BackupStopReason, JsError> {
 /// Which backups turn off on this pass, and why (spec Amendment 12, steps
 /// 1-4): `[{category, reason}]` in category key order, empty when nothing
 /// changes. `notices`: the `notifications` rows (`{type, data,
-/// created_at_ms}`); a row of another type is skipped. `lastPassAtMs`: on the
+/// created_at_ms}`); a row that is not a backup notice is skipped whatever its
+/// shape, and a backup notice without a whole `created_at_ms` throws. `lastPassAtMs`: on the
 /// server's clock, when this device's previous pass started, or when the
 /// person last turned a backup on or chose "Back up again" since. `listing`:
 /// `{device_folder_id, device_folder_live, folders: [{category,
@@ -202,25 +229,13 @@ fn parse_stop_reason(reason: &str) -> Result<BackupStopReason, JsError> {
 /// id that is not a UUID throws.
 #[wasm_bindgen(js_name = backupStop)]
 pub fn backup_stop(notices: JsValue, last_pass_at_ms: f64, listing: JsValue) -> Result<JsValue, JsError> {
-    if !(last_pass_at_ms.is_finite()
-        && last_pass_at_ms.fract() == 0.0
-        && last_pass_at_ms.abs() <= 9_007_199_254_740_991.0)
-    {
-        return Err(JsError::new("lastPassAtMs is not a whole number of milliseconds"));
-    }
-    let rows: Vec<NoticeRowJs> =
+    let last_pass_at_ms = whole_ms(&serde_json::Value::from(last_pass_at_ms))
+        .ok_or_else(|| JsError::new("lastPassAtMs is not a whole number of milliseconds"))?;
+    let rows: Vec<serde_json::Value> =
         serde_wasm_bindgen::from_value(notices).map_err(|e| JsError::new(&format!("invalid notices: {e}")))?;
     let listing: StopListingJs =
         serde_wasm_bindgen::from_value(listing).map_err(|e| JsError::new(&format!("invalid listing: {e}")))?;
-    let notices: Vec<ReceivedNotice> = rows
-        .iter()
-        .filter_map(|row| {
-            parse_backup_notice(&row.kind, &row.data).map(|notice| ReceivedNotice {
-                notice,
-                created_at_ms: row.created_at_ms,
-            })
-        })
-        .collect();
+    let notices = backup_notices(&rows)?;
     let listing = StopListing {
         device_folder_id: parse_uuid("device_folder_id", &listing.device_folder_id)?,
         device_folder_live: listing.device_folder_live,
@@ -240,7 +255,7 @@ pub fn backup_stop(notices: JsValue, last_pass_at_ms: f64, listing: JsValue) -> 
             })
             .collect::<Result<Vec<_>, JsError>>()?,
     };
-    let stopped: Vec<StoppedJs> = beebeeb_core::backup::backup_stop(&notices, last_pass_at_ms as i64, &listing)
+    let stopped: Vec<StoppedJs> = beebeeb_core::backup::backup_stop(&notices, last_pass_at_ms, &listing)
         .into_iter()
         .map(|s| StoppedJs {
             category: s.category.key(),
