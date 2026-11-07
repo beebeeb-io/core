@@ -640,6 +640,15 @@ internal interface UniffiCallbackInterfaceDomainNotifierCallbackMethod0 : com.su
 internal interface UniffiCallbackInterfacePlatformTransferCancellerCallbackMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`tickets`: RustBuffer.ByValue,`uniffiOutReturn`: ByteByReference,uniffiCallStatus: UniffiRustCallStatus,)
 }
+internal interface UniffiCallbackInterfacePasskeyPromptMethod0 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`accountId`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfacePasskeyPromptMethod1 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`accountId`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceSecretStoreCallbackMethod0 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`name`: RustBuffer.ByValue,`uniffiOutReturn`: ByteByReference,uniffiCallStatus: UniffiRustCallStatus,)
+}
 internal interface UniffiCallbackInterfaceChunkTransportMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`location`: RustBuffer.ByValue,`headers`: RustBuffer.ByValue,`bodyPath`: RustBuffer.ByValue,`uniffiOutReturn`: ShortByReference,uniffiCallStatus: UniffiRustCallStatus,)
 }
@@ -651,15 +660,6 @@ internal interface UniffiCallbackInterfaceChunkTransportMethod2 : com.sun.jna.Ca
 }
 internal interface UniffiCallbackInterfaceImageCodecCallbackMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`sourcePath`: RustBuffer.ByValue,`maxDimension`: Int,`quality`: Float,`format`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
-}
-internal interface UniffiCallbackInterfacePasskeyPromptMethod0 : com.sun.jna.Callback {
-    fun callback(`uniffiHandle`: Long,`accountId`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
-}
-internal interface UniffiCallbackInterfacePasskeyPromptMethod1 : com.sun.jna.Callback {
-    fun callback(`uniffiHandle`: Long,`accountId`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
-}
-internal interface UniffiCallbackInterfaceSecretStoreCallbackMethod0 : com.sun.jna.Callback {
-    fun callback(`uniffiHandle`: Long,`name`: RustBuffer.ByValue,`uniffiOutReturn`: ByteByReference,uniffiCallStatus: UniffiRustCallStatus,)
 }
 @Structure.FieldOrder("uniffiFree", "uniffiClone", "onProgress")
 internal open class UniffiVTableCallbackInterfaceFileProgressCallback(
@@ -784,6 +784,47 @@ internal open class UniffiVTableCallbackInterfacePlatformTransferCancellerCallba
     }
 
 }
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "create", "authenticate")
+internal open class UniffiVTableCallbackInterfacePasskeyPrompt(
+    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+    @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+    @JvmField internal var `create`: UniffiCallbackInterfacePasskeyPromptMethod0? = null,
+    @JvmField internal var `authenticate`: UniffiCallbackInterfacePasskeyPromptMethod1? = null,
+) : Structure() {
+    class UniffiByValue(
+        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+        `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+        `create`: UniffiCallbackInterfacePasskeyPromptMethod0? = null,
+        `authenticate`: UniffiCallbackInterfacePasskeyPromptMethod1? = null,
+    ): UniffiVTableCallbackInterfacePasskeyPrompt(`uniffiFree`,`uniffiClone`,`create`,`authenticate`,), Structure.ByValue
+
+   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfacePasskeyPrompt) {
+        `uniffiFree` = other.`uniffiFree`
+        `uniffiClone` = other.`uniffiClone`
+        `create` = other.`create`
+        `authenticate` = other.`authenticate`
+    }
+
+}
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "authorizeAccess")
+internal open class UniffiVTableCallbackInterfaceSecretStoreCallback(
+    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+    @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+    @JvmField internal var `authorizeAccess`: UniffiCallbackInterfaceSecretStoreCallbackMethod0? = null,
+) : Structure() {
+    class UniffiByValue(
+        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+        `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+        `authorizeAccess`: UniffiCallbackInterfaceSecretStoreCallbackMethod0? = null,
+    ): UniffiVTableCallbackInterfaceSecretStoreCallback(`uniffiFree`,`uniffiClone`,`authorizeAccess`,), Structure.ByValue
+
+   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceSecretStoreCallback) {
+        `uniffiFree` = other.`uniffiFree`
+        `uniffiClone` = other.`uniffiClone`
+        `authorizeAccess` = other.`authorizeAccess`
+    }
+
+}
 @Structure.FieldOrder("uniffiFree", "uniffiClone", "uploadFile", "downloadRange", "cancelBackground")
 internal open class UniffiVTableCallbackInterfaceChunkTransport(
     @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
@@ -825,47 +866,6 @@ internal open class UniffiVTableCallbackInterfaceImageCodecCallback(
         `uniffiFree` = other.`uniffiFree`
         `uniffiClone` = other.`uniffiClone`
         `encode` = other.`encode`
-    }
-
-}
-@Structure.FieldOrder("uniffiFree", "uniffiClone", "create", "authenticate")
-internal open class UniffiVTableCallbackInterfacePasskeyPrompt(
-    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
-    @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
-    @JvmField internal var `create`: UniffiCallbackInterfacePasskeyPromptMethod0? = null,
-    @JvmField internal var `authenticate`: UniffiCallbackInterfacePasskeyPromptMethod1? = null,
-) : Structure() {
-    class UniffiByValue(
-        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
-        `uniffiClone`: UniffiCallbackInterfaceClone? = null,
-        `create`: UniffiCallbackInterfacePasskeyPromptMethod0? = null,
-        `authenticate`: UniffiCallbackInterfacePasskeyPromptMethod1? = null,
-    ): UniffiVTableCallbackInterfacePasskeyPrompt(`uniffiFree`,`uniffiClone`,`create`,`authenticate`,), Structure.ByValue
-
-   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfacePasskeyPrompt) {
-        `uniffiFree` = other.`uniffiFree`
-        `uniffiClone` = other.`uniffiClone`
-        `create` = other.`create`
-        `authenticate` = other.`authenticate`
-    }
-
-}
-@Structure.FieldOrder("uniffiFree", "uniffiClone", "authorizeAccess")
-internal open class UniffiVTableCallbackInterfaceSecretStoreCallback(
-    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
-    @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
-    @JvmField internal var `authorizeAccess`: UniffiCallbackInterfaceSecretStoreCallbackMethod0? = null,
-) : Structure() {
-    class UniffiByValue(
-        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
-        `uniffiClone`: UniffiCallbackInterfaceClone? = null,
-        `authorizeAccess`: UniffiCallbackInterfaceSecretStoreCallbackMethod0? = null,
-    ): UniffiVTableCallbackInterfaceSecretStoreCallback(`uniffiFree`,`uniffiClone`,`authorizeAccess`,), Structure.ByValue
-
-   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceSecretStoreCallback) {
-        `uniffiFree` = other.`uniffiFree`
-        `uniffiClone` = other.`uniffiClone`
-        `authorizeAccess` = other.`authorizeAccess`
     }
 
 }
@@ -1500,9 +1500,91 @@ external fun uniffi_beebeeb_uniffi_checksum_method_authservicehandle_submit_two_
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_authservicehandle_unlock_known_device(
 ): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_contactservicehandle_accept(
+external fun uniffi_beebeeb_uniffi_checksum_method_emailcodechallengehandle_expires_at(
 ): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_contactservicehandle_observe(
+external fun uniffi_beebeeb_uniffi_checksum_method_emailcodechallengehandle_message(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_emailcodetickethandle_expires_in(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_passwordacceptedhandle_canonical_email(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_passwordacceptedhandle_owner(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_eventstreamhandle_next(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_backup(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_file_provider(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_prepare_account_replacement(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_service_coordinator(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sign_out_this_app(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_auth(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_contacts(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_devices(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_downloads(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_events(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_files(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_generation(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_load_session(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_settings(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_shares(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sync(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_thumbnails(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_uploads(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_storehandle_prepare_for_suspension(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_filepagehandle_next_cursor(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_filepagehandle_records(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_create_folder(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_delete_forever(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_get(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_list_page(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_move_entry(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_rename(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_restore(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_restore_version(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_trash(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_searchservicehandle_index_page(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_searchservicehandle_query(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_searchservicehandle_remove(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_catch_up(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_foreground_once(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_recover_gap(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_refresh_snapshot(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_acknowledge_device_link(
 ): Short
@@ -1542,107 +1624,25 @@ external fun uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_list(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_remove(
 ): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_downloadservicehandle_cancel(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_downloadservicehandle_clear_cache(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_downloadservicehandle_open(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_emailcodechallengehandle_expires_at(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_emailcodechallengehandle_message(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_emailcodetickethandle_expires_in(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_eventstreamhandle_next(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_filepagehandle_next_cursor(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_filepagehandle_records(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_create_folder(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_delete_forever(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_get(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_list_page(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_move_entry(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_rename(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_restore(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_restore_version(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_trash(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_backup(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_file_provider(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_prepare_account_replacement(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_service_coordinator(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sign_out_this_app(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_auth(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_contacts(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_devices(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_downloads(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_events(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_files(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_generation(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_load_session(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_settings(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_shares(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sync(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_thumbnails(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_uploads(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_passwordacceptedhandle_canonical_email(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_passwordacceptedhandle_owner(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_searchservicehandle_index_page(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_searchservicehandle_query(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_searchservicehandle_remove(
-): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_settingsservicehandle_load_local(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_settingsservicehandle_save_local(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_settingsservicehandle_set_version_history(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_contactservicehandle_accept(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_contactservicehandle_observe(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_shareservicehandle_create_link(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_shareservicehandle_revoke_folder_link(
 ): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_storehandle_prepare_for_suspension(
+external fun uniffi_beebeeb_uniffi_checksum_method_downloadservicehandle_cancel(
 ): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_catch_up(
+external fun uniffi_beebeeb_uniffi_checksum_method_downloadservicehandle_clear_cache(
 ): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_foreground_once(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_recover_gap(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_refresh_snapshot(
+external fun uniffi_beebeeb_uniffi_checksum_method_downloadservicehandle_open(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_thumbnailservicehandle_clear(
 ): Short
@@ -1714,9 +1714,9 @@ external fun uniffi_beebeeb_uniffi_checksum_constructor_signupceremonyhandle_new
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_nativeclienthandle_new(
 ): Short
-external fun uniffi_beebeeb_uniffi_checksum_constructor_searchservicehandle_new(
-): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_storehandle_open(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_searchservicehandle_new(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_fileprogresscallback_on_progress(
 ): Short
@@ -1736,6 +1736,12 @@ external fun uniffi_beebeeb_uniffi_checksum_method_domainnotifiercallback_signal
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_platformtransfercancellercallback_cancel(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_passkeyprompt_create(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_passkeyprompt_authenticate(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_secretstorecallback_authorize_access(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_chunktransport_upload_file(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_chunktransport_download_range(
@@ -1743,12 +1749,6 @@ external fun uniffi_beebeeb_uniffi_checksum_method_chunktransport_download_range
 external fun uniffi_beebeeb_uniffi_checksum_method_chunktransport_cancel_background(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_imagecodeccallback_encode(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_passkeyprompt_create(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_passkeyprompt_authenticate(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_method_secretstorecallback_authorize_access(
 ): Short
 external fun ffi_beebeeb_uniffi_uniffi_contract_version(
 ): Int
@@ -2444,66 +2444,6 @@ external fun uniffi_beebeeb_uniffi_fn_method_authservicehandle_submit_two_factor
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_method_authservicehandle_unlock_known_device(`ptr`: Long,`accepted`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
-external fun uniffi_beebeeb_uniffi_fn_clone_contactservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_free_contactservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_contactservicehandle_accept(`ptr`: Long,`contactId`: RustBuffer.ByValue,`observedAt`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_contactservicehandle_observe(`ptr`: Long,`contactId`: RustBuffer.ByValue,`observedAt`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_clone_deviceservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_free_deviceservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_acknowledge_device_link(`ptr`: Long,`approval`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_approve_device_link(`ptr`: Long,`id`: RustBuffer.ByValue,`qr`: RustBuffer.ByValue,`typedCode`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_approve_typed_device_link(`ptr`: Long,`approval`: Long,`newDeviceMessage`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_begin_typed_device_approval(`ptr`: Long,`id`: RustBuffer.ByValue,`typedCode`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_deny_device_link(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_list_account_sessions(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_pending_device_links(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_poll_device_link(`ptr`: Long,`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_poll_typed_device_link(`ptr`: Long,`receiver`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_revoke_account_session(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_send_typed_approval_message(`ptr`: Long,`id`: RustBuffer.ByValue,`message`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_send_typed_new_device_message(`ptr`: Long,`id`: RustBuffer.ByValue,`message`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_start_device_link(`ptr`: Long,`deviceName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_start_device_link_for_sign_in(`ptr`: Long,`accepted`: Long,`deviceName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_typed_approval_message(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_typed_new_device_message(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_sign_out_whole_device(`ptr`: Long,`coordinator`: Long,`deviceId`: RustBuffer.ByValue,`confirmLastDevice`: Byte,`canceller`: Long,`purger`: Long,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_list(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_remove(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_clone_downloadservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_free_downloadservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_downloadservicehandle_cancel(`ptr`: Long,`fileId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_downloadservicehandle_clear_cache(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_downloadservicehandle_open(`ptr`: Long,`file`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_clone_emailcodechallengehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_emailcodechallengehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -2518,42 +2458,20 @@ external fun uniffi_beebeeb_uniffi_fn_free_emailcodetickethandle(`handle`: Long,
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_method_emailcodetickethandle_expires_in(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
+external fun uniffi_beebeeb_uniffi_fn_clone_passwordacceptedhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_passwordacceptedhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_passwordacceptedhandle_canonical_email(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_passwordacceptedhandle_owner(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_clone_eventstreamhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_eventstreamhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_method_eventstreamhandle_next(`ptr`: Long,`timeoutMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_clone_filepagehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_free_filepagehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_filepagehandle_next_cursor(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_filepagehandle_records(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_clone_fileservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_free_fileservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_create_folder(`ptr`: Long,`name`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_delete_forever(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_get(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_list_page(`ptr`: Long,`parentId`: RustBuffer.ByValue,`trashed`: Byte,`cursor`: RustBuffer.ByValue,`limit`: Short,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_move_entry(`ptr`: Long,`page`: Long,`id`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_rename(`ptr`: Long,`page`: Long,`id`: RustBuffer.ByValue,`newName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_restore(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_restore_version(`ptr`: Long,`store`: Long,`fileId`: RustBuffer.ByValue,`versionId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_trash(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
 external fun uniffi_beebeeb_uniffi_fn_clone_nativeclienthandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_nativeclienthandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -2596,14 +2514,44 @@ external fun uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_thumbnails(`ptr`
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_uploads(`ptr`: Long,`store`: Long,`stagingRoot`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`product`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
-external fun uniffi_beebeeb_uniffi_fn_clone_passwordacceptedhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_beebeeb_uniffi_fn_clone_storehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
-external fun uniffi_beebeeb_uniffi_fn_free_passwordacceptedhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_beebeeb_uniffi_fn_free_storehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_passwordacceptedhandle_canonical_email(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_beebeeb_uniffi_fn_constructor_storehandle_open(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_storehandle_prepare_for_suspension(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_clone_filepagehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_filepagehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_filepagehandle_next_cursor(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_passwordacceptedhandle_owner(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_beebeeb_uniffi_fn_method_filepagehandle_records(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_clone_fileservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_fileservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_create_folder(`ptr`: Long,`name`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_delete_forever(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_get(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_list_page(`ptr`: Long,`parentId`: RustBuffer.ByValue,`trashed`: Byte,`cursor`: RustBuffer.ByValue,`limit`: Short,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_move_entry(`ptr`: Long,`page`: Long,`id`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_rename(`ptr`: Long,`page`: Long,`id`: RustBuffer.ByValue,`newName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_restore(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_restore_version(`ptr`: Long,`store`: Long,`fileId`: RustBuffer.ByValue,`versionId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_fileservicehandle_trash(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_beebeeb_uniffi_fn_clone_searchservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_searchservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -2615,32 +2563,6 @@ external fun uniffi_beebeeb_uniffi_fn_method_searchservicehandle_index_page(`ptr
 external fun uniffi_beebeeb_uniffi_fn_method_searchservicehandle_query(`ptr`: Long,`query`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_searchservicehandle_remove(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_clone_settingsservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_free_settingsservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_settingsservicehandle_load_local(`ptr`: Long,`deviceId`: RustBuffer.ByValue,`product`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_settingsservicehandle_save_local(`ptr`: Long,`deviceId`: RustBuffer.ByValue,`product`: RustBuffer.ByValue,`settings`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_settingsservicehandle_set_version_history(`ptr`: Long,`enabled`: Byte,`retentionDays`: Short,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_clone_shareservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_free_shareservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_shareservicehandle_create_link(`ptr`: Long,`fileId`: RustBuffer.ByValue,`wrappedFileKey`: RustBuffer.ByValue,`expiresInHours`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_shareservicehandle_revoke_folder_link(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_clone_storehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_free_storehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_constructor_storehandle_open(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_beebeeb_uniffi_fn_method_storehandle_prepare_for_suspension(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_clone_syncservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
@@ -2654,6 +2576,84 @@ external fun uniffi_beebeeb_uniffi_fn_method_syncservicehandle_recover_gap(`ptr`
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_method_syncservicehandle_refresh_snapshot(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_beebeeb_uniffi_fn_clone_deviceservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_deviceservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_acknowledge_device_link(`ptr`: Long,`approval`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_approve_device_link(`ptr`: Long,`id`: RustBuffer.ByValue,`qr`: RustBuffer.ByValue,`typedCode`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_approve_typed_device_link(`ptr`: Long,`approval`: Long,`newDeviceMessage`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_begin_typed_device_approval(`ptr`: Long,`id`: RustBuffer.ByValue,`typedCode`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_deny_device_link(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_list_account_sessions(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_pending_device_links(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_poll_device_link(`ptr`: Long,`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_poll_typed_device_link(`ptr`: Long,`receiver`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_revoke_account_session(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_send_typed_approval_message(`ptr`: Long,`id`: RustBuffer.ByValue,`message`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_send_typed_new_device_message(`ptr`: Long,`id`: RustBuffer.ByValue,`message`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_start_device_link(`ptr`: Long,`deviceName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_start_device_link_for_sign_in(`ptr`: Long,`accepted`: Long,`deviceName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_typed_approval_message(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_typed_new_device_message(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_sign_out_whole_device(`ptr`: Long,`coordinator`: Long,`deviceId`: RustBuffer.ByValue,`confirmLastDevice`: Byte,`canceller`: Long,`purger`: Long,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_list(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_remove(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_clone_settingsservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_settingsservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_settingsservicehandle_load_local(`ptr`: Long,`deviceId`: RustBuffer.ByValue,`product`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_settingsservicehandle_save_local(`ptr`: Long,`deviceId`: RustBuffer.ByValue,`product`: RustBuffer.ByValue,`settings`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_settingsservicehandle_set_version_history(`ptr`: Long,`enabled`: Byte,`retentionDays`: Short,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_clone_contactservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_contactservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_contactservicehandle_accept(`ptr`: Long,`contactId`: RustBuffer.ByValue,`observedAt`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_contactservicehandle_observe(`ptr`: Long,`contactId`: RustBuffer.ByValue,`observedAt`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_clone_shareservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_shareservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_shareservicehandle_create_link(`ptr`: Long,`fileId`: RustBuffer.ByValue,`wrappedFileKey`: RustBuffer.ByValue,`expiresInHours`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_shareservicehandle_revoke_folder_link(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_clone_downloadservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_downloadservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_downloadservicehandle_cancel(`ptr`: Long,`fileId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_downloadservicehandle_clear_cache(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_downloadservicehandle_open(`ptr`: Long,`file`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_clone_thumbnailservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_thumbnailservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -2694,13 +2694,13 @@ external fun uniffi_beebeeb_uniffi_fn_init_callback_vtable_domainnotifiercallbac
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_init_callback_vtable_platformtransfercancellercallback(`vtable`: UniffiVTableCallbackInterfacePlatformTransferCancellerCallback,
 ): Unit
-external fun uniffi_beebeeb_uniffi_fn_init_callback_vtable_chunktransport(`vtable`: UniffiVTableCallbackInterfaceChunkTransport,
-): Unit
-external fun uniffi_beebeeb_uniffi_fn_init_callback_vtable_imagecodeccallback(`vtable`: UniffiVTableCallbackInterfaceImageCodecCallback,
-): Unit
 external fun uniffi_beebeeb_uniffi_fn_init_callback_vtable_passkeyprompt(`vtable`: UniffiVTableCallbackInterfacePasskeyPrompt,
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_init_callback_vtable_secretstorecallback(`vtable`: UniffiVTableCallbackInterfaceSecretStoreCallback,
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_init_callback_vtable_chunktransport(`vtable`: UniffiVTableCallbackInterfaceChunkTransport,
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_init_callback_vtable_imagecodeccallback(`vtable`: UniffiVTableCallbackInterfaceImageCodecCallback,
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_func_breach_verdict_allows_proceeding(`verdict`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
@@ -3638,10 +3638,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_recoveredsessionhandle_owner() != 49827.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_recoveryattempthandle_cancel() != 65119.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_recoveryattempthandle_cancel() != 27703.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_recoveryattempthandle_complete() != 37835.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_recoveryattempthandle_complete() != 50139.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_recoveryattempthandle_id() != 44419.toShort()) {
@@ -3650,7 +3650,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_recoveryattempthandle_ready_at() != 37150.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_recoveryattempthandle_status() != 32728.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_recoveryattempthandle_status() != 36508.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_recoveryattempthandle_waits() != 38817.toShort()) {
@@ -3737,10 +3737,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_children() != 46589.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_create_file() != 27223.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_create_file() != 56410.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_create_folder() != 1163.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_create_folder() != 41044.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_delete() != 8447.toShort()) {
@@ -3749,13 +3749,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_delete_local() != 46274.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_fetch_contents() != 1181.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_fetch_contents() != 1950.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_item() != 38779.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_modify() != 32389.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_modify() != 47982.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_set_system_items() != 15680.toShort()) {
@@ -3764,7 +3764,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_work_state() != 36637.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_servicecoordinatorhandle_start() != 43713.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_servicecoordinatorhandle_start() != 63986.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_chunk_format() != 45751.toShort()) {
@@ -3779,10 +3779,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_open_frame() != 5620.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authchallengehandle_canonical_email() != 9736.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authchallengehandle_canonical_email() != 30433.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authchallengehandle_kind() != 22789.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authchallengehandle_kind() != 25087.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_change_email() != 48731.toShort()) {
@@ -3794,10 +3794,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_enable_authenticator() != 34763.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_device_approval() != 39436.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_device_approval() != 1579.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_device_approval_replacing_account() != 63832.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_device_approval_replacing_account() != 352.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_recovered_session() != 46442.toShort()) {
@@ -3824,49 +3824,172 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_start_recovery_with_password() != 62447.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_accept_password() != 10784.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_accept_password() != 33322.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_create_passkey_copy() != 8792.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_create_passkey_copy() != 11395.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_new_device_with_passkey() != 52074.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_new_device_with_passkey() != 53043.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_new_device_with_passkey_replacing_account() != 57224.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_new_device_with_passkey_replacing_account() != 53556.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_new_device_with_recovery_key() != 2666.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_new_device_with_recovery_key() != 6961.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_new_device_with_recovery_key_replacing_account() != 63983.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_install_new_device_with_recovery_key_replacing_account() != 15215.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_open_with_passkey() != 32298.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_open_with_passkey() != 44323.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_request_email_code() != 7966.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_request_email_code() != 58646.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_sign_in() != 3041.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_sign_in() != 19493.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_sign_in_on_device() != 40693.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_sign_in_on_device() != 24466.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_submit_email_code() != 2243.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_submit_email_code() != 16213.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_submit_two_factor() != 60363.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_submit_two_factor() != 12764.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_unlock_known_device() != 32211.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_authservicehandle_unlock_known_device() != 23352.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_contactservicehandle_accept() != 34234.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_emailcodechallengehandle_expires_at() != 35463.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_contactservicehandle_observe() != 6426.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_emailcodechallengehandle_message() != 31770.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_emailcodetickethandle_expires_in() != 46463.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_passwordacceptedhandle_canonical_email() != 9512.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_passwordacceptedhandle_owner() != 26537.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_eventstreamhandle_next() != 14144.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_backup() != 39255.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_file_provider() != 23944.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_prepare_account_replacement() != 31668.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_service_coordinator() != 3296.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sign_out_this_app() != 21684.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_auth() != 15199.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_contacts() != 19540.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_devices() != 4554.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_downloads() != 60144.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_events() != 17410.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_files() != 60938.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_generation() != 31725.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_load_session() != 17813.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_settings() != 30271.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_shares() != 8637.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sync() != 62927.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_thumbnails() != 31903.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_uploads() != 38026.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_storehandle_prepare_for_suspension() != 126.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_filepagehandle_next_cursor() != 14223.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_filepagehandle_records() != 45978.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_create_folder() != 3407.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_delete_forever() != 41752.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_get() != 33560.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_list_page() != 41559.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_move_entry() != 24301.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_rename() != 51185.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_restore() != 49470.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_restore_version() != 3454.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_trash() != 20879.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_searchservicehandle_index_page() != 40032.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_searchservicehandle_query() != 38084.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_searchservicehandle_remove() != 36302.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_catch_up() != 27050.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_foreground_once() != 28495.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_recover_gap() != 42058.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_refresh_snapshot() != 11778.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_acknowledge_device_link() != 20880.toShort()) {
@@ -3908,7 +4031,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_start_device_link() != 20240.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_start_device_link_for_sign_in() != 2472.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_start_device_link_for_sign_in() != 62530.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_typed_approval_message() != 31463.toShort()) {
@@ -3920,193 +4043,70 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_sign_out_whole_device() != 56713.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_list() != 26103.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_list() != 27053.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_remove() != 57377.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_remove() != 42558.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_downloadservicehandle_cancel() != 63782.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_settingsservicehandle_load_local() != 52814.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_downloadservicehandle_clear_cache() != 32778.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_settingsservicehandle_save_local() != 9902.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_downloadservicehandle_open() != 55066.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_settingsservicehandle_set_version_history() != 35932.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_emailcodechallengehandle_expires_at() != 54123.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_contactservicehandle_accept() != 40123.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_emailcodechallengehandle_message() != 7191.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_contactservicehandle_observe() != 53748.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_emailcodetickethandle_expires_in() != 50374.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_shareservicehandle_create_link() != 39871.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_eventstreamhandle_next() != 43943.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_shareservicehandle_revoke_folder_link() != 45913.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_filepagehandle_next_cursor() != 3126.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_downloadservicehandle_cancel() != 57975.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_filepagehandle_records() != 48940.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_downloadservicehandle_clear_cache() != 41907.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_create_folder() != 48416.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_downloadservicehandle_open() != 16739.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_delete_forever() != 42987.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_thumbnailservicehandle_clear() != 41568.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_get() != 21168.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_thumbnailservicehandle_enqueue() != 14826.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_list_page() != 11560.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_thumbnailservicehandle_get() != 39173.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_move_entry() != 8372.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_thumbnailservicehandle_run_next() != 42806.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_rename() != 58101.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_cancel() != 49349.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_restore() != 2939.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_enqueue() != 38546.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_restore_version() != 3776.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_list() != 35362.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_fileservicehandle_trash() != 44477.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_pause() != 62124.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_backup() != 24696.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_resume() != 19695.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_file_provider() != 23944.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_prepare_account_replacement() != 31668.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_service_coordinator() != 54752.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sign_out_this_app() != 21684.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_auth() != 23581.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_contacts() != 58584.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_devices() != 6506.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_downloads() != 46371.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_events() != 25272.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_files() != 22902.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_generation() != 35527.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_load_session() != 23146.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_settings() != 15791.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_shares() != 28644.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sync() != 34631.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_thumbnails() != 64700.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_uploads() != 37968.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_passwordacceptedhandle_canonical_email() != 4557.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_passwordacceptedhandle_owner() != 56337.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_searchservicehandle_index_page() != 52420.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_searchservicehandle_query() != 1166.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_searchservicehandle_remove() != 59570.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_settingsservicehandle_load_local() != 59820.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_settingsservicehandle_save_local() != 37880.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_settingsservicehandle_set_version_history() != 58430.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_shareservicehandle_create_link() != 37032.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_shareservicehandle_revoke_folder_link() != 35642.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_storehandle_prepare_for_suspension() != 60982.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_catch_up() != 65142.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_foreground_once() != 30534.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_recover_gap() != 56330.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_syncservicehandle_refresh_snapshot() != 32239.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_thumbnailservicehandle_clear() != 51714.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_thumbnailservicehandle_enqueue() != 63640.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_thumbnailservicehandle_get() != 59821.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_thumbnailservicehandle_run_next() != 45808.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_cancel() != 59804.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_enqueue() != 9949.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_list() != 10473.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_pause() != 7932.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_resume() != 11467.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_run_next() != 37677.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_run_next() != 45328.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_breachcheckhandle_new() != 51691.toShort()) {
@@ -4181,13 +4181,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_signupceremonyhandle_new() != 22479.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_nativeclienthandle_new() != 30108.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_nativeclienthandle_new() != 1687.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_searchservicehandle_new() != 59702.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_storehandle_open() != 10955.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_storehandle_open() != 53496.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_searchservicehandle_new() != 65022.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_fileprogresscallback_on_progress() != 13325.toShort()) {
@@ -4217,25 +4217,25 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_platformtransfercancellercallback_cancel() != 59187.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_chunktransport_upload_file() != 41345.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_passkeyprompt_create() != 33222.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_chunktransport_download_range() != 9216.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_passkeyprompt_authenticate() != 258.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_chunktransport_cancel_background() != 4288.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_secretstorecallback_authorize_access() != 58143.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_imagecodeccallback_encode() != 15496.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_chunktransport_upload_file() != 13271.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_passkeyprompt_create() != 25155.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_chunktransport_download_range() != 40279.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_passkeyprompt_authenticate() != 49735.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_chunktransport_cancel_background() != 34685.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_secretstorecallback_authorize_access() != 21635.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_imagecodeccallback_encode() != 10715.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
