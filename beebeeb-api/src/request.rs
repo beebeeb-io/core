@@ -30,15 +30,51 @@ impl Header {
     }
 }
 
+/// The headers whose values `Debug` may print. Every other value is
+/// `[REDACTED]`: `Authorization`, `Cookie`, `Set-Cookie` (the session cookie
+/// on sign-in answers), tokens, passphrases, presigned `Location`s and any
+/// header a server adds later (core #74 crypto review, P2-6).
+const DEBUG_VISIBLE_HEADERS: &[&str] = &[
+    "accept",
+    "accept-encoding",
+    "accept-ranges",
+    "cache-control",
+    "content-encoding",
+    "content-length",
+    "content-range",
+    "content-type",
+    "date",
+    "etag",
+    "range",
+    "retry-after",
+    "x-beebeeb-capabilities",
+    "x-beebeeb-client",
+    "x-beebeeb-client-os",
+    "x-beebeeb-client-version",
+    "x-request-id",
+];
+
+impl Header {
+    /// Whether `Debug` may print this header's value (the allow-list above).
+    pub fn value_is_printable(&self) -> bool {
+        DEBUG_VISIBLE_HEADERS
+            .iter()
+            .any(|visible| self.name.eq_ignore_ascii_case(visible))
+    }
+}
+
 impl fmt::Debug for Header {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let sensitive = self.name.eq_ignore_ascii_case("authorization")
-            || self.name.eq_ignore_ascii_case("cookie")
-            || self.name.eq_ignore_ascii_case("x-share-passphrase")
-            || self.name.to_ascii_lowercase().contains("token");
         f.debug_struct("Header")
             .field("name", &self.name)
-            .field("value", &if sensitive { "[REDACTED]" } else { &self.value })
+            .field(
+                "value",
+                &if self.value_is_printable() {
+                    self.value.as_str()
+                } else {
+                    "[REDACTED]"
+                },
+            )
             .finish()
     }
 }
