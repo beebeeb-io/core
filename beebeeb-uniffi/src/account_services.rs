@@ -655,6 +655,8 @@ pub enum RecoveryStateData {
     Ready,
     Completed,
     Cancelled,
+    /// The window to complete the attempt has passed; start a new one.
+    Expired,
 }
 
 impl From<RecoveryState> for RecoveryStateData {
@@ -664,6 +666,7 @@ impl From<RecoveryState> for RecoveryStateData {
             RecoveryState::Ready => Self::Ready,
             RecoveryState::Completed => Self::Completed,
             RecoveryState::Cancelled => Self::Cancelled,
+            RecoveryState::Expired => Self::Expired,
         }
     }
 }

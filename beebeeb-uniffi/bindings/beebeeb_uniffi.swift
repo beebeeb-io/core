@@ -20466,6 +20466,10 @@ public enum RecoveryStateData: Equatable, Hashable {
     case ready
     case completed
     case cancelled
+    /**
+     * The window to complete the attempt has passed; start a new one.
+     */
+    case expired
 
 
 
@@ -20495,6 +20499,8 @@ public struct FfiConverterTypeRecoveryStateData: FfiConverterRustBuffer {
         
         case 4: return .cancelled
         
+        case 5: return .expired
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -20517,6 +20523,10 @@ public struct FfiConverterTypeRecoveryStateData: FfiConverterRustBuffer {
         
         case .cancelled:
             writeInt(&buf, Int32(4))
+        
+        
+        case .expired:
+            writeInt(&buf, Int32(5))
         
         }
     }
