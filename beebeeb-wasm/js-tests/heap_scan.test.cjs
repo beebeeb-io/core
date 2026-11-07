@@ -605,17 +605,17 @@ const CALLS = {
   },
   'WasmChunkDecryptor.new': (s) => {
     s.secret('master key (in)', chunkMk);
-    const d = new wasm.WasmChunkDecryptor(chunkMk, fileIdStr, 2);
+    const d = new wasm.WasmChunkDecryptor(chunkMk, fileIdStr, { chunk_format: 2 });
     s.secret('plaintext (out)', attempt(() => d.pushFrame(v2frame)));
     attempt(() => d.free());
   },
   'WasmChunkDecryptor.fromFileKey': (s) => {
     s.secret('file key (in)', chunkFileKey);
-    const d = wasm.WasmChunkDecryptor.fromFileKey(chunkFileKey, fileIdStr, 2);
+    const d = wasm.WasmChunkDecryptor.fromFileKey(chunkFileKey, fileIdStr, { chunk_format: 2 });
     d.free();
   },
   'WasmChunkDecryptor.pushFrame': (s) => {
-    const d = new wasm.WasmChunkDecryptor(chunkMk, fileIdStr, 2);
+    const d = new wasm.WasmChunkDecryptor(chunkMk, fileIdStr, { chunk_format: 2 });
     s.secret('master key (in)', chunkMk);
     s.secret('plaintext (out)', attempt(() => d.pushFrame(v2frame)));
     attempt(() => d.free());

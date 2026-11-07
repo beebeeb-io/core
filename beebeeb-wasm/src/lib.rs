@@ -11,10 +11,12 @@ mod zeroing_alloc;
 #[global_allocator]
 static GLOBAL_ALLOCATOR: zeroing_alloc::ZeroingAllocator = zeroing_alloc::ZeroingAllocator;
 
+mod chunk_decryptor;
 mod device_security;
 mod exports;
 mod request_row_exports;
 
+pub use chunk_decryptor::*;
 pub use device_security::*;
 
 use beebeeb_core::client_meta as cm;
@@ -906,133 +908,6 @@ impl WasmChunkEncryptor {
             total_plaintext: summary.total_plaintext,
             total_ciphertext: summary.total_ciphertext,
             chunk_size_bytes: summary.chunk_size_bytes,
-        })?)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Streaming chunk decryption (push form) — task 1908
-// ---------------------------------------------------------------------------
-
-/// Stateful, single-file streaming decryptor for the web client — the ONE way
-/// web should decrypt file content (downloads, previews, shared links).
-///
-/// Reads v2 (position-bound) and v1 (legacy) files. Both constructors take
-/// `expectedChunkFormat` from the file's encrypted metadata
-/// (`decrypt_file_metadata(...).chunk_format`; 0 = unrecorded, 2 = v2): with
-/// 2 only v2 frames open; with 0 (legacy metadata) chunk 0 decides. In v2 every
-/// frame must be the next chunk in order and from the same upload as chunk 0,
-/// and nothing may follow the last one; [`finish`] fails if the file ended
-/// before its last chunk (truncation). JS must treat any thrown error — from
-/// `pushFrame` or `finish` — as a failed download and discard the plaintext it
-/// has buffered.
-///
-/// Replaces the per-chunk `decrypt_chunk(fileKey, nonce, ciphertext)` loop for
-/// file content: that generic function has no position and can only open v1
-/// frames (it stays for key unwrapping).
-///
-/// [`finish`]: Self::finish
-#[wasm_bindgen]
-pub struct WasmChunkDecryptor {
-    inner: beebeeb_core::chunk_stream::ChunkDecryptor,
-}
-
-#[wasm_bindgen]
-impl WasmChunkDecryptor {
-    /// Decryptor for the owner: the file key is derived in core from the
-    /// 32-byte master key and `file_id`.
-    #[wasm_bindgen(constructor)]
-    pub fn new(master_key: &[u8], file_id: String, expected_chunk_format: u8) -> Result<WasmChunkDecryptor, JsError> {
-        let mk = master_key_from_slice(master_key)?;
-        let expected = expected_from_u8(expected_chunk_format)?;
-        Ok(Self {
-            inner: beebeeb_core::chunk_stream::ChunkDecryptor::for_push(&mk, &file_id, expected),
-        })
-    }
-
-    /// Decryptor from an already-unwrapped 32-byte file key (share / shared-link
-    /// recipients). `file_id` must be the id the file was uploaded under.
-    #[wasm_bindgen(js_name = fromFileKey)]
-    pub fn from_file_key(
-        file_key: &[u8],
-        file_id: String,
-        expected_chunk_format: u8,
-    ) -> Result<WasmChunkDecryptor, JsError> {
-        let fk = file_key_from_slice(file_key)?;
-        let expected = expected_from_u8(expected_chunk_format)?;
-        Ok(Self {
-            inner: beebeeb_core::chunk_stream::ChunkDecryptor::for_push_with_file_key(fk, &file_id, expected),
-        })
-    }
-
-    /// Protected current or historical read. Supply the fields from that
-    /// version's own decrypted metadata record.
-    #[wasm_bindgen(js_name = forVersion)]
-    pub fn for_version(
-        master_key: &[u8],
-        file_id: String,
-        expected_chunk_format: u8,
-        version_id: &[u8],
-        version_counter: f64,
-    ) -> Result<WasmChunkDecryptor, JsError> {
-        let mk = master_key_from_slice(master_key)?;
-        let expected = expected_from_u8(expected_chunk_format)?;
-        let version = version_commitment_from_js(version_id, version_counter)?;
-        let file_key = kdf::derive_file_key(&mk, file_id.as_bytes());
-        Ok(Self {
-            inner: beebeeb_core::chunk_stream::ChunkDecryptor::for_version_with_file_key(
-                file_key,
-                &file_id,
-                expected,
-                Some(version),
-            ),
-        })
-    }
-
-    /// v2: the upload's version id (chunk 0's 12-byte nonce) once chunk 0 has
-    /// authenticated — what a seeking reader passes to `decrypt_chunk_frame`.
-    /// `undefined` before chunk 0 and for v1 files.
-    #[wasm_bindgen(getter, js_name = versionId)]
-    pub fn version_id(&self) -> Option<Vec<u8>> {
-        self.inner.version_id().map(|v| v.to_vec())
-    }
-
-    /// Decrypt the next wire frame (`nonce(12) || ciphertext || tag(16)`),
-    /// returning its plaintext. Frames must be pushed in order from chunk 0.
-    #[wasm_bindgen(js_name = pushFrame)]
-    pub fn push_frame(&mut self, frame: &[u8]) -> Result<Vec<u8>, JsError> {
-        self.inner
-            .push_frame(frame)
-            .map(|c| c.data)
-            .map_err(|e| JsError::new(&e.to_string()))
-    }
-
-    /// The file's chunk format once chunk 0 has been opened: 1 = v1, 2 = v2;
-    /// 0 before the first frame.
-    #[wasm_bindgen(getter)]
-    pub fn format(&self) -> u8 {
-        self.inner.format().map(|f| f.as_u8()).unwrap_or(0)
-    }
-
-    /// How many frames have been decrypted so far.
-    #[wasm_bindgen(getter, js_name = chunksDecrypted)]
-    pub fn chunks_decrypted(&self) -> u32 {
-        self.inner.chunks_decrypted()
-    }
-
-    /// Consume the decryptor and run the end-of-stream check. Throws if no frame
-    /// was pushed or a v2 file ended before its last chunk. Returns
-    /// `{ chunk_count, format }`.
-    pub fn finish(self) -> Result<JsValue, JsError> {
-        let summary = self.inner.finish().map_err(|e| JsError::new(&e.to_string()))?;
-        #[derive(serde::Serialize)]
-        struct DecryptSummaryJs {
-            chunk_count: u32,
-            format: u8,
-        }
-        Ok(serde_wasm_bindgen::to_value(&DecryptSummaryJs {
-            chunk_count: summary.chunk_count,
-            format: summary.format.as_u8(),
         })?)
     }
 }
@@ -3722,7 +3597,14 @@ mod tests {
         assert_eq!(meta.chunk_format, ExpectedChunkFormat::V2);
         let pin = meta.chunk_format.as_u8();
 
-        let mut dec = WasmChunkDecryptor::new(mk_bytes.as_ref(), file_id.to_string(), pin).unwrap();
+        let legacy = crate::chunk_decryptor::DecryptorMetadataJs {
+            chunk_format: pin,
+            version_id: None,
+            version_counter: None,
+        };
+        let (expected, version) = crate::chunk_decryptor::metadata_pin(&legacy).unwrap();
+        let file_key = kdf::derive_file_key(&mk, file_id.as_bytes());
+        let mut dec = WasmChunkDecryptor::with_pin(file_key, file_id, expected, version);
         assert_eq!(dec.format(), 0);
         assert_eq!(dec.version_id(), None);
         let mut out = Vec::new();
@@ -3738,7 +3620,7 @@ mod tests {
         assert_eq!(summary.chunk_count, 3);
 
         let fk = kdf::derive_file_key(&mk, file_id.as_bytes());
-        let mut dec = WasmChunkDecryptor::from_file_key(fk.as_bytes(), file_id.to_string(), pin).unwrap();
+        let mut dec = WasmChunkDecryptor::with_pin(kdf::FileKey::from_bytes(*fk.as_bytes()), file_id, expected, None);
         for f in &frames {
             dec.push_frame(f).unwrap();
         }
