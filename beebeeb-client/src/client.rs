@@ -92,7 +92,10 @@ pub struct Client {
     events: EngineEvents,
 }
 
-const AUTHENTICATED_CAPABILITIES: [&str; 2] = ["file-write-v2", "version-metadata-v1"];
+/// What a native client declares. The request builder attaches it only to the
+/// routes whose server behaviour it gates (`Endpoint::capabilities`), never to
+/// every request.
+const NATIVE_CAPABILITIES: [&str; 2] = ["file-write-v2", "version-metadata-v1"];
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -112,7 +115,7 @@ pub enum ClientError {
 
 impl Client {
     fn request_builder(&self) -> RequestBuilder {
-        RequestBuilder::new(self.config.identity.clone()).with_capabilities(AUTHENTICATED_CAPABILITIES)
+        RequestBuilder::new(self.config.identity.clone()).with_capabilities(NATIVE_CAPABILITIES)
     }
 
     pub fn new(config: ClientConfig, transport: Arc<dyn Transport>) -> Result<Self, ClientError> {

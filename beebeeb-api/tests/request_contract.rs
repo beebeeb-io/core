@@ -1,6 +1,6 @@
 use beebeeb_api::{
     Answer, ApiError, ClientIdentity, RequestBuilder,
-    routes::{devices, files, uploads},
+    routes::{devices, direct, files, sync, uploads},
 };
 
 fn builder() -> RequestBuilder {
@@ -47,14 +47,17 @@ fn installed_device_report_uses_hardware_identity_and_reported_name() {
 }
 
 #[test]
-fn capabilities_are_sent_on_every_authenticated_request_including_chunks() {
+fn capabilities_go_only_on_the_requests_whose_server_behaviour_they_gate() {
     let builder = builder().with_capabilities(["file-write-v2", "version-metadata-v1"]);
-    let ordinary = files::get("f").build(&builder, &()).unwrap();
-    assert_eq!(
-        ordinary.header("X-Beebeeb-Capabilities"),
-        Some("file-write-v2, version-metadata-v1")
-    );
+    let declared = Some("file-write-v2, version-metadata-v1");
 
+    // Never globally: a read or an unrelated write carries no declaration.
+    let ordinary = files::get("f").build(&builder, &()).unwrap();
+    assert_eq!(ordinary.header("X-Beebeeb-Capabilities"), None);
+    let trash = files::trash("f").build(&builder, &()).unwrap();
+    assert_eq!(trash.header("X-Beebeeb-Capabilities"), None);
+
+    // The server checks `file-write-v2` on every call of an upload.
     let init = uploads::init()
         .build(
             &builder,
@@ -75,16 +78,45 @@ fn capabilities_are_sent_on_every_authenticated_request_including_chunks() {
             },
         )
         .unwrap();
-    assert_eq!(
-        init.header("X-Beebeeb-Capabilities"),
-        Some("file-write-v2, version-metadata-v1")
-    );
-
+    assert_eq!(init.header("X-Beebeeb-Capabilities"), declared);
     let chunk = uploads::chunk("session", 0).build(&builder, b"ciphertext").unwrap();
-    assert_eq!(
-        chunk.header("X-Beebeeb-Capabilities"),
-        Some("file-write-v2, version-metadata-v1")
-    );
+    assert_eq!(chunk.header("X-Beebeeb-Capabilities"), declared);
+    let heartbeat = uploads::heartbeat("session").build(&builder, &()).unwrap();
+    assert_eq!(heartbeat.header("X-Beebeeb-Capabilities"), declared);
+    let complete = uploads::complete("session")
+        .build(
+            &builder,
+            &uploads::CompleteRequest {
+                name_encrypted: None,
+                version_metadata_encrypted: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(complete.header("X-Beebeeb-Capabilities"), declared);
+    let grant = direct::upload_grant("session", 0)
+        .build(&builder, &direct::UploadGrantRequest { size: 40 })
+        .unwrap();
+    assert_eq!(grant.header("X-Beebeeb-Capabilities"), declared);
+    let commit = direct::upload_commit("session", 0)
+        .build(&builder, &direct::UploadCommitRequest { size: 40 })
+        .unwrap();
+    assert_eq!(commit.header("X-Beebeeb-Capabilities"), declared);
+
+    // And `version-metadata-v1` on the two metadata writes.
+    let rename = files::update("f")
+        .build(
+            &builder,
+            &files::UpdateFile {
+                name_encrypted: Some("sealed".into()),
+                parent_id: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(rename.header("X-Beebeeb-Capabilities"), declared);
+    let submit = sync::submit()
+        .build(&builder, &sync::Submit { ops: Vec::new() })
+        .unwrap();
+    assert_eq!(submit.header("X-Beebeeb-Capabilities"), declared);
 }
 
 #[test]

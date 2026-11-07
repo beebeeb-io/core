@@ -85,7 +85,9 @@ pub fn ops(since: i64, limit: u16) -> Endpoint<(), Ops> {
     .limits(0, 16 * 1024 * 1024)
 }
 pub fn submit() -> Endpoint<Submit, SubmitResult> {
-    Endpoint::new(Method::Post, "/api/v1/sync/ops", true).limits(4 * 1024 * 1024, 4 * 1024 * 1024)
+    Endpoint::new(Method::Post, "/api/v1/sync/ops", true)
+        .capabilities()
+        .limits(4 * 1024 * 1024, 4 * 1024 * 1024)
 }
 pub fn stream_token() -> Endpoint<(), StreamToken> {
     Endpoint::new(Method::Post, "/api/v1/sync/stream-token", false)

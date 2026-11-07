@@ -26,15 +26,21 @@ async fn account_switch_discards_an_answer_that_finishes_late() {
 }
 
 #[tokio::test]
-async fn native_authenticated_requests_declare_the_write_and_metadata_capabilities() {
+async fn native_requests_declare_the_write_and_metadata_capabilities_only_where_checked() {
     let transport = Arc::new(ScriptedTransport::json(200, br#"{"files":[]}"#.to_vec()));
     let client = Client::new(ClientConfig::for_tests(), transport.clone()).unwrap();
     client.set_authentication("token", "account-a").unwrap();
 
     client.execute(&routes::files::list(None, false), &()).await.unwrap();
+    // The scripted answer is not a submit result; only the request matters here.
+    let _ = client
+        .execute(&routes::sync::submit(), &routes::sync::Submit { ops: Vec::new() })
+        .await;
 
+    let requests = transport.requests();
+    assert_eq!(requests[0].header("X-Beebeeb-Capabilities"), None);
     assert_eq!(
-        transport.requests()[0].header("X-Beebeeb-Capabilities"),
+        requests[1].header("X-Beebeeb-Capabilities"),
         Some("file-write-v2, version-metadata-v1")
     );
 }

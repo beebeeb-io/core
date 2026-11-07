@@ -31,5 +31,6 @@ pub fn upload_commit(session: &str, index: u32) -> Endpoint<UploadCommitRequest,
         format!("/api/v1/uploads/{}/chunks/{index}/commit", component(session)),
         true,
     )
+    .capabilities()
     .limits(1024, 64 * 1024)
 }

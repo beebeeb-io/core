@@ -55,6 +55,7 @@ pub fn chunk(session: &str, index: u32) -> RawEndpoint<Vec<u8>> {
             format!("/api/v1/uploads/{}/chunks/{index}", component(session)),
             true,
         )
+        .capabilities()
         .raw_body()
         .limits(256 * 1024 * 1024 + 28, 1024),
     )
@@ -65,6 +66,7 @@ pub fn complete(session: &str) -> Endpoint<CompleteRequest, serde_json::Value> {
         format!("/api/v1/uploads/{}/complete", component(session)),
         true,
     )
+    .capabilities()
 }
 pub fn heartbeat(session: &str) -> Endpoint<(), serde_json::Value> {
     Endpoint::new(
@@ -72,6 +74,7 @@ pub fn heartbeat(session: &str) -> Endpoint<(), serde_json::Value> {
         format!("/api/v1/uploads/{}/heartbeat", component(session)),
         false,
     )
+    .capabilities()
 }
 pub fn abandon(file_id: &str) -> Endpoint<(), AbandonResponse> {
     Endpoint::new(

@@ -235,7 +235,9 @@ impl RequestBuilder {
             validate_header_value(token)?;
             headers.push(Header::new("Authorization", format!("Bearer {token}")));
         }
-        if (parts.authenticated || parts.send_capabilities) && !self.capabilities.is_empty() {
+        // Never globally: only the routes whose server behaviour the declaration
+        // gates carry it (`Endpoint::capabilities`).
+        if parts.send_capabilities && !self.capabilities.is_empty() {
             for capability in &self.capabilities {
                 validate_header_value(capability)?;
             }

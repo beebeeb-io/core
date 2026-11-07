@@ -156,8 +156,10 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 
 ### Fixed
 
-- Authenticated requests, including chunk requests, now advertise `file-write-v2` and
-  `version-metadata-v1` from the central request builder. A v2 file whose metadata predates version
+- Native requests declare `file-write-v2` and `version-metadata-v1` exactly where the server checks
+  them: upload init, chunk, heartbeat and complete, and the direct upload grant and commit
+  (`file-write-v2`), and file update and sync submit (`version-metadata-v1`). The request builder
+  attaches the header only to routes flagged `Endpoint::capabilities`, never to every request. A v2 file whose metadata predates version
   commitments remains readable until this device has observed a protected counter; stripping the
   commitment after that point is rejected as rollback.
 - Backup scans page, deduplicate, export and enqueue lazily with a 64-upload cap. Failed and cancelled

@@ -121,7 +121,7 @@ pub fn create_folder() -> Endpoint<CreateFolder, FileEntry> {
     Endpoint::new(Method::Post, "/api/v1/files/folder", true)
 }
 pub fn update(id: &str) -> Endpoint<UpdateFile, FileEntry> {
-    Endpoint::new(Method::Patch, format!("/api/v1/files/{}", component(id)), true)
+    Endpoint::new(Method::Patch, format!("/api/v1/files/{}", component(id)), true).capabilities()
 }
 pub fn trash(id: &str) -> Endpoint<(), TrashResponse> {
     Endpoint::new(Method::Delete, format!("/api/v1/files/{}", component(id)), false)
