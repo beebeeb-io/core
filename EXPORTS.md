@@ -6,7 +6,7 @@ toolchain.
 
 ## Compatibility policy
 
-The workspace is pre-1.0. Version `0.2.2` contains breaking API and binding changes. Consumers must pin
+The workspace is pre-1.0. Version `0.3.0` contains breaking API and binding changes. Consumers must pin
 one core revision, regenerate or replace generated bindings from that revision, and update call sites
 before moving the pin. Export counts are not an API guarantee.
 

@@ -6,7 +6,7 @@
 
 ## Status
 
-The workspace version is `0.2.2`. This is a breaking pre-1.0 release: consumers must read
+The workspace version is `0.3.0`. This is a breaking pre-1.0 release: consumers must read
 [EXPORTS.md](EXPORTS.md), regenerate bindings where applicable, and update their core pin together.
 
 Core protects file contents before upload. That does not make every client or protocol immune to a

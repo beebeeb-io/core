@@ -1,6 +1,6 @@
 [package]
 name = "beebeeb-upload"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 description = "Upload protocol for Beebeeb E2E encrypted storage"
 license = "AGPL-3.0-or-later"

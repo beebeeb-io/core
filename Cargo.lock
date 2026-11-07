@@ -238,7 +238,7 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-api"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "beebeeb-core",
  "beebeeb-types",
@@ -250,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-backup"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "beebeeb-core",
  "beebeeb-types",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-client"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "base64",
  "beebeeb-api",
@@ -287,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-core"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "aes 0.8.4",
  "aes-gcm",
@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-store"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "beebeeb-core",
  "chrono",
@@ -340,7 +340,7 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-sync"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "beebeeb-core",
  "beebeeb-types",
@@ -358,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-transfer"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "beebeeb-core",
  "beebeeb-types",
@@ -374,7 +374,7 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-types"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-uniffi"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "beebeeb-api",
  "beebeeb-client",
@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-upload"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "beebeeb-core",
  "beebeeb-types",
@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "beebeeb-wasm"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "base64",
  "beebeeb-api",
