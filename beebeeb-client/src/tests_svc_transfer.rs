@@ -1075,3 +1075,55 @@ async fn public_share_download_uses_the_counted_chunk_manifest() {
     assert_eq!(requests[1].header("X-Share-Download-Token"), Some("counted-ticket"));
     assert_eq!(requests[2].header("X-Share-Download-Token"), Some("counted-ticket"));
 }
+
+/// Core #74 crypto review, P3: a replacement's counter is
+/// max(remembered, served) + 1, so a server that serves an older metadata
+/// record cannot make the new version reuse a counter this device has seen.
+#[tokio::test]
+async fn replacement_counter_never_falls_below_the_remembered_highest() {
+    let root = tempdir().unwrap();
+    let source = root.path().join("source.bin");
+    std::fs::write(&source, b"replacement").unwrap();
+    let file_id = "8426867a-a17a-4a56-a05d-ddff0afa15f7";
+    let master_key = MasterKey::from_bytes([7; 32]);
+    let served = |counter| {
+        beebeeb_core::encrypt::encrypt_name_with_version(
+            &master_key,
+            file_id,
+            "current.bin",
+            None,
+            beebeeb_core::chunk_stream::ExpectedChunkFormat::V2,
+            beebeeb_core::chunk_stream::VersionCommitment::new([9; 12], counter).unwrap(),
+        )
+        .unwrap()
+    };
+    let (rolled_back, current) = (served(4), served(12));
+    let store = Arc::new(Mutex::new(Store::open_in_memory().unwrap()));
+    store.lock().unwrap().observe_file_version(file_id, 9).unwrap();
+    let transport = Arc::new(ScriptedTransport::json(200, b"{}".to_vec()));
+    let client = Arc::new(Client::new(ClientConfig::for_tests(), transport).unwrap());
+    let service = UploadService::new_for_test(
+        client,
+        Arc::clone(&store),
+        Arc::new(MasterKey::from_bytes([7; 32])),
+        root.path().join("staging"),
+    )
+    .unwrap();
+    let previous = |metadata: &str| {
+        let id = service
+            .enqueue(
+                UploadRequest::replacement(&source, "replacement.bin", None, file_id, 4, metadata),
+                1,
+            )
+            .unwrap();
+        let transfer = store.lock().unwrap().transfer(id).unwrap().unwrap();
+        let record: serde_json::Value = serde_json::from_slice(&transfer.payload).unwrap();
+        record["replacement"]["previous_version_counter"].as_u64()
+    };
+    assert_eq!(previous(&rolled_back), Some(9), "the remembered 9 wins over a served 4");
+    assert_eq!(
+        previous(&current),
+        Some(12),
+        "a newer served counter wins over the remembered 9"
+    );
+}
