@@ -74,16 +74,26 @@ pub fn backup_stop(
     last_pass_at_ms: i64,
     listing: BackupStopListing,
 ) -> Result<Vec<BackupStopped>, CryptoError> {
-    let notices: Vec<rules::ReceivedNotice> = notices
-        .iter()
+    let notices = received_notices(&notices);
+    let listing = stop_listing(listing)?;
+    Ok(stopped_dtos(rules::backup_stop(&notices, last_pass_at_ms, &listing)))
+}
+
+/// The backup notices among the rows (another kind is skipped; data that is
+/// not JSON reads as `null`).
+fn received_notices(rows: &[BackupNoticeRow]) -> Vec<rules::ReceivedNotice> {
+    rows.iter()
         .filter_map(|row| {
             rules::parse_backup_notice(&row.kind, &notice_data(&row.data_json)).map(|notice| rules::ReceivedNotice {
                 notice,
                 created_at_ms: row.created_at_ms,
             })
         })
-        .collect();
-    let listing = rules::StopListing {
+        .collect()
+}
+
+fn stop_listing(listing: BackupStopListing) -> Result<rules::StopListing, CryptoError> {
+    Ok(rules::StopListing {
         device_folder_id: parse_id("device_folder_id", &listing.device_folder_id)?,
         device_folder_live: listing.device_folder_live,
         folders: listing
@@ -101,14 +111,73 @@ pub fn backup_stop(
                 })
             })
             .collect::<Result<Vec<_>, CryptoError>>()?,
-    };
-    Ok(rules::backup_stop(&notices, last_pass_at_ms, &listing)
+    })
+}
+
+fn stopped_dtos(stopped: Vec<rules::StoppedBackup>) -> Vec<BackupStopped> {
+    stopped
         .into_iter()
         .map(|s| BackupStopped {
             category: s.category.key(),
             reason: s.reason.as_str().to_string(),
         })
-        .collect())
+        .collect()
+}
+
+/// The `last_pass_at_ms` of a device with none under this engine yet (spec
+/// Amendment 12c): the moment backups were set up on this device, or an
+/// upgraded device's last successful backup under the old engine; with both,
+/// the earlier; with neither, 0 (any removal notice stops the backup). Both on
+/// the server's clock.
+#[uniffi::export]
+pub fn backup_first_pass_baseline(setup_at_ms: Option<i64>, legacy_last_backup_ms: Option<i64>) -> i64 {
+    rules::first_pass_baseline(setup_at_ms, legacy_last_backup_ms)
+}
+
+/// What one pass does before it uploads anything (spec Amendments 12, 12c).
+#[derive(Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum BackupPassGate {
+    /// The notices were read: `stopped` turn off with their words; every
+    /// other listed backup runs, and this pass's start becomes the next
+    /// `last_pass_at_ms`.
+    Run { stopped: Vec<BackupStopped> },
+    /// The notices could not be read: upload nothing, turn nothing off, show
+    /// `backup_check_failed_words()`, retry at the next scheduled pass, and
+    /// keep `last_pass_at_ms` where it was.
+    CheckFailed,
+}
+
+/// Decide a pass. `notices_fetch_ok` is `false` when the notices could not be
+/// read completely (a server or network error, or a page missing); `notices`
+/// is then ignored. Otherwise as `backup_stop`.
+#[uniffi::export]
+pub fn backup_pass_gate(
+    notices_fetch_ok: bool,
+    notices: Vec<BackupNoticeRow>,
+    last_pass_at_ms: i64,
+    listing: BackupStopListing,
+) -> Result<BackupPassGate, CryptoError> {
+    let listing = stop_listing(listing)?;
+    let notices = received_notices(&notices);
+    Ok(
+        match rules::backup_pass_gate(
+            notices_fetch_ok.then_some(notices.as_slice()),
+            last_pass_at_ms,
+            &listing,
+        ) {
+            rules::BackupPassGate::Run { stopped } => BackupPassGate::Run {
+                stopped: stopped_dtos(stopped),
+            },
+            rules::BackupPassGate::CheckFailed => BackupPassGate::CheckFailed,
+        },
+    )
+}
+
+/// The words when the notices could not be read: "Couldn't check — will
+/// retry."
+#[uniffi::export]
+pub fn backup_check_failed_words() -> String {
+    rules::MSG_STOP_CHECK_FAILED.to_string()
 }
 
 /// The reason a `notifications` row gives, or `None` for a row that is not a
@@ -259,5 +328,78 @@ mod tests {
                 Err(CryptoError::InvalidInput { .. })
             ));
         }
+    }
+
+    fn rows(case: &serde_json::Value) -> Vec<BackupNoticeRow> {
+        case["notices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| BackupNoticeRow {
+                kind: n["type"].as_str().unwrap().to_string(),
+                data_json: n["data"].to_string(),
+                created_at_ms: n["created_at_ms"].as_i64().unwrap(),
+            })
+            .collect()
+    }
+
+    fn listing_dto(l: &serde_json::Value) -> BackupStopListing {
+        BackupStopListing {
+            device_folder_id: l["device_folder_id"].as_str().unwrap().to_string(),
+            device_folder_live: l["device_folder_live"].as_bool().unwrap(),
+            folders: l["folders"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|f| BackupStopFolder {
+                    category: f["category"].as_str().unwrap().to_string(),
+                    category_folder_id: f["category_folder_id"].as_str().map(str::to_string),
+                    category_folder_live: f["category_folder_live"].as_bool(),
+                })
+                .collect(),
+        }
+    }
+
+    /// Amendment 12c through the binding: every baseline and gate case, and
+    /// the check-failed words.
+    #[test]
+    fn uniffi_backup_first_pass_baseline_and_pass_gate_match_the_vectors() {
+        let baselines = of_kind("baseline");
+        assert_eq!(baselines.len(), 5);
+        for case in &baselines {
+            let got = backup_first_pass_baseline(case["setup_at_ms"].as_i64(), case["legacy_last_backup_ms"].as_i64());
+            assert_eq!(got, case["expect"].as_i64().unwrap(), "{}", case["id"]);
+        }
+        let gates = of_kind("gate");
+        assert_eq!(gates.len(), 5);
+        for case in &gates {
+            let got = backup_pass_gate(
+                case["notices_fetch_ok"].as_bool().unwrap(),
+                rows(case),
+                case["last_pass_at_ms"].as_i64().unwrap(),
+                listing_dto(&case["listing"]),
+            )
+            .unwrap();
+            let want = match case["expect"]["outcome"].as_str().unwrap() {
+                "check_failed" => BackupPassGate::CheckFailed,
+                "run" => BackupPassGate::Run {
+                    stopped: case["expect"]["stopped"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|s| BackupStopped {
+                            category: s["category"].as_str().unwrap().to_string(),
+                            reason: s["reason"].as_str().unwrap().to_string(),
+                        })
+                        .collect(),
+                },
+                other => panic!("unknown outcome {other}"),
+            };
+            assert_eq!(got, want, "{}", case["id"]);
+        }
+        assert_eq!(
+            backup_check_failed_words(),
+            of_kind("check_failed_words")[0]["expect"].as_str().unwrap()
+        );
     }
 }
