@@ -157,3 +157,23 @@ nodeTest('backupStop skips rows that are not backup notices, whatever their shap
     assert.throws(() => wasm.backupStop([row], 0, listing), /no whole created_at_ms/, String(created_at_ms));
   }
 });
+
+// Amendment 12c: the first pass's baseline, the pass gate when the notices could not be read, and its words.
+nodeTest('backupFirstPassBaseline, backupPassGate and backupCheckFailedWords agree with the shared vector', () => {
+  const baselines = plan.cases.filter((c) => c.kind === 'baseline');
+  assert.equal(baselines.length, 5);
+  for (const c of baselines) {
+    const arg = (v) => (v === null ? undefined : v);
+    assert.equal(wasm.backupFirstPassBaseline(arg(c.setup_at_ms), arg(c.legacy_last_backup_ms)), c.expect, c.id);
+  }
+  assert.throws(() => wasm.backupFirstPassBaseline(1.5, undefined), /setupAtMs is not a whole number/);
+  const gates = plan.cases.filter((c) => c.kind === 'gate');
+  assert.equal(gates.length, 5);
+  for (const c of gates) {
+    assert.deepEqual(wasm.backupPassGate(c.notices_fetch_ok, c.notices, c.last_pass_at_ms, c.listing), c.expect, c.id);
+  }
+  // A failed fetch never reads the notices: whatever came back (or nothing) is not a decision.
+  const listing = gates[0].listing;
+  assert.deepEqual(wasm.backupPassGate(false, undefined, 0, listing), { outcome: 'check_failed' });
+  assert.equal(wasm.backupCheckFailedWords(), plan.cases.find((c) => c.kind === 'check_failed_words').expect);
+});

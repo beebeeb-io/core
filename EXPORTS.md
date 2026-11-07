@@ -1,74 +1,53 @@
-# beebeeb-wasm / uniffi exports — branch `feat/LD-0121-0123-backup-stop-clock`
+# beebeeb-wasm / uniffi exports — branch `feat/LD-0121-first-pass-baseline`
 
-LD-0123 (the rebuild's clock rule) and LD-0121 (why a backup stops, and its
-words: spec `2026-11-06-backup-from-source-design.md` Amendments 12 and 12a).
-Base: tag `v0.2.1` (`a5413d2049f5`). Additive only: nothing in v0.2.1 is
-renamed, retyped or removed.
+LD-0121, spec `2026-11-06-backup-from-source-design.md` Amendment 12c (Guus,
+2026-11-07 20:45): the first pass's baseline and the pass gate when the
+notices could not be read. Base: tag `v0.2.2` (`2d89adc1e2e3`). Additive only:
+nothing in v0.2.2 is renamed, retyped or removed.
 
 ## WASM
 
-Counts are the `export function` / `export class` names in the generated
-`beebeeb_wasm.d.ts` (`wasm-pack build beebeeb-wasm --target web --dev
---no-opt`, base tree and head tree), which is what a bundler sees, and `comm`
-over the sorted names for the added and removed lists.
+Counted from source: the `js_name = …` names in `beebeeb-wasm/src` of the
+v0.2.2 tree and of this branch, with `comm` over the sorted names. The
+generated `.d.ts` is type-checked by CI's WASM JS surface job.
 
-- base (`v0.2.1`): 157 names
-- head: 161 names
+- base (`v0.2.2`): 149 names
+- head: 152 names
 - **removed: 0**
-- **added: 4**
+- **added: 3**
 
 | Name | What |
 | --- | --- |
-| `backupStop(notices, lastPassAtMs, listing)` | Which backups turn off on this pass, and why (Amendment 12, steps 1-4): `[{category, reason}]` in category key order, `[]` when nothing changes. `notices`: the `notifications` rows `{type, data, created_at_ms}` (a row that is not a backup notice is skipped whatever its shape; a backup notice without a whole `created_at_ms` throws); `lastPassAtMs`: on the server's clock; `listing`: `{device_folder_id, device_folder_live, folders: [{category, category_folder_id, category_folder_live}]}`. An unknown category key, an id that is not a UUID, or a `lastPassAtMs` that is not a whole number throws. |
-| `backupNoticeReason(type, data)` | The reason a `notifications` row gives (`"erase_request"`, ..., `"backup_deleted"`; `"unknown_removal"` for a removal whose reason this build does not know (Amendment 12b)), or `undefined` for a row that is not a backup notice. |
-| `backupStopWords(reason, device, folder)` | Core's words for a stopped backup (the six lines of Amendment 12, final, and 12b's seventh, `unknown_removal`); an unknown reason throws. |
-| `backupAgainAction()` | `"Back up again"`. |
+| `backupFirstPassBaseline(setupAtMs?, legacyLastBackupMs?)` | The `lastPassAtMs` of a device with none under the new engine: the setup time, or an upgraded device's last old-engine backup; with both, the earlier; with neither, 0. A value that is not a whole number of milliseconds throws. |
+| `backupPassGate(noticesFetchOk, notices, lastPassAtMs, listing)` | `{outcome: "run", stopped: [{category, reason}]}` (as `backupStop`), or `{outcome: "check_failed"}` when the notices could not be read: upload nothing, turn nothing off, keep `lastPassAtMs`, retry next pass. `notices` is not read when the fetch failed. |
+| `backupCheckFailedWords()` | "Couldn't check — will retry." |
 
 ## UniFFI
 
-Counts are the `uniffi_beebeeb_uniffi_fn_*` and `uniffi_beebeeb_uniffi_checksum_*`
-symbols the built library exports (`nm -D --defined-only` over the debug
-`libbeebeeb_uniffi.so` of the base tree and of the head tree; these are the
-symbols `uniffi-bindgen` writes into `beebeeb_uniffiFFI.h`; the base count
-equals the v0.2.1 header count, 608), and `comm` over the sorted symbols.
+Counted from source: the `#[uniffi::export]` functions in `beebeeb-uniffi/src`
+of both trees, with `comm` over the sorted names.
 
-- base (`v0.2.1`): 608 symbols
-- head: 616 symbols
+- base (`v0.2.2`): 108 functions
+- head: 111 functions
 - **removed: 0**
-- **added: 8** (4 functions, each with its checksum)
+- **added: 3**
 
 | Function | What |
 | --- | --- |
-| `backup_stop(notices, last_pass_at_ms, listing)` | `throws -> [BackupStopped]` (`category` key, `reason`); `notices` are `BackupNoticeRow { kind, data_json, created_at_ms }` (another kind is skipped, data that is not JSON reads as `null`); `listing` is `BackupStopListing { device_folder_id, device_folder_live, folders: [BackupStopFolder { category, category_folder_id, category_folder_live }] }`; an unknown category key or an id that is not a UUID is `InvalidInput` |
-| `backup_notice_reason(kind, data_json)` | `String?`: the reason a row gives, or none for a row that is not a backup notice |
-| `backup_stop_words(reason, device, folder)` | `throws -> String`: the words; an unknown reason is `InvalidInput` |
-| `backup_again_action()` | `"Back up again"` |
-
-The rebuild's clock (LD-0123) has no binding: `records_from_remote` had none in
-v0.2.1 (spec §4.4 lists none); desktop and the CLI call it from Rust.
-
-The committed `beebeeb-uniffi/bindings/` copy is regenerated by `build-ios.sh`
-/ `build-android.sh` on the platform rung; this branch does not commit it.
+| `backup_first_pass_baseline(setup_at_ms, legacy_last_backup_ms)` | `Int64`, as `backupFirstPassBaseline` |
+| `backup_pass_gate(notices_fetch_ok, notices, last_pass_at_ms, listing)` | `throws -> BackupPassGate` (`Run { stopped }` or `CheckFailed`); the listing parses as for `backup_stop` |
+| `backup_check_failed_words()` | "Couldn't check — will retry." |
 
 ## Rust (rustdoc JSON, private items included)
 
-rustdoc JSON (`RUSTC_BOOTSTRAP=1 cargo rustdoc -p <crate> --lib -- -Z
-unstable-options --output-format json --document-private-items`, pinned
-1.96.0) of `v0.2.1` and of this branch, each item keyed by its path, ids
-replaced by the paths they point to, docs, spans and child lists left out,
-blanket and auto-trait impl members skipped:
+The same instrument as v0.2.2's PRs (each item keyed by its path, ids replaced
+by the paths they point to, docs, spans, child lists and blanket/auto-trait impl
+members left out), `v0.2.2` against this branch, pinned 1.96.0:
 
 | Crate | Added | Removed | Changed |
 | --- | --- | --- | --- |
-| `beebeeb_core` | 186 | 0 | 1 (private) |
-| `beebeeb_types` | 84 | 0 | 0 |
-| `beebeeb_uniffi` | 242 | 0 | 0 |
-| `beebeeb_wasm` | 85 | 0 | 0 |
+| `beebeeb_core` | 37 | 0 | 0 |
+| `beebeeb_types` | 0 | 0 | 0 |
+| `beebeeb_uniffi` | 73 | 0 | 0 |
+| `beebeeb_wasm` | 33 | 0 | 0 |
 | `beebeeb_backup` | 0 | 0 | 0 |
-
-The one changed item is the private helper `backup::rebuild::newest_copy`,
-which takes the clock now; no public item changed. `records_from_remote` keeps
-its v0.2.1 signature (it applies `RebuildClock::UNKNOWN`, the 10-minute
-floor); the clock goes through the new `records_from_remote_with_clock`. The
-instrument's self-test sees one removal, one retype and one addition, and 0/0/0
-on identical input.
