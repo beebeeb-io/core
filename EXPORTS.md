@@ -1,79 +1,74 @@
-# beebeeb-wasm / uniffi exports — branch `feat/LD-0113-backup-rules`
+# beebeeb-wasm / uniffi exports — branch `feat/LD-0121-0123-backup-stop-clock`
 
-LD-0113 (backups from the real folder, a protected Backups root, backup rules
-in core). Base: tag `v0.2.0` (`3db0cc26f286`). Additive only: nothing in v0.2.0
-is renamed, retyped or removed.
+LD-0123 (the rebuild's clock rule) and LD-0121 (why a backup stops, and its
+words: spec `2026-11-06-backup-from-source-design.md` Amendments 12 and 12a).
+Base: tag `v0.2.1` (`a5413d2049f5`). Additive only: nothing in v0.2.1 is
+renamed, retyped or removed.
 
 ## WASM
 
 Counts are the `export function` / `export class` names in the generated
-`beebeeb_wasm.d.ts` (`wasm-pack build beebeeb-wasm --target web`), which is
-what a bundler sees: `grep -c "^export function\|^export class" beebeeb_wasm.d.ts`,
-and `comm` over the sorted names for the added and removed lists.
+`beebeeb_wasm.d.ts` (`wasm-pack build beebeeb-wasm --target web --dev
+--no-opt`, base tree and head tree), which is what a bundler sees, and `comm`
+over the sorted names for the added and removed lists.
 
-- base (`v0.2.0`): 149 names
-- head: 157 names
+- base (`v0.2.1`): 157 names
+- head: 161 names
 - **removed: 0**
-- **added: 8** (the eight `backup*` names below)
+- **added: 4**
 
 | Name | What |
 | --- | --- |
-| `backupCheckAppMutation(position, mutation)` | The app rule, the web's own (spec Amendment 8): core's words when `mutation` (`trash`, `delete`, `rename`, `move`, `create`, `write`) of a row at `position` (`root`, `device_folder`, `manifest`, `category_folder`, `inside`, `outside`; for `create`, the destination folder) is refused, else `undefined`. The root and a device's manifest refuse everything; under the root only trash and delete are allowed. |
-| `backupCheckDriveMutation(position, ownActiveSource, mutation)` | The drive rule (Explorer, Finder, the Files app), same words: the root's words, then the own-active-backup words, then "Backups are managed in the Beebeeb app…" or "Backups are read-only…" for anything at or under the root, else `undefined`. |
-| `backupCheckRootMutation(role, mutation)` | The server's root rule: the root's words for a trash / delete / rename / move of the `backups_root` row, else `undefined`. |
-| `backupPositionAtDepth(depth?, name)` | A row's position from its depth below the flagged root (`undefined`: not under it) and its name (`manifest` for a device folder's `.device.json`). |
-| `backupIsHiddenItem(depth?, name)` | `true` for a row no listing shows (a device folder's `.device.json`). |
-| `backupRootBadge()` | The badge shown on the Backups root, `"Read-only"`. |
-| `backupProtectionMany(roles: string[])` | One byte per listing row, 1 = the protected root (one crossing per listing). A role this build does not know is protected (1), never a throw. |
-| `backupParseManifest(json)` | A decrypted `.device.json` as a plain object; unknown fields kept. |
-
-Every unknown mutation, position or role string throws, except in
-`backupProtectionMany`. Dialog copy (the device-folder confirmation) stays in
-the web UI. The web client keeps the row's `system_role` from the listing and
-passes it here.
+| `backupStop(notices, lastPassAtMs, listing)` | Which backups turn off on this pass, and why (Amendment 12, steps 1-4): `[{category, reason}]` in category key order, `[]` when nothing changes. `notices`: the `notifications` rows `{type, data, created_at_ms}` (a row that is not a backup notice is skipped whatever its shape; a backup notice without a whole `created_at_ms` throws); `lastPassAtMs`: on the server's clock; `listing`: `{device_folder_id, device_folder_live, folders: [{category, category_folder_id, category_folder_live}]}`. An unknown category key, an id that is not a UUID, or a `lastPassAtMs` that is not a whole number throws. |
+| `backupNoticeReason(type, data)` | The reason a `notifications` row gives (`"erase_request"`, ..., `"backup_deleted"`; `"unknown"` for a removal whose reason this build does not know), or `undefined` for a row that is not a backup notice. |
+| `backupStopWords(reason, device, folder)` | Core's words for a stopped backup (the six lines of Amendment 12, as drafted); an unknown reason throws. |
+| `backupAgainAction()` | `"Back up again"`. |
 
 ## UniFFI
 
 Counts are the `uniffi_beebeeb_uniffi_fn_*` and `uniffi_beebeeb_uniffi_checksum_*`
-symbols in the generated `beebeeb_uniffiFFI.h` (`uniffi-bindgen generate
---language swift` over the built library), base against head:
-`grep -c -E "uniffi_beebeeb_uniffi_(fn|checksum)_" beebeeb_uniffiFFI.h`, and `comm`
-over the sorted symbols.
+symbols the built library exports (`nm -D --defined-only` over the debug
+`libbeebeeb_uniffi.so` of the base tree and of the head tree; these are the
+symbols `uniffi-bindgen` writes into `beebeeb_uniffiFFI.h`; the base count
+equals the v0.2.1 header count, 608), and `comm` over the sorted symbols.
 
-- base (`v0.2.0`): 576 symbols
-- head: 608 symbols
+- base (`v0.2.1`): 608 symbols
+- head: 616 symbols
 - **removed: 0**
-- **added: 32** (16 functions, each with its checksum)
+- **added: 8** (4 functions, each with its checksum)
 
 | Function | What |
 | --- | --- |
-| `backup_check_app_mutation(position, mutation)` | `throws -> String?`: the app rule (the iOS app), the refusal words or none; `position` from `backup_position_at_depth`, for `create` the destination folder; the root and a device's manifest refuse everything |
-| `backup_check_drive_mutation(position, own_active_source, mutation)` | `throws -> String?`: the drive rule (Files app), same precedence as core |
-| `backup_check_root_mutation(role, mutation)` | `throws -> String?`: the server's root rule |
-| `backup_position_at_depth(depth, name)` | `"root"`, `"device_folder"`, `"manifest"` (a device folder's `.device.json`), `"category_folder"`, `"inside"` or `"outside"` (`depth` none) |
-| `backup_is_hidden_item(depth, name)` | `true` for a row no listing shows (the manifest) |
-| `backup_root_badge()` / `backup_root_name()` | `"Read-only"`, the badge shown on the Backups root; `"Backups"`, the name of a root made on `BackupRootPlan.Create` |
-| `backup_origin_header()` | `BackupHeader { name: "X-Beebeeb-Origin", value: "backup" }`, sent on every request of a backup pass |
-| `backup_skip_reason(name, is_dir, is_link, not_local)` | Why an entry is never backed up, or none |
-| `backup_resolve_root(candidates)` | `BackupRootPlan`: `Use`, `Claim { id, merge_from }`, `Create` |
-| `backup_plan_merge(survivor, duplicates, clash_label, hhmm)` | `[BackupMergeStep]` from flat listing rows; pass `hhmm` with a dot |
-| `backup_device_folder_name(raw, my_id, taken)` | The device folder name, with the device-id suffix on a collision; ids are strings (a UUID or an iOS legacy id) |
-| `backup_find_device_folder(me, candidates)` | `BackupDeviceFolderChoice`: `Existing`, `AdoptLegacy`, `Create { name }`; a manifest that does not parse is "unreadable" (not mine, not adoptable), never an error; a legacy non-UUID id matches `Existing` |
-| `backup_parse_manifest(json)` / `backup_serialize_manifest(manifest)` | `.device.json`; unknown fields cross as `other_json` (the manifest's, and each `BackupFolderState`'s own); only a document that is not a JSON object fails to parse |
-| `backup_plan_pass(entries, records, live_remote, live_remote_complete, unseen, held, max_uploads, max_bytes)` | `BackupPassPlan` with `held` and `deferred_unknown`; each upload carries `record_key` and, for `changed`, `remote_id`; `mark_removed_elsewhere` is `[BackupRecordRef]` (key and remote id): mark a record only while it still names that remote id; `max_uploads` 0 counts as 1 (iOS passes an empty `unseen` and asset ids with `/` replaced by `\|`) |
+| `backup_stop(notices, last_pass_at_ms, listing)` | `throws -> [BackupStopped]` (`category` key, `reason`); `notices` are `BackupNoticeRow { kind, data_json, created_at_ms }` (another kind is skipped, data that is not JSON reads as `null`); `listing` is `BackupStopListing { device_folder_id, device_folder_live, folders: [BackupStopFolder { category, category_folder_id, category_folder_live }] }`; an unknown category key or an id that is not a UUID is `InvalidInput` |
+| `backup_notice_reason(kind, data_json)` | `String?`: the reason a row gives, or none for a row that is not a backup notice |
+| `backup_stop_words(reason, device, folder)` | `throws -> String`: the words; an unknown reason is `InvalidInput` |
+| `backup_again_action()` | `"Back up again"` |
 
-Every string the binding parses (mutation, position, role, platform, record
-state, id) that it does not know is `CryptoError.InvalidInput`, never a pass.
+The rebuild's clock (LD-0123) has no binding: `records_from_remote` had none in
+v0.2.1 (spec §4.4 lists none); desktop and the CLI call it from Rust.
 
 The committed `beebeeb-uniffi/bindings/` copy is regenerated by `build-ios.sh`
 / `build-android.sh` on the platform rung; this branch does not commit it.
-Before this branch it was already behind v0.2.0's source (43 functions of
-v0.2.0 are missing from the committed header), so a regeneration also brings
-those in.
 
 ## Rust (rustdoc JSON, private items included)
 
-`beebeeb_core` +211 items, `beebeeb_types` +33, `beebeeb_uniffi` +439 (the
-uniffi scaffolding behind the 16 exports), `beebeeb_wasm` +13; **0 removed and 0
-changed** in all four (rustdoc JSON of `v0.2.0` and of this branch, pinned
-1.96.0, item paths compared). New crate: `beebeeb-backup`.
+rustdoc JSON (`RUSTC_BOOTSTRAP=1 cargo rustdoc -p <crate> --lib -- -Z
+unstable-options --output-format json --document-private-items`, pinned
+1.96.0) of `v0.2.1` and of this branch, each item keyed by its path, ids
+replaced by the paths they point to, docs, spans and child lists left out,
+blanket and auto-trait impl members skipped:
+
+| Crate | Added | Removed | Changed |
+| --- | --- | --- | --- |
+| `beebeeb_core` | 186 | 0 | 1 (private) |
+| `beebeeb_types` | 84 | 0 | 0 |
+| `beebeeb_uniffi` | 242 | 0 | 0 |
+| `beebeeb_wasm` | 85 | 0 | 0 |
+| `beebeeb_backup` | 0 | 0 | 0 |
+
+The one changed item is the private helper `backup::rebuild::newest_copy`,
+which takes the clock now; no public item changed. `records_from_remote` keeps
+its v0.2.1 signature (it applies `RebuildClock::UNKNOWN`, the 10-minute
+floor); the clock goes through the new `records_from_remote_with_clock`. The
+instrument's self-test sees one removal, one retype and one addition, and 0/0/0
+on identical input.
