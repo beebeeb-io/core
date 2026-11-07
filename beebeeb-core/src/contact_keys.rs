@@ -35,6 +35,15 @@ pub fn key_fingerprint(public_key: &[u8]) -> [u8; 32] {
 ///
 /// No IDNA and no provider rewriting, so two addresses the server keeps apart
 /// as two accounts stay apart here too.
+///
+/// **The trim is Rust's `str::trim`, pinned:** it strips the Unicode
+/// `White_Space` characters (U+0009-U+000D, U+0020, U+0085, U+00A0, U+1680,
+/// U+2000-U+200A, U+2028, U+2029, U+202F, U+205F, U+3000) and nothing else, as
+/// the server's `canonical_email` does. JavaScript's `String.prototype.trim`
+/// differs (it strips U+FEFF and keeps U+0085), so a web client calls this
+/// function through WASM (`normalizeEmail`, `safetyNumber`) and never trims an
+/// email itself. `test-vectors/safety_number.json` holds a row for each side
+/// of the difference.
 pub fn normalize_email(raw: &str) -> String {
     raw.trim().to_lowercase()
 }
@@ -129,7 +138,7 @@ mod tests {
             serde_json::from_str(include_str!("../../test-vectors/safety_number.json")).unwrap();
         assert_eq!(doc.domain.as_bytes(), SAFETY_NUMBER_DOMAIN);
         assert_eq!(doc.rounds, SAFETY_NUMBER_ROUNDS);
-        assert_eq!(doc.vectors.len(), 6);
+        assert_eq!(doc.vectors.len(), 8);
         for row in &doc.vectors {
             let (a, b) = (key(&row.public_key_a_hex), key(&row.public_key_b_hex));
             assert_eq!(
@@ -159,6 +168,11 @@ mod tests {
         assert_eq!(by_name("typed_forms_normalize"), by_name("ascii"));
         assert_ne!(by_name("other_email_same_key"), by_name("ascii"));
         assert_ne!(by_name("other_key_same_email"), by_name("ascii"));
+        // The pinned trim: Unicode White_Space goes, U+FEFF stays.
+        assert_eq!(by_name("nel_and_nbsp_are_trimmed"), by_name("ascii"));
+        assert_ne!(by_name("bom_is_kept"), by_name("ascii"));
+        assert_eq!(normalize_email("\u{0085}A@B.test\u{00A0}"), "a@b.test");
+        assert_eq!(normalize_email("\u{FEFF}a@b.test"), "\u{FEFF}a@b.test");
     }
 
     #[test]

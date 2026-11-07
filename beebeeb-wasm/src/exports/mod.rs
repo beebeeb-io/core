@@ -11,6 +11,7 @@
 //! declares `mod exports;` and the new surface grows here.
 
 pub mod backup;
+pub mod contacts;
 pub mod format;
 pub mod media;
 pub mod metadata_wire;

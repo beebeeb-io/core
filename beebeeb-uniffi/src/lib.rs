@@ -15,6 +15,7 @@ uniffi::setup_scaffolding!();
 mod account_services;
 mod backup;
 mod chunk_decryptor;
+mod contacts;
 mod platform_services;
 mod request_seal;
 mod secret_types;
@@ -22,6 +23,7 @@ mod services;
 
 pub use account_services::*;
 pub use chunk_decryptor::*;
+pub use contacts::*;
 pub use platform_services::*;
 pub use secret_types::*;
 pub use services::*;

@@ -19,10 +19,20 @@ DOMAIN = b"beebeeb-safety-number-v1"
 ROUNDS = 5200
 
 
+# Rust's str::trim strips exactly the Unicode White_Space property (the server's
+# canonical_email uses it). Python's str.strip uses str.isspace, which also strips
+# U+001C-U+001F, and JavaScript's trim also strips U+FEFF: both differ, so the set
+# is spelled out here and pinned by the nel_and_nbsp_are_trimmed / bom_is_kept rows.
+WHITE_SPACE = "".join(
+    [chr(c) for c in range(0x09, 0x0E)]
+    + ["\u0020", "\u0085", "\u00a0", "\u1680"]
+    + [chr(c) for c in range(0x2000, 0x200B)]
+    + ["\u2028", "\u2029", "\u202f", "\u205f", "\u3000"]
+)
+
+
 def normalize_email(raw):
-    # The rows below use only ASCII spaces and tabs around the address, where Python's
-    # str.strip and Rust's str::trim agree.
-    return raw.strip().lower()
+    return raw.strip(WHITE_SPACE).lower()
 
 
 def party(email, public_key):
@@ -68,6 +78,22 @@ def main():
         row("other_email_same_key", "carol@example.test", alice_key, "bob@example.test", bob_key, "the email changes the number"),
         row("other_key_same_email", "alice@example.test", other_key, "bob@example.test", bob_key, "the key changes the number"),
         row("edge_keys", "a@b.test", bytes(32), "z@y.test", bytes([0xFF]) * 32, "all-zero and all-0xff keys"),
+        row(
+            "nel_and_nbsp_are_trimmed",
+            "\u0085alice@example.test\u00a0",
+            alice_key,
+            "\u3000bob@example.test\u2028",
+            bob_key,
+            "U+0085, U+00A0, U+3000 and U+2028 are Unicode White_Space, which str::trim strips: equals the ascii row",
+        ),
+        row(
+            "bom_is_kept",
+            "\ufeffalice@example.test",
+            alice_key,
+            "bob@example.test",
+            bob_key,
+            "U+FEFF is not White_Space: str::trim keeps it (JavaScript's trim would not), so this differs from ascii",
+        ),
     ]
     doc = {
         "domain": DOMAIN.decode(),
