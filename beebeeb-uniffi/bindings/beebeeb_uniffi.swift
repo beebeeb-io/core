@@ -18363,6 +18363,89 @@ public func FfiConverterTypeBackupMergeStep_lower(_ value: BackupMergeStep) -> R
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
+ * What one pass does before it uploads anything (spec Amendments 12, 12c).
+ */
+
+public enum BackupPassGate: Equatable, Hashable {
+    
+    /**
+     * The notices were read: `stopped` turn off with their words; every
+     * other listed backup runs, and this pass's start becomes the next
+     * `last_pass_at_ms`.
+     */
+    case run(stopped: [BackupStopped]
+    )
+    /**
+     * The notices could not be read: upload nothing, turn nothing off, show
+     * `backup_check_failed_words()`, retry at the next scheduled pass, and
+     * keep `last_pass_at_ms` where it was.
+     */
+    case checkFailed
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension BackupPassGate: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBackupPassGate: FfiConverterRustBuffer {
+    typealias SwiftType = BackupPassGate
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BackupPassGate {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .run(stopped: try FfiConverterSequenceTypeBackupStopped.read(from: &buf)
+        )
+        
+        case 2: return .checkFailed
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: BackupPassGate, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .run(stopped):
+            writeInt(&buf, Int32(1))
+            FfiConverterSequenceTypeBackupStopped.write(stopped, into: &buf)
+            
+        
+        case .checkFailed:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupPassGate_lift(_ buf: RustBuffer) throws -> BackupPassGate {
+    return try FfiConverterTypeBackupPassGate.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupPassGate_lower(_ value: BackupPassGate) -> RustBuffer {
+    return FfiConverterTypeBackupPassGate.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
  * What the client does about the root; on `Create` it names the new root
  * [`backup_root_name`].
  */
@@ -25559,6 +25642,31 @@ public func backupAgainAction() -> String  {
 })
 }
 /**
+ * The words when the notices could not be read: "Couldn't check — will
+ * retry."
+ */
+public func backupCheckFailedWords() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_backup_check_failed_words($0
+    )
+})
+}
+/**
+ * The `last_pass_at_ms` of a device with none under this engine yet (spec
+ * Amendment 12c): the moment backups were set up on this device, or an
+ * upgraded device's last successful backup under the old engine; with both,
+ * the earlier; with neither, 0 (any removal notice stops the backup). Both on
+ * the server's clock.
+ */
+public func backupFirstPassBaseline(setupAtMs: Int64?, legacyLastBackupMs: Int64?) -> Int64  {
+    return try!  FfiConverterInt64.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_backup_first_pass_baseline(
+        FfiConverterOptionInt64.lower(setupAtMs),
+        FfiConverterOptionInt64.lower(legacyLastBackupMs),$0
+    )
+})
+}
+/**
  * The reason a `notifications` row gives, or `None` for a row that is not a
  * backup notice: for showing the notification itself with
  * `backup_stop_words`.
@@ -25568,6 +25676,21 @@ public func backupNoticeReason(kind: String, dataJson: String) -> String?  {
     uniffi_beebeeb_uniffi_fn_func_backup_notice_reason(
         FfiConverterString.lower(kind),
         FfiConverterString.lower(dataJson),$0
+    )
+})
+}
+/**
+ * Decide a pass. `notices_fetch_ok` is `false` when the notices could not be
+ * read completely (a server or network error, or a page missing); `notices`
+ * is then ignored. Otherwise as `backup_stop`.
+ */
+public func backupPassGate(noticesFetchOk: Bool, notices: [BackupNoticeRow], lastPassAtMs: Int64, listing: BackupStopListing)throws  -> BackupPassGate  {
+    return try  FfiConverterTypeBackupPassGate_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_backup_pass_gate(
+        FfiConverterBool.lower(noticesFetchOk),
+        FfiConverterSequenceTypeBackupNoticeRow.lower(notices),
+        FfiConverterInt64.lower(lastPassAtMs),
+        FfiConverterTypeBackupStopListing_lower(listing),$0
     )
 })
 }
@@ -25850,7 +25973,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_backup_again_action() != 13263) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_func_backup_check_failed_words() != 58772) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_backup_first_pass_baseline() != 15552) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_func_backup_notice_reason() != 40118) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_backup_pass_gate() != 16391) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_backup_stop() != 43581) {
