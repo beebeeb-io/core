@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 Additive on v0.2.1: the rebuild's clock rule (LD-0123) and why a backup stops (LD-0121, spec
-`2026-11-06-backup-from-source-design.md` Amendments 12 and 12a). No v0.2.1 API is renamed, retyped or
+`2026-11-06-backup-from-source-design.md` Amendments 12, 12a and 12b). No v0.2.1 API is renamed, retyped or
 removed. The version is the lead's call at release.
 
 ### Added
@@ -20,7 +20,7 @@ removed. The version is the lead's call at release.
   received_at_ms)` measures the offset from a listing response's `Date` header (margin
   `REBUILD_MARGIN_BASE_MS` 2 s + the round trip; any failure gives the unknown clock).
 - **`beebeeb_types::backup` (LD-0121)**: `BackupStopReason` (`backup_deleted`, `erase_request`,
-  `account_lapsed`, `inactive_cleanup`, `account_reset`, `unknown`), `NOTICE_FILES_REMOVED`,
+  `account_lapsed`, `inactive_cleanup`, `account_reset`, `unknown_removal`, `unknown`), `NOTICE_FILES_REMOVED`,
   `NOTICE_BACKUP_DELETED`, and `BackupNotice` (the `notifications` row's `type` and `data`, ids only).
 - **`beebeeb_core::backup`, stop (LD-0121)**: `backup_stop(notices, last_pass_at_ms, listing)` (Amendment
   12's steps 1-4: a newer `files_removed` notice turns every backup off, folders present or not; else per
@@ -28,11 +28,16 @@ removed. The version is the lead's call at release.
   folder gone with no notice, `unknown`; else nothing),
   `parse_backup_notice`, `ReceivedNotice`, `StopListing`, `StopFolder`, `StoppedBackup`, and the words:
   `backup_stop_words(reason, device, folder)`, `MSG_STOP_ERASE_REQUEST`, `MSG_STOP_ACCOUNT_LAPSED`,
-  `MSG_STOP_INACTIVE_CLEANUP`, `MSG_STOP_ACCOUNT_RESET`, `MSG_BACK_UP_AGAIN` ("Back up again"), as drafted
-  in Amendment 12, awaiting Guus's per-item look (G6).
+  `MSG_STOP_INACTIVE_CLEANUP`, `MSG_STOP_ACCOUNT_RESET`, `MSG_STOP_UNKNOWN_REMOVAL`, `MSG_BACK_UP_AGAIN`
+  ("Back up again"): Amendment 12's six lines as drafted are final (Guus 2026-11-07 19:04, G6).
+- **The seventh line (LD-0121, spec Amendment 12b)**: a `files_removed` notice whose reason this build does
+  not recognise (a future reason, or none) stops every backup as `BackupStopReason::UnknownRemoval`
+  (`"unknown_removal"`) with `MSG_STOP_UNKNOWN_REMOVAL`, "Your files were removed, so backups are off.",
+  never the `unknown` row's "was deleted" words; `parse_backup_notice`, `BackupNotice::reason` and the uniffi
+  and wasm `backup_notice_reason` / `backupNoticeReason` give `unknown_removal` for it.
 - **Bindings**: uniffi `backup_stop`, `backup_notice_reason`, `backup_stop_words`, `backup_again_action`
   (4); wasm `backupStop`, `backupNoticeReason`, `backupStopWords`, `backupAgainAction` (4).
-- **Vectors**: `backup_plan.json` 71 → 114 cases (+6 rebuild clock, 21 stop, 9 notice, 6 words, 1
+- **Vectors**: `backup_plan.json` 71 → 117 cases (+6 rebuild clock, 22 stop, 10 notice, 7 words, 1
   action); every rebuild case now carries its clock.
 
 ### Changed

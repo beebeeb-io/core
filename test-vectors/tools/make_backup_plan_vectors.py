@@ -329,10 +329,14 @@ stop("stop_backup_deleted_for_another_device_ignored", [deleted(OTHER_DEV), dele
 stop("stop_category_notice_with_another_device_folder_ignored", [deleted(OTHER_DEV, PICS)], listing(), [])
 stop("stop_category_notice_with_another_device_folder_gone_is_unknown", [deleted(OTHER_DEV, PICS)],
      listing(pics=False), [off("pictures", "unknown")])
-# A files_removed notice whose reason this version does not know still stops (stop and say why), with the unknown
-# words; a row of any other type is not a backup notice.
+# A files_removed notice whose reason this build does not recognise (a future reason, or none) still stops every
+# backup (stop and say why), as unknown_removal with its own words, never the unknown row's "was deleted" words
+# (Amendment 12b, Guus 2026-11-07 19:04, G6); a row of any other type is not a backup notice.
 stop("stop_files_removed_unknown_reason_still_stops",
-     [{"type": "files_removed", "data": {"reason": "billing_v2"}, "created_at_ms": LAST + 1}], listing(), both("unknown"))
+     [{"type": "files_removed", "data": {"reason": "billing_v2"}, "created_at_ms": LAST + 1}], listing(),
+     both("unknown_removal"))
+stop("stop_files_removed_without_a_reason_still_stops",
+     [{"type": "files_removed", "data": {}, "created_at_ms": LAST + 1}], listing(), both("unknown_removal"))
 stop("stop_other_notice_types_are_ignored",
      [{"type": "share_received", "data": {"reason": "erase_request"}, "created_at_ms": LAST + 1}], listing(), [])
 # A malformed category id names no folder: it never reads as the whole device.
@@ -351,24 +355,27 @@ def notice(id_, type_, data, expect):
 for reason in ["erase_request", "account_lapsed", "inactive_cleanup", "account_reset"]:
     notice(f"notice_files_removed_{reason}", "files_removed", {"reason": reason},
            {"type": "files_removed", "reason": reason})
-notice("notice_files_removed_with_a_non_removal_reason_is_unknown", "files_removed", {"reason": "backup_deleted"},
-       {"type": "files_removed", "reason": "unknown"})
-notice("notice_files_removed_without_a_reason_is_unknown", "files_removed", {}, {"type": "files_removed",
-                                                                                  "reason": "unknown"})
-notice("notice_files_removed_with_null_data_is_unknown", "files_removed", None, {"type": "files_removed",
-                                                                                   "reason": "unknown"})
+notice("notice_files_removed_with_a_future_reason_is_an_unknown_removal", "files_removed", {"reason": "billing_v2"},
+       {"type": "files_removed", "reason": "unknown_removal"})
+notice("notice_files_removed_with_a_non_removal_reason_is_an_unknown_removal", "files_removed",
+       {"reason": "backup_deleted"}, {"type": "files_removed", "reason": "unknown_removal"})
+notice("notice_files_removed_without_a_reason_is_an_unknown_removal", "files_removed", {},
+       {"type": "files_removed", "reason": "unknown_removal"})
+notice("notice_files_removed_with_null_data_is_an_unknown_removal", "files_removed", None,
+       {"type": "files_removed", "reason": "unknown_removal"})
 notice("notice_backup_deleted", "backup_deleted", {"device_folder_id": DEV, "category_folder_id": PICS},
        {"type": "backup_deleted", "reason": "backup_deleted"})
 notice("notice_other_type_is_not_a_backup_notice", "share_received", {"reason": "erase_request"}, None)
 
-# Core's words (spec Amendment 12's table: the lead's drafts, for Guus's per-item look, G6), each followed by the
-# action "Back up again".
+# Core's words (spec Amendment 12's table, final: Guus 2026-11-07 19:04, G6 "All six as drafted"; and Amendment 12b's
+# seventh line for a removal whose reason this build does not recognise), each followed by "Back up again".
 for reason, words in [
     ("backup_deleted", "GLegion's backup of Pictures was deleted from another device."),
     ("erase_request", "Your files were erased, so backups are off."),
     ("account_lapsed", "Your files were removed after the account lapsed, so backups are off."),
     ("inactive_cleanup", "Your files were removed because the account was inactive, so backups are off."),
     ("account_reset", "Your files were removed when the account was reset, so backups are off."),
+    ("unknown_removal", "Your files were removed, so backups are off."),
     ("unknown", "GLegion's backup of Pictures was deleted, so it is off."),
 ]:
     cases.append({"id": f"stop_words_{reason}", "kind": "stop_words", "reason": reason, "device": "GLegion",
@@ -382,8 +389,8 @@ doc = {
     "removed elsewhere (stays deleted until it changes), folder presence, key normalisation, and rebuilding records "
     "from the remote tree (uploaded after the last change by the device clock's measured offset and margin, or the "
     "one-sided 10-minute floor when no offset is known: LD-0123), and why a backup stops with its words (spec "
-    "Amendments 12 and 12a, LD-0121).",
-    "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\") + LD-0123 + Amendments 12/12a (LD-0121); written by "
+    "Amendments 12, 12a and 12b, LD-0121).",
+    "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\") + LD-0123 + Amendments 12/12a/12b (LD-0121); written by "
     "test-vectors/tools/make_backup_plan_vectors.py (independent of core)",
     "cases": cases,
 }

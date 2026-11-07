@@ -112,7 +112,7 @@ fn run_plan_case(case: &Value) -> Value {
 #[test]
 fn backup_plan_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 114, "every named backup_plan case is present");
+    assert_eq!(cases.len(), 117, "every named backup_plan case is present");
 
     let (mut plans, mut keys, mut presences, mut rebuilds) = (0, 0, 0, 0);
     let (mut stops, mut notices, mut words, mut actions) = (0, 0, 0, 0);
@@ -217,7 +217,7 @@ fn backup_plan_cases_match_core() {
     );
     assert_eq!(
         (stops, notices, words, actions),
-        (21, 9, 6, 1),
+        (22, 10, 7, 1),
         "stop case counts per kind"
     );
 }
@@ -855,4 +855,42 @@ fn stop_restored_before_pass_no_notice_no_change() {
         backup_stop(&[backup_deleted(None, LAST + 1)], LAST, &two_backups(true, true)).len(),
         2
     );
+}
+
+/// Amendment 12b (Guus, 2026-11-07 19:04, G6): a `files_removed` notice whose
+/// reason this build does not recognise stops every backup with its own line,
+/// "Your files were removed, so backups are off.", never the `unknown` row's
+/// "was deleted" words, which would be untrue (the folders are still there).
+#[test]
+fn stop_files_removed_unknown_reason_uses_the_removed_words() {
+    let row = parse_backup_notice("files_removed", &json!({"reason": "billing_v2"})).expect("a backup notice");
+    // The notice itself carries the reason, not only `reason()`: a client that
+    // stores or re-serialises the notice keeps the right words.
+    assert_eq!(
+        row,
+        BackupNotice::FilesRemoved {
+            reason: BackupStopReason::UnknownRemoval
+        }
+    );
+    let got = backup_stop(
+        &[ReceivedNotice {
+            notice: row,
+            created_at_ms: LAST + 1,
+        }],
+        LAST,
+        &two_backups(true, true),
+    );
+    assert_eq!(
+        got,
+        stopped(&[
+            (Category::Documents, BackupStopReason::UnknownRemoval),
+            (Category::Pictures, BackupStopReason::UnknownRemoval),
+        ])
+    );
+    for s in &got {
+        assert_eq!(
+            backup_stop_words(s.reason, "GLegion", s.category.display_name()),
+            "Your files were removed, so backups are off."
+        );
+    }
 }

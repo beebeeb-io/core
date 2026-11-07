@@ -1,6 +1,6 @@
 {
-  "description": "LD-0113 backup pass planner (spec 2026-11-06-backup-from-source §4.2 rules 9-11): new, changed (size or mtime), unchanged, gone (stays in the backup), unique moves (same size, mtime and case-folded name, unique both ways), the per-pass budget (a prefix; the first upload always fits), parent folders parents-first, removed elsewhere (stays deleted until it changes), folder presence, key normalisation, and rebuilding records from the remote tree (uploaded after the last change by the device clock's measured offset and margin, or the one-sided 10-minute floor when no offset is known: LD-0123), and why a backup stops with its words (spec Amendments 12 and 12a, LD-0121).",
-  "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\") + LD-0123 + Amendments 12/12a (LD-0121); written by test-vectors/tools/make_backup_plan_vectors.py (independent of core)",
+  "description": "LD-0113 backup pass planner (spec 2026-11-06-backup-from-source §4.2 rules 9-11): new, changed (size or mtime), unchanged, gone (stays in the backup), unique moves (same size, mtime and case-folded name, unique both ways), the per-pass budget (a prefix; the first upload always fits), parent folders parents-first, removed elsewhere (stays deleted until it changes), folder presence, key normalisation, and rebuilding records from the remote tree (uploaded after the last change by the device clock's measured offset and margin, or the one-sided 10-minute floor when no offset is known: LD-0123), and why a backup stops with its words (spec Amendments 12, 12a and 12b, LD-0121).",
+  "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\") + LD-0123 + Amendments 12/12a/12b (LD-0121); written by test-vectors/tools/make_backup_plan_vectors.py (independent of core)",
   "cases": [
     {
       "id": "plan_new_file",
@@ -3849,11 +3849,49 @@
       "expect": [
         {
           "category": "documents",
-          "reason": "unknown"
+          "reason": "unknown_removal"
         },
         {
           "category": "pictures",
-          "reason": "unknown"
+          "reason": "unknown_removal"
+        }
+      ]
+    },
+    {
+      "id": "stop_files_removed_without_a_reason_still_stops",
+      "kind": "stop",
+      "notices": [
+        {
+          "type": "files_removed",
+          "data": {},
+          "created_at_ms": 1762430400001
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": [
+        {
+          "category": "documents",
+          "reason": "unknown_removal"
+        },
+        {
+          "category": "pictures",
+          "reason": "unknown_removal"
         }
       ]
     },
@@ -3987,7 +4025,19 @@
       }
     },
     {
-      "id": "notice_files_removed_with_a_non_removal_reason_is_unknown",
+      "id": "notice_files_removed_with_a_future_reason_is_an_unknown_removal",
+      "kind": "notice",
+      "type": "files_removed",
+      "data": {
+        "reason": "billing_v2"
+      },
+      "expect": {
+        "type": "files_removed",
+        "reason": "unknown_removal"
+      }
+    },
+    {
+      "id": "notice_files_removed_with_a_non_removal_reason_is_an_unknown_removal",
       "kind": "notice",
       "type": "files_removed",
       "data": {
@@ -3995,27 +4045,27 @@
       },
       "expect": {
         "type": "files_removed",
-        "reason": "unknown"
+        "reason": "unknown_removal"
       }
     },
     {
-      "id": "notice_files_removed_without_a_reason_is_unknown",
+      "id": "notice_files_removed_without_a_reason_is_an_unknown_removal",
       "kind": "notice",
       "type": "files_removed",
       "data": {},
       "expect": {
         "type": "files_removed",
-        "reason": "unknown"
+        "reason": "unknown_removal"
       }
     },
     {
-      "id": "notice_files_removed_with_null_data_is_unknown",
+      "id": "notice_files_removed_with_null_data_is_an_unknown_removal",
       "kind": "notice",
       "type": "files_removed",
       "data": null,
       "expect": {
         "type": "files_removed",
-        "reason": "unknown"
+        "reason": "unknown_removal"
       }
     },
     {
@@ -4079,6 +4129,14 @@
       "device": "GLegion",
       "folder": "Pictures",
       "expect": "Your files were removed when the account was reset, so backups are off."
+    },
+    {
+      "id": "stop_words_unknown_removal",
+      "kind": "stop_words",
+      "reason": "unknown_removal",
+      "device": "GLegion",
+      "folder": "Pictures",
+      "expect": "Your files were removed, so backups are off."
     },
     {
       "id": "stop_words_unknown",

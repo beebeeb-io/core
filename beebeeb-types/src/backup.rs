@@ -183,8 +183,9 @@ impl Platform {
 ///
 /// The wire strings are the `notifications` row's `data.reason` values
 /// (`erase_request`, `account_reset`, `inactive_cleanup`, `account_lapsed`),
-/// plus `backup_deleted` (a step-up delete from another device) and `unknown`
-/// (a folder gone with no notice).
+/// plus `unknown_removal` (a removal whose reason this build does not know),
+/// `backup_deleted` (a step-up delete from another device) and `unknown` (a
+/// folder gone with no notice).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BackupStopReason {
@@ -199,18 +200,24 @@ pub enum BackupStopReason {
     InactiveCleanup,
     /// The admin onboarding reset (row 7).
     AccountReset,
+    /// The account's files were removed for a reason this build does not know
+    /// (a `files_removed` notice whose reason is missing or new). It stops
+    /// every backup like the four removal reasons, with its own words, never
+    /// the "deleted" words (Guus, 2026-11-07 19:04, G6).
+    UnknownRemoval,
     /// The folder is gone or trashed and no notice says why.
     Unknown,
 }
 
 impl BackupStopReason {
     /// Every reason, in declaration order.
-    pub const ALL: [BackupStopReason; 6] = [
+    pub const ALL: [BackupStopReason; 7] = [
         BackupStopReason::BackupDeleted,
         BackupStopReason::EraseRequest,
         BackupStopReason::AccountLapsed,
         BackupStopReason::InactiveCleanup,
         BackupStopReason::AccountReset,
+        BackupStopReason::UnknownRemoval,
         BackupStopReason::Unknown,
     ];
 
@@ -222,6 +229,7 @@ impl BackupStopReason {
             BackupStopReason::AccountLapsed => "account_lapsed",
             BackupStopReason::InactiveCleanup => "inactive_cleanup",
             BackupStopReason::AccountReset => "account_reset",
+            BackupStopReason::UnknownRemoval => "unknown_removal",
             BackupStopReason::Unknown => "unknown",
         }
     }
@@ -232,8 +240,8 @@ impl BackupStopReason {
     }
 
     /// Whether the account's files were removed (a `files_removed` notice's
-    /// reason): every backup of every device stops, even where the folders are
-    /// still there.
+    /// reason, `UnknownRemoval` included): every backup of every device stops,
+    /// even where the folders are still there.
     pub const fn files_removed(self) -> bool {
         matches!(
             self,
@@ -241,6 +249,7 @@ impl BackupStopReason {
                 | BackupStopReason::AccountLapsed
                 | BackupStopReason::InactiveCleanup
                 | BackupStopReason::AccountReset
+                | BackupStopReason::UnknownRemoval
         )
     }
 }
@@ -267,7 +276,9 @@ pub const NOTICE_BACKUP_DELETED: &str = "backup_deleted";
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum BackupNotice {
     /// Wire type [`NOTICE_FILES_REMOVED`]. `reason` is one of the four
-    /// reasons for which [`BackupStopReason::files_removed`] holds.
+    /// removal reasons the server writes; any reason for which
+    /// [`BackupStopReason::files_removed`] does not hold reads as
+    /// `UnknownRemoval`.
     FilesRemoved { reason: BackupStopReason },
     /// Wire type [`NOTICE_BACKUP_DELETED`]. Without `category_folder_id` the
     /// whole device folder was deleted.
@@ -288,12 +299,12 @@ impl BackupNotice {
     }
 
     /// Why the backups this notice reaches stop: a `files_removed` notice's
-    /// reason (`Unknown` when it is not one of the four removal reasons), or
+    /// reason (`UnknownRemoval` when it is not a removal reason), or
     /// `BackupDeleted`.
     pub const fn reason(&self) -> BackupStopReason {
         match self {
             BackupNotice::FilesRemoved { reason } if reason.files_removed() => *reason,
-            BackupNotice::FilesRemoved { .. } => BackupStopReason::Unknown,
+            BackupNotice::FilesRemoved { .. } => BackupStopReason::UnknownRemoval,
             BackupNotice::BackupDeleted { .. } => BackupStopReason::BackupDeleted,
         }
     }
@@ -317,6 +328,7 @@ mod tests {
                 "\"account_lapsed\"",
                 "\"inactive_cleanup\"",
                 "\"account_reset\"",
+                "\"unknown_removal\"",
                 "\"unknown\""
             ]
         );
@@ -332,7 +344,13 @@ mod tests {
             .collect();
         assert_eq!(
             removed,
-            ["erase_request", "account_lapsed", "inactive_cleanup", "account_reset"]
+            [
+                "erase_request",
+                "account_lapsed",
+                "inactive_cleanup",
+                "account_reset",
+                "unknown_removal"
+            ]
         );
     }
 
@@ -376,7 +394,7 @@ mod tests {
         let odd = BackupNotice::FilesRemoved {
             reason: BackupStopReason::BackupDeleted,
         };
-        assert_eq!(odd.reason(), BackupStopReason::Unknown);
+        assert_eq!(odd.reason(), BackupStopReason::UnknownRemoval);
     }
 
     #[test]
