@@ -5,7 +5,7 @@
 
 /// `Debug` for a wire record: the listed public fields as they are, and
 /// `[REDACTED]` for the secret ones (tokens, tickets, codes, passphrases,
-/// authenticator secrets). Core #74 crypto review, P2-5.
+/// authenticator secrets). Crypto review, P2-5.
 macro_rules! redacted_debug {
     ($ty:ident; show: [$($shown:ident),* $(,)?]; hide: [$($hidden:ident),* $(,)?]) => {
         impl ::std::fmt::Debug for $ty {

@@ -1076,7 +1076,7 @@ async fn public_share_download_uses_the_counted_chunk_manifest() {
     assert_eq!(requests[2].header("X-Share-Download-Token"), Some("counted-ticket"));
 }
 
-/// Core #74 crypto review, P3: a replacement's counter is
+/// Crypto review, P3: a replacement's counter is
 /// max(remembered, served) + 1, so a server that serves an older metadata
 /// record cannot make the new version reuse a counter this device has seen.
 #[tokio::test]

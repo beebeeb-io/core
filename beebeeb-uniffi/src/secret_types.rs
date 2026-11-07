@@ -1,4 +1,4 @@
-//! Secrets that cross FFI inside records (core #74 crypto review, P2-5):
+//! Secrets that cross FFI inside records (crypto review, P2-5):
 //! wiped on drop and `[REDACTED]` in `Debug`. Swift and Kotlin see a plain
 //! `String` / `Data` (`ByteArray`) through UniFFI custom types; the bytes
 //! UniFFI itself copies across the boundary are outside Rust's reach.

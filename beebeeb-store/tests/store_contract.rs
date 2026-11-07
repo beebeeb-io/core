@@ -220,7 +220,7 @@ fn sync_store_applies_only_the_changed_node_in_a_large_tree() {
     assert_eq!(store.load().unwrap(), after);
 }
 
-/// Core #74 crypto review, P3: the plaintext cache is owner-only on Unix: a new
+/// Crypto review, P3: the plaintext cache is owner-only on Unix: a new
 /// database and the sidecars SQLite creates for it are `0600`, the directory
 /// this call creates is `0700`, and an existing world-readable database is
 /// tightened on open.

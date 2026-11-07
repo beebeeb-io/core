@@ -421,7 +421,7 @@ fn restore_removes_an_unreferenced_ciphertext_file_before_restaging_it() {
     assert!(!orphan.exists());
 }
 
-/// Core #74 crypto review, P3 (data integrity): a frame reaches the OS only
+/// Crypto review, P3 (data integrity): a frame reaches the OS only
 /// after the state that names it was serialized. A frame staged after the last
 /// snapshot dies with the process: restore deletes its file and seals that
 /// index again with a fresh nonce, so it must never have been handed out, or

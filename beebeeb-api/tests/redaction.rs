@@ -1,4 +1,4 @@
-//! Core #74 crypto review, P2-5: wire records that carry a secret print
+//! Crypto review, P2-5: wire records that carry a secret print
 //! `[REDACTED]` for it in `Debug` (core CLAUDE.md, "Secrets ... never appear in
 //! errors or debug output").
 

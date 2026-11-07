@@ -1,5 +1,5 @@
-//! Streaming chunk decryption (push form), task 1908. Moved out of `lib.rs`
-//! when the constructors began to take the decrypted metadata (core #74 crypto
+//! Streaming chunk decryption (push form). Moved out of `lib.rs`
+//! when the constructors began to take the decrypted metadata (crypto
 //! review, P2-4).
 
 use beebeeb_core::chunk_stream::{ChunkDecryptor, ExpectedChunkFormat, VersionCommitment};
@@ -74,7 +74,7 @@ fn metadata_from_js(metadata: JsValue) -> Result<(ExpectedChunkFormat, Option<Ve
 ///
 /// Reads v2 (position-bound) and v1 (legacy) files. Both constructors take the
 /// object `decrypt_file_metadata(...)` returned for the version being read
-/// (task 1908, core #74 P2-4): its `chunk_format` (0 = unrecorded, 2 = v2) and,
+/// (crypto review P2-4): its `chunk_format` (0 = unrecorded, 2 = v2) and,
 /// when the record carries one, its version commitment, which frame 0 must
 /// match, so the server cannot serve another upload in its place. A missing
 /// object, or one with only half a commitment, is refused; a legacy record

@@ -70,7 +70,7 @@ mod tests {
         );
     }
 
-    /// Known answers computed outside Rust (core #74 crypto review, P3), with
+    /// Known answers computed outside Rust (crypto review, P3), with
     /// Python's `hmac`/`hashlib` as RFC 5869 HKDF-SHA256, no salt:
     /// `hkdf(ikm=bytes([7])*32, info=b"beebeeb/product/pass/v1", L=32)`, and
     /// the same for `chat`. A changed label or derivation fails here.

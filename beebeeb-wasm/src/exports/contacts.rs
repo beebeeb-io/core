@@ -1,5 +1,5 @@
 //! Contact safety numbers (relayed-key pinning design, D1/D2) for the web
-//! client, so it shows the same number as the apps (core #74 crypto review,
+//! client, so it shows the same number as the apps (crypto review,
 //! P2-7). No rule lives here: the format is `beebeeb_core::contact_keys`,
 //! proved by `test-vectors/safety_number.json`. Web must use `normalizeEmail`
 //! and never its own `String.prototype.trim`, which strips other characters.

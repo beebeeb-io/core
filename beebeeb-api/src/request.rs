@@ -33,7 +33,7 @@ impl Header {
 /// The headers whose values `Debug` may print. Every other value is
 /// `[REDACTED]`: `Authorization`, `Cookie`, `Set-Cookie` (the session cookie
 /// on sign-in answers), tokens, passphrases, presigned `Location`s and any
-/// header a server adds later (core #74 crypto review, P2-6).
+/// header a server adds later (crypto review, P2-6).
 const DEBUG_VISIBLE_HEADERS: &[&str] = &[
     "accept",
     "accept-encoding",

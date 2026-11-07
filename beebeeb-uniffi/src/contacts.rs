@@ -1,5 +1,5 @@
 //! Contact safety numbers (relayed-key pinning design, D1/D2) for Swift and
-//! Kotlin, so the apps show the same number as web (core #74 crypto review,
+//! Kotlin, so the apps show the same number as web (crypto review,
 //! P2-7). The format is `beebeeb_core::contact_keys`, proved by
 //! `test-vectors/safety_number.json`.
 

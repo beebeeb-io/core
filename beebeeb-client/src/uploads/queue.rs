@@ -55,7 +55,7 @@ impl UploadService {
             }
             // The new version is max(remembered, served) + 1: the metadata
             // comes from the server, which could serve an older record and make
-            // this version reuse a counter already seen (core #74 crypto
+            // this version reuse a counter already seen (crypto
             // review, P3).
             let served = metadata.version.ok_or(UploadServiceError::Encryption)?.counter;
             let remembered = self

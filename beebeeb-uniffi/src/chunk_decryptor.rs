@@ -1,5 +1,5 @@
 //! Stateful streaming decryptor handle. Moved out of `lib.rs` when its
-//! constructors began to take the decrypted metadata (core #74 crypto review,
+//! constructors began to take the decrypted metadata (crypto review,
 //! P2-4): every constructor applies the version commitment the record carries.
 
 use std::sync::{Arc, Mutex};

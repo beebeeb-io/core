@@ -1,5 +1,5 @@
 'use strict';
-// Core #74 crypto review, P2-4: the content decryptor takes the object
+// Crypto review, P2-4: the content decryptor takes the object
 // decrypt_file_metadata returned, so the version commitment in it is enforced:
 // the server cannot serve another complete upload of the same file in place
 // of the recorded version.

@@ -1,5 +1,5 @@
 'use strict';
-// The device-link surface a web client sees (core #74 crypto review, P2-3 and
+// The device-link surface a web client sees (crypto review, P2-3 and
 // P2-1): the QR path takes the raw scanned text, never fingerprint bytes; the
 // typed-code path runs both roles with the approver's confirmation check
 // before anything is sealed.

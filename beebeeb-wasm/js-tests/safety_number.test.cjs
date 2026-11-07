@@ -1,5 +1,5 @@
 'use strict';
-// Core #74 crypto review, P2-7: web reaches the one safety-number format and
+// Crypto review, P2-7: web reaches the one safety-number format and
 // the one email normalisation through WASM, on every row of
 // test-vectors/safety_number.json (generated independently with hashlib),
 // including the two rows that pin str::trim against JavaScript's trim.

@@ -71,8 +71,8 @@ impl PasskeySealedMasterKey {
 }
 
 /// AES-GCM associated data: `domain ‖ version ‖ u32_be(len) ‖ account ‖
-/// u32_be(len) ‖ credential`. The wire version byte is inside the AAD (core #74
-/// crypto review, P3), so a later format cannot reuse a version-1 blob under
+/// u32_be(len) ‖ credential`. The wire version byte is inside the AAD (crypto
+/// review, P3), so a later format cannot reuse a version-1 blob under
 /// another version byte. No 61-byte blob had shipped when this was added.
 fn context(version: u8, account_id: &[u8], credential_id: &[u8]) -> Result<Vec<u8>, CoreError> {
     if account_id.is_empty() || credential_id.is_empty() {

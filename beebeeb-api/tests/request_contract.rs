@@ -177,7 +177,7 @@ fn non_success_uses_core_server_error_parser() {
     }
 }
 
-/// Core #74 crypto review, P2-6: header values are redacted unless allow-listed,
+/// Crypto review, P2-6: header values are redacted unless allow-listed,
 /// so the session cookie a sign-in answer sets never reaches a log.
 #[test]
 fn header_values_are_redacted_unless_allow_listed() {

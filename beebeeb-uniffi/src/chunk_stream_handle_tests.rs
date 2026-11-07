@@ -502,7 +502,7 @@ fn pull_file_roundtrip_via_handles() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Core #74 crypto review, P2-4: every decryptor constructor takes the record
+/// Crypto review, P2-4: every decryptor constructor takes the record
 /// `decrypt_file_metadata` returned and enforces its version commitment, so an
 /// older complete upload of the same file is refused, through the master key
 /// and through a key handle alike.

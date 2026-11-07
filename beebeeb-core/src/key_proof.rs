@@ -104,7 +104,7 @@ pub fn create_challenge() -> Result<(KeyProofChallenge, KeyProofVerifier), CoreE
 /// shared secret only ever enters HKDF under `KEY_INFO` and then an HMAC over
 /// a domain-separated transcript, never a raw DH output, and no other
 /// derivation in core uses the account X25519 key with that info string.
-/// Small-order and other non-contributory points are refused. Core #74 crypto
+/// Small-order and other non-contributory points are refused. Crypto
 /// review, P3.
 pub fn answer_challenge(
     master_key: &MasterKey,

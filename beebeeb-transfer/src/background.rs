@@ -229,7 +229,7 @@ struct PersistedState {
 /// snapshot. A frame staged after it is not in the persisted state, so after a
 /// crash restore deletes its file and seals that index again with a fresh
 /// nonce; had the OS already uploaded the first frame, the server would hold
-/// two valid frames for one index (core #74 crypto review, P3).
+/// two valid frames for one index (crypto review, P3).
 pub struct BackgroundUploadPlanner {
     state: PersistedState,
     /// Runtime only, never serialized: chunks below this index were staged
