@@ -67,16 +67,29 @@ impl SecretStore for MemorySecretStore {
     }
 }
 
+/// The Keychain exists only on Apple targets. Elsewhere the store keeps no
+/// fields and every call returns `SecretError::Backend`; the constructor keeps
+/// one signature on every platform so callers need no cfg of their own.
 pub struct KeychainSecretStore {
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     service: String,
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     access_group: String,
 }
 
 impl KeychainSecretStore {
     pub fn new(service: impl Into<String>, access_group: impl Into<String>) -> Self {
-        Self {
-            service: service.into(),
-            access_group: access_group.into(),
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        {
+            Self {
+                service: service.into(),
+                access_group: access_group.into(),
+            }
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        {
+            let _ = (service, access_group);
+            Self {}
         }
     }
 }
