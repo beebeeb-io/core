@@ -39,3 +39,12 @@ panic = "abort"
 debug = false
 incremental = false
 overflow-checks = true
+
+# Dev and test builds compile the DEPENDENCIES (argon2, blake2, aes-gcm, opaque-ke, ...) the way release does:
+# optimised and without their internal debug assertions (overflow checks stay on, as in release). The
+# workspace's own crates keep the dev defaults, debug assertions included. Argon2id at the production
+# parameters (256 MiB, 4 iterations) in unoptimised dependencies made core's CI Tests job take 40 min
+# (task 2381). The KDF parameters and the tests are unchanged.
+[profile.dev.package."*"]
+opt-level = 3
+debug-assertions = false

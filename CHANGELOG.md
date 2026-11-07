@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Additive on v0.2.1: the rebuild's clock rule (LD-0123) and why a backup stops (LD-0121, spec
-`2026-11-06-backup-from-source-design.md` Amendments 12, 12a and 12b). No v0.2.1 API is renamed, retyped or
-removed. The version is the lead's call at release.
+## [0.2.2] - 2026-11-07
+
+Additive on v0.2.1: the rebuild's clock rule (LD-0123), why a backup stops (LD-0121, spec
+`2026-11-06-backup-from-source-design.md` Amendments 12, 12a and 12b), and the CLI-login ECDH moved off
+RUSTSEC-2026-0387 (task 2378). No v0.2.1 API is renamed, retyped or removed.
 
 ### Added
 
