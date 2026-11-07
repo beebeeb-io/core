@@ -47,7 +47,7 @@ pub struct BackupStopListing {
 
 /// A backup that turns off: its category key and the reason
 /// (`"backup_deleted"`, `"erase_request"`, `"account_lapsed"`,
-/// `"inactive_cleanup"`, `"account_reset"`, `"unknown"`).
+/// `"inactive_cleanup"`, `"account_reset"`, `"unknown_removal"`, `"unknown"`).
 #[derive(Debug, PartialEq, Eq, uniffi::Record)]
 pub struct BackupStopped {
     pub category: String,
@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn uniffi_backup_stop_matches_every_stop_case() {
         let cases = of_kind("stop");
-        assert_eq!(cases.len(), 21);
+        assert_eq!(cases.len(), 22);
         for case in &cases {
             let notices = case["notices"]
                 .as_array()
@@ -201,14 +201,14 @@ mod tests {
     #[test]
     fn uniffi_backup_notice_reason_and_words_match_the_vectors() {
         let notices = of_kind("notice");
-        assert_eq!(notices.len(), 9);
+        assert_eq!(notices.len(), 10);
         for case in &notices {
             let got = backup_notice_reason(case["type"].as_str().unwrap().to_string(), case["data"].to_string());
             let want = case["expect"]["reason"].as_str().map(str::to_string);
             assert_eq!(got, want, "{}", case["id"]);
         }
         let words = of_kind("stop_words");
-        assert_eq!(words.len(), 6);
+        assert_eq!(words.len(), 7);
         for case in &words {
             let got = backup_stop_words(
                 case["reason"].as_str().unwrap().to_string(),
@@ -225,7 +225,7 @@ mod tests {
         // Data that is not JSON reads as null: a removal still stops.
         assert_eq!(
             backup_notice_reason("files_removed".to_string(), "{not json".to_string()).as_deref(),
-            Some("unknown")
+            Some("unknown_removal")
         );
     }
 

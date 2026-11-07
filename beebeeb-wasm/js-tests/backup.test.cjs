@@ -107,7 +107,7 @@ const plan = require(
 
 nodeTest('backupStop agrees with every stop case of the shared vector', () => {
   const cases = plan.cases.filter((c) => c.kind === 'stop');
-  assert.equal(cases.length, 21, 'the six cases Amendment 12 names and fifteen more');
+  assert.equal(cases.length, 22, 'the six cases Amendment 12 names and sixteen more');
   for (const c of cases) {
     assert.deepEqual(wasm.backupStop(c.notices, c.last_pass_at_ms, c.listing), c.expect, c.id);
   }
@@ -115,12 +115,12 @@ nodeTest('backupStop agrees with every stop case of the shared vector', () => {
 
 nodeTest('backupNoticeReason, backupStopWords and backupAgainAction agree with the shared vector', () => {
   const notices = plan.cases.filter((c) => c.kind === 'notice');
-  assert.equal(notices.length, 9);
+  assert.equal(notices.length, 10);
   for (const c of notices) {
     assert.equal(wasm.backupNoticeReason(c.type, c.data), c.expect === null ? undefined : c.expect.reason, c.id);
   }
   const words = plan.cases.filter((c) => c.kind === 'stop_words');
-  assert.equal(words.length, 6, 'one line per reason');
+  assert.equal(words.length, 7, 'one line per reason');
   for (const c of words) {
     assert.equal(wasm.backupStopWords(c.reason, c.device, c.folder), c.expect, c.id);
   }

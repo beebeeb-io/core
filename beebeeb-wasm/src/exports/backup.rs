@@ -270,7 +270,7 @@ pub fn backup_stop(notices: JsValue, last_pass_at_ms: f64, listing: JsValue) -> 
 /// The reason a `notifications` row (`type`, `data`) gives, or `undefined` for
 /// a row that is not a backup notice: to show the notification with
 /// `backupStopWords`. A removal whose reason this build does not know is
-/// `"unknown"`.
+/// `"unknown_removal"` (its own words, never the "deleted" ones).
 #[wasm_bindgen(js_name = backupNoticeReason)]
 pub fn backup_notice_reason(kind: &str, data: JsValue) -> Option<String> {
     let data: serde_json::Value = serde_wasm_bindgen::from_value(data).unwrap_or(serde_json::Value::Null);
