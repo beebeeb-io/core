@@ -14,6 +14,9 @@
 # the same archives with the AES extra field's vendor version set to 1 and
 # the real CRC-32 written into both headers (WinZip's AE-1 layout); the
 # reader test makes them from the AE-2 fixtures (support::to_ae1).
+#
+# gen_archives_v1.py writes these fixtures' rows in test-vectors/archives_v1.json (the files
+# each archive holds, as made below); it never writes the archives themselves.
 set -euo pipefail
 
 out=$(cd "$(dirname "${BASH_SOURCE[0]}")/../archives" && pwd)

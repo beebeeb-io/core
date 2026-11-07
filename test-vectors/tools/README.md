@@ -82,3 +82,19 @@ python3 -I test-vectors/tools/make_cli_auth_vectors.py                 # prints 
 python3 -I test-vectors/tools/make_cli_auth_vectors.py --check beebeeb-core/tests/cli_auth_vectors.rs
 python3 -I test-vectors/tools/make_cli_auth_vectors.py --self-test beebeeb-core/tests/cli_auth_vectors.rs
 ```
+
+`gen_archives_v1.py` writes `test-vectors/archives_v1.json` and the fixtures in `test-vectors/archives/`: what core
+must list for each archive (shown name, path, kind, size, protection, skip reason, or the refusal) and every archive
+word, from the archives design (§5.1, §6, §9), never from the Rust. It writes the fixtures byte by byte with no zlib
+(zlib and zlib-ng write different deflate streams; its deflate data is one fixed-Huffman block), then reads each back
+with Python's own `zipfile`, `tarfile` and `gzip`. The password fixtures come from 7-Zip and Info-ZIP
+(`make_archive_password_fixtures.sh`, salted at random), so the generator writes only their rows. Bombs are built in
+the tests, never committed. `beebeeb-core/tests/archives_vectors.rs` runs every row through core;
+`check-archives-vectors-generated.sh` (CI, with `--self-test`) fails when the JSON or a generated fixture is not
+byte-for-byte what the generator writes: add a fixture in the generator, never in the JSON.
+
+```sh
+python3 -I test-vectors/tools/gen_archives_v1.py test-vectors/archives_v1.json test-vectors/archives
+bash test-vectors/tools/check-archives-vectors-generated.sh
+bash test-vectors/tools/check-archives-vectors-generated.sh --self-test
+```

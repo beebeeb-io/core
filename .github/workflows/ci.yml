@@ -81,6 +81,15 @@ jobs:
         if: always()
         run: bash test-vectors/tools/check-backup-vectors-generated.sh --self-test
 
+      # The archive vectors: archives_v1.json and the fixtures gen_archives_v1.py writes, byte for byte.
+      - name: archive vectors match their generator
+        if: always()
+        run: bash test-vectors/tools/check-archives-vectors-generated.sh
+
+      - name: archive vector check can go red
+        if: always()
+        run: bash test-vectors/tools/check-archives-vectors-generated.sh --self-test
+
       # The CLI-auth handshake known answers (task 2378) are Rust constants, not JSON: the independent
       # pure-Python generator must agree with every one of them, and its check must be able to go red.
       - name: cli-auth vectors match their generator

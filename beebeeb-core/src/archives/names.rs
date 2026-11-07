@@ -10,7 +10,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::limits::{MAX_COMPONENT_BYTES, MAX_DEPTH, MAX_PATH_BYTES};
 use super::model::SkipReason;
-use crate::path_safety::archive_component;
+use crate::path_safety::{archive_component, is_bidi_control};
 
 /// An entry's raw name, as its format stores it.
 #[derive(Debug, Clone, Copy)]
@@ -147,12 +147,19 @@ pub fn entry_path(decoded: &str) -> Result<EntryPath, SkipReason> {
 }
 
 /// A name as the listing shows it: the decoded text with every control
-/// character shown as U+FFFD, so a hostile name cannot move the cursor or
-/// break a line on screen.
+/// character, and every bidi override or isolate, shown as U+FFFD, so a
+/// hostile name cannot move the cursor, break a line, or show
+/// `photo\u{202e}gpj.exe` as `photoexe.jpg` on screen.
 pub fn display_name(decoded: &str) -> String {
     decoded
         .chars()
-        .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+        .map(|c| {
+            if c.is_control() || is_bidi_control(c) {
+                '\u{FFFD}'
+            } else {
+                c
+            }
+        })
         .collect()
 }
 

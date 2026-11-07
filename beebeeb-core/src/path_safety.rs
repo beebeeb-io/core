@@ -179,7 +179,7 @@ pub(crate) fn is_windows_reserved_stem(name: &str) -> bool {
 /// characters to `char::is_control`, but a name containing one can render as a
 /// different name (`evil\u{202e}fdp.exe` shows as `evilexe.pdf`), so they are
 /// refused outright.
-fn is_bidi_control(c: char) -> bool {
+pub(crate) fn is_bidi_control(c: char) -> bool {
     matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 
