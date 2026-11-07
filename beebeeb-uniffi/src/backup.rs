@@ -14,6 +14,9 @@ use uuid::Uuid;
 
 use super::CryptoError;
 
+// Why a backup stops and its words (spec Amendment 12, LD-0121).
+mod stop;
+
 fn invalid(detail: impl Into<String>) -> CryptoError {
     CryptoError::InvalidInput { detail: detail.into() }
 }

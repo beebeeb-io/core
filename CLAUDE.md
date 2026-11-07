@@ -132,6 +132,10 @@ Generated files, backups and this public repo:
   does or no record names that remote file (compare-and-set); only a complete remote listing marks
   anything removed elsewhere, and a removed file that changes comes back as a new file, never a
   version of the deleted one. Details are in [docs/agent-notes.md](docs/agent-notes.md).
+- Backups, rebuild and stop: a rebuilt record needs `uploaded_at > modified + offset + margin` (a
+  10-minute floor with no offset), never "uploaded after the device's mtime" alone; `backup_stop`'s
+  `last_pass_at` is on the server's clock, never the device's; a stopped backup never fills the account
+  up again by itself.
 - Design files live in the workspace; never copy them into this public repo (a snapshot once published
   a false external-audit claim, and the claims guard fails on those strings).
 
