@@ -27,7 +27,7 @@ fn base_of(case: &Value) -> Option<VersionInfo> {
 #[test]
 fn sync_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 20, "every named sync case is present");
+    assert_eq!(cases.len(), 21, "every named sync case is present");
 
     let mut conflicts = 0;
     let mut deadlines = 0;
@@ -67,15 +67,27 @@ fn sync_cases_match_core() {
                     case["expect_due"].as_bool().unwrap(),
                     "{id}"
                 );
+                let waiting = ConflictPolicy {
+                    auto_resolve_after_secs: 24 * 3600,
+                };
+                assert_eq!(waiting.deadline(detected_at), Some(deadline), "{id}: waiting policy");
+                // The shipped policy keeps both at once: it has no deadline.
                 assert_eq!(
                     ConflictPolicy::DEFAULT.deadline(detected_at),
-                    Some(deadline),
-                    "{id}: policy"
+                    None,
+                    "{id}: shipped policy"
                 );
             }
             "outcome" => {
                 outcomes += 1;
-                let policy = ConflictPolicy::DEFAULT;
+                let policy = case["wait_secs"]
+                    .as_u64()
+                    .map_or(ConflictPolicy::DEFAULT, |wait| ConflictPolicy {
+                        auto_resolve_after_secs: wait,
+                    });
+                if policy == ConflictPolicy::DEFAULT {
+                    assert_ne!(case["expect"], "needs_user", "{id}: the shipped policy never asks");
+                }
                 let outcome = policy.resolve(
                     &version_of(&case["local"]),
                     &version_of(&case["remote"]),
@@ -116,11 +128,13 @@ fn sync_cases_match_core() {
         }
     }
 
-    assert_eq!((conflicts, deadlines, outcomes, names), (7, 3, 3, 7));
+    assert_eq!((conflicts, deadlines, outcomes, names), (7, 3, 4, 7));
     for required in [
         "sync_both_directions_diverge",
         "sync_24h_due",
         "sync_conflict_auto_keep_both",
+        "sync_conflict_keeps_both_at_once",
+        "sync_conflict_waits_for_user",
         "sync_keep_both_counter",
         "sync_keep_both_hostile_device",
     ] {

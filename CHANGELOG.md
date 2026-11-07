@@ -69,6 +69,10 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 - Conflict input now uses `VersionInfo::authenticated_version`, never a server content hash.
   Conflict deadlines return `Option<u64>`, and `keep_both_name` returns `Result` and requires a valid
   `HH.MM` time.
+- `ConflictPolicy::DEFAULT` keeps both at once: a diverged file resolves to `AutoKeepBoth` when it is
+  detected, whatever the clocks say, and its `deadline` is `None`. `NeedsUser` and a deadline come only
+  from a policy with a non-zero `auto_resolve_after_secs`, so `conflict_state` reports `auto_keep_both`
+  with no `decision_deadline`.
 - `beebeeb-sync::SyncEngine::sync_once` now fails with `RemoteListingUnavailable`. Do not ship the
   legacy desktop prototype; build product sync on `beebeeb_core::sync`.
 

@@ -3,8 +3,10 @@
 //! Ported from the desktop client (`src-tauri/src/conflict.rs` and
 //! `engine_bridge::keep_both_name`): pure functions over versions, no I/O.
 //! A file has a conflict when **both** sides moved past the last shared base
-//! and they moved to different states. Core never auto-picks a winner;
-//! auto-resolution is only the time-based "Keep Both" fallback after 24 h.
+//! and they moved to different states. Core never picks a winner. The shipped
+//! policy keeps both at once: the second copy gets a new name and version
+//! history keeps every version, with no question and no deadline. A caller may
+//! still choose a policy that waits for the user first.
 //!
 //! Conflict decisions are consumed by [`super::engine::SyncEngine`].
 
@@ -65,12 +67,14 @@ pub fn is_conflict(local: &VersionInfo, remote: &VersionInfo, base: &VersionInfo
         && local.authenticated_version != remote.authenticated_version
 }
 
-/// Twenty-four hours after detection, in seconds since the Unix epoch.
+/// Twenty-four hours after detection, in seconds since the Unix epoch: the
+/// window of the earlier rule, for a caller that still waits for the user.
+/// [`ConflictPolicy::DEFAULT`] does not wait.
 pub fn auto_resolution_deadline(detected_at: u64) -> Option<u64> {
     detected_at.checked_add(24 * 3600)
 }
 
-/// Whether the 24 h fallback may fire now.
+/// Whether the 24 h window of [`auto_resolution_deadline`] has passed.
 pub fn resolution_due(detected_at: u64, now: u64) -> bool {
     auto_resolution_deadline(detected_at).is_some_and(|deadline| now >= deadline)
 }
@@ -100,9 +104,10 @@ impl Resolution {
 pub enum ConflictOutcome {
     /// Nothing diverged; apply normally.
     Clean,
-    /// Diverged: wait for the user. Never pick a side.
+    /// Diverged, under a policy that waits: ask the user. Never pick a side.
+    /// The shipped policy never returns this.
     NeedsUser,
-    /// Diverged and ignored for the whole window: materialise Keep Both.
+    /// Diverged: keep both, the second copy under a new name.
     AutoKeepBoth,
 }
 
@@ -123,28 +128,33 @@ impl fmt::Display for ConflictOutcome {
     }
 }
 
-/// The conflict policy: how long a conflict may wait before the fallback
-/// materialises a Keep Both copy.
+/// The conflict policy: how long a conflict waits for the user before both
+/// are kept. Zero, the shipped policy, keeps both at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConflictPolicy {
-    /// Seconds after detection before `AutoKeepBoth` may fire.
+    /// Seconds after detection before `AutoKeepBoth`; 0 keeps both at once.
     pub auto_resolve_after_secs: u64,
 }
 
 impl ConflictPolicy {
-    /// The shipped policy: 24 h.
+    /// The shipped policy: keep both at once, with no question and no deadline.
     pub const DEFAULT: Self = Self {
-        auto_resolve_after_secs: 24 * 3600,
+        auto_resolve_after_secs: 0,
     };
 
     /// Seconds-since-epoch deadline for a conflict detected at `detected_at`.
+    /// `None` when the policy does not wait, or when the deadline overflows.
     pub fn deadline(&self, detected_at: u64) -> Option<u64> {
+        if self.auto_resolve_after_secs == 0 {
+            return None;
+        }
         detected_at.checked_add(self.auto_resolve_after_secs)
     }
 
-    /// Whether the fallback may fire now.
+    /// Whether both may be kept now. Always, under a policy that does not
+    /// wait, whatever the clocks say; never, when a waiting deadline overflows.
     pub fn due(&self, detected_at: u64, now: u64) -> bool {
-        self.deadline(detected_at).is_some_and(|deadline| now >= deadline)
+        self.auto_resolve_after_secs == 0 || self.deadline(detected_at).is_some_and(|deadline| now >= deadline)
     }
 
     /// Decide one file. `base = None` means no shared base is known: equal

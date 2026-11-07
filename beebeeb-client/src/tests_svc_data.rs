@@ -432,3 +432,22 @@ async fn stream_that_never_ends_hits_the_client_deadline() {
 
     assert!(matches!(result, Err(SyncLoopError::StreamTimeout)));
 }
+
+/// 1022 G5, "Auto-name, no question": a file changed in two places keeps both
+/// at once, named; nobody is asked and nothing waits for a deadline.
+#[test]
+fn a_sync_conflict_is_auto_named_at_once_with_no_question_or_deadline() {
+    use beebeeb_core::sync::conflict::{AuthenticatedVersionId, VersionInfo};
+    let version = |id: &str| VersionInfo {
+        authenticated_version: AuthenticatedVersionId::new(id).unwrap(),
+        modified_at: 1,
+    };
+    let (local, remote, base) = (version("local"), version("remote"), version("base"));
+    for (detected_at, now) in [(1_000, 1_000), (1_000, 1_001), (1_000, 999), (1_000, 1_000 + 86_399)] {
+        let state = crate::sync::conflict_state("file", &local, &remote, Some(&base), detected_at, now);
+        assert_eq!(state.status, "auto_keep_both", "detected {detected_at}, now {now}");
+        assert_eq!(state.decision_deadline, None, "detected {detected_at}, now {now}");
+    }
+    let clean = crate::sync::conflict_state("file", &base, &base, Some(&base), 1_000, 1_000);
+    assert_eq!(clean.status, "clean");
+}
