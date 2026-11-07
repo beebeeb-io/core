@@ -4,3 +4,4 @@
 //! them. Every fixture is built in the test (bombs are never committed).
 
 mod detect;
+mod names;

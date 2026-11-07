@@ -11,9 +11,13 @@
 
 pub mod detect;
 pub mod limits;
+pub mod model;
+pub mod names;
 pub mod platform;
 pub mod words;
 
 pub use detect::{ArchiveFormat, Detection, ForeignFormat, detect, detect_gzip_inner};
+pub use model::SkipReason;
+pub use names::{EntryPath, RawName, decode_name, display_name, entry_path};
 pub use platform::ArchivePlatform;
 pub use words::{ArchiveKey, ArchiveText, archive_text};
