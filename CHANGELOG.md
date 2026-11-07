@@ -57,6 +57,21 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 - `RecoveryStateData` adds `Expired`: the server reports an attempt whose window to complete has passed
   as `expired`, and the status call returns that state instead of failing. Offer to start a new
   recovery.
+- Device link (UniFFI): `approve_device_link(id, scanned_qr, typed_code)` takes the raw text the camera
+  scanned; `DeviceLinkQrData` and `DeviceLinkHandle.qr()` are removed (render `qr_payload()`). The
+  typed-code path now starts at the approver: `begin_typed_device_approval` → relay its message → the
+  new device's `answer_typed_path(approver_message)` → relay its answer →
+  `approve_typed_device_link`, which checks the new device's confirmation before it seals and returns
+  `ServiceError::Authentication` (and denies the link) for a wrong code or a changed device name.
+  `TypedDeviceLinkHandle`, `TypedDeviceLinkStartData` and `begin_typed_path` are removed;
+  `TypedDeviceApprovalStartData` adds `device_name`. Show that name while the person types the code.
+- Content decryptors (UniFFI) take the decrypted metadata: `ChunkDecryptorHandle.from_file`,
+  `for_push`, `for_push_with_file_key_handle` and the legacy `for_push_with_file_key` take a
+  `NameMetadataDto` in place of `expected_chunk_format`, and enforce its version commitment. Key-handle
+  holders reading a historical version use the new `for_version_with_file_key_handle`.
+- `RecoveryChangesData`'s codes and password and `PasskeyPromptResult.prf_output` are `SecretString` /
+  `SecretBytes`: the same `String` and `Data` / `ByteArray` in Swift and Kotlin, wiped and redacted in
+  Rust. New: `safety_number` and `normalize_email`.
 
 ### Rust sync and conflict integrators
 
@@ -90,14 +105,26 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   fail. Immediately re-register migrated accounts as version 1.
 - CLI-auth decryption accepts only the authenticated HKDF-derived ciphertext. Upgrade producers of the
   old raw-secret format.
-- The passkey seal is a new 61-byte, versioned, account-and-credential-bound format. Existing 60-byte
-  web blobs require an explicit migration and reseal; never reinterpret them. Recovery phrases are
+- The passkey seal is a new 61-byte, versioned, account-and-credential-bound format whose version byte
+  is also in the associated data. Existing 60-byte web blobs require an explicit migration and reseal;
+  never reinterpret them. Recovery phrases are
   exactly 12 words.
 - `MasterKey::to_bytes`, `combine_folder_link_key`, `OpaqueEnvelope::to_bytes`, OPAQUE finish secrets,
   and transfer shared secrets now use `Zeroizing` guards. The transfer helper is fallible and rejects
   low-order keys. Generic SAS derivation is fallible and rejects output above 8,160 bytes.
-- Device-link QR sealing now takes the typed code and uses the new format. New-device PAKE starts by
-  consuming `NewDeviceLink`; approvers use `start_approver`. Replace the draft `beebeeb-api::proposed`
+- Device link, QR path: `DeviceLinkQr::parse(scanned_text)` is the only constructor (`from_parts` is
+  removed and `fingerprint()` is crate-private); `seal_for_new_device` takes the typed code and the
+  new format; `NewDeviceLink::generate(session_id, device_name)` canonicalises the name
+  (`canonical_device_name`), and `NewDeviceLink::open(sealed)` no longer takes the code.
+- Device link, typed-code path: SPAKE2 with key confirmation in both directions over a transcript that
+  binds the session, a fresh salt and the canonical device name (labels `…/v2`). The approver starts
+  (`TypedCodeApprover::start(code, session_id, device_name)`), the new device answers
+  (`NewDeviceLink::answer_typed_code` → `TypedCodeReceiver` and its message), the approver checks the
+  answer (`confirm` → `ConfirmedTypedApproval`, `CoreError::Decryption` on a wrong code or a changed
+  name) and only then seals; the new device checks the approver's tag in `TypedCodeReceiver::open`.
+  `PakeSealedAccountKeyMaterial::from_parts(nonce, ciphertext)` drops the session id. Small-order
+  peer elements are refused, and randomness failures are errors, not panics. `spake2` 0.4 does not
+  wipe its copies of the code and scalars; the residual is documented in `device_link`. Replace the draft `beebeeb-api::proposed`
   request/answer types, rename `second_factor_required` to `authenticator_required`, and handle the
   exact locked-action allowlist.
 - Key-proof servers may export/import the 64-byte verifier state between requests. Keep it only in an
@@ -116,7 +143,10 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   metadata commitment; use the historical-version path for history. Raw-key metadata claiming v2 is
   rejected.
 - Production v2 upload resume always restarts: abandon the old session, initialize again, and upload
-  from chunk zero. `BackgroundUploadPlanner` constructors and restore now require authenticated file
+  from chunk zero. The one exception is `BackgroundUploadPlanner` continuing its own persisted v2
+  version (same session, version id and counter) after the source and the staged-plaintext hash
+  check; `BackgroundUploadPlanner::to_bytes` now takes `&mut self` and is the persistence point:
+  `next_transfers` hands the OS only frames staged before the last `to_bytes`. `BackgroundUploadPlanner` constructors and restore now require authenticated file
   geometry and source identity; version-1 planner blobs are non-resumable.
 - `DownloadRequest` requires a `MemoryBudget` and optional authenticated chunk size. `DownloadOutcome`
   and `AfterWriteCause` add handoff, `ApiMethod` adds `Put`, and background transports should override
@@ -124,6 +154,10 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 - `TransferState` adds `Paused` and `Cancelled`. `TransferFinished` adds
   `UploadTokenExpired { index }`; mint a fresh scoped token and requeue the staged ciphertext without
   spending a retry.
+- A replacement upload's version counter is one above both the served metadata's counter and the
+  store's remembered high-water mark, so a server serving an older record cannot make a counter repeat.
+- `Store::open` creates the database 0600 and its directories 0700 on Unix and tightens an existing
+  database and its `-wal`/`-shm`; the crate docs list what the plaintext cache holds.
 - `beebeeb_store::atomic_publish` is removed. Publish relative to a
   `path_safety::TrustedDirectory` handle. The `store-test-helper` binary now requires the default-off
   `test-support` feature, which product builds must not enable.
@@ -149,6 +183,14 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   recovery authorization, optional device approver keys, unknown-safe optional two-factor state, and
   the current device/login response models. `AuthError` adds fixed-label `InvalidAnswer` and
   `InvalidTransition` variants.
+- Records that carry a secret redact it in `Debug`: TOTP setup, share links and shares, chunk
+  manifests, file-request and stream tokens, signup tickets, email codes, pilot keys, push tokens, the
+  data-export URL and key-proof tickets. The ones a person types or copies are also `Zeroizing`, which
+  changes their type: `TotpSetup`'s `secret`, `qr_uri` and `backup_codes`, `CreateLink`'s
+  `passphrase` and `token`, the client's `RecoveryChanges` codes and `AuthenticatorEnrollment`'s
+  `qr_uri`. Wrap a `String` with `Zeroizing::new`.
+- A request's `Debug` prints a header value only when the header is in `DEBUG_VISIBLE_HEADERS`;
+  `Set-Cookie`, `Cookie`, `Authorization` and every other header print `[REDACTED]`.
 - `ClientMetaField` adds `DeviceSettings = 7` and `ContactKey = 8`; codes 5 and 6 remain reserved.
   Sync `Op` literals add optional `device_id` and `created_at`.
 
@@ -156,6 +198,14 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 
 - WASM `formatCompact` throws above precision 2; pass 0 through 2 and handle the exception. Rust's
   infallible formatter clamps instead.
+- WASM device link: `sealDeviceLink(masterKey, scannedQr, relayedPublic, typedCode)` takes the raw
+  text the camera scanned, never session or fingerprint bytes; without a camera use the typed-code
+  path, now exported: `WasmTypedApproval` (approver) and `WasmNewDeviceLink.answerTypedCode` →
+  `WasmTypedReceiver` (new device). `new WasmNewDeviceLink(sessionId, deviceName)`; `publicFields()`
+  returns `qr_payload` and `device_name` and no fingerprint; `open(approverPublic, nonce, ciphertext)`.
+- WASM content decryptors take the object `decrypt_file_metadata[_with_key]` returned:
+  `new WasmChunkDecryptor(masterKey, fileId, metadata)` and `fromFileKey(fileKey, fileId, metadata)`.
+- WASM `safetyNumber` and `normalizeEmail`: use them; JavaScript's `trim` differs from core's.
 - Regenerate bindings for the protected metadata fields and update the shared vector fixture to version
   18, including the protected metadata and session key-proof vectors.
 

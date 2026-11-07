@@ -127,9 +127,48 @@ local search-index synchronization. The web host performs plain API transport.
 
 Existing browser byte-key entry points remain compatibility surface because browser storage is not yet
 handle-based. New device-security exports are `WasmNewDeviceLink`, `sealDeviceLink`,
-`answerSessionKeyProof` and the purpose-specific `apiDescriptor`; the approved account key stays in an
-opaque `WasmAccountKeyMaterial`. No native service uses the browser byte-key entry points, and new WASM
+`WasmTypedApproval`, `WasmTypedReceiver`, `answerSessionKeyProof` and the purpose-specific
+`apiDescriptor`; the approved account key stays in an opaque `WasmAccountKeyMaterial`. No native service uses the browser byte-key entry points, and new WASM
 exports must not return a raw key.
+
+## Breaking changes from the crypto review (0.3.0)
+
+Each change closes a review finding; the old form is removed, not deprecated.
+
+### WASM
+
+| Export | Before | Now |
+| --- | --- | --- |
+| `sealDeviceLink` | `(masterKey, sessionId, fingerprint, relayedPublic, typedCode)` | `(masterKey, scannedQr, relayedPublic, typedCode)`: the raw text the camera scanned; core parses it. Never build that text from server data. |
+| `new WasmNewDeviceLink` | `(sessionId)` | `(sessionId, deviceName)`; the name is canonicalised (`device_name` in `publicFields()`) |
+| `WasmNewDeviceLink.publicFields()` | `{session_id, public_key, fingerprint}` | `{session_id, public_key, device_name, qr_payload}`: render `qr_payload` as the QR; no fingerprint bytes leave core |
+| `WasmNewDeviceLink.open` | `(typedCode, sessionId, recipientPublic, approverPublic, nonce, ciphertext)` | `(approverPublic, nonce, ciphertext)`: the link supplies its own session id and key |
+| `WasmNewDeviceLink.answerTypedCode(approverMessage)` | none | the new device's typed-code answer: a `WasmTypedReceiver` (`message` to relay, then `open(nonce, ciphertext)`) |
+| `new WasmTypedApproval(typedCode, sessionId, deviceName)` | none | the approver's typed-code side: relay `message`, show `deviceName`, `confirm(newDeviceMessage)` (throws `confirmation_failed` for a wrong code or a changed name, `malformed_answer` for a bad message), then `seal(masterKey)` → `{nonce, ciphertext}`; nothing is sealed before `confirm` succeeds |
+| `new WasmChunkDecryptor` | `(masterKey, fileId, expectedChunkFormat)` | `(masterKey, fileId, metadata)`: the object `decrypt_file_metadata` returned; its commitment is enforced |
+| `WasmChunkDecryptor.fromFileKey` | `(fileKey, fileId, expectedChunkFormat)` | `(fileKey, fileId, metadata)`, from `decrypt_file_metadata_with_key` |
+| `safetyNumber(emailA, publicKeyA, emailB, publicKeyB)`, `normalizeEmail(raw)` | none | core's safety number and email normalisation; web never trims an email itself |
+| `apiDescriptor` | | adds `get_device_link_pake_for_approver`, `pending_device_links`, `get_device_link`, `approve_device_link`, `deny_device_link` |
+
+### UniFFI
+
+| Export | Before | Now |
+| --- | --- | --- |
+| `DeviceServiceHandle.approve_device_link` | `(id, qr: DeviceLinkQrData, typed_code)` | `(id, scanned_qr: String, typed_code)`; `DeviceLinkQrData` is removed |
+| `DeviceLinkHandle.qr()` | `DeviceLinkQrData` | removed: `qr_payload()` is the text to render, `device_name()` the canonical name |
+| `DeviceLinkHandle.begin_typed_path()`, `TypedDeviceLinkHandle`, `TypedDeviceLinkStartData` | the new device spoke first | removed: the approver speaks first; the new device calls `answer_typed_path(approver_message)` → `TypedDeviceLinkAnswerData { handle, outbound_message }` |
+| `TypedDeviceApprovalStartData` | `{handle, outbound_message}` | adds `device_name`, the name the new device's confirmation must match |
+| `DeviceServiceHandle.approve_typed_device_link` | sealed after the exchange | checks the new device's confirmation first; a wrong code or a changed name is `ServiceError::Authentication` and denies the link |
+| `ChunkDecryptorHandle.from_file` | `(master_key, file_id, expected_chunk_format, chunk_size_bytes, input_path)` | `(master_key, file_id, metadata: NameMetadataDto, chunk_size_bytes, input_path)` |
+| `ChunkDecryptorHandle.for_push` | `(master_key, file_id, expected_chunk_format)` | `(master_key, file_id, metadata: NameMetadataDto)` |
+| `ChunkDecryptorHandle.for_push_with_file_key_handle` | `(file_key, file_id, expected_chunk_format)` | `(file_key, file_id, metadata: NameMetadataDto)` |
+| `ChunkDecryptorHandle.for_version_with_file_key_handle` | none | `(file_key, file_id, expected_chunk_format, version_id, version_counter)` for key-handle holders |
+| `ChunkDecryptorHandle.for_push_with_file_key` (`legacy-bindings`) | `(file_key, file_id, expected_chunk_format)` | `(file_key, file_id, metadata: NameMetadataDto)` |
+| `RecoveryChangesData`, `PasskeyPromptResult.prf_output` | `String` / `Vec<u8>` | `SecretString` / `SecretBytes`: still `String` and `Data` / `ByteArray` in Swift and Kotlin, wiped and redacted on the Rust side |
+| `safety_number(email_a, public_key_a, email_b, public_key_b)`, `normalize_email(raw)` | none | core's safety number and email normalisation |
+
+A decryptor refuses a missing record or half a commitment (`version_id` without `version_counter`, or
+the reverse). A record with neither field is legacy metadata and is read without a commitment.
 
 ## Verifying a release
 
