@@ -3092,9 +3092,25 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_again_action(RustCallStatus *_No
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_CHECK_FAILED_WORDS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_CHECK_FAILED_WORDS
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_check_failed_words(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_FIRST_PASS_BASELINE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_FIRST_PASS_BASELINE
+int64_t uniffi_beebeeb_uniffi_fn_func_backup_first_pass_baseline(RustBuffer setup_at_ms, RustBuffer legacy_last_backup_ms, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_NOTICE_REASON
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_NOTICE_REASON
 RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_notice_reason(RustBuffer kind, RustBuffer data_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_PASS_GATE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_PASS_GATE
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_pass_gate(int8_t notices_fetch_ok, RustBuffer notices, int64_t last_pass_at_ms, RustBuffer listing, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_STOP
@@ -3773,9 +3789,27 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_again_action(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_CHECK_FAILED_WORDS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_CHECK_FAILED_WORDS
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_check_failed_words(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_FIRST_PASS_BASELINE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_FIRST_PASS_BASELINE
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_first_pass_baseline(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_NOTICE_REASON
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_NOTICE_REASON
 uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_notice_reason(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_PASS_GATE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_PASS_GATE
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_pass_gate(void
     
 );
 #endif

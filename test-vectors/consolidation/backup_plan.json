@@ -1,6 +1,6 @@
 {
-  "description": "LD-0113 backup pass planner (spec 2026-11-06-backup-from-source §4.2 rules 9-11): new, changed (size or mtime), unchanged, gone (stays in the backup), unique moves (same size, mtime and case-folded name, unique both ways), the per-pass budget (a prefix; the first upload always fits), parent folders parents-first, removed elsewhere (stays deleted until it changes), folder presence, key normalisation, and rebuilding records from the remote tree (uploaded after the last change by the device clock's measured offset and margin, or the one-sided 10-minute floor when no offset is known: LD-0123), and why a backup stops with its words (spec Amendments 12, 12a and 12b, LD-0121).",
-  "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\") + LD-0123 + Amendments 12/12a/12b (LD-0121); written by test-vectors/tools/make_backup_plan_vectors.py (independent of core)",
+  "description": "LD-0113 backup pass planner (spec 2026-11-06-backup-from-source §4.2 rules 9-11): new, changed (size or mtime), unchanged, gone (stays in the backup), unique moves (same size, mtime and case-folded name, unique both ways), the per-pass budget (a prefix; the first upload always fits), parent folders parents-first, removed elsewhere (stays deleted until it changes), folder presence, key normalisation, and rebuilding records from the remote tree (uploaded after the last change by the device clock's measured offset and margin, or the one-sided 10-minute floor when no offset is known: LD-0123), and why a backup stops with its words (spec Amendments 12, 12a, 12b and 12c, LD-0121): the first pass's baseline and the pass gate when the notices could not be read.",
+  "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\") + LD-0123 + Amendments 12/12a/12b/12c (LD-0121); written by test-vectors/tools/make_backup_plan_vectors.py (independent of core)",
   "cases": [
     {
       "id": "plan_new_file",
@@ -4150,6 +4150,213 @@
       "id": "stop_action_back_up_again",
       "kind": "stop_action",
       "expect": "Back up again"
+    },
+    {
+      "id": "baseline_fresh_setup_uses_the_setup_time",
+      "kind": "baseline",
+      "setup_at_ms": 1762434000000,
+      "legacy_last_backup_ms": null,
+      "expect": 1762434000000
+    },
+    {
+      "id": "baseline_upgraded_device_uses_the_old_engines_last_backup",
+      "kind": "baseline",
+      "setup_at_ms": null,
+      "legacy_last_backup_ms": 1762344000000,
+      "expect": 1762344000000
+    },
+    {
+      "id": "baseline_both_known_the_old_engines_earlier_backup_wins",
+      "kind": "baseline",
+      "setup_at_ms": 1762434000000,
+      "legacy_last_backup_ms": 1762344000000,
+      "expect": 1762344000000
+    },
+    {
+      "id": "baseline_both_known_the_earlier_wins_whichever_it_is",
+      "kind": "baseline",
+      "setup_at_ms": 1762344000000,
+      "legacy_last_backup_ms": 1762434000000,
+      "expect": 1762344000000
+    },
+    {
+      "id": "baseline_neither_known_is_zero",
+      "kind": "baseline",
+      "setup_at_ms": null,
+      "legacy_last_backup_ms": null,
+      "expect": 0
+    },
+    {
+      "id": "gate_notices_read_runs_backup_stop",
+      "kind": "gate",
+      "notices_fetch_ok": true,
+      "notices": [
+        {
+          "type": "files_removed",
+          "data": {
+            "reason": "erase_request"
+          },
+          "created_at_ms": 1762430400001
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "run",
+        "stopped": [
+          {
+            "category": "documents",
+            "reason": "erase_request"
+          },
+          {
+            "category": "pictures",
+            "reason": "erase_request"
+          }
+        ]
+      }
+    },
+    {
+      "id": "gate_notices_read_nothing_to_stop_runs",
+      "kind": "gate",
+      "notices_fetch_ok": true,
+      "notices": [],
+      "last_pass_at_ms": 1762430400000,
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "run",
+        "stopped": []
+      }
+    },
+    {
+      "id": "gate_check_failed_uploads_nothing_and_stops_nothing",
+      "kind": "gate",
+      "notices_fetch_ok": false,
+      "notices": [],
+      "last_pass_at_ms": 1762430400000,
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "check_failed"
+      }
+    },
+    {
+      "id": "gate_check_failed_ignores_a_folder_gone_too",
+      "kind": "gate",
+      "notices_fetch_ok": false,
+      "notices": [],
+      "last_pass_at_ms": 1762430400000,
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": false
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "check_failed"
+      }
+    },
+    {
+      "id": "gate_first_pass_upgraded_device_catches_a_notice_the_old_engine_missed",
+      "kind": "gate",
+      "notices_fetch_ok": true,
+      "notices": [
+        {
+          "type": "files_removed",
+          "data": {
+            "reason": "account_lapsed"
+          },
+          "created_at_ms": 1762344000001
+        }
+      ],
+      "last_pass_at_ms": 1762344000000,
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "run",
+        "stopped": [
+          {
+            "category": "documents",
+            "reason": "account_lapsed"
+          },
+          {
+            "category": "pictures",
+            "reason": "account_lapsed"
+          }
+        ]
+      }
+    },
+    {
+      "id": "check_failed_words",
+      "kind": "check_failed_words",
+      "expect": "Couldn't check — will retry."
     }
   ]
 }

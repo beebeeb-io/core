@@ -1022,7 +1022,13 @@ external fun uniffi_beebeeb_uniffi_checksum_func_backup_skip_reason(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_backup_again_action(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_backup_check_failed_words(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_backup_first_pass_baseline(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_backup_notice_reason(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_backup_pass_gate(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_backup_stop(
 ): Short
@@ -2844,7 +2850,13 @@ external fun uniffi_beebeeb_uniffi_fn_func_backup_skip_reason(`name`: RustBuffer
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_backup_again_action(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_backup_check_failed_words(uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_backup_first_pass_baseline(`setupAtMs`: RustBuffer.ByValue,`legacyLastBackupMs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
 external fun uniffi_beebeeb_uniffi_fn_func_backup_notice_reason(`kind`: RustBuffer.ByValue,`dataJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_backup_pass_gate(`noticesFetchOk`: Byte,`notices`: RustBuffer.ByValue,`lastPassAtMs`: Long,`listing`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_backup_stop(`notices`: RustBuffer.ByValue,`lastPassAtMs`: Long,`listing`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -3170,7 +3182,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_again_action() != 13263.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_check_failed_words() != 58772.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_first_pass_baseline() != 15552.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_notice_reason() != 40118.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_pass_gate() != 16391.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_stop() != 43581.toShort()) {
@@ -28911,6 +28932,92 @@ public object FfiConverterTypeBackupMergeStep : FfiConverterRustBuffer<BackupMer
 
 
 /**
+ * What one pass does before it uploads anything (spec Amendments 12, 12c).
+ */
+sealed class BackupPassGate {
+    
+    /**
+     * The notices were read: `stopped` turn off with their words; every
+     * other listed backup runs, and this pass's start becomes the next
+     * `last_pass_at_ms`.
+     */
+    data class Run(
+        val `stopped`: List<uniffi.beebeeb_uniffi.BackupStopped>) : BackupPassGate()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * The notices could not be read: upload nothing, turn nothing off, show
+     * `backup_check_failed_words()`, retry at the next scheduled pass, and
+     * keep `last_pass_at_ms` where it was.
+     */
+    object CheckFailed : BackupPassGate()
+    
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBackupPassGate : FfiConverterRustBuffer<BackupPassGate>{
+    override fun read(buf: ByteBuffer): BackupPassGate {
+        return when(buf.getInt()) {
+            1 -> BackupPassGate.Run(
+                FfiConverterSequenceTypeBackupStopped.read(buf),
+                )
+            2 -> BackupPassGate.CheckFailed
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: BackupPassGate) = when(value) {
+        is BackupPassGate.Run -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterSequenceTypeBackupStopped.allocationSize(value.`stopped`)
+            )
+        }
+        is BackupPassGate.CheckFailed -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+    }
+
+    override fun write(value: BackupPassGate, buf: ByteBuffer) {
+        when(value) {
+            is BackupPassGate.Run -> {
+                buf.putInt(1)
+                FfiConverterSequenceTypeBackupStopped.write(value.`stopped`, buf)
+                Unit
+            }
+            is BackupPassGate.CheckFailed -> {
+                buf.putInt(2)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+/**
  * What the client does about the root; on `Create` it names the new root
  * [`backup_root_name`].
  */
@@ -35695,6 +35802,37 @@ public typealias FfiConverterTypeSecretString = FfiConverterString
     
 
         /**
+         * The words when the notices could not be read: "Couldn't check — will
+         * retry."
+         */ fun `backupCheckFailedWords`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_backup_check_failed_words(
+    
+        _status)
+}
+    )
+    }
+    
+
+        /**
+         * The `last_pass_at_ms` of a device with none under this engine yet (spec
+         * Amendment 12c): the moment backups were set up on this device, or an
+         * upgraded device's last successful backup under the old engine; with both,
+         * the earlier; with neither, 0 (any removal notice stops the backup). Both on
+         * the server's clock.
+         */ fun `backupFirstPassBaseline`(`setupAtMs`: kotlin.Long?, `legacyLastBackupMs`: kotlin.Long?): kotlin.Long {
+            return FfiConverterLong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_backup_first_pass_baseline(
+    
+        FfiConverterOptionalLong.lower(`setupAtMs`),FfiConverterOptionalLong.lower(`legacyLastBackupMs`),_status)
+}
+    )
+    }
+    
+
+        /**
          * The reason a `notifications` row gives, or `None` for a row that is not a
          * backup notice: for showing the notification itself with
          * `backup_stop_words`.
@@ -35704,6 +35842,22 @@ public typealias FfiConverterTypeSecretString = FfiConverterString
     UniffiLib.uniffi_beebeeb_uniffi_fn_func_backup_notice_reason(
     
         FfiConverterString.lower(`kind`),FfiConverterString.lower(`dataJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Decide a pass. `notices_fetch_ok` is `false` when the notices could not be
+         * read completely (a server or network error, or a page missing); `notices`
+         * is then ignored. Otherwise as `backup_stop`.
+         */
+    @Throws(CryptoException::class) fun `backupPassGate`(`noticesFetchOk`: kotlin.Boolean, `notices`: List<BackupNoticeRow>, `lastPassAtMs`: kotlin.Long, `listing`: BackupStopListing): BackupPassGate {
+            return FfiConverterTypeBackupPassGate.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_backup_pass_gate(
+    
+        FfiConverterBoolean.lower(`noticesFetchOk`),FfiConverterSequenceTypeBackupNoticeRow.lower(`notices`),FfiConverterLong.lower(`lastPassAtMs`),FfiConverterTypeBackupStopListing.lower(`listing`),_status)
 }
     )
     }

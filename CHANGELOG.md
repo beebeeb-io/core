@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Additive on v0.2.2: the first pass's baseline and the pass gate when the notices could not be read (LD-0121, spec
+`2026-11-06-backup-from-source-design.md` Amendment 12c, Guus 2026-11-07 20:45). No v0.2.2 API is renamed,
+retyped or removed.
+
+### Added
+
+- **`beebeeb_core::backup`**: `first_pass_baseline(setup_at_ms, legacy_last_backup_ms)`, the `last_pass_at_ms`
+  of a device with none under the new engine: the moment backups were set up on this device, or an upgraded
+  device's last successful backup under the old mirror engine; with both known the earlier (a later baseline
+  hides more notices, so the earlier never lets an emptied account fill up again); with neither, 0 (any
+  removal notice stops the backup). `backup_pass_gate(notices, last_pass_at_ms, listing)` with
+  `BackupPassGate::{Run { stopped }, CheckFailed}`: when the notices could not be read (`None`), the pass
+  uploads nothing, turns nothing off, keeps `last_pass_at_ms` and retries at the next scheduled pass, showing
+  `MSG_STOP_CHECK_FAILED` ("Couldn't check — will retry.").
+- **Bindings**: uniffi `backup_first_pass_baseline`, `backup_pass_gate` (`BackupPassGate` enum),
+  `backup_check_failed_words` (3); wasm `backupFirstPassBaseline`, `backupPassGate`, `backupCheckFailedWords` (3).
+- **Vectors**: `backup_plan.json` 117 → 128 cases (+5 baseline, 5 gate, 1 check-failed words).
+
 ## [0.3.0] - Unreleased
 
 This is a breaking pre-1.0 release. The changes below are grouped by the people who must act.
