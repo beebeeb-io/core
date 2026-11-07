@@ -127,6 +127,7 @@ fn expired_scoped_token_keeps_ciphertext_ready_for_a_fresh_token() {
     .unwrap();
     planner.stage_available(&mut encryptor, &[grant(0)], None).unwrap();
     planner.finish_encryption(encryptor).unwrap();
+    planner.to_bytes().unwrap();
     let first = planner.next_transfers(1, "expired", 0).remove(0);
     assert_eq!(
         planner.transfer_finished(&first.ticket, 401, None, None, b"", 0),
@@ -163,6 +164,7 @@ fn upgrade_required_chunk_answer_is_terminal_without_a_retry() {
     .unwrap();
     planner.stage_available(&mut encryptor, &[grant(0)], None).unwrap();
     planner.finish_encryption(encryptor).unwrap();
+    planner.to_bytes().unwrap();
     let request = planner.next_transfers(1, "scoped", 0).remove(0);
 
     let result = planner.transfer_finished(
@@ -211,6 +213,7 @@ fn upgrade_required_direct_commit_is_terminal_without_a_retry() {
     direct.commit_path = Some("/api/v1/uploads/s/chunks/0/commit".into());
     planner.stage_available(&mut encryptor, &[direct], None).unwrap();
     planner.finish_encryption(encryptor).unwrap();
+    planner.to_bytes().unwrap();
     let request = planner.next_transfers(1, "scoped", 0).remove(0);
     assert!(matches!(
         planner.transfer_finished(&request.ticket, 200, None, None, b"", 0),
@@ -396,7 +399,7 @@ fn same_size_same_mtime_changed_prefix_requires_restart() {
 fn restore_removes_an_unreferenced_ciphertext_file_before_restaging_it() {
     let scratch = Scratch::new();
     let identity = source(10);
-    let planner = BackgroundUploadPlanner::new(
+    let mut planner = BackgroundUploadPlanner::new(
         "upload",
         "session",
         "11111111-2222-4333-8444-555555555555",
@@ -416,4 +419,65 @@ fn restore_removes_an_unreferenced_ciphertext_file_before_restaging_it() {
         panic!("unchanged source should resume");
     };
     assert!(!orphan.exists());
+}
+
+/// Core #74 crypto review, P3 (data integrity): a frame reaches the OS only
+/// after the state that names it was serialized. A frame staged after the last
+/// snapshot dies with the process: restore deletes its file and seals that
+/// index again with a fresh nonce, so it must never have been handed out, or
+/// the server would hold two valid frames for one index.
+#[test]
+fn a_frame_reaches_the_os_only_after_its_state_was_persisted() {
+    const ID: &str = "55555555-5555-4555-8555-555555555555";
+    let scratch = Scratch::new();
+    let plain = b"four chunks of eight bytes each.".to_vec();
+    let identity = source(plain.len() as u64);
+    let mut encryptor = ChunkEncryptor::from_reader_with_file_key(
+        FileKey::from_bytes([7; 32]),
+        ID,
+        plain.len() as u64,
+        8,
+        std::io::Cursor::new(plain.clone()),
+    )
+    .unwrap();
+    let count = encryptor.chunk_plan().chunk_count as u32;
+    assert_eq!(count, 4);
+    let mut planner = BackgroundUploadPlanner::new("u", "s", ID, &scratch.0, 4096, 8, count, identity.clone()).unwrap();
+    planner
+        .stage_available(&mut encryptor, &[grant(0), grant(1)], None)
+        .unwrap();
+    assert!(
+        planner.next_transfers(4, "scoped", 0).is_empty(),
+        "a frame staged since the last snapshot must not reach the OS"
+    );
+    planner
+        .record_staged_plaintext_hash(std::io::Cursor::new(plain.clone()))
+        .unwrap();
+    let persisted = planner.to_bytes().unwrap();
+
+    // A third frame is staged; the process dies before its state is persisted.
+    planner.stage_available(&mut encryptor, &[grant(2)], None).unwrap();
+    let handed: Vec<PathBuf> = planner
+        .next_transfers(4, "scoped", 0)
+        .into_iter()
+        .map(|request| request.body_path)
+        .collect();
+    let third = scratch.0.join("chunk-00000002.bbcipher");
+    assert!(third.exists());
+    assert_eq!(
+        handed,
+        vec![
+            scratch.0.join("chunk-00000000.bbcipher"),
+            scratch.0.join("chunk-00000001.bbcipher")
+        ],
+        "only the persisted frames went to the OS"
+    );
+
+    let BackgroundRestore::Resumed(mut restored) =
+        BackgroundUploadPlanner::from_bytes(&persisted, &scratch.0, &identity).unwrap()
+    else {
+        panic!("unchanged source must resume");
+    };
+    assert!(!third.exists(), "restore deletes the frame it never recorded");
+    assert_eq!(restored.next_transfers(4, "scoped", 0).len(), 2);
 }

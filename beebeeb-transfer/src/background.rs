@@ -223,8 +223,18 @@ struct PersistedState {
 }
 
 /// Serializable state machine for one background upload.
+///
+/// **Persist before the OS sees a frame.** [`Self::next_transfers`] hands the
+/// platform only frames that were staged before the last [`Self::to_bytes`]
+/// snapshot. A frame staged after it is not in the persisted state, so after a
+/// crash restore deletes its file and seals that index again with a fresh
+/// nonce; had the OS already uploaded the first frame, the server would hold
+/// two valid frames for one index (core #74 crypto review, P3).
 pub struct BackgroundUploadPlanner {
     state: PersistedState,
+    /// Runtime only, never serialized: chunks below this index were staged
+    /// before the last `to_bytes` snapshot.
+    persisted_through: u32,
 }
 
 impl fmt::Debug for BackgroundUploadPlanner {
@@ -285,6 +295,7 @@ impl BackgroundUploadPlanner {
                 chunks: Vec::new(),
                 failed: None,
             },
+            persisted_through: 0,
         })
     }
 
@@ -396,11 +407,20 @@ impl BackgroundUploadPlanner {
                 cleanup,
             }));
         }
-        Ok(BackgroundRestore::Resumed(Self { state }))
+        Ok(BackgroundRestore::Resumed(Self {
+            persisted_through: state.next_encrypt_index,
+            state,
+        }))
     }
 
-    pub fn to_bytes(&self) -> Result<Vec<u8>, BackgroundError> {
-        serde_json::to_vec(&self.state).map_err(|_| BackgroundError::InvalidState)
+    /// Serialize the state for durable storage. This is also the persistence
+    /// point: frames staged before this call become eligible for
+    /// [`Self::next_transfers`]. Write the returned bytes durably before
+    /// asking for transfers.
+    pub fn to_bytes(&mut self) -> Result<Vec<u8>, BackgroundError> {
+        let bytes = serde_json::to_vec(&self.state).map_err(|_| BackgroundError::InvalidState)?;
+        self.persisted_through = self.state.next_encrypt_index;
+        Ok(bytes)
     }
 
     /// Extend the persisted hash chain through every plaintext chunk staged so
@@ -653,13 +673,15 @@ impl BackgroundUploadPlanner {
 
     /// Dequeue ready work. The token is deliberately absent from serialized
     /// state and is copied only into API-route requests that ask for it.
+    /// Frames staged after the last [`Self::to_bytes`] are held back until the
+    /// state that names them has been serialized.
     pub fn next_transfers(&mut self, limit: usize, upload_scoped_token: &str, now_ms: u64) -> Vec<TransferRequest> {
         if limit == 0 || upload_scoped_token.is_empty() || self.state.failed.is_some() {
             return Vec::new();
         }
         let mut requests = Vec::new();
         for chunk in &mut self.state.chunks {
-            if requests.len() >= limit {
+            if requests.len() >= limit || chunk.index >= self.persisted_through {
                 break;
             }
             let ready = matches!(chunk.phase, Phase::Ready)
