@@ -56,6 +56,8 @@ pub enum RecoveryState {
     Ready,
     Completed,
     Cancelled,
+    /// The server's window to complete this attempt has passed; start again.
+    Expired,
 }
 
 impl RecoveryState {
@@ -65,6 +67,7 @@ impl RecoveryState {
             "ready" => Ok(Self::Ready),
             "completed" => Ok(Self::Completed),
             "cancelled" => Ok(Self::Cancelled),
+            "expired" => Ok(Self::Expired),
             _ => Err(AuthError::MalformedAnswer),
         }
     }

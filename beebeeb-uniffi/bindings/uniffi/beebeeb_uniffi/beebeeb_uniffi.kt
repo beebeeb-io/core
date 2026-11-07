@@ -31230,7 +31230,11 @@ enum class RecoveryStateData {
     PENDING,
     READY,
     COMPLETED,
-    CANCELLED;
+    CANCELLED,
+    /**
+     * The window to complete the attempt has passed; start a new one.
+     */
+    EXPIRED;
 
     
 

@@ -235,3 +235,37 @@ async fn recovery_authenticator_replacement_matches_the_server_payload() {
     assert_eq!(body["authenticator"]["code"], "123456");
     assert!(body.get("opaque_registration").is_none() || body["opaque_registration"].is_null());
 }
+
+/// The server reports an attempt whose completion window has passed as
+/// `expired`: a state of its own, never a malformed answer, and nothing is sent
+/// to complete it.
+#[tokio::test]
+async fn an_expired_recovery_is_reported_as_expired_and_cannot_complete() {
+    let transport = Arc::new(ScriptedTransport::json(
+        200,
+        br#"{"status":"expired","ready_at":"2000-01-01T00:00:00Z","expires_at":"2000-01-08T00:00:00Z"}"#.to_vec(),
+    ));
+    let client = Client::new(ClientConfig::for_tests(), transport.clone()).unwrap();
+    let mut attempt =
+        crate::auth::RecoveryAttempt::from_parts_for_test("recovery-id", "holder-secret", None, RecoveryState::Pending);
+
+    let state = client.recovery_status(&mut attempt).await;
+
+    assert!(matches!(state, Ok(RecoveryState::Expired)), "{state:?}");
+    assert!(!attempt.waits());
+    let requests = transport.request_count();
+    assert!(matches!(
+        client
+            .complete_recovery(
+                &attempt,
+                "person@example.test",
+                RecoveryChanges {
+                    remove_authenticator: true,
+                    ..RecoveryChanges::default()
+                },
+            )
+            .await,
+        Err(AuthError::RecoveryNotReady)
+    ));
+    assert_eq!(transport.request_count(), requests);
+}

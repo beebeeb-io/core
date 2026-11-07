@@ -54,6 +54,10 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   (`invalid_input`). `ServiceError::Protected { message }` (kind `protected`) carries core's words when
   a change under Backups is refused; show the message as it is.
 
+- `RecoveryStateData` adds `Expired`: the server reports an attempt whose window to complete has passed
+  as `expired`, and the status call returns that state instead of failing. Offer to start a new
+  recovery.
+
 ### Rust sync and conflict integrators
 
 - Replace `SyncEngine::load_snapshot` with `apply_complete_snapshot(CompleteSnapshot)` only for an
@@ -179,6 +183,8 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   `FileServiceError::Protected` and `UploadServiceError::Protected`, with core's words. `BackupFolder`
   replaces `ManagedBackupFolder` and `BackupError::NotInBackups` replaces `UnmanagedFolder`. The
   backup pass's own uploads are not checked: it is the one writer the rules protect the tree for.
+- An expired recovery attempt is `RecoveryState::Expired`, not `AuthError::MalformedAnswer`;
+  completing it is refused with `RecoveryNotReady` before anything is sent.
 - Backup scans page, deduplicate, export and enqueue lazily with a 64-upload cap. Failed and cancelled
   photo uploads retry at most three times, and successful completion is durable even when no backup
   completion handler is alive during a background wake.
