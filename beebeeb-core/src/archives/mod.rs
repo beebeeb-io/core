@@ -1,4 +1,4 @@
-//! Archives: list, preview and extract zip, tar, tgz and gz (task 2380).
+//! Archives: list, preview and extract zip, tar, tgz and gz.
 //!
 //! One sans-I/O reader for every client (spec A1): the reader asks its
 //! driver for byte ranges and never does I/O itself, so the native drivers

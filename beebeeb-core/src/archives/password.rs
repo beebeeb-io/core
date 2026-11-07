@@ -7,7 +7,7 @@ use zeroize::Zeroizing;
 /// prints `ArchivePassword(..)`; it has no `Display`. It lives for one
 /// preview or one extraction and is wiped when dropped.
 pub struct ArchivePassword(
-    #[expect(dead_code, reason = "read by the zip decoders (plan Tasks 5-6)")] Zeroizing<String>,
+    #[expect(dead_code, reason = "read by the zip decoders, which come next")] Zeroizing<String>,
 );
 
 impl ArchivePassword {

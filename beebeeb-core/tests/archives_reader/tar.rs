@@ -1,4 +1,4 @@
-//! Tar, tgz and gz listing and entry streams (plan Task 4).
+//! Tar, tgz and gz listing and entry streams.
 
 use beebeeb_core::archives::{
     ArchiveFormat, ArchivePlatform, ArchiveRefusal, ArchiveSession, ArchiveTime, EntryKind, PieceStep, SkipReason,

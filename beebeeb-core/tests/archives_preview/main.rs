@@ -1,3 +1,3 @@
-//! Task 2380: the archive preview's test binary (plan Tasks 2 and 9).
+//! The archive preview's test binary: the words and the screen model.
 
 mod words;
