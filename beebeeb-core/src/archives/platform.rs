@@ -69,6 +69,15 @@ impl ArchivePlatform {
         matches!(self, ArchivePlatform::MobileApp)
     }
 
+    /// The chunk plan this platform's uploads use (for stored sizes).
+    pub const fn chunk_profile(self) -> beebeeb_types::ChunkProfile {
+        match self {
+            ArchivePlatform::Native => beebeeb_types::ChunkProfile::Desktop,
+            ArchivePlatform::Browser => beebeeb_types::ChunkProfile::Web,
+            ArchivePlatform::MobileApp => beebeeb_types::ChunkProfile::Mobile,
+        }
+    }
+
     /// The row of core's preview table that decides what Open may show.
     pub const fn preview_platform(self) -> PreviewPlatform {
         match self {

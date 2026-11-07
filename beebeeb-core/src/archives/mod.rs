@@ -17,6 +17,7 @@ mod listing;
 pub mod model;
 pub mod names;
 pub mod password;
+pub mod plan;
 pub mod platform;
 pub mod session;
 pub mod source;
@@ -33,6 +34,10 @@ pub use model::{
 };
 pub use names::{EntryPath, RawName, decode_name, display_name, entry_path};
 pub use password::{ArchivePassword, PasswordStep};
+pub use plan::{
+    DestinationInfo, ExtractRequest, ExtractionPlan, NodeKind, PlanRefusal, PlanTarget, PlannedNode, Selection,
+    destination_stem, plan_extraction,
+};
 pub use platform::ArchivePlatform;
 pub use session::{ArchiveSession, EntryReader, PieceStep, SessionStep};
 pub use source::{ByteRange, ByteSource, ReadSeekSource, SourceError, SuppliedBytes};
