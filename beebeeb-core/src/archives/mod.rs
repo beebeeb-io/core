@@ -21,7 +21,10 @@ pub mod platform;
 pub mod session;
 pub mod source;
 mod tar;
+mod winzip_aes;
 pub mod words;
+mod zip;
+mod zipcrypto;
 
 pub use detect::{ArchiveFormat, Detection, ForeignFormat, detect, detect_gzip_inner};
 pub use model::{

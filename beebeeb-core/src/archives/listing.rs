@@ -18,6 +18,8 @@ pub(crate) enum Locator {
     Tar { ordinal: u32, data_offset: u64, size: u64 },
     /// The one file of a `.gz`.
     Gzip,
+    /// A zip entry, from its central directory record.
+    Zip(Box<super::zip::ZipLocator>),
 }
 
 #[derive(Default)]

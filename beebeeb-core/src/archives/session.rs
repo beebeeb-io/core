@@ -6,7 +6,7 @@
 //! `Listed` or `Refused`.
 
 use super::detect::{ArchiveFormat, Detection, detect, detect_gzip_inner};
-use super::limits::{DETECT_HEAD_BYTES, PIECE_BYTES, ZIP_TAIL_WINDOW};
+use super::limits::{DETECT_HEAD_BYTES, MAX_PARSE_RESTARTS, PIECE_BYTES, ZIP_TAIL_WINDOW};
 use super::listing::{ListingBuilder, Locator};
 use super::model::{ArchiveEntry, ArchiveListing, ArchiveRefusal, ArchiveTime, EntryCipher, EntryKind, SkipReason};
 use super::names::{RawName, decode_name, display_name, entry_path};
@@ -14,6 +14,7 @@ use super::password::ArchivePassword;
 use super::platform::ArchivePlatform;
 use super::source::{ByteRange, ByteSource, read_exact_at};
 use super::tar::{DataEvent, GzInput, Halt, RandomInput, TarEvent, TarHeader, TarInput, TarWalker};
+use super::zip::{ZipDecoder, ZipLister};
 
 /// What the session needs or says next.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,7 +35,7 @@ enum Phase {
     GzDetect(GzInput),
     TgzList(TarWalker<GzInput>),
     GzList(GzInput),
-    ZipPending,
+    Zip(ZipLister),
     Listed,
     Refused(ArchiveRefusal),
 }
@@ -46,6 +47,9 @@ pub struct ArchiveSession<S: ByteSource> {
     builder: ListingBuilder,
     listing: Option<ArchiveListing>,
     locators: Vec<Locator>,
+    /// The last demand and how often it came back unanswered in a row.
+    last_need: Option<ByteRange>,
+    repeats: u32,
 }
 
 impl<S: ByteSource> ArchiveSession<S> {
@@ -57,6 +61,8 @@ impl<S: ByteSource> ArchiveSession<S> {
             builder: ListingBuilder::default(),
             listing: None,
             locators: Vec::new(),
+            last_need: None,
+            repeats: 0,
         }
     }
 
@@ -84,11 +90,30 @@ impl<S: ByteSource> ArchiveSession<S> {
                 Phase::GzDetect(_) => self.step_gz_detect(),
                 Phase::TgzList(_) => self.step_tgz_list(),
                 Phase::GzList(_) => self.step_gz_list(),
-                Phase::ZipPending => Err(Halt::Refused(ArchiveRefusal::Damaged)),
+                Phase::Zip(_) => self.step_zip(),
             };
             match outcome {
-                Ok(()) => continue,
-                Err(Halt::Need(range)) => return SessionStep::NeedBytes(range),
+                Ok(()) => {
+                    self.last_need = None;
+                    self.repeats = 0;
+                    continue;
+                }
+                Err(Halt::Need(range)) => {
+                    // The same demand, unanswered more than eight times in a
+                    // row: the driver cannot supply it, and stepping on would
+                    // never end.
+                    if self.last_need == Some(range) {
+                        self.repeats += 1;
+                        if self.repeats > MAX_PARSE_RESTARTS {
+                            self.phase = Phase::Refused(ArchiveRefusal::Damaged);
+                            continue;
+                        }
+                    } else {
+                        self.last_need = Some(range);
+                        self.repeats = 0;
+                    }
+                    return SessionStep::NeedBytes(range);
+                }
                 Err(Halt::Io(e)) => return SessionStep::Io(e),
                 Err(Halt::Refused(refusal)) => {
                     self.phase = Phase::Refused(refusal);
@@ -111,7 +136,7 @@ impl<S: ByteSource> ArchiveSession<S> {
             self.phase = Phase::Tail { head };
             return Ok(());
         }
-        self.detected(detect(&head, &[], len))
+        self.detected(detect(&head, &[], len), &head)
     }
 
     fn step_tail(&mut self) -> Result<(), Halt> {
@@ -124,13 +149,14 @@ impl<S: ByteSource> ArchiveSession<S> {
             return Ok(());
         };
         let detection = detect(head, &tail, len);
-        self.detected(detection)
+        let head = head.clone();
+        self.detected(detection, &head)
     }
 
-    fn detected(&mut self, detection: Detection) -> Result<(), Halt> {
+    fn detected(&mut self, detection: Detection, head: &[u8]) -> Result<(), Halt> {
         self.phase = match detection {
             Detection::Archive(ArchiveFormat::Tar) => Phase::TarList(TarWalker::new(RandomInput { pos: 0 })),
-            Detection::Archive(ArchiveFormat::Zip) => Phase::ZipPending,
+            Detection::Archive(ArchiveFormat::Zip) => Phase::Zip(ZipLister::new(head)),
             Detection::Archive(_) | Detection::GzipNeedsInflatedHead => Phase::GzDetect(GzInput::new(None)),
             Detection::Foreign(format) => return Err(Halt::Refused(ArchiveRefusal::Foreign(format))),
             Detection::SelfExtracting => return Err(Halt::Refused(ArchiveRefusal::SelfExtracting)),
@@ -152,6 +178,16 @@ impl<S: ByteSource> ArchiveSession<S> {
                 TarEvent::End => return self.finish_listing(ArchiveFormat::Tar, true),
             }
         }
+    }
+
+    fn step_zip(&mut self) -> Result<(), Halt> {
+        let Phase::Zip(lister) = &mut self.phase else {
+            return Ok(());
+        };
+        if lister.step(&mut self.source, self.platform, &mut self.builder)? {
+            return self.finish_listing(ArchiveFormat::Zip, true);
+        }
+        Ok(())
     }
 
     fn step_gz_detect(&mut self) -> Result<(), Halt> {
@@ -246,12 +282,15 @@ impl<S: ByteSource> ArchiveSession<S> {
         index: u32,
         password: Option<&ArchivePassword>,
     ) -> Result<EntryReader<'_, S>, ArchiveRefusal> {
-        let _ = password;
-        let decoder = self.decoder(index)?;
+        let decoder = self.decoder(index, password)?;
         Ok(EntryReader { session: self, decoder })
     }
 
-    pub(crate) fn decoder(&self, index: u32) -> Result<EntryDecoder, ArchiveRefusal> {
+    pub(crate) fn decoder(
+        &self,
+        index: u32,
+        password: Option<&ArchivePassword>,
+    ) -> Result<EntryDecoder, ArchiveRefusal> {
         let listing = self.listing.as_ref().ok_or(ArchiveRefusal::Damaged)?;
         let locator = self.locators.get(index as usize).ok_or(ArchiveRefusal::Damaged)?;
         Ok(match (listing.format, locator) {
@@ -269,6 +308,10 @@ impl<S: ByteSource> ArchiveSession<S> {
                 input: Box::new(GzInput::new(None)),
                 max: self.platform.max_entry_bytes(),
             },
+            (ArchiveFormat::Zip, Locator::Zip(locator)) => EntryDecoder::Zip(Box::new(ZipDecoder::new(
+                (**locator).clone(),
+                password.map(ArchivePassword::utf8),
+            ))),
             _ => return Err(ArchiveRefusal::Damaged),
         })
     }
@@ -356,6 +399,7 @@ pub(crate) enum EntryDecoder {
         input: Box<GzInput>,
         max: u64,
     },
+    Zip(Box<ZipDecoder>),
     Done,
 }
 
@@ -363,6 +407,13 @@ impl EntryDecoder {
     pub(crate) fn next_piece<S: ByteSource + ?Sized>(&mut self, source: &mut S) -> PieceStep {
         let step = match self {
             EntryDecoder::Done => return PieceStep::Verified,
+            EntryDecoder::Zip(decoder) => {
+                let step = decoder.next_piece(source);
+                if !matches!(step, PieceStep::Data(_) | PieceStep::NeedBytes(_) | PieceStep::Io(_)) {
+                    *self = EntryDecoder::Done;
+                }
+                return step;
+            }
             EntryDecoder::Empty => Ok(PieceStep::Verified),
             EntryDecoder::TarPlain { remaining: 0, .. } => Ok(PieceStep::Verified),
             EntryDecoder::TarPlain { pos, remaining } => {

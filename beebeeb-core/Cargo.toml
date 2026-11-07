@@ -76,3 +76,8 @@ test-support = []
 hex = "0.4"
 # Differential test only: the authority check must agree with the WHATWG parser reqwest connects with.
 url = "2"
+# Archive tests only: zip 9's AES and ZipCrypto writers build the encrypted
+# fixtures, and its reader is the independent one-shot reference that the
+# archive reader's output is compared with. Production never decodes
+# through zip (it only writes folder downloads).
+zip = { version = "9", default-features = false, features = ["deflate", "aes-crypto"] }

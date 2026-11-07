@@ -6,13 +6,16 @@ use zeroize::Zeroizing;
 /// The password the person typed for an archive. Not `Clone`; its `Debug`
 /// prints `ArchivePassword(..)`; it has no `Display`. It lives for one
 /// preview or one extraction and is wiped when dropped.
-pub struct ArchivePassword(
-    #[expect(dead_code, reason = "read by the zip decoders, which come next")] Zeroizing<String>,
-);
+pub struct ArchivePassword(Zeroizing<String>);
 
 impl ArchivePassword {
     pub fn new(secret: String) -> Self {
         Self(Zeroizing::new(secret))
+    }
+
+    /// The password's UTF-8 bytes, wiped when dropped.
+    pub(crate) fn utf8(&self) -> Zeroizing<Vec<u8>> {
+        Zeroizing::new(self.0.as_bytes().to_vec())
     }
 }
 

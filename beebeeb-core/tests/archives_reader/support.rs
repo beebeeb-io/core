@@ -417,3 +417,253 @@ fn length_code(n: u64) -> (u64, u32, u64) {
     ];
     *TABLE.iter().rev().find(|(_, _, base)| *base <= n).expect("n >= 3")
 }
+
+// ---------------------------------------------------------------- zip
+
+pub fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = flate2::Crc::new();
+    crc.update(bytes);
+    crc.sum()
+}
+
+pub fn deflate(data: &[u8]) -> Vec<u8> {
+    let mut encoder = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(data).unwrap();
+    encoder.finish().unwrap()
+}
+
+/// One entry of a hand-built zip. Every field the reader checks can be set
+/// to a lie.
+#[derive(Clone)]
+pub struct RawZipEntry {
+    pub name: Vec<u8>,
+    pub local_name: Option<Vec<u8>>,
+    pub method: u16,
+    pub local_method: Option<u16>,
+    pub flags: u16,
+    /// The bytes after the local header (compressed, perhaps encrypted).
+    pub data: Vec<u8>,
+    pub crc: u32,
+    pub compressed: Option<u64>,
+    pub uncompressed: u64,
+    pub made_by: u16,
+    pub external: u32,
+    pub dos_time: u16,
+    pub dos_date: u16,
+    pub cd_extra: Vec<u8>,
+    pub local_extra: Vec<u8>,
+    pub header_offset: Option<u64>,
+}
+
+impl RawZipEntry {
+    pub fn stored(name: &str, data: &[u8]) -> Self {
+        Self {
+            name: name.as_bytes().to_vec(),
+            local_name: None,
+            method: 0,
+            local_method: None,
+            flags: 0,
+            data: data.to_vec(),
+            crc: crc32(data),
+            compressed: None,
+            uncompressed: data.len() as u64,
+            made_by: 20,
+            external: 0,
+            dos_time: (12 << 11) | (34 << 5) | (56 / 2),
+            dos_date: ((2024 - 1980) << 9) | (3 << 5) | 15,
+            cd_extra: Vec::new(),
+            local_extra: Vec::new(),
+            header_offset: None,
+        }
+    }
+
+    pub fn deflated(name: &str, data: &[u8]) -> Self {
+        Self {
+            method: 8,
+            data: deflate(data),
+            ..Self::stored(name, data)
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct RawZip {
+    pub entries: Vec<RawZipEntry>,
+    pub comment: Vec<u8>,
+    pub zip64: bool,
+    pub prefix: Vec<u8>,
+    pub disk: u16,
+    pub entries_override: Option<u64>,
+    pub cd_size_override: Option<u64>,
+}
+
+fn le16(out: &mut Vec<u8>, v: u16) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+
+fn le32(out: &mut Vec<u8>, v: u32) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+
+fn le64(out: &mut Vec<u8>, v: u64) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+
+impl RawZip {
+    pub fn of(entries: Vec<RawZipEntry>) -> Self {
+        Self {
+            entries,
+            ..Self::default()
+        }
+    }
+
+    pub fn build(&self) -> Vec<u8> {
+        let mut out = self.prefix.clone();
+        let mut offsets = Vec::new();
+        for e in &self.entries {
+            offsets.push((out.len() - self.prefix.len()) as u64);
+            let compressed = e.compressed.unwrap_or(e.data.len() as u64);
+            let local_name = e.local_name.as_ref().unwrap_or(&e.name);
+            le32(&mut out, 0x0403_4B50);
+            le16(&mut out, 20);
+            le16(&mut out, e.flags);
+            le16(&mut out, e.local_method.unwrap_or(e.method));
+            le16(&mut out, e.dos_time);
+            le16(&mut out, e.dos_date);
+            le32(&mut out, e.crc);
+            le32(&mut out, if self.zip64 { 0xFFFF_FFFF } else { compressed as u32 });
+            le32(&mut out, if self.zip64 { 0xFFFF_FFFF } else { e.uncompressed as u32 });
+            le16(&mut out, local_name.len() as u16);
+            le16(&mut out, e.local_extra.len() as u16);
+            out.extend_from_slice(local_name);
+            out.extend_from_slice(&e.local_extra);
+            out.extend_from_slice(&e.data);
+        }
+        let cd_start = (out.len() - self.prefix.len()) as u64;
+        for (e, offset) in self.entries.iter().zip(offsets) {
+            let compressed = e.compressed.unwrap_or(e.data.len() as u64);
+            let offset = e.header_offset.unwrap_or(offset);
+            let mut extra = e.cd_extra.clone();
+            if self.zip64 {
+                le16(&mut extra, 0x0001);
+                le16(&mut extra, 24);
+                le64(&mut extra, e.uncompressed);
+                le64(&mut extra, compressed);
+                le64(&mut extra, offset);
+            }
+            le32(&mut out, 0x0201_4B50);
+            le16(&mut out, e.made_by);
+            le16(&mut out, 20);
+            le16(&mut out, e.flags);
+            le16(&mut out, e.method);
+            le16(&mut out, e.dos_time);
+            le16(&mut out, e.dos_date);
+            le32(&mut out, e.crc);
+            le32(&mut out, if self.zip64 { 0xFFFF_FFFF } else { compressed as u32 });
+            le32(&mut out, if self.zip64 { 0xFFFF_FFFF } else { e.uncompressed as u32 });
+            le16(&mut out, e.name.len() as u16);
+            le16(&mut out, extra.len() as u16);
+            le16(&mut out, 0);
+            le16(&mut out, 0);
+            le16(&mut out, 0);
+            le32(&mut out, e.external);
+            le32(&mut out, if self.zip64 { 0xFFFF_FFFF } else { offset as u32 });
+            out.extend_from_slice(&e.name);
+            out.extend_from_slice(&extra);
+        }
+        let cd_end = (out.len() - self.prefix.len()) as u64;
+        let entries = self.entries_override.unwrap_or(self.entries.len() as u64);
+        let cd_size = self.cd_size_override.unwrap_or(cd_end - cd_start);
+        if self.zip64 {
+            let record_at = cd_end;
+            le32(&mut out, 0x0606_4B50);
+            le64(&mut out, 44);
+            le16(&mut out, 45);
+            le16(&mut out, 45);
+            le32(&mut out, 0);
+            le32(&mut out, 0);
+            le64(&mut out, entries);
+            le64(&mut out, entries);
+            le64(&mut out, cd_size);
+            le64(&mut out, cd_start);
+            le32(&mut out, 0x0706_4B50);
+            le32(&mut out, 0);
+            le64(&mut out, record_at);
+            le32(&mut out, 1);
+        }
+        le32(&mut out, 0x0605_4B50);
+        le16(&mut out, self.disk);
+        le16(&mut out, self.disk);
+        let classic_entries = if self.zip64 { 0xFFFF } else { entries.min(0xFFFF) as u16 };
+        le16(&mut out, classic_entries);
+        le16(&mut out, classic_entries);
+        le32(&mut out, if self.zip64 { 0xFFFF_FFFF } else { cd_size as u32 });
+        le32(&mut out, if self.zip64 { 0xFFFF_FFFF } else { cd_start as u32 });
+        le16(&mut out, self.comment.len() as u16);
+        out.extend_from_slice(&self.comment);
+        out
+    }
+}
+
+/// An entry's password and whether it uses AES-256 (else ZipCrypto).
+pub type Lock<'a> = Option<(&'a str, bool)>;
+/// One entry for [`zip9`]: name, method, lock, data.
+pub type Zip9Entry<'a> = (&'a str, zip::CompressionMethod, Lock<'a>, &'a [u8]);
+
+/// A zip written by zip 9 (the independent writer).
+pub fn zip9(entries: &[Zip9Entry<'_>]) -> Vec<u8> {
+    use zip::unstable::write::FileOptionsExt;
+    use zip::write::SimpleFileOptions;
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for (name, method, password, data) in entries {
+        let options = SimpleFileOptions::default().compression_method(*method);
+        let options = match password {
+            None => options,
+            Some((password, true)) => options.with_aes_encryption(zip::AesMode::Aes256, password),
+            Some((password, false)) => options.with_deprecated_encryption(password.as_bytes()).unwrap(),
+        };
+        if name.ends_with('/') {
+            writer.add_directory(*name, options).unwrap();
+        } else {
+            writer.start_file(*name, options).unwrap();
+            writer.write_all(data).unwrap();
+        }
+    }
+    writer.finish().unwrap().into_inner()
+}
+
+/// zip 9's own one-shot read of entry `index`: the reference output.
+pub fn zip9_read(bytes: &[u8], index: usize, password: Option<&str>) -> Vec<u8> {
+    use std::io::Read;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut file = match password {
+        Some(password) => archive.by_index_decrypt(index, password.as_bytes()).unwrap(),
+        None => archive.by_index(index).unwrap(),
+    };
+    let mut out = Vec::new();
+    file.read_to_end(&mut out).unwrap();
+    out
+}
+
+/// Read entry `index` through a session over `source`, answering every
+/// demand with `grant`. Returns the plaintext and how it ended.
+pub fn read_entry_with<S: ByteSource>(
+    session: &mut ArchiveSession<S>,
+    index: u32,
+    password: Option<&beebeeb_core::archives::ArchivePassword>,
+    mut grant: impl FnMut(&mut S, ByteRange),
+) -> (Vec<u8>, PieceStep) {
+    let mut reader = session.entry_reader(index, password).expect("entry reader");
+    let mut out = Vec::new();
+    for _ in 0..10_000_000 {
+        match reader.next_piece() {
+            PieceStep::Data(piece) => {
+                assert!(piece.len() <= 64 * 1024, "a piece of {} bytes", piece.len());
+                out.extend_from_slice(&piece);
+            }
+            PieceStep::NeedBytes(range) => grant(reader.source_mut(), range),
+            end => return (out, end),
+        }
+    }
+    panic!("the reader never finished");
+}

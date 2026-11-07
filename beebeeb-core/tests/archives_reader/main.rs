@@ -7,3 +7,4 @@ mod detect;
 mod names;
 mod support;
 mod tar;
+mod zip;
