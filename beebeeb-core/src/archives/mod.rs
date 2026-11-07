@@ -10,14 +10,27 @@
 //! extension only decides whether the preview and Extract are offered.
 
 pub mod detect;
+mod gzip;
+mod inflate;
 pub mod limits;
+mod listing;
 pub mod model;
 pub mod names;
+pub mod password;
 pub mod platform;
+pub mod session;
+pub mod source;
+mod tar;
 pub mod words;
 
 pub use detect::{ArchiveFormat, Detection, ForeignFormat, detect, detect_gzip_inner};
-pub use model::SkipReason;
+pub use model::{
+    ArchiveEntry, ArchiveListing, ArchiveRefusal, ArchiveTime, ArchiveTotals, EntryCipher, EntryKind, Protection,
+    SkipReason,
+};
 pub use names::{EntryPath, RawName, decode_name, display_name, entry_path};
+pub use password::ArchivePassword;
 pub use platform::ArchivePlatform;
+pub use session::{ArchiveSession, EntryReader, PieceStep, SessionStep};
+pub use source::{ByteRange, ByteSource, ReadSeekSource, SourceError, SuppliedBytes};
 pub use words::{ArchiveKey, ArchiveText, archive_text};
