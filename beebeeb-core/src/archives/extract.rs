@@ -642,7 +642,7 @@ impl<S: ByteSource> Extraction<S> {
     /// extracts the entries past it. `None` when there is nothing left.
     fn after_planned_files(&mut self) -> Option<ExtractStep> {
         let listing = self.session.listing()?;
-        if listing.format != ArchiveFormat::TarGzip || self.tail_checked {
+        if listing.format != ArchiveFormat::TarGzip || self.tail_checked || !self.plan.whole_archive {
             return None;
         }
         let complete = listing.complete;
@@ -713,7 +713,7 @@ impl<S: ByteSource> Extraction<S> {
             if let Some(parent) = node.parent {
                 taken.entry(parent).or_default().insert(&node.name);
                 if node.kind == NodeKind::Folder {
-                    folders.insert((parent, node.name.clone()), node.id);
+                    folders.insert((parent, node.source_name.clone()), node.id);
                 }
             }
         }
@@ -794,6 +794,7 @@ impl<S: ByteSource> Extraction<S> {
             id,
             parent: Some(parent),
             name: final_name,
+            source_name: name.to_string(),
             kind,
             entry: None,
             size,

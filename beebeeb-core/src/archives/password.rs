@@ -58,4 +58,7 @@ pub enum PasswordStep {
     Wrong,
     /// The entry is not protected.
     NotNeeded,
+    /// The source failed (a disk or network error): the password was not
+    /// checked.
+    Io(String),
 }

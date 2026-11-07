@@ -10,7 +10,7 @@ use beebeeb_types::limits::ENCRYPTED_FRAME_OVERHEAD_BYTES;
 
 use super::detect::ArchiveFormat;
 use super::limits::{MAX_ENTRIES, MAX_EXTRACTION_BYTES};
-use super::model::{ArchiveListing, ArchiveTotals, EntryKind, SkipReason};
+use super::model::{ArchiveEntry, ArchiveListing, ArchiveTotals, EntryKind, SkipReason};
 use super::platform::ArchivePlatform;
 use super::words::{ArchiveKey, ArchiveText, archive_text, count_label, size_label};
 use crate::backup::BackupPosition;
@@ -20,7 +20,8 @@ use crate::name_clash::{ItemKind, TakenNames, numbered_name};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
     All,
-    /// Paths as the listing shows them; a folder selects everything in it.
+    /// Paths as the preview rows name them (`ArchiveEntry::selection_path`:
+    /// the extraction path); a folder selects everything in it.
     Paths(Vec<String>),
 }
 
@@ -70,6 +71,8 @@ pub struct PlannedNode {
     pub id: u32,
     pub parent: Option<u32>,
     pub name: String,
+    /// The archive's own name for it (`name` before any numbering).
+    pub source_name: String,
     pub kind: NodeKind,
     /// The listing entry a file comes from.
     pub entry: Option<u32>,
@@ -95,6 +98,11 @@ pub struct ExtractionPlan {
     pub renamed: Vec<(u32, String)>,
     pub totals: ArchiveTotals,
     pub notices: Vec<ArchiveText>,
+    /// Every entry was selected: a tgz extraction then also writes the
+    /// entries past an incomplete listing, and reads the stream to its end
+    /// so every gzip trailer is checked. A selection stops after its last
+    /// file.
+    pub whole_archive: bool,
 }
 
 /// Why nothing is written.
@@ -190,13 +198,16 @@ fn free_name(name: &str, kind: ItemKind, taken: &TakenNames) -> String {
     }
 }
 
-fn selected(selection: &Selection, display_path: &str) -> bool {
+fn selected(selection: &Selection, entry: &ArchiveEntry) -> bool {
     match selection {
         Selection::All => true,
-        Selection::Paths(paths) => paths.iter().any(|p| {
-            let p = p.trim_end_matches('/');
-            display_path == p || display_path.strip_prefix(p).is_some_and(|rest| rest.starts_with('/'))
-        }),
+        Selection::Paths(paths) => {
+            let path = entry.selection_path();
+            paths.iter().any(|p| {
+                let p = p.trim_end_matches('/');
+                path == p || path.strip_prefix(p).is_some_and(|rest| rest.starts_with('/'))
+            })
+        }
     }
 }
 
@@ -229,6 +240,7 @@ impl Builder {
             id,
             parent: Some(parent),
             name,
+            source_name: wanted.to_string(),
             kind,
             entry,
             size,
@@ -262,7 +274,7 @@ pub fn plan_extraction(listing: &ArchiveListing, request: &ExtractRequest) -> Re
     let chosen: Vec<_> = listing
         .entries
         .iter()
-        .filter(|e| selected(&request.selection, &e.display_path))
+        .filter(|e| selected(&request.selection, e))
         .collect();
     if chosen.is_empty() {
         return Err(PlanRefusal::Empty);
@@ -285,6 +297,7 @@ pub fn plan_extraction(listing: &ArchiveListing, request: &ExtractRequest) -> Re
             id: 0,
             parent: None,
             name,
+            source_name: stem.clone(),
             kind: NodeKind::File,
             entry: Some(entry.index),
             size: entry.size,
@@ -296,6 +309,7 @@ pub fn plan_extraction(listing: &ArchiveListing, request: &ExtractRequest) -> Re
             id: 0,
             parent: None,
             name,
+            source_name: stem.clone(),
             kind: NodeKind::Folder,
             entry: None,
             size: 0,
@@ -353,6 +367,15 @@ pub fn plan_extraction(listing: &ArchiveListing, request: &ExtractRequest) -> Re
             NodeKind::Folder => {}
         }
     }
+    // A tgz or gz listed only up to the scan limit: its compressed size is
+    // the floor (spec §6.2); the server still refuses past the quota.
+    if !listing.complete {
+        let floor = listing.totals.compressed_bytes;
+        stored = stored.max(stored_size(floor, request.platform));
+        if listing.format == ArchiveFormat::Gzip {
+            largest = largest.max(floor);
+        }
+    }
     if totals.bytes > MAX_EXTRACTION_BYTES {
         return Err(PlanRefusal::TooLarge { total: totals.bytes });
     }
@@ -381,5 +404,6 @@ pub fn plan_extraction(listing: &ArchiveListing, request: &ExtractRequest) -> Re
         renamed: builder.renamed,
         totals,
         notices,
+        whole_archive: request.selection == Selection::All,
     })
 }

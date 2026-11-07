@@ -329,3 +329,40 @@ fn plan_quota_uses_ciphertext_size() {
     // An empty archive refuses as empty.
     assert_eq!(plan_extraction(&files(&[]), &request("e.zip")), Err(PlanRefusal::Empty));
 }
+
+/// A selection names entries as the preview rows do, by their extraction
+/// path: selecting `docs` takes files stored as `./docs/a.txt` and
+/// `docs\\b.txt` (review finding).
+#[test]
+fn plan_selection_matches_extraction_paths_not_stored_names() {
+    let l = listing(
+        ArchiveFormat::Tar,
+        &[
+            ("./docs/a.txt", EntryKind::File, 10, None),
+            ("docs\\b.txt", EntryKind::File, 10, None),
+            ("other.txt", EntryKind::File, 10, None),
+        ],
+    );
+    let mut r = request("x.tar");
+    r.selection = Selection::Paths(vec!["docs".into()]);
+    let plan = plan_extraction(&l, &r).expect("plans");
+    let names: Vec<&str> = plan.nodes.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["x", "docs", "a.txt", "b.txt"]);
+}
+
+/// A tgz or gz listed only up to the scan limit has its compressed size as
+/// the quota floor (spec §6.2): a 3 GB stream listed as 256 MiB does not
+/// pass a 1 GB quota (review finding).
+#[test]
+fn plan_partly_listed_gz_uses_the_compressed_size_as_the_quota_floor() {
+    let mut l = listing(ArchiveFormat::Gzip, &[("big.log", EntryKind::File, 256 << 20, None)]);
+    l.complete = false;
+    l.entries[0].compressed_size = 3_000_000_000;
+    l.totals.compressed_bytes = 3_000_000_000;
+    let mut r = request("big.log.gz");
+    r.server_free_bytes = 1_000_000_000;
+    assert!(matches!(plan_extraction(&l, &r), Err(PlanRefusal::Quota { .. })));
+    r.server_free_bytes = u64::MAX;
+    r.device_free_bytes = Some(1_000_000_000);
+    assert!(matches!(plan_extraction(&l, &r), Err(PlanRefusal::DeviceSpace { .. })));
+}

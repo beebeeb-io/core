@@ -53,9 +53,22 @@ fn start_on<S: ByteSource>(
     password: Option<&str>,
     grant: impl FnMut(&mut S, beebeeb_core::archives::ByteRange),
 ) -> Extraction<S> {
+    start_selected(platform, source, name, Selection::All, password, grant)
+}
+
+fn start_selected<S: ByteSource>(
+    platform: ArchivePlatform,
+    source: S,
+    name: &str,
+    selection: Selection,
+    password: Option<&str>,
+    grant: impl FnMut(&mut S, beebeeb_core::archives::ByteRange),
+) -> Extraction<S> {
     let mut session = ArchiveSession::open(source, platform);
     assert_eq!(drive(&mut session, grant), SessionStep::Listed);
-    let plan = plan_extraction(session.listing().unwrap(), &request(name)).unwrap();
+    let mut request = request(name);
+    request.selection = selection;
+    let plan = plan_extraction(session.listing().unwrap(), &request).unwrap();
     Extraction::start(
         session,
         identity("v1"),
@@ -538,4 +551,67 @@ fn extract_tgz_trailer_mismatch_fails_damaged() {
     let summary = out.summary.unwrap();
     assert_eq!(summary.outcome, ExtractOutcome::Failed(FailReason::Damaged));
     assert_eq!(summary.files_done, 3);
+}
+
+/// A tgz the phone lists only partly: `first.txt` and a 260 MiB entry in
+/// the listing, `tail` past it.
+fn partly_listed_tgz(listed: &[(&str, &[u8])], tail: &[(&str, &[u8])]) -> Vec<u8> {
+    use crate::support::{TarBuilder, gzip, gzip_zeros_member, octal, tar_header};
+    let big_len = 260u64 * 1024 * 1024;
+    let mut head = TarBuilder::default();
+    for (name, data) in listed {
+        head.file(name, data);
+    }
+    head.raw(&tar_header(b"big.bin", b'0', &octal(big_len, 12), true));
+    let mut head_bytes = head.finish();
+    head_bytes.truncate(head_bytes.len() - 1024);
+    let mut rest = TarBuilder::default();
+    for (name, data) in tail {
+        rest.file(name, data);
+    }
+    [gzip(&head_bytes), gzip_zeros_member(big_len), gzip(&rest.finish())].concat()
+}
+
+/// Extract Selected on a partly listed tgz writes the selection only:
+/// nothing past the listing, and the stream is not read past the last
+/// selected file (review finding).
+#[test]
+fn extract_selected_on_a_partly_listed_tgz_writes_only_the_selection() {
+    let tgz = partly_listed_tgz(&[("first.txt", b"first")], &[("late/after.txt", b"after")]);
+    let len = tgz.len() as u64;
+    let mut x = start_selected(
+        ArchivePlatform::MobileApp,
+        crate::support::Recording::new(tgz),
+        "t.tgz",
+        Selection::Paths(vec!["first.txt".into()]),
+        None,
+        |_, r| panic!("{r:?}"),
+    );
+    let listed_reads = x.source_mut().bytes_read();
+    let out = run(&mut x, |_, r| panic!("{r:?}"), vec![], |_, _| {});
+    let summary = out.summary.unwrap();
+    assert_eq!(summary.outcome, ExtractOutcome::Done);
+    assert_eq!((summary.files_done, summary.files_total), (1, 1));
+    assert_eq!(out.published.keys().cloned().collect::<Vec<_>>(), vec!["t/first.txt"]);
+    let extract_reads = x.source_mut().bytes_read() - listed_reads;
+    assert!(
+        extract_reads < len / 2,
+        "read {extract_reads} of {len} bytes to extract one small file"
+    );
+}
+
+/// An entry past the listing goes into the folder the planner made for
+/// its archive folder, even when the planner numbered that folder
+/// (review finding).
+#[test]
+fn extract_tgz_tail_entry_joins_a_renamed_planned_folder() {
+    let tgz = partly_listed_tgz(&[("a", b"file a"), ("a/y.txt", b"listed")], &[("a/x.txt", b"tail")]);
+    let mut x = start_on(ArchivePlatform::MobileApp, Blocking(tgz), "t.tgz", None, |_, r| {
+        panic!("{r:?}")
+    });
+    let out = run(&mut x, |_, r| panic!("{r:?}"), vec![], |_, _| {});
+    assert_eq!(out.summary.unwrap().outcome, ExtractOutcome::Done);
+    let mut names: Vec<_> = out.published.keys().cloned().collect();
+    names.sort();
+    assert_eq!(names, vec!["t/a", "t/a (2)/x.txt", "t/a (2)/y.txt", "t/big.bin"]);
 }

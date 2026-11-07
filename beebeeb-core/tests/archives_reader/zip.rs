@@ -346,3 +346,16 @@ fn resumable_pull_matches_one_shot() {
         }
     }
 }
+
+/// A ZIP64 locator that names a record offset near u64::MAX is damaged,
+/// never an overflow (review finding).
+#[test]
+fn zip64_locator_offset_near_the_end_of_u64_is_damaged() {
+    let mut zip = RawZip::of(vec![RawZipEntry::stored("a.txt", b"a")]);
+    zip.zip64 = true;
+    let mut bytes = zip.build();
+    let locator = bytes.len() - 22 - 20;
+    assert_eq!(&bytes[locator..locator + 4], b"PK\x06\x07");
+    bytes[locator + 8..locator + 16].copy_from_slice(&(u64::MAX - 15).to_le_bytes());
+    assert_eq!(list(bytes), Err(ArchiveRefusal::Damaged));
+}

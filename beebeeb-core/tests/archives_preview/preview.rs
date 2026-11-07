@@ -509,3 +509,15 @@ fn preview_refused_offers_download() {
         );
     }
 }
+
+/// One selected file is named by its extraction path, so `./docs/a.txt`
+/// offers Download as `docs/a.txt` (review finding).
+#[test]
+fn preview_single_selection_by_extraction_path_offers_download() {
+    let listing = listing(vec![entry(0, "./docs/a.txt", EntryKind::File, 12)]);
+    let selection = ["docs/a.txt".to_string()];
+    let mut one = input(ListingState::Listed(&listing));
+    one.selection = &selection;
+    let model = archive_preview(&one);
+    assert!(model.selection_actions.iter().any(|a| a.kind == ActionKind::Download));
+}

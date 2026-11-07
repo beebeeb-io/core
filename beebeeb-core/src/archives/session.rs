@@ -276,7 +276,12 @@ impl<S: ByteSource> ArchiveSession<S> {
 
     fn finish_listing(&mut self, format: ArchiveFormat, complete: bool) -> Result<(), Halt> {
         let builder = std::mem::take(&mut self.builder);
-        let (listing, locators) = builder.finish(format, complete);
+        let (mut listing, locators) = builder.finish(format, complete);
+        if format == ArchiveFormat::TarGzip {
+            // The whole stream is compressed: the archive's own size is its
+            // compressed size (the quota floor for a partial listing).
+            listing.totals.compressed_bytes = self.source.len();
+        }
         self.listing = Some(listing);
         self.locators = locators;
         self.phase = Phase::Listed;
@@ -320,7 +325,9 @@ impl<S: ByteSource> ArchiveSession<S> {
             Ok(true) => PasswordStep::Accepted,
             Ok(false) => PasswordStep::Wrong,
             Err(Miss::Need(range)) => PasswordStep::NeedBytes(range),
-            Err(Miss::Truncated | Miss::Io(_)) => PasswordStep::Accepted,
+            Err(Miss::Io(e)) => PasswordStep::Io(e),
+            // A damaged entry cannot be judged; its read reports Corrupt.
+            Err(Miss::Truncated) => PasswordStep::Accepted,
         }
     }
 

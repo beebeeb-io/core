@@ -429,7 +429,7 @@ impl<I: TarInput> TarWalker<I> {
         let padded = padded(size)?;
         let header_mtime = parse_number(&block[136..148])
             .and_then(|s| i64::try_from(s).ok())
-            .map(|s| s * 1000);
+            .and_then(|s| s.checked_mul(1000));
         let header = TarHeader {
             name,
             typeflag: block[156],

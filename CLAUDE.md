@@ -96,9 +96,11 @@ Formats and keys:
 Secrets, input and bindings:
 
 - Archives are hostile input (`archives`). Every entry name goes through `archives::names`, never a
-  hand-joined path; a file is published only after its entry reads `Verified` (CRC-32, and for AES
-  the authentication code); a password is an `ArchivePassword` (zeroized, not `Clone`, never logged);
-  the limits in `archives::limits` are core's, never raised by a client.
+  hand-joined path; a file is published only after its entry reads `Verified` (zip: CRC-32, and for
+  AES the authentication code; a tar entry has no checksum of its own, and a tgz's gzip CRC-32 covers
+  the whole stream, so a mismatch fails the run as `Damaged` after the files before it were
+  published); a password is an `ArchivePassword` (zeroized, not `Clone`, never logged); the limits in
+  `archives::limits` are core's, never raised by a client; hostile numbers use checked arithmetic.
 - `MasterKey` and `FileKey` are not `Clone`; intermediate key buffers are `Zeroizing`; crypto paths
   return `Result` and never panic. Secrets are wiped on drop and never appear in errors or debug output.
 - Hostile sizes and counts use checked arithmetic and return errors; `MAX_CHUNK_SIZE` (256 MiB) rejects

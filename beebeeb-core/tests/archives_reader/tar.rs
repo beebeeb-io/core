@@ -6,7 +6,7 @@ use beebeeb_core::archives::{
 
 use crate::support::{
     Blocking, Recording, TarBuilder, drive, gzip, gzip_named, gzip_zeros_member, list, list_chaos, list_on, octal,
-    read_entry, tar_header,
+    read_entry, seal_checksum, tar_header,
 };
 
 fn sample_tar() -> Vec<u8> {
@@ -206,10 +206,14 @@ fn tar_entry_count_over_cap_refused() {
 
 #[test]
 fn tgz_detected_by_inner_header() {
-    let listing = list(gzip(&sample_tar())).unwrap();
+    let tgz = gzip(&sample_tar());
+    let len = tgz.len() as u64;
+    let listing = list(tgz).unwrap();
     assert_eq!(listing.format, ArchiveFormat::TarGzip);
     assert!(listing.complete);
     assert_eq!(paths(&listing).len(), 3);
+    // The whole stream is compressed: its size is the compressed total.
+    assert_eq!(listing.totals.compressed_bytes, len);
 }
 
 #[test]
@@ -345,4 +349,23 @@ impl FinishExt for TarBuilder {
         self.raw(&bytes[..bytes.len() - 1024]);
         bytes
     }
+}
+
+/// A GNU base-256 mtime of 2^62 seconds fits an i64 but not as
+/// milliseconds: the entry lists with no time, and nothing overflows
+/// (review finding).
+#[test]
+fn tar_huge_base256_mtime_lists_without_a_time() {
+    let mut h = tar_header(b"old.txt", b'0', &octal(2, 12), true);
+    h[136..148].copy_from_slice(&[0x80, 0, 0, 0, 0x40, 0, 0, 0, 0, 0, 0, 0]);
+    seal_checksum(&mut h);
+    let mut tar = TarBuilder::default();
+    tar.raw(&h).raw(&{
+        let mut block = [0u8; 512];
+        block[..2].copy_from_slice(b"ok");
+        block
+    });
+    let listing = list(tar.finish()).expect("lists");
+    assert_eq!(listing.entries[0].display_path, "old.txt");
+    assert_eq!(listing.entries[0].modified, None);
 }

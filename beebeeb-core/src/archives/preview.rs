@@ -50,7 +50,7 @@ pub struct PreviewInput<'a> {
     pub listing: ListingState<'a>,
     /// The archive folder being shown, as path components.
     pub folder: &'a [String],
-    /// Selected paths, as the listing shows them.
+    /// Selected paths, as the rows name them (`ArchiveEntry::selection_path`).
     pub selection: &'a [String],
     pub platform: ArchivePlatform,
     pub destination: DestinationKind,
@@ -333,7 +333,7 @@ fn selection_actions(listing: &ArchiveListing, input: &PreviewInput<'_>) -> Vec<
         enabled: true,
     }];
     if let [one] = input.selection
-        && let Some(entry) = listing.entries.iter().find(|e| &e.display_path == one)
+        && let Some(entry) = listing.entries.iter().find(|e| &e.selection_path() == one)
         && entry.kind == EntryKind::File
         && entry.skip.is_none()
     {

@@ -1,7 +1,9 @@
 //! Password-protected zips (spec §7): AES AE-1/AE-2 and ZipCrypto, wrong
 //! passwords, mixed archives, the CP437 fallback, and the secret's life.
 
-use beebeeb_core::archives::{ArchivePassword, ArchivePlatform, ArchiveSession, PasswordStep, PieceStep, SessionStep};
+use beebeeb_core::archives::{
+    ArchivePassword, ArchivePlatform, ArchiveSession, ByteSource, PasswordStep, PieceStep, SessionStep, SourceError,
+};
 
 use crate::support::{
     Blocking, CP437_TEST_PASSWORD, OTHER_TEST_PASSWORD, TEST_PASSWORD, crc32, drive, first_data_start, fixture,
@@ -214,4 +216,43 @@ fn password_never_in_debug_or_errors() {
     let hits = printed.iter().filter(|text| text.contains(secret)).count();
     assert_eq!(hits, 0, "the password appeared in {hits} printed values");
     assert!(printed.len() >= 8);
+}
+
+/// Serves the archive, then fails every read once `fail` is set.
+struct Flaky {
+    bytes: Vec<u8>,
+    fail: bool,
+}
+
+impl ByteSource for Flaky {
+    fn len(&self) -> u64 {
+        self.bytes.len() as u64
+    }
+
+    fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize, SourceError> {
+        if self.fail {
+            return Err(SourceError::Io("the disk went away".into()));
+        }
+        let start = (offset as usize).min(self.bytes.len());
+        let n = buf.len().min(self.bytes.len() - start);
+        buf[..n].copy_from_slice(&self.bytes[start..start + n]);
+        Ok(n)
+    }
+}
+
+/// A read error while checking is reported as one, never as a password
+/// that worked (review finding).
+#[test]
+fn check_password_reports_a_read_error_not_accepted() {
+    let mut session = ArchiveSession::open(
+        Flaky {
+            bytes: fixture("aes256.zip"),
+            fail: false,
+        },
+        ArchivePlatform::Native,
+    );
+    assert_eq!(session.step(), SessionStep::Listed);
+    session.source_mut().fail = true;
+    let step = session.check_password(0, &ArchivePassword::new("any-password".into()));
+    assert_eq!(step, PasswordStep::Io("the disk went away".into()));
 }

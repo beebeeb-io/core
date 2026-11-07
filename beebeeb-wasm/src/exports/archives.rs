@@ -234,6 +234,7 @@ enum PasswordStepJs {
     Accepted,
     Wrong,
     NotNeeded,
+    Io { message: String },
 }
 
 #[derive(Serialize)]
@@ -780,7 +781,8 @@ impl WasmArchiveSession {
     }
 
     /// Whether `password` opens entry `index`: `{kind: "need_bytes", start,
-    /// end}`, `"accepted"`, `"wrong"` or `"not_needed"`.
+    /// end}`, `"accepted"`, `"wrong"`, `"not_needed"` or `{kind: "io",
+    /// message}`.
     #[wasm_bindgen(js_name = checkPassword)]
     pub fn check_password(&mut self, index: u32, password: String) -> Result<JsValue, JsError> {
         let password = ArchivePassword::new(password);
@@ -792,6 +794,7 @@ impl WasmArchiveSession {
             PasswordStep::Accepted => PasswordStepJs::Accepted,
             PasswordStep::Wrong => PasswordStepJs::Wrong,
             PasswordStep::NotNeeded => PasswordStepJs::NotNeeded,
+            PasswordStep::Io(message) => PasswordStepJs::Io { message },
         };
         to_js(&step)
     }

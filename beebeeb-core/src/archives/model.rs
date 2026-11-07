@@ -181,6 +181,16 @@ pub struct ArchiveEntry {
     pub skip: Option<SkipReason>,
 }
 
+impl ArchiveEntry {
+    /// The path a selection names this entry by, as the preview rows show
+    /// it: its extraction path, or its shown name when it has none.
+    pub fn selection_path(&self) -> String {
+        self.path
+            .as_ref()
+            .map_or_else(|| self.display_path.clone(), |p| p.joined())
+    }
+}
+
 /// Counts over the listing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ArchiveTotals {

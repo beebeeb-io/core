@@ -147,7 +147,8 @@ impl ZipLister {
                 tail_start,
                 tail,
             } => {
-                let record = slice_or_read(source, *tail_start, tail, ByteRange::new(*record_at, record_at + 56))?;
+                let record_end = record_at.checked_add(56).ok_or_else(damaged)?;
+                let record = slice_or_read(source, *tail_start, tail, ByteRange::new(*record_at, record_end))?;
                 if record[..4] != SIG_ZIP64_END {
                     return Err(damaged());
                 }
@@ -165,7 +166,7 @@ impl ZipLister {
                     cd_offset: pick(classic.2, 0xFFFF_FFFF, u64_at(&record, 48)),
                     cd_must_end_at: *record_at,
                 };
-                if *locator_at < record_at + 56 {
+                if *locator_at < record_end {
                     return Err(damaged());
                 }
                 let next = ListState::Central {
