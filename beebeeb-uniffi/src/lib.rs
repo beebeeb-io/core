@@ -17,11 +17,13 @@ mod backup;
 mod chunk_decryptor;
 mod platform_services;
 mod request_seal;
+mod secret_types;
 mod services;
 
 pub use account_services::*;
 pub use chunk_decryptor::*;
 pub use platform_services::*;
+pub use secret_types::*;
 pub use services::*;
 #[cfg(test)]
 mod folder_link_2237c {
@@ -3762,11 +3764,21 @@ pub struct ConstellationFrameDto {
     pub ring_phase: f32,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Clone, uniffi::Record)]
 pub struct ConstellationSessionInitDto {
     pub payload: ConstellationPayloadDto,
     pub confirm_code: String,
     pub ephemeral_private: Vec<u8>,
+}
+
+impl std::fmt::Debug for ConstellationSessionInitDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConstellationSessionInitDto")
+            .field("payload", &self.payload)
+            .field("confirm_code", &"[REDACTED]")
+            .field("ephemeral_private", &"[REDACTED]")
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, uniffi::Record)]

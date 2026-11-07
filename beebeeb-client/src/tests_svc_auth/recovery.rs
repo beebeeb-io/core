@@ -221,7 +221,7 @@ async fn recovery_authenticator_replacement_matches_the_server_payload() {
             "person@example.test",
             RecoveryChanges {
                 new_authenticator: Some(Zeroizing::new(replacement.into())),
-                authenticator_code: Some("123456".into()),
+                authenticator_code: Some(Zeroizing::new("123456".into())),
                 ..RecoveryChanges::default()
             },
         )

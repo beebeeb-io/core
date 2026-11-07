@@ -18,8 +18,8 @@ use zeroize::Zeroizing;
 
 use crate::{
     AccountReplacementHandle, AuthServiceHandle, BreachCheckHandle, CeremonyStepDto, DeviceServiceHandle,
-    MasterKeyHandle, NativeClientHandle, PasswordAcceptedHandle, PasswordEvaluationDto, ServiceError, ServiceErrorKind,
-    copy_master_key, lock_tolerant, map_client_error, take_password_accepted,
+    MasterKeyHandle, NativeClientHandle, PasswordAcceptedHandle, PasswordEvaluationDto, SecretString, ServiceError,
+    ServiceErrorKind, copy_master_key, lock_tolerant, map_client_error, take_password_accepted,
 };
 
 fn invalid() -> ServiceError {
@@ -653,13 +653,15 @@ impl From<RecoveryState> for RecoveryStateData {
     }
 }
 
+/// The changes a recovery applies. The secret fields are [`SecretString`]s
+/// (plain strings to Swift and Kotlin): wiped on drop, redacted in `Debug`.
 #[derive(Debug, Clone, Default, uniffi::Record)]
 pub struct RecoveryChangesData {
-    pub new_password: Option<String>,
+    pub new_password: Option<SecretString>,
     pub new_email: Option<String>,
-    pub email_verification_code: Option<String>,
-    pub new_authenticator: Option<String>,
-    pub authenticator_code: Option<String>,
+    pub email_verification_code: Option<SecretString>,
+    pub new_authenticator: Option<SecretString>,
+    pub authenticator_code: Option<SecretString>,
     pub remove_authenticator: bool,
 }
 
@@ -740,11 +742,11 @@ impl RecoveryAttemptHandle {
         let mut state = self.state.lock().map_err(|_| unavailable())?;
         let attempt = state.as_ref().ok_or_else(invalid)?;
         let changes = RecoveryChanges {
-            new_password: changes.new_password.map(Zeroizing::new),
+            new_password: changes.new_password.map(SecretString::into_zeroizing),
             new_email: changes.new_email,
-            email_verification_code: changes.email_verification_code,
-            new_authenticator: changes.new_authenticator.map(Zeroizing::new),
-            authenticator_code: changes.authenticator_code,
+            email_verification_code: changes.email_verification_code.map(SecretString::into_zeroizing),
+            new_authenticator: changes.new_authenticator.map(SecretString::into_zeroizing),
+            authenticator_code: changes.authenticator_code.map(SecretString::into_zeroizing),
             remove_authenticator: changes.remove_authenticator,
         };
         let recovered = auth

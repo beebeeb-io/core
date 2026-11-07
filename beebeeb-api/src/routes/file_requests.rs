@@ -17,7 +17,7 @@ pub struct Create {
     #[serde(default)]
     pub expires_in_secs: Option<i64>,
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct FileRequest {
     pub id: String,
     #[serde(default)]
@@ -30,13 +30,15 @@ pub struct FileRequest {
     #[serde(flatten)]
     pub extra: super::ExtraFields,
 }
-#[derive(Debug, Clone, Deserialize)]
+crate::redacted_debug!(FileRequest; show: [id, title, closed, closed_at, extra]; hide: [token]);
+#[derive(Clone, Deserialize)]
 pub struct Created {
     pub id: String,
     pub token: String,
     #[serde(flatten)]
     pub extra: super::ExtraFields,
 }
+crate::redacted_debug!(Created; show: [id, extra]; hide: [token]);
 #[derive(Debug, Clone, Deserialize)]
 pub struct List {
     #[serde(default)]

@@ -354,12 +354,13 @@ pub struct KeyProofChallenge {
     pub expires_in_seconds: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct KeyProofAnswer {
     pub response: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email_code_ticket: Option<String>,
 }
+crate::redacted_debug!(KeyProofAnswer; show: [response]; hide: [email_code_ticket]);
 
 #[derive(Clone, Deserialize)]
 pub struct KeyProofFinish {

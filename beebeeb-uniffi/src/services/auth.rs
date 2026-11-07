@@ -389,10 +389,13 @@ pub trait SecretStoreCallback: Send + Sync {
     fn authorize_access(&self, name: String) -> bool;
 }
 
+/// What the platform passkey prompt returned. `prf_output` is key material: a
+/// [`SecretBytes`](crate::SecretBytes) (plain `Data` / `ByteArray` to Swift and
+/// Kotlin), wiped on drop and redacted in `Debug`.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct PasskeyPromptResult {
     pub credential_id: String,
-    pub prf_output: Vec<u8>,
+    pub prf_output: crate::SecretBytes,
     pub user_verified: bool,
 }
 
@@ -417,7 +420,7 @@ impl beebeeb_client::auth::PasskeyPrompt for PasskeyPromptAdapter {
                 .ok_or(beebeeb_client::auth::PasskeyPromptError)?;
             Ok(beebeeb_client::auth::PasskeyPromptOutput {
                 credential_id: output.credential_id,
-                prf_output: Zeroizing::new(output.prf_output),
+                prf_output: output.prf_output.into_zeroizing(),
             })
         })
     }
@@ -431,7 +434,7 @@ impl beebeeb_client::auth::PasskeyPrompt for PasskeyPromptAdapter {
                 .ok_or(beebeeb_client::auth::PasskeyPromptError)?;
             Ok(beebeeb_client::auth::PasskeyPromptOutput {
                 credential_id: output.credential_id,
-                prf_output: Zeroizing::new(output.prf_output),
+                prf_output: output.prf_output.into_zeroizing(),
             })
         })
     }

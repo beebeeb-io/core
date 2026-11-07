@@ -11,7 +11,9 @@ beebeeb-types = { path = "../beebeeb-types" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-zeroize = "1"
+# `serde` lets wire records hold secrets in `Zeroizing` (core #74 review, P2-5);
+# the locked zeroize already builds with it, so no new package.
+zeroize = { version = "1", features = ["serde"] }
 
 [features]
 default = []

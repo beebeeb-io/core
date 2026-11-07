@@ -919,7 +919,7 @@ async fn recovery_replaces_a_lost_authenticator() -> TestResult {
             &account.email,
             RecoveryChanges {
                 new_authenticator: Some(Zeroizing::new(replacement_secret.into())),
-                authenticator_code: Some(totp_now(replacement_secret)?),
+                authenticator_code: Some(Zeroizing::new(totp_now(replacement_secret)?)),
                 ..RecoveryChanges::default()
             },
         )
@@ -978,7 +978,7 @@ async fn recovery_replaces_a_lost_email_address() -> TestResult {
             RecoveryChanges {
                 new_password: Some(Zeroizing::new(account.password.clone())),
                 new_email: Some(replacement_email),
-                email_verification_code: Some(code),
+                email_verification_code: Some(Zeroizing::new(code)),
                 ..RecoveryChanges::default()
             },
         )
