@@ -30,16 +30,20 @@ pub const MSG_STOP_INACTIVE_CLEANUP: &str =
     "Your files were removed because the account was inactive, so backups are off.";
 /// The words for [`BackupStopReason::AccountReset`].
 pub const MSG_STOP_ACCOUNT_RESET: &str = "Your files were removed when the account was reset, so backups are off.";
+/// The words for [`BackupStopReason::UnknownRemoval`]: a removal whose reason
+/// this build does not know (spec Amendment 12b, Guus 2026-11-07 19:04, G6).
+/// Never the "deleted" words, which may be untrue.
+pub const MSG_STOP_UNKNOWN_REMOVAL: &str = "Your files were removed, so backups are off.";
 
-/// The words a stopped backup shows (spec Amendment 12's table), each followed
-/// by the action [`MSG_BACK_UP_AGAIN`]. `device` is this device's name and
-/// `folder` the backed-up folder's display name; the four account-wide reasons
-/// name neither:
+/// The words a stopped backup shows (spec Amendment 12's table and 12b's
+/// seventh line), each followed by the action [`MSG_BACK_UP_AGAIN`]. `device`
+/// is this device's name and `folder` the backed-up folder's display name; the
+/// five account-wide reasons name neither:
 ///
 /// - `BackupDeleted`: "`device`'s backup of `folder` was deleted from another
 ///   device." (spec §4.2 rule 11)
-/// - `EraseRequest`, `AccountLapsed`, `InactiveCleanup`, `AccountReset`: the
-///   `MSG_STOP_*` lines
+/// - `EraseRequest`, `AccountLapsed`, `InactiveCleanup`, `AccountReset`,
+///   `UnknownRemoval`: the `MSG_STOP_*` lines
 /// - `Unknown`: "`device`'s backup of `folder` was deleted, so it is off."
 pub fn backup_stop_words(reason: BackupStopReason, device: &str, folder: &str) -> String {
     match reason {
@@ -48,14 +52,16 @@ pub fn backup_stop_words(reason: BackupStopReason, device: &str, folder: &str) -
         BackupStopReason::AccountLapsed => MSG_STOP_ACCOUNT_LAPSED.to_string(),
         BackupStopReason::InactiveCleanup => MSG_STOP_INACTIVE_CLEANUP.to_string(),
         BackupStopReason::AccountReset => MSG_STOP_ACCOUNT_RESET.to_string(),
+        BackupStopReason::UnknownRemoval => MSG_STOP_UNKNOWN_REMOVAL.to_string(),
         BackupStopReason::Unknown => format!("{device}'s backup of {folder} was deleted, so it is off."),
     }
 }
 
 /// Read one `notifications` row (`type` and `data`) as a backup notice.
 /// `None` for a row of any other type. It never fails on a backup row: a
-/// `files_removed` row whose reason is missing or unknown still removes, with
-/// [`BackupStopReason::Unknown`] (stop and say why); in a `backup_deleted` row
+/// `files_removed` row whose reason is missing or not one this build knows
+/// still removes, with [`BackupStopReason::UnknownRemoval`] and its own words
+/// (stop and say why, Amendment 12b); in a `backup_deleted` row
 /// an id that is missing or not a string names no folder (a folder that is
 /// really gone still stops through the listing).
 pub fn parse_backup_notice(kind: &str, data: &Value) -> Option<BackupNotice> {
@@ -66,7 +72,7 @@ pub fn parse_backup_notice(kind: &str, data: &Value) -> Option<BackupNotice> {
                 .and_then(Value::as_str)
                 .and_then(BackupStopReason::parse)
                 .filter(|reason| reason.files_removed())
-                .unwrap_or(BackupStopReason::Unknown),
+                .unwrap_or(BackupStopReason::UnknownRemoval),
         }),
         NOTICE_BACKUP_DELETED => Some(BackupNotice::BackupDeleted {
             device_folder_id: id_text(data.get("device_folder_id")).unwrap_or_default(),

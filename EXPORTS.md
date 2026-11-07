@@ -20,8 +20,8 @@ over the sorted names for the added and removed lists.
 | Name | What |
 | --- | --- |
 | `backupStop(notices, lastPassAtMs, listing)` | Which backups turn off on this pass, and why (Amendment 12, steps 1-4): `[{category, reason}]` in category key order, `[]` when nothing changes. `notices`: the `notifications` rows `{type, data, created_at_ms}` (a row that is not a backup notice is skipped whatever its shape; a backup notice without a whole `created_at_ms` throws); `lastPassAtMs`: on the server's clock; `listing`: `{device_folder_id, device_folder_live, folders: [{category, category_folder_id, category_folder_live}]}`. An unknown category key, an id that is not a UUID, or a `lastPassAtMs` that is not a whole number throws. |
-| `backupNoticeReason(type, data)` | The reason a `notifications` row gives (`"erase_request"`, ..., `"backup_deleted"`; `"unknown"` for a removal whose reason this build does not know), or `undefined` for a row that is not a backup notice. |
-| `backupStopWords(reason, device, folder)` | Core's words for a stopped backup (the six lines of Amendment 12, as drafted); an unknown reason throws. |
+| `backupNoticeReason(type, data)` | The reason a `notifications` row gives (`"erase_request"`, ..., `"backup_deleted"`; `"unknown_removal"` for a removal whose reason this build does not know (Amendment 12b)), or `undefined` for a row that is not a backup notice. |
+| `backupStopWords(reason, device, folder)` | Core's words for a stopped backup (the six lines of Amendment 12, final, and 12b's seventh, `unknown_removal`); an unknown reason throws. |
 | `backupAgainAction()` | `"Back up again"`. |
 
 ## UniFFI
