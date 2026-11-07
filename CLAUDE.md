@@ -120,9 +120,12 @@ Transfers:
 
 Generated files, backups and this public repo:
 
-- Generated bindings and vector JSON are generated, not hand-edited. The direct, range, backup and
-  safety-number vectors each have a drift guard that fails on a hand edit: add rows in the generator,
-  never in the JSON.
+- Generated bindings and vector JSON are generated, not hand-edited. The direct, range, backup,
+  safety-number and name-clash vectors, and the case-folding table, each have a drift guard that fails
+  on a hand edit: add rows in the generator, never in the JSON.
+- Two names clash when their `name_tag::normalize_for_tag` forms are equal, never by lower case alone.
+  A clash's second name comes from `name_clash` (`numbered_name` in a prompt, `drive_conflict_name` in
+  the drive) and from the incoming name only, never from the existing item's.
 - Backups: the root is the `backups_root` row, never a name or a path; a backup is written only by its
   device's own pass (the app and drive rules refuse every other create, write, rename and move under
   the root, and every change to a device's `.device.json`; the pass never goes through them); the pass

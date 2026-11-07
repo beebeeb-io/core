@@ -112,7 +112,10 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 - `ConflictPolicy::DEFAULT` keeps both at once: a diverged file resolves to `AutoKeepBoth` when it is
   detected, whatever the clocks say, and its `deadline` is `None`. `NeedsUser` and a deadline come only
   from a policy with a non-zero `auto_resolve_after_secs`, so `conflict_state` reports `auto_keep_both`
-  with no `decision_deadline`.
+  with no `decision_deadline`. `ConflictPolicy::DRIVE` names that policy, and `DEFAULT` is it.
+- Name the drive's copy with `name_clash::drive_conflict_name`, for a name race and a sync conflict alike:
+  `report (conflict, <device>).pdf`, then ` (2)`, ` (3)`. `keep_both_name` (`({device}, HH.MM)`) is
+  unchanged and is no longer a drive name; the backup merge plan still uses it.
 - `beebeeb-sync::SyncEngine::sync_once` now fails with `RemoteListingUnavailable`. Do not ship the
   legacy desktop prototype; build product sync on `beebeeb_core::sync`.
 
@@ -194,6 +197,12 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 
 ### Added
 
+- `beebeeb_core::name_clash`: `ItemKind`, `TakenNames`, `numbered_name` ("Keep both": `report (2).pdf`,
+  then `(3)`), `numbered_candidates` and `drive_conflict_name`. Names clash when their normalised forms
+  are equal, and a candidate is cut so that the whole name fits in 255 bytes.
+- `beebeeb_core::name_tag::normalize_for_tag`: `NFKC(simple_casefold(NFKC(name)))`, with simple case
+  folding (statuses C and S) at Unicode 17.0.0; an empty name or one over 1024 bytes is refused
+  (`NormalizeError`). Vectors: `test-vectors/name_clash_v1.json`, from an independent Python generator.
 - `beebeeb-api`, `beebeeb-client`, and `beebeeb-store`, plus the native service-handle surface for
   authentication, devices, files, sync, transfers, thumbnails, sharing, contacts, settings, search,
   backup, File Provider, and coordinated sign-out.
