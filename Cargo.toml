@@ -30,15 +30,6 @@ thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 
-# The archive tests stream hundreds of MiB through deflate and CRC-32. An
-# unoptimized zlib-rs or crc32fast makes each of them take tens of seconds;
-# optimizing these two dependencies in dev builds changes no behaviour.
-[profile.dev.package.zlib-rs]
-opt-level = 3
-
-[profile.dev.package.crc32fast]
-opt-level = 3
-
 [profile.release]
 opt-level = "z"
 lto = "off"
