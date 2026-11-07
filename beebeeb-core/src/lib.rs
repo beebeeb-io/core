@@ -1,5 +1,6 @@
 pub mod api_error;
 pub mod archive;
+pub mod archives;
 pub mod backup;
 pub mod blob;
 pub mod chunk_stream;
