@@ -1020,6 +1020,14 @@ external fun uniffi_beebeeb_uniffi_checksum_func_backup_serialize_manifest(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_backup_skip_reason(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_backup_again_action(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_backup_notice_reason(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_backup_stop(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_backup_stop_words(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_mint_guest_item_id(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_breachcheckhandle_evaluate(
@@ -2830,6 +2838,14 @@ external fun uniffi_beebeeb_uniffi_fn_func_backup_serialize_manifest(`manifest`:
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_backup_skip_reason(`name`: RustBuffer.ByValue,`isDir`: Byte,`isLink`: Byte,`notLocal`: Byte,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_backup_again_action(uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_backup_notice_reason(`kind`: RustBuffer.ByValue,`dataJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_backup_stop(`notices`: RustBuffer.ByValue,`lastPassAtMs`: Long,`listing`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_backup_stop_words(`reason`: RustBuffer.ByValue,`device`: RustBuffer.ByValue,`folder`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_mint_guest_item_id(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun ffi_beebeeb_uniffi_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -3141,6 +3157,18 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_skip_reason() != 2820.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_again_action() != 13263.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_notice_reason() != 40118.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_stop() != 43581.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_stop_words() != 39803.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_mint_guest_item_id() != 8655.toShort()) {
@@ -24338,6 +24366,63 @@ public object FfiConverterTypeBackupMergeEntry: FfiConverterRustBuffer<BackupMer
 
 
 
+/**
+ * One `notifications` row as the server lists it.
+ */
+data class BackupNoticeRow (
+    /**
+     * The row's `type` (`"files_removed"`, `"backup_deleted"`, or any other
+     * type, which is skipped).
+     */
+    var `kind`: kotlin.String
+    , 
+    /**
+     * The row's `data`, as JSON text. Text that does not parse reads as
+     * `null`.
+     */
+    var `dataJson`: kotlin.String
+    , 
+    /**
+     * The row's `created_at`, in milliseconds since the epoch (server clock).
+     */
+    var `createdAtMs`: kotlin.Long
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBackupNoticeRow: FfiConverterRustBuffer<BackupNoticeRow> {
+    override fun read(buf: ByteBuffer): BackupNoticeRow {
+        return BackupNoticeRow(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterLong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: BackupNoticeRow) = (
+            FfiConverterString.allocationSize(value.`kind`) +
+            FfiConverterString.allocationSize(value.`dataJson`) +
+            FfiConverterLong.allocationSize(value.`createdAtMs`)
+    )
+
+    override fun write(value: BackupNoticeRow, buf: ByteBuffer) {
+            FfiConverterString.write(value.`kind`, buf)
+            FfiConverterString.write(value.`dataJson`, buf)
+            FfiConverterLong.write(value.`createdAtMs`, buf)
+    }
+}
+
+
+
 data class BackupPassPlan (
     var `uploads`: List<BackupPlannedUpload>
     , 
@@ -24726,6 +24811,152 @@ public object FfiConverterTypeBackupSourceEntry: FfiConverterRustBuffer<BackupSo
             FfiConverterBoolean.write(value.`isDir`, buf)
             FfiConverterULong.write(value.`size`, buf)
             FfiConverterLong.write(value.`modifiedMs`, buf)
+    }
+}
+
+
+
+/**
+ * One backup turned on on this device, as the listing shows it.
+ */
+data class BackupStopFolder (
+    /**
+     * A category key (`"camera_roll"`, `"custom:<name>"`, ...).
+     */
+    var `category`: kotlin.String
+    , 
+    /**
+     * `None` when the category folder was never created (a first backup).
+     */
+    var `categoryFolderId`: kotlin.String?
+    , 
+    /**
+     * `Some(false)` only when the category folder existed and is now trashed
+     * or gone.
+     */
+    var `categoryFolderLive`: kotlin.Boolean?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBackupStopFolder: FfiConverterRustBuffer<BackupStopFolder> {
+    override fun read(buf: ByteBuffer): BackupStopFolder {
+        return BackupStopFolder(
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: BackupStopFolder) = (
+            FfiConverterString.allocationSize(value.`category`) +
+            FfiConverterOptionalString.allocationSize(value.`categoryFolderId`) +
+            FfiConverterOptionalBoolean.allocationSize(value.`categoryFolderLive`)
+    )
+
+    override fun write(value: BackupStopFolder, buf: ByteBuffer) {
+            FfiConverterString.write(value.`category`, buf)
+            FfiConverterOptionalString.write(value.`categoryFolderId`, buf)
+            FfiConverterOptionalBoolean.write(value.`categoryFolderLive`, buf)
+    }
+}
+
+
+
+data class BackupStopListing (
+    var `deviceFolderId`: kotlin.String
+    , 
+    /**
+     * `false` only when this device's folder existed and is now trashed or
+     * gone.
+     */
+    var `deviceFolderLive`: kotlin.Boolean
+    , 
+    var `folders`: List<BackupStopFolder>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBackupStopListing: FfiConverterRustBuffer<BackupStopListing> {
+    override fun read(buf: ByteBuffer): BackupStopListing {
+        return BackupStopListing(
+            FfiConverterString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterSequenceTypeBackupStopFolder.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: BackupStopListing) = (
+            FfiConverterString.allocationSize(value.`deviceFolderId`) +
+            FfiConverterBoolean.allocationSize(value.`deviceFolderLive`) +
+            FfiConverterSequenceTypeBackupStopFolder.allocationSize(value.`folders`)
+    )
+
+    override fun write(value: BackupStopListing, buf: ByteBuffer) {
+            FfiConverterString.write(value.`deviceFolderId`, buf)
+            FfiConverterBoolean.write(value.`deviceFolderLive`, buf)
+            FfiConverterSequenceTypeBackupStopFolder.write(value.`folders`, buf)
+    }
+}
+
+
+
+/**
+ * A backup that turns off: its category key and the reason
+ * (`"backup_deleted"`, `"erase_request"`, `"account_lapsed"`,
+ * `"inactive_cleanup"`, `"account_reset"`, `"unknown"`).
+ */
+data class BackupStopped (
+    var `category`: kotlin.String
+    , 
+    var `reason`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBackupStopped: FfiConverterRustBuffer<BackupStopped> {
+    override fun read(buf: ByteBuffer): BackupStopped {
+        return BackupStopped(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: BackupStopped) = (
+            FfiConverterString.allocationSize(value.`category`) +
+            FfiConverterString.allocationSize(value.`reason`)
+    )
+
+    override fun write(value: BackupStopped, buf: ByteBuffer) {
+            FfiConverterString.write(value.`category`, buf)
+            FfiConverterString.write(value.`reason`, buf)
     }
 }
 
@@ -32683,6 +32914,38 @@ public object FfiConverterOptionalLong: FfiConverterRustBuffer<kotlin.Long?> {
 /**
  * @suppress
  */
+public object FfiConverterOptionalBoolean: FfiConverterRustBuffer<kotlin.Boolean?> {
+    override fun read(buf: ByteBuffer): kotlin.Boolean? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterBoolean.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.Boolean?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterBoolean.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.Boolean?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterBoolean.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?> {
     override fun read(buf: ByteBuffer): kotlin.String? {
         if (buf.get().toInt() == 0) {
@@ -33667,6 +33930,34 @@ public object FfiConverterSequenceTypeBackupMergeEntry: FfiConverterRustBuffer<L
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeBackupNoticeRow: FfiConverterRustBuffer<List<BackupNoticeRow>> {
+    override fun read(buf: ByteBuffer): List<BackupNoticeRow> {
+        val len = buf.getInt()
+        return List<BackupNoticeRow>(len) {
+            FfiConverterTypeBackupNoticeRow.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<BackupNoticeRow>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeBackupNoticeRow.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<BackupNoticeRow>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeBackupNoticeRow.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeBackupPlannedMove: FfiConverterRustBuffer<List<BackupPlannedMove>> {
     override fun read(buf: ByteBuffer): List<BackupPlannedMove> {
         val len = buf.getInt()
@@ -33825,6 +34116,62 @@ public object FfiConverterSequenceTypeBackupSourceEntry: FfiConverterRustBuffer<
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeBackupSourceEntry.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeBackupStopFolder: FfiConverterRustBuffer<List<BackupStopFolder>> {
+    override fun read(buf: ByteBuffer): List<BackupStopFolder> {
+        val len = buf.getInt()
+        return List<BackupStopFolder>(len) {
+            FfiConverterTypeBackupStopFolder.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<BackupStopFolder>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeBackupStopFolder.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<BackupStopFolder>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeBackupStopFolder.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeBackupStopped: FfiConverterRustBuffer<List<BackupStopped>> {
+    override fun read(buf: ByteBuffer): List<BackupStopped> {
+        val len = buf.getInt()
+        return List<BackupStopped>(len) {
+            FfiConverterTypeBackupStopped.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<BackupStopped>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeBackupStopped.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<BackupStopped>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeBackupStopped.write(it, buf)
         }
     }
 }
@@ -35454,6 +35801,70 @@ public object FfiConverterSequenceSequenceTypeBackupMergeEntry: FfiConverterRust
     UniffiLib.uniffi_beebeeb_uniffi_fn_func_backup_skip_reason(
     
         FfiConverterString.lower(`name`),FfiConverterBoolean.lower(`isDir`),FfiConverterBoolean.lower(`isLink`),FfiConverterBoolean.lower(`notLocal`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The action every stopped backup offers: `"Back up again"`.
+         */ fun `backupAgainAction`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_backup_again_action(
+    
+        _status)
+}
+    )
+    }
+    
+
+        /**
+         * The reason a `notifications` row gives, or `None` for a row that is not a
+         * backup notice: for showing the notification itself with
+         * `backup_stop_words`.
+         */ fun `backupNoticeReason`(`kind`: kotlin.String, `dataJson`: kotlin.String): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_backup_notice_reason(
+    
+        FfiConverterString.lower(`kind`),FfiConverterString.lower(`dataJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Which backups turn off on this pass, and why (spec Amendment 12, steps
+         * 1-4). `last_pass_at_ms` is on the server's clock, like the notices: when
+         * this device's previous pass of these backups started, or when the person
+         * last turned a backup on or chose "Back up again" since. Empty means nothing
+         * changes. An unknown category key or an id that is not a UUID in the listing
+         * is `InvalidInput`.
+         */
+    @Throws(CryptoException::class) fun `backupStop`(`notices`: List<BackupNoticeRow>, `lastPassAtMs`: kotlin.Long, `listing`: BackupStopListing): List<BackupStopped> {
+            return FfiConverterSequenceTypeBackupStopped.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_backup_stop(
+    
+        FfiConverterSequenceTypeBackupNoticeRow.lower(`notices`),FfiConverterLong.lower(`lastPassAtMs`),FfiConverterTypeBackupStopListing.lower(`listing`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The words a stopped backup shows (spec Amendment 12), followed by the
+         * action `backup_again_action()`. `device` is this device's name and
+         * `folder` the folder's display name; the four account-wide reasons name
+         * neither.
+         */
+    @Throws(CryptoException::class) fun `backupStopWords`(`reason`: kotlin.String, `device`: kotlin.String, `folder`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_backup_stop_words(
+    
+        FfiConverterString.lower(`reason`),FfiConverterString.lower(`device`),FfiConverterString.lower(`folder`),_status)
 }
     )
     }
