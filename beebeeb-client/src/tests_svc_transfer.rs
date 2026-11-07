@@ -343,10 +343,9 @@ async fn thumbnail_worker_uploads_only_core_sealed_bytes() {
     let request = transport.requests().pop().unwrap();
     assert_ne!(request.body(), b"plaintext thumbnail");
     assert!(request.path().contains("/thumbnail/small"));
-    assert_eq!(
-        request.header("x-beebeeb-capabilities"),
-        Some("file-write-v2, version-metadata-v1")
-    );
+    // The server's thumbnail route checks no capability, so the declaration
+    // stays off this request (it goes only where the server reads it).
+    assert_eq!(request.header("x-beebeeb-capabilities"), None);
 }
 
 #[tokio::test]
