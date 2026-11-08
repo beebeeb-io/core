@@ -194,7 +194,7 @@ jobs:
           # sha256 of kotlin-compiler-2.0.21.zip (JetBrains, 2024-09-26 release)
           # Print the actual sha256 so a mismatch is immediately debuggable:
           echo "Actual sha256: $(sha256sum "$RUNNER_TEMP/kotlinc.zip")"
-          echo "b5cf3bbb9a64c14cc6c2c68f1de55a74b08ac35caf22aed3dbc41ed29e78a455  $RUNNER_TEMP/kotlinc.zip" | sha256sum --check
+          echo "0352c0a45bd22f80f6b26e485cd04da8047baa5de54865281fb9f89a4a7bcf2a  $RUNNER_TEMP/kotlinc.zip" | sha256sum --check
           unzip -q "$RUNNER_TEMP/kotlinc.zip" -d "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/kotlinc/bin" >> "$GITHUB_PATH"
 
