@@ -451,3 +451,141 @@ async fn a_restore_on_the_store_backed_engine_never_leaves_two_equal_names() {
     assert_eq!(stored(&a).name, CONFLICT);
     assert!(!stored(&a).is_trashed);
 }
+
+// ── The writing device's name (task 2388, Guus 2026-11-08 07:05) ────────────
+
+const WORK_LAPTOP: &str = "d0000000-0000-4000-8000-000000000001";
+const ODD_NAME: &str = "d0000000-0000-4000-8000-000000000002";
+
+fn device(id: &str, reported_name: &str, hostname_encrypted: Option<String>) -> Value {
+    json!({"id": id, "hostname": "", "platform": "macos", "last_seen": "2026-11-08T06:00:00Z",
+           "created_at": "2026-11-01T06:00:00Z", "reported_name": reported_name,
+           "hostname_encrypted": hostname_encrypted})
+}
+
+/// One catch-up pass: remote renames (seq 2, 3, ...), each written by the
+/// device `writer`, then the device list `devices` if a clash asks for it.
+/// Returns the transport, to count what was asked.
+async fn renames_written_by(
+    engine: &mut SyncEngine,
+    renames: Vec<(Value, Option<&str>)>,
+    devices: Value,
+) -> ScriptedTransport {
+    let ops: Vec<Value> = renames
+        .into_iter()
+        .enumerate()
+        .map(|(index, (payload, writer))| {
+            let seq = 2 + index as i64;
+            json!({"seq_id": seq, "user_seq": seq, "op_type": "file_rename", "payload": payload, "device_id": writer})
+        })
+        .collect();
+    let transport = ScriptedTransport::json(200, serde_json::to_vec(&json!({ "ops": ops })).unwrap());
+    transport.push_json(200, serde_json::to_vec(&json!({ "devices": devices })).unwrap());
+    let client = Client::new(ClientConfig::for_tests(), Arc::new(transport.clone())).unwrap();
+    client.set_authentication("token", "user-1").unwrap();
+    client.catch_up_sync(&session(), engine, 100).await.unwrap();
+    transport
+}
+
+fn device_list_reads(transport: &ScriptedTransport) -> usize {
+    transport
+        .requests()
+        .iter()
+        .filter(|request| request.path() == "/api/v1/clients/devices")
+        .count()
+}
+
+#[tokio::test]
+async fn a_clash_names_the_device_that_wrote_it() {
+    let master = MasterKey::from_bytes(KEY);
+    let (x, a) = (new_item(&master), new_item(&master));
+    let mut engine = engine_with(vec![
+        node(&master, &x, None, "x.txt", "x.txt", false),
+        node(&master, &a, None, "a.txt", "a.txt", false),
+    ]);
+
+    let transport = renames_written_by(
+        &mut engine,
+        vec![(
+            json!({"id": x.id.to_string(), "new_name_encrypted": sealed(&master, &x, "a.txt")}),
+            Some(WORK_LAPTOP),
+        )],
+        json!([device(WORK_LAPTOP, "Work laptop", None)]),
+    )
+    .await;
+
+    assert_eq!(name(&engine, &x), "a (conflict, Work laptop).txt");
+    assert_eq!(name(&engine, &a), "a.txt");
+    assert_eq!(device_list_reads(&transport), 1);
+}
+
+/// The name the device sealed under the account's key wins over the one it
+/// reported in plain text.
+#[tokio::test]
+async fn a_sealed_device_name_wins_over_the_reported_one() {
+    let master = MasterKey::from_bytes(KEY);
+    let (x, a) = (new_item(&master), new_item(&master));
+    let mut engine = engine_with(vec![
+        node(&master, &x, None, "x.txt", "x.txt", false),
+        node(&master, &a, None, "a.txt", "a.txt", false),
+    ]);
+    let hostname = beebeeb_core::client_meta::seal_client_meta(
+        &master,
+        &Uuid::parse_str(WORK_LAPTOP).unwrap(),
+        None,
+        beebeeb_core::client_meta::ClientMetaField::DeviceHostname,
+        "Studio Mac",
+    )
+    .unwrap();
+
+    renames_written_by(
+        &mut engine,
+        vec![(
+            json!({"id": x.id.to_string(), "new_name_encrypted": sealed(&master, &x, "a.txt")}),
+            Some(WORK_LAPTOP),
+        )],
+        json!([device(WORK_LAPTOP, "Reported", Some(hostname))]),
+    )
+    .await;
+
+    assert_eq!(name(&engine, &x), "a (conflict, Studio Mac).txt");
+}
+
+/// An unknown writer, or a name the path rule refuses, keeps core's
+/// `device`; the list is read once for the whole pass, never per op.
+#[tokio::test]
+async fn an_unknown_or_unsafe_writer_keeps_device_and_the_list_is_read_once() {
+    let master = MasterKey::from_bytes(KEY);
+    let (x, a, y, b) = (
+        new_item(&master),
+        new_item(&master),
+        new_item(&master),
+        new_item(&master),
+    );
+    let mut engine = engine_with(vec![
+        node(&master, &x, None, "x.txt", "x.txt", false),
+        node(&master, &a, None, "a.txt", "a.txt", false),
+        node(&master, &y, None, "y.txt", "y.txt", false),
+        node(&master, &b, None, "b.txt", "b.txt", false),
+    ]);
+
+    let transport = renames_written_by(
+        &mut engine,
+        vec![
+            (
+                json!({"id": x.id.to_string(), "new_name_encrypted": sealed(&master, &x, "a.txt")}),
+                Some("d0000000-0000-4000-8000-0000000000ff"),
+            ),
+            (
+                json!({"id": y.id.to_string(), "new_name_encrypted": sealed(&master, &y, "b.txt")}),
+                Some(ODD_NAME),
+            ),
+        ],
+        json!([device(ODD_NAME, "..", None)]),
+    )
+    .await;
+
+    assert_eq!(name(&engine, &x), CONFLICT);
+    assert_eq!(name(&engine, &y), "b (conflict, device).txt");
+    assert_eq!(device_list_reads(&transport), 1);
+}

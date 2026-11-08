@@ -214,6 +214,23 @@ impl Session {
         )
     }
 
+    /// A device's hostname as it sealed it under this account's key
+    /// (client-meta field 1, keyed by the device id).
+    #[cfg(feature = "sync")]
+    pub(crate) fn open_device_hostname(
+        &self,
+        device_id: &uuid::Uuid,
+        envelope: &str,
+    ) -> Result<String, beebeeb_core::CoreError> {
+        beebeeb_core::client_meta::open_client_meta(
+            &self.master_key,
+            device_id,
+            None,
+            beebeeb_core::client_meta::ClientMetaField::DeviceHostname,
+            envelope,
+        )
+    }
+
     #[cfg(feature = "contacts")]
     pub(crate) fn open_contact_key(
         &self,

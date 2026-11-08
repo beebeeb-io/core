@@ -99,6 +99,7 @@ impl Client {
             return Err(SyncLoopError::InvalidAnswer);
         }
         let mut since = engine.position().seq_id;
+        let mut writers = WriterNames::default();
         for _ in 0..MAX_CATCH_UP_PAGES {
             let answer: api::Ops = self.execute(&api::ops(since, limit), &()).await?;
             let next_since = answer.next_since;
@@ -109,7 +110,8 @@ impl Client {
                 .collect::<Result<Vec<_>, _>>()?;
             operations.sort_by_key(|operation| (operation.user_seq.unwrap_or(i64::MAX), operation.seq_id));
             for mut operation in operations {
-                resolve_operation_collision(session, engine, &mut operation)?;
+                self.resolve_operation_collision(session, engine, &mut operation, &mut writers)
+                    .await?;
                 engine.apply_remote_op(RemoteOp::from_authenticated_session(operation))?;
             }
             let after = engine.position();
@@ -194,6 +196,7 @@ impl Client {
         )
         .await
         .map_err(|_| SyncLoopError::StreamTimeout)??;
+        let mut writers = WriterNames::default();
         for event in batch.events {
             let value: Value = serde_json::from_slice(&event).map_err(|_| SyncLoopError::InvalidAnswer)?;
             if value.get("op_type").is_none() || value.get("payload").is_none() {
@@ -201,7 +204,8 @@ impl Client {
             }
             let wire: api::Op = serde_json::from_value(value).map_err(|_| SyncLoopError::InvalidAnswer)?;
             let mut operation = open_operation(session, wire)?;
-            resolve_operation_collision(session, engine, &mut operation)?;
+            self.resolve_operation_collision(session, engine, &mut operation, &mut writers)
+                .await?;
             engine.apply_remote_op(RemoteOp::from_authenticated_session(operation))?;
         }
         if batch.ended {
@@ -273,11 +277,64 @@ fn open_payload_name(session: &Session, op_type: &str, payload: &mut Value) {
     }
 }
 
-/// The device in a pull-side conflict name. The device whose write came
-/// second is not known by name here (a sync op carries at most an opaque
-/// client id, and an op written through the REST routes none), so the name
-/// takes core's generic word: `report (conflict, device).pdf`.
+/// The device in a pull-side conflict name when the writer is not known by
+/// name: the op carries no device id (one written through the REST routes),
+/// the account's device list has no such device or could not be read, or its
+/// name is empty. Core's `drive_conflict_name` then uses its generic word:
+/// `report (conflict, device).pdf`. A name the portable path rule refuses
+/// takes the same word there.
 const UNKNOWN_WRITER: &str = "";
+
+/// The names of the account's devices by id, for the device in a pull-side
+/// conflict name (task 2388, Guus 2026-11-08 07:05: `report (conflict, Work
+/// laptop).pdf`). Read at most once per pass, and only once a clash needs a
+/// name: never a request per op. A list that cannot be read names nobody for
+/// the rest of the pass (the clash still keeps both, as `device`).
+#[derive(Default)]
+struct WriterNames {
+    names: Option<BTreeMap<String, String>>,
+}
+
+impl WriterNames {
+    async fn name(&mut self, client: &Client, session: &Session, device_id: Option<&str>) -> String {
+        let Some(device_id) = device_id.filter(|id| !id.is_empty()) else {
+            return UNKNOWN_WRITER.to_owned();
+        };
+        if self.names.is_none() {
+            let names = match client.execute(&beebeeb_api::routes::devices::list(), &()).await {
+                Ok(list) => device_names(session, &list.devices),
+                Err(_) => BTreeMap::new(),
+            };
+            self.names = Some(names);
+        }
+        self.names
+            .as_ref()
+            .and_then(|names| names.get(&device_id.to_ascii_lowercase()))
+            .cloned()
+            .unwrap_or_else(|| UNKNOWN_WRITER.to_owned())
+    }
+}
+
+/// Each device's name by its id (lowercase): the first that is not empty of
+/// the hostname it sealed under this account's key (when that opens), the
+/// name it reported for itself, and its legacy hostname.
+fn device_names(session: &Session, devices: &[beebeeb_api::routes::devices::Device]) -> BTreeMap<String, String> {
+    devices
+        .iter()
+        .filter_map(|device| {
+            let sealed = device.hostname_encrypted.as_deref().and_then(|envelope| {
+                let id = Uuid::parse_str(&device.id).ok()?;
+                session.open_device_hostname(&id, envelope).ok()
+            });
+            let name = [sealed, device.reported_name.clone(), Some(device.hostname.clone())]
+                .into_iter()
+                .flatten()
+                .map(|name| name.trim().to_owned())
+                .find(|name| !name.is_empty())?;
+            Some((device.id.to_ascii_lowercase(), name))
+        })
+        .collect()
+}
 
 fn item_kind(is_folder: bool) -> ItemKind {
     if is_folder { ItemKind::Folder } else { ItemKind::File }
@@ -295,23 +352,62 @@ fn parent_field(payload: &Value, key: &str) -> Result<Option<Uuid>, SyncLoopErro
     }
 }
 
-/// A remote create, rename, move or restore can give an item a name its
-/// folder already holds: names are sealed, so the server keeps both. The drive
-/// keeps both too and asks nothing (1022 G5): the item that arrives second,
-/// this op's, takes core's `drive_conflict_name` from its own incoming name,
-/// never from the existing item's; two names clash when core's normal forms
-/// are equal (`TakenNames`). The folder is the one the item lands in: a
-/// create's `parent_id`, a move's `new_parent_id`, and for a rename or a
-/// restore (whose ops carry no parent) the item's current folder in the
-/// engine. Only live siblings hold a name, so a restore is checked too: an
-/// item may have taken the name while this one was in the Trash. A move or a
-/// restore carries no name, so its opened name is added as `new_name` (the
-/// engine applies it): moving out of a clash gives the item its own name back.
-fn resolve_operation_collision(
+impl Client {
+    /// A remote create, rename, move or restore can give an item a name its
+    /// folder already holds: names are sealed, so the server keeps both. The drive
+    /// keeps both too and asks nothing (1022 G5): the item that arrives second,
+    /// this op's, takes core's `drive_conflict_name` from its own incoming name,
+    /// never from the existing item's, with the name of the device that wrote the
+    /// op ([`WriterNames`]); two names clash when core's normal forms are equal
+    /// (`TakenNames`). The folder is the one the item lands in: a
+    /// create's `parent_id`, a move's `new_parent_id`, and for a rename or a
+    /// restore (whose ops carry no parent) the item's current folder in the
+    /// engine. Only live siblings hold a name, so a restore is checked too: an
+    /// item may have taken the name while this one was in the Trash. A move or a
+    /// restore carries no name, so its opened name is added as `new_name` (the
+    /// engine applies it): moving out of a clash gives the item its own name back.
+    async fn resolve_operation_collision(
+        &self,
+        session: &Session,
+        engine: &mut SyncEngine,
+        operation: &mut SyncOp,
+        writers: &mut WriterNames,
+    ) -> Result<(), SyncLoopError> {
+        // The engine is read only here, never across the device list's read:
+        // a `&SyncEngine` held over an await would make the pass `!Send`.
+        let Some(clash) = name_clash(session, engine, operation)? else {
+            return Ok(());
+        };
+        let writer = writers.name(self, session, operation.device_id.as_deref()).await;
+        let name = drive_conflict_name(&clash.name, clash.kind, &writer, &clash.taken);
+        set_payload_name(operation, clash.field, name)
+    }
+}
+
+/// A name the op's item would take that its folder already holds.
+struct NameClash {
+    field: &'static str,
+    name: String,
+    kind: ItemKind,
+    taken: TakenNames,
+}
+
+fn set_payload_name(operation: &mut SyncOp, field: &str, name: String) -> Result<(), SyncLoopError> {
+    operation
+        .payload
+        .as_object_mut()
+        .ok_or(SyncLoopError::InvalidAnswer)?
+        .insert(field.into(), Value::String(name));
+    Ok(())
+}
+
+/// The clash `operation` would make, if any. Without one, a move or a restore
+/// gets its own opened name as `new_name` here.
+fn name_clash(
     session: &Session,
     engine: &SyncEngine,
     operation: &mut SyncOp,
-) -> Result<(), SyncLoopError> {
+) -> Result<Option<NameClash>, SyncLoopError> {
     let id = operation
         .payload
         .get("id")
@@ -320,7 +416,7 @@ fn resolve_operation_collision(
     let (field, name, parent, kind) = match operation.op_type.as_str() {
         "file_create" | "folder_create" => {
             let Some(name) = operation.payload.get("name").and_then(Value::as_str) else {
-                return Ok(());
+                return Ok(None);
             };
             (
                 "name",
@@ -331,11 +427,11 @@ fn resolve_operation_collision(
         }
         "file_rename" | "folder_rename" => {
             let Some(name) = operation.payload.get("new_name").and_then(Value::as_str) else {
-                return Ok(());
+                return Ok(None);
             };
             // An item the engine does not have is not renamed by the op either.
             let Some(node) = id.map(|id| engine.lookup_node(id)).transpose()?.flatten() else {
-                return Ok(());
+                return Ok(None);
             };
             ("new_name", name.to_owned(), node.parent_id, item_kind(node.is_folder))
         }
@@ -347,15 +443,15 @@ fn resolve_operation_collision(
                 object.remove("new_name_undecryptable");
             }
             let Some(node) = id.map(|id| engine.lookup_node(id)).transpose()?.flatten() else {
-                return Ok(());
+                return Ok(None);
             };
             // A name this device cannot open, or one the portable path rule
             // refuses, takes no name: it clashes with nothing.
             let Ok(metadata) = session.open_name(&node.id.to_string(), &node.name_encrypted) else {
-                return Ok(());
+                return Ok(None);
             };
             if check_component(&metadata.name, Rules::Portable).is_err() {
-                return Ok(());
+                return Ok(None);
             }
             let parent = if operation.op_type == "file_restore" {
                 node.parent_id
@@ -364,7 +460,7 @@ fn resolve_operation_collision(
             };
             ("new_name", metadata.name, parent, item_kind(node.is_folder))
         }
-        _ => return Ok(()),
+        _ => return Ok(None),
     };
     let mut taken = TakenNames::new();
     for child in engine.lookup_children(parent)? {
@@ -372,17 +468,16 @@ fn resolve_operation_collision(
             taken.insert(&child.name);
         }
     }
-    let name = if taken.contains(&name) {
-        drive_conflict_name(&name, kind, UNKNOWN_WRITER, &taken)
-    } else {
-        name
-    };
-    operation
-        .payload
-        .as_object_mut()
-        .ok_or(SyncLoopError::InvalidAnswer)?
-        .insert(field.into(), Value::String(name));
-    Ok(())
+    if taken.contains(&name) {
+        return Ok(Some(NameClash {
+            field,
+            name,
+            kind,
+            taken,
+        }));
+    }
+    set_payload_name(operation, field, name)?;
+    Ok(None)
 }
 
 fn open_snapshot_nodes(
