@@ -826,3 +826,220 @@ fn progress_ends_at_exactly_the_total() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// LD-0146, lead review of #89: a sink that fails once, folders vs renames, understated sizes, overflowing sizes.
+// ---------------------------------------------------------------------------------------------------------------
+
+/// How [`ScriptedSink`] fails its one bad write.
+#[derive(Clone, Copy, Debug)]
+enum SinkFailure {
+    /// `write` returns an error.
+    Error,
+    /// `write` takes no bytes and returns `Ok(0)`, which `write_all` turns into `WriteZero`.
+    ZeroBytes,
+    /// `write` returns `ErrorKind::Interrupted` (EINTR), which `write_all` retries: not a failure.
+    Interrupted,
+}
+
+/// A sink that records every `write` call and can fail exactly one of them (`fail_call`, counted from 0, in the way of
+/// `failure`); every other call, and every call after the failure, goes through. `injected` says whether the failure
+/// really happened.
+struct ScriptedSink<'a> {
+    inner: Cursor<&'a mut Vec<u8>>,
+    writes: &'a std::cell::RefCell<Vec<Vec<u8>>>,
+    fail_call: Option<usize>,
+    failure: SinkFailure,
+    injected: &'a std::cell::Cell<bool>,
+}
+
+impl std::io::Write for ScriptedSink<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let call = self.writes.borrow().len();
+        self.writes.borrow_mut().push(buf.to_vec());
+        if self.fail_call == Some(call) {
+            self.injected.set(true);
+            return match self.failure {
+                SinkFailure::Error => Err(std::io::Error::other("sink: one transient failure")),
+                SinkFailure::ZeroBytes => Ok(0),
+                SinkFailure::Interrupted => Err(std::io::Error::from(std::io::ErrorKind::Interrupted)),
+            };
+        }
+        self.inner.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+impl std::io::Seek for ScriptedSink<'_> {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
+
+/// Runs the two-entry archive into a [`ScriptedSink`] whose one bad write is the last write before the
+/// end-of-central-directory record, found by a dry run. Returns the result, the output, and whether the sink really
+/// failed.
+fn run_with_failure_in_the_central_directory(failure: SinkFailure) -> (Result<(), CoreError>, Vec<u8>, bool) {
+    let (mk, entries, source) = two_entries();
+    let never = std::cell::Cell::new(false);
+
+    let mut dry_buf = Vec::new();
+    let dry_writes = std::cell::RefCell::new(Vec::new());
+    let mut fetch = fetch_from(&source);
+    let dry_sink = ScriptedSink {
+        inner: Cursor::new(&mut dry_buf),
+        writes: &dry_writes,
+        fail_call: None,
+        failure,
+        injected: &never,
+    };
+    stream_folder_zip(&mk, &entries, &mut fetch, dry_sink, &|_| {}, &AtomicBool::new(false)).unwrap();
+    let dry_writes = dry_writes.into_inner();
+    let first_header = dry_writes.iter().position(|w| w.starts_with(b"PK\x01\x02")).unwrap();
+    let footer = dry_writes.iter().position(|w| w.starts_with(b"PK\x05\x06")).unwrap();
+    let fail_call = footer - 1;
+    assert!(
+        fail_call >= first_header,
+        "the failing write ({fail_call}) must be inside the central directory (starts at {first_header})"
+    );
+
+    let mut buf = Vec::new();
+    let writes = std::cell::RefCell::new(Vec::new());
+    let injected = std::cell::Cell::new(false);
+    let mut fetch = fetch_from(&source);
+    let sink = ScriptedSink {
+        inner: Cursor::new(&mut buf),
+        writes: &writes,
+        fail_call: Some(fail_call),
+        failure,
+        injected: &injected,
+    };
+    let result = stream_folder_zip(&mk, &entries, &mut fetch, sink, &|_| {}, &AtomicBool::new(false));
+    (result, buf, injected.get())
+}
+
+/// Item 2, the zip crate's second chance: `ZipWriter::finish` fails, drops the writer inside, and that `Drop` finalizes
+/// again. If the sink works again by then (a network file system, one EIO), the second central directory and footer
+/// land after the first, partial one, and the output reads as a complete archive while the function returned `Err`.
+fn assert_sink_failure_in_the_central_directory_leaves_no_archive(failure: SinkFailure) {
+    let (result, buf, injected) = run_with_failure_in_the_central_directory(failure);
+    assert!(injected, "{failure:?}: the sink never failed, so this proves nothing");
+    assert!(matches!(result, Err(CoreError::Io(_))), "{failure:?}: got {result:?}");
+    assert!(
+        zip::ZipArchive::new(Cursor::new(&buf)).is_err(),
+        "{failure:?}: a reader accepts the {}-byte output as a complete archive although the function returned Err",
+        buf.len()
+    );
+    assert!(
+        !buf.windows(4).any(|w| w == b"PK\x05\x06"),
+        "{failure:?}: the output holds an end-of-central-directory record"
+    );
+}
+
+#[test]
+fn sink_error_in_the_central_directory_leaves_no_readable_archive() {
+    assert_sink_failure_in_the_central_directory_leaves_no_archive(SinkFailure::Error);
+}
+
+#[test]
+fn sink_taking_no_bytes_in_the_central_directory_leaves_no_readable_archive() {
+    assert_sink_failure_in_the_central_directory_leaves_no_archive(SinkFailure::ZeroBytes);
+}
+
+/// An `Interrupted` write is retried by `write_all` and is not a failure: the archive must still finish and open.
+#[test]
+fn interrupted_write_is_retried_and_the_archive_is_complete() {
+    let (result, buf, injected) = run_with_failure_in_the_central_directory(SinkFailure::Interrupted);
+    assert!(injected, "the sink never raised Interrupted, so this proves nothing");
+    assert!(result.is_ok(), "an interrupted write must be retried, got {result:?}");
+    let archive = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    assert_eq!(archive.len(), 2);
+}
+
+/// Item 3: a rename never takes a path that is a folder of another entry, and an entry never keeps a path that is
+/// another entry's folder; the archive would hold a file and a folder at one path.
+#[test]
+fn renames_do_not_take_a_folders_path() {
+    assert_eq!(
+        archive_names(&["report", "report", "report (2)/notes.txt"]),
+        ["report", "report (3)", "report (2)/notes.txt"],
+        "a duplicate must skip the folder `report (2)`"
+    );
+    assert_eq!(
+        archive_names(&["a", "a/b.txt"]),
+        ["a (2)", "a/b.txt"],
+        "a file named like another entry's folder is renamed"
+    );
+    assert_eq!(
+        archive_names(&["x/y", "X/y/z.txt"]),
+        ["x/y (2)", "X/y/z.txt"],
+        "folders compare folded, deep prefixes too"
+    );
+}
+
+/// Item 4: no event is above 100% when `size_bytes` is below what the entry really holds (0 for a legacy row, or any
+/// value the server chooses), and the run still ends at exactly 100%.
+#[test]
+fn progress_never_passes_100_when_sizes_are_understated() {
+    for (convention, declared) in [
+        ("both 0", [0, 0]),
+        ("first 0", [0, 9_000]),
+        ("second understated", [4_000, 100]),
+        ("both understated", [1, 1]),
+    ] {
+        let (mk, entries, source) = two_entries_declared(declared);
+        let mut fetch = fetch_from(&source);
+        let mut buf = Vec::new();
+        let events: Mutex<Vec<(u64, u64)>> = Mutex::new(Vec::new());
+        let on_progress = |p: &ZipProgress| events.lock().unwrap().push((p.bytes_done, p.bytes_total));
+        stream_folder_zip(
+            &mk,
+            &entries,
+            &mut fetch,
+            Cursor::new(&mut buf),
+            &on_progress,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let events = events.into_inner().unwrap();
+        assert!(
+            events.iter().all(|(done, total)| done <= total),
+            "{convention}: an event is above 100%: {events:?}"
+        );
+        assert_eq!(
+            events.last(),
+            Some(&(13_000, 13_000)),
+            "{convention}: events {events:?}"
+        );
+    }
+}
+
+/// Item 4: sizes that add up past `u64::MAX` (a corrupt or hostile row) must not panic, in the run or in the estimate.
+#[test]
+fn overflowing_sizes_do_not_panic() {
+    let (mk, entries, source) = two_entries_declared([u64::MAX, u64::MAX]);
+    assert_eq!(beebeeb_core::zip::estimate_zip_size(&entries), u64::MAX);
+
+    let mut fetch = fetch_from(&source);
+    let mut buf = Vec::new();
+    let events: Mutex<Vec<(u64, u64)>> = Mutex::new(Vec::new());
+    let on_progress = |p: &ZipProgress| events.lock().unwrap().push((p.bytes_done, p.bytes_total));
+    stream_folder_zip(
+        &mk,
+        &entries,
+        &mut fetch,
+        Cursor::new(&mut buf),
+        &on_progress,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    let events = events.into_inner().unwrap();
+    assert!(
+        events.iter().all(|(done, total)| done <= total),
+        "an event is above 100%: {events:?}"
+    );
+    assert_eq!(events.last(), Some(&(13_000, 13_000)), "events {events:?}");
+}
