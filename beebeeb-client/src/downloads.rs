@@ -9,9 +9,10 @@ use std::{
 
 use beebeeb_core::{
     chunk_stream::{
-        ChunkDecryptor, ExpectedChunkFormat, VersionCounterStatus, check_version_counter, open_version_chunk,
+        ChunkDecryptor, ExpectedChunkFormat, RangeOpener, VersionCounterStatus, check_version_counter,
+        open_version_chunk,
     },
-    direct_transfer::{Outcome, PinnedRetry, RetryDecision},
+    direct_transfer::{Geometry, Outcome, PinnedRetry, RetryDecision},
     download::{DownloadFailure, checked_frame_size_with_budget},
     encrypt::{NameMetadata, decrypt_file_metadata},
     kdf::{FileKey, derive_file_key},
@@ -20,6 +21,7 @@ use beebeeb_core::{
 use beebeeb_store::{AssetClass, BoundedInsert, CacheEntry, Store, VersionObservation};
 use beebeeb_types::limits::MemoryBudget;
 use tokio::sync::broadcast;
+use zeroize::Zeroizing;
 
 use crate::{Client, ClientError, EngineEvent, EngineEvents, SessionKey};
 
@@ -308,6 +310,149 @@ impl DownloadService {
         }
         self.observe_authenticated_counter(file, &metadata)?;
         Ok(selected[start_offset..end].to_vec())
+    }
+
+    /// Plaintext bytes `range` of `file`, v1 or v2, through core's `RangeOpener` (core Never
+    /// break: plaintext before `finish()` only from frames `RangeOpener` authenticated at the
+    /// requested index, for one recorded version). Each call is its own session: frame 0 opens
+    /// first (I3), so a range that does not start in chunk 0 also fetches chunk 0. A caller that
+    /// reads one file many times keeps a [`RangeReader`] instead ([`Self::read_with`]).
+    ///
+    /// v1 frames carry no position or version binding (I9): the same gap the whole-file read has.
+    pub async fn read_range(&self, file: &DownloadFile, range: Range<u64>) -> Result<Vec<u8>, DownloadServiceError> {
+        let mut reader = self.range_reader(file)?;
+        self.read_with(&mut reader, range).await
+    }
+
+    /// A reader of one recorded version of `file`: its pin and commitment come from the file's
+    /// authenticated metadata, never a server field.
+    pub fn range_reader(&self, file: &DownloadFile) -> Result<RangeReader, DownloadServiceError> {
+        if let Some(DownloadResult::HandOff {
+            frame_size,
+            context_limit,
+        }) = self.check_budget(file)?
+        {
+            return Err(DownloadServiceError::HandOff {
+                frame_size,
+                context_limit,
+            });
+        }
+        let session_key = self.client.session_key()?;
+        let metadata = self.metadata(file, &session_key)?;
+        self.check_counter_before_authentication(file, &metadata)?;
+        let overhead = u64::from(file.chunk_count)
+            .checked_mul(28)
+            .ok_or(DownloadServiceError::InvalidDescription)?;
+        let geometry = Geometry {
+            chunk_count: file.chunk_count,
+            chunk_size: file.chunk_size_bytes,
+            encrypted_size: file
+                .size_bytes
+                .checked_add(overhead)
+                .ok_or(DownloadServiceError::InvalidDescription)?,
+            original_size: file.size_bytes,
+        };
+        let mut reader = RangeReader {
+            file: file.clone(),
+            metadata,
+            geometry,
+            generation: session_key.generation(),
+            opener: None,
+        };
+        // A geometry no real version has is refused before anything is fetched (I2).
+        reader.opener = Some(reader.new_opener(&session_key)?);
+        Ok(reader)
+    }
+
+    /// Plaintext bytes `range` through `reader`. A chunk this reader's opener already opened
+    /// starts a new opener (frame 0 again): `RangeOpener` opens each index once per session.
+    pub async fn read_with(
+        &self,
+        reader: &mut RangeReader,
+        range: Range<u64>,
+    ) -> Result<Vec<u8>, DownloadServiceError> {
+        let file = reader.file.clone();
+        if range.start > range.end || range.end > file.size_bytes {
+            return Err(DownloadServiceError::InvalidDescription);
+        }
+        if range.is_empty() {
+            return Ok(Vec::new());
+        }
+        if range.end - range.start > range_read_cap(&file) {
+            return Err(DownloadServiceError::InvalidDescription);
+        }
+        let session_key = self.client.session_key()?;
+        if session_key.generation() != reader.generation {
+            return Err(ClientError::StaleAccount.into());
+        }
+        let stride = file.chunk_size_bytes;
+        let first = u32::try_from(range.start / stride).map_err(|_| DownloadServiceError::InvalidDescription)?;
+        let last = u32::try_from((range.end - 1) / stride).map_err(|_| DownloadServiceError::InvalidDescription)?;
+        let reopened = reader
+            .opener
+            .as_ref()
+            .is_none_or(|opener| (first..=last).any(|index| opener.is_opened(index)));
+        if reopened {
+            reader.opener = Some(reader.new_opener(&session_key)?);
+        }
+        let mut opener = reader.opener.take().ok_or(DownloadServiceError::State)?;
+        let result = self
+            .open_span(&file, &mut opener, first, last, session_key.generation())
+            .await;
+        reader.opener = Some(opener);
+        let selected = result?;
+        let start = usize::try_from(range.start - u64::from(first) * stride)
+            .map_err(|_| DownloadServiceError::InvalidDescription)?;
+        let end = usize::try_from(range.end - range.start)
+            .ok()
+            .and_then(|len| start.checked_add(len))
+            .ok_or(DownloadServiceError::InvalidDescription)?;
+        if end > selected.len() {
+            return Err(DownloadServiceError::Truncated);
+        }
+        if !session_key.is_current(&self.client) {
+            return Err(ClientError::StaleAccount.into());
+        }
+        self.observe_authenticated_counter(&file, &reader.metadata)?;
+        Ok(selected[start..end].to_vec())
+    }
+
+    /// Fetch and open chunks `first..=last` (frame 0 first when the opener has not opened it).
+    async fn open_span(
+        &self,
+        file: &DownloadFile,
+        opener: &mut RangeOpener,
+        first: u32,
+        last: u32,
+        generation: u64,
+    ) -> Result<Zeroizing<Vec<u8>>, DownloadServiceError> {
+        if opener.format().is_none() && first != 0 {
+            drop(self.open_chunk(file, opener, 0, generation).await?);
+        }
+        let mut selected = Zeroizing::new(Vec::new());
+        for index in first..=last {
+            let plain = self.open_chunk(file, opener, index, generation).await?;
+            selected.extend_from_slice(&plain);
+        }
+        Ok(selected)
+    }
+
+    async fn open_chunk(
+        &self,
+        file: &DownloadFile,
+        opener: &mut RangeOpener,
+        index: u32,
+        generation: u64,
+    ) -> Result<Zeroizing<Vec<u8>>, DownloadServiceError> {
+        let expected = opener
+            .geometry()
+            .chunk_length(index)
+            .ok_or(DownloadServiceError::InvalidDescription)?;
+        let frame = self.fetch_chunk(file, index, expected, generation).await?;
+        if frame.len() as u64 != expected {
+            return Err(DownloadServiceError::Truncated);
+        }
+        opener.open(index, &frame).map_err(|_| DownloadServiceError::Truncated)
     }
 
     /// Account-free share-view download. The caller supplies the opaque share
@@ -677,6 +822,48 @@ impl DownloadService {
     fn emit(&self, event: DownloadEvent) {
         let _ = self.events.send(event);
     }
+}
+
+/// One recorded version of one file, read at any offset ([`DownloadService::read_with`]).
+pub struct RangeReader {
+    file: DownloadFile,
+    metadata: NameMetadata,
+    geometry: Geometry,
+    generation: u64,
+    opener: Option<RangeOpener>,
+}
+
+impl std::fmt::Debug for RangeReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RangeReader")
+            .field("geometry", &self.geometry)
+            .field("pin", &self.metadata.chunk_format)
+            .finish_non_exhaustive()
+    }
+}
+
+impl RangeReader {
+    pub fn file(&self) -> &DownloadFile {
+        &self.file
+    }
+
+    fn new_opener(&self, session_key: &SessionKey) -> Result<RangeOpener, DownloadServiceError> {
+        RangeOpener::new(
+            derive_file_key(session_key.master_key(), self.file.file_id.as_bytes()),
+            &self.file.file_id,
+            self.metadata.chunk_format,
+            self.metadata.version,
+            self.geometry,
+            self.file.size_bytes,
+        )
+        .map_err(|_| DownloadServiceError::InvalidDescription)
+    }
+}
+
+/// The longest read [`DownloadService::read_with`] serves: a zip's whole central directory
+/// (core's archive limit) across two partial chunks.
+pub fn range_read_cap(file: &DownloadFile) -> u64 {
+    beebeeb_core::archives::limits::MAX_CENTRAL_DIRECTORY_BYTES.saturating_add(file.chunk_size_bytes.saturating_mul(2))
 }
 
 fn cache_identity(file: &DownloadFile, metadata: &NameMetadata) -> (String, Vec<u8>) {

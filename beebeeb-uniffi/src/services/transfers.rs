@@ -81,7 +81,8 @@ pub struct UploadServiceHandle {
 }
 
 impl UploadServiceHandle {
-    pub(crate) fn configured_request(&self, data: UploadEnqueueData) -> Result<(UploadRequest, i64), ServiceError> {
+    /// The device's upload settings: (Wi-Fi only, per-file staging bytes).
+    pub(crate) fn upload_settings(&self) -> Result<(bool, u64), ServiceError> {
         let session = self.root.session()?;
         let store = self.store.store.lock().map_err(|_| ServiceError::unavailable())?;
         let settings = beebeeb_client::settings::load_local_settings(&store, &session, &self.device_id, &self.product)
@@ -90,9 +91,14 @@ impl UploadServiceHandle {
         if settings.upload_staging_bytes == 0 {
             return Err(ServiceError::new(ServiceErrorKind::InvalidInput));
         }
+        Ok((settings.wifi_only, settings.upload_staging_bytes))
+    }
+
+    pub(crate) fn configured_request(&self, data: UploadEnqueueData) -> Result<(UploadRequest, i64), ServiceError> {
+        let (wifi_only, disk_limit) = self.upload_settings()?;
         let mut request = UploadRequest::new(data.source_path, data.name, data.mime_type, data.parent_id);
-        request.wifi_only = settings.wifi_only;
-        request.disk_limit = settings.upload_staging_bytes;
+        request.wifi_only = wifi_only;
+        request.disk_limit = disk_limit;
         Ok((request, transfer_now_ms().map_err(map_client_error)?))
     }
 }
