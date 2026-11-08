@@ -41,6 +41,8 @@ use base64::engine::general_purpose::STANDARD as B64;
 use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
+use crate::auth_flow::step_up::{self as auth_step_up, ConfirmToken, StepUpPurpose, StepUpStep};
+use crate::auth_flow::{self, AuthFlowError};
 use crate::kdf::MasterKey;
 use crate::opaque::{compute_recovery_check, derive_x25519_private, derive_x25519_public};
 use crate::opaque_protocol;
@@ -50,8 +52,8 @@ pub const MIN_PASSWORD_CHARS: usize = 12;
 /// Display name bounds (DW-A64 rules).
 pub const MAX_NAME_CHARS: usize = 64;
 
-pub const PATH_CONFIRM_START: &str = "/api/v1/auth/confirm-opaque-start";
-pub const PATH_CONFIRM_FINISH: &str = "/api/v1/auth/confirm-opaque-finish";
+pub const PATH_CONFIRM_START: &str = auth_step_up::CONFIRM_START_PATH;
+pub const PATH_CONFIRM_FINISH: &str = auth_step_up::CONFIRM_FINISH_PATH;
 pub const PATH_CHANGE_PASSWORD_START: &str = "/api/v1/auth/change-password-start";
 pub const PATH_CHANGE_PASSWORD_FINISH: &str = "/api/v1/auth/change-password-finish";
 pub const PATH_EMAIL_START: &str = "/api/v1/me/email/start";
@@ -105,9 +107,26 @@ impl ApiRequest {
         }
     }
 
-    fn gated(mut self, token: Zeroizing<String>) -> Self {
-        self.confirm_token = Some(token);
-        self
+    /// Spend `token` on this request (the `X-Confirm-Token` header).
+    fn gated(self, token: ConfirmToken) -> Self {
+        Self {
+            confirm_token: Some(token.into_header_value()),
+            ..self
+        }
+    }
+
+    /// A step-up request from `auth_flow`; both legs are POSTs on the signed-in session.
+    fn from_auth(request: auth_flow::HttpRequest) -> Self {
+        let method = match request.method {
+            auth_flow::Method::Get => Method::Get,
+            auth_flow::Method::Post => Method::Post,
+        };
+        Self {
+            method,
+            path: request.path,
+            body: request.body,
+            confirm_token: request.confirm_token,
+        }
     }
 
     /// The value for the `X-Confirm-Token` header, if this request is step-up gated.
@@ -143,6 +162,11 @@ pub struct ApiResponse {
 impl ApiResponse {
     pub fn new(status: u16, body: Value) -> Self {
         Self { status, body }
+    }
+
+    /// The same reply in `auth_flow`'s shape, for the shared step-up.
+    fn to_auth(&self) -> auth_flow::HttpResponse {
+        auth_flow::HttpResponse::new(self.status, self.body.clone())
     }
 
     /// Parse a raw body; an empty or non-JSON body becomes `null`.
@@ -309,75 +333,63 @@ impl AccountBinding {
 
 // ─── step-up ────────────────────────────────────────────────────────────────
 
-/// `/auth/confirm-opaque-{start,finish}`: the password proves itself to the server via
-/// OPAQUE and the server mints a single-use confirmation token.
+/// The step-up inside an account flow. It is [`crate::auth_flow::step_up::StepUp`], the one
+/// implementation of the OPAQUE confirm ceremony (`/auth/confirm-opaque-{start,finish}`), with
+/// the generic purpose (no `purpose` field: the account endpoints take the generic grant). This
+/// type only translates the account wire types and errors; the ceremony, the password copy and
+/// the [`ConfirmToken`] all live in `auth_flow`.
 struct StepUp {
-    login_state: Option<Zeroizing<Vec<u8>>>,
-    server_state: Option<String>,
+    machine: Option<auth_step_up::StepUp>,
 }
 
 impl StepUp {
     fn new() -> Self {
-        Self {
-            login_state: None,
-            server_state: None,
-        }
+        Self { machine: None }
     }
 
     fn start(&mut self, password: &[u8]) -> Result<ApiRequest, AccountFlowError> {
-        let start = opaque_protocol::client_login_start(password).map_err(|_| AccountFlowError::Protocol)?;
-        self.login_state = Some(Zeroizing::new(start.state));
-        Ok(ApiRequest::new(
-            Method::Post,
-            PATH_CONFIRM_START,
-            Some(json!({ "client_message": B64.encode(&start.message) })),
-        ))
+        let (machine, request) =
+            auth_step_up::StepUp::start(password, StepUpPurpose::Generic).map_err(step_up_error_at_start)?;
+        self.machine = Some(machine);
+        Ok(ApiRequest::from_auth(request))
     }
 
-    fn on_start(&mut self, password: &[u8], resp: &ApiResponse) -> Result<ApiRequest, AccountFlowError> {
-        if resp.status == 409 && resp.body.get("opaque_unavailable").and_then(Value::as_bool) == Some(true) {
-            // Never fall back to sending the password (crypto review rule 2).
-            return Err(AccountFlowError::OpaqueUnavailable);
+    fn on_start(&mut self, resp: &ApiResponse) -> Result<ApiRequest, AccountFlowError> {
+        let machine = self.machine.as_mut().ok_or(AccountFlowError::OutOfOrder)?;
+        match machine.on_response(resp.to_auth()) {
+            Ok(StepUpStep::Send(request)) => Ok(ApiRequest::from_auth(request)),
+            Ok(StepUpStep::Confirmed(_)) => Err(AccountFlowError::Protocol),
+            Err(e) => Err(step_up_error(e, resp)),
         }
-        if resp.status == 401 {
-            return Err(AccountFlowError::WrongPassword);
-        }
-        if !resp.ok() {
-            return Err(generic_error(resp));
-        }
-        let server_message = B64
-            .decode(resp.str_field("server_message")?)
-            .map_err(|_| AccountFlowError::Protocol)?;
-        let server_state = resp.str_field("server_state")?.to_string();
-        let ksf_version = resp
-            .body
-            .get("ksf_version")
-            .and_then(Value::as_u64)
-            .and_then(|v| u32::try_from(v).ok())
-            .ok_or(AccountFlowError::Protocol)?;
-        let state = self.login_state.take().ok_or(AccountFlowError::OutOfOrder)?;
-        // A wrong password and a wrong KSF are indistinguishable by design.
-        let finish = opaque_protocol::client_login_finish(&state, password, &server_message, ksf_version)
-            .map_err(|_| AccountFlowError::WrongPassword)?;
-        let _ = Zeroizing::new(finish.session_key);
-        let _ = Zeroizing::new(finish.export_key);
-        self.server_state = Some(server_state.clone());
-        Ok(ApiRequest::new(
-            Method::Post,
-            PATH_CONFIRM_FINISH,
-            Some(json!({ "client_message": B64.encode(&finish.message), "server_state": server_state })),
-        ))
     }
 
-    fn on_finish(&mut self, resp: &ApiResponse) -> Result<Zeroizing<String>, AccountFlowError> {
-        self.server_state.take().ok_or(AccountFlowError::OutOfOrder)?;
-        if resp.status == 401 {
-            return Err(AccountFlowError::WrongPassword);
+    fn on_finish(&mut self, resp: &ApiResponse) -> Result<ConfirmToken, AccountFlowError> {
+        let mut machine = self.machine.take().ok_or(AccountFlowError::OutOfOrder)?;
+        match machine.on_response(resp.to_auth()) {
+            Ok(StepUpStep::Confirmed(token)) => Ok(token),
+            Ok(StepUpStep::Send(_)) => Err(AccountFlowError::Protocol),
+            Err(e) => Err(step_up_error(e, resp)),
         }
-        if !resp.ok() {
-            return Err(generic_error(resp));
-        }
-        Ok(Zeroizing::new(resp.str_field("confirmation_token")?.to_string()))
+    }
+}
+
+/// A step-up that could not start: an empty password is a wrong password here.
+fn step_up_error_at_start(e: AuthFlowError) -> AccountFlowError {
+    match e {
+        AuthFlowError::InvalidInput(_) => AccountFlowError::WrongPassword,
+        _ => AccountFlowError::Protocol,
+    }
+}
+
+/// Map the ceremony's error onto the account codes. A wrong password and a wrong KSF are
+/// indistinguishable by design (both are `InvalidCredentials`, as a 401 is).
+fn step_up_error(e: AuthFlowError, resp: &ApiResponse) -> AccountFlowError {
+    match e {
+        AuthFlowError::OpaqueUnavailable => AccountFlowError::OpaqueUnavailable,
+        AuthFlowError::InvalidCredentials => AccountFlowError::WrongPassword,
+        _ if !resp.ok() => generic_error(resp),
+        AuthFlowError::WrongState => AccountFlowError::OutOfOrder,
+        _ => AccountFlowError::Protocol,
     }
 }
 
@@ -688,28 +700,10 @@ impl AccountFlow {
         result
     }
 
-    fn password_for_step_up(&self, n: u8) -> Option<&[u8]> {
-        match &self.kind {
-            Kind::ChangePassword { current, .. } => Some(current),
-            Kind::ChangeEmail { password, .. }
-            | Kind::DeleteAccount { password }
-            | Kind::VerifyPassword { password } => Some(password),
-            Kind::TotpSetup { password: Some(p), .. } => Some(p),
-            _ => None,
-        }
-        .filter(|_| n >= 1)
-        .map(|p| p.as_slice())
-    }
-
     fn advance(&mut self, resp: &ApiResponse) -> Result<Step, AccountFlowError> {
         match self.phase {
             Phase::StepUpStart(n) => {
-                let password = Zeroizing::new(
-                    self.password_for_step_up(n)
-                        .ok_or(AccountFlowError::OutOfOrder)?
-                        .to_vec(),
-                );
-                let req = self.step_up.on_start(&password, resp)?;
+                let req = self.step_up.on_start(resp)?;
                 self.phase = Phase::StepUpFinish(n);
                 Ok(Step::Send(req))
             }
@@ -727,7 +721,7 @@ impl AccountFlow {
         }
     }
 
-    fn after_step_up(&mut self, n: u8, token: Zeroizing<String>) -> Result<Step, AccountFlowError> {
+    fn after_step_up(&mut self, n: u8, token: ConfirmToken) -> Result<Step, AccountFlowError> {
         match &mut self.kind {
             Kind::ChangePassword {
                 new,

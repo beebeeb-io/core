@@ -46,6 +46,17 @@ impl ConfirmToken {
         request.confirm_token = Some(self.0);
         request
     }
+
+    /// The header value, for a crate flow with its own request type (`account_flows`). Crate-only:
+    /// no host ever receives the string; the caller puts it on exactly one request.
+    pub(crate) fn into_header_value(self) -> Zeroizing<String> {
+        self.0
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(value: &str) -> Self {
+        Self(Zeroizing::new(value.to_owned()))
+    }
 }
 
 impl std::fmt::Debug for ConfirmToken {

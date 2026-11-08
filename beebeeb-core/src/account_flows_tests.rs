@@ -402,7 +402,7 @@ fn resume_out_of_order_is_refused() {
 #[test]
 fn debug_output_never_prints_secrets() {
     let req = ApiRequest::new(Method::Post, "/p", Some(json!({ "client_message": "SECRETMSG" })))
-        .gated(Zeroizing::new("TOKEN123".into()));
+        .gated(crate::auth_flow::step_up::ConfirmToken::for_test("TOKEN123"));
     let s = format!("{req:?}");
     assert!(!s.contains("SECRETMSG") && !s.contains("TOKEN123"), "{s}");
     let out = AccountOutcome::PasswordChanged {
