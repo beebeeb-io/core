@@ -7,9 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (review hardening before v0.2.8; desktop v2 and mobile adapt to these)
+
+API changes, every one a compile error at the call site, none silent:
+
+1. `passkey::ceremony::parse_registration_start` / `parse_assertion_start` take `&ExpectedRp` (the host's own RP id);
+   any other server `rp.id` / `rpId` is `PasskeyError::RpMismatch` (`passkey_rp_mismatch`). `localhost` only in a
+   debug build or with `ExpectedRp::development`. `origin_for_rp` is removed (`ExpectedRp::origin_for`).
+2. `passkey::flow::add_passkey(http, authn, session, password, name, vault_key, rp)` and
+   `remove_passkey(http, session, password, id)` take the password and run the OPAQUE step-up inside; no confirm
+   token is passed in. `passkey::flow::sign_in` takes `&ExpectedRp`. New `PasskeyError::StepUp { code }`
+   (`passkey_step_up_failed`).
+3. `RequestOptions::local_prf_probe` asks for the creation's `user_verification` (was `discouraged`).
+4. `auth_flow::HttpRequest.confirm_token` is crate-only; transports read `HttpRequest::confirm_token_header()`;
+   bindings build the consuming request with `HttpRequest::session_post`.
+5. `auth_flow::step_up::StepUpPurpose::from_parts(purpose, cli_code)`: a `cli_code` with another purpose, or
+   `cli_device_approval` without a code, is `invalid_input` (UniFFI `StepUpFlow::new`, WASM `AuthStepUp`).
+6. `account_flows::AccountFlow::change_password(current, new, binding, &SignupPolicy, Option<&BreachCheck>)` runs
+   sign-up's gate (`signup_flow::password_gate`, new). `MIN_PASSWORD_CHARS` is removed. New error codes
+   `password_breached`, `breach_check_missing`, `breach_check_blocked`. UniFFI `AccountFlowHandle::change_password`
+   and WASM `AccountFlow.changePassword` take the onboarding answer (`status`, `body`) and an optional breach check.
+7. `account_flows::HostStep` / `HostOutcome`: `body_json`, `confirm_token`, `session_token`, `totp_secret`,
+   `otpauth_uri` are `Zeroizing<String>`, `backup_codes` is `Zeroizing<Vec<String>>` (JSON shape unchanged).
+8. `ApiResponse` (account flows, passkey flows) no longer derives `Debug` over its body: it prints the status only.
+   `AccountOutcome::EmailChanged` prints the email redacted.
+9. `share_flow::link::rebuild_link` takes the stored `wrapped_file_key` (`None` for a bundle) and returns `None`
+   when it does not open under the rebuilt `K_c`. UniFFI `share_rebuild_link` / WASM `shareRebuildLink` take it too.
+10. Folder shares refuse a folder or child id that is not already a canonical lower-case UUID (`invalid_input`).
+11. UniFFI: keys cross as handles. Out: `SignupCreatedFfi.master_key`, `RecoveredFfi::SignedIn.master_key`,
+    `DeviceRequestEventFfi::Approved.master_key` (`Arc<MasterKeyHandle>`), `share_open_member_file_key`,
+    `share_open_link_file_key` (`Arc<FileKeyHandle>`). In: `ApprovalFlow.approve`, `MemberInviteFlow`,
+    `CreateLinkFlow::new` / `bundle` (`BundleItemFfi.file_key`), the folder-share constructors,
+    `share_rebuild_link`, `share_rebuild_folder_link` and the other share functions that took `master_key: Vec<u8>`.
+12. UniFFI and WASM `passkey_parse_registration_start` / `passkey_parse_assertion_start` take `expected_rp_id` and
+    `allow_localhost`.
+
+Also: the device-approval payload is serialized into one pre-sized wiped buffer; the sign-up terms / privacy URL host
+is compared exactly; UniFFI account-flow passwords, codes and link tokens are held in `Zeroizing`.
+
 ### Added
 
-- **Desktop v2 B10b: server #422's account routes.** `account_flows`: the three-step delete (`delete_account(password,
+- **Desktop v2 B05b: share flows ported** (#99). `share_flow`: person shares of a file, folder invites and folder links
+  (the 2133 folder-key rules: random folder keys, custody, L7 child wraps), file links, bundles and file requests, in
+  UniFFI and WASM; the 15 share vectors match web byte for byte.
+- **Desktop v2 B10b: server #422's account routes** (#100). `account_flows`: the three-step delete (`delete_account(password,
   code?)` → `POST /auth/account/delete-request` with the second factor on a 2FA account; `delete_confirm` and
   `delete_cancel` with the mailed link's token), `regenerate_backup_codes(code)` (`POST /auth/2fa/backup-codes`; the
   authenticator stays) and a step-up inside `set_activity_logging(false, password)`. `auth_flow::device`: the deny
@@ -30,7 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to 32, HKDF-SHA256 info `beebeeb.io/vault-wrap/v1` with an empty salt, AES-256-GCM `nonce || ct || tag`, no AAD),
   the native hmac-secret salt (the WebAuthn PRF hash applied), the ceremony wire for the server's passkey and
   escrow routes, and the flows (add, sign in + unlock, list, remove) over an injected HTTP and platform call.
-  UniFFI and WASM exports; vectors generated from web's TS (`test-vectors/passkey_vault.json`) and core vectors
+  UniFFI and WASM export the primitive and the per-step wire helpers, not the async flows (UniFFI hands the vault
+  key as a `MasterKeyHandle`, WASM as raw bytes, its convention); vectors generated from web's TS (`test-vectors/passkey_vault.json`) and core vectors
   web's TS opens (`test-vectors/passkey_vault_core.json`, `scripts/passkey-vectors/`). Additive.
 
 ## [0.2.7] - 2026-11-08
