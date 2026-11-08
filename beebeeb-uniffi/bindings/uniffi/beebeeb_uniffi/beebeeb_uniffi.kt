@@ -4060,7 +4060,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_eventstreamhandle_next() != 14144.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_backup() != 10971.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_backup() != 44271.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_file_provider() != 23944.toShort()) {
@@ -4069,7 +4069,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_prepare_account_replacement() != 31668.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_service_coordinator() != 3296.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_service_coordinator() != 27286.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sign_out_this_app() != 21684.toShort()) {
@@ -17345,14 +17345,23 @@ public interface NativeClientHandleInterface {
     /**
      * The native backup. Make it right after the upload service, before any
      * transfer resumes: a backup stopped before a crash cancels its uploads
-     * here, before they can publish.
+     * here, before they can publish. When that cancel fails (the store
+     * fails), no service is made and the error is `BackupStopUnfinished`:
+     * its `reason` is the stop's core wire string, so show
+     * `backup_stop_words` for it all the same, then try again later.
      *
      * One per upload service, and one per manifest store across processes
      * too: a second while the first lives is refused (`unavailable`), and an
-     * extension or a second process must never open the same store. Its
-     * callbacks run while the service holds its locks: `manifest_store`'s
-     * and `source`'s must not call back into this backup service, nor wait
-     * on a thread that is inside `next_batch`. Either deadlocks.
+     * extension or a second process must never open the same store. "Lives"
+     * means while any handle holds it: this backup handle, and a service
+     * coordinator made with it. Before making a new backup service on the
+     * same upload service (after a sign-out and sign-in, or in a worker),
+     * close the old coordinator and the old backup handle (Kotlin `close()`,
+     * Swift: drop the last reference), or keep the service and call
+     * `configure` on it. Its callbacks run while the service holds its
+     * locks: `manifest_store`'s and `source`'s must not call back into this
+     * backup service, nor wait on a thread that is inside `next_batch`.
+     * Either deadlocks.
      */
     fun `backup`(`uploads`: UploadServiceHandle, `source`: AssetSourceCallback, `manifestStore`: BackupManifestStoreCallback, `configuration`: BackupConfigurationData): BackupServiceHandle
     
@@ -17364,6 +17373,12 @@ public interface NativeClientHandleInterface {
     
     fun `prepareAccountReplacement`(`coordinator`: ServiceCoordinatorHandle, `confirmedLastDeviceWarning`: kotlin.Boolean, `canceller`: PlatformTransferCancellerCallback, `purger`: AccountDataPurgerCallback, `nowMs`: kotlin.Long): AccountReplacementHandle
     
+    /**
+     * The coordinator keeps the backup service alive while it lives: close
+     * it (Kotlin `close()`, Swift: drop the last reference) together with
+     * the backup handle before making a new backup service on the same
+     * upload service, or that is refused (`unavailable`).
+     */
     fun `serviceCoordinator`(`uploads`: UploadServiceHandle, `downloads`: DownloadServiceHandle, `thumbnails`: ThumbnailServiceHandle, `backup`: BackupServiceHandle, `search`: SearchServiceHandle, `store`: StoreHandle): ServiceCoordinatorHandle
     
     fun `signOutThisApp`(`coordinator`: ServiceCoordinatorHandle, `canceller`: PlatformTransferCancellerCallback, `purger`: AccountDataPurgerCallback, `nowMs`: kotlin.Long): SignOutReportData
@@ -17514,14 +17529,23 @@ open class NativeClientHandle: Disposable, AutoCloseable, NativeClientHandleInte
     /**
      * The native backup. Make it right after the upload service, before any
      * transfer resumes: a backup stopped before a crash cancels its uploads
-     * here, before they can publish.
+     * here, before they can publish. When that cancel fails (the store
+     * fails), no service is made and the error is `BackupStopUnfinished`:
+     * its `reason` is the stop's core wire string, so show
+     * `backup_stop_words` for it all the same, then try again later.
      *
      * One per upload service, and one per manifest store across processes
      * too: a second while the first lives is refused (`unavailable`), and an
-     * extension or a second process must never open the same store. Its
-     * callbacks run while the service holds its locks: `manifest_store`'s
-     * and `source`'s must not call back into this backup service, nor wait
-     * on a thread that is inside `next_batch`. Either deadlocks.
+     * extension or a second process must never open the same store. "Lives"
+     * means while any handle holds it: this backup handle, and a service
+     * coordinator made with it. Before making a new backup service on the
+     * same upload service (after a sign-out and sign-in, or in a worker),
+     * close the old coordinator and the old backup handle (Kotlin `close()`,
+     * Swift: drop the last reference), or keep the service and call
+     * `configure` on it. Its callbacks run while the service holds its
+     * locks: `manifest_store`'s and `source`'s must not call back into this
+     * backup service, nor wait on a thread that is inside `next_batch`.
+     * Either deadlocks.
      */
     @Throws(ServiceException::class)override fun `backup`(`uploads`: UploadServiceHandle, `source`: AssetSourceCallback, `manifestStore`: BackupManifestStoreCallback, `configuration`: BackupConfigurationData): BackupServiceHandle {
             return FfiConverterTypeBackupServiceHandle.lift(
@@ -17569,6 +17593,12 @@ open class NativeClientHandle: Disposable, AutoCloseable, NativeClientHandleInte
     
 
     
+    /**
+     * The coordinator keeps the backup service alive while it lives: close
+     * it (Kotlin `close()`, Swift: drop the last reference) together with
+     * the backup handle before making a new backup service on the same
+     * upload service, or that is refused (`unavailable`).
+     */
     @Throws(ServiceException::class)override fun `serviceCoordinator`(`uploads`: UploadServiceHandle, `downloads`: DownloadServiceHandle, `thumbnails`: ThumbnailServiceHandle, `backup`: BackupServiceHandle, `search`: SearchServiceHandle, `store`: StoreHandle): ServiceCoordinatorHandle {
             return FfiConverterTypeServiceCoordinatorHandle.lift(
     callWithHandle {
@@ -34791,6 +34821,20 @@ sealed class ServiceException: kotlin.Exception() {
             get() = ""
     }
     
+    /**
+     * The backup is off and could not finish its stop when the backup
+     * service was made, so none was made. `reason` is the stop's core wire
+     * string: show `backup_stop_words` for it as for a stopped batch, then
+     * make the service again later.
+     */
+    class BackupStopUnfinished(
+        
+        val `reason`: kotlin.String
+        ) : ServiceException() {
+        override val message
+            get() = "reason=${ `reason` }"
+    }
+    
 
     
 
@@ -34832,6 +34876,9 @@ public object FfiConverterTypeServiceError : FfiConverterRustBuffer<ServiceExcep
             13 -> ServiceException.AnchorExpired()
             14 -> ServiceException.AnotherAccountOnDevice()
             15 -> ServiceException.Unavailable()
+            16 -> ServiceException.BackupStopUnfinished(
+                FfiConverterString.read(buf),
+                )
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
     }
@@ -34902,6 +34949,11 @@ public object FfiConverterTypeServiceError : FfiConverterRustBuffer<ServiceExcep
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
             )
+            is ServiceException.BackupStopUnfinished -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`reason`)
+            )
         }
     }
 
@@ -34971,6 +35023,11 @@ public object FfiConverterTypeServiceError : FfiConverterRustBuffer<ServiceExcep
                 buf.putInt(15)
                 Unit
             }
+            is ServiceException.BackupStopUnfinished -> {
+                buf.putInt(16)
+                FfiConverterString.write(value.`reason`, buf)
+                Unit
+            }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 
@@ -34995,7 +35052,8 @@ enum class ServiceErrorKind {
     RETRY_AFTER,
     ANCHOR_EXPIRED,
     ANOTHER_ACCOUNT_ON_DEVICE,
-    UNAVAILABLE;
+    UNAVAILABLE,
+    BACKUP_STOP_UNFINISHED;
 
     
 

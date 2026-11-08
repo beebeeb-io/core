@@ -8048,14 +8048,23 @@ public protocol NativeClientHandleProtocol: AnyObject, Sendable {
     /**
      * The native backup. Make it right after the upload service, before any
      * transfer resumes: a backup stopped before a crash cancels its uploads
-     * here, before they can publish.
+     * here, before they can publish. When that cancel fails (the store
+     * fails), no service is made and the error is `BackupStopUnfinished`:
+     * its `reason` is the stop's core wire string, so show
+     * `backup_stop_words` for it all the same, then try again later.
      *
      * One per upload service, and one per manifest store across processes
      * too: a second while the first lives is refused (`unavailable`), and an
-     * extension or a second process must never open the same store. Its
-     * callbacks run while the service holds its locks: `manifest_store`'s
-     * and `source`'s must not call back into this backup service, nor wait
-     * on a thread that is inside `next_batch`. Either deadlocks.
+     * extension or a second process must never open the same store. "Lives"
+     * means while any handle holds it: this backup handle, and a service
+     * coordinator made with it. Before making a new backup service on the
+     * same upload service (after a sign-out and sign-in, or in a worker),
+     * close the old coordinator and the old backup handle (Kotlin `close()`,
+     * Swift: drop the last reference), or keep the service and call
+     * `configure` on it. Its callbacks run while the service holds its
+     * locks: `manifest_store`'s and `source`'s must not call back into this
+     * backup service, nor wait on a thread that is inside `next_batch`.
+     * Either deadlocks.
      */
     func backup(uploads: UploadServiceHandle, source: AssetSourceCallback, manifestStore: BackupManifestStoreCallback, configuration: BackupConfigurationData) throws  -> BackupServiceHandle
     
@@ -8067,6 +8076,12 @@ public protocol NativeClientHandleProtocol: AnyObject, Sendable {
     
     func prepareAccountReplacement(coordinator: ServiceCoordinatorHandle, confirmedLastDeviceWarning: Bool, canceller: PlatformTransferCancellerCallback, purger: AccountDataPurgerCallback, nowMs: Int64) throws  -> AccountReplacementHandle
     
+    /**
+     * The coordinator keeps the backup service alive while it lives: close
+     * it (Kotlin `close()`, Swift: drop the last reference) together with
+     * the backup handle before making a new backup service on the same
+     * upload service, or that is refused (`unavailable`).
+     */
     func serviceCoordinator(uploads: UploadServiceHandle, downloads: DownloadServiceHandle, thumbnails: ThumbnailServiceHandle, backup: BackupServiceHandle, search: SearchServiceHandle, store: StoreHandle) throws  -> ServiceCoordinatorHandle
     
     func signOutThisApp(coordinator: ServiceCoordinatorHandle, canceller: PlatformTransferCancellerCallback, purger: AccountDataPurgerCallback, nowMs: Int64) throws  -> SignOutReportData
@@ -8172,14 +8187,23 @@ public convenience init(configuration: NativeClientConfiguration, secretAccess: 
     /**
      * The native backup. Make it right after the upload service, before any
      * transfer resumes: a backup stopped before a crash cancels its uploads
-     * here, before they can publish.
+     * here, before they can publish. When that cancel fails (the store
+     * fails), no service is made and the error is `BackupStopUnfinished`:
+     * its `reason` is the stop's core wire string, so show
+     * `backup_stop_words` for it all the same, then try again later.
      *
      * One per upload service, and one per manifest store across processes
      * too: a second while the first lives is refused (`unavailable`), and an
-     * extension or a second process must never open the same store. Its
-     * callbacks run while the service holds its locks: `manifest_store`'s
-     * and `source`'s must not call back into this backup service, nor wait
-     * on a thread that is inside `next_batch`. Either deadlocks.
+     * extension or a second process must never open the same store. "Lives"
+     * means while any handle holds it: this backup handle, and a service
+     * coordinator made with it. Before making a new backup service on the
+     * same upload service (after a sign-out and sign-in, or in a worker),
+     * close the old coordinator and the old backup handle (Kotlin `close()`,
+     * Swift: drop the last reference), or keep the service and call
+     * `configure` on it. Its callbacks run while the service holds its
+     * locks: `manifest_store`'s and `source`'s must not call back into this
+     * backup service, nor wait on a thread that is inside `next_batch`.
+     * Either deadlocks.
      */
 open func backup(uploads: UploadServiceHandle, source: AssetSourceCallback, manifestStore: BackupManifestStoreCallback, configuration: BackupConfigurationData)throws  -> BackupServiceHandle  {
     return try  FfiConverterTypeBackupServiceHandle_lift(try rustCallWithError(FfiConverterTypeServiceError_lift) {
@@ -8222,6 +8246,12 @@ open func prepareAccountReplacement(coordinator: ServiceCoordinatorHandle, confi
 })
 }
     
+    /**
+     * The coordinator keeps the backup service alive while it lives: close
+     * it (Kotlin `close()`, Swift: drop the last reference) together with
+     * the backup handle before making a new backup service on the same
+     * upload service, or that is refused (`unavailable`).
+     */
 open func serviceCoordinator(uploads: UploadServiceHandle, downloads: DownloadServiceHandle, thumbnails: ThumbnailServiceHandle, backup: BackupServiceHandle, search: SearchServiceHandle, store: StoreHandle)throws  -> ServiceCoordinatorHandle  {
     return try  FfiConverterTypeServiceCoordinatorHandle_lift(try rustCallWithError(FfiConverterTypeServiceError_lift) {
     uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_service_coordinator(
@@ -23897,6 +23927,14 @@ public enum ServiceError: Swift.Error, Equatable, Hashable, Foundation.Localized
     case AnchorExpired
     case AnotherAccountOnDevice
     case Unavailable
+    /**
+     * The backup is off and could not finish its stop when the backup
+     * service was made, so none was made. `reason` is the stop's core wire
+     * string: show `backup_stop_words` for it as for a stopped batch, then
+     * make the service again later.
+     */
+    case BackupStopUnfinished(reason: String
+    )
 
     
 
@@ -23948,6 +23986,9 @@ public struct FfiConverterTypeServiceError: FfiConverterRustBuffer {
         case 13: return .AnchorExpired
         case 14: return .AnotherAccountOnDevice
         case 15: return .Unavailable
+        case 16: return .BackupStopUnfinished(
+            reason: try FfiConverterString.read(from: &buf)
+            )
 
          default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -24023,6 +24064,11 @@ public struct FfiConverterTypeServiceError: FfiConverterRustBuffer {
         case .Unavailable:
             writeInt(&buf, Int32(15))
         
+        
+        case let .BackupStopUnfinished(reason):
+            writeInt(&buf, Int32(16))
+            FfiConverterString.write(reason, into: &buf)
+            
         }
     }
 }
@@ -24062,6 +24108,7 @@ public enum ServiceErrorKind: Equatable, Hashable {
     case anchorExpired
     case anotherAccountOnDevice
     case unavailable
+    case backupStopUnfinished
 
 
 
@@ -24112,6 +24159,8 @@ public struct FfiConverterTypeServiceErrorKind: FfiConverterRustBuffer {
         case 14: return .anotherAccountOnDevice
         
         case 15: return .unavailable
+        
+        case 16: return .backupStopUnfinished
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -24179,6 +24228,10 @@ public struct FfiConverterTypeServiceErrorKind: FfiConverterRustBuffer {
         
         case .unavailable:
             writeInt(&buf, Int32(15))
+        
+        
+        case .backupStopUnfinished:
+            writeInt(&buf, Int32(16))
         
         }
     }
@@ -30174,7 +30227,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_eventstreamhandle_next() != 14144) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_backup() != 10971) {
+    if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_backup() != 44271) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_file_provider() != 23944) {
@@ -30183,7 +30236,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_prepare_account_replacement() != 31668) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_service_coordinator() != 3296) {
+    if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_service_coordinator() != 27286) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sign_out_this_app() != 21684) {
