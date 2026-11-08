@@ -179,6 +179,10 @@ Generated files, backups and this public repo:
   10-minute floor with no offset), never "uploaded after the device's mtime" alone; `backup_stop`'s
   `last_pass_at` is on the server's clock, never the device's; a stopped backup never fills the account
   up again by itself.
+- Backups (LD-0121, Amendment 12d): a pass reads notices from `notices_since(last_pass_at)` with the
+  10-minute overlap and decides with `backup_pass_gate_v2`, never the strict v0.2.3 filter; the
+  acknowledged ids it returns are stored in the same write as the stops, never before them, and an empty
+  id never acknowledges anything.
 - Design files live in the workspace; never copy them into this public repo (a snapshot once published
   a false external-audit claim, and the claims guard fails on those strings).
 

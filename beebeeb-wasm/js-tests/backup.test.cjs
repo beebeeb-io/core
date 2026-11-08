@@ -177,3 +177,52 @@ nodeTest('backupFirstPassBaseline, backupPassGate and backupCheckFailedWords agr
   assert.deepEqual(wasm.backupPassGate(false, undefined, 0, listing), { outcome: 'check_failed' });
   assert.equal(wasm.backupCheckFailedWords(), plan.cases.find((c) => c.kind === 'check_failed_words').expect);
 });
+
+// Amendment 12d: the 10-minute overlap a pass reads notices with, the acknowledged notice ids, and the `since`.
+nodeTest('backupStopV2, backupPassGateV2, backupNoticesSince and backupNoticeOverlapMs agree with the shared vector', () => {
+  const stops = plan.cases.filter((c) => c.kind === 'stop_ack');
+  assert.equal(stops.length, 17);
+  for (const c of stops) {
+    assert.deepEqual(wasm.backupStopV2(c.notices, c.last_pass_at_ms, c.acknowledged, c.listing), c.expect, c.id);
+  }
+  const gates = plan.cases.filter((c) => c.kind === 'gate_ack');
+  assert.equal(gates.length, 4);
+  for (const c of gates) {
+    assert.deepEqual(
+      wasm.backupPassGateV2(c.notices_fetch_ok, c.notices, c.last_pass_at_ms, c.acknowledged, c.listing),
+      c.expect,
+      c.id,
+    );
+  }
+  const sinces = plan.cases.filter((c) => c.kind === 'notices_since');
+  assert.equal(sinces.length, 4);
+  for (const c of sinces) {
+    assert.equal(wasm.backupNoticesSince(c.last_pass_at_ms), c.expect, c.id);
+  }
+  assert.equal(wasm.backupNoticeOverlapMs(), plan.cases.find((c) => c.kind === 'notice_overlap').expect);
+});
+
+nodeTest('backupStopV2 reads ids leniently and the rest as backupStop does', () => {
+  const dev = '00000064-0000-4000-8000-0000000000aa';
+  const listing = { device_folder_id: dev, device_folder_live: true, folders: [{ category: 'pictures' }] };
+  const at = 1762430400000;
+  const erased = (id) => ({ id, type: 'files_removed', data: { reason: 'erase_request' }, created_at_ms: at - 1 });
+  // An id that is not a non-empty string is no id: never acknowledged, so the notice still stops.
+  for (const id of [undefined, null, '', 42]) {
+    assert.deepEqual(
+      wasm.backupStopV2([erased(id)], at, [''], listing),
+      { stopped: [{ category: 'pictures', reason: 'erase_request' }], acknowledged: [] },
+      String(id),
+    );
+  }
+  // `acknowledged` may be undefined or null (a first pass).
+  for (const none of [undefined, null]) {
+    assert.deepEqual(wasm.backupStopV2([erased('n1')], at, none, listing).acknowledged, ['n1']);
+  }
+  assert.throws(() => wasm.backupStopV2([], at, [1], listing), /invalid acknowledged ids/);
+  assert.throws(() => wasm.backupStopV2([], 1.5, [], listing), /lastPassAtMs/);
+  assert.throws(() => wasm.backupNoticesSince(1.5), /lastPassAtMs/);
+  assert.throws(() => wasm.backupStopV2([{ ...erased('n1'), created_at_ms: 'today' }], at, [], listing), /created_at_ms/);
+  // A failed fetch never reads the notices.
+  assert.deepEqual(wasm.backupPassGateV2(false, undefined, 0, undefined, listing), { outcome: 'check_failed' });
+});

@@ -9,11 +9,13 @@
 //! role the server adds later must never break an older bundle's listing.
 //! Why a backup stops and its words (spec Amendment 12, LD-0121): the web
 //! shows both notification types with core's words; a notification row is
-//! read leniently, like the server's own new types.
+//! read leniently, like the server's own new types. The `V2` functions read
+//! with the overlap margin and acknowledged notice ids (Amendment 12d).
 use beebeeb_core::backup::{
-    BackupPassGate, BackupPosition, MSG_BACK_UP_AGAIN, MSG_BADGE, MSG_STOP_CHECK_FAILED, Mutation, ReceivedNotice,
-    StopFolder, StopListing, StoppedBackup, check_app_mutation, check_drive_mutation, check_root_mutation,
-    first_pass_baseline, is_hidden_backup_item, parse_backup_notice, parse_manifest,
+    BackupPassGate, BackupPassGateV2, BackupPosition, ListedNotice, MSG_BACK_UP_AGAIN, MSG_BADGE,
+    MSG_STOP_CHECK_FAILED, Mutation, NOTICE_OVERLAP_MS, ReceivedNotice, StopFolder, StopListing, StopOutcome,
+    StoppedBackup, check_app_mutation, check_drive_mutation, check_root_mutation, first_pass_baseline,
+    is_hidden_backup_item, notices_since, parse_backup_notice, parse_manifest,
 };
 use beebeeb_types::backup::{BackupStopReason, Category, SystemRole};
 use serde::{Deserialize, Serialize};
@@ -227,6 +229,10 @@ fn parse_stop_reason(reason: &str) -> Result<BackupStopReason, JsError> {
 /// `{device_folder_id, device_folder_live, folders: [{category,
 /// category_folder_id, category_folder_live}]}`. An unknown category key or an
 /// id that is not a UUID throws.
+///
+/// Superseded by `backupStopV2` (spec Amendment 12d): this strict filter
+/// misses a notice whose server transaction was still open when the previous
+/// pass read the notices. Kept unchanged for v0.2.3 callers.
 #[wasm_bindgen(js_name = backupStop)]
 pub fn backup_stop(notices: JsValue, last_pass_at_ms: f64, listing: JsValue) -> Result<JsValue, JsError> {
     let last_pass_at_ms = last_pass(last_pass_at_ms)?;
@@ -360,6 +366,9 @@ pub fn backup_first_pass_baseline(
 /// upload nothing, turn nothing off, show `backupCheckFailedWords()`, retry at
 /// the next scheduled pass, and keep `lastPassAtMs` where it was. `notices`
 /// is not read when the fetch failed.
+///
+/// Superseded by `backupPassGateV2` (spec Amendment 12d), for the reason
+/// given on `backupStop`. Kept unchanged for v0.2.3 callers.
 #[wasm_bindgen(js_name = backupPassGate)]
 pub fn backup_pass_gate(
     notices_fetch_ok: bool,
@@ -389,4 +398,136 @@ pub fn backup_pass_gate(
 #[wasm_bindgen(js_name = backupCheckFailedWords)]
 pub fn backup_check_failed_words() -> String {
     MSG_STOP_CHECK_FAILED.to_string()
+}
+
+// ── The overlap margin and acknowledged notice ids (spec Amendment 12d) ───
+
+#[derive(Serialize)]
+struct StopOutcomeJs {
+    stopped: Vec<StoppedJs>,
+    acknowledged: Vec<String>,
+}
+
+/// The outcome of `backupPassGateV2`.
+#[derive(Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+enum PassGateV2Js {
+    Run {
+        stopped: Vec<StoppedJs>,
+        acknowledged: Vec<String>,
+    },
+    CheckFailed,
+}
+
+/// The backup notices among `rows` with their ids, read as `backupStop` reads
+/// them; a row's `id` that is missing, `null`, empty or not a string is no id
+/// (that notice is never acknowledged, so it counts on every pass whose
+/// window holds it).
+fn listed_notices_from_js(notices: JsValue) -> Result<Vec<ListedNotice>, JsError> {
+    let rows: Vec<serde_json::Value> =
+        serde_wasm_bindgen::from_value(notices).map_err(|e| JsError::new(&format!("invalid notices: {e}")))?;
+    let mut listed = Vec::new();
+    for row in &rows {
+        let Some(kind) = row.get("type").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(notice) = parse_backup_notice(kind, row.get("data").unwrap_or(&serde_json::Value::Null)) else {
+            continue;
+        };
+        let created_at_ms = row
+            .get("created_at_ms")
+            .and_then(whole_ms)
+            .ok_or_else(|| JsError::new("a backup notice row has no whole created_at_ms"))?;
+        let id = row.get("id").and_then(serde_json::Value::as_str).map(str::to_string);
+        listed.push(ListedNotice {
+            id,
+            notice,
+            created_at_ms,
+        });
+    }
+    Ok(listed)
+}
+
+/// `acknowledged`: an array of strings; `undefined` or `null` is none.
+fn acknowledged_from_js(acknowledged: JsValue) -> Result<Vec<String>, JsError> {
+    let ids: Option<Vec<String>> = serde_wasm_bindgen::from_value(acknowledged)
+        .map_err(|e| JsError::new(&format!("invalid acknowledged ids: {e}")))?;
+    Ok(ids.unwrap_or_default())
+}
+
+/// How far before `lastPassAtMs` a notice still counts, in milliseconds:
+/// 600000 (10 minutes). A notice's `created_at` is the start of the server
+/// transaction that wrote it, not its commit.
+#[wasm_bindgen(js_name = backupNoticeOverlapMs)]
+pub fn backup_notice_overlap_ms() -> f64 {
+    NOTICE_OVERLAP_MS as f64
+}
+
+/// The `since` to send to `GET /api/v1/notifications` (integer milliseconds,
+/// inclusive): `lastPassAtMs` minus the overlap, never below 0. A value that
+/// is not a whole number of milliseconds throws.
+#[wasm_bindgen(js_name = backupNoticesSince)]
+pub fn backup_notices_since(last_pass_at_ms: f64) -> Result<f64, JsError> {
+    Ok(notices_since(last_pass(last_pass_at_ms)?) as f64)
+}
+
+/// Which backups turn off on this pass, and why (spec Amendments 12 and
+/// 12d): `{stopped: [{category, reason}], acknowledged: [id]}`. A notice
+/// counts when its `created_at_ms` is after `lastPassAtMs` minus the overlap
+/// and its `id` is not in `acknowledged` (the ids the previous pass returned;
+/// empty on a first pass). `acknowledged` in the answer replaces the stored
+/// set: store it with the stops and the new `lastPassAtMs`, and keep it when
+/// the person chooses "Back up again". `notices`: the rows (`{id, type, data,
+/// created_at_ms}`) from `backupNoticesSince(lastPassAtMs)` on, read as for
+/// `backupStop`; `listing` as for `backupStop`.
+#[wasm_bindgen(js_name = backupStopV2)]
+pub fn backup_stop_v2(
+    notices: JsValue,
+    last_pass_at_ms: f64,
+    acknowledged: JsValue,
+    listing: JsValue,
+) -> Result<JsValue, JsError> {
+    let last_pass_at_ms = last_pass(last_pass_at_ms)?;
+    let notices = listed_notices_from_js(notices)?;
+    let acknowledged = acknowledged_from_js(acknowledged)?;
+    let listing = listing_from_js(listing)?;
+    let StopOutcome { stopped, acknowledged } =
+        beebeeb_core::backup::backup_stop_v2(&notices, last_pass_at_ms, &acknowledged, &listing);
+    to_js(&StopOutcomeJs {
+        stopped: stopped_js(stopped),
+        acknowledged,
+    })
+}
+
+/// What one pass does before it uploads anything (spec Amendments 12, 12c,
+/// 12d): `{outcome: "run", stopped, acknowledged}` when the notices were read
+/// (as `backupStopV2`), or `{outcome: "check_failed"}` when `noticesFetchOk`
+/// is false: upload nothing, turn nothing off, show `backupCheckFailedWords()`,
+/// retry at the next scheduled pass, and keep both `lastPassAtMs` and the
+/// acknowledged set. `notices` is not read when the fetch failed.
+#[wasm_bindgen(js_name = backupPassGateV2)]
+pub fn backup_pass_gate_v2(
+    notices_fetch_ok: bool,
+    notices: JsValue,
+    last_pass_at_ms: f64,
+    acknowledged: JsValue,
+    listing: JsValue,
+) -> Result<JsValue, JsError> {
+    let last_pass_at_ms = last_pass(last_pass_at_ms)?;
+    let listing = listing_from_js(listing)?;
+    let acknowledged = acknowledged_from_js(acknowledged)?;
+    let notices = if notices_fetch_ok {
+        Some(listed_notices_from_js(notices)?)
+    } else {
+        None
+    };
+    to_js(
+        &match beebeeb_core::backup::backup_pass_gate_v2(notices.as_deref(), last_pass_at_ms, &acknowledged, &listing) {
+            BackupPassGateV2::Run { stopped, acknowledged } => PassGateV2Js::Run {
+                stopped: stopped_js(stopped),
+                acknowledged,
+            },
+            BackupPassGateV2::CheckFailed => PassGateV2Js::CheckFailed,
+        },
+    )
 }
