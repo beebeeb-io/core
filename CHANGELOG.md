@@ -70,6 +70,14 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   `BackupConfigurationData` adds `setup_at_ms` and `legacy_last_backup_ms` (server clock) for the first
   pass's baseline. `BackupCopyStateData::Gone` is split into `Deleted` (removed on the server, never
   uploaded again by the pass) and `UploadFailed` (retried at most three times).
+- `AssetData` and `BackupManifestRecordData` add `modified_ms` and `size_bytes` (default `None`), and
+  `BackupCopyStateData` adds `RemovedElsewhere`. Report when each asset last changed on the device and
+  its size, and store both with each record: a backup copy that was removed (trashed or deleted here,
+  on the web or on another device) is uploaded again only once its asset changes (backup spec §4.2
+  rule 11); with neither known it never comes back by itself. "Back up again" forgets every record.
+  After a stop because the backup's folder was deleted (`unknown`, `backup_deleted`), `configure` a
+  live folder first (`find_device_folder`; a folder restored from Trash is found again), then call
+  `back_up_again`: with the deleted folder still configured, the next pass stops again.
 - Device link (UniFFI): `approve_device_link(id, scanned_qr, typed_code)` takes the raw text the camera
   scanned; `DeviceLinkQrData` and `DeviceLinkHandle.qr()` are removed (render `qr_payload()`). The QR
   now carries the device name: show `scanned_device_link_name(scanned_qr)` while the person confirms,
@@ -125,6 +133,9 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   unchanged and is no longer a drive name; the backup merge plan still uses it.
 - `beebeeb-sync::SyncEngine::sync_once` now fails with `RemoteListingUnavailable`. Do not ship the
   legacy desktop prototype; build product sync on `beebeeb_core::sync`.
+- `SyncEvent::FileMoved` adds `name`, the item's name after the move (a client that resolved a name
+  clash in the destination may have given it a new one). `apply_restore`, like `apply_move`, applies a
+  client-added `new_name`.
 
 ### Rust cryptography and authentication callers
 
@@ -339,6 +350,21 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   the same release path as `read_range`.
 - A UniFFI chunk decryptor, chunk encryptor or key handle whose lock was poisoned by a panic answers
   `CryptoError::InvalidInput` and drops its state, instead of panicking across FFI on every call.
+- The native backup no longer uploads again a photo whose copy was trashed or deleted on the web or on
+  another device: the server's check counts only live copies, so a copy this device had backed up that
+  it asks for again becomes `RemovedElsewhere`, and only a new modification time or size uploads it
+  again. A removed copy is measured against the asset as it is after the removal, so an edit made
+  before it does not bring the copy back.
+- A backup stop is recorded before its uploads are cancelled, and every pass while the backup is off
+  cancels what is left and forgets every queued record, so a stop cut off part-way no longer leaves
+  photos queued forever. One cancel that fails no longer stops the others.
+- Backup passes run one at a time, and a pass writes the gate's state as it is when it writes, so a
+  stop is never written over. The gate also runs while 64 backup uploads are active, so a stop cancels
+  them. A configured backup folder the server no longer has (404 or 403) reaches the gate and stops the
+  backup with its reason, instead of failing every pass before it.
+- Sync: a remote restore is checked for a name clash in the item's folder, on the in-memory and the
+  store-backed engine alike. Trashed items hold no name, so an item could take a trashed item's name,
+  and restoring the trashed one left two items with that name in one folder.
 - Durable uploads remove safe orphan ciphertext, count invalid saved state as a terminal attempt, keep
   partial staging resumable, and can finish after the platform removes the plaintext export once all
   chunks and the staged hash are committed.
