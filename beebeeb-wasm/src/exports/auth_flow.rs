@@ -11,7 +11,7 @@ use wasm_bindgen::prelude::*;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RequestJs {
+pub(crate) struct RequestJs {
     method: &'static str,
     path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -37,7 +37,7 @@ pub(crate) fn to_js<T: Serialize>(v: &T) -> Result<JsValue, JsError> {
         .map_err(|_| JsError::new("protocol"))
 }
 
-fn request_js(req: &HttpRequest) -> RequestJs {
+pub(crate) fn request_js(req: &HttpRequest) -> RequestJs {
     RequestJs {
         method: req.method.as_str(),
         path: req.path.clone(),

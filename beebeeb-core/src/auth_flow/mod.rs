@@ -49,6 +49,10 @@ pub(crate) fn b64_decode(s: &str) -> Result<Vec<u8>, AuthFlowError> {
 pub enum Method {
     Get,
     Post,
+    /// Only the share flows use it (revoking a link or an invite).
+    Delete,
+    /// Only the folder share flow uses it (registering a folder's custody record).
+    Put,
 }
 
 impl Method {
@@ -56,6 +60,8 @@ impl Method {
         match self {
             Self::Get => "GET",
             Self::Post => "POST",
+            Self::Delete => "DELETE",
+            Self::Put => "PUT",
         }
     }
 }
@@ -85,6 +91,26 @@ impl HttpRequest {
         Self {
             method: Method::Post,
             path: path.to_owned(),
+            body: Some(body),
+            auth,
+            confirm_token: None,
+        }
+    }
+
+    pub(crate) fn delete(path: String, auth: RequestAuth) -> Self {
+        Self {
+            method: Method::Delete,
+            path,
+            body: None,
+            auth,
+            confirm_token: None,
+        }
+    }
+
+    pub(crate) fn put(path: String, body: serde_json::Value, auth: RequestAuth) -> Self {
+        Self {
+            method: Method::Put,
+            path,
             body: Some(body),
             auth,
             confirm_token: None,
@@ -141,7 +167,8 @@ impl HttpResponse {
         }
     }
 
-    pub(crate) fn ok(&self) -> bool {
+    /// A 2xx status.
+    pub fn ok(&self) -> bool {
         (200..300).contains(&self.status)
     }
 

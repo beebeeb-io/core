@@ -41,6 +41,7 @@ pub mod request_content;
 pub mod retry;
 pub mod search_index;
 pub mod search_sync;
+pub mod share_flow;
 pub mod share_link;
 pub mod share_token;
 pub mod signup_flow;

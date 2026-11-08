@@ -1,3 +1,50 @@
+# beebeeb-wasm / uniffi exports — branch `feat/v2-share-flows`
+
+Desktop v2 B05b (Guus: every crypto and account flow lives in core). Person shares of a file and double-encrypted
+file links move into core as `beebeeb_core::share_flow`, byte-identical to web (web's `share-wrap-kat` vectors and
+the `x25519_share_key_exchange` vector are pinned in `share_flow::tests`). Measured against `main` at `e3eeb8b`.
+Additive only, except `auth_flow::Method` gains `Delete` (a host that matches it exhaustively adds one arm).
+
+## WASM
+
+Counted from source (unique `js_name = …` under `beebeeb-wasm/src`): base 187, head 193.
+
+- **removed: 0**
+- **added: 6**
+
+| Name | What |
+| --- | --- |
+| `shareWrapKey(wrapKey, key)` / `shareUnwrapKey(wrapKey, wrapped)` | Web's `wrapKeyForShare` / `unwrapKeyFromShare`: `nonce(12) \|\| ct`, no AAD. |
+| `ShareMemberInvite(itemId, isFolder, email, masterKey, fileKey)` | `start()`, `onResponse(...)` → `{kind: "send"}` / `"shared"` / `"invited"` / `"awaiting_approval"`. A folder throws `invalid_input` (use `ShareFolderInvite`). |
+| `ShareFolderInvite(folderId, email, sharedFoldersWrite, custodySeen, custodyUnreadable, masterKey)` (B05c) | `start()` / `onResponse(...)` → `{kind: "send", request, markCustodySeen}` (persist the id BEFORE sending) / `"shared"` / `"invited"` / `"awaiting_approval"`. Throws `folder_key_unverified`, `folder_keys_unavailable`, `folder_needs_upgrade`, `folder_too_large`. |
+| `ShareFolderInvite.link(folderId, appUrl, accessLevel, label?, expiresInHours?, capBytes?, maxOpens?, passphrase?, custodySeen, custodyUnreadable, masterKey)` (B05c) | Web's `createFolderLinkWithKeys`: same steps, ends `{kind: "link_created", shareId, link, display, accessLevel, passphraseProtected, keyVersion}`. |
+| `ShareCreateRequest(appUrl, title, description?, targetFolderId?, maxFiles?, maxTotalBytes?, expiresInSecs?, masterKey)` (B05c) | A file request (web `pages/file-request.tsx`): `start()`, `onResponse(...)` → `{id, link, display}`; `link` is `/r/{token}#{b64url(R_pub)}`. |
+| `shareRebuildFolderLink(appUrl, masterKey, shareId, ownerWrappedKey?, ownerWrappedToken?, wrappedFolderKey?, passphraseProtected)` (B05c) | Web `rebuildFolderLinkUrl`: the owner's folder link, or `undefined`. UniFFI: `share_rebuild_folder_link`. |
+| `fileRequestRebuildLink(appUrl, masterKey, token?, wrappedPrivateKey?, wrapNonce?)` (B05c) | Web `handleCopyExisting`: the request's link again, or `undefined`. |
+| `shareCreateBundle(appUrl, fileIds, positions, fileKeys, masterKey, expiresInHours?, maxOpens?, passphrase?)` (B05c) | A `ShareCreateLink` over an ordered set of files (web's bundle branch); `fileKeys` is the 32-byte keys concatenated. |
+| `ShareCreateLink(appUrl, fileId, masterKey, fileKey, expiresInHours?, maxOpens?, passphrase?)` | `start()`, `onResponse(...)` → `{kind: "send"}` (one retry on an untyped 409) / `{kind: "created", shareId, link, display}`. |
+| `shareRebuildLink(appUrl, masterKey, ownerWrappedKey?, ownerWrappedToken?)` | Web's `buildShareLink`: the owner's link, or `undefined`. |
+| `shareOpenMemberFileKey(masterKey, ownerPublicKey, fileId, sealed)` | The recipient side of a person share. |
+
+## UniFFI
+
+- **removed: 0**
+- **added:** objects `MemberInviteFlow`, `CreateLinkFlow`; enums `InviteStepFfi`, `LinkStepFfi`; error
+  `ShareFlowFfiError::Flow { code }`; functions `share_approve_file_invite_request`, `share_open_member_file_key`,
+  `share_rebuild_link`, `share_open_link_file_key`, `share_revoke_request`. Requests reuse `AuthHttpRequest`.
+- **added (B05c):** object `FolderShareFlow` (constructor `new` = a folder invite, `link` = a folder link), enum
+  `FolderStepFfi` (`Send` carries `mark_custody_seen`; `LinkCreated` carries `link` with `#key=` and `display`).
+- **added (B05c):** object `CreateRequestFlow`, record `CreatedRequestFfi`, functions `file_request_rebuild_link`,
+  `file_request_close_request`; `CreateLinkFlow.bundle` constructor with record `BundleItemFfi`.
+
+The committed Kotlin bindings under `bindings/` are not regenerated here.
+
+## Rust
+
+New module `beebeeb_core::share_flow` (`member`, `link`; B05c: `folder` with `folder::link`, `folder_keys`, `request`, `bundle`); `auth_flow::Method::Delete`
+and (B05c) `Method::Put`, with their `account_flows` arms. `ShareFlowError::FolderInviteUnsupported` is gone (B05c):
+four folder codes replace it.
+
 # beebeeb-wasm / uniffi exports — branch `feat/v2-auth-wiring`
 
 Desktop v2 B10b: server PR #422's routes wired into `account_flows` and `auth_flow`, and the bindings for B11's
