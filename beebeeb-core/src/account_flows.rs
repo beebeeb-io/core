@@ -163,10 +163,19 @@ impl std::fmt::Debug for ApiRequest {
 }
 
 /// The server's reply, as the host received it.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ApiResponse {
     pub status: u16,
     pub body: Value,
+}
+
+impl std::fmt::Debug for ApiResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Bodies can carry session tokens, TOTP secrets, backup codes and mailed tokens: status only.
+        f.debug_struct("ApiResponse")
+            .field("status", &self.status)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ApiResponse {
@@ -333,7 +342,7 @@ impl std::fmt::Debug for AccountOutcome {
         match self {
             Self::Done => f.write_str("Done"),
             Self::PasswordChanged { .. } => f.write_str("PasswordChanged { .. }"),
-            Self::EmailChanged { email } => write!(f, "EmailChanged {{ email: {email} }}"),
+            Self::EmailChanged { .. } => f.write_str("EmailChanged { email: <redacted> }"),
             Self::TotpEnrollment(_) => f.write_str("TotpEnrollment { .. }"),
             Self::BackupCodes(c) => write!(f, "BackupCodes({} codes)", c.len()),
             Self::Revoked { count } => write!(f, "Revoked {{ count: {count} }}"),

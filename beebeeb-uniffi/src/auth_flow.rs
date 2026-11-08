@@ -56,7 +56,7 @@ pub(crate) fn out(req: HttpRequest) -> AuthHttpRequest {
         path: req.path.clone(),
         body_json: req.body.as_ref().map(|b| b.to_string()),
         needs_session: req.auth == RequestAuth::Session,
-        confirm_token: req.confirm_token.as_ref().map(|t| t.as_str().to_owned()),
+        confirm_token: req.confirm_token_header().map(str::to_owned),
     }
 }
 
@@ -165,7 +165,8 @@ pub struct StepUpFlow {
 
 #[uniffi::export]
 impl StepUpFlow {
-    /// `purpose` empty: the generic grant; `cli_code` set: a device approval for that code.
+    /// `purpose` empty: the generic grant; `cli_code` set: a device approval for that code. A
+    /// `cli_code` with any purpose other than `cli_device_approval` is refused (`invalid_input`).
     #[uniffi::constructor]
     pub fn new(
         password: String,
@@ -173,11 +174,7 @@ impl StepUpFlow {
         cli_code: Option<String>,
     ) -> Result<Arc<Self>, AuthFlowFfiError> {
         let password = zeroize::Zeroizing::new(password);
-        let purpose = match (purpose, cli_code) {
-            (_, Some(code)) => af::step_up::StepUpPurpose::DeviceApproval { code },
-            (Some(p), None) if !p.is_empty() => af::step_up::StepUpPurpose::Named(p),
-            _ => af::step_up::StepUpPurpose::Generic,
-        };
+        let purpose = af::step_up::StepUpPurpose::from_parts(purpose, cli_code)?;
         let (flow, first) = af::step_up::StepUp::start(password.as_bytes(), purpose)?;
         Ok(Arc::new(Self {
             flow: Mutex::new(Some(flow)),
@@ -218,13 +215,7 @@ impl StepUpFlow {
             .ok_or_else(wrong_state)?;
         let body = serde_json::from_str(&body_json)
             .map_err(|_| AuthFlowFfiError::from(AuthFlowError::InvalidInput("body")))?;
-        let req = HttpRequest {
-            method: af::Method::Post,
-            path,
-            body: Some(body),
-            auth: RequestAuth::Session,
-            confirm_token: None,
-        };
+        let req = HttpRequest::session_post(path, body);
         Ok(out(token.attach(req)))
     }
 }

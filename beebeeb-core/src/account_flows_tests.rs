@@ -637,3 +637,32 @@ fn host_outcome_carries_the_delete_times() {
         ("deletion_scheduled", Some("s"), Some("c"))
     );
 }
+
+#[test]
+fn response_and_outcome_debug_never_print_a_secret() {
+    const PLANTED: &str = "planted-secret-7f3a";
+    let body = json!({
+        "session_token": PLANTED, "secret": PLANTED,
+        "otpauth_uri": format!("otpauth://totp/x?secret={PLANTED}"),
+        "backup_codes": [PLANTED], "token": PLANTED,
+    });
+    let shown = format!("{:?}", ApiResponse::new(200, body));
+    assert!(!shown.contains(PLANTED), "ApiResponse Debug printed a planted secret");
+    assert!(shown.contains("200"), "the status is still shown");
+
+    let email = "anna.secret-box@northwind.studio";
+    let shown = format!(
+        "{:?}",
+        AccountOutcome::EmailChanged {
+            email: email.to_owned()
+        }
+    );
+    assert!(
+        !shown.contains("secret-box"),
+        "AccountOutcome Debug printed the email's local part"
+    );
+    assert!(
+        !shown.contains("northwind"),
+        "AccountOutcome Debug printed the email's domain"
+    );
+}

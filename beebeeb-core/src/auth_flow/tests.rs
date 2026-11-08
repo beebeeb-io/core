@@ -380,3 +380,49 @@ fn deny_posts_the_code_and_maps_not_found() {
         Some("request_not_found")
     );
 }
+
+#[test]
+fn the_approval_payload_is_serialized_into_one_presized_buffer() {
+    let token = "tok-\"quoted\"-\u{1}-value";
+    let master = [7u8; 32];
+    let buf = device::approval_plaintext(token, &master);
+    let initial_cap = 64 + 6 * token.len() + b64().encode(master).len();
+    // The buffer was never reallocated, so no freed copy of the payload exists.
+    assert_eq!(buf.capacity(), initial_cap, "the payload buffer reallocated");
+    let v: Value = serde_json::from_slice(&buf).unwrap();
+    assert!(v["session_token"].as_str() == Some(token), "token round-trips");
+    assert!(v["master_key_b64"].as_str() == Some(b64().encode(master).as_str()));
+    assert_eq!(v.as_object().unwrap().len(), 2);
+}
+
+#[test]
+fn a_cli_code_never_silently_replaces_another_purpose() {
+    use super::step_up::StepUpPurpose as P;
+    let s = |v: &str| Some(v.to_owned());
+    assert_eq!(P::from_parts(None, None), Ok(P::Generic));
+    assert_eq!(P::from_parts(s(""), None), Ok(P::Generic));
+    assert_eq!(
+        P::from_parts(s("password_step_up"), None),
+        Ok(P::Named("password_step_up".into()))
+    );
+    assert_eq!(
+        P::from_parts(None, s("K7QM-4WTD")),
+        Ok(P::DeviceApproval {
+            code: "K7QM-4WTD".into()
+        })
+    );
+    assert_eq!(
+        P::from_parts(s("cli_device_approval"), s("K7QM-4WTD")),
+        Ok(P::DeviceApproval {
+            code: "K7QM-4WTD".into()
+        })
+    );
+    assert_eq!(
+        P::from_parts(s("password_step_up"), s("K7QM-4WTD")).unwrap_err().code(),
+        "invalid_input"
+    );
+    assert_eq!(
+        P::from_parts(s("cli_device_approval"), None).unwrap_err().code(),
+        "invalid_input"
+    );
+}

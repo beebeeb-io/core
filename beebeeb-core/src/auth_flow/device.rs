@@ -36,6 +36,29 @@ pub const CLAIM_PATH: &str = "/api/v1/auth/cli-session";
 pub const RELAY_PATH: &str = "/api/v1/auth/cli-authorize";
 pub const DENY_PATH: &str = "/api/v1/auth/cli-deny";
 
+/// The approval payload `{session_token, master_key_b64}`, borrowed fields only.
+#[derive(serde::Serialize)]
+struct ApprovalPayload<'a> {
+    session_token: &'a str,
+    master_key_b64: &'a str,
+}
+
+/// Serializes the approval payload straight into one pre-sized wiped buffer: no intermediate
+/// `serde_json::Value` or `String` holds the session token or the encoded master key, and the
+/// buffer never reallocates (a reallocation would free an unwiped copy).
+pub(crate) fn approval_plaintext(session_token: &str, master_key: &[u8; 32]) -> Zeroizing<Vec<u8>> {
+    let master_b64 = Zeroizing::new(b64().encode(master_key));
+    // JSON escaping can at most sextuple a byte (`\u00XX`); keys and punctuation are fixed.
+    let cap = 64 + 6 * session_token.len() + master_b64.len();
+    let mut buf = Zeroizing::new(Vec::with_capacity(cap));
+    let payload = ApprovalPayload {
+        session_token,
+        master_key_b64: master_b64.as_str(),
+    };
+    serde_json::to_writer(&mut *buf, &payload).expect("serializing borrowed strs cannot fail");
+    buf
+}
+
 // ── The requesting side ──────────────────────────────────────────────────────
 
 /// What the requesting device reports about itself. The approver sees these labelled
@@ -381,12 +404,8 @@ impl ApproveRun {
                     return Err(AuthFlowError::from_status(&resp));
                 }
                 let session_token = Zeroizing::new(resp.str_field("session_token")?.to_owned());
-                let master_b64 = Zeroizing::new(b64().encode(*self.master_key));
-                let plain = Zeroizing::new(
-                    json!({ "session_token": session_token.as_str(), "master_key_b64": master_b64.as_str() })
-                        .to_string(),
-                );
-                let sealed = encrypt_for_requester(&self.requester_public, plain.as_bytes())
+                let plain = approval_plaintext(&session_token, &self.master_key);
+                let sealed = encrypt_for_requester(&self.requester_public, &plain)
                     .map_err(|_| AuthFlowError::Protocol("requester key"))?;
                 self.master_key.zeroize();
                 self.stage = ApproveStage::Relay;
