@@ -109,6 +109,11 @@ impl AccountFlowJs {
         self.begin(Ok(AccountFlow::set_activity_logging(on)))
     }
 
+    #[wasm_bindgen(js_name = verifyPassword)]
+    pub fn verify_password(&mut self, password: String) -> Result<JsValue, JsValue> {
+        self.begin(AccountFlow::verify_password(&password))
+    }
+
     #[wasm_bindgen(js_name = deleteAccount)]
     pub fn delete_account(&mut self, password: String) -> Result<JsValue, JsValue> {
         self.begin(AccountFlow::delete_account(&password))

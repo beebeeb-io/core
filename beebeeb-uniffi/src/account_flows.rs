@@ -161,6 +161,10 @@ impl AccountFlowHandle {
         self.begin(Ok(AccountFlow::set_activity_logging(on)))
     }
 
+    pub fn verify_password(&self, password: String) -> Result<AccountFlowStep, AccountFlowFfiError> {
+        self.begin(AccountFlow::verify_password(&password))
+    }
+
     pub fn delete_account(&self, password: String) -> Result<AccountFlowStep, AccountFlowFfiError> {
         self.begin(AccountFlow::delete_account(&password))
     }

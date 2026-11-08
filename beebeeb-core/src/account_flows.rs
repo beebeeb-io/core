@@ -408,6 +408,9 @@ enum Kind {
     DeleteAccount {
         password: Zeroizing<Vec<u8>>,
     },
+    VerifyPassword {
+        password: Zeroizing<Vec<u8>>,
+    },
     /// One request; `parse` turns the 2xx reply into the outcome, `map_err` maps a
     /// non-2xx reply to an error.
     Single {
@@ -603,6 +606,17 @@ impl AccountFlow {
         )
     }
 
+    /// Check the password with a step-up and drop the token (delete step 1, DW-A58):
+    /// nothing is changed or scheduled. Counts toward the sign-in lockout server side.
+    pub fn verify_password(password: &str) -> Result<Self, AccountFlowError> {
+        if password.is_empty() {
+            return Err(AccountFlowError::WrongPassword);
+        }
+        Ok(Self::with(Kind::VerifyPassword {
+            password: Zeroizing::new(password.as_bytes().to_vec()),
+        }))
+    }
+
     /// Delete the account: a step-up with the password, then `DELETE /auth/account`.
     pub fn delete_account(password: &str) -> Result<Self, AccountFlowError> {
         if password.is_empty() {
@@ -635,7 +649,9 @@ impl AccountFlow {
                 self.phase = Phase::StepUpStart(1);
                 self.step_up.start(current)?
             }
-            Kind::ChangeEmail { password, .. } | Kind::DeleteAccount { password } => {
+            Kind::ChangeEmail { password, .. }
+            | Kind::DeleteAccount { password }
+            | Kind::VerifyPassword { password } => {
                 self.phase = Phase::StepUpStart(1);
                 self.step_up.start(password)?
             }
@@ -675,7 +691,9 @@ impl AccountFlow {
     fn password_for_step_up(&self, n: u8) -> Option<&[u8]> {
         match &self.kind {
             Kind::ChangePassword { current, .. } => Some(current),
-            Kind::ChangeEmail { password, .. } | Kind::DeleteAccount { password } => Some(password),
+            Kind::ChangeEmail { password, .. }
+            | Kind::DeleteAccount { password }
+            | Kind::VerifyPassword { password } => Some(password),
             Kind::TotpSetup { password: Some(p), .. } => Some(p),
             _ => None,
         }
@@ -769,6 +787,11 @@ impl AccountFlow {
                     )
                     .gated(token),
                 ))
+            }
+            Kind::VerifyPassword { .. } => {
+                drop(token);
+                self.phase = Phase::Finished;
+                Ok(Step::Done(AccountOutcome::Done))
             }
             Kind::TotpSetup { .. } => {
                 self.phase = Phase::Final;
@@ -904,6 +927,7 @@ impl AccountFlow {
                     shred_after: resp.str_field("shred_after")?.to_string(),
                 })
             }
+            Kind::VerifyPassword { .. } => Err(AccountFlowError::OutOfOrder),
             Kind::Single { parse, map_err, .. } => {
                 if !resp.ok() {
                     return Err(map_err(resp));

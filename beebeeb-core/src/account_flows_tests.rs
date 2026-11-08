@@ -447,3 +447,21 @@ fn host_session_totp_round_trip_keeps_codes_until_confirmed() {
     assert_eq!(done.outcome.unwrap().backup_codes.len(), 8);
     assert!(host.totp_confirm("123456").is_err(), "the enrollment is used once");
 }
+
+#[test]
+fn verify_password_only_steps_up() {
+    let mut server = MockServer::new(OLD.as_bytes());
+    assert!(matches!(
+        run(AccountFlow::verify_password(OLD).unwrap(), &mut server).unwrap(),
+        AccountOutcome::Done
+    ));
+    assert_eq!(
+        run(AccountFlow::verify_password("nope nope").unwrap(), &mut server).unwrap_err(),
+        AccountFlowError::WrongPassword
+    );
+    assert!(
+        server.log.iter().all(|l| l.contains("confirm-opaque")),
+        "{:?}",
+        server.log
+    );
+}
