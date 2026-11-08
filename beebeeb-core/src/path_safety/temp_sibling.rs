@@ -76,7 +76,8 @@ impl TempSibling {
     /// docs). On an error the temp is removed and nothing else changes.
     pub fn publish(mut self) -> io::Result<()> {
         match walk_last(&self.output)? {
-            Walk::Alias(conflict) => return Err(conflict_error(conflict)),
+            // RED MUTANT: no re-check before the publish.
+            Walk::Alias(_) => fs::rename(&self.temp, &self.output)?,
             Walk::Missing => publish_new(&self.temp, &self.output)?,
             Walk::Own | Walk::Unchecked => fs::rename(&self.temp, &self.output)?,
         }
@@ -117,7 +118,7 @@ fn appeared(output: &Path) -> io::Error {
 /// Publish `temp` as `output`, where the check found nothing: never replaces
 /// an entry that appeared at `output` since, whatever name reaches it.
 fn publish_new(temp: &Path, output: &Path) -> io::Result<()> {
-    match fs::hard_link(temp, output) {
+    match fs::rename(temp, output) { // RED MUTANT: a replacing publish
         Ok(()) => {
             // `output` is published. A temp that cannot be removed stays as a
             // second name of the same file; the publish still succeeded.
@@ -137,7 +138,7 @@ fn publish_new(temp: &Path, output: &Path) -> io::Result<()> {
 /// empty file that create just made. Between the two steps `output` exists
 /// and is empty; the rename is a single step and replaces only that file.
 fn publish_by_exclusive_create(temp: &Path, output: &Path) -> io::Result<()> {
-    match OpenOptions::new().write(true).create_new(true).open(output) {
+    match Ok::<(), io::Error>(()) { // RED MUTANT: no exclusive claim
         Ok(_claimed) => {}
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => return Err(appeared(output)),
         Err(error) => return Err(error),
