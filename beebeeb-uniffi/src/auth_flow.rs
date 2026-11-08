@@ -50,7 +50,7 @@ fn wrong_state() -> AuthFlowFfiError {
     AuthFlowError::WrongState.into()
 }
 
-fn out(req: HttpRequest) -> AuthHttpRequest {
+pub(crate) fn out(req: HttpRequest) -> AuthHttpRequest {
     AuthHttpRequest {
         method: req.method.as_str().to_owned(),
         path: req.path.clone(),
@@ -60,7 +60,7 @@ fn out(req: HttpRequest) -> AuthHttpRequest {
     }
 }
 
-fn into(resp: AuthHttpResponse) -> HttpResponse {
+pub(crate) fn into(resp: AuthHttpResponse) -> HttpResponse {
     HttpResponse::from_text(resp.status, &resp.body_json, resp.retry_after_secs)
 }
 
@@ -313,6 +313,7 @@ enum ApprovalState {
     Lookup(af::device::ApprovalLookup),
     Pending(af::device::PendingApproval),
     Running(af::device::ApproveRun),
+    Denying(af::device::Denial),
     Done,
 }
 
@@ -386,6 +387,25 @@ impl ApprovalFlow {
         let (run, req) = pending.approve(&typed_code, password.as_bytes(), key)?;
         *guard = ApprovalState::Running(run);
         Ok(out(req))
+    }
+
+    /// Deny the request shown for review (DW-A09); send it, then `on_deny_response`.
+    pub fn deny(&self) -> Result<AuthHttpRequest, AuthFlowFfiError> {
+        let mut guard = self.state.lock().map_err(|_| wrong_state())?;
+        let ApprovalState::Pending(pending) = std::mem::replace(&mut *guard, ApprovalState::Done) else {
+            return Err(wrong_state());
+        };
+        let (denial, req) = pending.deny();
+        *guard = ApprovalState::Denying(denial);
+        Ok(out(req))
+    }
+
+    pub fn on_deny_response(&self, response: AuthHttpResponse) -> Result<(), AuthFlowFfiError> {
+        let mut guard = self.state.lock().map_err(|_| wrong_state())?;
+        let ApprovalState::Denying(denial) = std::mem::replace(&mut *guard, ApprovalState::Done) else {
+            return Err(wrong_state());
+        };
+        Ok(denial.on_response(into(response))?)
     }
 
     pub fn on_response(&self, response: AuthHttpResponse) -> Result<ApproveStepFfi, AuthFlowFfiError> {

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Desktop v2 B10b: server #422's account routes.** `account_flows`: the three-step delete (`delete_account(password,
+  code?)` → `POST /auth/account/delete-request` with the second factor on a 2FA account; `delete_confirm` and
+  `delete_cancel` with the mailed link's token), `regenerate_backup_codes(code)` (`POST /auth/2fa/backup-codes`; the
+  authenticator stays) and a step-up inside `set_activity_logging(false, password)`. `auth_flow::device`: the deny
+  route (`Approval::deny`, `PendingApproval::deny` → `POST /auth/cli-deny`). UniFFI and WASM exports for
+  `signup_flow` and `recovery_flow`. **Changed signatures:** `delete_account`, `set_activity_logging` (see EXPORTS.md).
 - **`auth_flow`: sign-in, step-up and sign in with another device as plain logic** (desktop v2, B10). Sans-IO state
   machines over the existing API: the OPAQUE password sign-in and second factor (6-digit or 8-digit backup code), the
   OPAQUE step-up that mints a single-use confirm token (purpose-bound for `cli_device_approval`; no plaintext-password

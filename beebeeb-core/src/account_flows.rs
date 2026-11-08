@@ -34,7 +34,10 @@
 //! | change email | 1 | `POST /me/email/{start,finish}` |
 //! | TOTP set-up when already on | 1 (or the current code) | `POST /auth/2fa/setup` |
 //! | TOTP disable | the current code | `POST /auth/2fa/disable` |
-//! | delete account | 1 | `DELETE /auth/account` |
+//! | regenerate backup codes | the current code | `POST /auth/2fa/backup-codes` |
+//! | activity logging off | 1 | `PUT /me/tracking` |
+//! | delete account (request) | 1 (+ code on a 2FA account) | `POST /auth/account/delete-request` |
+//! | delete confirm / cancel | the mailed link token | `POST /auth/account/delete-{confirm,cancel}` |
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -62,11 +65,16 @@ pub const PATH_VERIFY_EMAIL: &str = "/api/v1/auth/verify-email";
 pub const PATH_TOTP_SETUP: &str = "/api/v1/auth/2fa/setup";
 pub const PATH_TOTP_ENABLE: &str = "/api/v1/auth/2fa/enable";
 pub const PATH_TOTP_DISABLE: &str = "/api/v1/auth/2fa/disable";
+pub const PATH_BACKUP_CODES: &str = "/api/v1/auth/2fa/backup-codes";
 pub const PATH_PROFILE: &str = "/api/v1/me/profile";
 pub const PATH_TRACKING: &str = "/api/v1/me/tracking";
 pub const PATH_SESSIONS: &str = "/api/v1/account/sessions";
 pub const PATH_REVOKE_OTHERS: &str = "/api/v1/account/sessions/revoke-all-others";
-pub const PATH_DELETE_ACCOUNT: &str = "/api/v1/auth/account";
+pub const PATH_DELETE_REQUEST: &str = "/api/v1/auth/account/delete-request";
+pub const PATH_DELETE_CONFIRM: &str = "/api/v1/auth/account/delete-confirm";
+pub const PATH_DELETE_CANCEL: &str = "/api/v1/auth/account/delete-cancel";
+/// Longest delete-link token accepted (the server mints a short random token).
+const MAX_LINK_TOKEN_CHARS: usize = 256;
 
 /// HTTP method of an [`ApiRequest`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,6 +242,12 @@ pub enum AccountFlowError {
     Protocol,
     #[error("the flow was resumed out of order")]
     OutOfOrder,
+    #[error("an authenticator or backup code is required")]
+    SecondFactorRequired,
+    #[error("the link is invalid or expired")]
+    LinkInvalid,
+    #[error("the request needs a confirmation")]
+    ConfirmationRequired,
 }
 
 impl AccountFlowError {
@@ -253,6 +267,9 @@ impl AccountFlowError {
             Self::Server(_) => "server_error",
             Self::Protocol => "protocol",
             Self::OutOfOrder => "out_of_order",
+            Self::SecondFactorRequired => "second_factor_required",
+            Self::LinkInvalid => "link_invalid",
+            Self::ConfirmationRequired => "confirmation_required",
         }
     }
 }
@@ -295,8 +312,18 @@ pub enum AccountOutcome {
     BackupCodes(Zeroizing<Vec<String>>),
     /// Sessions revoked (count from the server; 1 for a single revoke).
     Revoked { count: u32 },
-    /// Account deletion scheduled; RFC 3339 time after which data is shredded.
-    DeletionScheduled { shred_after: String },
+    /// Delete step 1 done: a single-use link went to the owner's mailbox. Nothing is
+    /// scheduled yet. RFC 3339 time the link stops working.
+    DeletionRequested { link_expires_at: String },
+    /// Account deletion scheduled (the link was confirmed); RFC 3339 times after which
+    /// data is shredded and until which the same link can cancel it.
+    DeletionScheduled {
+        shred_after: String,
+        cancel_until: Option<String>,
+    },
+    /// Deletion cancelled; `not_restored` names what the cancel does not bring back
+    /// (`sessions`, `share_links`, ...), as the server reports it.
+    DeletionCancelled { not_restored: Vec<String> },
 }
 
 impl std::fmt::Debug for AccountOutcome {
@@ -308,7 +335,11 @@ impl std::fmt::Debug for AccountOutcome {
             Self::TotpEnrollment(_) => f.write_str("TotpEnrollment { .. }"),
             Self::BackupCodes(c) => write!(f, "BackupCodes({} codes)", c.len()),
             Self::Revoked { count } => write!(f, "Revoked {{ count: {count} }}"),
-            Self::DeletionScheduled { shred_after } => write!(f, "DeletionScheduled {{ {shred_after} }}"),
+            Self::DeletionRequested { link_expires_at } => write!(f, "DeletionRequested {{ {link_expires_at} }}"),
+            Self::DeletionScheduled { shred_after, .. } => write!(f, "DeletionScheduled {{ {shred_after} }}"),
+            Self::DeletionCancelled { not_restored } => {
+                write!(f, "DeletionCancelled({} not restored)", not_restored.len())
+            }
         }
     }
 }
@@ -419,6 +450,10 @@ enum Kind {
     },
     DeleteAccount {
         password: Zeroizing<Vec<u8>>,
+        code: Option<Zeroizing<String>>,
+    },
+    TrackingOff {
+        password: Zeroizing<Vec<u8>>,
     },
     VerifyPassword {
         password: Zeroizing<Vec<u8>>,
@@ -477,6 +512,53 @@ fn validate_second_factor(code: &str) -> Result<Zeroizing<String>, AccountFlowEr
 fn code_error(resp: &ApiResponse) -> AccountFlowError {
     match resp.status {
         400 | 401 | 403 | 422 => AccountFlowError::InvalidCode,
+        _ => generic_error(resp),
+    }
+}
+
+/// A delete-link token: what follows `#t=` in the mailed link. The whole link may be
+/// pasted; the token is taken from its fragment.
+fn validate_link_token(input: &str) -> Result<Zeroizing<String>, AccountFlowError> {
+    let input = input.trim();
+    let token = input.rsplit_once("#t=").map_or(input, |(_, t)| t);
+    let token = token.split('&').next().unwrap_or_default();
+    if token.is_empty()
+        || token.len() > MAX_LINK_TOKEN_CHARS
+        || !token.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(AccountFlowError::LinkInvalid);
+    }
+    Ok(Zeroizing::new(token.to_string()))
+}
+
+fn link_error(resp: &ApiResponse) -> AccountFlowError {
+    match resp.status {
+        400 | 404 | 410 => AccountFlowError::LinkInvalid,
+        _ => generic_error(resp),
+    }
+}
+
+fn parse_backup_codes(resp: &ApiResponse) -> Result<Zeroizing<Vec<String>>, AccountFlowError> {
+    let codes: Vec<String> = resp
+        .body
+        .get("backup_codes")
+        .and_then(Value::as_array)
+        .ok_or(AccountFlowError::Protocol)?
+        .iter()
+        .map(|c| c.as_str().map(str::to_string).ok_or(AccountFlowError::Protocol))
+        .collect::<Result<_, _>>()?;
+    if codes.is_empty() {
+        return Err(AccountFlowError::Protocol);
+    }
+    Ok(Zeroizing::new(codes))
+}
+
+/// Delete-request errors: a missing second factor, a wrong code, the mail limit.
+fn delete_request_error(resp: &ApiResponse, sent_code: bool) -> AccountFlowError {
+    let code = resp.error_code().unwrap_or_default();
+    match resp.status {
+        403 if code == "second_factor_required" => AccountFlowError::SecondFactorRequired,
+        400 | 401 | 422 if sent_code && code != "unauthorized" => AccountFlowError::InvalidCode,
         _ => generic_error(resp),
     }
 }
@@ -609,13 +691,34 @@ impl AccountFlow {
         ))
     }
 
-    /// Turn sign-in activity recording on or off (DW-A77 to A79).
-    pub fn set_activity_logging(on: bool) -> Self {
-        Self::single(
-            ApiRequest::new(Method::Put, PATH_TRACKING, Some(json!({ "opted_in": on }))),
-            done,
-            generic_error,
-        )
+    /// Turn sign-in activity recording on or off (DW-A77 to A79). Turning it off is a
+    /// security change: it takes a step-up with the password (server: `X-Confirm-Token`
+    /// on `opted_in: false`). Turning it on needs no password; one passed is ignored.
+    pub fn set_activity_logging(on: bool, password: Option<&str>) -> Result<Self, AccountFlowError> {
+        if on {
+            return Ok(Self::single(
+                ApiRequest::new(Method::Put, PATH_TRACKING, Some(json!({ "opted_in": true }))),
+                done,
+                generic_error,
+            ));
+        }
+        let password = password
+            .filter(|p| !p.is_empty())
+            .ok_or(AccountFlowError::WrongPassword)?;
+        Ok(Self::with(Kind::TrackingOff {
+            password: Zeroizing::new(password.as_bytes().to_vec()),
+        }))
+    }
+
+    /// Make new backup codes (DW-A71): the current authenticator code (6 digits, not a
+    /// backup code) proves the person; the authenticator stays, the old codes stop working.
+    pub fn regenerate_backup_codes(code: &str) -> Result<Self, AccountFlowError> {
+        let code = validate_code(code, 6)?;
+        Ok(Self::single(
+            ApiRequest::new(Method::Post, PATH_BACKUP_CODES, Some(json!({ "code": code.as_str() }))),
+            |r| Ok(AccountOutcome::BackupCodes(parse_backup_codes(r)?)),
+            code_error,
+        ))
     }
 
     /// Check the password with a step-up and drop the token (delete step 1, DW-A58):
@@ -629,14 +732,66 @@ impl AccountFlow {
         }))
     }
 
-    /// Delete the account: a step-up with the password, then `DELETE /auth/account`.
-    pub fn delete_account(password: &str) -> Result<Self, AccountFlowError> {
+    /// Delete step 2 (DW-A59): a step-up with the password, then
+    /// `POST /auth/account/delete-request` with the second factor on a 2FA account (`code`:
+    /// a 6-digit authenticator code or an 8-digit backup code). The server mails a
+    /// single-use link; nothing is scheduled until that link is confirmed.
+    pub fn delete_account(password: &str, code: Option<&str>) -> Result<Self, AccountFlowError> {
         if password.is_empty() {
             return Err(AccountFlowError::WrongPassword);
         }
+        let code = code
+            .filter(|c| !c.trim().is_empty())
+            .map(validate_second_factor)
+            .transpose()?;
         Ok(Self::with(Kind::DeleteAccount {
             password: Zeroizing::new(password.as_bytes().to_vec()),
+            code,
         }))
+    }
+
+    /// Delete step 3: confirm with the mailed link's token. Schedules the deletion.
+    pub fn delete_confirm(link_token: &str) -> Result<Self, AccountFlowError> {
+        let token = validate_link_token(link_token)?;
+        Ok(Self::single(
+            ApiRequest::new(
+                Method::Post,
+                PATH_DELETE_CONFIRM,
+                Some(json!({ "token": token.as_str() })),
+            ),
+            |r| {
+                Ok(AccountOutcome::DeletionScheduled {
+                    shred_after: r.str_field("shred_after")?.to_string(),
+                    cancel_until: r.str_field("cancel_until").ok().map(str::to_string),
+                })
+            },
+            link_error,
+        ))
+    }
+
+    /// Undo a scheduled deletion with the same link token (DW-A81 / A82).
+    pub fn delete_cancel(link_token: &str) -> Result<Self, AccountFlowError> {
+        let token = validate_link_token(link_token)?;
+        Ok(Self::single(
+            ApiRequest::new(
+                Method::Post,
+                PATH_DELETE_CANCEL,
+                Some(json!({ "token": token.as_str() })),
+            ),
+            |r| {
+                if r.body.get("cancelled").and_then(Value::as_bool) != Some(true) {
+                    return Err(AccountFlowError::Protocol);
+                }
+                let not_restored = r
+                    .body
+                    .get("not_restored")
+                    .and_then(Value::as_array)
+                    .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                    .unwrap_or_default();
+                Ok(AccountOutcome::DeletionCancelled { not_restored })
+            },
+            link_error,
+        ))
     }
 
     fn single(
@@ -662,7 +817,8 @@ impl AccountFlow {
                 self.step_up.start(current)?
             }
             Kind::ChangeEmail { password, .. }
-            | Kind::DeleteAccount { password }
+            | Kind::DeleteAccount { password, .. }
+            | Kind::TrackingOff { password }
             | Kind::VerifyPassword { password } => {
                 self.phase = Phase::StepUpStart(1);
                 self.step_up.start(password)?
@@ -793,15 +949,20 @@ impl AccountFlow {
                     ApiRequest::new(Method::Post, PATH_TOTP_SETUP, None).gated(token),
                 ))
             }
-            Kind::DeleteAccount { .. } => {
+            Kind::DeleteAccount { code, .. } => {
+                self.phase = Phase::Final;
+                let body = match code {
+                    Some(c) => json!({ "code": c.as_str() }),
+                    None => json!({}),
+                };
+                Ok(Step::Send(
+                    ApiRequest::new(Method::Post, PATH_DELETE_REQUEST, Some(body)).gated(token),
+                ))
+            }
+            Kind::TrackingOff { .. } => {
                 self.phase = Phase::Final;
                 Ok(Step::Send(
-                    ApiRequest::new(
-                        Method::Delete,
-                        PATH_DELETE_ACCOUNT,
-                        Some(json!({ "confirmation": "DELETE" })),
-                    )
-                    .gated(token),
+                    ApiRequest::new(Method::Put, PATH_TRACKING, Some(json!({ "opted_in": false }))).gated(token),
                 ))
             }
             _ => Err(AccountFlowError::OutOfOrder),
@@ -913,13 +1074,22 @@ impl AccountFlow {
                     &mut enrollment.backup_codes,
                 )))
             }
-            Kind::DeleteAccount { .. } => {
+            Kind::DeleteAccount { code, .. } => {
+                if !resp.ok() {
+                    return Err(delete_request_error(resp, code.is_some()));
+                }
+                Ok(AccountOutcome::DeletionRequested {
+                    link_expires_at: resp.str_field("link_expires_at")?.to_string(),
+                })
+            }
+            Kind::TrackingOff { .. } => {
+                if resp.status == 403 && resp.error_code() == Some("confirmation_required") {
+                    return Err(AccountFlowError::ConfirmationRequired);
+                }
                 if !resp.ok() {
                     return Err(generic_error(resp));
                 }
-                Ok(AccountOutcome::DeletionScheduled {
-                    shred_after: resp.str_field("shred_after")?.to_string(),
-                })
+                Ok(AccountOutcome::Done)
             }
             Kind::VerifyPassword { .. } => Err(AccountFlowError::OutOfOrder),
             Kind::Single { parse, map_err, .. } => {
@@ -955,133 +1125,9 @@ pub fn run(mut flow: AccountFlow, transport: &mut dyn AccountTransport) -> Resul
 
 // ─── host adapter for the bindings ─────────────────────────────────────────
 
-/// A step in plain strings, for UniFFI and WASM hosts that perform the HTTP call.
-/// `confirm_token` must go straight into the `X-Confirm-Token` header and nowhere else.
-#[derive(serde::Serialize)]
-pub struct HostStep {
-    pub done: bool,
-    pub method: String,
-    pub path: String,
-    pub body_json: String,
-    pub confirm_token: Option<String>,
-    pub outcome: Option<HostOutcome>,
-}
-
-/// A finished flow, flattened. `kind` is one of `done`, `password_changed`,
-/// `email_changed`, `totp_enrollment`, `backup_codes`, `revoked`, `deletion_scheduled`.
-/// For `totp_enrollment` the backup codes stay in the [`HostSession`] until
-/// [`HostSession::totp_confirm`] succeeds.
-#[derive(serde::Serialize, Default)]
-pub struct HostOutcome {
-    pub kind: String,
-    pub session_token: Option<String>,
-    pub email: Option<String>,
-    pub totp_secret: Option<String>,
-    pub otpauth_uri: Option<String>,
-    pub backup_codes: Vec<String>,
-    pub revoked: u32,
-    pub shred_after: Option<String>,
-}
-
-/// One flow at a time for a binding handle, plus the pending TOTP enrollment.
-#[derive(Default)]
-pub struct HostSession {
-    flow: Option<AccountFlow>,
-    enrollment: Option<TotpEnrollment>,
-}
-
-impl HostSession {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Replace the current flow (a pending enrollment survives) and return its first step.
-    pub fn begin(&mut self, mut flow: AccountFlow) -> Result<HostStep, AccountFlowError> {
-        let step = flow.start();
-        self.flow = Some(flow);
-        self.convert(step)
-    }
-
-    /// Feed the reply to the last step.
-    pub fn resume(&mut self, status: u16, body_text: &str) -> Result<HostStep, AccountFlowError> {
-        let flow = self.flow.as_mut().ok_or(AccountFlowError::OutOfOrder)?;
-        let step = flow.resume(ApiResponse::from_text(status, body_text));
-        self.convert(step)
-    }
-
-    /// Confirm the pending TOTP enrollment with the first code.
-    pub fn totp_confirm(&mut self, code: &str) -> Result<HostStep, AccountFlowError> {
-        let enrollment = self.enrollment.take().ok_or(AccountFlowError::OutOfOrder)?;
-        self.begin(AccountFlow::totp_confirm(enrollment, code)?)
-    }
-
-    /// Drop the flow and any pending enrollment (back, cancel, error exits).
-    pub fn abandon(&mut self) {
-        self.flow = None;
-        self.enrollment = None;
-    }
-
-    fn convert(&mut self, step: Result<Step, AccountFlowError>) -> Result<HostStep, AccountFlowError> {
-        let step = match step {
-            Ok(s) => s,
-            Err(e) => {
-                self.flow = None;
-                return Err(e);
-            }
-        };
-        Ok(match step {
-            Step::Send(req) => HostStep {
-                done: false,
-                method: req.method.as_str().to_string(),
-                path: req.path.clone(),
-                body_json: req.body_json(),
-                confirm_token: req.confirm_token().map(str::to_string),
-                outcome: None,
-            },
-            Step::Done(outcome) => {
-                self.flow = None;
-                let mut o = HostOutcome::default();
-                match outcome {
-                    AccountOutcome::Done => o.kind = "done".into(),
-                    AccountOutcome::PasswordChanged { session_token } => {
-                        o.kind = "password_changed".into();
-                        o.session_token = Some(session_token.to_string());
-                    }
-                    AccountOutcome::EmailChanged { email } => {
-                        o.kind = "email_changed".into();
-                        o.email = Some(email);
-                    }
-                    AccountOutcome::TotpEnrollment(e) => {
-                        o.kind = "totp_enrollment".into();
-                        o.totp_secret = Some(e.secret.to_string());
-                        o.otpauth_uri = Some(e.otpauth_uri.to_string());
-                        self.enrollment = Some(e);
-                    }
-                    AccountOutcome::BackupCodes(codes) => {
-                        o.kind = "backup_codes".into();
-                        o.backup_codes = codes.to_vec();
-                    }
-                    AccountOutcome::Revoked { count } => {
-                        o.kind = "revoked".into();
-                        o.revoked = count;
-                    }
-                    AccountOutcome::DeletionScheduled { shred_after } => {
-                        o.kind = "deletion_scheduled".into();
-                        o.shred_after = Some(shred_after);
-                    }
-                }
-                HostStep {
-                    done: true,
-                    method: String::new(),
-                    path: String::new(),
-                    body_json: String::new(),
-                    confirm_token: None,
-                    outcome: Some(o),
-                }
-            }
-        })
-    }
-}
+#[path = "account_flows_host.rs"]
+mod host;
+pub use host::{HostOutcome, HostSession, HostStep};
 
 #[cfg(test)]
 #[path = "account_flows_tests.rs"]

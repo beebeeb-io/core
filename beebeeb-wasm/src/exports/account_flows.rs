@@ -104,9 +104,15 @@ impl AccountFlowJs {
         self.begin(AccountFlow::set_display_name(&name))
     }
 
+    /// Turning it off takes the password (a step-up inside); turning it on ignores it.
     #[wasm_bindgen(js_name = setActivityLogging)]
-    pub fn set_activity_logging(&mut self, on: bool) -> Result<JsValue, JsValue> {
-        self.begin(Ok(AccountFlow::set_activity_logging(on)))
+    pub fn set_activity_logging(&mut self, on: bool, password: Option<String>) -> Result<JsValue, JsValue> {
+        self.begin(AccountFlow::set_activity_logging(on, password.as_deref()))
+    }
+
+    #[wasm_bindgen(js_name = regenerateBackupCodes)]
+    pub fn regenerate_backup_codes(&mut self, code: String) -> Result<JsValue, JsValue> {
+        self.begin(AccountFlow::regenerate_backup_codes(&code))
     }
 
     #[wasm_bindgen(js_name = verifyPassword)]
@@ -115,8 +121,18 @@ impl AccountFlowJs {
     }
 
     #[wasm_bindgen(js_name = deleteAccount)]
-    pub fn delete_account(&mut self, password: String) -> Result<JsValue, JsValue> {
-        self.begin(AccountFlow::delete_account(&password))
+    pub fn delete_account(&mut self, password: String, code: Option<String>) -> Result<JsValue, JsValue> {
+        self.begin(AccountFlow::delete_account(&password, code.as_deref()))
+    }
+
+    #[wasm_bindgen(js_name = deleteConfirm)]
+    pub fn delete_confirm(&mut self, link_token: String) -> Result<JsValue, JsValue> {
+        self.begin(AccountFlow::delete_confirm(&link_token))
+    }
+
+    #[wasm_bindgen(js_name = deleteCancel)]
+    pub fn delete_cancel(&mut self, link_token: String) -> Result<JsValue, JsValue> {
+        self.begin(AccountFlow::delete_cancel(&link_token))
     }
 
     pub fn resume(&mut self, status: u16, body_text: String) -> Result<JsValue, JsValue> {
