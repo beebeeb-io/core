@@ -275,3 +275,123 @@ async fn a_conflict_name_never_takes_another_siblings_real_name() {
     assert_eq!(name(&engine, &real), CONFLICT, "a real name is kept");
     assert_eq!(name(&engine, &two), "a (conflict, device) (2).txt");
 }
+
+// ── Only core's decryption names an item (review r4, finding 10) ────────────
+
+/// Apply remote ops `ops` (seq 2, 3, ...) through catch-up.
+async fn apply_all(engine: &mut SyncEngine, ops: Vec<(&str, Value)>) -> Result<(), crate::sync::SyncLoopError> {
+    let ops: Vec<Value> = ops
+        .into_iter()
+        .enumerate()
+        .map(|(index, (op_type, payload))| {
+            let seq = 2 + index as i64;
+            json!({"seq_id": seq, "user_seq": seq, "op_type": op_type, "payload": payload})
+        })
+        .collect();
+    client(json!({ "ops": ops }))
+        .catch_up_sync(&session(), engine, 100)
+        .await
+}
+
+#[tokio::test]
+async fn a_plaintext_server_name_without_a_sealed_name_names_nothing_and_sync_goes_on() {
+    let master = MasterKey::from_bytes(KEY);
+    let (x, created, after) = (new_item(&master), new_item(&master), new_item(&master));
+    let mut engine = engine_with(vec![node(&master, &x, None, "x.txt", "x.txt", false)]);
+    let after_name = sealed(&master, &after, "after.txt");
+
+    apply_all(
+        &mut engine,
+        vec![
+            ("file_rename", json!({"id": x.id.to_string(), "new_name": "../x"})),
+            (
+                "file_create",
+                json!({"id": created.id.to_string(), "parent_id": null, "name": "chosen.txt"}),
+            ),
+            (
+                "file_create",
+                json!({"id": after.id.to_string(), "parent_id": null, "name_encrypted": after_name}),
+            ),
+        ],
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(name(&engine, &x), "x.txt", "no sealed name: the rename names nothing");
+    let created_node = engine.get_node(created.id).unwrap();
+    assert!(created_node.name_undecryptable);
+    assert_eq!(created_node.name, "");
+    assert_eq!(name(&engine, &after), "after.txt", "the loop went on");
+}
+
+#[tokio::test]
+async fn a_plaintext_server_name_never_outranks_a_sealed_name_that_does_not_open() {
+    let master = MasterKey::from_bytes(KEY);
+    let other = MasterKey::from_bytes([42; 32]);
+    let y = new_item(&master);
+    let mut engine = engine_with(vec![node(&master, &y, None, "y.txt", "y.txt", false)]);
+    let not_ours = sealed(&other, &y, "sealed elsewhere.txt");
+
+    apply_all(
+        &mut engine,
+        vec![(
+            "file_rename",
+            json!({"id": y.id.to_string(), "new_name": "chosen.txt", "new_name_undecryptable": false,
+                   "new_name_encrypted": not_ours}),
+        )],
+    )
+    .await
+    .unwrap();
+
+    let node = engine.get_node(y.id).unwrap();
+    assert!(node.name_undecryptable, "the server's plaintext is never shown");
+    assert_eq!(node.name, "");
+}
+
+#[tokio::test]
+async fn a_sealed_name_the_path_rule_refuses_is_shown_undecryptable_and_sync_goes_on() {
+    let master = MasterKey::from_bytes(KEY);
+    let (unsafe_item, after) = (new_item(&master), new_item(&master));
+    let mut engine = engine_with(Vec::new());
+    let unsafe_name = sealed(&master, &unsafe_item, "../escape");
+    let after_name = sealed(&master, &after, "after.txt");
+
+    apply_all(
+        &mut engine,
+        vec![
+            (
+                "file_create",
+                json!({"id": unsafe_item.id.to_string(), "parent_id": null, "name_encrypted": unsafe_name}),
+            ),
+            (
+                "file_create",
+                json!({"id": after.id.to_string(), "parent_id": null, "name_encrypted": after_name}),
+            ),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let node = engine.get_node(unsafe_item.id).unwrap();
+    assert!(node.name_undecryptable);
+    assert_eq!(node.name, "");
+    assert_eq!(name(&engine, &after), "after.txt");
+}
+
+#[tokio::test]
+async fn a_snapshot_name_the_path_rule_refuses_is_shown_undecryptable() {
+    let master = MasterKey::from_bytes(KEY);
+    let (unsafe_item, fine) = (new_item(&master), new_item(&master));
+    let mut engine = SyncEngine::new("device-1".into());
+
+    refresh(
+        &mut engine,
+        snapshot_answer(&master, &[(&unsafe_item, "../escape"), (&fine, "fine.txt")]),
+    )
+    .await;
+
+    let node = engine.get_node(unsafe_item.id).unwrap();
+    assert!(node.name_undecryptable);
+    assert_eq!(node.name, "");
+    assert_eq!(name(&engine, &fine), "fine.txt");
+}

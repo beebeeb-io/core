@@ -224,7 +224,7 @@ fn open_operation(session: &Session, operation: api::Op) -> Result<SyncOp, SyncL
         .map(|value| value.with_timezone(&Utc))
         .unwrap_or_else(Utc::now);
     let mut payload = operation.payload;
-    open_payload_name(session, &mut payload)?;
+    open_payload_name(session, &operation.op_type, &mut payload);
     Ok(SyncOp {
         seq_id,
         user_seq: operation.user_seq,
@@ -236,30 +236,41 @@ fn open_operation(session: &Session, operation: api::Op) -> Result<SyncOp, SyncL
     })
 }
 
-fn open_payload_name(session: &Session, payload: &mut Value) -> Result<(), SyncLoopError> {
-    let Some(id) = payload.get("id").and_then(Value::as_str).map(str::to_owned) else {
-        return Ok(());
+/// The plaintext name fields of a remote op come from core's decryption and
+/// nothing else (zero-knowledge: the server never chooses a name the person
+/// sees). Whatever `name` / `new_name` or undecryptable marker the server put
+/// in the payload is dropped first; then each sealed name that opens to a
+/// name the portable path rule accepts fills its plaintext field, and every
+/// other one is marked undecryptable, shown as such, without stopping the
+/// sync. A create whose name is not sealed at all is marked too. Local ops
+/// never come through here and keep their own plaintext.
+fn open_payload_name(session: &Session, op_type: &str, payload: &mut Value) {
+    let Some(object) = payload.as_object_mut() else {
+        return;
     };
-    for (encrypted_field, plain_field) in [("name_encrypted", "name"), ("new_name_encrypted", "new_name")] {
-        let Some(encrypted) = payload.get(encrypted_field).and_then(Value::as_str).map(str::to_owned) else {
+    for field in ["name", "new_name", "name_undecryptable", "new_name_undecryptable"] {
+        object.remove(field);
+    }
+    let id = object.get("id").and_then(Value::as_str).map(str::to_owned);
+    for (encrypted_field, plain_field, marker) in [
+        ("name_encrypted", "name", "name_undecryptable"),
+        ("new_name_encrypted", "new_name", "new_name_undecryptable"),
+    ] {
+        let Some(encrypted) = object.get(encrypted_field).and_then(Value::as_str).map(str::to_owned) else {
+            if plain_field == "name" && matches!(op_type, "file_create" | "folder_create") {
+                object.insert(marker.into(), Value::Bool(true));
+            }
             continue;
         };
-        let object = payload.as_object_mut().ok_or(SyncLoopError::InvalidAnswer)?;
-        match session.open_name(&id, &encrypted) {
-            Ok(metadata) => {
+        match id.as_deref().map(|id| session.open_name(id, &encrypted)) {
+            Some(Ok(metadata)) if check_component(&metadata.name, Rules::Portable).is_ok() => {
                 object.insert(plain_field.into(), Value::String(metadata.name));
             }
-            Err(_) => {
-                let marker = if plain_field == "new_name" {
-                    "new_name_undecryptable"
-                } else {
-                    "name_undecryptable"
-                };
+            _ => {
                 object.insert(marker.into(), Value::Bool(true));
             }
         }
     }
-    Ok(())
 }
 
 /// The device in a pull-side conflict name. The device whose write came
@@ -330,10 +341,14 @@ fn resolve_operation_collision(
             let Some(node) = id.map(|id| engine.lookup_node(id)).transpose()?.flatten() else {
                 return Ok(());
             };
-            // A name this device cannot open takes no name: it clashes with nothing.
+            // A name this device cannot open, or one the portable path rule
+            // refuses, takes no name: it clashes with nothing.
             let Ok(metadata) = session.open_name(&node.id.to_string(), &node.name_encrypted) else {
                 return Ok(());
             };
+            if check_component(&metadata.name, Rules::Portable).is_err() {
+                return Ok(());
+            }
             (
                 "new_name",
                 metadata.name,
@@ -343,7 +358,6 @@ fn resolve_operation_collision(
         }
         _ => return Ok(()),
     };
-    check_component(&name, Rules::Portable).map_err(|_| SyncLoopError::InvalidAnswer)?;
     let mut taken = TakenNames::new();
     for child in engine.lookup_children(parent)? {
         if Some(child.id) != id && !child.name_undecryptable {
@@ -438,12 +452,13 @@ fn open_snapshot_node(session: &Session, wire: &api::Node) -> Result<TreeNode, S
         .transpose()
         .map_err(|_| SyncLoopError::InvalidAnswer)?;
     let encrypted = field_string(&wire.fields, "name_encrypted").ok_or(SyncLoopError::InvalidAnswer)?;
+    // A name that does not open, or that the portable path rule refuses, is
+    // shown as undecryptable; it never stops the snapshot.
     let (name, mime_type, name_undecryptable) = match session.open_name(&wire.id, &encrypted) {
-        Ok(metadata) => {
-            check_component(&metadata.name, Rules::Portable).map_err(|_| SyncLoopError::InvalidAnswer)?;
+        Ok(metadata) if check_component(&metadata.name, Rules::Portable).is_ok() => {
             (metadata.name, metadata.mime_type, false)
         }
-        Err(_) => (String::new(), None, true),
+        _ => (String::new(), None, true),
     };
     let size_bytes = wire.fields.get("size_bytes").and_then(Value::as_i64).unwrap_or(0);
     let version_number = wire
