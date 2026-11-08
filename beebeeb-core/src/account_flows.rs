@@ -83,6 +83,7 @@ pub enum Method {
     Post,
     Put,
     Delete,
+    Patch,
 }
 
 impl Method {
@@ -92,6 +93,7 @@ impl Method {
             Method::Post => "POST",
             Method::Put => "PUT",
             Method::Delete => "DELETE",
+            Method::Patch => "PATCH",
         }
     }
 }
@@ -130,6 +132,7 @@ impl ApiRequest {
             auth_flow::Method::Post => Method::Post,
             auth_flow::Method::Delete => Method::Delete,
             auth_flow::Method::Put => Method::Put,
+            auth_flow::Method::Patch => Method::Patch,
         };
         Self {
             method,

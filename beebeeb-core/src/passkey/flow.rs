@@ -130,7 +130,8 @@ fn from_auth(request: auth_flow::HttpRequest, session: &str) -> ApiRequest {
     let method = match request.method {
         auth_flow::Method::Get => Method::Get,
         auth_flow::Method::Delete => Method::Delete,
-        auth_flow::Method::Post | auth_flow::Method::Put => Method::Post,
+        // The step-up legs are POSTs; PUT and PATCH (B05e's access change) never reach this mapping.
+        auth_flow::Method::Post | auth_flow::Method::Put | auth_flow::Method::Patch => Method::Post,
     };
     ApiRequest {
         method,

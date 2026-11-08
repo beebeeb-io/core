@@ -44,7 +44,7 @@ use super::folder_keys::{
     SentInvite, active_folder_invites, canonical_folder_id, folder_key_id_b64, open_owner_copy, owner_copy_b64,
     proof_rows, seal_folder_child, unique_owner_blobs,
 };
-use super::member::{INVITES_PATH, InviteOutcome, approve_request, check_email};
+use super::member::{ClaimedStep, INVITES_PATH, InviteOutcome, PeerKeyExpectation, awaiting, check_email, on_claimed};
 use super::{ShareFlowError, b64, b64_decode, own_master, path_id, require_ok, split, str_field};
 use crate::auth_flow::{HttpRequest, HttpResponse, RequestAuth};
 use crate::kdf::{self, FileKey, MasterKey};
@@ -59,6 +59,9 @@ pub struct FolderInviteInput<'a> {
     pub email: &'a str,
     pub shared_folders_write: bool,
     pub custody: CustodyMemory,
+    /// Required: `Compared(fingerprint)` of the host's mark for this person (a different server key
+    /// ends in [`InviteOutcome::PeerKeyChanged`], nothing sealed) or `NotCompared`.
+    pub peer_key: PeerKeyExpectation,
 }
 
 /// A request to send. `mark_custody_seen` is a folder id the host must add to its durable custody
@@ -121,6 +124,7 @@ enum Stage {
     },
     AwaitApprove {
         invite_id: String,
+        recipient_public_key: [u8; 32],
     },
     Done,
 }
@@ -141,6 +145,7 @@ pub struct FolderShare {
     stage: Stage,
     keyed: Option<Keyed>,
     active: Vec<SentInvite>,
+    peer_key: PeerKeyExpectation,
 }
 
 impl std::fmt::Debug for FolderShare {
@@ -202,6 +207,7 @@ impl FolderShare {
             stage: Stage::Done,
             keyed: None,
             active: Vec::new(),
+            peer_key: PeerKeyExpectation::NotCompared,
         })
     }
 
@@ -209,6 +215,7 @@ impl FolderShare {
     pub fn invite(input: FolderInviteInput<'_>, master: &MasterKey) -> Result<(Self, FolderStep), ShareFlowError> {
         let email = check_email(input.email)?;
         let mut flow = Self::new(input.folder_id, Purpose::Invite { email }, master, input.custody)?;
+        flow.peer_key = input.peer_key;
         let step = if input.shared_folders_write {
             flow.stage = Stage::EnsureRead;
             send(get(custody_path(&flow.folder_id)))
@@ -390,23 +397,37 @@ impl FolderShare {
                 let keyed = self.keyed.take().ok_or(ShareFlowError::WrongState)?;
                 let key = resp.body.get("recipient_public_key").and_then(Value::as_str);
                 match key {
-                    Some(key) if status == "claimed" => {
-                        match approve_request(&invite_id, &self.folder_id, key, &self.master, &keyed.folder_key) {
-                            Ok(req) => {
-                                self.stage = Stage::AwaitApprove { invite_id };
-                                Ok(send(req))
-                            }
-                            Err(_) => Ok(FolderStep::Done(InviteOutcome::AwaitingApproval { invite_id })),
+                    Some(key) if status == "claimed" => match on_claimed(
+                        &invite_id,
+                        &self.folder_id,
+                        key,
+                        &self.master,
+                        &keyed.folder_key,
+                        self.peer_key,
+                    ) {
+                        ClaimedStep::Send(sealed) => {
+                            self.stage = Stage::AwaitApprove {
+                                invite_id,
+                                recipient_public_key: sealed.recipient_public_key,
+                            };
+                            Ok(send(sealed.request))
                         }
-                    }
+                        ClaimedStep::Done(outcome) => Ok(FolderStep::Done(outcome)),
+                    },
                     _ => Ok(FolderStep::Done(InviteOutcome::Invited { invite_id, status })),
                 }
             }
             Stage::AwaitLink { id, attempt } => self.on_link_response(resp, id, attempt),
-            Stage::AwaitApprove { invite_id } => Ok(FolderStep::Done(if resp.ok() {
-                InviteOutcome::Shared { invite_id }
+            Stage::AwaitApprove {
+                invite_id,
+                recipient_public_key,
+            } => Ok(FolderStep::Done(if resp.ok() {
+                InviteOutcome::Shared {
+                    invite_id,
+                    recipient_public_key,
+                }
             } else {
-                InviteOutcome::AwaitingApproval { invite_id }
+                awaiting(&invite_id, Some(recipient_public_key))
             })),
             Stage::Done => Err(ShareFlowError::WrongState),
         }

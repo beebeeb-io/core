@@ -23,6 +23,7 @@ pub enum FolderStepFfi {
     },
     Shared {
         invite_id: String,
+        recipient_public_key: Vec<u8>,
     },
     Invited {
         invite_id: String,
@@ -30,6 +31,12 @@ pub enum FolderStepFfi {
     },
     AwaitingApproval {
         invite_id: String,
+        recipient_public_key: Option<Vec<u8>>,
+    },
+    /// Code `peer_key_changed`: the server's key is not the compared one; nothing was sealed.
+    PeerKeyChanged {
+        invite_id: String,
+        recipient_public_key: Vec<u8>,
     },
     /// `link` carries `#key=`; `display` is the part before `#`.
     LinkCreated {
@@ -51,11 +58,28 @@ fn step_ffi(step: FolderStep) -> FolderStepFfi {
             request: out(request),
             mark_custody_seen,
         },
-        FolderStep::Done(InviteOutcome::Shared { invite_id }) => FolderStepFfi::Shared { invite_id },
+        FolderStep::Done(InviteOutcome::Shared {
+            invite_id,
+            recipient_public_key,
+        }) => FolderStepFfi::Shared {
+            invite_id,
+            recipient_public_key: recipient_public_key.to_vec(),
+        },
         FolderStep::Done(InviteOutcome::Invited { invite_id, status }) => FolderStepFfi::Invited { invite_id, status },
-        FolderStep::Done(InviteOutcome::AwaitingApproval { invite_id }) => {
-            FolderStepFfi::AwaitingApproval { invite_id }
-        }
+        FolderStep::Done(InviteOutcome::AwaitingApproval {
+            invite_id,
+            recipient_public_key,
+        }) => FolderStepFfi::AwaitingApproval {
+            invite_id,
+            recipient_public_key: recipient_public_key.map(|k| k.to_vec()),
+        },
+        FolderStep::Done(InviteOutcome::PeerKeyChanged {
+            invite_id,
+            recipient_public_key,
+        }) => FolderStepFfi::PeerKeyChanged {
+            invite_id,
+            recipient_public_key: recipient_public_key.to_vec(),
+        },
         FolderStep::LinkCreated(c) => FolderStepFfi::LinkCreated {
             display: display_form(&c.link),
             link: c.link.to_string(),
@@ -90,6 +114,7 @@ impl FolderShareFlow {
         custody_seen: Vec<String>,
         custody_unreadable: bool,
         master_key: Arc<MasterKeyHandle>,
+        peer_key: crate::share_flow::PeerKeyExpectationFfi,
     ) -> Result<Arc<Self>, ShareFlowFfiError> {
         let master = crate::share_flow::master(&master_key)?;
         let input = FolderInviteInput {
@@ -97,6 +122,7 @@ impl FolderShareFlow {
             email: &email,
             shared_folders_write,
             custody: CustodyMemory::new(custody_seen, custody_unreadable),
+            peer_key: crate::share_flow::expectation(peer_key)?,
         };
         let (flow, first) = FolderShare::invite(input, &master)?;
         Ok(Arc::new(Self {

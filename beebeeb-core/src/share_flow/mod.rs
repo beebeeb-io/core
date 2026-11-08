@@ -42,15 +42,19 @@ use crate::encrypt::{decrypt_chunk, encrypt_chunk};
 use crate::kdf::{FileKey, MasterKey};
 use crate::opaque::{derive_share_key, derive_x25519_private, x25519_shared_secret};
 
+pub mod access;
 pub mod bundle;
 pub mod folder;
 pub mod folder_keys;
 pub mod link;
 pub mod member;
 pub mod request;
+pub mod safety;
 
 #[cfg(test)]
 mod folder_tests;
+#[cfg(test)]
+mod safety_tests;
 #[cfg(test)]
 mod tests;
 
@@ -96,6 +100,9 @@ pub enum ShareFlowError {
     /// A wrap or unwrap failed (wrong key, a damaged blob). Never says which byte.
     Crypto,
     WrongState,
+    /// The server's key for a person is not the one the host's "compared" mark was made against:
+    /// nothing was sealed (B05e).
+    PeerKeyChanged,
 }
 
 impl ShareFlowError {
@@ -114,6 +121,7 @@ impl ShareFlowError {
             Self::Protocol(_) => "protocol",
             Self::Crypto => "crypto",
             Self::WrongState => "wrong_state",
+            Self::PeerKeyChanged => "peer_key_changed",
         }
     }
 
@@ -223,7 +231,7 @@ fn member_share_key(master: &MasterKey, peer_public: &[u8; 32], file_id: &str) -
 
 /// Web's `encryptFileKeyForSharing` + the `nonce || ciphertext` concatenation the invite approval
 /// sends: the owner seals `file_key` for the recipient's X25519 public key.
-pub fn seal_file_key_for_member(
+pub(crate) fn seal_file_key_for_member(
     master: &MasterKey,
     recipient_public: &[u8; 32],
     file_id: &str,

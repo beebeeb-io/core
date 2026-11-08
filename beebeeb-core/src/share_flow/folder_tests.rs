@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use super::folder::{FolderInviteInput, FolderShare, FolderStep};
 use super::folder_keys::*;
 use super::member::InviteOutcome;
+use super::member::PeerKeyExpectation;
 use super::*;
 use crate::auth_flow::Method;
 use crate::kdf;
@@ -60,6 +61,7 @@ fn input(flag: bool, custody: CustodyMemory) -> FolderInviteInput<'static> {
         email: " Bob@Beebeeb.TEST ",
         shared_folders_write: flag,
         custody,
+        peer_key: PeerKeyExpectation::NotCompared,
     }
 }
 
@@ -241,7 +243,13 @@ fn flag_off_no_active_invite_mints_and_seals_every_descendant() {
     let opened = open_member_file_key(&bob, &owner_pub, FOLDER, &sealed).unwrap();
     assert_eq!(opened.as_bytes(), key.as_bytes());
     match flow.on_response(resp(200, json!({}))).unwrap() {
-        FolderStep::Done(InviteOutcome::Shared { invite_id }) => assert_eq!(invite_id, INVITE),
+        FolderStep::Done(InviteOutcome::Shared {
+            invite_id,
+            recipient_public_key,
+        }) => {
+            assert_eq!(invite_id, INVITE);
+            assert_eq!(recipient_public_key, bob_pub);
+        }
         other => panic!("{other:?}"),
     }
 }
@@ -521,6 +529,37 @@ fn custody_memory_matches_any_form_of_a_uuid() {
     assert!(!mem.has_seen(PARENT));
 }
 
+/// B05e: a folder seal to a key other than the compared one stops before sealing.
+#[test]
+fn a_folder_seal_to_a_key_other_than_the_compared_one_is_refused() {
+    let m = master();
+    let bob_pub = derive_x25519_public(&crate::opaque::derive_x25519_private(&MasterKey::from_bytes([9; 32])));
+    let other_pub = derive_x25519_public(&crate::opaque::derive_x25519_private(&MasterKey::from_bytes([8; 32])));
+    let mut i = input(false, CustodyMemory::default());
+    i.peer_key = PeerKeyExpectation::Compared(super::safety::key_fingerprint(&bob_pub).unwrap());
+    let (mut flow, first) = FolderShare::invite(i, &m).unwrap();
+    sent(first);
+    let step = flow.on_response(resp(200, json!({ "invites": [] }))).unwrap();
+    let (path, _) = answer_listing(&mut flow, step);
+    assert_eq!(path, "/api/v1/shares/invites");
+    let step = flow
+        .on_response(resp(
+            200,
+            json!({ "invite_id": INVITE, "status": "claimed", "recipient_public_key": b64(&other_pub) }),
+        ))
+        .unwrap();
+    match step {
+        FolderStep::Done(InviteOutcome::PeerKeyChanged {
+            invite_id,
+            recipient_public_key,
+        }) => {
+            assert_eq!(invite_id, INVITE);
+            assert_eq!(recipient_public_key, other_pub);
+        }
+        other => panic!("a seal request was built: {other:?}"),
+    }
+}
+
 #[test]
 fn an_upper_case_item_id_is_refused_never_used_as_key_input() {
     let m = master();
@@ -530,6 +569,7 @@ fn an_upper_case_item_id_is_refused_never_used_as_key_input() {
         email: "bob@beebeeb.test",
         shared_folders_write: false,
         custody: CustodyMemory::default(),
+        peer_key: PeerKeyExpectation::NotCompared,
     };
     assert_eq!(
         FolderShare::invite(input, &m).err(),
