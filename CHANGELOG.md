@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-08
+
+Same API as v0.2.3, with `zip` moved from 8.6.0 to 9.4.1 (LD-0144). Nothing else changes in core: no item is renamed, retyped or
+removed, and `src/` is untouched.
+
 ### Security
 
 - `beebeeb-core` uses `zip` 9.4.1 (was 8.6.0) for `beebeeb_core::zip`. This clears RUSTSEC-2026-0429, -0367, -0368 and
