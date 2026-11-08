@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-11-08
+
+Fixes to the folder-zip writer `zip::stream_folder_zip` (LD-0146, core #89, #90 and #91): an entry of 4 GiB or more is
+written as ZIP64 instead of failing the archive; a cancelled or failed archive is no longer a valid-looking, shorter zip;
+a duplicate path is stored as `name (2).ext` and never takes the path of a folder; and progress ends at exactly 100%.
+The public API is the same: no signature or type is renamed, retyped or removed. No caller on main uses
+`stream_folder_zip` yet (the cli writes its own archives), so no client has to move for this tag.
+
 ### Fixed
 
 - **`zip::stream_folder_zip` (LD-0146); no signature or type changes.**
