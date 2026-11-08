@@ -183,6 +183,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Ubuntu 26 ships Java 25, which Kotlin 2.0.21's IntelliJ runtime cannot
+      # parse (JavaVersion.parse throws IllegalArgumentException on "25.0.5").
+      # Pin Java 21 LTS so kotlinc has a known-good JVM regardless of the
+      # runner's default. Temurin is Eclipse Adoptium OpenJDK — no license issues.
+      - uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
       # Download kotlinc 2.0.21 from JetBrains' GitHub releases.
       # The version is pinned in the URL; sha256sum --check hardens the step
       # against a compromised CDN response. The expected hash is hardcoded here
