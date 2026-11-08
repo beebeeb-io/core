@@ -4,6 +4,8 @@
 //! `confirm_token` is set) and passes the answer back as an [`AuthHttpResponse`].
 use std::sync::{Arc, Mutex};
 
+use crate::MasterKeyHandle;
+
 use beebeeb_core::auth_flow::{self as af, AuthFlowError, HttpRequest, HttpResponse, RequestAuth};
 
 #[derive(uniffi::Record)]
@@ -56,7 +58,7 @@ pub(crate) fn out(req: HttpRequest) -> AuthHttpRequest {
         path: req.path.clone(),
         body_json: req.body.as_ref().map(|b| b.to_string()),
         needs_session: req.auth == RequestAuth::Session,
-        confirm_token: req.confirm_token.as_ref().map(|t| t.as_str().to_owned()),
+        confirm_token: req.confirm_token_header().map(str::to_owned),
     }
 }
 
@@ -165,7 +167,8 @@ pub struct StepUpFlow {
 
 #[uniffi::export]
 impl StepUpFlow {
-    /// `purpose` empty: the generic grant; `cli_code` set: a device approval for that code.
+    /// `purpose` empty: the generic grant; `cli_code` set: a device approval for that code. A
+    /// `cli_code` with any purpose other than `cli_device_approval` is refused (`invalid_input`).
     #[uniffi::constructor]
     pub fn new(
         password: String,
@@ -173,11 +176,7 @@ impl StepUpFlow {
         cli_code: Option<String>,
     ) -> Result<Arc<Self>, AuthFlowFfiError> {
         let password = zeroize::Zeroizing::new(password);
-        let purpose = match (purpose, cli_code) {
-            (_, Some(code)) => af::step_up::StepUpPurpose::DeviceApproval { code },
-            (Some(p), None) if !p.is_empty() => af::step_up::StepUpPurpose::Named(p),
-            _ => af::step_up::StepUpPurpose::Generic,
-        };
+        let purpose = af::step_up::StepUpPurpose::from_parts(purpose, cli_code)?;
         let (flow, first) = af::step_up::StepUp::start(password.as_bytes(), purpose)?;
         Ok(Arc::new(Self {
             flow: Mutex::new(Some(flow)),
@@ -218,13 +217,7 @@ impl StepUpFlow {
             .ok_or_else(wrong_state)?;
         let body = serde_json::from_str(&body_json)
             .map_err(|_| AuthFlowFfiError::from(AuthFlowError::InvalidInput("body")))?;
-        let req = HttpRequest {
-            method: af::Method::Post,
-            path,
-            body: Some(body),
-            auth: RequestAuth::Session,
-            confirm_token: None,
-        };
+        let req = HttpRequest::session_post(path, body);
         Ok(out(token.attach(req)))
     }
 }
@@ -239,7 +232,10 @@ pub enum DeviceRequestEventFfi {
         expires_in: u64,
     },
     /// The keys arrived; the app stores both in its secure store at once.
-    Approved { session_token: String, master_key: Vec<u8> },
+    Approved {
+        session_token: String,
+        master_key: Arc<MasterKeyHandle>,
+    },
 }
 
 #[derive(uniffi::Object)]
@@ -286,7 +282,7 @@ impl DeviceRequestFlow {
             },
             af::device::DeviceRequestEvent::Approved(c) => DeviceRequestEventFfi::Approved {
                 session_token: c.session_token.clone(),
-                master_key: c.master_key.to_vec(),
+                master_key: MasterKeyHandle::new(beebeeb_core::kdf::MasterKey::from_bytes(c.master_key)),
             },
         })
     }
@@ -372,14 +368,15 @@ impl ApprovalFlow {
         &self,
         typed_code: String,
         password: String,
-        master_key: Vec<u8>,
+        master_key: Arc<MasterKeyHandle>,
     ) -> Result<AuthHttpRequest, AuthFlowFfiError> {
         let password = zeroize::Zeroizing::new(password);
-        let master_key = zeroize::Zeroizing::new(master_key);
-        let key: &[u8; 32] = master_key
-            .as_slice()
-            .try_into()
-            .map_err(|_| AuthFlowFfiError::from(AuthFlowError::InvalidInput("master key")))?;
+        let key = zeroize::Zeroizing::new(
+            master_key
+                .with_key(|k| k.to_bytes())
+                .map_err(|_| AuthFlowFfiError::from(AuthFlowError::InvalidInput("master key")))?,
+        );
+        let key: &[u8; 32] = &key;
         let mut guard = self.state.lock().map_err(|_| wrong_state())?;
         let ApprovalState::Pending(pending) = std::mem::replace(&mut *guard, ApprovalState::Done) else {
             return Err(wrong_state());

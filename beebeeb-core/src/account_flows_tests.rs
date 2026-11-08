@@ -228,7 +228,7 @@ const NEW: &str = "a much better passphrase";
 #[test]
 fn change_password_two_step_ups_then_new_password_logs_in() {
     let mut server = MockServer::new(OLD.as_bytes());
-    let flow = AccountFlow::change_password(OLD, NEW, binding()).unwrap();
+    let flow = AccountFlow::change_password(OLD, NEW, binding(), &pw_policy(false), None).unwrap();
     let outcome = run(flow, &mut server).unwrap();
     let AccountOutcome::PasswordChanged { session_token } = outcome else {
         panic!("{outcome:?}")
@@ -258,7 +258,7 @@ fn change_password_two_step_ups_then_new_password_logs_in() {
 fn change_password_wrong_current_changes_nothing() {
     let mut server = MockServer::new(OLD.as_bytes());
     let err = run(
-        AccountFlow::change_password("not the password", NEW, binding()).unwrap(),
+        AccountFlow::change_password("not the password", NEW, binding(), &pw_policy(false), None).unwrap(),
         &mut server,
     )
     .unwrap_err();
@@ -274,11 +274,11 @@ fn change_password_wrong_current_changes_nothing() {
 #[test]
 fn change_password_policy_is_checked_before_any_request() {
     assert_eq!(
-        AccountFlow::change_password(OLD, "short", binding()).err(),
+        AccountFlow::change_password(OLD, "short", binding(), &pw_policy(false), None).err(),
         Some(AccountFlowError::WeakPassword)
     );
     assert_eq!(
-        AccountFlow::change_password(OLD, OLD, binding()).err(),
+        AccountFlow::change_password(OLD, OLD, binding(), &pw_policy(false), None).err(),
         Some(AccountFlowError::SamePassword)
     );
 }
@@ -636,4 +636,108 @@ fn host_outcome_carries_the_delete_times() {
         (o.kind.as_str(), o.shred_after.as_deref(), o.cancel_until.as_deref()),
         ("deletion_scheduled", Some("s"), Some("c"))
     );
+}
+
+#[test]
+fn response_and_outcome_debug_never_print_a_secret() {
+    const PLANTED: &str = "planted-secret-7f3a";
+    let body = json!({
+        "session_token": PLANTED, "secret": PLANTED,
+        "otpauth_uri": format!("otpauth://totp/x?secret={PLANTED}"),
+        "backup_codes": [PLANTED], "token": PLANTED,
+    });
+    let shown = format!("{:?}", ApiResponse::new(200, body));
+    assert!(!shown.contains(PLANTED), "ApiResponse Debug printed a planted secret");
+    assert!(shown.contains("200"), "the status is still shown");
+
+    let email = "anna.secret-box@northwind.studio";
+    let shown = format!(
+        "{:?}",
+        AccountOutcome::EmailChanged {
+            email: email.to_owned()
+        }
+    );
+    assert!(
+        !shown.contains("secret-box"),
+        "AccountOutcome Debug printed the email's local part"
+    );
+    assert!(
+        !shown.contains("northwind"),
+        "AccountOutcome Debug printed the email's domain"
+    );
+}
+
+/// The server's onboarding policy: a 16-character minimum, and a breach check when asked.
+fn pw_policy(breach: bool) -> crate::signup_flow::SignupPolicy {
+    let mut doc = json!({ "policy": { "password": { "min_length": 16 } } });
+    if breach {
+        doc["policy"]["password"]["breach_check"] =
+            json!({ "endpoint": "/api/v1/breach/range/{prefix}", "fail_open": false });
+    }
+    crate::signup_flow::SignupPolicy::from_response(&crate::auth_flow::HttpResponse::new(200, doc)).unwrap()
+}
+
+/// A check for `password` answered with `body`, or as an outage when `body` is `None`.
+fn answered(password: &str, body: Option<&str>) -> crate::onboarding::BreachCheck {
+    use crate::onboarding::{BreachCheck, BreachResponse};
+    let mut c = BreachCheck::new(password);
+    let prefix = c.prefix().to_owned();
+    c.record(&prefix, body.map_or(BreachResponse::Unavailable, BreachResponse::Body))
+        .unwrap();
+    c
+}
+
+fn sha1_suffix(password: &str) -> String {
+    use sha1::{Digest, Sha1};
+    Sha1::digest(password.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<String>()[5..]
+        .to_owned()
+}
+
+#[test]
+fn change_password_runs_the_sign_up_gate_with_the_servers_policy() {
+    let code = |r: Result<AccountFlow, AccountFlowError>| r.err().map(|e| e.code());
+    let fourteen = "fourteen chars"; // 12-15 characters: over the old fixed floor, under the server's 16
+    assert_eq!(
+        code(AccountFlow::change_password(
+            OLD,
+            fourteen,
+            binding(),
+            &pw_policy(false),
+            None
+        )),
+        Some("weak_password"),
+        "the server's minimum applies, not a fixed 12"
+    );
+    let new = "a long new passphrase 2026";
+    assert!(AccountFlow::change_password(OLD, new, binding(), &pw_policy(false), None).is_ok());
+    // A declared breach check must be answered for THIS password.
+    let p = pw_policy(true);
+    assert_eq!(
+        code(AccountFlow::change_password(OLD, new, binding(), &p, None)),
+        Some("breach_check_missing")
+    );
+    let other = answered("some other password!!", Some(""));
+    assert_eq!(
+        code(AccountFlow::change_password(OLD, new, binding(), &p, Some(&other))),
+        Some("breach_check_missing")
+    );
+    let hit = answered(new, Some(&format!("{}:42\n", sha1_suffix(new))));
+    assert_eq!(
+        code(AccountFlow::change_password(OLD, new, binding(), &p, Some(&hit))),
+        Some("password_breached")
+    );
+    let clean = answered(new, Some("0000000000000000000000000000000000A:1\n"));
+    assert!(AccountFlow::change_password(OLD, new, binding(), &p, Some(&clean)).is_ok());
+    // fail_open exactly as sign-up: an outage blocks unless the server allows it.
+    let outage = answered(new, None);
+    assert_eq!(
+        code(AccountFlow::change_password(OLD, new, binding(), &p, Some(&outage))),
+        Some("breach_check_blocked")
+    );
+    let mut open = p.clone();
+    open.breach_fail_open = true;
+    assert!(AccountFlow::change_password(OLD, new, binding(), &open, Some(&outage)).is_ok());
 }

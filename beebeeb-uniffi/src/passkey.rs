@@ -46,11 +46,27 @@ pub fn passkey_unwrap_vault_key(prf_output: Vec<u8>, blob: Vec<u8>) -> Result<Ar
     Ok(MasterKeyHandle::new(passkey::unwrap_vault_key(&prf, &blob)?))
 }
 
-/// `register-start`'s answer → `RegistrationStart` JSON (options for the platform's create call).
+/// The relying party the app expects (its own configuration, never the server's answer). `allow_localhost` is the
+/// explicit development flag; a release build without it refuses a `localhost` server (`passkey_rp_mismatch`).
+fn expected_rp(expected_rp_id: String, allow_localhost: bool) -> ceremony::ExpectedRp {
+    if allow_localhost {
+        ceremony::ExpectedRp::development(expected_rp_id)
+    } else {
+        ceremony::ExpectedRp::new(expected_rp_id)
+    }
+}
+
+/// `register-start`'s answer → `RegistrationStart` JSON (options for the platform's create call). The server's
+/// `rp.id` must equal `expected_rp_id`, else `passkey_rp_mismatch`.
 #[uniffi::export]
-pub fn passkey_parse_registration_start(answer_json: String) -> Result<String, CryptoError> {
+pub fn passkey_parse_registration_start(
+    answer_json: String,
+    expected_rp_id: String,
+    allow_localhost: bool,
+) -> Result<String, CryptoError> {
     let answer: serde_json::Value = serde_json::from_str(&answer_json).map_err(json_err)?;
-    serde_json::to_string(&ceremony::parse_registration_start(&answer).map_err(step_err)?).map_err(json_err)
+    let rp = expected_rp(expected_rp_id, allow_localhost);
+    serde_json::to_string(&ceremony::parse_registration_start(&answer, &rp).map_err(step_err)?).map_err(json_err)
 }
 
 /// `RegistrationStart` JSON + `NativeAttestation` JSON → `register-finish` body.
@@ -71,11 +87,17 @@ pub fn passkey_escrow_body(credential_id: Vec<u8>, blob: Vec<u8>) -> String {
     ceremony::escrow_body(&credential_id, &blob).to_string()
 }
 
-/// `login-start`'s answer → `AssertionStart` JSON (options for the platform's get call).
+/// `login-start`'s answer → `AssertionStart` JSON (options for the platform's get call). The server's `rpId` must
+/// equal `expected_rp_id`, else `passkey_rp_mismatch`.
 #[uniffi::export]
-pub fn passkey_parse_assertion_start(answer_json: String) -> Result<String, CryptoError> {
+pub fn passkey_parse_assertion_start(
+    answer_json: String,
+    expected_rp_id: String,
+    allow_localhost: bool,
+) -> Result<String, CryptoError> {
     let answer: serde_json::Value = serde_json::from_str(&answer_json).map_err(json_err)?;
-    serde_json::to_string(&ceremony::parse_assertion_start(&answer).map_err(step_err)?).map_err(json_err)
+    let rp = expected_rp(expected_rp_id, allow_localhost);
+    serde_json::to_string(&ceremony::parse_assertion_start(&answer, &rp).map_err(step_err)?).map_err(json_err)
 }
 
 /// `AssertionStart` JSON + `NativeAssertion` JSON → `login-finish` body.
@@ -107,11 +129,12 @@ mod passkey_binding_tests {
         assert!(passkey_unwrap_vault_key(vec![2u8; 32], blob).is_err());
         assert_eq!(passkey_hmac_secret_salt().len(), 32);
         let answer = r#"{"publicKey":{"challenge":"AAAA","rpId":"beebeeb.io"},"auth_state":"s","user_id":"u"}"#;
-        let start = passkey_parse_assertion_start(answer.into()).unwrap();
+        let start = passkey_parse_assertion_start(answer.into(), "beebeeb.io".into(), false).unwrap();
+        assert!(passkey_parse_assertion_start(answer.into(), "other.example".into(), false).is_err());
         let assertion = r#"{"credential_id":[1],"authenticator_data":[2],"client_data_json":[123,125],"signature":[3],"user_handle":null}"#;
         let body: serde_json::Value =
             serde_json::from_str(&passkey_assertion_finish_body(start, assertion.into()).unwrap()).unwrap();
         assert_eq!(body["credential"]["id"], "AQ");
-        assert!(passkey_parse_assertion_start("{}".into()).is_err());
+        assert!(passkey_parse_assertion_start("{}".into(), "beebeeb.io".into(), false).is_err());
     }
 }

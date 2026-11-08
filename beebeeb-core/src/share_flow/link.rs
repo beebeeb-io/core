@@ -182,17 +182,57 @@ impl CreateLink {
 /// Rebuild a working link from a share's owner blobs (web `buildShareLink`). `None` when the share
 /// has no blobs (a legacy share), a blob does not open, `K_c` is not 32 bytes or the token is empty:
 /// the caller shows its honest "the key isn't stored" copy instead.
+///
+/// `wrapped_file_key_b64` is the share's stored `wrapped_file_key` and is required: it must open under
+/// `K_c` to a 32-byte key, as in [`super::folder::link::rebuild_folder_link`], so a link whose fragment
+/// would not open the file is never handed out. An empty value is `None`. A bundle has one wrapped key
+/// per item: use [`rebuild_bundle_link`]. The wire format is web's (no AAD).
 pub fn rebuild_link(
     app_url: &str,
     master: &MasterKey,
     owner_wrapped_key_b64: Option<&str>,
     owner_wrapped_token_b64: Option<&str>,
+    wrapped_file_key_b64: &str,
+) -> Option<Zeroizing<String>> {
+    if wrapped_file_key_b64.is_empty() {
+        return None;
+    }
+    rebuild_inner(
+        app_url,
+        master,
+        owner_wrapped_key_b64,
+        owner_wrapped_token_b64,
+        Some(wrapped_file_key_b64),
+    )
+}
+
+/// [`rebuild_link`] for a bundle: its items carry their own wrapped keys, so there is no single
+/// `wrapped_file_key` to check.
+pub fn rebuild_bundle_link(
+    app_url: &str,
+    master: &MasterKey,
+    owner_wrapped_key_b64: Option<&str>,
+    owner_wrapped_token_b64: Option<&str>,
+) -> Option<Zeroizing<String>> {
+    rebuild_inner(app_url, master, owner_wrapped_key_b64, owner_wrapped_token_b64, None)
+}
+
+fn rebuild_inner(
+    app_url: &str,
+    master: &MasterKey,
+    owner_wrapped_key_b64: Option<&str>,
+    owner_wrapped_token_b64: Option<&str>,
+    wrapped_file_key_b64: Option<&str>,
 ) -> Option<Zeroizing<String>> {
     let wrapped_key = b64_decode(owner_wrapped_key_b64.filter(|s| !s.is_empty())?).ok()?;
     let wrapped_token = b64_decode(owner_wrapped_token_b64.filter(|s| !s.is_empty())?).ok()?;
     let k_c = unwrap_key_from_share(master.as_bytes(), &wrapped_key).ok()?;
-    if k_c.len() != 32 {
-        return None;
+    let k_c_arr: &[u8; 32] = k_c.as_slice().try_into().ok()?;
+    if let Some(wrapped) = wrapped_file_key_b64 {
+        let file_key = unwrap_key_from_share(k_c_arr, &b64_decode(wrapped).ok()?).ok()?;
+        if file_key.len() != 32 {
+            return None;
+        }
     }
     let token_bytes = unwrap_key_from_share(master.as_bytes(), &wrapped_token).ok()?;
     let token = Zeroizing::new(String::from_utf8(token_bytes.to_vec()).ok()?);

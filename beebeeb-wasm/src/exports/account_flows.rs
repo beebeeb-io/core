@@ -38,18 +38,33 @@ impl AccountFlowJs {
         }
     }
 
+    /// `onboardingStatus` / `onboardingBody`: the server's `GET /api/v1/onboarding` answer (its
+    /// password policy). `breachCheck`: a `WasmBreachCheck` made for `newPassword` and answered,
+    /// required when that policy declares a breach check (sign-up's gate).
     #[wasm_bindgen(js_name = changePassword)]
+    #[allow(clippy::too_many_arguments)]
     pub fn change_password(
         &mut self,
         current: String,
         new_password: String,
         recovery_check_b64: String,
         x25519_public_b64: String,
+        onboarding_status: u16,
+        onboarding_body: &str,
+        breach_check: Option<crate::WasmBreachCheck>,
     ) -> Result<JsValue, JsValue> {
+        let current = zeroize::Zeroizing::new(current);
+        let new_password = zeroize::Zeroizing::new(new_password);
+        let policy = beebeeb_core::signup_flow::SignupPolicy::from_response(
+            &beebeeb_core::auth_flow::HttpResponse::from_text(onboarding_status, onboarding_body, None),
+        )
+        .map_err(|_| JsValue::from_str("policy_unavailable"))?;
         self.begin(AccountFlow::change_password(
             &current,
             &new_password,
             binding(recovery_check_b64, x25519_public_b64),
+            &policy,
+            breach_check.as_ref().map(|c| &c.check),
         ))
     }
 

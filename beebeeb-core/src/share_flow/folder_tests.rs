@@ -558,3 +558,39 @@ fn a_folder_seal_to_a_key_other_than_the_compared_one_is_refused() {
         other => panic!("a seal request was built: {other:?}"),
     }
 }
+
+#[test]
+fn an_upper_case_item_id_is_refused_never_used_as_key_input() {
+    let m = master();
+    let upper = FOLDER.to_ascii_uppercase();
+    let input = FolderInviteInput {
+        folder_id: &upper,
+        email: "bob@beebeeb.test",
+        shared_folders_write: false,
+        custody: CustodyMemory::default(),
+        expected_peer_fingerprint: None,
+    };
+    assert_eq!(
+        FolderShare::invite(input, &m).err(),
+        Some(ShareFlowError::InvalidInput("folder id")),
+        "an upper-case folder id is refused before any request"
+    );
+    // A child id from the listing is HKDF info too: an upper-case one stops the share.
+    let (mut flow, first) = FolderShare::invite(input_for_child_test(), &m).unwrap();
+    let _ = sent(first);
+    let step = flow.on_response(resp(200, json!({ "invites": [] }))).unwrap();
+    let _ = sent(step);
+    let upper_child = CHILD_FILE.to_ascii_uppercase();
+    assert_eq!(
+        flow.on_response(resp(
+            200,
+            json!({ "files": [{ "id": upper_child, "is_folder": false }] })
+        ))
+        .err(),
+        Some(ShareFlowError::InvalidInput("child id"))
+    );
+}
+
+fn input_for_child_test() -> FolderInviteInput<'static> {
+    input(false, CustodyMemory::default())
+}

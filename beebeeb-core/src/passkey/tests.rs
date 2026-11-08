@@ -189,7 +189,7 @@ fn login_start_answer() -> Value {
 
 #[test]
 fn passkey_registration_options_decode_the_server_answer() {
-    let start = ceremony::parse_registration_start(&register_start_answer()).unwrap();
+    let start = ceremony::parse_registration_start(&register_start_answer(), &rp()).unwrap();
     let o = &start.options;
     assert_eq!(start.reg_id, "4f1c2a8e-6b1d-4b5e-9a35-2b7f7d1f0c11");
     assert_eq!(
@@ -213,16 +213,16 @@ fn passkey_registration_options_decode_the_server_answer() {
     // The double-wrapped shape web also accepts.
     let mut double = register_start_answer();
     double["publicKey"] = json!({ "publicKey": register_start_answer()["publicKey"] });
-    assert_eq!(ceremony::parse_registration_start(&double).unwrap(), start);
+    assert_eq!(ceremony::parse_registration_start(&double, &rp()).unwrap(), start);
     assert_eq!(
-        ceremony::parse_registration_start(&json!({ "reg_id": "x" })),
+        ceremony::parse_registration_start(&json!({ "reg_id": "x" }), &rp()),
         Err(PasskeyError::Malformed("publicKey"))
     );
 }
 
 #[test]
 fn passkey_finish_bodies_match_the_web_wire() {
-    let start = ceremony::parse_registration_start(&register_start_answer()).unwrap();
+    let start = ceremony::parse_registration_start(&register_start_answer(), &rp()).unwrap();
     let att = NativeAttestation {
         credential_id: vec![0xfb; 3],
         attestation_object: vec![1, 2],
@@ -244,7 +244,7 @@ fn passkey_finish_bodies_match_the_web_wire() {
     );
     assert_eq!(ceremony::escrow_path(&[0xfb; 3]), "/api/v1/auth/vault-key-escrow/-_v7");
 
-    let start = ceremony::parse_assertion_start(&login_start_answer()).unwrap();
+    let start = ceremony::parse_assertion_start(&login_start_answer(), &rp()).unwrap();
     assert_eq!(start.options.allow_credentials, vec![vec![1u8; 16]]);
     let a = NativeAssertion {
         credential_id: vec![1u8; 16],
@@ -308,6 +308,35 @@ fn block_on<F: Future>(f: F) -> F::Output {
 }
 
 const SESSION: &str = "session-from-login";
+const PASSWORD: &[u8] = b"correct horse battery staple";
+const EMAIL: &str = "ada@example.eu";
+
+fn rp() -> ceremony::ExpectedRp {
+    ceremony::ExpectedRp::new("beebeeb.io")
+}
+
+/// The server's OPAQUE record for `PASSWORD`, made once (each OPAQUE leg pays Argon2id).
+fn opaque_account() -> &'static (Vec<u8>, Vec<u8>) {
+    static ACCOUNT: std::sync::OnceLock<(Vec<u8>, Vec<u8>)> = std::sync::OnceLock::new();
+    ACCOUNT.get_or_init(|| {
+        use crate::opaque_protocol as op;
+        let setup = op::create_server_setup();
+        let start = op::client_registration_start(PASSWORD).unwrap();
+        let resp = op::server_registration_start(&setup, &start.message, EMAIL.as_bytes()).unwrap();
+        let upload = op::client_registration_finish(&start.state, PASSWORD, &resp).unwrap();
+        (setup, op::server_registration_finish(&upload).unwrap())
+    })
+}
+
+fn std_b64(b: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(b)
+}
+
+fn std_unb64(s: &str) -> Vec<u8> {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.decode(s).unwrap()
+}
 const NEW_SESSION: &str = "session-minted-by-passkey";
 
 /// One recorded call: method, path, bearer, confirm token, body.
@@ -334,6 +363,26 @@ impl PasskeyHttp for Server {
         ));
         let ok = |body: Value| Ok(ApiResponse { status: 200, body });
         let res = match (r.method, r.path.as_str()) {
+            (Method::Post, "/api/v1/auth/confirm-opaque-start") => {
+                let (setup, file) = opaque_account();
+                let msg = std_unb64(r.body.as_ref().unwrap()["client_message"].as_str().unwrap());
+                let s = crate::opaque_protocol::server_login_start(setup, file, &msg, EMAIL.as_bytes()).unwrap();
+                ok(
+                    json!({ "server_message": std_b64(&s.message), "server_state": std_b64(&s.state), "ksf_version": 1 }),
+                )
+            }
+            (Method::Post, "/api/v1/auth/confirm-opaque-finish") => {
+                let b = r.body.as_ref().unwrap();
+                let state = std_unb64(b["server_state"].as_str().unwrap());
+                let msg = std_unb64(b["client_message"].as_str().unwrap());
+                match crate::opaque_protocol::server_login_finish(&state, &msg) {
+                    Ok(_) => ok(json!({ "confirmation_token": "fresh-proof", "expires_at": "x" })),
+                    Err(_) => Ok(ApiResponse {
+                        status: 401,
+                        body: Value::Null,
+                    }),
+                }
+            }
             (Method::Post, "/api/v1/auth/passkey/register-start") if confirm.as_deref() == Some("fresh-proof") => {
                 ok(register_start_answer())
             }
@@ -457,9 +506,10 @@ fn passkey_add_with_prf_at_create_escrows_a_blob_the_sign_in_opens() {
         &server,
         &authn,
         SESSION,
-        "fresh-proof",
+        PASSWORD,
         Some("Laptop"),
         Some(&vault_key),
+        &rp(),
     ))
     .unwrap();
     assert_eq!(
@@ -477,21 +527,31 @@ fn passkey_add_with_prf_at_create_escrows_a_blob_the_sign_in_opens() {
         assert_eq!(
             paths,
             [
+                "/api/v1/auth/confirm-opaque-start",
+                "/api/v1/auth/confirm-opaque-finish",
                 "/api/v1/auth/passkey/register-start",
                 "/api/v1/auth/passkey/register-finish",
                 "/api/v1/auth/vault-key-escrow"
             ]
         );
-        assert_eq!(calls[0].3.as_deref(), Some("fresh-proof"));
+        assert_eq!(
+            calls[2].3.as_deref(),
+            Some("fresh-proof"),
+            "the step-up's token goes on register-start"
+        );
+        assert!(
+            calls.iter().enumerate().all(|(i, c)| (i == 2) == c.3.is_some()),
+            "the token goes on register-start only"
+        );
         assert!(calls.iter().all(|c| c.2.as_deref() == Some(SESSION)));
-        assert_eq!(calls[1].4.as_ref().unwrap()["name"], "Laptop");
+        assert_eq!(calls[3].4.as_ref().unwrap()["name"], "Laptop");
         // The escrow body carries ciphertext only: never the vault key, the PRF output or the wrap key.
-        let escrow = serde_json::to_string(&calls[2].4).unwrap();
+        let escrow = serde_json::to_string(&calls[4].4).unwrap();
         for secret in [hex(&[0x11; 32]), hex(&[0x42; 32])] {
             assert!(!escrow.contains(&secret));
         }
     }
-    let signed = block_on(flow::sign_in(&server, &authn, "ada@example.eu")).unwrap();
+    let signed = block_on(flow::sign_in(&server, &authn, "ada@example.eu", &rp())).unwrap();
     assert_eq!(signed.user_id, "9d0e1a1f-0000-4000-8000-000000000002");
     assert_eq!(signed.session_token.as_str(), NEW_SESSION);
     let key = signed.vault.into_master_key().expect("unlocked");
@@ -513,9 +573,10 @@ fn passkey_add_probes_for_prf_when_create_gives_none() {
         &server,
         &authn,
         SESSION,
-        "fresh-proof",
+        PASSWORD,
         None,
         Some(&mk(&[3; 32])),
+        &rp(),
     ))
     .unwrap();
     assert!(added.prf && added.escrowed);
@@ -533,7 +594,7 @@ fn passkey_add_probes_for_prf_when_create_gives_none() {
     );
     assert_eq!(
         server.calls.lock().unwrap().len(),
-        3,
+        5,
         "the probe never reaches the server"
     );
 }
@@ -546,9 +607,10 @@ fn passkey_without_prf_is_added_but_never_escrowed_and_signs_in_locked() {
         &server,
         &authn,
         SESSION,
-        "fresh-proof",
+        PASSWORD,
         None,
         Some(&mk(&[3; 32])),
+        &rp(),
     ))
     .unwrap();
     assert_eq!((added.prf, added.escrowed), (false, false));
@@ -557,8 +619,8 @@ fn passkey_without_prf_is_added_but_never_escrowed_and_signs_in_locked() {
         0,
         "the platform said no PRF: no probe"
     );
-    assert_eq!(server.calls.lock().unwrap().len(), 2, "no escrow call");
-    let signed = block_on(flow::sign_in(&server, &authn, "ada@example.eu")).unwrap();
+    assert_eq!(server.calls.lock().unwrap().len(), 4, "no escrow call");
+    let signed = block_on(flow::sign_in(&server, &authn, "ada@example.eu", &rp())).unwrap();
     assert!(matches!(signed.vault, VaultOutcome::NoPrf));
 }
 
@@ -566,7 +628,7 @@ fn passkey_without_prf_is_added_but_never_escrowed_and_signs_in_locked() {
 fn passkey_sign_in_reports_no_escrow_and_a_blob_that_does_not_open() {
     let server = Server::default();
     let authn = Authenticator::new(Prf::AtCreate);
-    let signed = block_on(flow::sign_in(&server, &authn, "ada@example.eu")).unwrap();
+    let signed = block_on(flow::sign_in(&server, &authn, "ada@example.eu", &rp())).unwrap();
     assert!(matches!(signed.vault, VaultOutcome::NoEscrow));
     // An escrow made under another PRF output.
     let other = PrfOutput::from_slice(&[0x01; 32]).unwrap();
@@ -576,7 +638,7 @@ fn passkey_sign_in_reports_no_escrow_and_a_blob_that_does_not_open() {
         body["credential_id"].as_str().unwrap().into(),
         body["encrypted_vault_key"].as_str().unwrap().into(),
     );
-    let signed = block_on(flow::sign_in(&server, &authn, "ada@example.eu")).unwrap();
+    let signed = block_on(flow::sign_in(&server, &authn, "ada@example.eu", &rp())).unwrap();
     assert!(matches!(signed.vault, VaultOutcome::UnwrapFailed));
     assert!(
         !format!("{signed:?}").contains(NEW_SESSION),
@@ -588,8 +650,22 @@ fn passkey_sign_in_reports_no_escrow_and_a_blob_that_does_not_open() {
 fn passkey_add_needs_a_fresh_proof_and_survives_a_failed_escrow() {
     let server = Server::default();
     let authn = Authenticator::new(Prf::AtCreate);
-    let err = block_on(flow::add_passkey(&server, &authn, SESSION, "stale", None, None)).unwrap_err();
-    assert_eq!(err, PasskeyError::ConfirmationRequired);
+    let err = block_on(flow::add_passkey(
+        &server,
+        &authn,
+        SESSION,
+        b"not the password",
+        None,
+        None,
+        &rp(),
+    ))
+    .unwrap_err();
+    assert_eq!(
+        err,
+        PasskeyError::StepUp {
+            code: "invalid_credentials"
+        }
+    );
     assert_eq!(
         *authn.creates.lock().unwrap(),
         0,
@@ -603,17 +679,22 @@ fn passkey_add_needs_a_fresh_proof_and_survives_a_failed_escrow() {
         &server,
         &authn,
         SESSION,
-        "fresh-proof",
+        PASSWORD,
         None,
         Some(&mk(&[3; 32])),
+        &rp(),
     ))
     .unwrap();
     assert_eq!((added.prf, added.escrowed), (true, false));
     // No vault key in memory: added with PRF, nothing escrowed, no escrow call.
     let server = Server::default();
-    let added = block_on(flow::add_passkey(&server, &authn, SESSION, "fresh-proof", None, None)).unwrap();
+    let added = block_on(flow::add_passkey(&server, &authn, SESSION, PASSWORD, None, None, &rp())).unwrap();
     assert_eq!((added.prf, added.escrowed), (true, false));
-    assert_eq!(server.calls.lock().unwrap().len(), 2);
+    assert_eq!(
+        server.calls.lock().unwrap().len(),
+        4,
+        "two step-up legs, start, finish; no escrow call"
+    );
 }
 
 #[test]
@@ -624,20 +705,142 @@ fn passkey_list_and_remove_go_to_the_right_routes() {
     block_on(flow::remove_passkey(
         &server,
         SESSION,
-        Some("proof"),
+        PASSWORD,
         "4f1c2a8e-6b1d-4b5e-9a35-2b7f7d1f0c11",
     ))
     .unwrap();
     let calls = server.calls.lock().unwrap();
-    assert_eq!(calls[1].0, Method::Delete);
-    assert_eq!(calls[1].1, "/api/v1/auth/passkeys/4f1c2a8e-6b1d-4b5e-9a35-2b7f7d1f0c11");
-    assert_eq!(calls[1].3.as_deref(), Some("proof"));
+    assert_eq!(calls[1].1, "/api/v1/auth/confirm-opaque-start");
+    assert_eq!(calls[2].1, "/api/v1/auth/confirm-opaque-finish");
+    assert_eq!(calls[3].0, Method::Delete);
+    assert_eq!(calls[3].1, "/api/v1/auth/passkeys/4f1c2a8e-6b1d-4b5e-9a35-2b7f7d1f0c11");
+    assert_eq!(
+        calls[3].3.as_deref(),
+        Some("fresh-proof"),
+        "the minted token goes on the DELETE"
+    );
     drop(calls);
-    let err = block_on(flow::remove_passkey(&server, SESSION, None, "not-a-uuid")).unwrap_err();
+    let err = block_on(flow::remove_passkey(&server, SESSION, PASSWORD, "not-a-uuid")).unwrap_err();
     assert_eq!(err.code(), "passkey_malformed");
     assert_eq!(
         server.calls.lock().unwrap().len(),
-        2,
+        4,
         "a bad id never reaches the server"
     );
+}
+
+#[test]
+fn api_response_debug_never_prints_a_secret() {
+    const PLANTED: &str = "planted-secret-7f3a";
+    let resp = ApiResponse {
+        status: 200,
+        body: json!({ "session_token": PLANTED, "token": PLANTED }),
+    };
+    let shown = format!("{resp:?}");
+    assert!(
+        !shown.contains(PLANTED),
+        "passkey ApiResponse Debug printed a planted secret"
+    );
+    assert!(shown.contains("200"));
+}
+
+#[test]
+fn passkey_parse_refuses_a_relying_party_the_host_does_not_expect() {
+    let mut other = register_start_answer();
+    other["publicKey"]["rp"]["id"] = json!("evil.example");
+    assert_eq!(
+        ceremony::parse_registration_start(&other, &rp()).unwrap_err(),
+        PasskeyError::RpMismatch
+    );
+    let mut login = login_start_answer();
+    login["publicKey"]["rpId"] = json!("evil.example");
+    assert_eq!(
+        ceremony::parse_assertion_start(&login, &rp()).unwrap_err(),
+        PasskeyError::RpMismatch
+    );
+    // A suffix or a case variant is not the same relying party.
+    for id in ["beebeeb.io.evil.example", "BEEBEEB.IO", "app.beebeeb.io", ""] {
+        let mut a = login_start_answer();
+        a["publicKey"]["rpId"] = json!(id);
+        assert_eq!(
+            ceremony::parse_assertion_start(&a, &rp()).unwrap_err().code(),
+            "passkey_rp_mismatch"
+        );
+    }
+    assert_eq!(PasskeyError::RpMismatch.code(), "passkey_rp_mismatch");
+    // The expected one decodes to its https origin.
+    assert_eq!(
+        ceremony::parse_assertion_start(&login_start_answer(), &rp())
+            .unwrap()
+            .options
+            .origin,
+        "https://beebeeb.io"
+    );
+}
+
+#[test]
+fn passkey_localhost_is_claimed_only_by_a_development_host() {
+    let local = ceremony::ExpectedRp::new("localhost");
+    // A release build without the development flag never claims http://localhost.
+    assert_eq!(
+        local.origin_for_release_build("localhost").unwrap_err(),
+        PasskeyError::RpMismatch
+    );
+    let dev = ceremony::ExpectedRp::development("localhost");
+    assert_eq!(
+        dev.origin_for_release_build("localhost").unwrap(),
+        "http://localhost:5173"
+    );
+    // A production host never accepts a server that says localhost, development flag or not.
+    assert_eq!(rp().origin_for("localhost").unwrap_err(), PasskeyError::RpMismatch);
+    assert_eq!(
+        ceremony::ExpectedRp::development("beebeeb.io")
+            .origin_for("localhost")
+            .unwrap_err(),
+        PasskeyError::RpMismatch
+    );
+}
+
+#[test]
+fn passkey_prf_probe_asks_for_the_creations_user_verification() {
+    let start = ceremony::parse_registration_start(&register_start_answer(), &rp()).unwrap();
+    assert_eq!(start.options.user_verification, "required");
+    let probe = RequestOptions::local_prf_probe(&start.options, &[1u8; 16]);
+    assert_eq!(
+        probe.user_verification, "required",
+        "the probe is never weaker than the creation"
+    );
+    let mut preferred = start.options.clone();
+    preferred.user_verification = "preferred".into();
+    assert_eq!(
+        RequestOptions::local_prf_probe(&preferred, &[1u8; 16]).user_verification,
+        "required",
+        "the probe forces `required` whatever the options carry"
+    );
+}
+
+#[test]
+fn passkey_add_and_remove_never_take_a_token_from_the_caller() {
+    // A wrong password stops before any passkey route or platform prompt.
+    let server = Server::default();
+    let authn = Authenticator::new(Prf::AtCreate);
+    let err = block_on(flow::remove_passkey(
+        &server,
+        SESSION,
+        b"not the password",
+        "4f1c2a8e-6b1d-4b5e-9a35-2b7f7d1f0c11",
+    ))
+    .unwrap_err();
+    assert_eq!(err.code(), "passkey_step_up_failed");
+    assert!(
+        server
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|c| !c.1.starts_with("/api/v1/auth/passkeys/"))
+    );
+    let err = block_on(flow::add_passkey(&server, &authn, SESSION, b"", None, None, &rp())).unwrap_err();
+    assert_eq!(err, PasskeyError::StepUp { code: "invalid_input" });
+    assert_eq!(*authn.creates.lock().unwrap(), 0);
 }

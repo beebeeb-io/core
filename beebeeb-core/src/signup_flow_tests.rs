@@ -235,3 +235,29 @@ fn debug_prints_hold_no_secret() {
     assert!(!dbg.contains(words[0].as_str()));
     assert!(!dbg.contains("correct horse"));
 }
+
+#[test]
+fn the_terms_url_host_is_parsed_and_compared_exactly() {
+    let own = |u: &str| super::own_https_url(Some(&json!(u)));
+    for bad in [
+        "https://evil.example?.beebeeb.io",
+        "https://evil.example#.beebeeb.io",
+        "https://evil.example\\.beebeeb.io",
+        "https://evil.example\\@app.beebeeb.io",
+        "https://beebeeb.io@evil.example/terms",
+        "https://evil.example/.beebeeb.io",
+        "https://beebeeb.io.evil.example/terms",
+        "http://beebeeb.io/terms",
+        "https://beebeeb.io:8443/terms",
+    ] {
+        assert_eq!(own(bad), None, "{bad} must be refused");
+    }
+    assert_eq!(
+        own("https://beebeeb.io/terms").as_deref(),
+        Some("https://beebeeb.io/terms")
+    );
+    assert_eq!(
+        own("https://app.beebeeb.io/legal?v=2").as_deref(),
+        Some("https://app.beebeeb.io/legal?v=2")
+    );
+}

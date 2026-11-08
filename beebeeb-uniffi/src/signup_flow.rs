@@ -14,7 +14,7 @@ use beebeeb_core::signup_flow::{SignupError, SignupFlow, SignupPolicy};
 use zeroize::Zeroizing;
 
 use crate::auth_flow::{AuthHttpRequest, AuthHttpResponse, into, out};
-use crate::{BreachVerdictDto, PasswordEvaluationDto};
+use crate::{BreachVerdictDto, MasterKeyHandle, PasswordEvaluationDto};
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum SignupFlowFfiError {
@@ -65,7 +65,8 @@ fn policy(response: AuthHttpResponse) -> Result<SignupPolicy, SignupFlowFfiError
 pub struct SignupCreatedFfi {
     pub session_token: String,
     pub user_id: String,
-    pub master_key: Vec<u8>,
+    /// The master key as a handle; `export_for_keychain` once, to persist it.
+    pub master_key: Arc<MasterKeyHandle>,
 }
 
 // ── Sign-up ──────────────────────────────────────────────────────────────────
@@ -171,7 +172,7 @@ impl SignupFlowHandle {
         Ok(SignupCreatedFfi {
             session_token: created.session_token.to_string(),
             user_id: created.user_id.clone(),
-            master_key: Zeroizing::new(created.master_key.to_bytes()).to_vec(),
+            master_key: MasterKeyHandle::new(created.master_key),
         })
     }
 
@@ -193,7 +194,10 @@ impl SignupFlowHandle {
 #[derive(uniffi::Enum)]
 pub enum RecoveredFfi {
     /// Signed in with the new password: store both, then drop them.
-    SignedIn { session_token: String, master_key: Vec<u8> },
+    SignedIn {
+        session_token: String,
+        master_key: Arc<MasterKeyHandle>,
+    },
     /// The password changed; a normal sign-in comes next (two-factor on, or an older server).
     SignInRequired,
 }
@@ -285,7 +289,7 @@ impl PhraseRecoveryHandle {
                 master_key,
             } => RecoveredFfi::SignedIn {
                 session_token: session_token.to_string(),
-                master_key: Zeroizing::new(master_key.to_bytes()).to_vec(),
+                master_key: MasterKeyHandle::new(master_key),
             },
             Recovered::SignInRequired => RecoveredFfi::SignInRequired,
         })

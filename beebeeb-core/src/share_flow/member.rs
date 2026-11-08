@@ -16,7 +16,8 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
 use super::{
-    ShareFlowError, b64, b64_decode, own_file_key, own_master, path_id, require_ok, seal_file_key_for_member, str_field,
+    ShareFlowError, b64, b64_decode, canonical_item_id, own_file_key, own_master, path_id, require_ok,
+    seal_file_key_for_member, str_field,
 };
 use crate::auth_flow::{HttpRequest, HttpResponse, RequestAuth};
 use crate::kdf::{FileKey, MasterKey};
@@ -145,6 +146,7 @@ pub fn approve_request(
     expected_peer_fingerprint: Option<&[u8; 32]>,
 ) -> Result<SealedApproval, ShareFlowError> {
     let invite_id = path_id(invite_id)?;
+    let file_id = canonical_item_id(file_id, "file id")?;
     let public = recipient_key(recipient_public_key_b64, expected_peer_fingerprint)?;
     let sealed = seal_file_key_for_member(master, &public, file_id, file_key)?;
     Ok(SealedApproval {
@@ -214,7 +216,7 @@ impl MemberInvite {
             // A folder goes through `folder::FolderInvite` (its key rules), never the file path.
             return Err(ShareFlowError::InvalidInput("is_folder: use FolderInvite"));
         }
-        let file_id = path_id(&target.item_id).map_err(|_| ShareFlowError::InvalidInput("item id"))?;
+        let file_id = canonical_item_id(&target.item_id, "item id")?;
         let email = check_email(email)?;
         let request = HttpRequest::post(
             INVITES_PATH,

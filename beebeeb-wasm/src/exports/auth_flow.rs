@@ -43,7 +43,7 @@ pub(crate) fn request_js(req: &HttpRequest) -> RequestJs {
         path: req.path.clone(),
         body: req.body.clone(),
         needs_session: req.auth == RequestAuth::Session,
-        confirm_token: req.confirm_token.as_ref().map(|t| t.as_str().to_owned()),
+        confirm_token: req.confirm_token_header().map(str::to_owned),
     }
 }
 
@@ -152,11 +152,7 @@ pub struct AuthStepUp {
 impl AuthStepUp {
     #[wasm_bindgen(constructor)]
     pub fn new(password: &str, purpose: Option<String>, cli_code: Option<String>) -> Result<AuthStepUp, JsError> {
-        let purpose = match (purpose, cli_code) {
-            (_, Some(code)) => af::step_up::StepUpPurpose::DeviceApproval { code },
-            (Some(p), None) if !p.is_empty() => af::step_up::StepUpPurpose::Named(p),
-            _ => af::step_up::StepUpPurpose::Generic,
-        };
+        let purpose = af::step_up::StepUpPurpose::from_parts(purpose, cli_code).map_err(err)?;
         let (flow, first) = af::step_up::StepUp::start(password.as_bytes(), purpose).map_err(err)?;
         Ok(Self {
             flow: Some(flow),
@@ -187,13 +183,7 @@ impl AuthStepUp {
         let token = self.token.take().ok_or_else(wrong_state)?;
         let body: serde_json::Value =
             serde_wasm_bindgen::from_value(body).map_err(|_| JsError::new("invalid_input"))?;
-        out(token.attach(HttpRequest {
-            method: af::Method::Post,
-            path,
-            body: Some(body),
-            auth: RequestAuth::Session,
-            confirm_token: None,
-        }))
+        out(token.attach(HttpRequest::session_post(path, body)))
     }
 }
 
