@@ -11,17 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`zip::stream_folder_zip` (LD-0146); no signature or type changes.**
   - An entry of 4 GiB or more no longer fails the archive partway ("Large file option has not been set"): an entry whose
-    `size_bytes` is 3 GiB or more is written as ZIP64. Smaller entries keep the layout they had.
+    declared `size_bytes` is 3 GiB or more is written as ZIP64. Smaller entries keep the layout they had.
   - A cancelled or failed archive is no longer a valid-looking, shorter zip. The dropped `ZipWriter` used to finish
     the current entry with a short CRC and write a central directory; the writer is now sealed on every exit but the
-    finished archive (an `Err`, a cancel, a panic in a callback), so the output has no central directory and no reader
-    opens it as complete. The caller still deletes the file on `Err`. The zip crate reports the refused footer on
+    finished archive (an `Err`, a cancel, a panic in a callback) and by the first failure of the sink itself, so a sink
+    that fails once in the central directory and then works again cannot take a second, complete central directory
+    from the zip crate's retry in `Drop`. The output has no central directory and no reader opens it as complete. The
+    caller still deletes the file on `Err`. The zip crate reports the refused footer on
     stderr (`ZipWriter::drop: failed to finalize archive: ...`, with no trailing newline); core cannot silence it.
   - Two entries with the same path no longer abort the archive: the later one is stored as `name (2).ext`,
     `name (3).ext`, ... (the cli's rule), compared case- and normalisation-insensitively, as macOS and Windows extract.
-    An entry's own name is never taken by a rename.
-  - `ZipProgress::bytes_done` counts plaintext, like `bytes_total`, so the last event is 100% (it counted ciphertext
-    and ended above it).
+    An entry's own name is never taken by a rename, and neither is a path that is another entry's folder (`report`,
+    `report`, `report (2)/notes.txt` gives `report`, `report (3)`, `report (2)/notes.txt`); a file named like another
+    entry's folder is renamed too.
+  - `ZipProgress::bytes_done` counts plaintext, and each entry's declared `size_bytes` (plaintext for web uploads,
+    encrypted for cli uploads) is replaced in `bytes_total` by the plaintext read once its last chunk is in, so the
+    last event is exactly 100% (it counted ciphertext and ended above it for web uploads). No event reports more than
+    100%, even for an understated or zero `size_bytes`.
+  - The sum of the entries' `size_bytes` (also in `estimate_zip_size`) saturates instead of overflowing.
 
 ## [0.2.5] - 2026-11-08
 
