@@ -295,16 +295,18 @@ fn parent_field(payload: &Value, key: &str) -> Result<Option<Uuid>, SyncLoopErro
     }
 }
 
-/// A remote create, rename or move can give an item a name its folder
-/// already holds: names are sealed, so the server keeps both. The drive keeps
-/// both too and asks nothing (1022 G5): the item that arrives second, this
-/// op's, takes core's `drive_conflict_name` from its own incoming name, never
-/// from the existing item's; two names clash when core's normal forms are
-/// equal (`TakenNames`). The folder is the one the item lands in: a create's
-/// `parent_id`, a move's `new_parent_id`, and for a rename (whose op carries
-/// no parent) the item's current folder in the engine. A move carries no
-/// name, so its opened name is added as `new_name` (the engine applies it):
-/// moving out of a clash gives the item its own name back.
+/// A remote create, rename, move or restore can give an item a name its
+/// folder already holds: names are sealed, so the server keeps both. The drive
+/// keeps both too and asks nothing (1022 G5): the item that arrives second,
+/// this op's, takes core's `drive_conflict_name` from its own incoming name,
+/// never from the existing item's; two names clash when core's normal forms
+/// are equal (`TakenNames`). The folder is the one the item lands in: a
+/// create's `parent_id`, a move's `new_parent_id`, and for a rename or a
+/// restore (whose ops carry no parent) the item's current folder in the
+/// engine. Only live siblings hold a name, so a restore is checked too: an
+/// item may have taken the name while this one was in the Trash. A move or a
+/// restore carries no name, so its opened name is added as `new_name` (the
+/// engine applies it): moving out of a clash gives the item its own name back.
 fn resolve_operation_collision(
     session: &Session,
     engine: &SyncEngine,
@@ -337,7 +339,13 @@ fn resolve_operation_collision(
             };
             ("new_name", name.to_owned(), node.parent_id, item_kind(node.is_folder))
         }
-        "file_move" | "folder_move" => {
+        "file_move" | "folder_move" | "file_restore" => {
+            // The server's move and restore carry no name: any name in the
+            // payload is not this item's to take.
+            if let Some(object) = operation.payload.as_object_mut() {
+                object.remove("new_name");
+                object.remove("new_name_undecryptable");
+            }
             let Some(node) = id.map(|id| engine.lookup_node(id)).transpose()?.flatten() else {
                 return Ok(());
             };
@@ -349,12 +357,12 @@ fn resolve_operation_collision(
             if check_component(&metadata.name, Rules::Portable).is_err() {
                 return Ok(());
             }
-            (
-                "new_name",
-                metadata.name,
-                parent_field(&operation.payload, "new_parent_id")?,
-                item_kind(node.is_folder),
-            )
+            let parent = if operation.op_type == "file_restore" {
+                node.parent_id
+            } else {
+                parent_field(&operation.payload, "new_parent_id")?
+            };
+            ("new_name", metadata.name, parent, item_kind(node.is_folder))
         }
         _ => return Ok(()),
     };

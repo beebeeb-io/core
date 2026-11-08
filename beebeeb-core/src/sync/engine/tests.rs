@@ -232,6 +232,55 @@ fn test_apply_remote_file_move() {
     assert_eq!(engine.children(Some(folder_b)).len(), 1);
 }
 
+/// Review r5, P3-5: the move event carries the name the move assigned (a
+/// client's conflict name in the destination), and a restore applies one too.
+#[test]
+fn a_move_reports_the_name_it_assigned_and_a_restore_applies_one() {
+    let mut engine = SyncEngine::new("dev-1".into());
+    let folder_b = Uuid::new_v4();
+    let file = Uuid::new_v4();
+    let mut trashed = node(Uuid::new_v4(), "t.txt", None, false);
+    trashed.is_trashed = true;
+    let trashed_id = trashed.id;
+    engine
+        .apply_complete_snapshot(
+            CompleteSnapshot::new(
+                vec![
+                    node(folder_b, "B", None, true),
+                    node(file, "f.txt", None, false),
+                    trashed,
+                ],
+                SyncPosition::new(1, 1),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+    let moved = engine
+        .apply_remote_op(RemoteOp::from_authenticated_session(op(
+            2,
+            "file_move",
+            json!({"id": file.to_string(), "new_parent_id": folder_b.to_string(), "new_name": "f (conflict).txt"}),
+        )))
+        .unwrap();
+    let restored = engine
+        .apply_remote_op(RemoteOp::from_authenticated_session(op(
+            3,
+            "file_restore",
+            json!({"id": trashed_id.to_string(), "new_name": "t (conflict).txt"}),
+        )))
+        .unwrap();
+
+    match moved {
+        Some(SyncEvent::FileMoved { name, .. }) => assert_eq!(name, "f (conflict).txt"),
+        other => panic!("expected a move event, got {other:?}"),
+    }
+    assert!(matches!(restored, Some(SyncEvent::FileRestored { .. })));
+    let restored = engine.get_node(trashed_id).unwrap();
+    assert!(!restored.is_trashed);
+    assert_eq!(restored.name, "t (conflict).txt");
+}
+
 #[test]
 fn test_echo_suppression() {
     let mut engine = SyncEngine::new("dev-1".into());

@@ -650,6 +650,7 @@ impl SyncEngine {
             id,
             old_parent,
             new_parent,
+            name: node.name.clone(),
         })
     }
 
@@ -665,6 +666,14 @@ impl SyncEngine {
         let id = uuid_field(payload, "id")?;
         let node = self.state.tree.get_mut(&id)?;
         node.is_trashed = false;
+        // The server's restore carries no name. A client that found the
+        // item's name taken in its folder by now (only live items hold a name)
+        // adds the plaintext `new_name`: the drive's conflict name, or the
+        // item's own name.
+        if let Some(new_name) = string_field(payload, "new_name") {
+            node.name = new_name;
+            node.name_undecryptable = false;
+        }
         node.updated_at = Utc::now();
         Some(SyncEvent::FileRestored { id })
     }

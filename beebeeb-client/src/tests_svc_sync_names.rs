@@ -395,3 +395,59 @@ async fn a_snapshot_name_the_path_rule_refuses_is_shown_undecryptable() {
     assert_eq!(node.name, "");
     assert_eq!(name(&engine, &fine), "fine.txt");
 }
+
+// ── A restore is checked in the item's folder (review r5, P2-3) ─────────────
+
+/// `/Docs/a.txt` is in the Trash, and a trashed item holds no name, so a
+/// rename makes `/Docs/x.txt` into `a.txt`. Restoring the first `a.txt` must
+/// not leave two of them in `/Docs`.
+fn restore_after_a_rename(master: &MasterKey) -> (Vec<TreeNode>, Vec<(&'static str, Value)>, Item, Item) {
+    let (docs, x, a) = (new_item(master), new_item(master), new_item(master));
+    let mut trashed = node(master, &a, Some(docs.id), "a.txt", "a.txt", false);
+    trashed.is_trashed = true;
+    let nodes = vec![
+        node(master, &docs, None, "Docs", "Docs", true),
+        node(master, &x, Some(docs.id), "x.txt", "x.txt", false),
+        trashed,
+    ];
+    let ops = vec![
+        (
+            "file_rename",
+            json!({"id": x.id.to_string(), "new_name_encrypted": sealed(master, &x, "a.txt")}),
+        ),
+        ("file_restore", json!({"id": a.id.to_string()})),
+    ];
+    (nodes, ops, x, a)
+}
+
+#[tokio::test]
+async fn a_restore_never_leaves_two_equal_names_in_one_folder() {
+    let master = MasterKey::from_bytes(KEY);
+    let (nodes, ops, x, a) = restore_after_a_rename(&master);
+    let mut engine = engine_with(nodes);
+
+    apply_all(&mut engine, ops).await.unwrap();
+
+    assert_eq!(name(&engine, &x), "a.txt", "the trashed item held no name");
+    assert_eq!(name(&engine, &a), CONFLICT);
+    assert!(!engine.get_node(a.id).unwrap().is_trashed);
+}
+
+/// The same on the store-backed engine the File Provider uses.
+#[tokio::test]
+async fn a_restore_on_the_store_backed_engine_never_leaves_two_equal_names() {
+    let master = MasterKey::from_bytes(KEY);
+    let (nodes, ops, x, a) = restore_after_a_rename(&master);
+    let mut engine =
+        SyncEngine::with_store_backed("device-1".into(), beebeeb_store::Store::open_in_memory().unwrap()).unwrap();
+    engine
+        .apply_complete_snapshot(CompleteSnapshot::new(nodes, SyncPosition::new(1, 1)).unwrap())
+        .unwrap();
+
+    apply_all(&mut engine, ops).await.unwrap();
+
+    let stored = |item: &Item| engine.lookup_node(item.id).unwrap().unwrap();
+    assert_eq!(stored(&x).name, "a.txt");
+    assert_eq!(stored(&a).name, CONFLICT);
+    assert!(!stored(&a).is_trashed);
+}
