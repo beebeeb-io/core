@@ -24,6 +24,11 @@ cli = ["uniffi/cli"]
 # desktop, server). When building the iOS xcframework, leave this disabled so
 # the webp crate's C symbols don't conflict with aws-lc-sys.
 webp-encode = ["beebeeb-core/webp-encode"]
+# CI-only gate: `cargo test -p beebeeb-uniffi --features legacy-bindings` runs
+# the upload-path tests that guard against regressions introduced while
+# feat/core-foundation is in flight (task 2385). On main this is a no-op
+# placeholder; it will gain a dependency once that branch merges.
+legacy-bindings = []
 
 [dependencies]
 beebeeb-core = { path = "../beebeeb-core", default-features = false }

@@ -105,6 +105,14 @@ jobs:
       - name: cargo test
         run: cargo test --workspace
 
+      # The legacy-bindings feature gates upload-path tests that guard the UniFFI
+      # surface against regressions introduced while feat/core-foundation is in
+      # flight (task 2385). The feature is a no-op on main today; feat/core-foundation
+      # will add test cases behind it. Running it here now ensures the flag is
+      # syntactically valid and nothing accidentally breaks when the feature gains content.
+      - name: cargo test beebeeb-uniffi --features legacy-bindings
+        run: cargo test -p beebeeb-uniffi --features legacy-bindings
+
   # The JS surface of beebeeb-wasm as a web client sees it. `cargo test` has no JS engine and never parses
   # the glue wasm-bindgen generates: core #34 merged a doc comment that made beebeeb_wasm.js a SyntaxError and
   # the whole workspace test run stayed green. run.sh builds both targets, `node --check`s the glue,
@@ -160,3 +168,83 @@ jobs:
       - name: Canon sweep (whole tree, must be 0 rows)
         if: always()
         run: bash scripts/claims-guard/canon-sweep.sh
+
+  # Compile the committed Kotlin UniFFI bindings with kotlinc + JNA.
+  # core PR #74 shipped a Kotlin binding with a duplicate `message` field for
+  # three rounds and CI never caught it because we never compiled the generated
+  # Kotlin. This job detects that class of error before it reaches Android.
+  # Two copies of the binding live in the tree (beebeeb-uniffi/bindings/ and
+  # bindings/kotlin/); both are compiled.
+  kotlin-bindings:
+    name: Kotlin bindings compile
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Ubuntu 26 ships Java 25, which Kotlin 2.0.21's IntelliJ runtime cannot
+      # parse (JavaVersion.parse throws IllegalArgumentException on "25.0.5").
+      # Pin Java 21 LTS so kotlinc has a known-good JVM regardless of the
+      # runner's default. Temurin is Eclipse Adoptium OpenJDK — no license issues.
+      - uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # Download kotlinc 2.0.21 from JetBrains' GitHub releases.
+      # The version is pinned in the URL; sha256sum --check hardens the step
+      # against a compromised CDN response. The expected hash is hardcoded here
+      # (bootstrapped from the first green run; never updated without a review).
+      - name: Download and verify kotlinc 2.0.21
+        run: |
+          KC_URL="https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip"
+          curl -sSfL "$KC_URL" -o "$RUNNER_TEMP/kotlinc.zip"
+          # sha256 of kotlin-compiler-2.0.21.zip (JetBrains, 2024-09-26 release)
+          # Print the actual sha256 so a mismatch is immediately debuggable:
+          echo "Actual sha256: $(sha256sum "$RUNNER_TEMP/kotlinc.zip")"
+          echo "0352c0a45bd22f80f6b26e485cd04da8047baa5de54865281fb9f89a4a7bcf2a  $RUNNER_TEMP/kotlinc.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/kotlinc.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/kotlinc/bin" >> "$GITHUB_PATH"
+
+      # JNA is the only runtime the generated Kotlin bindings reference.
+      # sha256: 34ed1e1f27fa896bca50dbc4e99cf3732967cec387a7a0d5e3486c09673fe8c6
+      #   (lead-verified against Maven Central's published .sha1
+      #    67bf3eaea4f0718cb376a181a629e5f88fa1c9dd)
+      - name: Download and verify JNA 5.14.0
+        run: |
+          JNA_URL="https://repo1.maven.org/maven2/net/java/dev/jna/jna/5.14.0/jna-5.14.0.jar"
+          curl -sSfL "$JNA_URL" -o "$RUNNER_TEMP/jna.jar"
+          echo "34ed1e1f27fa896bca50dbc4e99cf3732967cec387a7a0d5e3486c09673fe8c6  $RUNNER_TEMP/jna.jar" | sha256sum --check
+
+      - name: Compile beebeeb-uniffi/bindings Kotlin
+        run: |
+          kotlinc -cp "$RUNNER_TEMP/jna.jar" \
+            beebeeb-uniffi/bindings/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt \
+            -d "$RUNNER_TEMP/beebeeb-uniffi-bindings.jar"
+
+      - name: Compile bindings/kotlin Kotlin
+        run: |
+          kotlinc -cp "$RUNNER_TEMP/jna.jar" \
+            bindings/kotlin/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt \
+            -d "$RUNNER_TEMP/bindings-kotlin.jar"
+
+  # Typecheck the committed Swift UniFFI bindings on macOS. The modulemap
+  # references Darwin (macOS SDK), so this job requires a macOS runner.
+  # `swiftc -typecheck` exits non-zero on any type error, duplicate definition,
+  # or unresolved import — without producing a binary, keeping the job fast.
+  swift-bindings:
+    name: Swift bindings typecheck
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Typecheck beebeeb-uniffi/bindings Swift
+        run: |
+          cd beebeeb-uniffi/bindings
+          swiftc -typecheck \
+            -module-name beebeeb_uniffi \
+            -Xcc -fmodule-map-file="$(pwd)/beebeeb_uniffiFFI.modulemap" \
+            beebeeb_uniffi.swift
