@@ -84,21 +84,28 @@ fn a_junction_in_place_of_the_directory_is_refused() {
     assert_eq!(entries(&real), ["ok.txt"]);
 }
 
+/// Whether a symbolic link could be made. ERROR_PRIVILEGE_NOT_HELD: a link
+/// needs Developer Mode or an elevated prompt. CI has it (a skip there
+/// fails); a developer machine may not.
+fn linked(made: io::Result<()>) -> bool {
+    match made {
+        Ok(()) => true,
+        Err(error) if error.raw_os_error() == Some(1314) && std::env::var_os("CI").is_none() => {
+            eprintln!("skipped: {error}");
+            false
+        }
+        Err(error) => panic!("symlink: {error}"),
+    }
+}
+
 #[test]
 fn a_directory_symlink_in_place_of_the_directory_is_refused() {
     let scratch = Scratch::new("symlink");
     let real = scratch.path().join("real");
     std::fs::create_dir(&real).unwrap();
     let link = scratch.path().join("link");
-    match std::os::windows::fs::symlink_dir(&real, &link) {
-        Ok(()) => {}
-        // ERROR_PRIVILEGE_NOT_HELD: a symbolic link needs Developer Mode or an
-        // elevated prompt. CI has it; a developer machine may not.
-        Err(error) if error.raw_os_error() == Some(1314) && std::env::var_os("CI").is_none() => {
-            eprintln!("skipped: {error}");
-            return;
-        }
-        Err(error) => panic!("symlink_dir: {error}"),
+    if !linked(std::os::windows::fs::symlink_dir(&real, &link)) {
+        return;
     }
     std::fs::write(link.join("through.txt"), b"x").unwrap();
     assert_eq!(entries(&real), ["through.txt"]);
@@ -211,4 +218,129 @@ fn windows_names_are_checked_before_anything_is_created() {
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{name:?}: {error}");
     }
     assert!(entries(scratch.path()).is_empty());
+}
+
+#[test]
+fn a_file_symlink_at_the_final_name_is_replaced_without_following_it() {
+    let scratch = Scratch::new("final-symlink");
+    let outside = Scratch::new("final-symlink-outside");
+    let victim = outside.path().join("victim.txt");
+    std::fs::write(&victim, b"keep").unwrap();
+    let target = scratch.path().join("out.txt");
+    if !linked(std::os::windows::fs::symlink_file(&victim, &target)) {
+        return;
+    }
+    // The fixture really redirects: an ordinary read through it reaches `victim`.
+    assert_eq!(std::fs::read(&target).unwrap(), b"keep");
+
+    TrustedDirectory::open(scratch.path())
+        .unwrap()
+        .publish_bytes("out.txt", Rules::Host, b"new")
+        .unwrap();
+    assert_eq!(std::fs::read(&victim).unwrap(), b"keep");
+    assert!(!std::fs::symlink_metadata(&target).unwrap().file_type().is_symlink());
+    assert_eq!(std::fs::read(&target).unwrap(), b"new");
+    assert_eq!(entries(scratch.path()), ["out.txt"]);
+}
+
+#[test]
+fn a_255_byte_name_publishes_and_a_longer_one_is_refused() {
+    let scratch = Scratch::new("long-name");
+    let directory = TrustedDirectory::open(scratch.path()).unwrap();
+    let longest = "a".repeat(MAX_PUBLISH_COMPONENT_BYTES);
+    directory.publish_bytes(&longest, Rules::Host, b"x").unwrap();
+    assert_eq!(entries(scratch.path()), std::slice::from_ref(&longest));
+    let error = directory
+        .begin_publish(&format!("{longest}a"), Rules::Host)
+        .expect_err("256 bytes");
+    assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{error}");
+    assert_eq!(entries(scratch.path()), std::slice::from_ref(&longest));
+}
+
+#[test]
+fn the_temp_create_never_opens_or_follows_a_planted_link() {
+    let scratch = Scratch::new("planted");
+    let elsewhere = Scratch::new("planted-elsewhere");
+    let planted = scratch.path().join(".bbtmp-planted");
+    junction(&planted, elsewhere.path());
+    let directory = TrustedDirectory::open(scratch.path()).unwrap();
+
+    let error = create_in(&directory.directory, ".bbtmp-planted").expect_err("an existing name is never opened");
+    assert_eq!(error.kind(), io::ErrorKind::AlreadyExists, "{error}");
+    assert!(entries(elsewhere.path()).is_empty());
+    // A fresh name is created, as a plain file.
+    drop(create_in(&directory.directory, ".bbtmp-fresh").unwrap());
+    assert!(
+        std::fs::symlink_metadata(scratch.path().join(".bbtmp-fresh"))
+            .unwrap()
+            .is_file()
+    );
+}
+
+#[test]
+fn a_commit_blocked_by_an_open_target_leaves_no_temp_file() {
+    let scratch = Scratch::new("blocked");
+    let target = scratch.path().join("doc.txt");
+    std::fs::write(&target, b"old contents").unwrap();
+    // Another program holds the file open without FILE_SHARE_DELETE.
+    let holder = OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .open(&target)
+        .unwrap();
+    let directory = TrustedDirectory::open(scratch.path()).unwrap();
+    let (pending, mut file) = directory.begin_publish("doc.txt", Rules::Host).unwrap();
+    file.write_all(b"new").unwrap();
+    drop(file);
+    assert_eq!(entries(scratch.path()).len(), 2);
+
+    pending.commit().expect_err("the open file cannot be replaced");
+    assert_eq!(entries(scratch.path()), ["doc.txt"]);
+    drop(holder);
+    assert_eq!(std::fs::read(&target).unwrap(), b"old contents");
+}
+
+/// The 8.3 short name of `path`'s last component, if the volume gave it one.
+fn short_name(path: &Path) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt as _;
+    use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    let mut buffer = vec![0u16; 1024];
+    // SAFETY: `wide` is NUL-terminated; `buffer` holds its stated length.
+    let written = unsafe { GetShortPathNameW(wide.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32) };
+    assert!(written != 0 && (written as usize) < buffer.len(), "GetShortPathNameW");
+    let short = String::from_utf16_lossy(&buffer[..written as usize]);
+    let last = short.rsplit('\\').next().unwrap_or(&short).to_owned();
+    let long = path.file_name().unwrap().to_string_lossy();
+    (last != long).then_some(last)
+}
+
+#[test]
+fn a_short_name_alias_never_replaces_another_file() {
+    let scratch = Scratch::new("short-name");
+    let original = scratch.path().join("Report final.pdf");
+    std::fs::write(&original, b"precious").unwrap();
+    let Some(alias) = short_name(&original) else {
+        // The CI runner's C: makes 8.3 names (its TEMP path holds one).
+        assert!(std::env::var_os("CI").is_none(), "no 8.3 name on this volume");
+        eprintln!("skipped: the volume makes no 8.3 names");
+        return;
+    };
+    // The fixture really aliases: an ordinary read of the short name reaches the file.
+    assert_eq!(std::fs::read(scratch.path().join(&alias)).unwrap(), b"precious");
+    let directory = TrustedDirectory::open(scratch.path()).unwrap();
+
+    let error = directory
+        .publish_bytes(&alias, Rules::Host, b"attacker")
+        .expect_err("a short-name alias must not replace another file");
+    assert_eq!(error.kind(), io::ErrorKind::AlreadyExists, "{alias}: {error}");
+    assert_eq!(std::fs::read(&original).unwrap(), b"precious");
+    assert_eq!(entries(scratch.path()), ["Report final.pdf"]);
+
+    // The same long name in another case is the same file, replaced as before.
+    directory
+        .publish_bytes("report FINAL.pdf", Rules::Host, b"new")
+        .unwrap();
+    assert_eq!(std::fs::read(&original).unwrap(), b"new");
+    assert_eq!(entries(scratch.path()).len(), 1);
 }

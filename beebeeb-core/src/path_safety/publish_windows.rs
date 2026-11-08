@@ -2,11 +2,12 @@
 //! with the guarantees of the Unix one in `path_safety.rs`, on handles.
 //!
 //! - The directory is opened once, as a handle (`FILE_FLAG_BACKUP_SEMANTICS`),
-//!   without following a reparse point (`FILE_FLAG_OPEN_REPARSE_POINT`). Unless
-//!   that handle is a plain directory it is refused: a junction, a symbolic
-//!   link or any other reparse point in its place, as `O_NOFOLLOW |
-//!   O_DIRECTORY` refuses a symlink on Unix. Ancestors are resolved as usual,
-//!   as on Unix.
+//!   without following a reparse point (`FILE_FLAG_OPEN_REPARSE_POINT`). A
+//!   link in its place is refused: a junction, a symbolic link or any other
+//!   name-surrogate reparse point (the link rule of the backup walk), as
+//!   `O_NOFOLLOW | O_DIRECTORY` refuses a symlink on Unix. A reparse point that
+//!   is not a link (a OneDrive folder) is the directory itself and is
+//!   accepted. Ancestors are resolved as usual, as on Unix.
 //! - The temporary sibling is created relative to that handle (`NtCreateFile`
 //!   with `RootDirectory`), with `FILE_CREATE`: like `O_EXCL`, an existing
 //!   name, a link included, is never opened or followed.
@@ -15,42 +16,51 @@
 //!   `FileRenameInformationEx` with `RootDirectory`), replacing an existing
 //!   file as `renameat` does: POSIX semantics first, so a reader holding the
 //!   old file open does not block it; the plain class where the volume
-//!   refuses that one.
+//!   refuses that one. An existing entry is replaced only when its own long
+//!   name is the final name: a name that reaches another file through its
+//!   8.3 short name (`REPORT~1.PDF` for `Report final.pdf`) is refused, where
+//!   Unix would only ever replace that exact name.
 //! - A publication dropped before commit is deleted through its own handle
 //!   (`FileDispositionInfoEx`, then the plain class), never by name, so a file
 //!   swapped in under the temporary name is never the one deleted.
 //!
-//! Two differences from Unix, both narrower than a guarantee: Windows has no
-//! directory fsync (the data is flushed before the rename, so a crash leaves
-//! the old file or the new one, never a torn one), and the temporary file
-//! takes the directory's inherited ACL where Unix sets mode 0600 (the cache
-//! roots live in the user's own profile).
+//! Where Windows differs from Unix, it refuses or does less, never more:
+//! there is no directory fsync (the data is flushed before the rename, so a
+//! crash leaves the old file or the new one, never a torn one); the file,
+//! temporary and published, keeps the directory's inherited ACL where Unix
+//! sets mode 0600 (the cache roots live in the user's own profile); and a
+//! commit fails, leaving the old file and no temp file, where the existing
+//! file is read-only or open elsewhere without `FILE_SHARE_DELETE`.
 
 use super::{MAX_PUBLISH_COMPONENT_BYTES, Rules, check_component};
 use rand::{RngCore, rngs::OsRng};
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::mem::{offset_of, size_of};
-use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+use std::os::windows::fs::OpenOptionsExt as _;
 use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, RawHandle};
 use std::path::Path;
 use std::ptr;
 use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Wdk::Storage::FileSystem::{
-    FILE_CREATE, FILE_INFORMATION_CLASS, FILE_NON_DIRECTORY_FILE, FILE_OPEN_REPARSE_POINT, FILE_RENAME_INFORMATION,
-    FILE_RENAME_POSIX_SEMANTICS, FILE_RENAME_REPLACE_IF_EXISTS, FILE_SYNCHRONOUS_IO_NONALERT, FileRenameInformation,
-    FileRenameInformationEx, NtCreateFile, NtSetInformationFile,
+    FILE_CREATE, FILE_INFORMATION_CLASS, FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_REPARSE_POINT,
+    FILE_RENAME_INFORMATION, FILE_RENAME_POSIX_SEMANTICS, FILE_RENAME_REPLACE_IF_EXISTS, FILE_SYNCHRONOUS_IO_NONALERT,
+    FileRenameInformation, FileRenameInformationEx, NTCREATEFILE_CREATE_DISPOSITION, NTCREATEFILE_CREATE_OPTIONS,
+    NtCreateFile, NtSetInformationFile,
 };
 use windows_sys::Win32::Foundation::{
-    HANDLE, NTSTATUS, OBJ_CASE_INSENSITIVE, RtlNtStatusToDosError, STATUS_INVALID_INFO_CLASS, STATUS_INVALID_PARAMETER,
-    STATUS_NOT_IMPLEMENTED, STATUS_NOT_SUPPORTED, UNICODE_STRING,
+    HANDLE, NTSTATUS, OBJ_CASE_INSENSITIVE, RtlNtStatusToDosError, STATUS_INVALID_DEVICE_REQUEST,
+    STATUS_INVALID_INFO_CLASS, STATUS_INVALID_PARAMETER, STATUS_NOT_IMPLEMENTED, STATUS_NOT_SUPPORTED,
+    STATUS_OBJECT_NAME_NOT_FOUND, UNICODE_STRING,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT,
-    FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO,
-    FILE_DISPOSITION_INFO_EX, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_WRITE,
-    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE,
-    FileDispositionInfo, FileDispositionInfoEx, SYNCHRONIZE, SetFileInformationByHandle,
+    DELETE, FILE_ACCESS_RIGHTS, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_ATTRIBUTE_TAG_INFO, FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_POSIX_SEMANTICS,
+    FILE_DISPOSITION_INFO, FILE_DISPOSITION_INFO_EX, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_GENERIC_WRITE, FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+    FILE_SHARE_MODE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FileAttributeTagInfo, FileDispositionInfo,
+    FileDispositionInfoEx, GetFileInformationByHandleEx, GetFinalPathNameByHandleW, SYNCHRONIZE,
+    SetFileInformationByHandle, VOLUME_NAME_NONE,
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
@@ -71,14 +81,30 @@ impl TrustedDirectory {
             .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
             .open(path)?;
-        let attributes = directory.metadata()?.file_attributes();
-        if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        let mut info = FILE_ATTRIBUTE_TAG_INFO {
+            FileAttributes: 0,
+            ReparseTag: 0,
+        };
+        // SAFETY: `info` is a FILE_ATTRIBUTE_TAG_INFO and its size is passed;
+        // the handle is open for the call.
+        let done = unsafe {
+            GetFileInformationByHandleEx(
+                directory.as_raw_handle() as HANDLE,
+                FileAttributeTagInfo,
+                (&raw mut info).cast(),
+                size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+            )
+        };
+        if done == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if is_link(info.FileAttributes, info.ReparseTag) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "the directory is a reparse point (a junction or symbolic link); refused",
+                "the directory is a link (a junction or symbolic link); refused",
             ));
         }
-        if attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
+        if info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
             return Err(io::Error::new(io::ErrorKind::NotADirectory, "not a directory"));
         }
         Ok(Self { directory })
@@ -141,6 +167,7 @@ impl PendingPublish {
     /// Flush file data, then atomically replace the final directory entry.
     pub fn commit(mut self) -> io::Result<()> {
         self.sync_file.sync_all()?;
+        refuse_short_name_alias(&self.directory, &self.target_name)?;
         rename_into(&self.sync_file, &self.directory, &self.target_name)?;
         // The handle names the published file now: drop must never delete
         // through it again.
@@ -157,12 +184,41 @@ impl Drop for PendingPublish {
     }
 }
 
+/// A name that is a link: a reparse point whose tag is a name surrogate
+/// (junctions, symbolic links, mount points). The same rule as std's
+/// `is_symlink` and the backup walk; a OneDrive placeholder is not a link.
+fn is_link(attributes: u32, reparse_tag: u32) -> bool {
+    const NAME_SURROGATE: u32 = 0x2000_0000;
+    attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 && reparse_tag & NAME_SURROGATE != 0
+}
+
 /// Create `name` (one component, already checked) under `directory`'s handle:
 /// never an existing entry, never through a reparse point.
 fn create_in(directory: &File, name: &str) -> io::Result<File> {
+    open_in(
+        directory,
+        name,
+        FILE_GENERIC_WRITE | DELETE | FILE_READ_ATTRIBUTES,
+        // No sharing: nothing else opens the plaintext before it is published.
+        0,
+        FILE_CREATE,
+        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT,
+    )
+    .map_err(nt_error)
+}
+
+/// `NtCreateFile` of the single component `name` relative to `directory`'s
+/// handle. The error is the raw status, so a caller can tell "not found".
+fn open_in(
+    directory: &File,
+    name: &str,
+    access: FILE_ACCESS_RIGHTS,
+    share: FILE_SHARE_MODE,
+    disposition: NTCREATEFILE_CREATE_DISPOSITION,
+    options: NTCREATEFILE_CREATE_OPTIONS,
+) -> Result<File, NTSTATUS> {
     let mut wide: Vec<u16> = name.encode_utf16().collect();
-    let length = u16::try_from(wide.len() * size_of::<u16>())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "temp name too long"))?;
+    let length = u16::try_from(wide.len() * size_of::<u16>()).map_err(|_| STATUS_INVALID_PARAMETER)?;
     let object_name = UNICODE_STRING {
         Length: length,
         MaximumLength: length,
@@ -184,23 +240,84 @@ fn create_in(directory: &File, name: &str) -> io::Result<File> {
     let status = unsafe {
         NtCreateFile(
             &mut handle,
-            FILE_GENERIC_WRITE | DELETE | FILE_READ_ATTRIBUTES,
+            access,
             &attributes,
             &mut status_block,
             ptr::null(),
             FILE_ATTRIBUTE_NORMAL,
-            // No sharing: nothing else opens the plaintext before it is published.
-            0,
-            FILE_CREATE,
-            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT,
+            share,
+            disposition,
+            options,
             ptr::null(),
             0,
         )
     };
-    nt_result(status)?;
+    if status < 0 {
+        return Err(status);
+    }
     // SAFETY: NtCreateFile succeeded, so `handle` is a new, synchronous file
     // handle that nothing else owns.
     Ok(unsafe { File::from_raw_handle(handle as RawHandle) })
+}
+
+/// Refuse to replace an existing entry that `target` reaches through its 8.3
+/// short name: NTFS looks names up in both namespaces, so `REPORT~1.PDF` can
+/// name `Report final.pdf`, and a replace would delete that unrelated file.
+/// A missing entry, or one whose long name is `target` (any case, as NTFS
+/// compares), is fine.
+fn refuse_short_name_alias(directory: &File, target: &str) -> io::Result<()> {
+    let existing = match open_in(
+        directory,
+        target,
+        // Attribute-only access never meets a sharing conflict.
+        FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        FILE_OPEN,
+        FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT,
+    ) {
+        Ok(existing) => existing,
+        Err(STATUS_OBJECT_NAME_NOT_FOUND) => return Ok(()),
+        Err(status) => return Err(nt_error(status)),
+    };
+    let long = final_component(&existing)?;
+    if long.to_lowercase() == target.to_lowercase() {
+        return Ok(());
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "the name is the 8.3 short name of another file; refused",
+    ))
+}
+
+/// The last component of the file's normalized path: its long name.
+fn final_component(file: &File) -> io::Result<String> {
+    let mut buffer = vec![0u16; 512];
+    loop {
+        let capacity = u32::try_from(buffer.len()).map_err(|_| io::Error::other("path too long"))?;
+        // SAFETY: `buffer` holds `capacity` u16s; the handle is open.
+        let written = unsafe {
+            GetFinalPathNameByHandleW(
+                file.as_raw_handle() as HANDLE,
+                buffer.as_mut_ptr(),
+                capacity,
+                FILE_NAME_NORMALIZED | VOLUME_NAME_NONE,
+            )
+        };
+        if written == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // Too small: `written` is the size needed, terminator included.
+        if written as usize >= buffer.len() {
+            buffer.resize(written as usize, 0);
+            continue;
+        }
+        let path = &buffer[..written as usize];
+        let start = path
+            .iter()
+            .rposition(|&unit| unit == u16::from(b'\\'))
+            .map_or(0, |at| at + 1);
+        return Ok(String::from_utf16_lossy(&path[start..]));
+    }
 }
 
 /// Rename the file behind `file` to `target` under `directory`'s handle,
@@ -243,11 +360,16 @@ fn rename_into(file: &File, directory: &File, target: &str) -> io::Result<()> {
     let status = set(FileRenameInformationEx);
     if !matches!(
         status,
-        STATUS_INVALID_INFO_CLASS | STATUS_INVALID_PARAMETER | STATUS_NOT_SUPPORTED | STATUS_NOT_IMPLEMENTED
+        STATUS_INVALID_INFO_CLASS
+            | STATUS_INVALID_PARAMETER
+            | STATUS_NOT_SUPPORTED
+            | STATUS_NOT_IMPLEMENTED
+            | STATUS_INVALID_DEVICE_REQUEST
     ) {
         return nt_result(status);
     }
-    // An older Windows or a volume without POSIX rename: the plain class.
+    // An older Windows, or a volume or third-party file system without POSIX
+    // rename: the plain class.
     // SAFETY: `info` points into `buffer`, as above.
     unsafe {
         (*info).Anonymous.Flags = 0;
@@ -294,12 +416,13 @@ fn delete_on_close(file: &File) -> io::Result<()> {
 }
 
 fn nt_result(status: NTSTATUS) -> io::Result<()> {
-    if status >= 0 {
-        return Ok(());
-    }
+    if status >= 0 { Ok(()) } else { Err(nt_error(status)) }
+}
+
+fn nt_error(status: NTSTATUS) -> io::Error {
     // SAFETY: a table lookup with no pointer arguments.
     let code = unsafe { RtlNtStatusToDosError(status) };
-    Err(io::Error::from_raw_os_error(code as i32))
+    io::Error::from_raw_os_error(code as i32)
 }
 
 #[cfg(test)]
