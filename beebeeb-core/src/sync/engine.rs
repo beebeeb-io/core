@@ -638,6 +638,13 @@ impl SyncEngine {
         let node = self.state.tree.get_mut(&id)?;
         let old_parent = node.parent_id;
         node.parent_id = new_parent;
+        // The server's move carries no name. A client that resolved a name
+        // clash in the destination (the drive's conflict name, or the item's
+        // own name back when it leaves a clash) adds the plaintext `new_name`.
+        if let Some(new_name) = string_field(payload, "new_name") {
+            node.name = new_name;
+            node.name_undecryptable = false;
+        }
         node.updated_at = Utc::now();
         Some(SyncEvent::FileMoved {
             id,

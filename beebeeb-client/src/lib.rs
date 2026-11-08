@@ -84,4 +84,6 @@ mod tests_svc_data;
 #[cfg(test)]
 mod tests_svc_platform;
 #[cfg(test)]
+mod tests_svc_sync_names;
+#[cfg(test)]
 mod tests_svc_transfer;

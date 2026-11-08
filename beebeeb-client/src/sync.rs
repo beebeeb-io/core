@@ -1,10 +1,11 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    time::Duration,
-};
+use std::{collections::BTreeMap, time::Duration};
 
 use beebeeb_api::routes::sync::{self as api, Snapshot};
-use beebeeb_core::sync::{CompleteSnapshot, SyncEngineError, SyncOp, SyncPosition, TreeNode};
+use beebeeb_core::{
+    name_clash::{ItemKind, TakenNames, drive_conflict_name},
+    path_safety::{Rules, check_component},
+    sync::{CompleteSnapshot, SyncEngineError, SyncOp, SyncPosition, TreeNode},
+};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use uuid::Uuid;
@@ -108,7 +109,7 @@ impl Client {
                 .collect::<Result<Vec<_>, _>>()?;
             operations.sort_by_key(|operation| (operation.user_seq.unwrap_or(i64::MAX), operation.seq_id));
             for mut operation in operations {
-                resolve_operation_collision(engine, &mut operation)?;
+                resolve_operation_collision(session, engine, &mut operation)?;
                 engine.apply_remote_op(RemoteOp::from_authenticated_session(operation))?;
             }
             let after = engine.position();
@@ -136,7 +137,7 @@ impl Client {
     /// explicitly marks it complete at known cursors.
     pub async fn refresh_sync_snapshot(&self, session: &Session, engine: &mut SyncEngine) -> Result<(), SyncLoopError> {
         let answer = self.execute(&beebeeb_api::proposed::complete_snapshot(), &()).await?;
-        let nodes = open_snapshot_nodes(session, &answer)?;
+        let nodes = open_snapshot_nodes(session, engine, &answer)?;
         if answer.complete == Some(true) {
             engine.apply_complete_snapshot(CompleteSnapshot::new(
                 nodes,
@@ -200,7 +201,7 @@ impl Client {
             }
             let wire: api::Op = serde_json::from_value(value).map_err(|_| SyncLoopError::InvalidAnswer)?;
             let mut operation = open_operation(session, wire)?;
-            resolve_operation_collision(engine, &mut operation)?;
+            resolve_operation_collision(session, engine, &mut operation)?;
             engine.apply_remote_op(RemoteOp::from_authenticated_session(operation))?;
         }
         if batch.ended {
@@ -261,108 +262,223 @@ fn open_payload_name(session: &Session, payload: &mut Value) -> Result<(), SyncL
     Ok(())
 }
 
-fn resolve_operation_collision(engine: &SyncEngine, operation: &mut SyncOp) -> Result<(), SyncLoopError> {
-    let field = if operation.payload.get("new_name").is_some() {
-        "new_name"
-    } else if operation.payload.get("name").is_some() {
-        "name"
-    } else {
-        return Ok(());
-    };
-    let Some(name) = operation.payload.get(field).and_then(Value::as_str) else {
-        return Ok(());
-    };
-    let parent = operation
-        .payload
-        .get("new_parent_id")
-        .or_else(|| operation.payload.get("parent_id"))
-        .and_then(Value::as_str)
-        .map(Uuid::parse_str)
-        .transpose()
-        .map_err(|_| SyncLoopError::InvalidAnswer)?;
-    let current_id = operation
+/// The device in a pull-side conflict name. The device whose write came
+/// second is not known by name here (a sync op carries at most an opaque
+/// client id, and an op written through the REST routes none), so the name
+/// takes core's generic word: `report (conflict, device).pdf`.
+const UNKNOWN_WRITER: &str = "";
+
+fn item_kind(is_folder: bool) -> ItemKind {
+    if is_folder { ItemKind::Folder } else { ItemKind::File }
+}
+
+/// An optional id field: absent or `null` is the drive root.
+fn parent_field(payload: &Value, key: &str) -> Result<Option<Uuid>, SyncLoopError> {
+    match payload.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_str()
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .map(Some)
+            .ok_or(SyncLoopError::InvalidAnswer),
+    }
+}
+
+/// A remote create, rename or move can give an item a name its folder
+/// already holds: names are sealed, so the server keeps both. The drive keeps
+/// both too and asks nothing (1022 G5): the item that arrives second, this
+/// op's, takes core's `drive_conflict_name` from its own incoming name, never
+/// from the existing item's; two names clash when core's normal forms are
+/// equal (`TakenNames`). The folder is the one the item lands in: a create's
+/// `parent_id`, a move's `new_parent_id`, and for a rename (whose op carries
+/// no parent) the item's current folder in the engine. A move carries no
+/// name, so its opened name is added as `new_name` (the engine applies it):
+/// moving out of a clash gives the item its own name back.
+fn resolve_operation_collision(
+    session: &Session,
+    engine: &SyncEngine,
+    operation: &mut SyncOp,
+) -> Result<(), SyncLoopError> {
+    let id = operation
         .payload
         .get("id")
         .and_then(Value::as_str)
         .and_then(|value| Uuid::parse_str(value).ok());
-    let mut used = BTreeSet::new();
+    let (field, name, parent, kind) = match operation.op_type.as_str() {
+        "file_create" | "folder_create" => {
+            let Some(name) = operation.payload.get("name").and_then(Value::as_str) else {
+                return Ok(());
+            };
+            (
+                "name",
+                name.to_owned(),
+                parent_field(&operation.payload, "parent_id")?,
+                item_kind(operation.op_type == "folder_create"),
+            )
+        }
+        "file_rename" | "folder_rename" => {
+            let Some(name) = operation.payload.get("new_name").and_then(Value::as_str) else {
+                return Ok(());
+            };
+            // An item the engine does not have is not renamed by the op either.
+            let Some(node) = id.map(|id| engine.lookup_node(id)).transpose()?.flatten() else {
+                return Ok(());
+            };
+            ("new_name", name.to_owned(), node.parent_id, item_kind(node.is_folder))
+        }
+        "file_move" | "folder_move" => {
+            let Some(node) = id.map(|id| engine.lookup_node(id)).transpose()?.flatten() else {
+                return Ok(());
+            };
+            // A name this device cannot open takes no name: it clashes with nothing.
+            let Ok(metadata) = session.open_name(&node.id.to_string(), &node.name_encrypted) else {
+                return Ok(());
+            };
+            (
+                "new_name",
+                metadata.name,
+                parent_field(&operation.payload, "new_parent_id")?,
+                item_kind(node.is_folder),
+            )
+        }
+        _ => return Ok(()),
+    };
+    check_component(&name, Rules::Portable).map_err(|_| SyncLoopError::InvalidAnswer)?;
+    let mut taken = TakenNames::new();
     for child in engine.lookup_children(parent)? {
-        if current_id != Some(child.id) {
-            used.insert(child.name);
+        if Some(child.id) != id && !child.name_undecryptable {
+            taken.insert(&child.name);
         }
     }
-    let deduplicated =
-        beebeeb_core::path_safety::deduplicate_component(name, &mut used).map_err(|_| SyncLoopError::InvalidAnswer)?;
+    let name = if taken.contains(&name) {
+        drive_conflict_name(&name, kind, UNKNOWN_WRITER, &taken)
+    } else {
+        name
+    };
     operation
         .payload
         .as_object_mut()
         .ok_or(SyncLoopError::InvalidAnswer)?
-        .insert(field.into(), Value::String(deduplicated));
+        .insert(field.into(), Value::String(name));
     Ok(())
 }
 
-fn open_snapshot_nodes(session: &Session, answer: &Snapshot) -> Result<Vec<TreeNode>, SyncLoopError> {
-    let mut used: BTreeMap<Option<Uuid>, BTreeSet<String>> = BTreeMap::new();
-    answer
+fn open_snapshot_nodes(
+    session: &Session,
+    engine: &SyncEngine,
+    answer: &Snapshot,
+) -> Result<Vec<TreeNode>, SyncLoopError> {
+    let mut nodes = answer
         .nodes
         .iter()
-        .map(|wire| {
-            let id = Uuid::parse_str(&wire.id).map_err(|_| SyncLoopError::InvalidAnswer)?;
-            let parent_id = wire
-                .parent_id
-                .as_deref()
-                .map(Uuid::parse_str)
-                .transpose()
-                .map_err(|_| SyncLoopError::InvalidAnswer)?;
-            let encrypted = field_string(&wire.fields, "name_encrypted").ok_or(SyncLoopError::InvalidAnswer)?;
-            let (name, mime_type, name_undecryptable) = match session.open_name(&wire.id, &encrypted) {
-                Ok(metadata) => (
-                    beebeeb_core::path_safety::deduplicate_component(
-                        &metadata.name,
-                        used.entry(parent_id).or_default(),
-                    )
-                    .map_err(|_| SyncLoopError::InvalidAnswer)?,
-                    metadata.mime_type,
-                    false,
-                ),
-                Err(_) => (String::new(), None, true),
-            };
-            let size_bytes = wire.fields.get("size_bytes").and_then(Value::as_i64).unwrap_or(0);
-            let version_number = wire
-                .fields
-                .get("version_number")
-                .and_then(Value::as_i64)
-                .and_then(|value| i32::try_from(value).ok())
-                .unwrap_or(1);
-            Ok(TreeNode {
-                id,
-                name,
-                name_undecryptable,
-                name_encrypted: encrypted,
-                parent_id,
-                is_folder: wire.fields.get("is_folder").and_then(Value::as_bool).unwrap_or(false),
-                size_bytes,
-                mime_type,
-                content_hash: field_string(&wire.fields, "content_hash"),
-                version_number,
-                has_thumbnail: wire
-                    .fields
-                    .get("has_thumbnail")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-                storage_pool_id: field_string(&wire.fields, "storage_pool_id")
-                    .map(|value| Uuid::parse_str(&value).map_err(|_| SyncLoopError::InvalidAnswer))
-                    .transpose()?,
-                is_trashed: wire.fields.get("is_trashed").and_then(Value::as_bool).unwrap_or(false),
-                is_starred: wire.fields.get("is_starred").and_then(Value::as_bool).unwrap_or(false),
-                updated_at: field_string(&wire.fields, "updated_at")
-                    .as_deref()
-                    .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-                    .map(|value| value.with_timezone(&Utc))
-                    .unwrap_or_else(Utc::now),
-            })
-        })
-        .collect()
+        .map(|wire| open_snapshot_node(session, wire))
+        .collect::<Result<Vec<_>, _>>()?;
+    name_snapshot_clashes(engine, &mut nodes)?;
+    Ok(nodes)
+}
+
+/// Siblings whose names clash keep both (1022 G5), named the same whatever
+/// order the server lists them in: the sibling that already holds the name
+/// in the engine keeps it, otherwise the smallest id; every other one takes
+/// core's `drive_conflict_name` of its own name, in id order, clear of every
+/// sibling's real name. Undecryptable names take no name and clash with
+/// nothing.
+fn name_snapshot_clashes(engine: &SyncEngine, nodes: &mut [TreeNode]) -> Result<(), SyncLoopError> {
+    let mut folders: BTreeMap<Option<Uuid>, Vec<usize>> = BTreeMap::new();
+    for (index, node) in nodes.iter().enumerate() {
+        if !node.name_undecryptable {
+            folders.entry(node.parent_id).or_default().push(index);
+        }
+    }
+    for siblings in folders.values() {
+        let mut taken = TakenNames::new();
+        let mut clash = false;
+        for &index in siblings {
+            clash |= taken.contains(&nodes[index].name);
+            taken.insert(&nodes[index].name);
+        }
+        if !clash {
+            continue;
+        }
+        let mut order = Vec::with_capacity(siblings.len());
+        for &index in siblings {
+            let node = &nodes[index];
+            let holds = engine.lookup_node(node.id)?.is_some_and(|known| {
+                known.parent_id == node.parent_id && !known.name_undecryptable && known.name == node.name
+            });
+            order.push((!holds, node.id, index));
+        }
+        order.sort_unstable();
+        let mut kept = TakenNames::new();
+        for (_, _, index) in order {
+            if kept.contains(&nodes[index].name) {
+                let renamed = drive_conflict_name(
+                    &nodes[index].name,
+                    item_kind(nodes[index].is_folder),
+                    UNKNOWN_WRITER,
+                    &taken,
+                );
+                taken.insert(&renamed);
+                kept.insert(&renamed);
+                nodes[index].name = renamed;
+            } else {
+                kept.insert(&nodes[index].name);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn open_snapshot_node(session: &Session, wire: &api::Node) -> Result<TreeNode, SyncLoopError> {
+    let id = Uuid::parse_str(&wire.id).map_err(|_| SyncLoopError::InvalidAnswer)?;
+    let parent_id = wire
+        .parent_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|_| SyncLoopError::InvalidAnswer)?;
+    let encrypted = field_string(&wire.fields, "name_encrypted").ok_or(SyncLoopError::InvalidAnswer)?;
+    let (name, mime_type, name_undecryptable) = match session.open_name(&wire.id, &encrypted) {
+        Ok(metadata) => {
+            check_component(&metadata.name, Rules::Portable).map_err(|_| SyncLoopError::InvalidAnswer)?;
+            (metadata.name, metadata.mime_type, false)
+        }
+        Err(_) => (String::new(), None, true),
+    };
+    let size_bytes = wire.fields.get("size_bytes").and_then(Value::as_i64).unwrap_or(0);
+    let version_number = wire
+        .fields
+        .get("version_number")
+        .and_then(Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
+        .unwrap_or(1);
+    Ok(TreeNode {
+        id,
+        name,
+        name_undecryptable,
+        name_encrypted: encrypted,
+        parent_id,
+        is_folder: wire.fields.get("is_folder").and_then(Value::as_bool).unwrap_or(false),
+        size_bytes,
+        mime_type,
+        content_hash: field_string(&wire.fields, "content_hash"),
+        version_number,
+        has_thumbnail: wire
+            .fields
+            .get("has_thumbnail")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        storage_pool_id: field_string(&wire.fields, "storage_pool_id")
+            .map(|value| Uuid::parse_str(&value).map_err(|_| SyncLoopError::InvalidAnswer))
+            .transpose()?,
+        is_trashed: wire.fields.get("is_trashed").and_then(Value::as_bool).unwrap_or(false),
+        is_starred: wire.fields.get("is_starred").and_then(Value::as_bool).unwrap_or(false),
+        updated_at: field_string(&wire.fields, "updated_at")
+            .as_deref()
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&Utc))
+            .unwrap_or_else(Utc::now),
+    })
 }
 
 fn field_string(fields: &beebeeb_api::routes::ExtraFields, key: &str) -> Option<String> {
