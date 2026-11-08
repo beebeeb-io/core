@@ -726,6 +726,358 @@ public func FfiConverterTypeAccountReplacementHandle_lower(_ value: AccountRepla
 
 
 
+public protocol ArchiveEventStreamHandleProtocol: AnyObject, Sendable {
+    
+    /**
+     * The next event, or `None` after `timeout_ms`. Missed events
+     * (`Unavailable`) mean: ask `preview` for the current screen.
+     */
+    func next(timeoutMs: UInt64) throws  -> ArchiveEventData?
+    
+}
+open class ArchiveEventStreamHandle: ArchiveEventStreamHandleProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_archiveeventstreamhandle(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_archiveeventstreamhandle(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * The next event, or `None` after `timeout_ms`. Missed events
+     * (`Unavailable`) mean: ask `preview` for the current screen.
+     */
+open func next(timeoutMs: UInt64)throws  -> ArchiveEventData?  {
+    return try  FfiConverterOptionTypeArchiveEventData.lift(try rustCallWithError(FfiConverterTypeServiceError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_archiveeventstreamhandle_next(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(timeoutMs),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeArchiveEventStreamHandle: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = ArchiveEventStreamHandle
+
+    public static func lift(_ handle: UInt64) throws -> ArchiveEventStreamHandle {
+        return ArchiveEventStreamHandle(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: ArchiveEventStreamHandle) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ArchiveEventStreamHandle {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: ArchiveEventStreamHandle, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeArchiveEventStreamHandle_lift(_ handle: UInt64) throws -> ArchiveEventStreamHandle {
+    return try FfiConverterTypeArchiveEventStreamHandle.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeArchiveEventStreamHandle_lower(_ value: ArchiveEventStreamHandle) -> UInt64 {
+    return FfiConverterTypeArchiveEventStreamHandle.lower(value)
+}
+
+
+
+
+
+
+public protocol ArchiveServiceHandleProtocol: AnyObject, Sendable {
+    
+    func cancel(extractionId: UInt64) 
+    
+    func close(archiveId: UInt64) 
+    
+    /**
+     * Plan and start an extraction. Uploads follow the device's upload
+     * settings (Wi-Fi only, staging limit).
+     */
+    func extract(archiveId: UInt64, options: ArchiveExtractOptions, passwordText: SecretString?) throws  -> UInt64
+    
+    func observe()  -> ArchiveEventStreamHandle
+    
+    /**
+     * Open an archive and start listing it; the listing arrives as a
+     * `model` event.
+     */
+    func `open`(file: DownloadData, name: String, parentId: String?) throws  -> UInt64
+    
+    /**
+     * One entry's bytes, after its own check passed (Open, Download).
+     */
+    func openEntry(archiveId: UInt64, index: UInt32, passwordText: SecretString?) throws  -> Data
+    
+    func preview(archiveId: UInt64, folder: [String], selection: [String]) throws  -> ArchivePreviewModel
+    
+    /**
+     * The password a run asked for (a `model` event in `needs_password`).
+     */
+    func supplyPassword(extractionId: UInt64, passwordText: SecretString) 
+    
+}
+open class ArchiveServiceHandle: ArchiveServiceHandleProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_archiveservicehandle(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_archiveservicehandle(handle, $0) }
+    }
+
+    
+
+    
+open func cancel(extractionId: UInt64)  {try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_cancel(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(extractionId),$0
+    )
+}
+}
+    
+open func close(archiveId: UInt64)  {try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_close(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(archiveId),$0
+    )
+}
+}
+    
+    /**
+     * Plan and start an extraction. Uploads follow the device's upload
+     * settings (Wi-Fi only, staging limit).
+     */
+open func extract(archiveId: UInt64, options: ArchiveExtractOptions, passwordText: SecretString?)throws  -> UInt64  {
+    return try  FfiConverterUInt64.lift(try rustCallWithError(FfiConverterTypeArchiveError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_extract(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(archiveId),
+        FfiConverterTypeArchiveExtractOptions_lower(options),
+        FfiConverterOptionTypeSecretString.lower(passwordText),$0
+    )
+})
+}
+    
+open func observe() -> ArchiveEventStreamHandle  {
+    return try!  FfiConverterTypeArchiveEventStreamHandle_lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_observe(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Open an archive and start listing it; the listing arrives as a
+     * `model` event.
+     */
+open func `open`(file: DownloadData, name: String, parentId: String?)throws  -> UInt64  {
+    return try  FfiConverterUInt64.lift(try rustCallWithError(FfiConverterTypeArchiveError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_open(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeDownloadData_lower(file),
+        FfiConverterString.lower(name),
+        FfiConverterOptionString.lower(parentId),$0
+    )
+})
+}
+    
+    /**
+     * One entry's bytes, after its own check passed (Open, Download).
+     */
+open func openEntry(archiveId: UInt64, index: UInt32, passwordText: SecretString?)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeArchiveError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_open_entry(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(archiveId),
+        FfiConverterUInt32.lower(index),
+        FfiConverterOptionTypeSecretString.lower(passwordText),$0
+    )
+})
+}
+    
+open func preview(archiveId: UInt64, folder: [String], selection: [String])throws  -> ArchivePreviewModel  {
+    return try  FfiConverterTypeArchivePreviewModel_lift(try rustCallWithError(FfiConverterTypeArchiveError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_preview(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(archiveId),
+        FfiConverterSequenceString.lower(folder),
+        FfiConverterSequenceString.lower(selection),$0
+    )
+})
+}
+    
+    /**
+     * The password a run asked for (a `model` event in `needs_password`).
+     */
+open func supplyPassword(extractionId: UInt64, passwordText: SecretString)  {try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_supply_password(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(extractionId),
+        FfiConverterTypeSecretString_lower(passwordText),$0
+    )
+}
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeArchiveServiceHandle: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = ArchiveServiceHandle
+
+    public static func lift(_ handle: UInt64) throws -> ArchiveServiceHandle {
+        return ArchiveServiceHandle(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: ArchiveServiceHandle) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ArchiveServiceHandle {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: ArchiveServiceHandle, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeArchiveServiceHandle_lift(_ handle: UInt64) throws -> ArchiveServiceHandle {
+    return try FfiConverterTypeArchiveServiceHandle.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeArchiveServiceHandle_lower(_ value: ArchiveServiceHandle) -> UInt64 {
+    return FfiConverterTypeArchiveServiceHandle.lower(value)
+}
+
+
+
+
+
+
 public protocol AuthChallengeHandleProtocol: AnyObject, Sendable {
     
     func canonicalEmail()  -> String
@@ -7631,6 +7983,12 @@ public protocol NativeClientHandleProtocol: AnyObject, Sendable {
     
     func signOutThisApp(coordinator: ServiceCoordinatorHandle, canceller: PlatformTransferCancellerCallback, purger: AccountDataPurgerCallback, nowMs: Int64) throws  -> SignOutReportData
     
+    /**
+     * The archive service (`platform`: `"mobile_app"` on the phone). It owns
+     * `temp_root`, where extracted files wait for their uploads.
+     */
+    func archives(downloads: DownloadServiceHandle, uploads: UploadServiceHandle, tempRoot: String, platform: String) throws  -> ArchiveServiceHandle
+    
     func auth()  -> AuthServiceHandle
     
     func contacts(store: StoreHandle)  -> ContactServiceHandle
@@ -7783,6 +8141,22 @@ open func signOutThisApp(coordinator: ServiceCoordinatorHandle, canceller: Platf
         FfiConverterCallbackInterfacePlatformTransferCancellerCallback_lower(canceller),
         FfiConverterCallbackInterfaceAccountDataPurgerCallback_lower(purger),
         FfiConverterInt64.lower(nowMs),$0
+    )
+})
+}
+    
+    /**
+     * The archive service (`platform`: `"mobile_app"` on the phone). It owns
+     * `temp_root`, where extracted files wait for their uploads.
+     */
+open func archives(downloads: DownloadServiceHandle, uploads: UploadServiceHandle, tempRoot: String, platform: String)throws  -> ArchiveServiceHandle  {
+    return try  FfiConverterTypeArchiveServiceHandle_lift(try rustCallWithError(FfiConverterTypeServiceError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_archives(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeDownloadServiceHandle_lower(downloads),
+        FfiConverterTypeUploadServiceHandle_lower(uploads),
+        FfiConverterString.lower(tempRoot),
+        FfiConverterString.lower(platform),$0
     )
 })
 }
@@ -11685,19 +12059,35 @@ public func FfiConverterTypeArchiveEntry_lower(_ value: ArchiveEntry) -> RustBuf
 
 
 /**
- * A single entry inside an archive (TAR, GZ, TGZ).
+ * One archive event (`kind`: `"model"`, `"read_failed"`, `"finished"`).
  */
-public struct ArchiveEntryDto: Equatable, Hashable {
-    public var name: String
-    public var size: UInt64
-    public var isDirectory: Bool
+public struct ArchiveEventData: Equatable, Hashable {
+    public var kind: String
+    /**
+     * The archive (`model`, `read_failed`).
+     */
+    public var archiveId: UInt64?
+    /**
+     * The extraction (`finished`).
+     */
+    public var extractionId: UInt64?
+    public var model: ArchivePreviewModel?
+    public var summary: ExtractSummary?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(name: String, size: UInt64, isDirectory: Bool) {
-        self.name = name
-        self.size = size
-        self.isDirectory = isDirectory
+    public init(kind: String, 
+        /**
+         * The archive (`model`, `read_failed`).
+         */archiveId: UInt64?, 
+        /**
+         * The extraction (`finished`).
+         */extractionId: UInt64?, model: ArchivePreviewModel?, summary: ExtractSummary?) {
+        self.kind = kind
+        self.archiveId = archiveId
+        self.extractionId = extractionId
+        self.model = model
+        self.summary = summary
     }
 
     
@@ -11706,26 +12096,30 @@ public struct ArchiveEntryDto: Equatable, Hashable {
 }
 
 #if compiler(>=6)
-extension ArchiveEntryDto: Sendable {}
+extension ArchiveEventData: Sendable {}
 #endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeArchiveEntryDto: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ArchiveEntryDto {
+public struct FfiConverterTypeArchiveEventData: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ArchiveEventData {
         return
-            try ArchiveEntryDto(
-                name: FfiConverterString.read(from: &buf), 
-                size: FfiConverterUInt64.read(from: &buf), 
-                isDirectory: FfiConverterBool.read(from: &buf)
+            try ArchiveEventData(
+                kind: FfiConverterString.read(from: &buf), 
+                archiveId: FfiConverterOptionUInt64.read(from: &buf), 
+                extractionId: FfiConverterOptionUInt64.read(from: &buf), 
+                model: FfiConverterOptionTypeArchivePreviewModel.read(from: &buf), 
+                summary: FfiConverterOptionTypeExtractSummary.read(from: &buf)
         )
     }
 
-    public static func write(_ value: ArchiveEntryDto, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.name, into: &buf)
-        FfiConverterUInt64.write(value.size, into: &buf)
-        FfiConverterBool.write(value.isDirectory, into: &buf)
+    public static func write(_ value: ArchiveEventData, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.kind, into: &buf)
+        FfiConverterOptionUInt64.write(value.archiveId, into: &buf)
+        FfiConverterOptionUInt64.write(value.extractionId, into: &buf)
+        FfiConverterOptionTypeArchivePreviewModel.write(value.model, into: &buf)
+        FfiConverterOptionTypeExtractSummary.write(value.summary, into: &buf)
     }
 }
 
@@ -11733,15 +12127,85 @@ public struct FfiConverterTypeArchiveEntryDto: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeArchiveEntryDto_lift(_ buf: RustBuffer) throws -> ArchiveEntryDto {
-    return try FfiConverterTypeArchiveEntryDto.lift(buf)
+public func FfiConverterTypeArchiveEventData_lift(_ buf: RustBuffer) throws -> ArchiveEventData {
+    return try FfiConverterTypeArchiveEventData.lift(buf)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeArchiveEntryDto_lower(_ value: ArchiveEntryDto) -> RustBuffer {
-    return FfiConverterTypeArchiveEntryDto.lower(value)
+public func FfiConverterTypeArchiveEventData_lower(_ value: ArchiveEventData) -> RustBuffer {
+    return FfiConverterTypeArchiveEventData.lower(value)
+}
+
+
+public struct ArchiveExtractOptions: Equatable, Hashable {
+    /**
+     * Paths as the preview rows name them; `None` extracts everything.
+     */
+    public var selection: [String]?
+    public var destination: ArchiveDestination
+    /**
+     * The device's free disk (staged files need room for the largest one).
+     */
+    public var deviceFreeBytes: UInt64?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Paths as the preview rows name them; `None` extracts everything.
+         */selection: [String]?, destination: ArchiveDestination, 
+        /**
+         * The device's free disk (staged files need room for the largest one).
+         */deviceFreeBytes: UInt64?) {
+        self.selection = selection
+        self.destination = destination
+        self.deviceFreeBytes = deviceFreeBytes
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ArchiveExtractOptions: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeArchiveExtractOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ArchiveExtractOptions {
+        return
+            try ArchiveExtractOptions(
+                selection: FfiConverterOptionSequenceString.read(from: &buf), 
+                destination: FfiConverterTypeArchiveDestination.read(from: &buf), 
+                deviceFreeBytes: FfiConverterOptionUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ArchiveExtractOptions, into buf: inout [UInt8]) {
+        FfiConverterOptionSequenceString.write(value.selection, into: &buf)
+        FfiConverterTypeArchiveDestination.write(value.destination, into: &buf)
+        FfiConverterOptionUInt64.write(value.deviceFreeBytes, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeArchiveExtractOptions_lift(_ buf: RustBuffer) throws -> ArchiveExtractOptions {
+    return try FfiConverterTypeArchiveExtractOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeArchiveExtractOptions_lower(_ value: ArchiveExtractOptions) -> RustBuffer {
+    return FfiConverterTypeArchiveExtractOptions.lower(value)
 }
 
 
@@ -19033,6 +19497,85 @@ public func FfiConverterTypeArchiveCipher_lower(_ value: ArchiveCipher) -> RustB
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Where an extraction lands.
+ */
+
+public enum ArchiveDestination: Equatable, Hashable {
+    
+    /**
+     * "Extract": the folder the archive is in.
+     */
+    case nextToArchive
+    /**
+     * "Extract to…": a chosen folder; `None` is the top of the drive.
+     */
+    case folder(parentId: String?
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ArchiveDestination: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeArchiveDestination: FfiConverterRustBuffer {
+    typealias SwiftType = ArchiveDestination
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ArchiveDestination {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .nextToArchive
+        
+        case 2: return .folder(parentId: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ArchiveDestination, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .nextToArchive:
+            writeInt(&buf, Int32(1))
+        
+        
+        case let .folder(parentId):
+            writeInt(&buf, Int32(2))
+            FfiConverterOptionString.write(parentId, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeArchiveDestination_lift(_ buf: RustBuffer) throws -> ArchiveDestination {
+    return try FfiConverterTypeArchiveDestination.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeArchiveDestination_lower(_ value: ArchiveDestination) -> RustBuffer {
+    return FfiConverterTypeArchiveDestination.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum ArchiveEntryKind: Equatable, Hashable {
     
@@ -19125,6 +19668,172 @@ public func FfiConverterTypeArchiveEntryKind_lower(_ value: ArchiveEntryKind) ->
     return FfiConverterTypeArchiveEntryKind.lower(value)
 }
 
+
+
+/**
+ * Why an archive call did nothing. `Refused` carries core's words.
+ */
+public enum ArchiveError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+
+    
+    
+    /**
+     * The planner refused before anything was written (`reason`: core's
+     * binding string, `"backups"`, `"quota"`, ...).
+     */
+    case Refused(reason: String, text: ArchiveText
+    )
+    /**
+     * The archive cannot be listed.
+     */
+    case Unreadable(refusal: ArchiveRefusal, text: ArchiveText
+    )
+    case Reading
+    case Busy
+    case UnknownArchive
+    case NoEntry
+    case PasswordNeeded
+    case WrongPassword
+    case Corrupt
+    case TooLarge
+    case Skipped(reason: ArchiveSkipReason
+    )
+    case Service(error: ServiceErrorKind
+    )
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
+}
+
+#if compiler(>=6)
+extension ArchiveError: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeArchiveError: FfiConverterRustBuffer {
+    typealias SwiftType = ArchiveError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ArchiveError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .Refused(
+            reason: try FfiConverterString.read(from: &buf), 
+            text: try FfiConverterTypeArchiveText.read(from: &buf)
+            )
+        case 2: return .Unreadable(
+            refusal: try FfiConverterTypeArchiveRefusal.read(from: &buf), 
+            text: try FfiConverterTypeArchiveText.read(from: &buf)
+            )
+        case 3: return .Reading
+        case 4: return .Busy
+        case 5: return .UnknownArchive
+        case 6: return .NoEntry
+        case 7: return .PasswordNeeded
+        case 8: return .WrongPassword
+        case 9: return .Corrupt
+        case 10: return .TooLarge
+        case 11: return .Skipped(
+            reason: try FfiConverterTypeArchiveSkipReason.read(from: &buf)
+            )
+        case 12: return .Service(
+            error: try FfiConverterTypeServiceErrorKind.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ArchiveError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case let .Refused(reason,text):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(reason, into: &buf)
+            FfiConverterTypeArchiveText.write(text, into: &buf)
+            
+        
+        case let .Unreadable(refusal,text):
+            writeInt(&buf, Int32(2))
+            FfiConverterTypeArchiveRefusal.write(refusal, into: &buf)
+            FfiConverterTypeArchiveText.write(text, into: &buf)
+            
+        
+        case .Reading:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .Busy:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .UnknownArchive:
+            writeInt(&buf, Int32(5))
+        
+        
+        case .NoEntry:
+            writeInt(&buf, Int32(6))
+        
+        
+        case .PasswordNeeded:
+            writeInt(&buf, Int32(7))
+        
+        
+        case .WrongPassword:
+            writeInt(&buf, Int32(8))
+        
+        
+        case .Corrupt:
+            writeInt(&buf, Int32(9))
+        
+        
+        case .TooLarge:
+            writeInt(&buf, Int32(10))
+        
+        
+        case let .Skipped(reason):
+            writeInt(&buf, Int32(11))
+            FfiConverterTypeArchiveSkipReason.write(reason, into: &buf)
+            
+        
+        case let .Service(error):
+            writeInt(&buf, Int32(12))
+            FfiConverterTypeServiceErrorKind.write(error, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeArchiveError_lift(_ buf: RustBuffer) throws -> ArchiveError {
+    return try FfiConverterTypeArchiveError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeArchiveError_lower(_ value: ArchiveError) -> RustBuffer {
+    return FfiConverterTypeArchiveError.lower(value)
+}
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
@@ -25275,6 +25984,54 @@ fileprivate struct FfiConverterOptionTypeWriteTargetHandle: FfiConverterRustBuff
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeArchiveEventData: FfiConverterRustBuffer {
+    typealias SwiftType = ArchiveEventData?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeArchiveEventData.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeArchiveEventData.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeArchivePreviewModel: FfiConverterRustBuffer {
+    typealias SwiftType = ArchivePreviewModel?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeArchivePreviewModel.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeArchivePreviewModel.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeArchiveText: FfiConverterRustBuffer {
     typealias SwiftType = ArchiveText?
 
@@ -25539,6 +26296,30 @@ fileprivate struct FfiConverterOptionTypeEngineEventData: FfiConverterRustBuffer
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeExtractSummary: FfiConverterRustBuffer {
+    typealias SwiftType = ExtractSummary?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeExtractSummary.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeExtractSummary.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeFileProviderItemData: FfiConverterRustBuffer {
     typealias SwiftType = FileProviderItemData?
 
@@ -25707,6 +26488,30 @@ fileprivate struct FfiConverterOptionCallbackInterfaceSecretStoreCallback: FfiCo
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [String]?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterSequenceString.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterSequenceString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionSequenceTypeBackupManifestRecordData: FfiConverterRustBuffer {
     typealias SwiftType = [BackupManifestRecordData]?
 
@@ -25847,31 +26652,6 @@ fileprivate struct FfiConverterSequenceTypeArchiveEntry: FfiConverterRustBuffer 
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeArchiveEntry.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-fileprivate struct FfiConverterSequenceTypeArchiveEntryDto: FfiConverterRustBuffer {
-    typealias SwiftType = [ArchiveEntryDto]
-
-    public static func write(_ value: [ArchiveEntryDto], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeArchiveEntryDto.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ArchiveEntryDto] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [ArchiveEntryDto]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeArchiveEntryDto.read(from: &buf))
         }
         return seq
     }
@@ -27245,16 +28025,6 @@ public func constellationVerifyCode(payload: ConstellationPayloadDto, code: Stri
 })
 }
 /**
- * Decompress gzip-compressed data.
- */
-public func decompressGzip(data: Data)throws  -> Data  {
-    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
-    uniffi_beebeeb_uniffi_fn_func_decompress_gzip(
-        FfiConverterData.lower(data),$0
-    )
-})
-}
-/**
  * A background URL session's resource timeout for a storage PUT, in milliseconds. No app timer runs in
  * the background, so this is the only bound; it stays under the server's late-write fence from any
  * start up to the link's expiry.
@@ -27537,29 +28307,6 @@ public func isPreviewableByExtension(filename: String) -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
     uniffi_beebeeb_uniffi_fn_func_is_previewable_by_extension(
         FfiConverterString.lower(filename),$0
-    )
-})
-}
-/**
- * List entries in an archive, detecting format from the filename extension.
- *
- * Supported: `.tar`, `.gz`, `.tgz`, `.tar.gz`.
- */
-public func listArchive(data: Data, filename: String)throws  -> [ArchiveEntryDto]  {
-    return try  FfiConverterSequenceTypeArchiveEntryDto.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
-    uniffi_beebeeb_uniffi_fn_func_list_archive(
-        FfiConverterData.lower(data),
-        FfiConverterString.lower(filename),$0
-    )
-})
-}
-/**
- * List entries in a TAR archive from raw bytes.
- */
-public func listTarEntries(data: Data)throws  -> [ArchiveEntryDto]  {
-    return try  FfiConverterSequenceTypeArchiveEntryDto.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
-    uniffi_beebeeb_uniffi_fn_func_list_tar_entries(
-        FfiConverterData.lower(data),$0
     )
 })
 }
@@ -28115,9 +28862,6 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_constellation_verify_code() != 40191) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_func_decompress_gzip() != 58898) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_beebeeb_uniffi_checksum_func_direct_background_put_resource_timeout_ms() != 64703) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -28191,12 +28935,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_is_previewable_by_extension() != 2408) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_beebeeb_uniffi_checksum_func_list_archive() != 4008) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_beebeeb_uniffi_checksum_func_list_tar_entries() != 55781) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_parse_direct_discovery() != 11833) {
@@ -28961,6 +29699,33 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_open_frame() != 5620) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_archiveeventstreamhandle_next() != 21560) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_cancel() != 5998) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_close() != 10467) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_extract() != 62260) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_observe() != 28255) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_open() != 43088) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_open_entry() != 4986) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_preview() != 27723) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_supply_password() != 39838) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_authchallengehandle_canonical_email() != 30433) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -29076,6 +29841,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sign_out_this_app() != 21684) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_archives() != 10038) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_auth() != 15199) {

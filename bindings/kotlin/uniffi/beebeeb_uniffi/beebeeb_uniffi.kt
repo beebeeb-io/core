@@ -906,8 +906,6 @@ external fun uniffi_beebeeb_uniffi_checksum_func_constellation_new_session(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_constellation_verify_code(
 ): Short
-external fun uniffi_beebeeb_uniffi_checksum_func_decompress_gzip(
-): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_background_put_resource_timeout_ms(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_direct_check_storage_body(
@@ -957,10 +955,6 @@ external fun uniffi_beebeeb_uniffi_checksum_func_is_media(
 external fun uniffi_beebeeb_uniffi_checksum_func_is_previewable(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_is_previewable_by_extension(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_func_list_archive(
-): Short
-external fun uniffi_beebeeb_uniffi_checksum_func_list_tar_entries(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_parse_direct_discovery(
 ): Short
@@ -1470,6 +1464,24 @@ external fun uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_file_id(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_open_frame(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_archiveeventstreamhandle_next(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_cancel(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_close(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_extract(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_observe(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_open(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_open_entry(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_preview(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_supply_password(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_authchallengehandle_canonical_email(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_authchallengehandle_kind(
@@ -1547,6 +1559,8 @@ external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_prepare_ac
 external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_service_coordinator(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sign_out_this_app(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_archives(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_auth(
 ): Short
@@ -2406,6 +2420,32 @@ external fun uniffi_beebeeb_uniffi_fn_method_requestcontentreader_file_id(`ptr`:
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_requestcontentreader_open_frame(`ptr`: Long,`versionId`: RustBuffer.ByValue,`index`: Int,`isLast`: Byte,`format`: Byte,`frame`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_clone_archiveeventstreamhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_archiveeventstreamhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_archiveeventstreamhandle_next(`ptr`: Long,`timeoutMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_clone_archiveservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_archiveservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_cancel(`ptr`: Long,`extractionId`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_close(`ptr`: Long,`archiveId`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_extract(`ptr`: Long,`archiveId`: Long,`options`: RustBuffer.ByValue,`passwordText`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_observe(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_open(`ptr`: Long,`file`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_open_entry(`ptr`: Long,`archiveId`: Long,`index`: Int,`passwordText`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_preview(`ptr`: Long,`archiveId`: Long,`folder`: RustBuffer.ByValue,`selection`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_supply_password(`ptr`: Long,`extractionId`: Long,`passwordText`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_beebeeb_uniffi_fn_clone_authchallengehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_authchallengehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -2514,6 +2554,8 @@ external fun uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_service_coordina
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_sign_out_this_app(`ptr`: Long,`coordinator`: Long,`canceller`: Long,`purger`: Long,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_archives(`ptr`: Long,`downloads`: Long,`uploads`: Long,`tempRoot`: RustBuffer.ByValue,`platform`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
 external fun uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_auth(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_contacts(`ptr`: Long,`store`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -2742,8 +2784,6 @@ external fun uniffi_beebeeb_uniffi_fn_func_constellation_new_session(`expiresInS
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_constellation_verify_code(`payload`: RustBuffer.ByValue,`code`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
-external fun uniffi_beebeeb_uniffi_fn_func_decompress_gzip(`data`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_direct_background_put_resource_timeout_ms(uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_func_direct_check_storage_body(`received`: Long,`expected`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -2794,10 +2834,6 @@ external fun uniffi_beebeeb_uniffi_fn_func_is_previewable(`mimeType`: RustBuffer
 ): Byte
 external fun uniffi_beebeeb_uniffi_fn_func_is_previewable_by_extension(`filename`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
-external fun uniffi_beebeeb_uniffi_fn_func_list_archive(`data`: RustBuffer.ByValue,`filename`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_func_list_tar_entries(`data`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_parse_direct_discovery(`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_parse_encrypted_metadata(`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -3024,9 +3060,6 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_func_constellation_verify_code() != 40191.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_func_decompress_gzip() != 58898.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_direct_background_put_resource_timeout_ms() != 64703.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -3100,12 +3133,6 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_is_previewable_by_extension() != 2408.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_func_list_archive() != 4008.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_func_list_tar_entries() != 55781.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_parse_direct_discovery() != 11833.toShort()) {
@@ -3870,6 +3897,33 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_requestcontentreader_open_frame() != 5620.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_archiveeventstreamhandle_next() != 21560.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_cancel() != 5998.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_close() != 10467.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_extract() != 62260.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_observe() != 28255.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_open() != 43088.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_open_entry() != 4986.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_preview() != 27723.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_archiveservicehandle_supply_password() != 39838.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_authchallengehandle_canonical_email() != 30433.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -3985,6 +4039,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sign_out_this_app() != 21684.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_archives() != 10038.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_auth() != 15199.toShort()) {
@@ -5011,6 +5068,649 @@ public object FfiConverterTypeAccountReplacementHandle: FfiConverter<AccountRepl
     override fun allocationSize(value: AccountReplacementHandle) = 8UL
 
     override fun write(value: AccountReplacementHandle, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+public interface ArchiveEventStreamHandleInterface {
+    
+    /**
+     * The next event, or `None` after `timeout_ms`. Missed events
+     * (`Unavailable`) mean: ask `preview` for the current screen.
+     */
+    fun `next`(`timeoutMs`: kotlin.ULong): ArchiveEventData?
+    
+    companion object
+}
+
+open class ArchiveEventStreamHandle: Disposable, AutoCloseable, ArchiveEventStreamHandleInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_beebeeb_uniffi_fn_free_archiveeventstreamhandle(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_beebeeb_uniffi_fn_clone_archiveeventstreamhandle(handle, status)
+        }
+    }
+
+    
+    /**
+     * The next event, or `None` after `timeout_ms`. Missed events
+     * (`Unavailable`) mean: ask `preview` for the current screen.
+     */
+    @Throws(ServiceException::class)override fun `next`(`timeoutMs`: kotlin.ULong): ArchiveEventData? {
+            return FfiConverterOptionalTypeArchiveEventData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ServiceException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_archiveeventstreamhandle_next(
+        it,
+        FfiConverterULong.lower(`timeoutMs`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveEventStreamHandle: FfiConverter<ArchiveEventStreamHandle, Long> {
+    override fun lower(value: ArchiveEventStreamHandle): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): ArchiveEventStreamHandle {
+        return ArchiveEventStreamHandle(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): ArchiveEventStreamHandle {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: ArchiveEventStreamHandle) = 8UL
+
+    override fun write(value: ArchiveEventStreamHandle, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+public interface ArchiveServiceHandleInterface {
+    
+    fun `cancel`(`extractionId`: kotlin.ULong)
+    
+    fun `close`(`archiveId`: kotlin.ULong)
+    
+    /**
+     * Plan and start an extraction. Uploads follow the device's upload
+     * settings (Wi-Fi only, staging limit).
+     */
+    fun `extract`(`archiveId`: kotlin.ULong, `options`: ArchiveExtractOptions, `passwordText`: SecretString?): kotlin.ULong
+    
+    fun `observe`(): ArchiveEventStreamHandle
+    
+    /**
+     * Open an archive and start listing it; the listing arrives as a
+     * `model` event.
+     */
+    fun `open`(`file`: DownloadData, `name`: kotlin.String, `parentId`: kotlin.String?): kotlin.ULong
+    
+    /**
+     * One entry's bytes, after its own check passed (Open, Download).
+     */
+    fun `openEntry`(`archiveId`: kotlin.ULong, `index`: kotlin.UInt, `passwordText`: SecretString?): kotlin.ByteArray
+    
+    fun `preview`(`archiveId`: kotlin.ULong, `folder`: List<kotlin.String>, `selection`: List<kotlin.String>): ArchivePreviewModel
+    
+    /**
+     * The password a run asked for (a `model` event in `needs_password`).
+     */
+    fun `supplyPassword`(`extractionId`: kotlin.ULong, `passwordText`: SecretString)
+    
+    companion object
+}
+
+open class ArchiveServiceHandle: Disposable, AutoCloseable, ArchiveServiceHandleInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_beebeeb_uniffi_fn_free_archiveservicehandle(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_beebeeb_uniffi_fn_clone_archiveservicehandle(handle, status)
+        }
+    }
+
+    override fun `cancel`(`extractionId`: kotlin.ULong)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_cancel(
+        it,
+        FfiConverterULong.lower(`extractionId`),_status)
+}
+    }
+    
+    
+
+    override fun `close`(`archiveId`: kotlin.ULong)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_close(
+        it,
+        FfiConverterULong.lower(`archiveId`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Plan and start an extraction. Uploads follow the device's upload
+     * settings (Wi-Fi only, staging limit).
+     */
+    @Throws(ArchiveException::class)override fun `extract`(`archiveId`: kotlin.ULong, `options`: ArchiveExtractOptions, `passwordText`: SecretString?): kotlin.ULong {
+            return FfiConverterULong.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ArchiveException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_extract(
+        it,
+        FfiConverterULong.lower(`archiveId`),FfiConverterTypeArchiveExtractOptions.lower(`options`),FfiConverterOptionalTypeSecretString.lower(`passwordText`),_status)
+}
+    }
+    )
+    }
+    
+
+    override fun `observe`(): ArchiveEventStreamHandle {
+            return FfiConverterTypeArchiveEventStreamHandle.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_observe(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Open an archive and start listing it; the listing arrives as a
+     * `model` event.
+     */
+    @Throws(ArchiveException::class)override fun `open`(`file`: DownloadData, `name`: kotlin.String, `parentId`: kotlin.String?): kotlin.ULong {
+            return FfiConverterULong.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ArchiveException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_open(
+        it,
+        FfiConverterTypeDownloadData.lower(`file`),FfiConverterString.lower(`name`),FfiConverterOptionalString.lower(`parentId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * One entry's bytes, after its own check passed (Open, Download).
+     */
+    @Throws(ArchiveException::class)override fun `openEntry`(`archiveId`: kotlin.ULong, `index`: kotlin.UInt, `passwordText`: SecretString?): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ArchiveException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_open_entry(
+        it,
+        FfiConverterULong.lower(`archiveId`),FfiConverterUInt.lower(`index`),FfiConverterOptionalTypeSecretString.lower(`passwordText`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(ArchiveException::class)override fun `preview`(`archiveId`: kotlin.ULong, `folder`: List<kotlin.String>, `selection`: List<kotlin.String>): ArchivePreviewModel {
+            return FfiConverterTypeArchivePreviewModel.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ArchiveException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_preview(
+        it,
+        FfiConverterULong.lower(`archiveId`),FfiConverterSequenceString.lower(`folder`),FfiConverterSequenceString.lower(`selection`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The password a run asked for (a `model` event in `needs_password`).
+     */override fun `supplyPassword`(`extractionId`: kotlin.ULong, `passwordText`: SecretString)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_archiveservicehandle_supply_password(
+        it,
+        FfiConverterULong.lower(`extractionId`),FfiConverterTypeSecretString.lower(`passwordText`),_status)
+}
+    }
+    
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveServiceHandle: FfiConverter<ArchiveServiceHandle, Long> {
+    override fun lower(value: ArchiveServiceHandle): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): ArchiveServiceHandle {
+        return ArchiveServiceHandle(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): ArchiveServiceHandle {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: ArchiveServiceHandle) = 8UL
+
+    override fun write(value: ArchiveServiceHandle, buf: ByteBuffer) {
         buf.putLong(lower(value))
     }
 }
@@ -16519,6 +17219,12 @@ public interface NativeClientHandleInterface {
     
     fun `signOutThisApp`(`coordinator`: ServiceCoordinatorHandle, `canceller`: PlatformTransferCancellerCallback, `purger`: AccountDataPurgerCallback, `nowMs`: kotlin.Long): SignOutReportData
     
+    /**
+     * The archive service (`platform`: `"mobile_app"` on the phone). It owns
+     * `temp_root`, where extracted files wait for their uploads.
+     */
+    fun `archives`(`downloads`: DownloadServiceHandle, `uploads`: UploadServiceHandle, `tempRoot`: kotlin.String, `platform`: kotlin.String): ArchiveServiceHandle
+    
     fun `auth`(): AuthServiceHandle
     
     fun `contacts`(`store`: StoreHandle): ContactServiceHandle
@@ -16720,6 +17426,24 @@ open class NativeClientHandle: Disposable, AutoCloseable, NativeClientHandleInte
     UniffiLib.uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_sign_out_this_app(
         it,
         FfiConverterTypeServiceCoordinatorHandle.lower(`coordinator`),FfiConverterTypePlatformTransferCancellerCallback.lower(`canceller`),FfiConverterTypeAccountDataPurgerCallback.lower(`purger`),FfiConverterLong.lower(`nowMs`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The archive service (`platform`: `"mobile_app"` on the phone). It owns
+     * `temp_root`, where extracted files wait for their uploads.
+     */
+    @Throws(ServiceException::class)override fun `archives`(`downloads`: DownloadServiceHandle, `uploads`: UploadServiceHandle, `tempRoot`: kotlin.String, `platform`: kotlin.String): ArchiveServiceHandle {
+            return FfiConverterTypeArchiveServiceHandle.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ServiceException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_archives(
+        it,
+        FfiConverterTypeDownloadServiceHandle.lower(`downloads`),FfiConverterTypeUploadServiceHandle.lower(`uploads`),FfiConverterString.lower(`tempRoot`),FfiConverterString.lower(`platform`),_status)
 }
     }
     )
@@ -23671,14 +24395,24 @@ public object FfiConverterTypeArchiveEntry: FfiConverterRustBuffer<ArchiveEntry>
 
 
 /**
- * A single entry inside an archive (TAR, GZ, TGZ).
+ * One archive event (`kind`: `"model"`, `"read_failed"`, `"finished"`).
  */
-data class ArchiveEntryDto (
-    var `name`: kotlin.String
+data class ArchiveEventData (
+    var `kind`: kotlin.String
     , 
-    var `size`: kotlin.ULong
+    /**
+     * The archive (`model`, `read_failed`).
+     */
+    var `archiveId`: kotlin.ULong?
     , 
-    var `isDirectory`: kotlin.Boolean
+    /**
+     * The extraction (`finished`).
+     */
+    var `extractionId`: kotlin.ULong?
+    , 
+    var `model`: ArchivePreviewModel?
+    , 
+    var `summary`: ExtractSummary?
     
 ){
     
@@ -23692,25 +24426,80 @@ data class ArchiveEntryDto (
 /**
  * @suppress
  */
-public object FfiConverterTypeArchiveEntryDto: FfiConverterRustBuffer<ArchiveEntryDto> {
-    override fun read(buf: ByteBuffer): ArchiveEntryDto {
-        return ArchiveEntryDto(
+public object FfiConverterTypeArchiveEventData: FfiConverterRustBuffer<ArchiveEventData> {
+    override fun read(buf: ByteBuffer): ArchiveEventData {
+        return ArchiveEventData(
             FfiConverterString.read(buf),
-            FfiConverterULong.read(buf),
-            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalULong.read(buf),
+            FfiConverterOptionalULong.read(buf),
+            FfiConverterOptionalTypeArchivePreviewModel.read(buf),
+            FfiConverterOptionalTypeExtractSummary.read(buf),
         )
     }
 
-    override fun allocationSize(value: ArchiveEntryDto) = (
-            FfiConverterString.allocationSize(value.`name`) +
-            FfiConverterULong.allocationSize(value.`size`) +
-            FfiConverterBoolean.allocationSize(value.`isDirectory`)
+    override fun allocationSize(value: ArchiveEventData) = (
+            FfiConverterString.allocationSize(value.`kind`) +
+            FfiConverterOptionalULong.allocationSize(value.`archiveId`) +
+            FfiConverterOptionalULong.allocationSize(value.`extractionId`) +
+            FfiConverterOptionalTypeArchivePreviewModel.allocationSize(value.`model`) +
+            FfiConverterOptionalTypeExtractSummary.allocationSize(value.`summary`)
     )
 
-    override fun write(value: ArchiveEntryDto, buf: ByteBuffer) {
-            FfiConverterString.write(value.`name`, buf)
-            FfiConverterULong.write(value.`size`, buf)
-            FfiConverterBoolean.write(value.`isDirectory`, buf)
+    override fun write(value: ArchiveEventData, buf: ByteBuffer) {
+            FfiConverterString.write(value.`kind`, buf)
+            FfiConverterOptionalULong.write(value.`archiveId`, buf)
+            FfiConverterOptionalULong.write(value.`extractionId`, buf)
+            FfiConverterOptionalTypeArchivePreviewModel.write(value.`model`, buf)
+            FfiConverterOptionalTypeExtractSummary.write(value.`summary`, buf)
+    }
+}
+
+
+
+data class ArchiveExtractOptions (
+    /**
+     * Paths as the preview rows name them; `None` extracts everything.
+     */
+    var `selection`: List<kotlin.String>?
+    , 
+    var `destination`: ArchiveDestination
+    , 
+    /**
+     * The device's free disk (staged files need room for the largest one).
+     */
+    var `deviceFreeBytes`: kotlin.ULong?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveExtractOptions: FfiConverterRustBuffer<ArchiveExtractOptions> {
+    override fun read(buf: ByteBuffer): ArchiveExtractOptions {
+        return ArchiveExtractOptions(
+            FfiConverterOptionalSequenceString.read(buf),
+            FfiConverterTypeArchiveDestination.read(buf),
+            FfiConverterOptionalULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveExtractOptions) = (
+            FfiConverterOptionalSequenceString.allocationSize(value.`selection`) +
+            FfiConverterTypeArchiveDestination.allocationSize(value.`destination`) +
+            FfiConverterOptionalULong.allocationSize(value.`deviceFreeBytes`)
+    )
+
+    override fun write(value: ArchiveExtractOptions, buf: ByteBuffer) {
+            FfiConverterOptionalSequenceString.write(value.`selection`, buf)
+            FfiConverterTypeArchiveDestination.write(value.`destination`, buf)
+            FfiConverterOptionalULong.write(value.`deviceFreeBytes`, buf)
     }
 }
 
@@ -29446,6 +30235,88 @@ public object FfiConverterTypeArchiveCipher : FfiConverterRustBuffer<ArchiveCiph
 
 
 
+/**
+ * Where an extraction lands.
+ */
+sealed class ArchiveDestination {
+    
+    /**
+     * "Extract": the folder the archive is in.
+     */
+    object NextToArchive : ArchiveDestination()
+    
+    
+    /**
+     * "Extract to…": a chosen folder; `None` is the top of the drive.
+     */
+    data class Folder(
+        val `parentId`: kotlin.String?) : ArchiveDestination()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveDestination : FfiConverterRustBuffer<ArchiveDestination>{
+    override fun read(buf: ByteBuffer): ArchiveDestination {
+        return when(buf.getInt()) {
+            1 -> ArchiveDestination.NextToArchive
+            2 -> ArchiveDestination.Folder(
+                FfiConverterOptionalString.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: ArchiveDestination) = when(value) {
+        is ArchiveDestination.NextToArchive -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is ArchiveDestination.Folder -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterOptionalString.allocationSize(value.`parentId`)
+            )
+        }
+    }
+
+    override fun write(value: ArchiveDestination, buf: ByteBuffer) {
+        when(value) {
+            is ArchiveDestination.NextToArchive -> {
+                buf.putInt(1)
+                Unit
+            }
+            is ArchiveDestination.Folder -> {
+                buf.putInt(2)
+                FfiConverterOptionalString.write(value.`parentId`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
 
 enum class ArchiveEntryKind {
     
@@ -29481,6 +30352,271 @@ public object FfiConverterTypeArchiveEntryKind: FfiConverterRustBuffer<ArchiveEn
 }
 
 
+
+
+
+
+
+/**
+ * Why an archive call did nothing. `Refused` carries core's words.
+ */
+sealed class ArchiveException: kotlin.Exception() {
+    
+    /**
+     * The planner refused before anything was written (`reason`: core's
+     * binding string, `"backups"`, `"quota"`, ...).
+     */
+    class Refused(
+        
+        val `reason`: kotlin.String, 
+        
+        val `text`: ArchiveText
+        ) : ArchiveException() {
+        override val message
+            get() = "reason=${ `reason` }, text=${ `text` }"
+    }
+    
+    /**
+     * The archive cannot be listed.
+     */
+    class Unreadable(
+        
+        val `refusal`: ArchiveRefusal, 
+        
+        val `text`: ArchiveText
+        ) : ArchiveException() {
+        override val message
+            get() = "refusal=${ `refusal` }, text=${ `text` }"
+    }
+    
+    class Reading(
+        ) : ArchiveException() {
+        override val message
+            get() = ""
+    }
+    
+    class Busy(
+        ) : ArchiveException() {
+        override val message
+            get() = ""
+    }
+    
+    class UnknownArchive(
+        ) : ArchiveException() {
+        override val message
+            get() = ""
+    }
+    
+    class NoEntry(
+        ) : ArchiveException() {
+        override val message
+            get() = ""
+    }
+    
+    class PasswordNeeded(
+        ) : ArchiveException() {
+        override val message
+            get() = ""
+    }
+    
+    class WrongPassword(
+        ) : ArchiveException() {
+        override val message
+            get() = ""
+    }
+    
+    class Corrupt(
+        ) : ArchiveException() {
+        override val message
+            get() = ""
+    }
+    
+    class TooLarge(
+        ) : ArchiveException() {
+        override val message
+            get() = ""
+    }
+    
+    class Skipped(
+        
+        val `reason`: ArchiveSkipReason
+        ) : ArchiveException() {
+        override val message
+            get() = "reason=${ `reason` }"
+    }
+    
+    class Service(
+        
+        val `error`: ServiceErrorKind
+        ) : ArchiveException() {
+        override val message
+            get() = "error=${ `error` }"
+    }
+    
+
+    
+
+
+    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<ArchiveException> {
+        override fun lift(error_buf: RustBuffer.ByValue): ArchiveException = FfiConverterTypeArchiveError.lift(error_buf)
+    }
+
+    
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveError : FfiConverterRustBuffer<ArchiveException> {
+    override fun read(buf: ByteBuffer): ArchiveException {
+        
+
+        return when(buf.getInt()) {
+            1 -> ArchiveException.Refused(
+                FfiConverterString.read(buf),
+                FfiConverterTypeArchiveText.read(buf),
+                )
+            2 -> ArchiveException.Unreadable(
+                FfiConverterTypeArchiveRefusal.read(buf),
+                FfiConverterTypeArchiveText.read(buf),
+                )
+            3 -> ArchiveException.Reading()
+            4 -> ArchiveException.Busy()
+            5 -> ArchiveException.UnknownArchive()
+            6 -> ArchiveException.NoEntry()
+            7 -> ArchiveException.PasswordNeeded()
+            8 -> ArchiveException.WrongPassword()
+            9 -> ArchiveException.Corrupt()
+            10 -> ArchiveException.TooLarge()
+            11 -> ArchiveException.Skipped(
+                FfiConverterTypeArchiveSkipReason.read(buf),
+                )
+            12 -> ArchiveException.Service(
+                FfiConverterTypeServiceErrorKind.read(buf),
+                )
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: ArchiveException): ULong {
+        return when(value) {
+            is ArchiveException.Refused -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`reason`)
+                + FfiConverterTypeArchiveText.allocationSize(value.`text`)
+            )
+            is ArchiveException.Unreadable -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterTypeArchiveRefusal.allocationSize(value.`refusal`)
+                + FfiConverterTypeArchiveText.allocationSize(value.`text`)
+            )
+            is ArchiveException.Reading -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is ArchiveException.Busy -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is ArchiveException.UnknownArchive -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is ArchiveException.NoEntry -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is ArchiveException.PasswordNeeded -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is ArchiveException.WrongPassword -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is ArchiveException.Corrupt -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is ArchiveException.TooLarge -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is ArchiveException.Skipped -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterTypeArchiveSkipReason.allocationSize(value.`reason`)
+            )
+            is ArchiveException.Service -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterTypeServiceErrorKind.allocationSize(value.`error`)
+            )
+        }
+    }
+
+    override fun write(value: ArchiveException, buf: ByteBuffer) {
+        when(value) {
+            is ArchiveException.Refused -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`reason`, buf)
+                FfiConverterTypeArchiveText.write(value.`text`, buf)
+                Unit
+            }
+            is ArchiveException.Unreadable -> {
+                buf.putInt(2)
+                FfiConverterTypeArchiveRefusal.write(value.`refusal`, buf)
+                FfiConverterTypeArchiveText.write(value.`text`, buf)
+                Unit
+            }
+            is ArchiveException.Reading -> {
+                buf.putInt(3)
+                Unit
+            }
+            is ArchiveException.Busy -> {
+                buf.putInt(4)
+                Unit
+            }
+            is ArchiveException.UnknownArchive -> {
+                buf.putInt(5)
+                Unit
+            }
+            is ArchiveException.NoEntry -> {
+                buf.putInt(6)
+                Unit
+            }
+            is ArchiveException.PasswordNeeded -> {
+                buf.putInt(7)
+                Unit
+            }
+            is ArchiveException.WrongPassword -> {
+                buf.putInt(8)
+                Unit
+            }
+            is ArchiveException.Corrupt -> {
+                buf.putInt(9)
+                Unit
+            }
+            is ArchiveException.TooLarge -> {
+                buf.putInt(10)
+                Unit
+            }
+            is ArchiveException.Skipped -> {
+                buf.putInt(11)
+                FfiConverterTypeArchiveSkipReason.write(value.`reason`, buf)
+                Unit
+            }
+            is ArchiveException.Service -> {
+                buf.putInt(12)
+                FfiConverterTypeServiceErrorKind.write(value.`error`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
+}
 
 
 
@@ -34858,6 +35994,70 @@ public object FfiConverterOptionalTypeWriteTargetHandle: FfiConverterRustBuffer<
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeArchiveEventData: FfiConverterRustBuffer<ArchiveEventData?> {
+    override fun read(buf: ByteBuffer): ArchiveEventData? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeArchiveEventData.read(buf)
+    }
+
+    override fun allocationSize(value: ArchiveEventData?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeArchiveEventData.allocationSize(value)
+        }
+    }
+
+    override fun write(value: ArchiveEventData?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeArchiveEventData.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeArchivePreviewModel: FfiConverterRustBuffer<ArchivePreviewModel?> {
+    override fun read(buf: ByteBuffer): ArchivePreviewModel? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeArchivePreviewModel.read(buf)
+    }
+
+    override fun allocationSize(value: ArchivePreviewModel?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeArchivePreviewModel.allocationSize(value)
+        }
+    }
+
+    override fun write(value: ArchivePreviewModel?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeArchivePreviewModel.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeArchiveText: FfiConverterRustBuffer<ArchiveText?> {
     override fun read(buf: ByteBuffer): ArchiveText? {
         if (buf.get().toInt() == 0) {
@@ -35210,6 +36410,38 @@ public object FfiConverterOptionalTypeEngineEventData: FfiConverterRustBuffer<En
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeExtractSummary: FfiConverterRustBuffer<ExtractSummary?> {
+    override fun read(buf: ByteBuffer): ExtractSummary? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeExtractSummary.read(buf)
+    }
+
+    override fun allocationSize(value: ExtractSummary?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeExtractSummary.allocationSize(value)
+        }
+    }
+
+    override fun write(value: ExtractSummary?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeExtractSummary.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeFileProviderItemData: FfiConverterRustBuffer<FileProviderItemData?> {
     override fun read(buf: ByteBuffer): FileProviderItemData? {
         if (buf.get().toInt() == 0) {
@@ -35434,6 +36666,38 @@ public object FfiConverterOptionalTypeSecretStoreCallback: FfiConverterRustBuffe
 /**
  * @suppress
  */
+public object FfiConverterOptionalSequenceString: FfiConverterRustBuffer<List<kotlin.String>?> {
+    override fun read(buf: ByteBuffer): List<kotlin.String>? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterSequenceString.read(buf)
+    }
+
+    override fun allocationSize(value: List<kotlin.String>?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterSequenceString.allocationSize(value)
+        }
+    }
+
+    override fun write(value: List<kotlin.String>?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterSequenceString.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalSequenceTypeBackupManifestRecordData: FfiConverterRustBuffer<List<BackupManifestRecordData>?> {
     override fun read(buf: ByteBuffer): List<BackupManifestRecordData>? {
         if (buf.get().toInt() == 0) {
@@ -35600,34 +36864,6 @@ public object FfiConverterSequenceTypeArchiveEntry: FfiConverterRustBuffer<List<
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeArchiveEntry.write(it, buf)
-        }
-    }
-}
-
-
-
-
-/**
- * @suppress
- */
-public object FfiConverterSequenceTypeArchiveEntryDto: FfiConverterRustBuffer<List<ArchiveEntryDto>> {
-    override fun read(buf: ByteBuffer): List<ArchiveEntryDto> {
-        val len = buf.getInt()
-        return List<ArchiveEntryDto>(len) {
-            FfiConverterTypeArchiveEntryDto.read(buf)
-        }
-    }
-
-    override fun allocationSize(value: List<ArchiveEntryDto>): ULong {
-        val sizeForLength = 4UL
-        val sizeForItems = value.map { FfiConverterTypeArchiveEntryDto.allocationSize(it) }.sum()
-        return sizeForLength + sizeForItems
-    }
-
-    override fun write(value: List<ArchiveEntryDto>, buf: ByteBuffer) {
-        buf.putInt(value.size)
-        value.iterator().forEach {
-            FfiConverterTypeArchiveEntryDto.write(it, buf)
         }
     }
 }
@@ -37093,20 +38329,6 @@ public typealias FfiConverterTypeSecretString = FfiConverterString
     
 
         /**
-         * Decompress gzip-compressed data.
-         */
-    @Throws(CryptoException::class) fun `decompressGzip`(`data`: kotlin.ByteArray): kotlin.ByteArray {
-            return FfiConverterByteArray.lift(
-    uniffiRustCallWithError(CryptoException) { _status ->
-    UniffiLib.uniffi_beebeeb_uniffi_fn_func_decompress_gzip(
-    
-        FfiConverterByteArray.lower(`data`),_status)
-}
-    )
-    }
-    
-
-        /**
          * A background URL session's resource timeout for a storage PUT, in milliseconds. No app timer runs in
          * the background, so this is the only bound; it stays under the server's late-write fence from any
          * start up to the link's expiry.
@@ -37451,36 +38673,6 @@ public typealias FfiConverterTypeSecretString = FfiConverterString
     UniffiLib.uniffi_beebeeb_uniffi_fn_func_is_previewable_by_extension(
     
         FfiConverterString.lower(`filename`),_status)
-}
-    )
-    }
-    
-
-        /**
-         * List entries in an archive, detecting format from the filename extension.
-         *
-         * Supported: `.tar`, `.gz`, `.tgz`, `.tar.gz`.
-         */
-    @Throws(CryptoException::class) fun `listArchive`(`data`: kotlin.ByteArray, `filename`: kotlin.String): List<ArchiveEntryDto> {
-            return FfiConverterSequenceTypeArchiveEntryDto.lift(
-    uniffiRustCallWithError(CryptoException) { _status ->
-    UniffiLib.uniffi_beebeeb_uniffi_fn_func_list_archive(
-    
-        FfiConverterByteArray.lower(`data`),FfiConverterString.lower(`filename`),_status)
-}
-    )
-    }
-    
-
-        /**
-         * List entries in a TAR archive from raw bytes.
-         */
-    @Throws(CryptoException::class) fun `listTarEntries`(`data`: kotlin.ByteArray): List<ArchiveEntryDto> {
-            return FfiConverterSequenceTypeArchiveEntryDto.lift(
-    uniffiRustCallWithError(CryptoException) { _status ->
-    UniffiLib.uniffi_beebeeb_uniffi_fn_func_list_tar_entries(
-    
-        FfiConverterByteArray.lower(`data`),_status)
 }
     )
     }
