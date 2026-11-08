@@ -107,6 +107,15 @@ pub struct ShareCreateLink {
     first: Option<HttpRequest>,
 }
 
+impl ShareCreateLink {
+    pub(crate) fn from_parts(flow: CreateLink, first: HttpRequest) -> Self {
+        Self {
+            flow,
+            first: Some(first),
+        }
+    }
+}
+
 #[wasm_bindgen(js_class = ShareCreateLink)]
 impl ShareCreateLink {
     #[wasm_bindgen(constructor)]

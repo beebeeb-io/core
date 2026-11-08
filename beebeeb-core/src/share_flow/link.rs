@@ -92,13 +92,7 @@ impl CreateLink {
         options: &LinkOptions,
     ) -> Result<(Self, HttpRequest), ShareFlowError> {
         let file_id = path_id(file_id).map_err(|_| ShareFlowError::InvalidInput("item id"))?;
-        if !(app_url.starts_with("https://") || app_url.starts_with("http://localhost")) {
-            return Err(ShareFlowError::InvalidInput("app url"));
-        }
-        let passphrase = options.passphrase.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty());
-        if passphrase.is_some_and(|p| p.chars().count() < MIN_PASSPHRASE_LEN) {
-            return Err(ShareFlowError::InvalidInput("passphrase too short"));
-        }
+        let passphrase = Self::check(app_url, options)?;
         let k_c = random_key()?;
         let wrapped_file_key = wrap_key_for_share(&k_c, file_key.as_bytes())?;
         let owner_wrapped_key = wrap_key_for_share(master.as_bytes(), &*k_c)?;
@@ -112,6 +106,33 @@ impl CreateLink {
         if let Some(p) = passphrase {
             body["passphrase"] = json!(p);
         }
+        Self::from_body(app_url, master, k_c, body)
+    }
+
+    /// Checks shared by every link kind: the app URL and the passphrase (trimmed, at least
+    /// [`MIN_PASSPHRASE_LEN`] characters). Returns the trimmed passphrase.
+    pub(super) fn check<'a>(app_url: &str, options: &'a LinkOptions) -> Result<Option<&'a str>, ShareFlowError> {
+        if !(app_url.starts_with("https://") || app_url.starts_with("http://localhost")) {
+            return Err(ShareFlowError::InvalidInput("app url"));
+        }
+        let passphrase = options.passphrase.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty());
+        if passphrase.is_some_and(|p| p.chars().count() < MIN_PASSPHRASE_LEN) {
+            return Err(ShareFlowError::InvalidInput("passphrase too short"));
+        }
+        Ok(passphrase)
+    }
+
+    pub(super) fn new_client_key() -> Result<Zeroizing<[u8; 32]>, ShareFlowError> {
+        random_key()
+    }
+
+    /// The token leg shared by file links and bundles: a fresh token, its owner copy, one retry.
+    pub(super) fn from_body(
+        app_url: &str,
+        master: &MasterKey,
+        k_c: Zeroizing<[u8; 32]>,
+        body: Value,
+    ) -> Result<(Self, HttpRequest), ShareFlowError> {
         let mut flow = Self {
             app_url: app_url.trim_end_matches('/').to_owned(),
             master: super::own_master(master),

@@ -164,3 +164,105 @@ impl FolderShareFlow {
         Ok(step_ffi(flow.on_response(into(response))?))
     }
 }
+
+// ── File requests ────────────────────────────────────────────────────────────
+
+/// The created request. `link` carries `R_pub` after `#`; `display` is the part before `#`.
+#[derive(uniffi::Record)]
+pub struct CreatedRequestFfi {
+    pub id: String,
+    pub link: String,
+    pub display: String,
+}
+
+#[derive(uniffi::Object)]
+pub struct CreateRequestFlow {
+    flow: Mutex<beebeeb_core::share_flow::request::CreateRequest>,
+    first: Mutex<Option<beebeeb_core::auth_flow::HttpRequest>>,
+}
+
+#[uniffi::export]
+impl CreateRequestFlow {
+    #[uniffi::constructor]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        app_url: String,
+        title: String,
+        description: Option<String>,
+        target_folder_id: Option<String>,
+        max_files: Option<u32>,
+        max_total_bytes: Option<u64>,
+        expires_in_secs: Option<u64>,
+        master_key: Vec<u8>,
+    ) -> Result<Arc<Self>, ShareFlowFfiError> {
+        let master_key = Zeroizing::new(master_key);
+        let bytes: [u8; 32] = master_key
+            .as_slice()
+            .try_into()
+            .map_err(|_| ShareFlowFfiError::from(ShareFlowError::InvalidInput("key length")))?;
+        let master = MasterKey::from_bytes(*Zeroizing::new(bytes));
+        let options = beebeeb_core::share_flow::request::RequestOptions {
+            title,
+            description,
+            target_folder_id,
+            max_files,
+            max_total_bytes,
+            expires_in_secs,
+        };
+        let (flow, first) = beebeeb_core::share_flow::request::CreateRequest::start(&app_url, &options, &master)?;
+        Ok(Arc::new(Self {
+            flow: Mutex::new(flow),
+            first: Mutex::new(Some(first)),
+        }))
+    }
+
+    pub fn start(&self) -> Result<AuthHttpRequest, ShareFlowFfiError> {
+        self.first
+            .lock()
+            .map_err(|_| wrong_state())?
+            .take()
+            .map(out)
+            .ok_or_else(wrong_state)
+    }
+
+    pub fn on_response(&self, response: AuthHttpResponse) -> Result<CreatedRequestFfi, ShareFlowFfiError> {
+        let mut flow = self.flow.lock().map_err(|_| wrong_state())?;
+        let c = flow.on_response(into(response))?;
+        Ok(CreatedRequestFfi {
+            id: c.id,
+            link: c.link.to_string(),
+            display: c.display,
+        })
+    }
+}
+
+/// A request's link again from its stored wrap; `None` when it can't be rebuilt.
+#[uniffi::export]
+pub fn file_request_rebuild_link(
+    app_url: String,
+    master_key: Vec<u8>,
+    token: Option<String>,
+    wrapped_private_key: Option<String>,
+    wrap_nonce: Option<String>,
+) -> Result<Option<String>, ShareFlowFfiError> {
+    let master_key = Zeroizing::new(master_key);
+    let bytes: [u8; 32] = master_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| ShareFlowFfiError::from(ShareFlowError::InvalidInput("key length")))?;
+    let master = MasterKey::from_bytes(*Zeroizing::new(bytes));
+    Ok(beebeeb_core::share_flow::request::rebuild_request_link(
+        &app_url,
+        &master,
+        token.as_deref(),
+        wrapped_private_key.as_deref(),
+        wrap_nonce.as_deref(),
+    )
+    .map(|l| l.to_string()))
+}
+
+/// `POST /api/v1/file-requests/{id}/close`.
+#[uniffi::export]
+pub fn file_request_close_request(id: String) -> Result<AuthHttpRequest, ShareFlowFfiError> {
+    Ok(out(beebeeb_core::share_flow::request::close_request(&id)?))
+}

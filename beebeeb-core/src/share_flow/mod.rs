@@ -21,6 +21,9 @@
 //!   key per folder (custody record, else the newest active invite's owner copy that opens), never
 //!   minted while an active invite has no provable owner copy, L7 or legacy child wraps by the
 //!   folder's custody state, and `folder_key_id` on the invite.
+//!   [`folder::FolderShare::link`] is a live folder link over the same custody key.
+//! - [`request`]: a file request (a per-request X25519 keypair, `R_priv` wrapped under the master key).
+//! - [`bundle`]: one link over an ordered set of files (the file-link token leg, many items).
 //! - [`link`]: a double-encrypted public link. A random client key `K_c` wraps the file key
 //!   (`nonce(12) || ciphertext(48)`, no AAD); `K_c` and the raw token are also wrapped under the
 //!   owner's master key so the owner can rebuild the link later. `K_c` lives only in the link's
@@ -39,10 +42,12 @@ use crate::encrypt::{decrypt_chunk, encrypt_chunk};
 use crate::kdf::{FileKey, MasterKey};
 use crate::opaque::{derive_share_key, derive_x25519_private, x25519_shared_secret};
 
+pub mod bundle;
 pub mod folder;
 pub mod folder_keys;
 pub mod link;
 pub mod member;
+pub mod request;
 
 #[cfg(test)]
 mod folder_tests;

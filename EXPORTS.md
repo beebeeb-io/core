@@ -18,6 +18,9 @@ Counted from source (unique `js_name = …` under `beebeeb-wasm/src`): base 187,
 | `ShareMemberInvite(itemId, isFolder, email, masterKey, fileKey)` | `start()`, `onResponse(...)` → `{kind: "send"}` / `"shared"` / `"invited"` / `"awaiting_approval"`. A folder throws `invalid_input` (use `ShareFolderInvite`). |
 | `ShareFolderInvite(folderId, email, sharedFoldersWrite, custodySeen, custodyUnreadable, masterKey)` (B05c) | `start()` / `onResponse(...)` → `{kind: "send", request, markCustodySeen}` (persist the id BEFORE sending) / `"shared"` / `"invited"` / `"awaiting_approval"`. Throws `folder_key_unverified`, `folder_keys_unavailable`, `folder_needs_upgrade`, `folder_too_large`. |
 | `ShareFolderInvite.link(folderId, appUrl, accessLevel, label?, expiresInHours?, capBytes?, maxOpens?, passphrase?, custodySeen, custodyUnreadable, masterKey)` (B05c) | Web's `createFolderLinkWithKeys`: same steps, ends `{kind: "link_created", shareId, link, display, accessLevel, passphraseProtected, keyVersion}`. |
+| `ShareCreateRequest(appUrl, title, description?, targetFolderId?, maxFiles?, maxTotalBytes?, expiresInSecs?, masterKey)` (B05c) | A file request (web `pages/file-request.tsx`): `start()`, `onResponse(...)` → `{id, link, display}`; `link` is `/r/{token}#{b64url(R_pub)}`. |
+| `fileRequestRebuildLink(appUrl, masterKey, token?, wrappedPrivateKey?, wrapNonce?)` (B05c) | Web `handleCopyExisting`: the request's link again, or `undefined`. |
+| `shareCreateBundle(appUrl, fileIds, positions, fileKeys, masterKey, expiresInHours?, maxOpens?, passphrase?)` (B05c) | A `ShareCreateLink` over an ordered set of files (web's bundle branch); `fileKeys` is the 32-byte keys concatenated. |
 | `ShareCreateLink(appUrl, fileId, masterKey, fileKey, expiresInHours?, maxOpens?, passphrase?)` | `start()`, `onResponse(...)` → `{kind: "send"}` (one retry on an untyped 409) / `{kind: "created", shareId, link, display}`. |
 | `shareRebuildLink(appUrl, masterKey, ownerWrappedKey?, ownerWrappedToken?)` | Web's `buildShareLink`: the owner's link, or `undefined`. |
 | `shareOpenMemberFileKey(masterKey, ownerPublicKey, fileId, sealed)` | The recipient side of a person share. |
@@ -30,12 +33,14 @@ Counted from source (unique `js_name = …` under `beebeeb-wasm/src`): base 187,
   `share_rebuild_link`, `share_open_link_file_key`, `share_revoke_request`. Requests reuse `AuthHttpRequest`.
 - **added (B05c):** object `FolderShareFlow` (constructor `new` = a folder invite, `link` = a folder link), enum
   `FolderStepFfi` (`Send` carries `mark_custody_seen`; `LinkCreated` carries `link` with `#key=` and `display`).
+- **added (B05c):** object `CreateRequestFlow`, record `CreatedRequestFfi`, functions `file_request_rebuild_link`,
+  `file_request_close_request`; `CreateLinkFlow.bundle` constructor with record `BundleItemFfi`.
 
 The committed Kotlin bindings under `bindings/` are not regenerated here.
 
 ## Rust
 
-New module `beebeeb_core::share_flow` (`member`, `link`; B05c: `folder` with `folder::link`, `folder_keys`); `auth_flow::Method::Delete`
+New module `beebeeb_core::share_flow` (`member`, `link`; B05c: `folder` with `folder::link`, `folder_keys`, `request`, `bundle`); `auth_flow::Method::Delete`
 and (B05c) `Method::Put`, with their `account_flows` arms. `ShareFlowError::FolderInviteUnsupported` is gone (B05c):
 four folder codes replace it.
 

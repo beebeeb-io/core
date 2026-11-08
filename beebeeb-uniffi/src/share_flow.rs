@@ -155,6 +155,14 @@ pub enum LinkStepFfi {
     },
 }
 
+/// One file of a bundle: its id, its position in the link's order, and the key that opens its row.
+#[derive(uniffi::Record)]
+pub struct BundleItemFfi {
+    pub file_id: String,
+    pub position: u32,
+    pub file_key: Vec<u8>,
+}
+
 #[derive(uniffi::Object)]
 pub struct CreateLinkFlow {
     flow: Mutex<CreateLink>,
@@ -163,6 +171,46 @@ pub struct CreateLinkFlow {
 
 #[uniffi::export]
 impl CreateLinkFlow {
+    /// A bundle link over `items` (web's bundle branch). Each item carries the key that opens its row.
+    #[uniffi::constructor]
+    pub fn bundle(
+        app_url: String,
+        items: Vec<BundleItemFfi>,
+        master_key: Vec<u8>,
+        expires_in_hours: Option<u32>,
+        max_opens: Option<u32>,
+        passphrase: Option<String>,
+    ) -> Result<Arc<Self>, ShareFlowFfiError> {
+        let master_key = Zeroizing::new(master_key);
+        let keys = items
+            .iter()
+            .map(|i| file_key(&Zeroizing::new(i.file_key.clone())))
+            .collect::<Result<Vec<_>, _>>()?;
+        let core_items: Vec<sf::bundle::BundleItem<'_>> = items
+            .iter()
+            .zip(&keys)
+            .map(|(i, k)| sf::bundle::BundleItem {
+                file_id: &i.file_id,
+                position: i.position,
+                file_key: k,
+            })
+            .collect();
+        let options = LinkOptions {
+            expires_in_hours,
+            max_opens,
+            passphrase: passphrase.map(Zeroizing::new),
+        };
+        let (flow, first) = CreateLink::bundle(&app_url, &core_items, &master(&master_key)?, &options)?;
+        drop(core_items);
+        for mut item in items {
+            zeroize::Zeroize::zeroize(&mut item.file_key);
+        }
+        Ok(Arc::new(Self {
+            flow: Mutex::new(flow),
+            first: Mutex::new(Some(first)),
+        }))
+    }
+
     #[uniffi::constructor]
     pub fn new(
         app_url: String,
