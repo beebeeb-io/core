@@ -47,6 +47,18 @@ API changes, every one a compile error at the call site, none silent:
     `approve_request`, `seal_file_key_for_member` and `open_member_file_key`; `rebuild_folder_link` returns `None` for one.
 14. Passkeys always ask for `userVerification: "required"` at creation, at the PRF probe and at the assertion, whatever
     the server's options say.
+15. (B05e, delta 2) Every member seal takes a REQUIRED `PeerKeyExpectation` (`Compared([u8;32])` / `NotCompared`), no
+    `Option`: `approve_request`, `MemberInvite::start`, `FolderInviteInput.peer_key` (was `expected_peer_fingerprint`);
+    UniFFI `PeerKeyExpectationFfi` on `MemberInviteFlow::new`, `FolderShareFlow::new`, `share_approve_file_invite_request`;
+    WASM a required non-trailing `expectedPeerFingerprint` (32 bytes, or an empty array for not compared) on
+    `ShareMemberInvite` and `ShareFolderInvite`. "Share anyway" seals to the bytes `peer_key_changed` carried with
+    `Compared(fingerprint of those bytes)`, never to a re-fetched key.
+16. The seal validates the recipient key like the safety number does: bit 255 set or a small-order key is
+    `invalid_input` (was accepted or `crypto`). `seal_file_key_for_member` is now `pub(crate)`: `approve_request` is the
+    only public member seal.
+17. UniFFI `share_approve_file_invite_request` returns `SealedApprovalFfi { request, recipient_public_key }`; new WASM
+    export `shareApproveFileInviteRequest(inviteId, fileId, recipientPublicKeyB64, masterKey, fileKey,
+    expectedPeerFingerprint)` returns `{request, recipientPublicKey}`.
 
 Also: the device-approval payload is serialized into one pre-sized wiped buffer; the sign-up terms / privacy URL host
 is compared exactly and a URL containing `\` is refused; UniFFI account-flow passwords, codes and link tokens are held in `Zeroizing`.

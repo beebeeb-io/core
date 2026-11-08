@@ -44,7 +44,7 @@ use super::folder_keys::{
     SentInvite, active_folder_invites, canonical_folder_id, folder_key_id_b64, open_owner_copy, owner_copy_b64,
     proof_rows, seal_folder_child, unique_owner_blobs,
 };
-use super::member::{ClaimedStep, INVITES_PATH, InviteOutcome, awaiting, check_email, on_claimed};
+use super::member::{ClaimedStep, INVITES_PATH, InviteOutcome, PeerKeyExpectation, awaiting, check_email, on_claimed};
 use super::{ShareFlowError, b64, b64_decode, own_master, path_id, require_ok, split, str_field};
 use crate::auth_flow::{HttpRequest, HttpResponse, RequestAuth};
 use crate::kdf::{self, FileKey, MasterKey};
@@ -59,9 +59,9 @@ pub struct FolderInviteInput<'a> {
     pub email: &'a str,
     pub shared_folders_write: bool,
     pub custody: CustodyMemory,
-    /// SHA-256 of the key the host's "compared" mark for this person was made against, if any:
-    /// a different server key ends in [`InviteOutcome::PeerKeyChanged`], nothing sealed.
-    pub expected_peer_fingerprint: Option<[u8; 32]>,
+    /// Required: `Compared(fingerprint)` of the host's mark for this person (a different server key
+    /// ends in [`InviteOutcome::PeerKeyChanged`], nothing sealed) or `NotCompared`.
+    pub peer_key: PeerKeyExpectation,
 }
 
 /// A request to send. `mark_custody_seen` is a folder id the host must add to its durable custody
@@ -145,7 +145,7 @@ pub struct FolderShare {
     stage: Stage,
     keyed: Option<Keyed>,
     active: Vec<SentInvite>,
-    expected_peer_fingerprint: Option<[u8; 32]>,
+    peer_key: PeerKeyExpectation,
 }
 
 impl std::fmt::Debug for FolderShare {
@@ -207,7 +207,7 @@ impl FolderShare {
             stage: Stage::Done,
             keyed: None,
             active: Vec::new(),
-            expected_peer_fingerprint: None,
+            peer_key: PeerKeyExpectation::NotCompared,
         })
     }
 
@@ -215,7 +215,7 @@ impl FolderShare {
     pub fn invite(input: FolderInviteInput<'_>, master: &MasterKey) -> Result<(Self, FolderStep), ShareFlowError> {
         let email = check_email(input.email)?;
         let mut flow = Self::new(input.folder_id, Purpose::Invite { email }, master, input.custody)?;
-        flow.expected_peer_fingerprint = input.expected_peer_fingerprint;
+        flow.peer_key = input.peer_key;
         let step = if input.shared_folders_write {
             flow.stage = Stage::EnsureRead;
             send(get(custody_path(&flow.folder_id)))
@@ -403,7 +403,7 @@ impl FolderShare {
                         key,
                         &self.master,
                         &keyed.folder_key,
-                        self.expected_peer_fingerprint.as_ref(),
+                        self.peer_key,
                     ) {
                         ClaimedStep::Send(sealed) => {
                             self.stage = Stage::AwaitApprove {

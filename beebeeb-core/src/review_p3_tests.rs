@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::kdf::{FileKey, MasterKey};
 use crate::passkey::ceremony::{self, ExpectedRp, RequestOptions};
-use crate::share_flow::member::{MemberInvite, ShareTarget, approve_request};
+use crate::share_flow::member::{MemberInvite, PeerKeyExpectation, ShareTarget, approve_request};
 use crate::share_flow::{b64, open_member_file_key, seal_file_key_for_member};
 
 const FILE_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
@@ -34,7 +34,16 @@ fn file_person_share_entry_points_refuse_an_upper_case_id() {
         item_id: upper.clone(),
         is_folder: false,
     };
-    assert!(MemberInvite::start(&target, "bob@beebeeb.test", &alice, &key, None).is_err());
+    assert!(
+        MemberInvite::start(
+            &target,
+            "bob@beebeeb.test",
+            &alice,
+            &key,
+            PeerKeyExpectation::NotCompared
+        )
+        .is_err()
+    );
     assert!(
         approve_request(
             "0a0a0a0a-0000-4000-8000-000000000001",
@@ -42,7 +51,7 @@ fn file_person_share_entry_points_refuse_an_upper_case_id() {
             &b64(&public),
             &alice,
             &key,
-            None
+            PeerKeyExpectation::NotCompared
         )
         .is_err()
     );

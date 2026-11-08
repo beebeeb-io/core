@@ -231,7 +231,7 @@ fn member_share_key(master: &MasterKey, peer_public: &[u8; 32], file_id: &str) -
 
 /// Web's `encryptFileKeyForSharing` + the `nonce || ciphertext` concatenation the invite approval
 /// sends: the owner seals `file_key` for the recipient's X25519 public key.
-pub fn seal_file_key_for_member(
+pub(crate) fn seal_file_key_for_member(
     master: &MasterKey,
     recipient_public: &[u8; 32],
     file_id: &str,

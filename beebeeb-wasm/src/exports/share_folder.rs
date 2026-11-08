@@ -40,7 +40,8 @@ fn step_js(step: FolderStep) -> Result<JsValue, JsError> {
     }
 }
 
-/// `new ShareFolderInvite(folderId, email, sharedFoldersWrite, custodySeen, custodyUnreadable, masterKey)`
+/// `new ShareFolderInvite(folderId, email, expectedPeerFingerprint, sharedFoldersWrite, custodySeen,
+/// custodyUnreadable, masterKey)` (`expectedPeerFingerprint` REQUIRED: 32 bytes, or empty = not compared)
 /// or `ShareFolderInvite.link(folderId, appUrl, accessLevel, label?, expiresInHours?, capBytes?,
 /// maxOpens?, passphrase?, custodySeen, custodyUnreadable, masterKey)`; `start()`, then
 /// `onResponse(...)` until `{kind: "shared" | "invited" | "awaiting_approval" | "link_created"}`. A
@@ -57,11 +58,11 @@ impl ShareFolderInvite {
     pub fn new(
         folder_id: &str,
         email: &str,
+        expected_peer_fingerprint: &[u8],
         shared_folders_write: bool,
         custody_seen: Vec<String>,
         custody_unreadable: bool,
         master_key: &[u8],
-        expected_peer_fingerprint: Option<Vec<u8>>,
     ) -> Result<ShareFolderInvite, JsError> {
         let bytes: [u8; 32] = master_key
             .try_into()
@@ -72,7 +73,7 @@ impl ShareFolderInvite {
             email,
             shared_folders_write,
             custody: CustodyMemory::new(custody_seen, custody_unreadable),
-            expected_peer_fingerprint: super::share_flow::expected_fp(expected_peer_fingerprint)?,
+            peer_key: super::share_flow::expectation(expected_peer_fingerprint)?,
         };
         let (flow, first) = FolderShare::invite(input, &master).map_err(err)?;
         Ok(Self {

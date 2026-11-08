@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
 use super::link::{CreateLink, LinkOptions, LinkStep, open_link_file_key, rebuild_link};
-use super::member::{InviteOutcome, InviteStep, MemberInvite, ShareTarget, approve_request};
+use super::member::{InviteOutcome, InviteStep, MemberInvite, PeerKeyExpectation, ShareTarget, approve_request};
 use super::*;
 use crate::auth_flow::Method;
 use crate::opaque::derive_x25519_public;
@@ -154,7 +154,7 @@ fn a_folder_is_never_shared_through_the_file_path() {
         "bob@beebeeb.test",
         &master(1),
         &FileKey::from_bytes([7; 32]),
-        None,
+        PeerKeyExpectation::NotCompared,
     )
     .unwrap_err();
     assert_eq!(err, ShareFlowError::InvalidInput("is_folder: use FolderInvite"));
@@ -165,7 +165,14 @@ fn invite_to_a_claimed_recipient_seals_and_approves() {
     let (alice, bob) = (master(1), master(2));
     let bob_pub = derive_x25519_public(&derive_x25519_private(&bob));
     let file_key = FileKey::from_bytes([7; 32]);
-    let (mut flow, first) = MemberInvite::start(&file_target(), " bob@beebeeb.test ", &alice, &file_key, None).unwrap();
+    let (mut flow, first) = MemberInvite::start(
+        &file_target(),
+        " bob@beebeeb.test ",
+        &alice,
+        &file_key,
+        PeerKeyExpectation::NotCompared,
+    )
+    .unwrap();
     assert_eq!(first.path, "/api/v1/shares/invites");
     assert_eq!(
         first.body.as_ref().unwrap(),
@@ -211,7 +218,7 @@ fn invite_without_a_recipient_key_is_sent_not_shared() {
         "new@beebeeb.test",
         &master(1),
         &FileKey::from_bytes([7; 32]),
-        None,
+        PeerKeyExpectation::NotCompared,
     )
     .unwrap();
     let InviteStep::Done(outcome) = flow
@@ -237,7 +244,7 @@ fn a_failed_approval_leaves_the_invite_awaiting_approval() {
         "bob@beebeeb.test",
         &master(1),
         &FileKey::from_bytes([7; 32]),
-        None,
+        PeerKeyExpectation::NotCompared,
     )
     .unwrap();
     flow.on_response(ok(
@@ -259,18 +266,53 @@ fn a_failed_approval_leaves_the_invite_awaiting_approval() {
 #[test]
 fn bad_input_and_server_ids_are_refused() {
     let key = FileKey::from_bytes([7; 32]);
-    assert!(MemberInvite::start(&file_target(), "not-an-email", &master(1), &key, None).is_err());
+    assert!(
+        MemberInvite::start(
+            &file_target(),
+            "not-an-email",
+            &master(1),
+            &key,
+            PeerKeyExpectation::NotCompared
+        )
+        .is_err()
+    );
     let bad = ShareTarget {
         item_id: "../x".into(),
         is_folder: false,
     };
-    assert!(MemberInvite::start(&bad, "bob@beebeeb.test", &master(1), &key, None).is_err());
-    let (mut flow, _) = MemberInvite::start(&file_target(), "bob@beebeeb.test", &master(1), &key, None).unwrap();
+    assert!(
+        MemberInvite::start(
+            &bad,
+            "bob@beebeeb.test",
+            &master(1),
+            &key,
+            PeerKeyExpectation::NotCompared
+        )
+        .is_err()
+    );
+    let (mut flow, _) = MemberInvite::start(
+        &file_target(),
+        "bob@beebeeb.test",
+        &master(1),
+        &key,
+        PeerKeyExpectation::NotCompared,
+    )
+    .unwrap();
     let err = flow
         .on_response(ok(json!({"invite_id": "a/../b", "status": "invited"})))
         .unwrap_err();
     assert_eq!(err, ShareFlowError::Protocol("bad id"));
-    assert!(approve_request("a/b", FILE_ID, &b64(&[9; 32]), &master(1), &key, None).is_err());
+    assert!(
+        approve_request(
+            "a/b",
+            FILE_ID,
+            &b64(&[9; 32]),
+            &master(1),
+            &key,
+            PeerKeyExpectation::NotCompared
+        )
+        .is_err()
+    );
     assert!(revoke_link_request("x?y").is_err());
     let revoke = revoke_link_request(INVITE_ID).unwrap();
     assert_eq!(
@@ -286,7 +328,7 @@ fn typed_refusals_keep_their_code() {
         "bob@beebeeb.test",
         &master(1),
         &FileKey::from_bytes([7; 32]),
-        None,
+        PeerKeyExpectation::NotCompared,
     )
     .unwrap();
     let err = flow
@@ -312,7 +354,7 @@ fn a_server_key_that_differs_from_the_compared_mark_is_refused_and_nothing_is_se
         "bob@beebeeb.test",
         &master(1),
         &FileKey::from_bytes([7; 32]),
-        Some(fp(&bob_pub)),
+        PeerKeyExpectation::Compared(fp(&bob_pub)),
     )
     .unwrap();
     let step = flow
@@ -345,7 +387,7 @@ fn the_compared_key_seals_and_reports_the_key_it_sealed_to() {
         "bob@beebeeb.test",
         &master(1),
         &FileKey::from_bytes([7; 32]),
-        Some(fp(&bob_pub)),
+        PeerKeyExpectation::Compared(fp(&bob_pub)),
     )
     .unwrap();
     let step = flow
@@ -368,28 +410,64 @@ fn the_compared_key_seals_and_reports_the_key_it_sealed_to() {
 }
 
 #[test]
-fn approve_request_refuses_a_changed_key_and_seals_with_none() {
+fn share_anyway_seals_to_the_bytes_the_refusal_carried_never_a_refetched_key() {
     let key = FileKey::from_bytes([7; 32]);
     let bob_pub = derive_x25519_public(&derive_x25519_private(&master(2)));
     let other_pub = derive_x25519_public(&derive_x25519_private(&master(3)));
-    let err = approve_request(
-        INVITE_ID,
-        FILE_ID,
-        &b64(&other_pub),
-        &master(1),
-        &key,
-        Some(&fp(&bob_pub)),
-    )
-    .unwrap_err();
+    let mark = PeerKeyExpectation::Compared(fp(&bob_pub));
+    // The server now serves another key: refused, and the refusal carries those bytes.
+    let (mut flow, _) = MemberInvite::start(&file_target(), "bob@beebeeb.test", &master(1), &key, mark).unwrap();
+    let step = flow
+        .on_response(ok(
+            json!({"invite_id": INVITE_ID, "status": "claimed", "recipient_public_key": b64(&other_pub)}),
+        ))
+        .unwrap();
+    let InviteStep::Done(InviteOutcome::PeerKeyChanged {
+        recipient_public_key: carried,
+        ..
+    }) = step
+    else {
+        panic!("expected peer_key_changed")
+    };
+    assert_eq!(carried, other_pub);
+    let err = approve_request(INVITE_ID, FILE_ID, &b64(&other_pub), &master(1), &key, mark).unwrap_err();
     assert_eq!(err, ShareFlowError::PeerKeyChanged);
     assert_eq!(err.code(), "peer_key_changed");
-    // "Share anyway": the same call without an expected fingerprint seals to the new key.
-    let sealed = approve_request(INVITE_ID, FILE_ID, &b64(&other_pub), &master(1), &key, None).unwrap();
+    // The user accepts: seal to the CARRIED bytes with Compared(fingerprint of those bytes).
+    let accepted = PeerKeyExpectation::Compared(fp(&carried));
+    let sealed = approve_request(INVITE_ID, FILE_ID, &b64(&carried), &master(1), &key, accepted).unwrap();
     assert_eq!(sealed.recipient_public_key, other_pub);
     assert_eq!(
         sealed.request.path,
         format!("/api/v1/shares/invites/{INVITE_ID}/approve")
     );
+}
+
+#[test]
+fn share_anyway_refuses_again_when_the_server_swaps_the_key_a_second_time() {
+    let key = FileKey::from_bytes([7; 32]);
+    let carried = derive_x25519_public(&derive_x25519_private(&master(3)));
+    let swapped = derive_x25519_public(&derive_x25519_private(&master(4)));
+    let accepted = PeerKeyExpectation::Compared(fp(&carried));
+    // A host that hands the re-fetched key to the accept call gets a refusal, not a seal.
+    let err = approve_request(INVITE_ID, FILE_ID, &b64(&swapped), &master(1), &key, accepted).unwrap_err();
+    assert_eq!(err, ShareFlowError::PeerKeyChanged);
+    // ... and the refusal carries the new bytes, so the user is asked again.
+    assert_ne!(swapped, carried);
+}
+
+#[test]
+fn the_seal_refuses_a_key_the_safety_number_refuses() {
+    let key = FileKey::from_bytes([7; 32]);
+    let mut high_bit = derive_x25519_public(&derive_x25519_private(&master(2)));
+    high_bit[31] |= 0x80;
+    let small_order = [0u8; 32];
+    for bad in [high_bit, small_order] {
+        for exp in [PeerKeyExpectation::NotCompared, PeerKeyExpectation::Compared([1; 32])] {
+            let err = approve_request(INVITE_ID, FILE_ID, &b64(&bad), &master(1), &key, exp).unwrap_err();
+            assert!(matches!(err, ShareFlowError::InvalidInput(_)), "{err:?}");
+        }
+    }
 }
 
 #[test]

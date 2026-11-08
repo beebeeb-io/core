@@ -15,7 +15,7 @@
 //!
 //! `key` is the 32-byte raw X25519 public key the server distributes for that user's sharing key
 //! (standard base64 on the wire, bit 255 clear, never a small-order point), the same bytes the member-share seal uses
-//! ([`super::seal_file_key_for_member`]). Public keys only: nothing secret goes in or out.
+//! ([`super::member::approve_request`]). Public keys only: nothing secret goes in or out.
 //! `peer_fingerprint` is SHA-256 of the peer's key bytes, which a host stores with its local
 //! "compared" mark; a changed peer key no longer matches the mark.
 use sha2::{Digest, Sha256, Sha512};

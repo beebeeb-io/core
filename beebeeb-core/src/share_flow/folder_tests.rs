@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use super::folder::{FolderInviteInput, FolderShare, FolderStep};
 use super::folder_keys::*;
 use super::member::InviteOutcome;
+use super::member::PeerKeyExpectation;
 use super::*;
 use crate::auth_flow::Method;
 use crate::kdf;
@@ -60,7 +61,7 @@ fn input(flag: bool, custody: CustodyMemory) -> FolderInviteInput<'static> {
         email: " Bob@Beebeeb.TEST ",
         shared_folders_write: flag,
         custody,
-        expected_peer_fingerprint: None,
+        peer_key: PeerKeyExpectation::NotCompared,
     }
 }
 
@@ -535,7 +536,7 @@ fn a_folder_seal_to_a_key_other_than_the_compared_one_is_refused() {
     let bob_pub = derive_x25519_public(&crate::opaque::derive_x25519_private(&MasterKey::from_bytes([9; 32])));
     let other_pub = derive_x25519_public(&crate::opaque::derive_x25519_private(&MasterKey::from_bytes([8; 32])));
     let mut i = input(false, CustodyMemory::default());
-    i.expected_peer_fingerprint = Some(super::safety::key_fingerprint(&bob_pub).unwrap());
+    i.peer_key = PeerKeyExpectation::Compared(super::safety::key_fingerprint(&bob_pub).unwrap());
     let (mut flow, first) = FolderShare::invite(i, &m).unwrap();
     sent(first);
     let step = flow.on_response(resp(200, json!({ "invites": [] }))).unwrap();
@@ -568,7 +569,7 @@ fn an_upper_case_item_id_is_refused_never_used_as_key_input() {
         email: "bob@beebeeb.test",
         shared_folders_write: false,
         custody: CustodyMemory::default(),
-        expected_peer_fingerprint: None,
+        peer_key: PeerKeyExpectation::NotCompared,
     };
     assert_eq!(
         FolderShare::invite(input, &m).err(),

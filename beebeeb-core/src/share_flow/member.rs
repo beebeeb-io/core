@@ -24,6 +24,18 @@ use crate::kdf::{FileKey, MasterKey};
 
 pub const INVITES_PATH: &str = "/api/v1/shares/invites";
 
+/// What the host knows about the recipient's key at seal time. REQUIRED on every member seal: there
+/// is no default, so a host cannot skip the comparison by omission.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PeerKeyExpectation {
+    /// The host holds a "compared" mark; this is the fingerprint ([`safety::key_fingerprint`]) of
+    /// the key it was made against. A server key with another fingerprint is refused with
+    /// `peer_key_changed`, before any seal byte exists.
+    Compared([u8; 32]),
+    /// The host has no compared mark for this person (never compared, or none stored).
+    NotCompared,
+}
+
 /// What is being shared. `is_folder` is required on purpose (web: "ALWAYS pass isFolder"):
 /// a folder shared through the file path would give the recipient a share that never opens.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,9 +62,9 @@ pub enum InviteOutcome {
         recipient_public_key: Option<[u8; 32]>,
     },
     /// The server's key for the recipient is not the one the host's "compared" mark was made
-    /// against (`expected_peer_fingerprint`): nothing was sealed. The invite exists and stays
+    /// against (`Compared`): nothing was sealed. The invite exists and stays
     /// claimed; the host shows the changed-key warning and, only if the user accepts the new key,
-    /// approves with [`approve_request`] and no expected fingerprint. `code()` is `peer_key_changed`.
+    /// approves with [`approve_request`], `Compared(key_fingerprint(key))` for the bytes carried here. `code()` is `peer_key_changed`.
     PeerKeyChanged {
         invite_id: String,
         recipient_public_key: [u8; 32],
@@ -93,7 +105,7 @@ pub struct MemberInvite {
     file_id: String,
     master: MasterKey,
     file_key: FileKey,
-    expected_peer_fingerprint: Option<[u8; 32]>,
+    peer_key: PeerKeyExpectation,
     stage: Stage,
 }
 
@@ -115,19 +127,21 @@ pub(crate) fn check_email(email: &str) -> Result<String, ShareFlowError> {
     Ok(email.to_lowercase())
 }
 
-/// The server's `recipient_public_key`, checked against the host's "compared" mark BEFORE anything
-/// is sealed: a different key is [`ShareFlowError::PeerKeyChanged`].
+/// The server's `recipient_public_key`: validated as a sharing key (32 bytes, bit 255 clear, not a
+/// small-order point: `invalid_input`, the same rule as the safety number), then checked against the
+/// host's expectation BEFORE anything is sealed: a different key is [`ShareFlowError::PeerKeyChanged`].
 pub(crate) fn recipient_key(
     recipient_public_key_b64: &str,
-    expected_peer_fingerprint: Option<&[u8; 32]>,
+    expectation: PeerKeyExpectation,
 ) -> Result<[u8; 32], ShareFlowError> {
-    let public: [u8; 32] = b64_decode(recipient_public_key_b64)?
-        .as_slice()
-        .try_into()
-        .map_err(|_| ShareFlowError::Protocol("recipient key length"))?;
-    if let Some(expected) = expected_peer_fingerprint {
+    let raw = b64_decode(recipient_public_key_b64)?;
+    if raw.len() != 32 {
+        return Err(ShareFlowError::Protocol("recipient key length"));
+    }
+    let public = super::safety::sharing_key(&raw)?;
+    if let PeerKeyExpectation::Compared(expected) = expectation {
         let actual: [u8; 32] = Sha256::digest(public).into();
-        if !bool::from(actual.ct_eq(expected)) {
+        if !bool::from(actual.ct_eq(&expected)) {
             return Err(ShareFlowError::PeerKeyChanged);
         }
     }
@@ -135,19 +149,26 @@ pub(crate) fn recipient_key(
 }
 
 /// The approval body: the file key sealed for `recipient_public_key_b64` (web `buildApprovalKeyBlob`,
-/// file branch). With `expected_peer_fingerprint` (SHA-256 of the key a "compared" mark was made
-/// against) a server key that differs is refused with `peer_key_changed` and nothing is sealed.
+/// file branch). The ONLY public member seal. With `Compared(fingerprint)` (SHA-256 of the key a
+/// "compared" mark was made against) a server key that differs is refused with `peer_key_changed`
+/// and nothing is sealed.
+///
+/// "Share anyway" after `peer_key_changed { key }`: call this again with THOSE bytes
+/// (`recipient_public_key_b64 = b64(key)`) and `Compared(key_fingerprint(key))`, never with a
+/// re-fetched server key. If the server swapped the key again in between, the bytes still match
+/// the expectation and the user's accepted key is what is sealed; a key the user never saw is
+/// never sealed to. The host then updates its mark to that fingerprint.
 pub fn approve_request(
     invite_id: &str,
     file_id: &str,
     recipient_public_key_b64: &str,
     master: &MasterKey,
     file_key: &FileKey,
-    expected_peer_fingerprint: Option<&[u8; 32]>,
+    expectation: PeerKeyExpectation,
 ) -> Result<SealedApproval, ShareFlowError> {
     let invite_id = path_id(invite_id)?;
     let file_id = canonical_item_id(file_id, "file id")?;
-    let public = recipient_key(recipient_public_key_b64, expected_peer_fingerprint)?;
+    let public = recipient_key(recipient_public_key_b64, expectation)?;
     let sealed = seal_file_key_for_member(master, &public, file_id, file_key)?;
     Ok(SealedApproval {
         request: HttpRequest::post(
@@ -172,24 +193,19 @@ pub(crate) fn on_claimed(
     recipient_public_key_b64: &str,
     master: &MasterKey,
     key: &FileKey,
-    expected_peer_fingerprint: Option<&[u8; 32]>,
+    expectation: PeerKeyExpectation,
 ) -> ClaimedStep {
-    match approve_request(
-        invite_id,
-        item_id,
-        recipient_public_key_b64,
-        master,
-        key,
-        expected_peer_fingerprint,
-    ) {
+    match approve_request(invite_id, item_id, recipient_public_key_b64, master, key, expectation) {
         Ok(sealed) => ClaimedStep::Send(sealed),
-        Err(ShareFlowError::PeerKeyChanged) => match recipient_key(recipient_public_key_b64, None) {
-            Ok(recipient_public_key) => ClaimedStep::Done(InviteOutcome::PeerKeyChanged {
-                invite_id: invite_id.to_owned(),
-                recipient_public_key,
-            }),
-            Err(_) => ClaimedStep::Done(awaiting(invite_id, None)),
-        },
+        Err(ShareFlowError::PeerKeyChanged) => {
+            match recipient_key(recipient_public_key_b64, PeerKeyExpectation::NotCompared) {
+                Ok(recipient_public_key) => ClaimedStep::Done(InviteOutcome::PeerKeyChanged {
+                    invite_id: invite_id.to_owned(),
+                    recipient_public_key,
+                }),
+                Err(_) => ClaimedStep::Done(awaiting(invite_id, None)),
+            }
+        }
         Err(_) => ClaimedStep::Done(awaiting(invite_id, None)),
     }
 }
@@ -203,14 +219,14 @@ pub(crate) fn awaiting(invite_id: &str, recipient_public_key: Option<[u8; 32]>) 
 
 impl MemberInvite {
     /// `file_key` is the key that opens the row (the caller resolves it, as web's `shareFileKey`).
-    /// `expected_peer_fingerprint` is the fingerprint of the host's "compared" mark for this
-    /// person, if it has one: a different server key ends in [`InviteOutcome::PeerKeyChanged`].
+    /// `peer_key` is required: `Compared(fingerprint of the host's mark)` makes a different server
+    /// key end in [`InviteOutcome::PeerKeyChanged`]; `NotCompared` when the host has no mark.
     pub fn start(
         target: &ShareTarget,
         email: &str,
         master: &MasterKey,
         file_key: &FileKey,
-        expected_peer_fingerprint: Option<[u8; 32]>,
+        peer_key: PeerKeyExpectation,
     ) -> Result<(Self, HttpRequest), ShareFlowError> {
         if target.is_folder {
             // A folder goes through `folder::FolderInvite` (its key rules), never the file path.
@@ -228,7 +244,7 @@ impl MemberInvite {
                 file_id: file_id.to_owned(),
                 master: own_master(master),
                 file_key: own_file_key(file_key),
-                expected_peer_fingerprint,
+                peer_key,
                 stage: Stage::AwaitInvite,
             },
             request,
@@ -249,7 +265,7 @@ impl MemberInvite {
                         key,
                         &self.master,
                         &self.file_key,
-                        self.expected_peer_fingerprint.as_ref(),
+                        self.peer_key,
                     ) {
                         ClaimedStep::Send(sealed) => {
                             self.stage = Stage::AwaitApprove {

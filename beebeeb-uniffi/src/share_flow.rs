@@ -8,7 +8,7 @@ use beebeeb_core::kdf::{FileKey, MasterKey};
 use beebeeb_core::share_flow::{
     self as sf, ShareFlowError,
     link::{CreateLink, LinkOptions, LinkStep},
-    member::{InviteOutcome, InviteStep, MemberInvite, ShareTarget},
+    member::{InviteOutcome, InviteStep, MemberInvite, PeerKeyExpectation, ShareTarget},
 };
 use zeroize::Zeroizing;
 
@@ -81,13 +81,22 @@ pub enum InviteStepFfi {
     },
 }
 
-/// A compared mark's fingerprint from the host: 32 bytes or `invalid_input`.
-pub(crate) fn expected_fp(fp: Option<Vec<u8>>) -> Result<Option<[u8; 32]>, ShareFlowFfiError> {
-    fp.map(|v| {
-        <[u8; 32]>::try_from(v.as_slice())
-            .map_err(|_| ShareFlowFfiError::from(ShareFlowError::InvalidInput("fingerprint length")))
-    })
-    .transpose()
+/// What the host knows about the recipient's key: REQUIRED on every member seal.
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum PeerKeyExpectationFfi {
+    /// The host holds a compared mark; `fingerprint` is 32 bytes (`share_key_fingerprint`).
+    Compared { fingerprint: Vec<u8> },
+    /// No compared mark for this person.
+    NotCompared,
+}
+
+pub(crate) fn expectation(e: PeerKeyExpectationFfi) -> Result<PeerKeyExpectation, ShareFlowFfiError> {
+    match e {
+        PeerKeyExpectationFfi::NotCompared => Ok(PeerKeyExpectation::NotCompared),
+        PeerKeyExpectationFfi::Compared { fingerprint } => <[u8; 32]>::try_from(fingerprint.as_slice())
+            .map(PeerKeyExpectation::Compared)
+            .map_err(|_| ShareFlowError::InvalidInput("fingerprint length").into()),
+    }
 }
 
 pub(crate) fn outcome_ffi(o: InviteOutcome) -> InviteStepFfi {
@@ -133,7 +142,7 @@ impl MemberInviteFlow {
         email: String,
         master_key: Arc<MasterKeyHandle>,
         file_key: Arc<FileKeyHandle>,
-        expected_peer_fingerprint: Option<Vec<u8>>,
+        peer_key: PeerKeyExpectationFfi,
     ) -> Result<Arc<Self>, ShareFlowFfiError> {
         let target = ShareTarget { item_id, is_folder };
         let (flow, first) = MemberInvite::start(
@@ -141,7 +150,7 @@ impl MemberInviteFlow {
             &email,
             &master(&master_key)?,
             &file_key_of(&file_key)?,
-            expected_fp(expected_peer_fingerprint)?,
+            expectation(peer_key)?,
         )?;
         Ok(Arc::new(Self {
             flow: Mutex::new(flow),
@@ -167,8 +176,17 @@ impl MemberInviteFlow {
     }
 }
 
+/// The approval request and the exact recipient key the file key was sealed to.
+#[derive(uniffi::Record)]
+pub struct SealedApprovalFfi {
+    pub request: AuthHttpRequest,
+    pub recipient_public_key: Vec<u8>,
+}
+
 /// Approve a claimed file invite later: the file key sealed for the recipient. With
-/// `expected_peer_fingerprint` a different server key is refused (`peer_key_changed`), unsealed.
+/// `Compared(fingerprint)` a different server key is refused (`peer_key_changed`), unsealed. After
+/// `peer_key_changed` and the user's "share anyway", pass the key bytes the refusal carried and
+/// `Compared(share_key_fingerprint(those bytes))`, never a re-fetched key. Returns the sealed key.
 #[uniffi::export]
 pub fn share_approve_file_invite_request(
     invite_id: String,
@@ -176,18 +194,20 @@ pub fn share_approve_file_invite_request(
     recipient_public_key_b64: String,
     master_key: Arc<MasterKeyHandle>,
     file_key: Arc<FileKeyHandle>,
-    expected_peer_fingerprint: Option<Vec<u8>>,
-) -> Result<AuthHttpRequest, ShareFlowFfiError> {
-    let expected = expected_fp(expected_peer_fingerprint)?;
-    Ok(out(sf::member::approve_request(
+    peer_key: PeerKeyExpectationFfi,
+) -> Result<SealedApprovalFfi, ShareFlowFfiError> {
+    let sealed = sf::member::approve_request(
         &invite_id,
         &file_id,
         &recipient_public_key_b64,
         &master(&master_key)?,
         &file_key_of(&file_key)?,
-        expected.as_ref(),
-    )?
-    .request))
+        expectation(peer_key)?,
+    )?;
+    Ok(SealedApprovalFfi {
+        request: out(sealed.request),
+        recipient_public_key: sealed.recipient_public_key.to_vec(),
+    })
 }
 
 /// The recipient side of a person share: the file key, opened with the owner's X25519 public key.

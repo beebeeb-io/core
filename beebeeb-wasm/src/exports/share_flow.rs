@@ -6,7 +6,7 @@ use beebeeb_core::kdf::{FileKey, MasterKey};
 use beebeeb_core::share_flow::{
     self as sf, ShareFlowError,
     link::{CreateLink, LinkOptions, LinkStep},
-    member::{InviteOutcome, InviteStep, MemberInvite, ShareTarget},
+    member::{InviteOutcome, InviteStep, MemberInvite, PeerKeyExpectation, ShareTarget},
 };
 use serde_json::json;
 use wasm_bindgen::prelude::*;
@@ -53,14 +53,48 @@ pub(crate) fn outcome_js(o: InviteOutcome) -> Result<JsValue, JsError> {
     })
 }
 
-/// A compared mark's fingerprint (32 bytes) or `invalid_input`.
-pub(crate) fn expected_fp(fp: Option<Vec<u8>>) -> Result<Option<[u8; 32]>, JsError> {
-    fp.map(|v| <[u8; 32]>::try_from(v.as_slice()).map_err(|_| err(ShareFlowError::InvalidInput("fingerprint length"))))
-        .transpose()
+/// The required peer-key expectation as one non-optional argument: 32 bytes = `Compared(fingerprint)`,
+/// an empty array = `NotCompared`, anything else `invalid_input`. Omitting it throws.
+pub(crate) fn expectation(fp: &[u8]) -> Result<PeerKeyExpectation, JsError> {
+    if fp.is_empty() {
+        return Ok(PeerKeyExpectation::NotCompared);
+    }
+    <[u8; 32]>::try_from(fp)
+        .map(PeerKeyExpectation::Compared)
+        .map_err(|_| err(ShareFlowError::InvalidInput("fingerprint length")))
 }
 
 fn send(req: HttpRequest) -> Result<JsValue, JsError> {
     to_js(&json!({ "kind": "send", "request": request_js(&req) }))
+}
+
+/// Approve a claimed file invite later: `shareApproveFileInviteRequest(inviteId, fileId,
+/// recipientPublicKeyB64, masterKey, fileKey, expectedPeerFingerprint)` returns
+/// `{request, recipientPublicKey}` (hex: the exact key sealed to). `expectedPeerFingerprint` is
+/// REQUIRED (32 bytes, or empty = not compared). After `peer_key_changed` and "share anyway", pass
+/// the key the refusal carried and the fingerprint of those bytes, never a re-fetched key.
+#[wasm_bindgen(js_name = shareApproveFileInviteRequest)]
+pub fn share_approve_file_invite_request(
+    invite_id: &str,
+    file_id: &str,
+    recipient_public_key_b64: &str,
+    master_key: &[u8],
+    file_key: &[u8],
+    expected_peer_fingerprint: &[u8],
+) -> Result<JsValue, JsError> {
+    let master = MasterKey::from_bytes(*key32(master_key)?);
+    let key = FileKey::from_bytes(*key32(file_key)?);
+    let sealed = sf::member::approve_request(
+        invite_id,
+        file_id,
+        recipient_public_key_b64,
+        &master,
+        &key,
+        expectation(expected_peer_fingerprint)?,
+    )
+    .map_err(err)?;
+    let hex: String = sealed.recipient_public_key.iter().map(|b| format!("{b:02x}")).collect();
+    to_js(&json!({ "request": request_js(&sealed.request), "recipientPublicKey": hex }))
 }
 
 /// Web's `wrapKeyForShare` in core: `nonce(12) || ciphertext`, no AAD.
@@ -76,8 +110,11 @@ pub fn share_unwrap_key(wrap_key: &[u8], wrapped: &[u8]) -> Result<Vec<u8>, JsEr
         .map_err(err)
 }
 
-/// `new ShareMemberInvite(itemId, isFolder, email, masterKey, fileKey)`; `start()`, then
-/// `onResponse(...)` until `{kind: "shared" | "invited" | "awaiting_approval", inviteId}`.
+/// `new ShareMemberInvite(itemId, isFolder, email, expectedPeerFingerprint, masterKey, fileKey)`;
+/// `start()`, then `onResponse(...)` until
+/// `{kind: "shared" | "invited" | "awaiting_approval" | "peer_key_changed", inviteId}`.
+/// `expectedPeerFingerprint` is REQUIRED: 32 bytes (the compared mark's fingerprint) or an empty
+/// `Uint8Array` (not compared). `peer_key_changed`: nothing was sealed.
 #[wasm_bindgen(js_name = ShareMemberInvite)]
 pub struct ShareMemberInvite {
     flow: MemberInvite,
@@ -91,14 +128,14 @@ impl ShareMemberInvite {
         item_id: String,
         is_folder: bool,
         email: &str,
+        expected_peer_fingerprint: &[u8],
         master_key: &[u8],
         file_key: &[u8],
-        expected_peer_fingerprint: Option<Vec<u8>>,
     ) -> Result<ShareMemberInvite, JsError> {
         let target = ShareTarget { item_id, is_folder };
         let master = MasterKey::from_bytes(*key32(master_key)?);
         let key = FileKey::from_bytes(*key32(file_key)?);
-        let expected = expected_fp(expected_peer_fingerprint)?;
+        let expected = expectation(expected_peer_fingerprint)?;
         let (flow, first) = MemberInvite::start(&target, email, &master, &key, expected).map_err(err)?;
         Ok(Self {
             flow,

@@ -114,7 +114,7 @@ impl FolderShareFlow {
         custody_seen: Vec<String>,
         custody_unreadable: bool,
         master_key: Arc<MasterKeyHandle>,
-        expected_peer_fingerprint: Option<Vec<u8>>,
+        peer_key: crate::share_flow::PeerKeyExpectationFfi,
     ) -> Result<Arc<Self>, ShareFlowFfiError> {
         let master = crate::share_flow::master(&master_key)?;
         let input = FolderInviteInput {
@@ -122,7 +122,7 @@ impl FolderShareFlow {
             email: &email,
             shared_folders_write,
             custody: CustodyMemory::new(custody_seen, custody_unreadable),
-            expected_peer_fingerprint: crate::share_flow::expected_fp(expected_peer_fingerprint)?,
+            peer_key: crate::share_flow::expectation(peer_key)?,
         };
         let (flow, first) = FolderShare::invite(input, &master)?;
         Ok(Arc::new(Self {
