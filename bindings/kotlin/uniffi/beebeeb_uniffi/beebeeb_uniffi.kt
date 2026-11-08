@@ -31558,15 +31558,17 @@ sealed class ServiceException: kotlin.Exception() {
     }
     
     /**
-     * Core's Backups rule refused the change. `message` is core's words, to
-     * be shown as they are (backup spec Amendments 6 to 8).
+     * Core's Backups rule refused the change. `detail` is core's words, to
+     * be shown as they are (backup spec Amendments 6 to 8). Never `message`:
+     * a UniFFI error field of that name collides with Kotlin's
+     * `Exception.message` (tests/error_fields.rs).
      */
     class Protected(
         
-        val `message`: kotlin.String
+        val `detail`: kotlin.String
         ) : ServiceException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "detail=${ `detail` }"
     }
     
     class Quota(
@@ -31693,7 +31695,7 @@ public object FfiConverterTypeServiceError : FfiConverterRustBuffer<ServiceExcep
             is ServiceException.Protected -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`detail`)
             )
             is ServiceException.Quota -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
@@ -31761,7 +31763,7 @@ public object FfiConverterTypeServiceError : FfiConverterRustBuffer<ServiceExcep
             }
             is ServiceException.Protected -> {
                 buf.putInt(9)
-                FfiConverterString.write(value.`message`, buf)
+                FfiConverterString.write(value.`detail`, buf)
                 Unit
             }
             is ServiceException.Quota -> {

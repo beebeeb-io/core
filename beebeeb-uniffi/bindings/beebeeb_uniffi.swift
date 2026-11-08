@@ -20951,10 +20951,12 @@ public enum ServiceError: Swift.Error, Equatable, Hashable, Foundation.Localized
     case Cancelled
     case ManagedByService
     /**
-     * Core's Backups rule refused the change. `message` is core's words, to
-     * be shown as they are (backup spec Amendments 6 to 8).
+     * Core's Backups rule refused the change. `detail` is core's words, to
+     * be shown as they are (backup spec Amendments 6 to 8). Never `message`:
+     * a UniFFI error field of that name collides with Kotlin's
+     * `Exception.message` (tests/error_fields.rs).
      */
-    case Protected(message: String
+    case Protected(detail: String
     )
     case Quota(limitBytes: UInt64?, usedBytes: UInt64?
     )
@@ -21002,7 +21004,7 @@ public struct FfiConverterTypeServiceError: FfiConverterRustBuffer {
         case 7: return .Cancelled
         case 8: return .ManagedByService
         case 9: return .Protected(
-            message: try FfiConverterString.read(from: &buf)
+            detail: try FfiConverterString.read(from: &buf)
             )
         case 10: return .Quota(
             limitBytes: try FfiConverterOptionUInt64.read(from: &buf), 
@@ -21059,9 +21061,9 @@ public struct FfiConverterTypeServiceError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(8))
         
         
-        case let .Protected(message):
+        case let .Protected(detail):
             writeInt(&buf, Int32(9))
-            FfiConverterString.write(message, into: &buf)
+            FfiConverterString.write(detail, into: &buf)
             
         
         case let .Quota(limitBytes,usedBytes):

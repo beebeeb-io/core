@@ -1,8 +1,10 @@
-#![cfg(feature = "legacy-bindings")]
+//! A UniFFI error field named `message` collides with Kotlin's
+//! `Exception.message`: the generated class declares `message` twice and the
+//! Android binding does not compile. Both guards run in the default feature
+//! set, so the workspace `cargo test` in CI runs them (the `legacy-bindings`
+//! upload tests below stay behind their feature).
 
 use std::path::{Path, PathBuf};
-
-use beebeeb_uniffi::UploadError;
 
 fn rust_sources(dir: &Path, paths: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir).unwrap() {
@@ -83,22 +85,83 @@ fn exported_errors_never_have_message_fields() {
     );
 }
 
+/// The generated Kotlin, both committed copies: no exception class has a
+/// constructor property named `message`. Catches what the source scan cannot
+/// see (an error derived through `cfg_attr`, a remote type) once the bindings
+/// are regenerated.
 #[test]
-fn upload_server_error_preserves_status_and_display() {
-    let error = UploadError::from(beebeeb_upload::UploadError::ServerError {
-        status: 503,
-        message: "upstream unavailable".into(),
-    });
-    assert!(matches!(error, UploadError::ServerError { status: 503, .. }));
-    assert_eq!(error.to_string(), "server error (HTTP 503): upstream unavailable");
+fn generated_kotlin_exceptions_never_declare_message() {
+    let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let copies = [
+        crate_dir.join("bindings/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
+        crate_dir.join("../bindings/kotlin/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt"),
+    ];
+    for copy in copies {
+        let source = std::fs::read_to_string(&copy).unwrap_or_else(|e| panic!("{}: {e}", copy.display()));
+        let families: Vec<&str> = source
+            .lines()
+            .filter_map(|line| line.strip_prefix("sealed class ")?.split_once(": kotlin.Exception()"))
+            .map(|(name, _)| name.trim())
+            .collect();
+        assert!(
+            families.len() >= 5,
+            "{}: expected at least five exception families, found {families:?}",
+            copy.display()
+        );
+        let mut variants = 0;
+        let mut offending = Vec::new();
+        let lines: Vec<&str> = source.lines().collect();
+        for (at, line) in lines.iter().enumerate() {
+            let Some(family) = families
+                .iter()
+                .find(|f| line.trim_start().starts_with(&format!(") : {f}()")))
+            else {
+                continue;
+            };
+            let start = lines[..at]
+                .iter()
+                .rposition(|l| l.trim_start().starts_with("class "))
+                .expect("a variant's constructor follows its class line");
+            variants += 1;
+            if lines[start..at].iter().any(|l| l.contains("`message`")) {
+                offending.push(format!("{family}.{}", lines[start].trim()));
+            }
+        }
+        assert!(
+            variants >= 10,
+            "{}: expected exception variants with fields, found {variants}",
+            copy.display()
+        );
+        assert!(
+            offending.is_empty(),
+            "{}: exception fields named `message` collide with Kotlin Exception.message; use detail:\n{}",
+            copy.display(),
+            offending.join("\n")
+        );
+    }
 }
 
-#[test]
-fn upload_client_error_preserves_status_and_display() {
-    let error = UploadError::from(beebeeb_upload::UploadError::ClientError {
-        status: 400,
-        message: "invalid request".into(),
-    });
-    assert!(matches!(error, UploadError::ClientError { status: 400, .. }));
-    assert_eq!(error.to_string(), "client error (HTTP 400): invalid request");
+#[cfg(feature = "legacy-bindings")]
+mod upload {
+    use beebeeb_uniffi::UploadError;
+
+    #[test]
+    fn upload_server_error_preserves_status_and_display() {
+        let error = UploadError::from(beebeeb_upload::UploadError::ServerError {
+            status: 503,
+            message: "upstream unavailable".into(),
+        });
+        assert!(matches!(error, UploadError::ServerError { status: 503, .. }));
+        assert_eq!(error.to_string(), "server error (HTTP 503): upstream unavailable");
+    }
+
+    #[test]
+    fn upload_client_error_preserves_status_and_display() {
+        let error = UploadError::from(beebeeb_upload::UploadError::ClientError {
+            status: 400,
+            message: "invalid request".into(),
+        });
+        assert!(matches!(error, UploadError::ClientError { status: 400, .. }));
+        assert_eq!(error.to_string(), "client error (HTTP 400): invalid request");
+    }
 }

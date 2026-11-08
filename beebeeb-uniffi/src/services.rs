@@ -106,10 +106,12 @@ pub enum ServiceError {
     Cancelled,
     #[error("this item is managed by a service")]
     ManagedByService,
-    /// Core's Backups rule refused the change. `message` is core's words, to
-    /// be shown as they are (backup spec Amendments 6 to 8).
-    #[error("{message}")]
-    Protected { message: String },
+    /// Core's Backups rule refused the change. `detail` is core's words, to
+    /// be shown as they are (backup spec Amendments 6 to 8). Never `message`:
+    /// a UniFFI error field of that name collides with Kotlin's
+    /// `Exception.message` (tests/error_fields.rs).
+    #[error("{detail}")]
+    Protected { detail: String },
     #[error("the account storage quota was exceeded")]
     Quota {
         limit_bytes: Option<u64>,
@@ -138,7 +140,7 @@ impl ServiceError {
             ServiceErrorKind::Crypto => Self::Crypto,
             ServiceErrorKind::Cancelled => Self::Cancelled,
             ServiceErrorKind::ManagedByService => Self::ManagedByService,
-            ServiceErrorKind::Protected => Self::Protected { message: String::new() },
+            ServiceErrorKind::Protected => Self::Protected { detail: String::new() },
             ServiceErrorKind::Quota => Self::Quota {
                 limit_bytes: None,
                 used_bytes: None,
@@ -166,7 +168,7 @@ pub(crate) fn map_client_error(error: impl std::error::Error + 'static) -> Servi
                 }
                 beebeeb_client::files::FileServiceError::Protected(protected) => {
                     return ServiceError::Protected {
-                        message: protected.message.to_string(),
+                        detail: protected.message.to_string(),
                     };
                 }
                 _ => {}
@@ -194,7 +196,7 @@ pub(crate) fn map_client_error(error: impl std::error::Error + 'static) -> Servi
             current.downcast_ref::<beebeeb_client::uploads::UploadServiceError>()
         {
             return ServiceError::Protected {
-                message: protected.message.to_string(),
+                detail: protected.message.to_string(),
             };
         }
         if let Some(sync) = current.downcast_ref::<beebeeb_core::sync::SyncEngineError>()
