@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-11-08
+
 Additive on v0.2.4: a backup pass reads the removal notices with an overlap margin and remembers the notice ids it
 acted on (LD-0121, spec `2026-11-06-backup-from-source-design.md` Amendment 12d, server #415 review finding 1; Guus
 2026-11-08 03:16, "Go w recommended"). No v0.2.4 API is renamed, retyped or removed.
