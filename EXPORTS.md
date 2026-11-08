@@ -139,14 +139,16 @@ Each change closes a review finding; the old form is removed, not deprecated.
 
 | Export | Before | Now |
 | --- | --- | --- |
-| `sealDeviceLink` | `(masterKey, sessionId, fingerprint, relayedPublic, typedCode)` | `(masterKey, scannedQr, relayedPublic, typedCode)`: the raw text the camera scanned; core parses it. Never build that text from server data. |
+| `sealDeviceLink` | `(masterKey, sessionId, fingerprint, relayedPublic, typedCode)` | `(masterKey, scannedQr, relayedPublic, relayedDeviceName, typedCode)`: the raw text the camera scanned; core parses it. Never build that text from server data. A relayed name that differs from the scanned one throws `device_name_changed` before anything is sealed. |
+| `scannedDeviceLinkName(scannedQr)` | none | the new device's name from the scanned QR: the name to show, never the relay's |
 | `new WasmNewDeviceLink` | `(sessionId)` | `(sessionId, deviceName)`; the name is canonicalised (`device_name` in `publicFields()`) |
-| `WasmNewDeviceLink.publicFields()` | `{session_id, public_key, fingerprint}` | `{session_id, public_key, device_name, qr_payload}`: render `qr_payload` as the QR; no fingerprint bytes leave core |
+| `WasmNewDeviceLink.publicFields()` | `{session_id, public_key, fingerprint}` | `{session_id, public_key, device_name, qr_payload}`: render `qr_payload` (`beebeeb-link:v2:`, with the device name) as the QR; no fingerprint bytes leave core |
 | `WasmNewDeviceLink.open` | `(typedCode, sessionId, recipientPublic, approverPublic, nonce, ciphertext)` | `(approverPublic, nonce, ciphertext)`: the link supplies its own session id and key |
 | `WasmNewDeviceLink.answerTypedCode(approverMessage)` | none | the new device's typed-code answer: a `WasmTypedReceiver` (`message` to relay, then `open(nonce, ciphertext)`) |
 | `new WasmTypedApproval(typedCode, sessionId, deviceName)` | none | the approver's typed-code side: relay `message`, show `deviceName`, `confirm(newDeviceMessage)` (throws `confirmation_failed` for a wrong code or a changed name, `malformed_answer` for a bad message), then `seal(masterKey)` → `{nonce, ciphertext}`; nothing is sealed before `confirm` succeeds |
 | `new WasmChunkDecryptor` | `(masterKey, fileId, expectedChunkFormat)` | `(masterKey, fileId, metadata)`: the object `decrypt_file_metadata` returned; its commitment is enforced |
 | `WasmChunkDecryptor.fromFileKey` | `(fileKey, fileId, expectedChunkFormat)` | `(fileKey, fileId, metadata)`, from `decrypt_file_metadata_with_key` |
+| `decrypt_chunk_frame` | `(fileKey, fileId, versionId, index, isLast, format, frame)` | `(fileKey, fileId, metadata, index, isLast, frame)`: the record's commitment names the one upload whose frames open; never chunk 0's bytes |
 | `safetyNumber(emailA, publicKeyA, emailB, publicKeyB)`, `normalizeEmail(raw)` | none | core's safety number and email normalisation; web never trims an email itself |
 | `apiDescriptor` | | adds `get_device_link_pake_for_approver`, `pending_device_links`, `get_device_link`, `approve_device_link`, `deny_device_link` |
 
@@ -154,7 +156,8 @@ Each change closes a review finding; the old form is removed, not deprecated.
 
 | Export | Before | Now |
 | --- | --- | --- |
-| `DeviceServiceHandle.approve_device_link` | `(id, qr: DeviceLinkQrData, typed_code)` | `(id, scanned_qr: String, typed_code)`; `DeviceLinkQrData` is removed |
+| `DeviceServiceHandle.approve_device_link` | `(id, qr: DeviceLinkQrData, typed_code)` | `(id, scanned_qr: String, typed_code)`; `DeviceLinkQrData` is removed. A relay name that differs from the scanned one is `ServiceError::Authentication` and denies the link |
+| `DeviceServiceHandle.scanned_device_link_name(scanned_qr)` | none | the new device's name from the scanned QR: the name to show, never the pending link's `device_name` |
 | `DeviceLinkHandle.qr()` | `DeviceLinkQrData` | removed: `qr_payload()` is the text to render, `device_name()` the canonical name |
 | `DeviceLinkHandle.begin_typed_path()`, `TypedDeviceLinkHandle`, `TypedDeviceLinkStartData` | the new device spoke first | removed: the approver speaks first; the new device calls `answer_typed_path(approver_message)` → `TypedDeviceLinkAnswerData { handle, outbound_message }` |
 | `TypedDeviceApprovalStartData` | `{handle, outbound_message}` | adds `device_name`, the name the new device's confirmation must match |
@@ -164,11 +167,35 @@ Each change closes a review finding; the old form is removed, not deprecated.
 | `ChunkDecryptorHandle.for_push_with_file_key_handle` | `(file_key, file_id, expected_chunk_format)` | `(file_key, file_id, metadata: NameMetadataDto)` |
 | `ChunkDecryptorHandle.for_version_with_file_key_handle` | none | `(file_key, file_id, expected_chunk_format, version_id, version_counter)` for key-handle holders |
 | `ChunkDecryptorHandle.for_push_with_file_key` (`legacy-bindings`) | `(file_key, file_id, expected_chunk_format)` | `(file_key, file_id, metadata: NameMetadataDto)` |
+| `FileKeyHandle.decrypt_chunk_frame` | `(file_id, version_id, index, is_last, format, frame)` | `(file_id, metadata: NameMetadataDto, index, is_last, frame)` |
+| `MasterKeyHandle.decrypt_file` | `(file_id, expected_chunk_format, chunk_paths, output_path, callback)` | `(file_id, metadata: NameMetadataDto, chunk_paths, output_path, callback)` |
+| `decrypt_chunks_to_file`, `decrypt_contiguous_to_file`, `download_and_decrypt_file` (`legacy-bindings`) | `expected_chunk_format: u8` | `metadata: NameMetadataDto` in its place |
 | `RecoveryChangesData`, `PasskeyPromptResult.prf_output` | `String` / `Vec<u8>` | `SecretString` / `SecretBytes`: still `String` and `Data` / `ByteArray` in Swift and Kotlin, wiped and redacted on the Rust side |
 | `safety_number(email_a, public_key_a, email_b, public_key_b)`, `normalize_email(raw)` | none | core's safety number and email normalisation |
 
 A decryptor refuses a missing record or half a commitment (`version_id` without `version_counter`, or
-the reverse). A record with neither field is legacy metadata and is read without a commitment.
+the reverse). A record with neither field is legacy metadata: it opens v1 content only. Since Guus's
+ruling of 2026-11-07 ("refuse v2 without commitment") a `chunk_format: 2` record without a commitment is
+refused when the reader is built, and an unrecorded one refuses a v2 frame 0. No released core wrote v2,
+so only development and test files are affected.
+
+### Rust (round 3)
+
+| Item | Before | Now |
+| --- | --- | --- |
+| `ChunkDecryptor` (every constructor), `RangeOpener`, `RequestContentReader::open_frame` | v2 opened without a commitment | a v2 frame 0 opens only against a commitment; `RangeOpener::new` refuses a v2 pin without one; the refusal is `CoreError::InvalidInput` |
+| `ChunkDecryptor::for_push`, `from_reader`, `for_push_with_file_key` | read v1 and v2 | read legacy v1 only (no commitment); read v2 with `for_current_version`, `from_reader_for_current_version` or `for_version_with_file_key` |
+| `chunk_stream::open_recorded_chunk(file_key, file_id, metadata, index, is_last, frame)` | none | the record-driven random-access open the bindings use |
+| `download::decrypt_frames_to`, `download::decrypt_chunks_to` | `(…, expected, chunk_count, …)` | `(…, expected, version: Option<VersionCommitment>, chunk_count, …)` |
+| `encrypt::decrypt_chunks_to_file`, `encrypt::decrypt_contiguous_to_file`, `file_encrypt::decrypt_chunks_to_file` | `(…, expected, …)` | `(…, expected, version: Option<VersionCommitment>, …)` |
+| `zip::ZipEntry` | no commitment | `version: Option<VersionCommitment>` |
+| `file_encrypt::EncryptedFileResult::version_commitment(previous)` | none | the commitment to seal for the written version |
+| `beebeeb_upload::download_and_decrypt_file`, `DownloadClient::download_and_decrypt`, `decrypt_downloaded_bytes` | `(…, expected, …)` | `(…, expected, version: Option<VersionCommitment>, …)` |
+| `beebeeb_transfer::RangeSessionError::MissingVersionCommitment` | none | a v2 pin without a commitment, refused before any request |
+| `beebeeb_client::downloads::DownloadServiceError::MissingVersionCommitment` | defined, unused | returned before any fetch for a `chunk_format: 2` record without a commitment |
+| `DeviceLinkQr` | `parse` of `beebeeb-link:v1:` (session id, fingerprint) | `parse` of `beebeeb-link:v2:` (session id, fingerprint, canonical device name); `device_name()`, `matches_relayed_name(name)`; a `v1` payload is refused |
+| `seal_for_new_device` | `(qr, relayed_public_key, typed_code, material)` | `(qr, relayed_public_key, relayed_device_name, typed_code, material)`: a relayed name that differs from the scanned one is refused before anything is sealed |
+| `beebeeb_client::devices::DeviceError::DeviceNameChanged` | none | QR path: the relay's name differs from the scanned one; the link is denied |
 
 ## Verifying a release
 
