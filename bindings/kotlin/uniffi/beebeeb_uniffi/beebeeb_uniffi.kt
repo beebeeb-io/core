@@ -3868,7 +3868,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_assets_changed() != 57850.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_back_up_again() != 10332.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_back_up_again() != 28592.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_configure() != 38428.toShort()) {
@@ -7297,7 +7297,13 @@ public interface BackupServiceHandleInterface {
     fun `assetsChanged`(`changes`: List<BackupAssetChangeData>)
     
     /**
-     * "Back up again" after a stop: the backup starts fresh.
+     * "Back up again" after a stop: the backup starts fresh (every record
+     * is forgotten; a copy still on the server counts as backed up). After a
+     * stop because the backup's folder was deleted (`unknown` or
+     * `backup_deleted`), call `configure` with a live folder first: this
+     * device's folder found again (`find_device_folder`; one restored from
+     * Trash is found again) or a new one. With the deleted folder still
+     * configured, the next pass stops again.
      */
     fun `backUpAgain`()
     
@@ -7426,7 +7432,13 @@ open class BackupServiceHandle: Disposable, AutoCloseable, BackupServiceHandleIn
 
     
     /**
-     * "Back up again" after a stop: the backup starts fresh.
+     * "Back up again" after a stop: the backup starts fresh (every record
+     * is forgotten; a copy still on the server counts as backed up). After a
+     * stop because the backup's folder was deleted (`unknown` or
+     * `backup_deleted`), call `configure` with a live folder first: this
+     * device's folder found again (`find_device_folder`; one restored from
+     * Trash is found again) or a new one. With the deleted folder still
+     * configured, the next pass stops again.
      */
     @Throws(ServiceException::class)override fun `backUpAgain`()
         = 
@@ -25114,12 +25126,22 @@ public object FfiConverterTypeArchiveTotals: FfiConverterRustBuffer<ArchiveTotal
 
 
 
+/**
+ * `modified_ms` (when the asset last changed on the device, in
+ * milliseconds) and `size_bytes`, `None` when unknown: a copy removed from the
+ * backup is uploaded again only when one of them changes (backup spec §4.2
+ * rule 11). With neither known, a removed copy never comes back by itself.
+ */
 data class AssetData (
     var `localIdentifier`: kotlin.String
     , 
     var `name`: kotlin.String
     , 
     var `mimeType`: kotlin.String?
+    , 
+    var `modifiedMs`: kotlin.Long? = null 
+    , 
+    var `sizeBytes`: kotlin.ULong? = null 
     
 ){
     
@@ -25139,19 +25161,25 @@ public object FfiConverterTypeAssetData: FfiConverterRustBuffer<AssetData> {
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalLong.read(buf),
+            FfiConverterOptionalULong.read(buf),
         )
     }
 
     override fun allocationSize(value: AssetData) = (
             FfiConverterString.allocationSize(value.`localIdentifier`) +
             FfiConverterString.allocationSize(value.`name`) +
-            FfiConverterOptionalString.allocationSize(value.`mimeType`)
+            FfiConverterOptionalString.allocationSize(value.`mimeType`) +
+            FfiConverterOptionalLong.allocationSize(value.`modifiedMs`) +
+            FfiConverterOptionalULong.allocationSize(value.`sizeBytes`)
     )
 
     override fun write(value: AssetData, buf: ByteBuffer) {
             FfiConverterString.write(value.`localIdentifier`, buf)
             FfiConverterString.write(value.`name`, buf)
             FfiConverterOptionalString.write(value.`mimeType`, buf)
+            FfiConverterOptionalLong.write(value.`modifiedMs`, buf)
+            FfiConverterOptionalULong.write(value.`sizeBytes`, buf)
     }
 }
 
@@ -25659,6 +25687,11 @@ public object FfiConverterTypeBackupHeader: FfiConverterRustBuffer<BackupHeader>
 
 
 
+/**
+ * `modified_ms` and `size_bytes`: the asset as the record last saw it.
+ * Store them with the record; a store that drops them only makes a removed
+ * copy wait for a second change before it comes back.
+ */
 data class BackupManifestRecordData (
     var `localIdentifier`: kotlin.String
     , 
@@ -25669,6 +25702,10 @@ data class BackupManifestRecordData (
     var `localPresent`: kotlin.Boolean
     , 
     var `retryCount`: kotlin.UInt
+    , 
+    var `modifiedMs`: kotlin.Long? = null 
+    , 
+    var `sizeBytes`: kotlin.ULong? = null 
     
 ){
     
@@ -25690,6 +25727,8 @@ public object FfiConverterTypeBackupManifestRecordData: FfiConverterRustBuffer<B
             FfiConverterTypeBackupCopyStateData.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterUInt.read(buf),
+            FfiConverterOptionalLong.read(buf),
+            FfiConverterOptionalULong.read(buf),
         )
     }
 
@@ -25698,7 +25737,9 @@ public object FfiConverterTypeBackupManifestRecordData: FfiConverterRustBuffer<B
             FfiConverterString.allocationSize(value.`fileId`) +
             FfiConverterTypeBackupCopyStateData.allocationSize(value.`state`) +
             FfiConverterBoolean.allocationSize(value.`localPresent`) +
-            FfiConverterUInt.allocationSize(value.`retryCount`)
+            FfiConverterUInt.allocationSize(value.`retryCount`) +
+            FfiConverterOptionalLong.allocationSize(value.`modifiedMs`) +
+            FfiConverterOptionalULong.allocationSize(value.`sizeBytes`)
     )
 
     override fun write(value: BackupManifestRecordData, buf: ByteBuffer) {
@@ -25707,6 +25748,8 @@ public object FfiConverterTypeBackupManifestRecordData: FfiConverterRustBuffer<B
             FfiConverterTypeBackupCopyStateData.write(value.`state`, buf)
             FfiConverterBoolean.write(value.`localPresent`, buf)
             FfiConverterUInt.write(value.`retryCount`, buf)
+            FfiConverterOptionalLong.write(value.`modifiedMs`, buf)
+            FfiConverterOptionalULong.write(value.`sizeBytes`, buf)
     }
 }
 
@@ -31683,9 +31726,11 @@ public object FfiConverterTypeAuthChallengeKind: FfiConverterRustBuffer<AuthChal
 
 
 /**
- * `Trashed` and `Deleted`: the person removed the copy on the server, and
- * the backup never uploads it again by itself. `UploadFailed`: the upload
- * failed and is tried again (at most three times).
+ * `Trashed` and `Deleted` (as the platform reported) and `RemovedElsewhere`
+ * (the server's check asked again for a copy this device had backed up): the
+ * copy was removed on the server, and it is uploaded again only once the
+ * asset changes on the device (backup spec §4.2 rule 11). `UploadFailed`: the
+ * upload failed and is tried again (at most three times).
  */
 
 enum class BackupCopyStateData {
@@ -31694,7 +31739,8 @@ enum class BackupCopyStateData {
     QUEUED,
     TRASHED,
     DELETED,
-    UPLOAD_FAILED;
+    UPLOAD_FAILED,
+    REMOVED_ELSEWHERE;
 
     
 

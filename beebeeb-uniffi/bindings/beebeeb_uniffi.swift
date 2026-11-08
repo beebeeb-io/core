@@ -1876,7 +1876,13 @@ public protocol BackupServiceHandleProtocol: AnyObject, Sendable {
     func assetsChanged(changes: [BackupAssetChangeData]) throws 
     
     /**
-     * "Back up again" after a stop: the backup starts fresh.
+     * "Back up again" after a stop: the backup starts fresh (every record
+     * is forgotten; a copy still on the server counts as backed up). After a
+     * stop because the backup's folder was deleted (`unknown` or
+     * `backup_deleted`), call `configure` with a live folder first: this
+     * device's folder found again (`find_device_folder`; one restored from
+     * Trash is found again) or a new one. With the deleted folder still
+     * configured, the next pass stops again.
      */
     func backUpAgain() throws 
     
@@ -1954,7 +1960,13 @@ open func assetsChanged(changes: [BackupAssetChangeData])throws   {try rustCallW
 }
     
     /**
-     * "Back up again" after a stop: the backup starts fresh.
+     * "Back up again" after a stop: the backup starts fresh (every record
+     * is forgotten; a copy still on the server counts as backed up). After a
+     * stop because the backup's folder was deleted (`unknown` or
+     * `backup_deleted`), call `configure` with a live folder first: this
+     * device's folder found again (`find_device_folder`; one restored from
+     * Trash is found again) or a new one. With the deleted folder still
+     * configured, the next pass stops again.
      */
 open func backUpAgain()throws   {try rustCallWithError(FfiConverterTypeServiceError_lift) {
     uniffi_beebeeb_uniffi_fn_method_backupservicehandle_back_up_again(
@@ -12889,17 +12901,27 @@ public func FfiConverterTypeArchiveTotals_lower(_ value: ArchiveTotals) -> RustB
 }
 
 
+/**
+ * `modified_ms` (when the asset last changed on the device, in
+ * milliseconds) and `size_bytes`, `None` when unknown: a copy removed from the
+ * backup is uploaded again only when one of them changes (backup spec §4.2
+ * rule 11). With neither known, a removed copy never comes back by itself.
+ */
 public struct AssetData: Equatable, Hashable {
     public var localIdentifier: String
     public var name: String
     public var mimeType: String?
+    public var modifiedMs: Int64?
+    public var sizeBytes: UInt64?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(localIdentifier: String, name: String, mimeType: String?) {
+    public init(localIdentifier: String, name: String, mimeType: String?, modifiedMs: Int64? = nil, sizeBytes: UInt64? = nil) {
         self.localIdentifier = localIdentifier
         self.name = name
         self.mimeType = mimeType
+        self.modifiedMs = modifiedMs
+        self.sizeBytes = sizeBytes
     }
 
     
@@ -12920,7 +12942,9 @@ public struct FfiConverterTypeAssetData: FfiConverterRustBuffer {
             try AssetData(
                 localIdentifier: FfiConverterString.read(from: &buf), 
                 name: FfiConverterString.read(from: &buf), 
-                mimeType: FfiConverterOptionString.read(from: &buf)
+                mimeType: FfiConverterOptionString.read(from: &buf), 
+                modifiedMs: FfiConverterOptionInt64.read(from: &buf), 
+                sizeBytes: FfiConverterOptionUInt64.read(from: &buf)
         )
     }
 
@@ -12928,6 +12952,8 @@ public struct FfiConverterTypeAssetData: FfiConverterRustBuffer {
         FfiConverterString.write(value.localIdentifier, into: &buf)
         FfiConverterString.write(value.name, into: &buf)
         FfiConverterOptionString.write(value.mimeType, into: &buf)
+        FfiConverterOptionInt64.write(value.modifiedMs, into: &buf)
+        FfiConverterOptionUInt64.write(value.sizeBytes, into: &buf)
     }
 }
 
@@ -13604,21 +13630,30 @@ public func FfiConverterTypeBackupHeader_lower(_ value: BackupHeader) -> RustBuf
 }
 
 
+/**
+ * `modified_ms` and `size_bytes`: the asset as the record last saw it.
+ * Store them with the record; a store that drops them only makes a removed
+ * copy wait for a second change before it comes back.
+ */
 public struct BackupManifestRecordData: Equatable, Hashable {
     public var localIdentifier: String
     public var fileId: String
     public var state: BackupCopyStateData
     public var localPresent: Bool
     public var retryCount: UInt32
+    public var modifiedMs: Int64?
+    public var sizeBytes: UInt64?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(localIdentifier: String, fileId: String, state: BackupCopyStateData, localPresent: Bool, retryCount: UInt32) {
+    public init(localIdentifier: String, fileId: String, state: BackupCopyStateData, localPresent: Bool, retryCount: UInt32, modifiedMs: Int64? = nil, sizeBytes: UInt64? = nil) {
         self.localIdentifier = localIdentifier
         self.fileId = fileId
         self.state = state
         self.localPresent = localPresent
         self.retryCount = retryCount
+        self.modifiedMs = modifiedMs
+        self.sizeBytes = sizeBytes
     }
 
     
@@ -13641,7 +13676,9 @@ public struct FfiConverterTypeBackupManifestRecordData: FfiConverterRustBuffer {
                 fileId: FfiConverterString.read(from: &buf), 
                 state: FfiConverterTypeBackupCopyStateData.read(from: &buf), 
                 localPresent: FfiConverterBool.read(from: &buf), 
-                retryCount: FfiConverterUInt32.read(from: &buf)
+                retryCount: FfiConverterUInt32.read(from: &buf), 
+                modifiedMs: FfiConverterOptionInt64.read(from: &buf), 
+                sizeBytes: FfiConverterOptionUInt64.read(from: &buf)
         )
     }
 
@@ -13651,6 +13688,8 @@ public struct FfiConverterTypeBackupManifestRecordData: FfiConverterRustBuffer {
         FfiConverterTypeBackupCopyStateData.write(value.state, into: &buf)
         FfiConverterBool.write(value.localPresent, into: &buf)
         FfiConverterUInt32.write(value.retryCount, into: &buf)
+        FfiConverterOptionInt64.write(value.modifiedMs, into: &buf)
+        FfiConverterOptionUInt64.write(value.sizeBytes, into: &buf)
     }
 }
 
@@ -20818,9 +20857,11 @@ public func FfiConverterTypeAuthChallengeKind_lower(_ value: AuthChallengeKind) 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
- * `Trashed` and `Deleted`: the person removed the copy on the server, and
- * the backup never uploads it again by itself. `UploadFailed`: the upload
- * failed and is tried again (at most three times).
+ * `Trashed` and `Deleted` (as the platform reported) and `RemovedElsewhere`
+ * (the server's check asked again for a copy this device had backed up): the
+ * copy was removed on the server, and it is uploaded again only once the
+ * asset changes on the device (backup spec §4.2 rule 11). `UploadFailed`: the
+ * upload failed and is tried again (at most three times).
  */
 
 public enum BackupCopyStateData: Equatable, Hashable {
@@ -20830,6 +20871,7 @@ public enum BackupCopyStateData: Equatable, Hashable {
     case trashed
     case deleted
     case uploadFailed
+    case removedElsewhere
 
 
 
@@ -20861,6 +20903,8 @@ public struct FfiConverterTypeBackupCopyStateData: FfiConverterRustBuffer {
         
         case 5: return .uploadFailed
         
+        case 6: return .removedElsewhere
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -20887,6 +20931,10 @@ public struct FfiConverterTypeBackupCopyStateData: FfiConverterRustBuffer {
         
         case .uploadFailed:
             writeInt(&buf, Int32(5))
+        
+        
+        case .removedElsewhere:
+            writeInt(&buf, Int32(6))
         
         }
     }
@@ -29895,7 +29943,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_assets_changed() != 57850) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_back_up_again() != 10332) {
+    if (uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_back_up_again() != 28592) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_configure() != 38428) {
