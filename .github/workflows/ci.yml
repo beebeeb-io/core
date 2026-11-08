@@ -69,6 +69,15 @@ jobs:
         if: always()
         run: bash test-vectors/tools/check-direct-range-vectors-generated.sh --self-test
 
+      # The share safety number vectors (B05e): generated from the contract text, read by the Rust test.
+      - name: safety number vectors match their generator
+        if: always()
+        run: bash test-vectors/tools/check-safety-number-vectors-generated.sh
+
+      - name: safety number vector check can go red
+        if: always()
+        run: bash test-vectors/tools/check-safety-number-vectors-generated.sh --self-test
+
       # The backup vectors (LD-0113): four files, four generators, the same rule and gate.
       - name: backup vectors match their generators
         if: always()

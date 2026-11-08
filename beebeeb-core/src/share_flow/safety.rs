@@ -14,13 +14,16 @@
 //! the same 60 digits (12 groups of 5).
 //!
 //! `key` is the 32-byte raw X25519 public key the server distributes for that user's sharing key
-//! (standard base64 on the wire), the same bytes the member-share seal uses
+//! (standard base64 on the wire, bit 255 clear, never a small-order point), the same bytes the member-share seal uses
 //! ([`super::seal_file_key_for_member`]). Public keys only: nothing secret goes in or out.
 //! `peer_fingerprint` is SHA-256 of the peer's key bytes, which a host stores with its local
 //! "compared" mark; a changed peer key no longer matches the mark.
 use sha2::{Digest, Sha256, Sha512};
 
 use super::ShareFlowError;
+use crate::item_id::parse_canonical;
+use crate::kdf::MasterKey;
+use crate::opaque::{derive_x25519_private, derive_x25519_public};
 
 /// Rounds of SHA-512 per party (Signal's numeric fingerprint).
 pub const SAFETY_ITERATIONS: usize = 5200;
@@ -45,10 +48,31 @@ impl SafetyNumber {
     }
 }
 
-fn key32(bytes: &[u8]) -> Result<&[u8; 32], ShareFlowError> {
-    bytes
+/// A sharing public key as the seal accepts it: 32 bytes, bit 255 clear (canonical X25519 encoding),
+/// and not a small-order point (the seal refuses those as non-contributory).
+pub(crate) fn sharing_key(bytes: &[u8]) -> Result<[u8; 32], ShareFlowError> {
+    let key: [u8; 32] = bytes
         .try_into()
-        .map_err(|_| ShareFlowError::InvalidInput("public key length"))
+        .map_err(|_| ShareFlowError::InvalidInput("public key length"))?;
+    if key[31] & 0x80 != 0 {
+        return Err(ShareFlowError::InvalidInput("public key encoding"));
+    }
+    // A clamped scalar is a multiple of 8, so any fixed one sends a small-order point to the
+    // identity: the same `was_contributory` rule `x25519_shared_secret` applies to the seal.
+    let probe = x25519_dalek::StaticSecret::from([0x5a; 32]);
+    if !probe
+        .diffie_hellman(&x25519_dalek::PublicKey::from(key))
+        .was_contributory()
+    {
+        return Err(ShareFlowError::InvalidInput("public key small order"));
+    }
+    Ok(key)
+}
+
+fn user_id(id: &str) -> Result<(), ShareFlowError> {
+    parse_canonical(id)
+        .map(|_| ())
+        .map_err(|_| ShareFlowError::InvalidInput("user id"))
 }
 
 /// One party's 30 digits.
@@ -71,23 +95,43 @@ fn party_digits(user_id: &str, public_key: &[u8; 32]) -> String {
     out
 }
 
-/// The safety number between the signed-in user and a peer. Both sides compute the same digits.
+/// The safety number between the signed-in user and a peer. The own sharing key is derived here
+/// from the master key (`derive_x25519_public(derive_x25519_private(master))`), never taken from
+/// a host or the server. `peer_public_key` must be the exact bytes the share was sealed to (the
+/// `recipient_public_key` a member seal returns). Both sides compute the same digits.
 pub fn safety_number(
+    master: &MasterKey,
+    own_user_id: &str,
+    peer_user_id: &str,
+    peer_public_key: &[u8],
+) -> Result<SafetyNumber, ShareFlowError> {
+    let own_key = derive_x25519_public(&derive_x25519_private(master));
+    safety_number_for_keys(own_user_id, &own_key, peer_user_id, peer_public_key)
+}
+
+/// [`safety_number`] over two given keys: the vector form (`test-vectors/safety_number.json`).
+/// User ids are canonical lowercase hyphenated UUIDs and must differ.
+pub(crate) fn safety_number_for_keys(
     own_user_id: &str,
     own_public_key: &[u8],
     peer_user_id: &str,
     peer_public_key: &[u8],
 ) -> Result<SafetyNumber, ShareFlowError> {
-    if own_user_id.is_empty() || peer_user_id.is_empty() {
-        return Err(ShareFlowError::InvalidInput("user id"));
+    user_id(own_user_id)?;
+    user_id(peer_user_id)?;
+    if own_user_id == peer_user_id {
+        return Err(ShareFlowError::InvalidInput("own user id equals peer user id"));
     }
-    let own_key = key32(own_public_key)?;
-    let peer_key = key32(peer_public_key)?;
-    let own = party_digits(own_user_id, own_key);
-    let peer = party_digits(peer_user_id, peer_key);
-    // Lower user id first; equal ids (never expected) fall back to key order so the result is still symmetric.
-    let own_first = (own_user_id.as_bytes(), own_key.as_slice()) <= (peer_user_id.as_bytes(), peer_key.as_slice());
-    let digits = if own_first { own + &peer } else { peer + &own };
+    let own_key = sharing_key(own_public_key)?;
+    let peer_key = sharing_key(peer_public_key)?;
+    let own = party_digits(own_user_id, &own_key);
+    let peer = party_digits(peer_user_id, &peer_key);
+    // Lower user id (byte order) first; the ids are distinct, so this is a strict order.
+    let digits = if own_user_id.as_bytes() < peer_user_id.as_bytes() {
+        own + &peer
+    } else {
+        peer + &own
+    };
     Ok(SafetyNumber {
         digits,
         peer_fingerprint: Sha256::digest(peer_key).into(),
@@ -96,5 +140,5 @@ pub fn safety_number(
 
 /// SHA-256 of a public key: the value a "compared" mark is keyed by.
 pub fn key_fingerprint(public_key: &[u8]) -> Result<[u8; 32], ShareFlowError> {
-    Ok(Sha256::digest(key32(public_key)?).into())
+    Ok(Sha256::digest(sharing_key(public_key)?).into())
 }

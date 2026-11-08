@@ -100,6 +100,9 @@ pub enum ShareFlowError {
     /// A wrap or unwrap failed (wrong key, a damaged blob). Never says which byte.
     Crypto,
     WrongState,
+    /// The server's key for a person is not the one the host's "compared" mark was made against:
+    /// nothing was sealed (B05e).
+    PeerKeyChanged,
 }
 
 impl ShareFlowError {
@@ -118,6 +121,7 @@ impl ShareFlowError {
             Self::Protocol(_) => "protocol",
             Self::Crypto => "crypto",
             Self::WrongState => "wrong_state",
+            Self::PeerKeyChanged => "peer_key_changed",
         }
     }
 

@@ -6,7 +6,6 @@ use beebeeb_core::share_flow::{
     ShareFlowError, display_form,
     folder::{FolderInviteInput, FolderLinkInput, FolderSend, FolderShare, FolderStep},
     folder_keys::CustodyMemory,
-    member::InviteOutcome,
 };
 use serde_json::json;
 use wasm_bindgen::prelude::*;
@@ -28,15 +27,7 @@ fn step_js(step: FolderStep) -> Result<JsValue, JsError> {
             "request": request_js(&request),
             "markCustodySeen": mark_custody_seen,
         })),
-        FolderStep::Done(InviteOutcome::Shared { invite_id }) => {
-            to_js(&json!({"kind": "shared", "inviteId": invite_id}))
-        }
-        FolderStep::Done(InviteOutcome::Invited { invite_id, status }) => {
-            to_js(&json!({"kind": "invited", "inviteId": invite_id, "status": status}))
-        }
-        FolderStep::Done(InviteOutcome::AwaitingApproval { invite_id }) => {
-            to_js(&json!({"kind": "awaiting_approval", "inviteId": invite_id}))
-        }
+        FolderStep::Done(outcome) => super::share_flow::outcome_js(outcome),
         FolderStep::LinkCreated(c) => to_js(&json!({
             "kind": "link_created",
             "shareId": c.share_id,
@@ -70,6 +61,7 @@ impl ShareFolderInvite {
         custody_seen: Vec<String>,
         custody_unreadable: bool,
         master_key: &[u8],
+        expected_peer_fingerprint: Option<Vec<u8>>,
     ) -> Result<ShareFolderInvite, JsError> {
         let bytes: [u8; 32] = master_key
             .try_into()
@@ -80,6 +72,7 @@ impl ShareFolderInvite {
             email,
             shared_folders_write,
             custody: CustodyMemory::new(custody_seen, custody_unreadable),
+            expected_peer_fingerprint: super::share_flow::expected_fp(expected_peer_fingerprint)?,
         };
         let (flow, first) = FolderShare::invite(input, &master).map_err(err)?;
         Ok(Self {

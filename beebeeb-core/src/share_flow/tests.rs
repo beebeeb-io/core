@@ -149,7 +149,14 @@ fn a_folder_is_never_shared_through_the_file_path() {
         item_id: FILE_ID.into(),
         is_folder: true,
     };
-    let err = MemberInvite::start(&target, "bob@beebeeb.test", &master(1), &FileKey::from_bytes([7; 32])).unwrap_err();
+    let err = MemberInvite::start(
+        &target,
+        "bob@beebeeb.test",
+        &master(1),
+        &FileKey::from_bytes([7; 32]),
+        None,
+    )
+    .unwrap_err();
     assert_eq!(err, ShareFlowError::InvalidInput("is_folder: use FolderInvite"));
 }
 
@@ -158,7 +165,7 @@ fn invite_to_a_claimed_recipient_seals_and_approves() {
     let (alice, bob) = (master(1), master(2));
     let bob_pub = derive_x25519_public(&derive_x25519_private(&bob));
     let file_key = FileKey::from_bytes([7; 32]);
-    let (mut flow, first) = MemberInvite::start(&file_target(), " bob@beebeeb.test ", &alice, &file_key).unwrap();
+    let (mut flow, first) = MemberInvite::start(&file_target(), " bob@beebeeb.test ", &alice, &file_key, None).unwrap();
     assert_eq!(first.path, "/api/v1/shares/invites");
     assert_eq!(
         first.body.as_ref().unwrap(),
@@ -187,7 +194,8 @@ fn invite_to_a_claimed_recipient_seals_and_approves() {
     assert_eq!(
         outcome,
         InviteOutcome::Shared {
-            invite_id: INVITE_ID.into()
+            invite_id: INVITE_ID.into(),
+            recipient_public_key: bob_pub,
         }
     );
     assert!(matches!(
@@ -203,6 +211,7 @@ fn invite_without_a_recipient_key_is_sent_not_shared() {
         "new@beebeeb.test",
         &master(1),
         &FileKey::from_bytes([7; 32]),
+        None,
     )
     .unwrap();
     let InviteStep::Done(outcome) = flow
@@ -228,6 +237,7 @@ fn a_failed_approval_leaves_the_invite_awaiting_approval() {
         "bob@beebeeb.test",
         &master(1),
         &FileKey::from_bytes([7; 32]),
+        None,
     )
     .unwrap();
     flow.on_response(ok(
@@ -240,7 +250,8 @@ fn a_failed_approval_leaves_the_invite_awaiting_approval() {
     assert_eq!(
         outcome,
         InviteOutcome::AwaitingApproval {
-            invite_id: INVITE_ID.into()
+            invite_id: INVITE_ID.into(),
+            recipient_public_key: Some(bob_pub),
         }
     );
 }
@@ -248,18 +259,18 @@ fn a_failed_approval_leaves_the_invite_awaiting_approval() {
 #[test]
 fn bad_input_and_server_ids_are_refused() {
     let key = FileKey::from_bytes([7; 32]);
-    assert!(MemberInvite::start(&file_target(), "not-an-email", &master(1), &key).is_err());
+    assert!(MemberInvite::start(&file_target(), "not-an-email", &master(1), &key, None).is_err());
     let bad = ShareTarget {
         item_id: "../x".into(),
         is_folder: false,
     };
-    assert!(MemberInvite::start(&bad, "bob@beebeeb.test", &master(1), &key).is_err());
-    let (mut flow, _) = MemberInvite::start(&file_target(), "bob@beebeeb.test", &master(1), &key).unwrap();
+    assert!(MemberInvite::start(&bad, "bob@beebeeb.test", &master(1), &key, None).is_err());
+    let (mut flow, _) = MemberInvite::start(&file_target(), "bob@beebeeb.test", &master(1), &key, None).unwrap();
     let err = flow
         .on_response(ok(json!({"invite_id": "a/../b", "status": "invited"})))
         .unwrap_err();
     assert_eq!(err, ShareFlowError::Protocol("bad id"));
-    assert!(approve_request("a/b", FILE_ID, &b64(&[9; 32]), &master(1), &key).is_err());
+    assert!(approve_request("a/b", FILE_ID, &b64(&[9; 32]), &master(1), &key, None).is_err());
     assert!(revoke_link_request("x?y").is_err());
     let revoke = revoke_link_request(INVITE_ID).unwrap();
     assert_eq!(
@@ -275,12 +286,127 @@ fn typed_refusals_keep_their_code() {
         "bob@beebeeb.test",
         &master(1),
         &FileKey::from_bytes([7; 32]),
+        None,
     )
     .unwrap();
     let err = flow
         .on_response(HttpResponse::new(409, json!({"code": "plan_required"})))
         .unwrap_err();
     assert_eq!(err.code(), "plan_required");
+}
+
+// ── B05e: the seal checks the key a "compared" mark was made against ──────────
+
+fn fp(key: &[u8; 32]) -> [u8; 32] {
+    super::safety::key_fingerprint(key).unwrap()
+}
+
+/// The server answers with a key that is not the one the user compared: the flow stops before
+/// sealing (no approval request is built) and reports the key it was given.
+#[test]
+fn a_server_key_that_differs_from_the_compared_mark_is_refused_and_nothing_is_sealed() {
+    let bob_pub = derive_x25519_public(&derive_x25519_private(&master(2)));
+    let other_pub = derive_x25519_public(&derive_x25519_private(&master(3)));
+    let (mut flow, _) = MemberInvite::start(
+        &file_target(),
+        "bob@beebeeb.test",
+        &master(1),
+        &FileKey::from_bytes([7; 32]),
+        Some(fp(&bob_pub)),
+    )
+    .unwrap();
+    let step = flow
+        .on_response(ok(
+            json!({"invite_id": INVITE_ID, "status": "claimed", "recipient_public_key": b64(&other_pub)}),
+        ))
+        .unwrap();
+    let InviteStep::Done(outcome) = step else {
+        panic!("a seal request was built: {step:?}")
+    };
+    assert_eq!(
+        outcome,
+        InviteOutcome::PeerKeyChanged {
+            invite_id: INVITE_ID.into(),
+            recipient_public_key: other_pub,
+        }
+    );
+    assert_eq!(outcome.refusal_code(), Some("peer_key_changed"));
+    assert!(matches!(
+        flow.on_response(ok(json!({}))),
+        Err(ShareFlowError::WrongState)
+    ));
+}
+
+#[test]
+fn the_compared_key_seals_and_reports_the_key_it_sealed_to() {
+    let bob_pub = derive_x25519_public(&derive_x25519_private(&master(2)));
+    let (mut flow, _) = MemberInvite::start(
+        &file_target(),
+        "bob@beebeeb.test",
+        &master(1),
+        &FileKey::from_bytes([7; 32]),
+        Some(fp(&bob_pub)),
+    )
+    .unwrap();
+    let step = flow
+        .on_response(ok(
+            json!({"invite_id": INVITE_ID, "status": "claimed", "recipient_public_key": b64(&bob_pub)}),
+        ))
+        .unwrap();
+    assert!(matches!(step, InviteStep::Send(_)));
+    let InviteStep::Done(outcome) = flow.on_response(ok(json!({}))).unwrap() else {
+        panic!("expected done")
+    };
+    assert_eq!(
+        outcome,
+        InviteOutcome::Shared {
+            invite_id: INVITE_ID.into(),
+            recipient_public_key: bob_pub,
+        }
+    );
+    assert_eq!(outcome.refusal_code(), None);
+}
+
+#[test]
+fn approve_request_refuses_a_changed_key_and_seals_with_none() {
+    let key = FileKey::from_bytes([7; 32]);
+    let bob_pub = derive_x25519_public(&derive_x25519_private(&master(2)));
+    let other_pub = derive_x25519_public(&derive_x25519_private(&master(3)));
+    let err = approve_request(
+        INVITE_ID,
+        FILE_ID,
+        &b64(&other_pub),
+        &master(1),
+        &key,
+        Some(&fp(&bob_pub)),
+    )
+    .unwrap_err();
+    assert_eq!(err, ShareFlowError::PeerKeyChanged);
+    assert_eq!(err.code(), "peer_key_changed");
+    // "Share anyway": the same call without an expected fingerprint seals to the new key.
+    let sealed = approve_request(INVITE_ID, FILE_ID, &b64(&other_pub), &master(1), &key, None).unwrap();
+    assert_eq!(sealed.recipient_public_key, other_pub);
+    assert_eq!(
+        sealed.request.path,
+        format!("/api/v1/shares/invites/{INVITE_ID}/approve")
+    );
+}
+
+#[test]
+fn the_safety_number_uses_the_own_key_derived_from_the_master_key() {
+    let alice = master(1);
+    let alice_pub = derive_x25519_public(&derive_x25519_private(&alice));
+    let bob_pub = derive_x25519_public(&derive_x25519_private(&master(2)));
+    let (a, b) = (
+        "0b3c7a52-5d0e-4f1a-9d2e-1c6f3a8b9e01",
+        "7f9e2d14-3a6b-4c8d-8e1f-2b4a6c8d0e12",
+    );
+    let n = super::safety::safety_number(&alice, a, b, &bob_pub).unwrap();
+    assert_eq!(
+        n,
+        super::safety::safety_number_for_keys(a, &alice_pub, b, &bob_pub).unwrap()
+    );
+    assert_eq!(n.peer_fingerprint, fp(&bob_pub));
 }
 
 // ── links ─────────────────────────────────────────────────────────────────────

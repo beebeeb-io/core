@@ -40,7 +40,7 @@ fn key32(bytes: &[u8]) -> Result<Zeroizing<[u8; 32]>, ShareFlowFfiError> {
     Ok(Zeroizing::new(arr))
 }
 
-fn master(bytes: &[u8]) -> Result<MasterKey, ShareFlowFfiError> {
+pub(crate) fn master(bytes: &[u8]) -> Result<MasterKey, ShareFlowFfiError> {
     Ok(MasterKey::from_bytes(*key32(bytes)?))
 }
 
@@ -52,10 +52,63 @@ fn file_key(bytes: &[u8]) -> Result<FileKey, ShareFlowFfiError> {
 
 #[derive(uniffi::Enum)]
 pub enum InviteStepFfi {
-    Send { request: AuthHttpRequest },
-    Shared { invite_id: String },
-    Invited { invite_id: String, status: String },
-    AwaitingApproval { invite_id: String },
+    Send {
+        request: AuthHttpRequest,
+    },
+    /// `recipient_public_key`: the exact key the file key was sealed to (safety number, mark).
+    Shared {
+        invite_id: String,
+        recipient_public_key: Vec<u8>,
+    },
+    Invited {
+        invite_id: String,
+        status: String,
+    },
+    AwaitingApproval {
+        invite_id: String,
+        recipient_public_key: Option<Vec<u8>>,
+    },
+    /// Code `peer_key_changed`: the server's key is not the compared one; nothing was sealed.
+    PeerKeyChanged {
+        invite_id: String,
+        recipient_public_key: Vec<u8>,
+    },
+}
+
+/// A compared mark's fingerprint from the host: 32 bytes or `invalid_input`.
+pub(crate) fn expected_fp(fp: Option<Vec<u8>>) -> Result<Option<[u8; 32]>, ShareFlowFfiError> {
+    fp.map(|v| {
+        <[u8; 32]>::try_from(v.as_slice())
+            .map_err(|_| ShareFlowFfiError::from(ShareFlowError::InvalidInput("fingerprint length")))
+    })
+    .transpose()
+}
+
+pub(crate) fn outcome_ffi(o: InviteOutcome) -> InviteStepFfi {
+    match o {
+        InviteOutcome::Shared {
+            invite_id,
+            recipient_public_key,
+        } => InviteStepFfi::Shared {
+            invite_id,
+            recipient_public_key: recipient_public_key.to_vec(),
+        },
+        InviteOutcome::Invited { invite_id, status } => InviteStepFfi::Invited { invite_id, status },
+        InviteOutcome::AwaitingApproval {
+            invite_id,
+            recipient_public_key,
+        } => InviteStepFfi::AwaitingApproval {
+            invite_id,
+            recipient_public_key: recipient_public_key.map(|k| k.to_vec()),
+        },
+        InviteOutcome::PeerKeyChanged {
+            invite_id,
+            recipient_public_key,
+        } => InviteStepFfi::PeerKeyChanged {
+            invite_id,
+            recipient_public_key: recipient_public_key.to_vec(),
+        },
+    }
 }
 
 #[derive(uniffi::Object)]
@@ -74,10 +127,17 @@ impl MemberInviteFlow {
         email: String,
         master_key: Vec<u8>,
         file_key_bytes: Vec<u8>,
+        expected_peer_fingerprint: Option<Vec<u8>>,
     ) -> Result<Arc<Self>, ShareFlowFfiError> {
         let (master_key, file_key_bytes) = (Zeroizing::new(master_key), Zeroizing::new(file_key_bytes));
         let target = ShareTarget { item_id, is_folder };
-        let (flow, first) = MemberInvite::start(&target, &email, &master(&master_key)?, &file_key(&file_key_bytes)?)?;
+        let (flow, first) = MemberInvite::start(
+            &target,
+            &email,
+            &master(&master_key)?,
+            &file_key(&file_key_bytes)?,
+            expected_fp(expected_peer_fingerprint)?,
+        )?;
         Ok(Arc::new(Self {
             flow: Mutex::new(flow),
             first: Mutex::new(Some(first)),
@@ -97,18 +157,13 @@ impl MemberInviteFlow {
         let mut flow = self.flow.lock().map_err(|_| wrong_state())?;
         Ok(match flow.on_response(into(response))? {
             InviteStep::Send(req) => InviteStepFfi::Send { request: out(req) },
-            InviteStep::Done(InviteOutcome::Shared { invite_id }) => InviteStepFfi::Shared { invite_id },
-            InviteStep::Done(InviteOutcome::Invited { invite_id, status }) => {
-                InviteStepFfi::Invited { invite_id, status }
-            }
-            InviteStep::Done(InviteOutcome::AwaitingApproval { invite_id }) => {
-                InviteStepFfi::AwaitingApproval { invite_id }
-            }
+            InviteStep::Done(outcome) => outcome_ffi(outcome),
         })
     }
 }
 
-/// Approve a claimed file invite later: the file key sealed for the recipient.
+/// Approve a claimed file invite later: the file key sealed for the recipient. With
+/// `expected_peer_fingerprint` a different server key is refused (`peer_key_changed`), unsealed.
 #[uniffi::export]
 pub fn share_approve_file_invite_request(
     invite_id: String,
@@ -116,15 +171,19 @@ pub fn share_approve_file_invite_request(
     recipient_public_key_b64: String,
     master_key: Vec<u8>,
     file_key_bytes: Vec<u8>,
+    expected_peer_fingerprint: Option<Vec<u8>>,
 ) -> Result<AuthHttpRequest, ShareFlowFfiError> {
     let (master_key, file_key_bytes) = (Zeroizing::new(master_key), Zeroizing::new(file_key_bytes));
+    let expected = expected_fp(expected_peer_fingerprint)?;
     Ok(out(sf::member::approve_request(
         &invite_id,
         &file_id,
         &recipient_public_key_b64,
         &master(&master_key)?,
         &file_key(&file_key_bytes)?,
-    )?))
+        expected.as_ref(),
+    )?
+    .request))
 }
 
 /// The recipient side of a person share: the file key, opened with the owner's X25519 public key.
