@@ -284,3 +284,30 @@ pub fn share_create_bundle(
         beebeeb_core::share_flow::link::CreateLink::bundle(app_url, &items, &master, &options).map_err(err)?;
     Ok(super::share_flow::ShareCreateLink::from_parts(flow, first))
 }
+
+/// Web `rebuildFolderLinkUrl` in core: the owner's folder link, or `undefined`.
+#[wasm_bindgen(js_name = shareRebuildFolderLink)]
+pub fn share_rebuild_folder_link(
+    app_url: &str,
+    master_key: &[u8],
+    share_id: &str,
+    owner_wrapped_key: Option<String>,
+    owner_wrapped_token: Option<String>,
+    wrapped_folder_key: Option<String>,
+    passphrase_protected: bool,
+) -> Result<Option<String>, JsError> {
+    let bytes: [u8; 32] = master_key
+        .try_into()
+        .map_err(|_| err(ShareFlowError::InvalidInput("key length")))?;
+    let master = MasterKey::from_bytes(*Zeroizing::new(bytes));
+    Ok(beebeeb_core::share_flow::folder::rebuild_folder_link(
+        app_url,
+        &master,
+        share_id,
+        owner_wrapped_key.as_deref(),
+        owner_wrapped_token.as_deref(),
+        wrapped_folder_key.as_deref(),
+        passphrase_protected,
+    )
+    .map(|l| l.to_string()))
+}

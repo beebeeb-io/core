@@ -78,7 +78,10 @@ pub enum FolderStep {
 }
 
 mod link;
-pub use link::{CreatedFolderLink, FolderLinkInput, LINK_ID_ATTEMPTS};
+pub use link::{
+    CreatedFolderLink, FolderLinkInput, LINK_ID_ATTEMPTS, list_folder_links_request, rebuild_folder_link,
+    revoke_folder_link_request,
+};
 
 enum Purpose {
     Invite { email: String },

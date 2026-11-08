@@ -200,6 +200,18 @@ fn a_plain_link_wraps_the_folder_key_under_k_c_and_seals_owner_copies_under_the_
             .as_slice(),
         token.as_bytes()
     );
+    // The owner rebuilds the same link from the stored copies; another share id or master does not.
+    let (ok_b64, ot_b64) = (body["owner_wrapped_key"].as_str(), body["owner_wrapped_token"].as_str());
+    let rebuilt =
+        rebuild_folder_link(APP, &m, &id, ok_b64, ot_b64, body["wrapped_folder_key"].as_str(), false).unwrap();
+    assert_eq!(rebuilt.as_str(), c.link.as_str());
+    let other = "2237c000-0000-4000-8000-0000000000ee";
+    assert!(rebuild_folder_link(APP, &m, other, ok_b64, ot_b64, None, false).is_none());
+    let wrong = b64(&wrap_key_for_share(&[9; 32], &[1; 32]).unwrap());
+    assert!(
+        rebuild_folder_link(APP, &m, &id, ok_b64, ot_b64, Some(&wrong), false).is_none(),
+        "a stored folder key that does not open under K_c is never handed out"
+    );
 }
 
 #[test]

@@ -266,3 +266,32 @@ pub fn file_request_rebuild_link(
 pub fn file_request_close_request(id: String) -> Result<AuthHttpRequest, ShareFlowFfiError> {
     Ok(out(beebeeb_core::share_flow::request::close_request(&id)?))
 }
+
+/// Web `rebuildFolderLinkUrl`: the owner's folder link again; `None` when it can't be rebuilt.
+#[uniffi::export]
+pub fn share_rebuild_folder_link(
+    app_url: String,
+    master_key: Vec<u8>,
+    share_id: String,
+    owner_wrapped_key: Option<String>,
+    owner_wrapped_token: Option<String>,
+    wrapped_folder_key: Option<String>,
+    passphrase_protected: bool,
+) -> Result<Option<String>, ShareFlowFfiError> {
+    let master_key = Zeroizing::new(master_key);
+    let bytes: [u8; 32] = master_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| ShareFlowFfiError::from(ShareFlowError::InvalidInput("key length")))?;
+    let master = MasterKey::from_bytes(*Zeroizing::new(bytes));
+    Ok(beebeeb_core::share_flow::folder::rebuild_folder_link(
+        &app_url,
+        &master,
+        &share_id,
+        owner_wrapped_key.as_deref(),
+        owner_wrapped_token.as_deref(),
+        wrapped_folder_key.as_deref(),
+        passphrase_protected,
+    )
+    .map(|l| l.to_string()))
+}

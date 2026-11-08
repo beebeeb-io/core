@@ -244,3 +244,54 @@ impl FolderShare {
         }))
     }
 }
+
+/// Web `rebuildFolderLinkUrl`: the owner's working folder link from its owner copies (bound to the
+/// share id). For a link without a passphrase the stored `wrapped_folder_key` must open under
+/// `K_c`, so a link whose fragment would not open is never handed out. `None` on any failure.
+pub fn rebuild_folder_link(
+    app_url: &str,
+    master: &MasterKey,
+    share_id: &str,
+    owner_wrapped_key_b64: Option<&str>,
+    owner_wrapped_token_b64: Option<&str>,
+    wrapped_folder_key_b64: Option<&str>,
+    passphrase_protected: bool,
+) -> Option<Zeroizing<String>> {
+    use super::super::{b64_decode, split, unwrap_key_from_share};
+    let owner_key = b64_decode(owner_wrapped_key_b64.filter(|s| !s.is_empty())?).ok()?;
+    let owner_token = b64_decode(owner_wrapped_token_b64.filter(|s| !s.is_empty())?).ok()?;
+    let k_c = kdf::unwrap_link_owner_key(master, share_id.as_bytes(), &split(&owner_key).ok()?).ok()?;
+    if !passphrase_protected {
+        if let Some(wrapped) = wrapped_folder_key_b64.filter(|s| !s.is_empty()) {
+            let unwrap_key = Zeroizing::new(kdf::combine_folder_link_key(k_c.as_bytes(), None));
+            unwrap_key_from_share(&unwrap_key, &b64_decode(wrapped).ok()?).ok()?;
+        }
+    }
+    let token = kdf::unwrap_link_owner_token(master, share_id.as_bytes(), &split(&owner_token).ok()?).ok()?;
+    let token = Zeroizing::new(String::from_utf8(token.to_vec()).ok()?);
+    if token.is_empty() {
+        return None;
+    }
+    let fragment = Zeroizing::new(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(k_c.as_bytes()));
+    Some(Zeroizing::new(share_link::build_for(
+        app_url,
+        &token,
+        &fragment,
+        ShareRoute::Folder,
+    )))
+}
+
+/// `GET /api/v1/shares/folder-links?folder_id=…`: the folder's links (owner listing).
+pub fn list_folder_links_request(folder_id: &str) -> Result<HttpRequest, ShareFlowError> {
+    let id = super::super::path_id(folder_id).map_err(|_| ShareFlowError::InvalidInput("folder id"))?;
+    Ok(super::get(format!("{FOLDER_LINKS_PATH}?folder_id={id}")))
+}
+
+/// `DELETE /api/v1/shares/folder-links/{id}`: revoke a folder link.
+pub fn revoke_folder_link_request(share_id: &str) -> Result<HttpRequest, ShareFlowError> {
+    let id = super::super::path_id(share_id)?;
+    Ok(HttpRequest::delete(
+        format!("{FOLDER_LINKS_PATH}/{id}"),
+        RequestAuth::Session,
+    ))
+}
