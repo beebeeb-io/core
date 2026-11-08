@@ -34,6 +34,7 @@ beebeeb-core/   AES-256-GCM, Argon2id KDF (256MiB/4iter/2par), BIP39 recovery, H
   src/direct_transfer/       pure-Rust rules of the direct S3 transfer contract (no I/O, clock or runtime); vectors in test-vectors/direct_transfer.json
   src/direct_transfer/range/ RangePlanner, PieceCutter, RangeBudget, the in-flight split (C3); vectors in test-vectors/direct_range.json
   src/onboarding/            password policy, breach (k-anonymity) check, signup ceremony; src/opaque*.rs, recovery.rs
+  src/passkey/               passkey vault (PRF -> wrap key -> escrow blob, web's format), ceremony wire, flows over injected HTTP + platform call
   src/backup/                pure backup rules (LD-0113): protection, skip, device folders, manifest, root/merge, pass planner; vectors in test-vectors/consolidation/backup_*.json
 beebeeb-types/  CipherSuite, EncryptedBlob, KdfParams, ChunkMeta (shared across all repos)
 beebeeb-sync/   desktop sync engine: watcher (notify), conflicts (KeepBoth), selective sync
@@ -97,6 +98,7 @@ The rules whose breakage costs data, a key, a credential or a user. One line eac
 - Backups (LD-0121/0123): a rebuilt record needs `uploaded_at > modified + offset + margin` (10-minute floor with no offset), never "uploaded after the device's mtime" alone; `backup_stop`'s `last_pass_at` is on the server's clock, never the device's; a stopped backup never fills the account up again by itself.
 - Backups (LD-0121, Amendment 12d): a pass reads notices from `notices_since(last_pass_at)` with the 10-minute overlap and decides with `backup_pass_gate_v2`, never the strict v0.2.3 filter; the acknowledged ids it returns are stored in the same write as the stops, never before them, and an empty id never acknowledges anything.
 - Windows: a create, truncate, replace or delete by name never touches an entry whose own long name differs (an 8.3 short-name alias): `path_safety::short_name_alias`; `safe_child`/`safe_rel_join`/`default_output_path` refuse it, and every core writer goes through `path_safety::TempSibling` (exclusive temp; publish never replaces on Windows) (task 2404).
+- Passkey vault: web's format byte for byte (`test-vectors/passkey_vault.json` from web's TS); native hmac-secret callers pass `hmac_secret_salt()`, PRF-input APIs `prf_eval_input()`; no non-PRF fallback key, and no flow returns a PRF output, wrap key or blob to its caller.
 - Never release plaintext before `finish()` outside `RangeSession` (`beebeeb_transfer::range_session`); `RangeSession` releases only `RangeOpener`-authenticated frames of one recorded version (`docs/agent-notes.md`, I1–I9).
 
 ## How we work

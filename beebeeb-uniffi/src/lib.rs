@@ -13,6 +13,7 @@ use beebeeb_types::{CipherSuite, EncryptedBlob};
 
 uniffi::setup_scaffolding!();
 mod backup;
+mod passkey;
 mod request_seal;
 #[cfg(test)]
 mod folder_link_2237c {

@@ -29,6 +29,7 @@ pub mod onboarding;
 pub mod opaque;
 pub mod opaque_protocol;
 pub mod owned_keys;
+pub mod passkey;
 pub mod path_safety;
 pub mod pdf;
 pub mod recovery;
