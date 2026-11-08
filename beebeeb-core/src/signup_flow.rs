@@ -75,10 +75,18 @@ impl Default for SignupPolicy {
     }
 }
 
-fn own_https_url(v: Option<&serde_json::Value>) -> Option<String> {
+/// An `https` URL on Beebeeb's own domain: parsed, no credentials or port, and the HOST compared
+/// exactly (`beebeeb.io` or a subdomain), so `?`, `#`, `\\` or `@` tricks never pass a foreign host.
+pub(crate) fn own_https_url(v: Option<&serde_json::Value>) -> Option<String> {
     let s = v?.as_str()?;
-    let rest = s.strip_prefix("https://")?;
-    let host = rest.split('/').next()?;
+    let url = url::Url::parse(s).ok()?;
+    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() || url.port().is_some() {
+        return None;
+    }
+    let host = match url.host()? {
+        url::Host::Domain(d) => d,
+        _ => return None,
+    };
     (host == "beebeeb.io" || host.ends_with(".beebeeb.io")).then(|| s.to_owned())
 }
 

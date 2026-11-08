@@ -330,19 +330,34 @@ fn a_link_opens_for_the_recipient_and_rebuilds_for_the_owner() {
         &owner,
         body["owner_wrapped_key"].as_str(),
         body["owner_wrapped_token"].as_str(),
+        body["wrapped_file_key"].as_str(),
     )
     .unwrap();
     assert_eq!(*rebuilt, *link.link);
+    // A stored wrapped_file_key that does not open under this share's K_c: no link is handed out.
+    let foreign = b64(&super::wrap_key_for_share(&[9u8; 32], &[7u8; 32]).unwrap());
+    assert!(
+        rebuild_link(
+            APP,
+            &owner,
+            body["owner_wrapped_key"].as_str(),
+            body["owner_wrapped_token"].as_str(),
+            Some(&foreign),
+        )
+        .is_none(),
+        "the content key must open under the rebuilt K_c"
+    );
     assert!(
         rebuild_link(
             APP,
             &master(2),
             body["owner_wrapped_key"].as_str(),
-            body["owner_wrapped_token"].as_str()
+            body["owner_wrapped_token"].as_str(),
+            None,
         )
         .is_none()
     );
-    assert!(rebuild_link(APP, &owner, None, body["owner_wrapped_token"].as_str()).is_none());
+    assert!(rebuild_link(APP, &owner, None, body["owner_wrapped_token"].as_str(), None).is_none());
     assert!(!format!("{link:?}{flow:?}").contains(&token));
 }
 

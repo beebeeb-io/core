@@ -74,6 +74,7 @@ fn every_item_opens_under_the_links_k_c_and_the_owner_can_rebuild_it() {
         &m,
         body["owner_wrapped_key"].as_str(),
         body["owner_wrapped_token"].as_str(),
+        None,
     )
     .unwrap();
     assert_eq!(rebuilt.as_str(), created.link.as_str());

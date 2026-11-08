@@ -169,6 +169,16 @@ pub(crate) fn path_id(id: &str) -> Result<&str, ShareFlowError> {
     Ok(id)
 }
 
+/// An item id that is HKDF info or an invite match key: it must already be a canonical lower-case
+/// hyphenated UUID, else `InvalidInput(what)`. Never normalized: a different spelling of the same
+/// UUID would derive a different key and miss the server's invite rows (item-id "Never break").
+pub(crate) fn canonical_item_id<'a>(id: &'a str, what: &'static str) -> Result<&'a str, ShareFlowError> {
+    match uuid::Uuid::parse_str(id) {
+        Ok(u) if u.hyphenated().to_string() == id => Ok(id),
+        _ => Err(ShareFlowError::InvalidInput(what)),
+    }
+}
+
 pub(crate) fn frame(blob: EncryptedBlob) -> Vec<u8> {
     let mut out = Vec::with_capacity(blob.nonce.len() + blob.ciphertext.len());
     out.extend_from_slice(&blob.nonce);
