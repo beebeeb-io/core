@@ -51,8 +51,9 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 - `BackupConfigurationData` no longer has `managed_by`. Pass this device's folder under the Backups
   root (a device or category folder); the backup service checks its place below the row whose
   `system_role` is `backups_root` before it queues anything and refuses any other folder
-  (`invalid_input`). `ServiceError::Protected { message }` (kind `protected`) carries core's words when
-  a change under Backups is refused; show the message as it is.
+  (`invalid_input`). `ServiceError::Protected { detail }` (kind `protected`) carries core's words when
+  a change under Backups is refused; show them as they are. The field is `detail`, never `message`,
+  which would collide with Kotlin's `Exception.message`.
 
 - `RecoveryStateData` adds `Expired`: the server reports an attempt whose window to complete has passed
   as `expired`, and the status call returns that state instead of failing. Offer to start a new
