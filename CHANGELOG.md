@@ -407,6 +407,25 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   now require a one-shot authorization issued only after the service coordinator purges the old
   account's queues, caches, manifest, store, secrets and platform-owned data.
 
+## [0.2.4] - 2026-11-08
+
+Same API as v0.2.3, with `zip` moved from 8.6.0 to 9.4.1 (LD-0144). Nothing else changes in core: no item is renamed, retyped or
+removed, and `src/` is untouched.
+
+### Security
+
+- `beebeeb-core` uses `zip` 9.4.1 (was 8.6.0) for `beebeeb_core::zip`. This clears RUSTSEC-2026-0429, -0367, -0368 and
+  -0369, which are about `ZipArchive::extract` and `ZipStreamReader::extract`. Core writes archives (`ZipWriter`) and its
+  tests read them back with `ZipArchive::new`; `git grep` finds no `.extract(` and no `ZipStreamReader` in this workspace,
+  so none of the four was reachable here. A client that calls `zip` itself is not covered by that statement.
+- A five-entry archive (incompressible, compressible, several chunks, empty, nested paths) written by `zip` 8.6.0 and by
+  9.4.1 was byte-identical (342,915 bytes) in a one-off comparison on 2026-11-08; no test pins the bytes, so a later
+  `zip` 9.x is not covered by that statement. No API of core changes, and `mixed_payloads_roundtrip` is new: the other
+  zip tests use payloads of a few bytes.
+- `zip` 9 adds `nix` 0.31 to core's tree (macOS and BSD targets only) and moves `typed-path` from 0.12 to 0.13. It also
+  depends on `libc`, `windows-sys` 0.61 and `getrandom` 0.4, which core's lockfile already had. Every client's lockfile
+  re-resolves when it takes this core.
+
 ## [0.2.3] - 2026-11-07
 
 Additive on v0.2.2: the first pass's baseline and the pass gate when the notices could not be read (LD-0121, spec
