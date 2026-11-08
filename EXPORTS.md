@@ -28,72 +28,41 @@ Errors throw `JsError(code)`: `invalid_credentials`, `wrong_code`, `rate_limited
 
 ---
 
-# beebeeb-wasm / uniffi exports — branch `feat/LD-0121-notice-overlap`
+# beebeeb-wasm / uniffi exports — branch `feat/passkey-vault-primitive`
 
-LD-0121, spec `2026-11-06-backup-from-source-design.md` Amendment 12d (server
-#415 review finding 1; Guus 2026-11-08 03:16, "Go w recommended"): a backup
-pass reads the removal notices with a 10-minute overlap and remembers the
-notice ids it acted on. Ships as core v0.2.5. Measured against tag `v0.2.3`
-(`df93011`); tag `v0.2.4` (`1d1a335`, the zip 8 → 9 bump) changes no file
-under `src/` (`git diff --name-only v0.2.3 v0.2.4 -- '*/src/*'` is empty), so
-every count below holds against v0.2.4 too. Additive only: nothing in v0.2.4
-is renamed, retyped or removed; `backup_stop` / `backup_pass_gate`
-(`backupStop` / `backupPassGate`) keep their behaviour and are documented as
-superseded.
+B15 (desktop v2, passkeys; Guus 2026-11-08: the logic in core, only the platform call in each client). Measured
+against `124389a` (v0.2.7). Additive only: nothing is renamed, retyped or removed.
 
 ## WASM
 
-Counted from source: the `js_name = …` names in `beebeeb-wasm/src` of the
-v0.2.3 tree and of this branch, with `comm` over the sorted names. The
-generated `.d.ts` is type-checked by CI's WASM JS surface job.
+Counted from source: the unique `js_name = …` names under `beebeeb-wasm/src` (`grep -o | sort -u | wc -l`).
 
-- base (`v0.2.3`): 152 names
-- head: 156 names
+- base (`124389a`): 156 names
+- head: 162 names
 - **removed: 0**
-- **added: 4**
+- **added: 6**
 
 | Name | What |
 | --- | --- |
-| `backupNoticeOverlapMs()` | 600000: how far before `lastPassAtMs` a notice still counts (a notice's `created_at` is the start of the server transaction that wrote it, not its commit). |
-| `backupNoticesSince(lastPassAtMs)` | The `since` to send to `GET /api/v1/notifications` (inclusive, integer ms): `lastPassAtMs` minus the overlap, never below 0. A value that is not a whole number of milliseconds throws. |
-| `backupStopV2(notices, lastPassAtMs, acknowledged, listing)` | `{stopped: [{category, reason}], acknowledged: [id]}`. A notice (`{id, type, data, created_at_ms}`) counts when it is after `lastPassAtMs` minus the overlap and its `id` is not in `acknowledged`; `acknowledged` in the answer replaces the stored set. An `id` that is not a non-empty string is no id (never acknowledged). `acknowledged` may be `undefined`/`null`; a non-string entry throws. |
-| `backupPassGateV2(noticesFetchOk, notices, lastPassAtMs, acknowledged, listing)` | `{outcome: "run", stopped, acknowledged}` (as `backupStopV2`), or `{outcome: "check_failed"}` when the notices could not be read: keep both `lastPassAtMs` and the acknowledged set. |
+| `passkeyPrfEvalInput()` | The 32-byte `prf.eval.first` web passes (`beebeeb.io/vault-wrap-key/v1`, zero-padded). |
+| `passkeyWrapVaultKey(prfOutput, masterKey)` | The escrow blob `nonce(12) || ct(32) || tag(16)`; web's `encryptVaultBlob` format. |
+| `passkeyUnwrapVaultKey(prfOutput, blob)` | The 32-byte vault key; throws on a wrong PRF output, a changed byte or a blob that is not 60 bytes. |
+| `passkeyParseRegistrationStart(answerJson)` | `register-start`'s answer as `RegistrationStart` JSON. |
+| `passkeyParseAssertionStart(answerJson)` | `login-start`'s answer as `AssertionStart` JSON. |
+| `passkeyEscrowBody(credentialId, blob)` | The `vault-key-escrow` POST body. |
+
+Web keeps its TS (`src/lib/passkey-vault.ts`) until a later web task switches; the vectors prove parity.
 
 ## UniFFI
 
-Counted from source: the free functions directly under a `#[uniffi::export]`
-in `beebeeb-uniffi/src` of both trees, with `comm` over the sorted names (this
-scan counts v0.2.3 as 110; v0.2.3's own file said 111 by a scanner not in the
-repo; the delta is the same either way).
-
-- base (`v0.2.3`): 110 functions
-- head: 114 functions
 - **removed: 0**
-- **added: 4**
+- **added: 10** free functions (`passkey_prf_eval_input`, `passkey_hmac_secret_salt`, `passkey_wrap_vault_key`,
+  `passkey_unwrap_vault_key` → `MasterKeyHandle` (no raw key crosses), `passkey_parse_registration_start`,
+  `passkey_registration_finish_body`, `passkey_escrow_body`, `passkey_parse_assertion_start`,
+  `passkey_assertion_finish_body`, `passkey_parse_escrow`).
 
-| Function | What |
-| --- | --- |
-| `backup_notice_overlap_ms()` | `Int64`, as `backupNoticeOverlapMs` |
-| `backup_notices_since(last_pass_at_ms)` | `Int64`, as `backupNoticesSince` |
-| `backup_stop_v2(notices, last_pass_at_ms, acknowledged, listing)` | `throws -> BackupStopOutcome` (`stopped`, `acknowledged`); rows are `BackupNoticeRowV2` (`id: String?`, `kind`, `data_json`, `created_at_ms`); the listing parses as for `backup_stop` |
-| `backup_pass_gate_v2(notices_fetch_ok, notices, last_pass_at_ms, acknowledged, listing)` | `throws -> BackupPassGateV2` (`Run { stopped, acknowledged }` or `CheckFailed`) |
+The committed Kotlin bindings under `bindings/` are not regenerated here.
 
-The committed Kotlin bindings under `bindings/` are not regenerated here (they
-do not carry the v0.2.2/v0.2.3 backup functions either).
+## Rust
 
-## Rust (rustdoc JSON, private items included)
-
-Each item keyed by its path, ids replaced by the paths they point to, docs,
-spans, child lists and blanket/auto-trait impl members left out; `v0.2.3`
-against this branch, rustc 1.96.0 (`RUSTC_BOOTSTRAP=1`, separate target dirs
-per tree). Seen red: with the inputs swapped it reports `beebeeb_core` 43
-removed, and a head with `backup_stop`'s `last_pass_at_ms` retyped to `u64`
-reports 1 changed.
-
-| Crate | Added | Removed | Changed |
-| --- | --- | --- | --- |
-| `beebeeb_core` | 43 | 0 | 0 |
-| `beebeeb_types` | 0 | 0 | 0 |
-| `beebeeb_uniffi` | 124 | 0 | 0 |
-| `beebeeb_wasm` | 18 | 0 | 0 |
-| `beebeeb_backup` | 0 | 0 | 0 |
+New module `beebeeb_core::passkey` (`ceremony`, `flow`); no existing item changed.
