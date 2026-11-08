@@ -106,6 +106,14 @@ pub fn encrypt_file_to_chunks(
     // Safe cast: from_reader already validated chunk_count fits in u32.
     let chunk_count = plan.chunk_count as u32;
 
+    // Before any chunk is written, no chunk name or its temp name may reach a
+    // DIFFERENT existing file through an 8.3 short name (task 2404), so a
+    // refusal leaves no partial chunk set behind.
+    for index in 0..chunk_count {
+        crate::path_safety::refuse_alias_at(&output_dir.join(format!("{index}.enc")))?;
+        crate::path_safety::refuse_alias_at(&output_dir.join(format!("{index}.enc.tmp")))?;
+    }
+
     let mut chunks = Vec::with_capacity(chunk_count as usize);
     let mut total_plaintext: u64 = 0;
     let mut total_ciphertext: u64 = 0;
@@ -117,12 +125,9 @@ pub fn encrypt_file_to_chunks(
         let nonce = encrypted[..NONCE_LEN].to_vec();
         let plaintext_size = ciphertext_size - (NONCE_LEN + TAG_LEN) as u64;
 
-        // Write to .tmp then atomic rename to .enc. On Windows neither name may
-        // reach a DIFFERENT existing file through an 8.3 short name (task 2404).
+        // Write to .tmp then atomic rename to .enc
         let enc_path = output_dir.join(format!("{chunk_index}.enc"));
         let tmp_path = output_dir.join(format!("{chunk_index}.enc.tmp"));
-        crate::path_safety::refuse_alias_at(&enc_path)?;
-        crate::path_safety::refuse_alias_at(&tmp_path)?;
 
         let mut writer =
             BufWriter::new(File::create(&tmp_path).map_err(|e| CoreError::Io(format!("create chunk file: {e}")))?);
@@ -132,7 +137,11 @@ pub fn encrypt_file_to_chunks(
         writer.flush().map_err(|e| CoreError::Io(format!("flush chunk: {e}")))?;
         drop(writer);
 
-        // Atomic rename
+        // Atomic rename, after checking the final name once more (task 2404).
+        if let Err(refused) = crate::path_safety::refuse_alias_at(&enc_path) {
+            fs::remove_file(&tmp_path).ok();
+            return Err(refused);
+        }
         fs::rename(&tmp_path, &enc_path).map_err(|e| CoreError::Io(format!("rename chunk: {e}")))?;
 
         total_plaintext += plaintext_size;
@@ -220,7 +229,12 @@ pub fn decrypt_chunks_to_file(
 
     // Stream into a sibling .tmp, renamed over output_path on success only;
     // on ANY Err the .tmp is removed so no partial plaintext survives.
-    let tmp_path = output_path.with_extension("tmp");
+    // `{output_path}.tmp`, as documented above. (It was `with_extension("tmp")`,
+    // which IS the output for `notes.tmp`, so a failed decrypt truncated and
+    // then deleted that file, and `a.pdf` and `a.doc` shared one temp file.)
+    let mut tmp_name = output_path.as_os_str().to_owned();
+    tmp_name.push(".tmp");
+    let tmp_path = PathBuf::from(tmp_name);
     let (total_bytes, chunks_processed) = crate::path_safety::write_through_tmp(output_path, &tmp_path, || {
         decrypt_chunks_to_tmp(&file_key, file_id, expected, chunk_paths, &tmp_path, callback)
     })?;
@@ -748,7 +762,7 @@ mod tests {
         fs::write(second_chunk, &raw).unwrap();
 
         let output_path = dir.join("output.bin");
-        let tmp_path = output_path.with_extension("tmp");
+        let tmp_path = dir.join("output.bin.tmp");
         // Ensure no stale artifacts mask the assertion.
         let _ = fs::remove_file(&output_path);
         let _ = fs::remove_file(&tmp_path);
@@ -770,6 +784,35 @@ mod tests {
         );
         assert!(!tmp_path.exists(), "no .tmp artifact may remain after a failed decrypt");
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The temp file is `{output}.tmp`, never the output itself: a failed
+    /// decrypt to an existing `notes.tmp` leaves that file as it was.
+    #[test]
+    fn a_failed_decrypt_never_touches_an_existing_output_named_tmp() {
+        let mk = test_master_key();
+        let dir = std::env::temp_dir().join(format!("beebeeb_file_encrypt_tmp_output_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let output_path = dir.join("notes.tmp");
+        fs::write(&output_path, b"the previous notes").unwrap();
+        // A chunk that never authenticates: a nonce and a tag of zeros.
+        let chunk = dir.join("0.enc");
+        fs::write(&chunk, [0u8; NONCE_LEN + TAG_LEN + 4]).unwrap();
+
+        let res = decrypt_chunks_to_file(
+            &mk,
+            "tmp-output",
+            ExpectedChunkFormat::Unrecorded,
+            &[chunk.as_path()],
+            &output_path,
+            None,
+        );
+
+        assert!(res.is_err(), "a chunk that does not authenticate must fail");
+        assert_eq!(fs::read(&output_path).unwrap(), b"the previous notes");
+        assert!(!dir.join("notes.tmp.tmp").exists(), "no .tmp artifact may remain");
         let _ = fs::remove_dir_all(&dir);
     }
 

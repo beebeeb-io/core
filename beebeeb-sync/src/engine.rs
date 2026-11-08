@@ -172,7 +172,7 @@ impl SyncEngine {
                     // state entry once the on-disk file is actually gone, so a
                     // transient fs error retries next cycle instead of resurrecting.
                     if self.delete_local_file(p) {
-                        info!(path = %p.display(), "deleted locally (removed remotely)");
+                        info!(path = %p.display(), "local copy gone (removed remotely)");
                         self.state.files.remove(p);
                     }
                 }
@@ -415,13 +415,18 @@ impl SyncEngine {
     /// On Windows `rel` may reach a DIFFERENT file through an 8.3 short name
     /// (task 2404). That file is never deleted: `rel`'s own file is not on disk,
     /// which is success, as `NotFound` is. On every host a `rel` that is not a
-    /// relative path of plain names (`..`, absolute) is never deleted either.
+    /// relative path of plain names (`..`, absolute) is never deleted either:
+    /// it can never name a file below the vault, so its row is dropped.
     fn delete_local_file(&self, rel: &Path) -> bool {
         let abs = self.config.vault_path.join(rel);
         match beebeeb_core::path_safety::short_name_alias(&self.config.vault_path, rel) {
             Ok(None) => {}
             Ok(Some(conflict)) => {
                 warn!(path = %abs.display(), %conflict, "not deleting: the name reaches a different file");
+                return true;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => {
+                warn!(path = %abs.display(), error = %e, "not deleting: not a path below the vault");
                 return true;
             }
             Err(e) => {
@@ -714,6 +719,10 @@ mod tests {
             fs::read_to_string(&outside).unwrap(),
             "keep",
             "a file outside the vault must survive"
+        );
+        assert!(
+            !engine.state.files.contains_key(&rel),
+            "a row that can never name a vault file is dropped"
         );
     }
 

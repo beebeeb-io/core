@@ -50,24 +50,6 @@ impl Drop for Scratch {
     }
 }
 
-/// The current directory, restored on drop (declare it after the `Scratch` it
-/// enters, so it is restored before the scratch directory is removed).
-struct CurrentDir(PathBuf);
-
-impl CurrentDir {
-    fn enter(dir: &Path) -> Self {
-        let previous = std::env::current_dir().expect("current dir");
-        std::env::set_current_dir(dir).expect("enter scratch dir");
-        Self(previous)
-    }
-}
-
-impl Drop for CurrentDir {
-    fn drop(&mut self) {
-        let _ = std::env::set_current_dir(&self.0);
-    }
-}
-
 fn entries(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .expect("list directory")
@@ -265,20 +247,61 @@ fn safe_rel_join_never_walks_through_another_entrys_short_name() {
     }
 }
 
+/// `default_output_path` resolves against the current directory. Changing it
+/// in this process would move it under every test running in parallel, so the
+/// check runs in a child process of this test binary started IN the scratch
+/// directory: the child is [`default_output_path_child`], selected by its full
+/// name and switched on by `BB_SHORT_NAME_CWD_CHILD`.
 #[test]
 fn default_output_path_never_names_another_file_in_the_current_directory() {
     let scratch = Scratch::new("cwd");
     let Some(alias) = aliased_file(scratch.path(), "Report for 2026.pdf") else {
         return;
     };
-    // Only this test changes the current directory, and every other test in
-    // this binary uses absolute paths.
-    let _cwd = CurrentDir::enter(scratch.path());
+    let child = Command::new(std::env::current_exe().expect("this test binary"))
+        .args([
+            "--exact",
+            "windows_short_names::default_output_path_child",
+            "--nocapture",
+        ])
+        .env("BB_SHORT_NAME_CWD_CHILD", &alias)
+        .current_dir(scratch.path())
+        .output()
+        .expect("run the child test");
+    let stdout = String::from_utf8_lossy(&child.stdout);
+    let stderr = String::from_utf8_lossy(&child.stderr);
+    assert!(child.status.success(), "the child failed:\n{stdout}\n{stderr}");
+    // A filter that matched nothing would also exit 0: require the one test
+    // and the line only its switched-on body prints.
+    assert!(
+        stdout.contains("test result: ok. 1 passed"),
+        "the child ran no test:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("child checked"),
+        "the child's check did not run:\n{stdout}"
+    );
+    assert_eq!(entries(scratch.path()), ["Report for 2026.pdf"]);
+}
+
+/// The child half of the test above: returns at once unless that test started
+/// it (with its current directory set to the scratch directory).
+#[test]
+fn default_output_path_child() {
+    let Some(alias) = std::env::var_os("BB_SHORT_NAME_CWD_CHILD") else {
+        return;
+    };
+    let alias = alias.into_string().expect("UTF-8 short name");
     let error = default_output_path(&alias).expect_err("a short name of another file is a name conflict");
     assert!(error.contains("8.3"), "{alias}: not the short-name refusal: {error}");
+    assert!(
+        error.contains("pass -o"),
+        "{alias}: the refusal must say how to go on: {error}"
+    );
     for own in ["Report for 2026.pdf", "report FOR 2026.PDF", "new.pdf"] {
         default_output_path(own).unwrap_or_else(|error| panic!("{own}: {error}"));
     }
+    println!("child checked {alias}");
 }
 
 #[test]
@@ -313,11 +336,12 @@ fn file_decrypt_chunks_to_file_never_replaces_another_file_through_its_short_nam
 
 #[test]
 fn file_decrypt_chunks_to_file_never_truncates_another_file_through_its_tmp_name() {
-    // This path's temp file is `output.with_extension("tmp")`.
+    // The temp file is `{output}.tmp` (v0.2.6 wrote `output.with_extension("tmp")`,
+    // which is the same name for an output without an extension).
     assert_refused(
         "chunk-files-tmp",
         "Report for 2026.tmp",
-        |alias| format!("{}.pdf", stem_of_tmp_alias(alias)),
+        stem_of_tmp_alias,
         chunk_files_to,
     );
 }

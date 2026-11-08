@@ -368,7 +368,8 @@ mod native {
         })?;
         let path = PathBuf::from(name);
         reject_symlink(&path)?;
-        short_name::refuse_alias(Path::new("."), &path)?;
+        short_name::refuse_alias(Path::new("."), &path)
+            .map_err(|e| format!("{e}; pass -o <path> to choose where to save it"))?;
         Ok(path)
     }
 }

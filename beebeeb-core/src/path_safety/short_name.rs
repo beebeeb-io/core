@@ -45,12 +45,21 @@ impl fmt::Display for ShortNameAlias {
 impl std::error::Error for ShortNameAlias {}
 
 /// One UTF-16 code unit upper-cased the way NTFS compares names: its upcase
-/// table maps each code unit to one code unit. A letter whose uppercase is
-/// several letters (`ß` → `SS`) or lies outside the Basic Multilingual Plane
-/// stays as it is, and so does a surrogate (characters outside the BMP are
-/// compared exactly).
+/// table holds the Unicode SIMPLE uppercase of each code unit, one unit for
+/// one. A letter without a one-letter uppercase (`ß`, whose full uppercase is
+/// `SS`) or whose uppercase lies outside the Basic Multilingual Plane stays as
+/// it is, and so does a surrogate (characters outside the BMP are compared
+/// exactly).
 #[cfg_attr(not(windows), allow(dead_code))] // the Windows lookup; tests everywhere
 fn upcase_unit(unit: u16) -> u16 {
+    // The 27 BMP letters whose full uppercase is two letters but whose simple
+    // uppercase is one: Greek with ypogegrammeni (`ᾳ` → `ᾼ`). `char` has only
+    // the full mapping.
+    match unit {
+        0x1F80..=0x1F87 | 0x1F90..=0x1F97 | 0x1FA0..=0x1FA7 => return unit + 8,
+        0x1FB3 | 0x1FC3 | 0x1FF3 => return unit + 9,
+        _ => {}
+    }
     let Some(c) = char::from_u32(u32::from(unit)) else {
         return unit;
     };
@@ -94,23 +103,29 @@ fn lookup(dir: &Path, name: &std::ffi::OsStr) -> io::Result<Lookup> {
         Err(error) => return Err(error),
     };
     let own = |long: &std::ffi::OsStr| is_own_name(name.encode_wide(), long.encode_wide());
-    let mut existing = None;
     // `canonicalize` opens the entry the name reaches and asks that handle for
     // its normalized path (GetFinalPathNameByHandleW), whose last component is
-    // the entry's own long name. It opens THROUGH a link, so a link's own name
-    // is not in that answer: a link goes straight to the listing.
+    // the entry's own long name: that answer is final. It opens THROUGH a
+    // link, so a link's own name is not in it: a link, or an entry the handle
+    // cannot be opened for, goes to the listing instead.
     if !meta.file_type().is_symlink()
         && let Ok(canonical) = std::fs::canonicalize(&path)
         && let Some(long) = canonical.file_name()
     {
-        if own(long) {
-            return Ok(Lookup::Own);
-        }
-        existing = Some(long.to_string_lossy().into_owned());
+        return Ok(if own(long) {
+            Lookup::Own
+        } else {
+            Lookup::Alias(ShortNameAlias {
+                requested: name.to_string_lossy().into_owned(),
+                existing: Some(long.to_string_lossy().into_owned()),
+            })
+        });
     }
     // The listing holds every entry's long name. An entry listed under `name`
     // is the entry `name` reaches (a directory never holds a short name equal
     // to another entry's long name); with none, `name` reached another entry.
+    // (In a folder made case-sensitive, a link's short name could still match
+    // another entry's long name in a different case: a limit of the listing.)
     let listed = if dir.as_os_str().is_empty() {
         Path::new(".")
     } else {
@@ -123,7 +138,7 @@ fn lookup(dir: &Path, name: &std::ffi::OsStr) -> io::Result<Lookup> {
     }
     Ok(Lookup::Alias(ShortNameAlias {
         requested: name.to_string_lossy().into_owned(),
-        existing,
+        existing: None,
     }))
 }
 
@@ -294,6 +309,10 @@ mod tests {
             ("ÄRGER.TXT", "ärger.txt"),
             ("ΣΟΦΊΑ", "σοφία"),
             ("ǅ", "ǆ"),
+            // Simple uppercase, not full: `ᾳ` is `ᾼ` (full uppercase `ΑΙ`).
+            ("ᾳ.txt", "ᾼ.txt"),
+            ("ᾀ", "ᾈ"),
+            ("ῳ", "ῼ"),
             ("\u{10400}.txt", "\u{10400}.TXT"),
         ] {
             assert!(decide(requested, existing), "{requested} is {existing}'s own name");

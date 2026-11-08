@@ -23,8 +23,11 @@ Additive: no public item is renamed, retyped or removed.
     file: `CoreError::InvalidInput` naming the conflict. beebeeb-upload's downloads do the same
     (`UploadError::InvalidInput`).
   - beebeeb-sync's remote delete never deletes the file such a name reaches.
-  - Other hosts: no extra file-system calls, and no change but one: beebeeb-sync's remote delete now refuses a state
-    path that is not a relative path of plain names (`..`, absolute) instead of deleting `vault/<path>`.
+  - Other hosts: no extra file-system calls, and no change but two: beebeeb-sync's remote delete drops a state row that
+    is not a relative path of plain names (`..`, absolute) instead of deleting `vault/<path>`, and the item below.
+- **`file_encrypt::decrypt_chunks_to_file` writes `{output_path}.tmp`, as its docs say** (it wrote
+  `output_path.with_extension("tmp")`, which is the output itself for `notes.tmp`: a failed decrypt truncated and then
+  deleted that file, and `a.pdf` and `a.doc` in one folder shared one temp file).
 
 ### Added
 

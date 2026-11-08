@@ -292,14 +292,17 @@ A range session serves reads at any offset while the download runs (desktop Wind
 Windows resolves a name against both the long names and the 8.3 short names of a directory, so a server name can reach
 an existing entry with a different long name. `path_safety::short_name_alias(base, rel)` walks `rel` below `base` and
 returns a typed `ShortNameAlias` for the first existing component whose entry's own long name differs (NTFS
-comparison: case-insensitive per UTF-16 unit). The long name comes from the file system (`canonicalize` on the opened
-handle, else the directory listing; a link always goes to the listing), never from the shape of the name. `base` is
+comparison: Unicode simple uppercase per UTF-16 unit; `char` has only the full mapping, so the 27 Greek letters with
+ypogegrammeni are mapped by hand). The long name comes from the file system: `canonicalize` on the opened handle, whose
+answer is final; only a link (opened through) or an entry that cannot be opened goes to the directory listing. Never
+from the shape of the name. `base` is
 trusted: a user-chosen root may be written in short form. On every other host it is `Ok(None)` without disk access.
 
 - `safe_child`, `safe_rel_join` (every segment) and `default_output_path` refuse such a name (their `String` error).
 - Core's own writes refuse it before creating anything: `encrypt::decrypt_chunks_to_file` /
   `decrypt_contiguous_to_file` and `file_encrypt::decrypt_chunks_to_file` (through `path_safety::write_through_tmp`,
-  which checks the output and the `.tmp`, and the output again before the rename), `file_encrypt::encrypt_file_to_chunks`,
+  which checks the output and the `{output}.tmp`, and the output again before the rename),
+  `file_encrypt::encrypt_file_to_chunks` (every chunk name before the first write, and each again before its rename),
   and beebeeb-upload's `{output}.tmp`. In `CoreError` it is `InvalidInput` naming the conflict (no new variant in a
   patch release). beebeeb-sync's remote delete never deletes the entry an alias reaches.
 - A caller with a conflict path ("(2)", a conflict copy) calls `short_name_alias` first and takes that path on
