@@ -13,11 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   -0369, which are about `ZipArchive::extract` and `ZipStreamReader::extract`. Core writes archives (`ZipWriter`) and its
   tests read them back with `ZipArchive::new`; `git grep` finds no `.extract(` and no `ZipStreamReader` in this workspace,
   so none of the four was reachable here. A client that calls `zip` itself is not covered by that statement.
-- The archive core writes is byte for byte the one zip 8.6.0 wrote for the same entries (checked on five entries:
-  incompressible, compressible, several chunks, empty, nested paths; 342,915 bytes, `unzip -t` clean). No API of core
-  changes, and `mixed_payloads_roundtrip` is new: the other zip tests use payloads of a few bytes.
-- `zip` 9 brings `nix` (macOS and BSD targets), `libc` (unix), `windows-sys` (Windows), `getrandom` 0.4 and `typed-path`
-  0.13 into the tree. Core uses none of them itself, and every client's lockfile re-resolves when it takes this core.
+- A five-entry archive (incompressible, compressible, several chunks, empty, nested paths) written by `zip` 8.6.0 and by
+  9.4.1 was byte-identical (342,915 bytes) in a one-off comparison on 2026-11-08; no test pins the bytes, so a later
+  `zip` 9.x is not covered by that statement. No API of core changes, and `mixed_payloads_roundtrip` is new: the other
+  zip tests use payloads of a few bytes.
+- `zip` 9 adds `nix` 0.31 to core's tree (macOS and BSD targets only) and moves `typed-path` from 0.12 to 0.13. It also
+  depends on `libc`, `windows-sys` 0.61 and `getrandom` 0.4, which core's lockfile already had. Every client's lockfile
+  re-resolves when it takes this core.
 
 ## [0.2.3] - 2026-11-07
 

@@ -287,8 +287,9 @@ fn incompressible(len: usize, seed: u64) -> Vec<u8> {
 }
 
 /// The entries of [`mixed_payloads_roundtrip`]: several chunks per file, incompressible and compressible, an empty
-/// file, nested paths. LD-0144: zip 9 reuses its DEFLATE compressor across entries and writes entry attributes
-/// differently, which five fixtures of a few bytes each cannot show.
+/// file, nested paths. LD-0144: zip 9 reuses its DEFLATE compressor across entries, which the six other tests, with
+/// payloads of a few bytes, cannot show. Core's writer has one compression level, so this does not cover a switch
+/// between levels (where that cache is reset).
 fn mixed_payloads() -> Vec<(&'static str, Vec<Vec<u8>>)> {
     let text: Vec<u8> = b"the quick brown fox jumps over the lazy dog\n"
         .iter()
