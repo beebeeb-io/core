@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`zip::stream_folder_zip` (LD-0146); no signature or type changes.**
+  - An entry of 4 GiB or more no longer fails the archive partway ("Large file option has not been set"): an entry whose
+    `size_bytes` is 3 GiB or more is written as ZIP64. Smaller entries keep the layout they had.
+  - A cancelled or failed archive is no longer a valid-looking, shorter zip. The dropped `ZipWriter` used to finish
+    the current entry with a short CRC and write a central directory; the writer is now sealed on every exit but the
+    finished archive (an `Err`, a cancel, a panic in a callback), so the output has no central directory and no reader
+    opens it as complete. The caller still deletes the file on `Err`. The zip crate reports the refused footer on
+    stderr (`ZipWriter::drop: failed to finalize archive: ...`, with no trailing newline); core cannot silence it.
+  - Two entries with the same path no longer abort the archive: the later one is stored as `name (2).ext`,
+    `name (3).ext`, ... (the cli's rule), compared case- and normalisation-insensitively, as macOS and Windows extract.
+    An entry's own name is never taken by a rename.
+  - `ZipProgress::bytes_done` counts plaintext, like `bytes_total`, so the last event is 100% (it counted ciphertext
+    and ended above it).
+
 ## [0.3.0] - Unreleased
 
 This is a breaking pre-1.0 release. The changes below are grouped by the people who must act.

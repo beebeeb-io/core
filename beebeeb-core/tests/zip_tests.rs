@@ -412,3 +412,417 @@ fn mixed_payloads_roundtrip() {
         assert!(got == want, "{path}: {} bytes read, {} written", got.len(), want.len());
     }
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// LD-0146: large entries, an unfinished archive, duplicate names, progress units.
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The only place these tests build a `ZipEntry`, so a new field is one edit.
+fn entry_for(path: &str, file_id: &str, chunk_count: u32, size_bytes: u64) -> ZipEntry {
+    ZipEntry {
+        path: path.to_string(),
+        file_id: file_id.to_string(),
+        chunk_count,
+        size_bytes,
+        chunk_format: ExpectedChunkFormat::Unrecorded,
+        // 0.3.0: no commitment, so only the v1 frames `encrypt_chunks` writes open.
+        version: None,
+    }
+}
+
+/// A source of encrypted chunks, `file_id` -> frames, for [`stream_folder_zip`]'s `fetch_chunk`.
+type Source = std::collections::HashMap<String, Vec<Vec<u8>>>;
+
+fn fetch_from(source: &Source) -> impl FnMut(&str, u32) -> Result<Vec<u8>, CoreError> + '_ {
+    move |fid, idx| Ok(source[fid][idx as usize].clone())
+}
+
+/// A text payload that is the same on every run and has no zip signature in it.
+fn text_chunk(label: &str, len: usize) -> Vec<u8> {
+    format!("{label} line of text\n")
+        .into_bytes()
+        .into_iter()
+        .cycle()
+        .take(len)
+        .collect()
+}
+
+/// Item 1: an entry past the 4 GiB ZIP64 threshold. The source is one 64 MiB frame of zeros that the mock reader
+/// serves 65 times (a v1 frame carries no position, so the decryptor takes the same frame again); DEFLATE shrinks
+/// the zeros, so the 4 GiB archive is a few MiB in memory and nothing large touches the disk.
+///
+/// It decrypts 4 GiB through a debug build, which takes about five minutes (289 s on an Apple-silicon Mac, 352 s on a
+/// GitHub runner), so it is opt-in: `cargo test -p beebeeb-core --test zip_tests -- --ignored entry_above_4_gib`. Run
+/// it before changing the ZIP64 rules; `zip64_is_chosen_from_three_gib_declared` covers the decision on every run.
+#[test]
+#[ignore = "decrypts 4 GiB in a debug build (about 5 minutes); run with --ignored"]
+fn entry_above_4_gib_completes_as_zip64() {
+    const CHUNK: usize = 64 * 1024 * 1024;
+    const CHUNKS: u32 = 65;
+    let mk = test_master_key();
+    let frame = encrypt_chunks(&mk, "big-file", &[vec![0u8; CHUNK].as_slice()]).remove(0);
+    let size = CHUNK as u64 * u64::from(CHUNKS);
+    assert!(size > u64::from(u32::MAX), "the fixture must pass the ZIP64 threshold");
+
+    let entries = vec![entry_for("big.bin", "big-file", CHUNKS, size)];
+    let mut fetch = |_: &str, _: u32| -> Result<Vec<u8>, CoreError> { Ok(frame.clone()) };
+    let mut buf = Vec::new();
+    let result = stream_folder_zip(
+        &mk,
+        &entries,
+        &mut fetch,
+        Cursor::new(&mut buf),
+        &|_| {},
+        &AtomicBool::new(false),
+    );
+    assert!(result.is_ok(), "a 4 GiB entry must complete, got: {result:?}");
+
+    let mut archive = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    assert_eq!(archive.len(), 1);
+    let mut file = archive.by_index(0).unwrap();
+    assert_eq!(file.size(), size, "declared size");
+    // The reader checks the CRC-32 when it reaches the end of the entry.
+    let read = std::io::copy(&mut file, &mut std::io::sink()).unwrap();
+    assert_eq!(read, size, "bytes read back");
+}
+
+/// The `version needed to extract` of a five-byte entry whose `size_bytes` says `declared`: 45 is ZIP64, 20 is the
+/// plain layout every reader opens.
+fn version_needed_when_declared(declared: u64) -> u16 {
+    let mk = test_master_key();
+    let mut source = Source::new();
+    source.insert("tiny".into(), encrypt_chunks(&mk, "tiny", &[b"tiny!".as_slice()]));
+    let entries = vec![entry_for("tiny.bin", "tiny", 1, declared)];
+    let mut fetch = fetch_from(&source);
+    let mut buf = Vec::new();
+    stream_folder_zip(
+        &mk,
+        &entries,
+        &mut fetch,
+        Cursor::new(&mut buf),
+        &|_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    let mut archive = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let file = archive.by_index(0).unwrap();
+    file.version_needed()
+}
+
+/// Item 1, fast: the layout follows the entry's declared size. From 3 GiB it is ZIP64 (the 1 GiB below `u32::MAX`
+/// is the margin for DEFLATE growth and a size that is only the server's word); below it nothing changes, so the
+/// archives of everyday folders stay readable by every tool.
+#[test]
+fn zip64_is_chosen_from_three_gib_declared() {
+    const THREE_GIB: u64 = 3 << 30;
+    assert_eq!(version_needed_when_declared(0), 20, "an empty declaration");
+    assert_eq!(version_needed_when_declared(THREE_GIB - 1), 20, "just below 3 GiB");
+    assert_eq!(version_needed_when_declared(THREE_GIB), 45, "3 GiB");
+    assert_eq!(version_needed_when_declared(u64::from(u32::MAX) + 1), 45, "4 GiB");
+}
+
+/// What a reader must refuse: output that stopped before the archive was finished.
+fn assert_unfinished(buf: &[u8], what: &str) {
+    assert!(
+        !buf.is_empty(),
+        "{what}: the fixture wrote nothing, so it proves nothing"
+    );
+    assert!(
+        zip::ZipArchive::new(Cursor::new(buf)).is_err(),
+        "{what}: a reader accepts the {}-byte output as a complete archive",
+        buf.len()
+    );
+    for (record, signature) in [
+        ("end of central directory", b"PK\x05\x06"),
+        ("central directory header", b"PK\x01\x02"),
+    ] {
+        assert!(
+            !buf.windows(4).any(|w| w == signature),
+            "{what}: the output holds a {record} record"
+        );
+    }
+}
+
+/// Two entries: `first.txt` (one chunk of 4,000 bytes) and `second.txt` (three chunks of 3,000), each declaring the
+/// size in `declared`.
+fn two_entries_declared(declared: [u64; 2]) -> (MasterKey, Vec<ZipEntry>, Source) {
+    let mk = test_master_key();
+    let first = text_chunk("first", 4_000);
+    let parts: Vec<Vec<u8>> = (0..3).map(|i| text_chunk(&format!("second {i}"), 3_000)).collect();
+    let part_refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+    let mut source = Source::new();
+    source.insert("f1".into(), encrypt_chunks(&mk, "f1", &[first.as_slice()]));
+    source.insert("f2".into(), encrypt_chunks(&mk, "f2", &part_refs));
+    let entries = vec![
+        entry_for("first.txt", "f1", 1, declared[0]),
+        entry_for("second.txt", "f2", 3, declared[1]),
+    ];
+    (mk, entries, source)
+}
+
+fn two_entries() -> (MasterKey, Vec<ZipEntry>, Source) {
+    two_entries_declared([4_000, 9_000])
+}
+
+/// Item 2: cancelled in the middle of an entry.
+#[test]
+fn cancel_mid_entry_leaves_no_readable_archive() {
+    let (mk, entries, source) = two_entries();
+    let cancel = AtomicBool::new(false);
+    let mut inner = fetch_from(&source);
+    let mut fetched = 0;
+    let mut fetch = |fid: &str, idx: u32| {
+        fetched += 1;
+        if fetched == 3 {
+            cancel.store(true, Ordering::Relaxed); // the second chunk of `second.txt`
+        }
+        inner(fid, idx)
+    };
+    let mut buf = Vec::new();
+    let result = stream_folder_zip(&mk, &entries, &mut fetch, Cursor::new(&mut buf), &|_| {}, &cancel);
+    assert!(matches!(result, Err(CoreError::Cancelled)), "got {result:?}");
+    assert_unfinished(&buf, "cancel mid-entry");
+}
+
+/// Item 2: cancelled between two entries, after the first one was complete.
+#[test]
+fn cancel_between_entries_leaves_no_readable_archive() {
+    let (mk, entries, source) = two_entries();
+    let cancel = AtomicBool::new(false);
+    let mut fetch = fetch_from(&source);
+    let mut buf = Vec::new();
+    let on_progress = |p: &ZipProgress| {
+        if p.file_index == 0 {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    };
+    let result = stream_folder_zip(&mk, &entries, &mut fetch, Cursor::new(&mut buf), &on_progress, &cancel);
+    assert!(matches!(result, Err(CoreError::Cancelled)), "got {result:?}");
+    assert_unfinished(&buf, "cancel between entries");
+}
+
+/// Item 2: the download of a chunk fails.
+#[test]
+fn fetch_error_leaves_no_readable_archive() {
+    let (mk, entries, source) = two_entries();
+    let mut inner = fetch_from(&source);
+    let mut fetch = |fid: &str, idx: u32| {
+        if fid == "f2" && idx == 1 {
+            return Err(CoreError::Io("connection reset".into()));
+        }
+        inner(fid, idx)
+    };
+    let mut buf = Vec::new();
+    let result = stream_folder_zip(
+        &mk,
+        &entries,
+        &mut fetch,
+        Cursor::new(&mut buf),
+        &|_| {},
+        &AtomicBool::new(false),
+    );
+    assert!(matches!(result, Err(CoreError::Io(_))), "got {result:?}");
+    assert_unfinished(&buf, "fetch error");
+}
+
+/// Item 2: a chunk that does not authenticate.
+#[test]
+fn corrupt_chunk_leaves_no_readable_archive() {
+    let (mk, entries, mut source) = two_entries();
+    let frame = &mut source.get_mut("f2").unwrap()[1];
+    let last = frame.len() - 1;
+    frame[last] ^= 0x01;
+    let mut fetch = fetch_from(&source);
+    let mut buf = Vec::new();
+    let result = stream_folder_zip(
+        &mk,
+        &entries,
+        &mut fetch,
+        Cursor::new(&mut buf),
+        &|_| {},
+        &AtomicBool::new(false),
+    );
+    assert!(result.is_err(), "a corrupt chunk must fail the archive");
+    assert_unfinished(&buf, "corrupt chunk");
+}
+
+/// Item 2: a panic in the caller's callback unwinds through the writer, which must not finish the archive either.
+#[test]
+fn panic_in_progress_callback_leaves_no_readable_archive() {
+    let (mk, entries, source) = two_entries();
+    let mut fetch = fetch_from(&source);
+    let mut buf = Vec::new();
+    let on_progress = |p: &ZipProgress| {
+        if p.file_index == 1 {
+            panic!("progress callback failed");
+        }
+    };
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = stream_folder_zip(
+            &mk,
+            &entries,
+            &mut fetch,
+            Cursor::new(&mut buf),
+            &on_progress,
+            &AtomicBool::new(false),
+        );
+    }));
+    assert!(unwound.is_err(), "the fixture must panic");
+    assert_unfinished(&buf, "panic in the progress callback");
+}
+
+/// Item 4 relies on this: a zero-chunk entry never reaches a finished archive (`ChunkDecryptor::finish` errors when
+/// no frame was pushed), so the progress total is only ever corrected from an entry's last chunk.
+#[test]
+fn zero_chunk_entry_fails_the_archive() {
+    let (mk, mut entries, source) = two_entries();
+    entries.push(entry_for("none.bin", "f1", 0, 28));
+    let mut fetch = fetch_from(&source);
+    let mut buf = Vec::new();
+    let result = stream_folder_zip(
+        &mk,
+        &entries,
+        &mut fetch,
+        Cursor::new(&mut buf),
+        &|_| {},
+        &AtomicBool::new(false),
+    );
+    assert!(
+        result.is_err(),
+        "a zero-chunk entry must fail the archive, got {result:?}"
+    );
+    assert_unfinished(&buf, "zero-chunk entry");
+}
+
+/// The names of the archive made from entries at `paths`, in order; every entry reads the same one-chunk file.
+fn archive_names(paths: &[&str]) -> Vec<String> {
+    let mk = test_master_key();
+    let mut source = Source::new();
+    source.insert("same".into(), encrypt_chunks(&mk, "same", &[b"same bytes".as_slice()]));
+    let entries: Vec<ZipEntry> = paths.iter().map(|p| entry_for(p, "same", 1, 10)).collect();
+    let mut fetch = fetch_from(&source);
+    let mut buf = Vec::new();
+    stream_folder_zip(
+        &mk,
+        &entries,
+        &mut fetch,
+        Cursor::new(&mut buf),
+        &|_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    let archive = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    archive.file_names().map(|name| name.unwrap().into_owned()).collect()
+}
+
+/// Item 3: two entries with the same decrypted path both land; the second is renamed like the cli renames a
+/// duplicate (`scan (2).pdf`), and each name keeps its own bytes.
+#[test]
+fn duplicate_names_are_renamed_and_both_land() {
+    let mk = test_master_key();
+    let (a, b) = (text_chunk("copy A", 500), text_chunk("copy B", 700));
+    let mut source = Source::new();
+    source.insert("fa".into(), encrypt_chunks(&mk, "fa", &[a.as_slice()]));
+    source.insert("fb".into(), encrypt_chunks(&mk, "fb", &[b.as_slice()]));
+    let entries = vec![
+        entry_for("docs/scan.pdf", "fa", 1, 500),
+        entry_for("docs/scan.pdf", "fb", 1, 700),
+    ];
+    let mut fetch = fetch_from(&source);
+    let mut buf = Vec::new();
+    stream_folder_zip(
+        &mk,
+        &entries,
+        &mut fetch,
+        Cursor::new(&mut buf),
+        &|_| {},
+        &AtomicBool::new(false),
+    )
+    .expect("a duplicate name must not abort the archive");
+
+    let mut archive = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    assert_eq!(archive.len(), 2);
+    for (name, want) in [("docs/scan.pdf", &a), ("docs/scan (2).pdf", &b)] {
+        let mut got = Vec::new();
+        archive.by_name(name).unwrap().read_to_end(&mut got).unwrap();
+        assert!(&got == want, "{name}: wrong bytes");
+    }
+}
+
+/// Item 3: the rules around the rename. Names compare as a case- and normalisation-insensitive drive would show
+/// them (macOS and Windows extract that way); a name an entry already has is never taken by a rename; the suffix
+/// goes before the extension of the last path component only; a leading dot is not an extension.
+#[test]
+fn duplicate_name_rules() {
+    let names = archive_names(&[
+        "docs/scan.pdf",
+        "docs/scan.pdf", // (3): "docs/scan (2).pdf" is another entry's own name
+        "docs/scan (2).pdf",
+        "DOCS/Scan.PDF", // the same file on a case-insensitive drive
+        "v1.2/README",   // a dot in the folder is not an extension
+        "v1.2/README",
+        ".env",
+        ".env",
+        "caf\u{e9}.txt",
+        "cafe\u{301}.txt", // the same name, decomposed
+    ]);
+    assert_eq!(
+        names,
+        [
+            "docs/scan.pdf",
+            "docs/scan (3).pdf",
+            "docs/scan (2).pdf",
+            "DOCS/Scan (4).PDF",
+            "v1.2/README",
+            "v1.2/README (2)",
+            ".env",
+            ".env (2)",
+            "caf\u{e9}.txt",
+            "cafe\u{301} (2).txt",
+        ]
+    );
+}
+
+/// Item 4: the last progress event is 100% and none is above it, whichever unit the uploader declared `size_bytes` in.
+/// The server accepts either (`complete.rs`): the web declares the plaintext size, the cli the encrypted one
+/// (plaintext + 28 bytes per chunk). Here `first.txt` has 1 chunk and `second.txt` 3, so 4,028 and 9,084 encrypted.
+#[test]
+fn progress_ends_at_exactly_the_total() {
+    for (convention, declared) in [
+        ("plaintext sizes (web)", [4_000, 9_000]),
+        ("encrypted sizes (cli)", [4_028, 9_084]),
+        ("web file, then cli file", [4_000, 9_084]),
+        ("cli file, then web file", [4_028, 9_000]),
+    ] {
+        let (mk, entries, source) = two_entries_declared(declared);
+        let mut fetch = fetch_from(&source);
+        let mut buf = Vec::new();
+        let events: Mutex<Vec<(u64, u64)>> = Mutex::new(Vec::new());
+        let on_progress = |p: &ZipProgress| events.lock().unwrap().push((p.bytes_done, p.bytes_total));
+        stream_folder_zip(
+            &mk,
+            &entries,
+            &mut fetch,
+            Cursor::new(&mut buf),
+            &on_progress,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+
+        let events = events.into_inner().unwrap();
+        assert_eq!(events.len(), 4, "{convention}: one event per chunk");
+        assert!(
+            events.iter().all(|(done, total)| done <= total),
+            "{convention}: an event is above 100%: {events:?}"
+        );
+        assert!(
+            events.windows(2).all(|w| w[0].0 < w[1].0),
+            "{convention}: bytes_done does not grow: {events:?}"
+        );
+        assert_eq!(
+            events.last(),
+            Some(&(13_000, 13_000)),
+            "{convention}: events {events:?}"
+        );
+    }
+}
