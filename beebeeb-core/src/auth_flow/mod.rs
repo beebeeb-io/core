@@ -51,6 +51,15 @@ pub enum Method {
     Post,
 }
 
+impl Method {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Post => "POST",
+        }
+    }
+}
+
 /// Which credential the transport puts on the request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RequestAuth {
@@ -120,6 +129,15 @@ impl HttpResponse {
             status,
             body,
             retry_after_secs: None,
+        }
+    }
+
+    /// Build a response from the raw body text (bindings): a body that is empty or not JSON is `Null`.
+    pub fn from_text(status: u16, body: &str, retry_after_secs: Option<u64>) -> Self {
+        Self {
+            status,
+            body: serde_json::from_str(body).unwrap_or(serde_json::Value::Null),
+            retry_after_secs,
         }
     }
 

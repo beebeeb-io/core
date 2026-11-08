@@ -159,6 +159,10 @@ Client-built, E2E-encrypted file-name search; the server is zero-knowledge, ever
 - Bindings: UniFFI `SearchIndexHandle` + WASM `WasmSearchIndex` (same surface); sync helper `search_sync::diff_manifest` (`searchIndexSyncPlan`). Dependency: `unicode-normalization` (NFKD). WASM constructors accept at most 64 shards (zero still normalizes to one), matching `deriveSharedFolderIndexKey` buckets 0–63.
 - Wiring: WEB is wired (task 0871). Follow-ups: mobile wiring; retiring `/api/v1/index` (Guus-gated, after web + mobile both cut over); Part A recursive in-app search.
 
+## Account flows (`auth_flow/`)
+
+Sans-IO: each flow returns an `HttpRequest` and takes the `HttpResponse`; the platform owns the transport. `sign_in` (OPAQUE login + `2fa/verify`), `step_up` (`confirm-opaque-*`, purpose + `cli_code` binding; 409 `opaque_unavailable` is an error, no plaintext fallback), `device` (requester socket frames; approver `cli-pubkey` → step-up → `cli-session` with `X-Confirm-Token` → `cli-authorize`). Payload `{session_token, master_key_b64}`, the same JSON web and `bb login` use. Tests: `auth_flow::tests` drives core's OPAQUE server half (one Argon2id registration per suite run). The server has no deny endpoint yet: the requester maps a future `{"error":"denied"}` frame to `Denied`; until then a deny is a timeout.
+
 ## CLI login handshake (`cli_auth.rs`)
 
 Device-authorization crypto for `bb login` — separate from OPAQUE. P-256 ECDH → HKDF-SHA256 (info `beebeeb-cli-auth-v1`) → AES-256-GCM; byte-identical to web's WebCrypto. `decrypt_cli_payload()` falls back to the raw shared secret (legacy v0.4 web). **Wire format is pinned, no protocol change** (`tests/cli_auth_vectors.rs` + `cli/tests/ecdh_compat.rs`) — changing the info string / point encoding is a coordinated cross-client migration, never a refactor.

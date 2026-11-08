@@ -82,6 +82,7 @@ The rules whose breakage costs data, a key, a credential or a user. One line eac
 - Canonical ids are UTF-8. Never fall back to the legacy file-key custody opener after authentication fails (L6).
 - Owner file-key wraps (L8) use the same textual encoding as L6 custody, never the binary UUID encoding of L7.
 - `ClientMetaKey`: the derived key is never exported (a `FileKey` would also fit `encrypt_chunk`); `current_file`/`detail` are discarded from S1, never sealed.
+- `auth_flow`: no plaintext-password step-up (`opaque_unavailable` is an error, never `/auth/confirm`); `ksf_version` only from the server; a `ConfirmToken` is only ever attached to its consuming request, never returned as a value in Rust; the approval payload is sealed with `cli_auth::encrypt_for_requester` (HKDF form only). UniFFI/WASM hand the session token, the confirm token on its claim request and the device-approval master key to the platform transport by design.
 - A wire-format, info-string or point-encoding change is a coordinated cross-client migration, never a refactor.
 - `MIN_LENGTH_FLOOR = 12` is a floor applied inside `from_server` (the server may raise, never lower); no hard-coded fallback policy.
 - Breach check: the SHA-1 suffix never leaves the device. The HTTP call stays in each client, to Beebeeb's own endpoint, never the public HIBP API (task 0995).
