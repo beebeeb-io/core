@@ -3209,9 +3209,20 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_check_failed_words(RustCallStatu
 int64_t uniffi_beebeeb_uniffi_fn_func_backup_first_pass_baseline(RustBuffer setup_at_ms, RustBuffer legacy_last_backup_ms, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_NOTICE_OVERLAP_MS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_NOTICE_OVERLAP_MS
+int64_t uniffi_beebeeb_uniffi_fn_func_backup_notice_overlap_ms(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_NOTICE_REASON
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_NOTICE_REASON
 RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_notice_reason(RustBuffer kind, RustBuffer data_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_NOTICES_SINCE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_NOTICES_SINCE
+int64_t uniffi_beebeeb_uniffi_fn_func_backup_notices_since(int64_t last_pass_at_ms, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_PASS_GATE
@@ -3219,9 +3230,19 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_notice_reason(RustBuffer kind, R
 RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_pass_gate(int8_t notices_fetch_ok, RustBuffer notices, int64_t last_pass_at_ms, RustBuffer listing, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_PASS_GATE_V2
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_PASS_GATE_V2
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_pass_gate_v2(int8_t notices_fetch_ok, RustBuffer notices, int64_t last_pass_at_ms, RustBuffer acknowledged, RustBuffer listing, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_STOP
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_STOP
 RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_stop(RustBuffer notices, int64_t last_pass_at_ms, RustBuffer listing, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_STOP_V2
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_STOP_V2
+RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_stop_v2(RustBuffer notices, int64_t last_pass_at_ms, RustBuffer acknowledged, RustBuffer listing, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_BACKUP_STOP_WORDS
@@ -3913,9 +3934,21 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_first_pass_baseline(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_NOTICE_OVERLAP_MS
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_NOTICE_OVERLAP_MS
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_notice_overlap_ms(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_NOTICE_REASON
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_NOTICE_REASON
 uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_notice_reason(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_NOTICES_SINCE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_NOTICES_SINCE
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_notices_since(void
     
 );
 #endif
@@ -3925,9 +3958,21 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_pass_gate(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_PASS_GATE_V2
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_PASS_GATE_V2
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_pass_gate_v2(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_STOP
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_STOP
 uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_stop(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_STOP_V2
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_BACKUP_STOP_V2
+uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_stop_v2(void
     
 );
 #endif

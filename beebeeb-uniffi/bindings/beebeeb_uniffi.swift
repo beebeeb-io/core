@@ -13923,6 +13923,103 @@ public func FfiConverterTypeBackupNoticeRow_lower(_ value: BackupNoticeRow) -> R
 }
 
 
+/**
+ * One `notifications` row as the server lists it, with its `id`.
+ */
+public struct BackupNoticeRowV2: Equatable, Hashable {
+    /**
+     * The row's `id` (a UUID), compared exactly. `None` or empty when the
+     * client has none: that notice is never acknowledged, so it counts on
+     * every pass whose window holds it.
+     */
+    public var id: String?
+    /**
+     * The row's `type` (`"files_removed"`, `"backup_deleted"`, or any other
+     * type, which is skipped).
+     */
+    public var kind: String
+    /**
+     * The row's `data`, as JSON text. Text that does not parse reads as
+     * `null`.
+     */
+    public var dataJson: String
+    /**
+     * The row's `created_at`, in milliseconds since the epoch (server clock).
+     */
+    public var createdAtMs: Int64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The row's `id` (a UUID), compared exactly. `None` or empty when the
+         * client has none: that notice is never acknowledged, so it counts on
+         * every pass whose window holds it.
+         */id: String?, 
+        /**
+         * The row's `type` (`"files_removed"`, `"backup_deleted"`, or any other
+         * type, which is skipped).
+         */kind: String, 
+        /**
+         * The row's `data`, as JSON text. Text that does not parse reads as
+         * `null`.
+         */dataJson: String, 
+        /**
+         * The row's `created_at`, in milliseconds since the epoch (server clock).
+         */createdAtMs: Int64) {
+        self.id = id
+        self.kind = kind
+        self.dataJson = dataJson
+        self.createdAtMs = createdAtMs
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension BackupNoticeRowV2: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBackupNoticeRowV2: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BackupNoticeRowV2 {
+        return
+            try BackupNoticeRowV2(
+                id: FfiConverterOptionString.read(from: &buf), 
+                kind: FfiConverterString.read(from: &buf), 
+                dataJson: FfiConverterString.read(from: &buf), 
+                createdAtMs: FfiConverterInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BackupNoticeRowV2, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.id, into: &buf)
+        FfiConverterString.write(value.kind, into: &buf)
+        FfiConverterString.write(value.dataJson, into: &buf)
+        FfiConverterInt64.write(value.createdAtMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupNoticeRowV2_lift(_ buf: RustBuffer) throws -> BackupNoticeRowV2 {
+    return try FfiConverterTypeBackupNoticeRowV2.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupNoticeRowV2_lower(_ value: BackupNoticeRowV2) -> RustBuffer {
+    return FfiConverterTypeBackupNoticeRowV2.lower(value)
+}
+
+
 public struct BackupPassPlan: Equatable, Hashable {
     public var uploads: [BackupPlannedUpload]
     public var moves: [BackupPlannedMove]
@@ -14639,6 +14736,81 @@ public func FfiConverterTypeBackupStopListing_lift(_ buf: RustBuffer) throws -> 
 #endif
 public func FfiConverterTypeBackupStopListing_lower(_ value: BackupStopListing) -> RustBuffer {
     return FfiConverterTypeBackupStopListing.lower(value)
+}
+
+
+/**
+ * What `backup_stop_v2` decided.
+ */
+public struct BackupStopOutcome: Equatable, Hashable {
+    /**
+     * The backups that turn off, in category key order.
+     */
+    public var stopped: [BackupStopped]
+    /**
+     * The acknowledged notice ids to store in place of the ones passed in
+     * (sorted): store them in the same write as the stops and the new
+     * `last_pass_at_ms`, and keep them when the person chooses "Back up
+     * again".
+     */
+    public var acknowledged: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The backups that turn off, in category key order.
+         */stopped: [BackupStopped], 
+        /**
+         * The acknowledged notice ids to store in place of the ones passed in
+         * (sorted): store them in the same write as the stops and the new
+         * `last_pass_at_ms`, and keep them when the person chooses "Back up
+         * again".
+         */acknowledged: [String]) {
+        self.stopped = stopped
+        self.acknowledged = acknowledged
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension BackupStopOutcome: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBackupStopOutcome: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BackupStopOutcome {
+        return
+            try BackupStopOutcome(
+                stopped: FfiConverterSequenceTypeBackupStopped.read(from: &buf), 
+                acknowledged: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BackupStopOutcome, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeBackupStopped.write(value.stopped, into: &buf)
+        FfiConverterSequenceString.write(value.acknowledged, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupStopOutcome_lift(_ buf: RustBuffer) throws -> BackupStopOutcome {
+    return try FfiConverterTypeBackupStopOutcome.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupStopOutcome_lower(_ value: BackupStopOutcome) -> RustBuffer {
+    return FfiConverterTypeBackupStopOutcome.lower(value)
 }
 
 
@@ -21275,6 +21447,92 @@ public func FfiConverterTypeBackupPassGate_lower(_ value: BackupPassGate) -> Rus
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
+ * What one pass does before it uploads anything (spec Amendments 12, 12c,
+ * 12d).
+ */
+
+public enum BackupPassGateV2: Equatable, Hashable {
+    
+    /**
+     * The notices were read: `stopped` turn off with their words; every
+     * other listed backup runs. Store in one write the stops, this pass's
+     * start as the next `last_pass_at_ms`, and `acknowledged` in place of
+     * the acknowledged set.
+     */
+    case run(stopped: [BackupStopped], acknowledged: [String]
+    )
+    /**
+     * The notices could not be read: upload nothing, turn nothing off, show
+     * `backup_check_failed_words()`, retry at the next scheduled pass, and
+     * keep both `last_pass_at_ms` and the acknowledged set.
+     */
+    case checkFailed
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension BackupPassGateV2: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBackupPassGateV2: FfiConverterRustBuffer {
+    typealias SwiftType = BackupPassGateV2
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BackupPassGateV2 {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .run(stopped: try FfiConverterSequenceTypeBackupStopped.read(from: &buf), acknowledged: try FfiConverterSequenceString.read(from: &buf)
+        )
+        
+        case 2: return .checkFailed
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: BackupPassGateV2, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .run(stopped,acknowledged):
+            writeInt(&buf, Int32(1))
+            FfiConverterSequenceTypeBackupStopped.write(stopped, into: &buf)
+            FfiConverterSequenceString.write(acknowledged, into: &buf)
+            
+        
+        case .checkFailed:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupPassGateV2_lift(_ buf: RustBuffer) throws -> BackupPassGateV2 {
+    return try FfiConverterTypeBackupPassGateV2.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupPassGateV2_lower(_ value: BackupPassGateV2) -> RustBuffer {
+    return FfiConverterTypeBackupPassGateV2.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
  * What the client does about the root; on `Create` it names the new root
  * [`backup_root_name`].
  */
@@ -27378,6 +27636,31 @@ fileprivate struct FfiConverterSequenceTypeBackupNoticeRow: FfiConverterRustBuff
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeBackupNoticeRowV2: FfiConverterRustBuffer {
+    typealias SwiftType = [BackupNoticeRowV2]
+
+    public static func write(_ value: [BackupNoticeRowV2], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeBackupNoticeRowV2.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [BackupNoticeRowV2] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [BackupNoticeRowV2]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeBackupNoticeRowV2.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeBackupPlannedMove: FfiConverterRustBuffer {
     typealias SwiftType = [BackupPlannedMove]
 
@@ -29123,6 +29406,17 @@ public func backupFirstPassBaseline(setupAtMs: Int64?, legacyLastBackupMs: Int64
 })
 }
 /**
+ * How far before `last_pass_at_ms` a notice still counts, in milliseconds:
+ * 600 000 (10 minutes). A notice's `created_at` is the start of the server
+ * transaction that wrote it, not its commit.
+ */
+public func backupNoticeOverlapMs() -> Int64  {
+    return try!  FfiConverterInt64.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_backup_notice_overlap_ms($0
+    )
+})
+}
+/**
  * The reason a `notifications` row gives, or `None` for a row that is not a
  * backup notice: for showing the notification itself with
  * `backup_stop_words`.
@@ -29136,9 +29430,23 @@ public func backupNoticeReason(kind: String, dataJson: String) -> String?  {
 })
 }
 /**
+ * The `since` to send to `GET /api/v1/notifications` (integer milliseconds,
+ * inclusive): `last_pass_at_ms` minus the overlap, never below 0.
+ */
+public func backupNoticesSince(lastPassAtMs: Int64) -> Int64  {
+    return try!  FfiConverterInt64.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_backup_notices_since(
+        FfiConverterInt64.lower(lastPassAtMs),$0
+    )
+})
+}
+/**
  * Decide a pass. `notices_fetch_ok` is `false` when the notices could not be
  * read completely (a server or network error, or a page missing); `notices`
  * is then ignored. Otherwise as `backup_stop`.
+ *
+ * Superseded by `backup_pass_gate_v2` (spec Amendment 12d), for the reason
+ * given on `backup_stop`. Kept unchanged for v0.2.3 callers.
  */
 public func backupPassGate(noticesFetchOk: Bool, notices: [BackupNoticeRow], lastPassAtMs: Int64, listing: BackupStopListing)throws  -> BackupPassGate  {
     return try  FfiConverterTypeBackupPassGate_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
@@ -29151,18 +29459,56 @@ public func backupPassGate(noticesFetchOk: Bool, notices: [BackupNoticeRow], las
 })
 }
 /**
+ * Decide a pass. `notices_fetch_ok` is `false` when the notices could not be
+ * read completely (a server or network error, or a page missing); `notices`
+ * is then ignored. Otherwise as `backup_stop_v2`.
+ */
+public func backupPassGateV2(noticesFetchOk: Bool, notices: [BackupNoticeRowV2], lastPassAtMs: Int64, acknowledged: [String], listing: BackupStopListing)throws  -> BackupPassGateV2  {
+    return try  FfiConverterTypeBackupPassGateV2_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_backup_pass_gate_v2(
+        FfiConverterBool.lower(noticesFetchOk),
+        FfiConverterSequenceTypeBackupNoticeRowV2.lower(notices),
+        FfiConverterInt64.lower(lastPassAtMs),
+        FfiConverterSequenceString.lower(acknowledged),
+        FfiConverterTypeBackupStopListing_lower(listing),$0
+    )
+})
+}
+/**
  * Which backups turn off on this pass, and why (spec Amendment 12, steps
  * 1-4). `last_pass_at_ms` is on the server's clock, like the notices: when
  * this device's previous pass of these backups started, or when the person
  * last turned a backup on or chose "Back up again" since. Empty means nothing
  * changes. An unknown category key or an id that is not a UUID in the listing
  * is `InvalidInput`.
+ *
+ * Superseded by `backup_stop_v2` (spec Amendment 12d): this strict filter
+ * misses a notice whose server transaction was still open when the previous
+ * pass read the notices. Kept unchanged for v0.2.3 callers.
  */
 public func backupStop(notices: [BackupNoticeRow], lastPassAtMs: Int64, listing: BackupStopListing)throws  -> [BackupStopped]  {
     return try  FfiConverterSequenceTypeBackupStopped.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_func_backup_stop(
         FfiConverterSequenceTypeBackupNoticeRow.lower(notices),
         FfiConverterInt64.lower(lastPassAtMs),
+        FfiConverterTypeBackupStopListing_lower(listing),$0
+    )
+})
+}
+/**
+ * Which backups turn off on this pass, and why (spec Amendments 12 and
+ * 12d). A notice counts when it is newer than `last_pass_at_ms` minus the
+ * overlap and its id is not in `acknowledged` (the set the previous pass
+ * returned; empty on a first pass). Fetch `notices` from
+ * `backup_notices_since(last_pass_at_ms)`. An unknown category key or an id
+ * that is not a UUID in the listing is `InvalidInput`.
+ */
+public func backupStopV2(notices: [BackupNoticeRowV2], lastPassAtMs: Int64, acknowledged: [String], listing: BackupStopListing)throws  -> BackupStopOutcome  {
+    return try  FfiConverterTypeBackupStopOutcome_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_backup_stop_v2(
+        FfiConverterSequenceTypeBackupNoticeRowV2.lower(notices),
+        FfiConverterInt64.lower(lastPassAtMs),
+        FfiConverterSequenceString.lower(acknowledged),
         FfiConverterTypeBackupStopListing_lower(listing),$0
     )
 })
@@ -29438,13 +29784,25 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_backup_first_pass_baseline() != 15552) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_func_backup_notice_overlap_ms() != 55180) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_func_backup_notice_reason() != 40118) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_func_backup_pass_gate() != 16391) {
+    if (uniffi_beebeeb_uniffi_checksum_func_backup_notices_since() != 61232) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_func_backup_stop() != 43581) {
+    if (uniffi_beebeeb_uniffi_checksum_func_backup_pass_gate() != 16887) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_backup_pass_gate_v2() != 19511) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_backup_stop() != 8048) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_backup_stop_v2() != 9926) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_backup_stop_words() != 39803) {

@@ -1040,11 +1040,19 @@ external fun uniffi_beebeeb_uniffi_checksum_func_backup_check_failed_words(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_backup_first_pass_baseline(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_backup_notice_overlap_ms(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_backup_notice_reason(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_backup_notices_since(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_backup_pass_gate(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_backup_pass_gate_v2(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_backup_stop(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_backup_stop_v2(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_backup_stop_words(
 ): Short
@@ -2934,11 +2942,19 @@ external fun uniffi_beebeeb_uniffi_fn_func_backup_check_failed_words(uniffi_out_
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_backup_first_pass_baseline(`setupAtMs`: RustBuffer.ByValue,`legacyLastBackupMs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
+external fun uniffi_beebeeb_uniffi_fn_func_backup_notice_overlap_ms(uniffi_out_err: UniffiRustCallStatus, 
+): Long
 external fun uniffi_beebeeb_uniffi_fn_func_backup_notice_reason(`kind`: RustBuffer.ByValue,`dataJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_backup_notices_since(`lastPassAtMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
 external fun uniffi_beebeeb_uniffi_fn_func_backup_pass_gate(`noticesFetchOk`: Byte,`notices`: RustBuffer.ByValue,`lastPassAtMs`: Long,`listing`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_backup_pass_gate_v2(`noticesFetchOk`: Byte,`notices`: RustBuffer.ByValue,`lastPassAtMs`: Long,`acknowledged`: RustBuffer.ByValue,`listing`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_backup_stop(`notices`: RustBuffer.ByValue,`lastPassAtMs`: Long,`listing`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_backup_stop_v2(`notices`: RustBuffer.ByValue,`lastPassAtMs`: Long,`acknowledged`: RustBuffer.ByValue,`listing`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_backup_stop_words(`reason`: RustBuffer.ByValue,`device`: RustBuffer.ByValue,`folder`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -3271,13 +3287,25 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_first_pass_baseline() != 15552.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_notice_overlap_ms() != 55180.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_notice_reason() != 40118.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_pass_gate() != 16391.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_notices_since() != 61232.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_stop() != 43581.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_pass_gate() != 16887.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_pass_gate_v2() != 19511.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_stop() != 8048.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_stop_v2() != 9926.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_backup_stop_words() != 39803.toShort()) {
@@ -25930,6 +25958,73 @@ public object FfiConverterTypeBackupNoticeRow: FfiConverterRustBuffer<BackupNoti
 
 
 
+/**
+ * One `notifications` row as the server lists it, with its `id`.
+ */
+data class BackupNoticeRowV2 (
+    /**
+     * The row's `id` (a UUID), compared exactly. `None` or empty when the
+     * client has none: that notice is never acknowledged, so it counts on
+     * every pass whose window holds it.
+     */
+    var `id`: kotlin.String?
+    , 
+    /**
+     * The row's `type` (`"files_removed"`, `"backup_deleted"`, or any other
+     * type, which is skipped).
+     */
+    var `kind`: kotlin.String
+    , 
+    /**
+     * The row's `data`, as JSON text. Text that does not parse reads as
+     * `null`.
+     */
+    var `dataJson`: kotlin.String
+    , 
+    /**
+     * The row's `created_at`, in milliseconds since the epoch (server clock).
+     */
+    var `createdAtMs`: kotlin.Long
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBackupNoticeRowV2: FfiConverterRustBuffer<BackupNoticeRowV2> {
+    override fun read(buf: ByteBuffer): BackupNoticeRowV2 {
+        return BackupNoticeRowV2(
+            FfiConverterOptionalString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterLong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: BackupNoticeRowV2) = (
+            FfiConverterOptionalString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`kind`) +
+            FfiConverterString.allocationSize(value.`dataJson`) +
+            FfiConverterLong.allocationSize(value.`createdAtMs`)
+    )
+
+    override fun write(value: BackupNoticeRowV2, buf: ByteBuffer) {
+            FfiConverterOptionalString.write(value.`id`, buf)
+            FfiConverterString.write(value.`kind`, buf)
+            FfiConverterString.write(value.`dataJson`, buf)
+            FfiConverterLong.write(value.`createdAtMs`, buf)
+    }
+}
+
+
+
 data class BackupPassPlan (
     var `uploads`: List<BackupPlannedUpload>
     , 
@@ -26471,6 +26566,56 @@ public object FfiConverterTypeBackupStopListing: FfiConverterRustBuffer<BackupSt
             FfiConverterString.write(value.`deviceFolderId`, buf)
             FfiConverterBoolean.write(value.`deviceFolderLive`, buf)
             FfiConverterSequenceTypeBackupStopFolder.write(value.`folders`, buf)
+    }
+}
+
+
+
+/**
+ * What `backup_stop_v2` decided.
+ */
+data class BackupStopOutcome (
+    /**
+     * The backups that turn off, in category key order.
+     */
+    var `stopped`: List<BackupStopped>
+    , 
+    /**
+     * The acknowledged notice ids to store in place of the ones passed in
+     * (sorted): store them in the same write as the stops and the new
+     * `last_pass_at_ms`, and keep them when the person chooses "Back up
+     * again".
+     */
+    var `acknowledged`: List<kotlin.String>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBackupStopOutcome: FfiConverterRustBuffer<BackupStopOutcome> {
+    override fun read(buf: ByteBuffer): BackupStopOutcome {
+        return BackupStopOutcome(
+            FfiConverterSequenceTypeBackupStopped.read(buf),
+            FfiConverterSequenceString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: BackupStopOutcome) = (
+            FfiConverterSequenceTypeBackupStopped.allocationSize(value.`stopped`) +
+            FfiConverterSequenceString.allocationSize(value.`acknowledged`)
+    )
+
+    override fun write(value: BackupStopOutcome, buf: ByteBuffer) {
+            FfiConverterSequenceTypeBackupStopped.write(value.`stopped`, buf)
+            FfiConverterSequenceString.write(value.`acknowledged`, buf)
     }
 }
 
@@ -32148,6 +32293,98 @@ public object FfiConverterTypeBackupPassGate : FfiConverterRustBuffer<BackupPass
 
 
 /**
+ * What one pass does before it uploads anything (spec Amendments 12, 12c,
+ * 12d).
+ */
+sealed class BackupPassGateV2 {
+    
+    /**
+     * The notices were read: `stopped` turn off with their words; every
+     * other listed backup runs. Store in one write the stops, this pass's
+     * start as the next `last_pass_at_ms`, and `acknowledged` in place of
+     * the acknowledged set.
+     */
+    data class Run(
+        val `stopped`: List<uniffi.beebeeb_uniffi.BackupStopped>, 
+        val `acknowledged`: List<kotlin.String>) : BackupPassGateV2()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * The notices could not be read: upload nothing, turn nothing off, show
+     * `backup_check_failed_words()`, retry at the next scheduled pass, and
+     * keep both `last_pass_at_ms` and the acknowledged set.
+     */
+    object CheckFailed : BackupPassGateV2()
+    
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBackupPassGateV2 : FfiConverterRustBuffer<BackupPassGateV2>{
+    override fun read(buf: ByteBuffer): BackupPassGateV2 {
+        return when(buf.getInt()) {
+            1 -> BackupPassGateV2.Run(
+                FfiConverterSequenceTypeBackupStopped.read(buf),
+                FfiConverterSequenceString.read(buf),
+                )
+            2 -> BackupPassGateV2.CheckFailed
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: BackupPassGateV2) = when(value) {
+        is BackupPassGateV2.Run -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterSequenceTypeBackupStopped.allocationSize(value.`stopped`)
+                + FfiConverterSequenceString.allocationSize(value.`acknowledged`)
+            )
+        }
+        is BackupPassGateV2.CheckFailed -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+    }
+
+    override fun write(value: BackupPassGateV2, buf: ByteBuffer) {
+        when(value) {
+            is BackupPassGateV2.Run -> {
+                buf.putInt(1)
+                FfiConverterSequenceTypeBackupStopped.write(value.`stopped`, buf)
+                FfiConverterSequenceString.write(value.`acknowledged`, buf)
+                Unit
+            }
+            is BackupPassGateV2.CheckFailed -> {
+                buf.putInt(2)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+/**
  * What the client does about the root; on `Create` it names the new root
  * [`backup_root_name`].
  */
@@ -37666,6 +37903,34 @@ public object FfiConverterSequenceTypeBackupNoticeRow: FfiConverterRustBuffer<Li
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeBackupNoticeRowV2: FfiConverterRustBuffer<List<BackupNoticeRowV2>> {
+    override fun read(buf: ByteBuffer): List<BackupNoticeRowV2> {
+        val len = buf.getInt()
+        return List<BackupNoticeRowV2>(len) {
+            FfiConverterTypeBackupNoticeRowV2.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<BackupNoticeRowV2>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeBackupNoticeRowV2.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<BackupNoticeRowV2>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeBackupNoticeRowV2.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeBackupPlannedMove: FfiConverterRustBuffer<List<BackupPlannedMove>> {
     override fun read(buf: ByteBuffer): List<BackupPlannedMove> {
         val len = buf.getInt()
@@ -39619,6 +39884,21 @@ public typealias FfiConverterTypeSecretString = FfiConverterString
     
 
         /**
+         * How far before `last_pass_at_ms` a notice still counts, in milliseconds:
+         * 600 000 (10 minutes). A notice's `created_at` is the start of the server
+         * transaction that wrote it, not its commit.
+         */ fun `backupNoticeOverlapMs`(): kotlin.Long {
+            return FfiConverterLong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_backup_notice_overlap_ms(
+    
+        _status)
+}
+    )
+    }
+    
+
+        /**
          * The reason a `notifications` row gives, or `None` for a row that is not a
          * backup notice: for showing the notification itself with
          * `backup_stop_words`.
@@ -39634,9 +39914,26 @@ public typealias FfiConverterTypeSecretString = FfiConverterString
     
 
         /**
+         * The `since` to send to `GET /api/v1/notifications` (integer milliseconds,
+         * inclusive): `last_pass_at_ms` minus the overlap, never below 0.
+         */ fun `backupNoticesSince`(`lastPassAtMs`: kotlin.Long): kotlin.Long {
+            return FfiConverterLong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_backup_notices_since(
+    
+        FfiConverterLong.lower(`lastPassAtMs`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Decide a pass. `notices_fetch_ok` is `false` when the notices could not be
          * read completely (a server or network error, or a page missing); `notices`
          * is then ignored. Otherwise as `backup_stop`.
+         *
+         * Superseded by `backup_pass_gate_v2` (spec Amendment 12d), for the reason
+         * given on `backup_stop`. Kept unchanged for v0.2.3 callers.
          */
     @Throws(CryptoException::class) fun `backupPassGate`(`noticesFetchOk`: kotlin.Boolean, `notices`: List<BackupNoticeRow>, `lastPassAtMs`: kotlin.Long, `listing`: BackupStopListing): BackupPassGate {
             return FfiConverterTypeBackupPassGate.lift(
@@ -39650,12 +39947,32 @@ public typealias FfiConverterTypeSecretString = FfiConverterString
     
 
         /**
+         * Decide a pass. `notices_fetch_ok` is `false` when the notices could not be
+         * read completely (a server or network error, or a page missing); `notices`
+         * is then ignored. Otherwise as `backup_stop_v2`.
+         */
+    @Throws(CryptoException::class) fun `backupPassGateV2`(`noticesFetchOk`: kotlin.Boolean, `notices`: List<BackupNoticeRowV2>, `lastPassAtMs`: kotlin.Long, `acknowledged`: List<kotlin.String>, `listing`: BackupStopListing): BackupPassGateV2 {
+            return FfiConverterTypeBackupPassGateV2.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_backup_pass_gate_v2(
+    
+        FfiConverterBoolean.lower(`noticesFetchOk`),FfiConverterSequenceTypeBackupNoticeRowV2.lower(`notices`),FfiConverterLong.lower(`lastPassAtMs`),FfiConverterSequenceString.lower(`acknowledged`),FfiConverterTypeBackupStopListing.lower(`listing`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Which backups turn off on this pass, and why (spec Amendment 12, steps
          * 1-4). `last_pass_at_ms` is on the server's clock, like the notices: when
          * this device's previous pass of these backups started, or when the person
          * last turned a backup on or chose "Back up again" since. Empty means nothing
          * changes. An unknown category key or an id that is not a UUID in the listing
          * is `InvalidInput`.
+         *
+         * Superseded by `backup_stop_v2` (spec Amendment 12d): this strict filter
+         * misses a notice whose server transaction was still open when the previous
+         * pass read the notices. Kept unchanged for v0.2.3 callers.
          */
     @Throws(CryptoException::class) fun `backupStop`(`notices`: List<BackupNoticeRow>, `lastPassAtMs`: kotlin.Long, `listing`: BackupStopListing): List<BackupStopped> {
             return FfiConverterSequenceTypeBackupStopped.lift(
@@ -39663,6 +39980,25 @@ public typealias FfiConverterTypeSecretString = FfiConverterString
     UniffiLib.uniffi_beebeeb_uniffi_fn_func_backup_stop(
     
         FfiConverterSequenceTypeBackupNoticeRow.lower(`notices`),FfiConverterLong.lower(`lastPassAtMs`),FfiConverterTypeBackupStopListing.lower(`listing`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Which backups turn off on this pass, and why (spec Amendments 12 and
+         * 12d). A notice counts when it is newer than `last_pass_at_ms` minus the
+         * overlap and its id is not in `acknowledged` (the set the previous pass
+         * returned; empty on a first pass). Fetch `notices` from
+         * `backup_notices_since(last_pass_at_ms)`. An unknown category key or an id
+         * that is not a UUID in the listing is `InvalidInput`.
+         */
+    @Throws(CryptoException::class) fun `backupStopV2`(`notices`: List<BackupNoticeRowV2>, `lastPassAtMs`: kotlin.Long, `acknowledged`: List<kotlin.String>, `listing`: BackupStopListing): BackupStopOutcome {
+            return FfiConverterTypeBackupStopOutcome.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_backup_stop_v2(
+    
+        FfiConverterSequenceTypeBackupNoticeRowV2.lower(`notices`),FfiConverterLong.lower(`lastPassAtMs`),FfiConverterSequenceString.lower(`acknowledged`),FfiConverterTypeBackupStopListing.lower(`listing`),_status)
 }
     )
     }
