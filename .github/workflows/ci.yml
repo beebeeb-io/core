@@ -124,6 +124,29 @@ jobs:
       - name: cargo test
         run: cargo test --workspace --locked
 
+  # Windows is a shipped platform (desktop). Core 0.3.0 did not compile there and no job could see it
+  # (#74 round 8): every crate and target must build on Windows, and the crates with platform file code
+  # (the trusted publish path in core, used by client and transfer) run their tests there too.
+  windows:
+    name: Windows build & tests
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # action pinned; toolchain set below
+        with:
+          toolchain: "1.96.0"
+
+      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+
+      - name: cargo check (every crate, every target)
+        run: cargo check --workspace --all-targets --locked
+
+      - name: cargo test (core, client, transfer)
+        run: cargo test --locked -p beebeeb-core -p beebeeb-client -p beebeeb-transfer
+
   dependencies:
     name: Dependency advisories, licenses & sources
     runs-on: ubuntu-latest
