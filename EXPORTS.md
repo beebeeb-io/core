@@ -15,7 +15,8 @@ Counted from source (unique `js_name = …` under `beebeeb-wasm/src`): base 187,
 | Name | What |
 | --- | --- |
 | `shareWrapKey(wrapKey, key)` / `shareUnwrapKey(wrapKey, wrapped)` | Web's `wrapKeyForShare` / `unwrapKeyFromShare`: `nonce(12) \|\| ct`, no AAD. |
-| `ShareMemberInvite(itemId, isFolder, email, masterKey, fileKey)` | `start()`, `onResponse(...)` → `{kind: "send"}` / `"shared"` / `"invited"` / `"awaiting_approval"`. A folder throws `folder_invite_unsupported`. |
+| `ShareMemberInvite(itemId, isFolder, email, masterKey, fileKey)` | `start()`, `onResponse(...)` → `{kind: "send"}` / `"shared"` / `"invited"` / `"awaiting_approval"`. A folder throws `invalid_input` (use `ShareFolderInvite`). |
+| `ShareFolderInvite(folderId, email, sharedFoldersWrite, custodySeen, custodyUnreadable, masterKey)` (B05c) | `start()` / `onResponse(...)` → `{kind: "send", request, markCustodySeen}` (persist the id BEFORE sending) / `"shared"` / `"invited"` / `"awaiting_approval"`. Throws `folder_key_unverified`, `folder_keys_unavailable`, `folder_needs_upgrade`, `folder_too_large`. |
 | `ShareCreateLink(appUrl, fileId, masterKey, fileKey, expiresInHours?, maxOpens?, passphrase?)` | `start()`, `onResponse(...)` → `{kind: "send"}` (one retry on an untyped 409) / `{kind: "created", shareId, link, display}`. |
 | `shareRebuildLink(appUrl, masterKey, ownerWrappedKey?, ownerWrappedToken?)` | Web's `buildShareLink`: the owner's link, or `undefined`. |
 | `shareOpenMemberFileKey(masterKey, ownerPublicKey, fileId, sealed)` | The recipient side of a person share. |
@@ -26,12 +27,15 @@ Counted from source (unique `js_name = …` under `beebeeb-wasm/src`): base 187,
 - **added:** objects `MemberInviteFlow`, `CreateLinkFlow`; enums `InviteStepFfi`, `LinkStepFfi`; error
   `ShareFlowFfiError::Flow { code }`; functions `share_approve_file_invite_request`, `share_open_member_file_key`,
   `share_rebuild_link`, `share_open_link_file_key`, `share_revoke_request`. Requests reuse `AuthHttpRequest`.
+- **added (B05c):** object `FolderInviteFlow`, enum `FolderInviteStepFfi` (`Send` carries `mark_custody_seen`).
 
 The committed Kotlin bindings under `bindings/` are not regenerated here.
 
 ## Rust
 
-New module `beebeeb_core::share_flow` (`member`, `link`); `auth_flow::Method::Delete` and its `account_flows` arm.
+New module `beebeeb_core::share_flow` (`member`, `link`; B05c: `folder`, `folder_keys`); `auth_flow::Method::Delete`
+and (B05c) `Method::Put`, with their `account_flows` arms. `ShareFlowError::FolderInviteUnsupported` is gone (B05c):
+four folder codes replace it.
 
 ---
 

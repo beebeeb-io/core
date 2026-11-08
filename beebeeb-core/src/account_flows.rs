@@ -121,6 +121,7 @@ impl ApiRequest {
             auth_flow::Method::Get => Method::Get,
             auth_flow::Method::Post => Method::Post,
             auth_flow::Method::Delete => Method::Delete,
+            auth_flow::Method::Put => Method::Put,
         };
         Self {
             method,

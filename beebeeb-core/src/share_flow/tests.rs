@@ -150,7 +150,7 @@ fn a_folder_is_never_shared_through_the_file_path() {
         is_folder: true,
     };
     let err = MemberInvite::start(&target, "bob@beebeeb.test", &master(1), &FileKey::from_bytes([7; 32])).unwrap_err();
-    assert_eq!(err, ShareFlowError::FolderInviteUnsupported);
+    assert_eq!(err, ShareFlowError::InvalidInput("is_folder: use FolderInvite"));
 }
 
 #[test]

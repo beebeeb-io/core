@@ -65,13 +65,14 @@ impl std::fmt::Debug for MemberInvite {
     }
 }
 
-fn check_email(email: &str) -> Result<&str, ShareFlowError> {
+/// Web lower-cases the address before the invite (`recipientEmail = raw.toLowerCase()`).
+pub(crate) fn check_email(email: &str) -> Result<String, ShareFlowError> {
     let email = email.trim();
     let at = email.find('@').ok_or(ShareFlowError::InvalidInput("email"))?;
     if at == 0 || at + 1 == email.len() || email.chars().any(char::is_whitespace) || email.len() > 254 {
         return Err(ShareFlowError::InvalidInput("email"));
     }
-    Ok(email)
+    Ok(email.to_lowercase())
 }
 
 /// The approval body: the file key sealed for `recipient_public_key_b64` (web `buildApprovalKeyBlob`,
@@ -105,7 +106,8 @@ impl MemberInvite {
         file_key: &FileKey,
     ) -> Result<(Self, HttpRequest), ShareFlowError> {
         if target.is_folder {
-            return Err(ShareFlowError::FolderInviteUnsupported);
+            // A folder goes through `folder::FolderInvite` (its key rules), never the file path.
+            return Err(ShareFlowError::InvalidInput("is_folder: use FolderInvite"));
         }
         let file_id = path_id(&target.item_id).map_err(|_| ShareFlowError::InvalidInput("item id"))?;
         let email = check_email(email)?;

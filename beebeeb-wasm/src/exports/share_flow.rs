@@ -1,6 +1,6 @@
 //! Share flows for web (`beebeeb_core::share_flow`). Thin: each class wraps one core flow and
 //! converts requests and responses the way `exports::auth_flow` does; no rule lives here.
-//! Errors throw a `JsError` whose message is the core code (`folder_invite_unsupported`, …).
+//! Errors throw a `JsError` whose message is the core code (`invalid_input`, `plan_required`, …).
 use beebeeb_core::auth_flow::HttpRequest;
 use beebeeb_core::kdf::{FileKey, MasterKey};
 use beebeeb_core::share_flow::{

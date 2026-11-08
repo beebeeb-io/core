@@ -66,7 +66,7 @@ pub struct MemberInviteFlow {
 
 #[uniffi::export]
 impl MemberInviteFlow {
-    /// `is_folder` is required: a folder answers `folder_invite_unsupported` until core has it.
+    /// `is_folder` is required: a folder is refused here: it goes through `FolderInviteFlow`.
     #[uniffi::constructor]
     pub fn new(
         item_id: String,

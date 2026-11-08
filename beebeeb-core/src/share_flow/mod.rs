@@ -16,8 +16,11 @@
 //!
 //! - [`member`]: a person share of one file. The file key is sealed for the recipient with
 //!   X25519 + HKDF (`beebeeb-share`, info = the file id) + AES-256-GCM, `nonce(12) || ciphertext`.
-//!   A folder invite needs the folder-key rules of task 2133 and is not ported yet: asking for
-//!   one is [`ShareFlowError::FolderInviteUnsupported`], never a silent file share.
+//!   A folder through this path is refused; folders go through [`folder`].
+//! - [`folder`]: a person share of a folder, with the task-2133 key rules ([`folder_keys`]): one
+//!   key per folder (custody record, else the newest active invite's owner copy that opens), never
+//!   minted while an active invite has no provable owner copy, L7 or legacy child wraps by the
+//!   folder's custody state, and `folder_key_id` on the invite.
 //! - [`link`]: a double-encrypted public link. A random client key `K_c` wraps the file key
 //!   (`nonce(12) || ciphertext(48)`, no AAD); `K_c` and the raw token are also wrapped under the
 //!   owner's master key so the owner can rebuild the link later. `K_c` lives only in the link's
@@ -36,9 +39,13 @@ use crate::encrypt::{decrypt_chunk, encrypt_chunk};
 use crate::kdf::{FileKey, MasterKey};
 use crate::opaque::{derive_share_key, derive_x25519_private, x25519_shared_secret};
 
+pub mod folder;
+pub mod folder_keys;
 pub mod link;
 pub mod member;
 
+#[cfg(test)]
+mod folder_tests;
 #[cfg(test)]
 mod tests;
 
@@ -61,8 +68,15 @@ pub const SHARE_REFUSAL_CODES: [&str; 6] = [
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ShareFlowError {
     InvalidInput(&'static str),
-    /// Folder invites are not ported to core yet (they carry `folder_key_id` and the 2133 rules).
-    FolderInviteUnsupported,
+    /// The folder (or a folder above it) was seen with a custody record and the server now says it
+    /// has none (L7c/L7d), or the folder id is no UUID. Never falls back to the legacy format.
+    FolderKeysUnavailable,
+    /// The folder has active invites but no owner copy opens with proof (task 2133): never mint.
+    FolderKeyUnverified,
+    /// The folder has flag-off invites and no custody record; its keys need the upgrade first.
+    FolderNeedsUpgrade,
+    /// More descendants than a share can carry, or a server that cannot page them all.
+    FolderTooLarge,
     /// A typed server refusal, one of [`SHARE_REFUSAL_CODES`].
     Refused(&'static str),
     NotFound,
@@ -83,7 +97,10 @@ impl ShareFlowError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::InvalidInput(_) => "invalid_input",
-            Self::FolderInviteUnsupported => "folder_invite_unsupported",
+            Self::FolderKeysUnavailable => "folder_keys_unavailable",
+            Self::FolderKeyUnverified => "folder_key_unverified",
+            Self::FolderNeedsUpgrade => "folder_needs_upgrade",
+            Self::FolderTooLarge => "folder_too_large",
             Self::Refused(code) => code,
             Self::NotFound => "not_found",
             Self::Unauthorized => "unauthorized",
@@ -147,14 +164,14 @@ pub(crate) fn path_id(id: &str) -> Result<&str, ShareFlowError> {
     Ok(id)
 }
 
-fn frame(blob: EncryptedBlob) -> Vec<u8> {
+pub(crate) fn frame(blob: EncryptedBlob) -> Vec<u8> {
     let mut out = Vec::with_capacity(blob.nonce.len() + blob.ciphertext.len());
     out.extend_from_slice(&blob.nonce);
     out.extend_from_slice(&blob.ciphertext);
     out
 }
 
-fn split(frame: &[u8]) -> Result<EncryptedBlob, ShareFlowError> {
+pub(crate) fn split(frame: &[u8]) -> Result<EncryptedBlob, ShareFlowError> {
     if frame.len() < NONCE_LEN + TAG_LEN {
         return Err(ShareFlowError::Crypto);
     }
