@@ -141,11 +141,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
 
+      # --keep-going: report every crate that fails on Windows, not only the first one.
       - name: cargo check (every crate, every target)
-        run: cargo check --workspace --all-targets --locked
+        run: cargo check --workspace --all-targets --locked --keep-going
 
+      # --no-fail-fast: one run lists every test that fails on Windows.
       - name: cargo test (core, client, transfer)
-        run: cargo test --locked -p beebeeb-core -p beebeeb-client -p beebeeb-transfer
+        run: cargo test --locked --no-fail-fast -p beebeeb-core -p beebeeb-client -p beebeeb-transfer
 
   dependencies:
     name: Dependency advisories, licenses & sources
