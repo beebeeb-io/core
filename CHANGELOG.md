@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `passkey`: the passkey vault primitive in web's format (PRF eval input `beebeeb.io/vault-wrap-key/v1` zero-padded
+  to 32, HKDF-SHA256 info `beebeeb.io/vault-wrap/v1` with an empty salt, AES-256-GCM `nonce || ct || tag`, no AAD),
+  the native hmac-secret salt (the WebAuthn PRF hash applied), the ceremony wire for the server's passkey and
+  escrow routes, and the flows (add, sign in + unlock, list, remove) over an injected HTTP and platform call.
+  UniFFI and WASM exports; vectors generated from web's TS (`test-vectors/passkey_vault.json`) and core vectors
+  web's TS opens (`test-vectors/passkey_vault_core.json`, `scripts/passkey-vectors/`). Additive.
+
 ## [0.2.7] - 2026-11-08
 
 Windows: a create by name never touches a different file that the OS resolves the name to (8.3 alias), task 2404.

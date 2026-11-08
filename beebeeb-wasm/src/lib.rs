@@ -12,6 +12,7 @@ mod zeroing_alloc;
 static GLOBAL_ALLOCATOR: zeroing_alloc::ZeroingAllocator = zeroing_alloc::ZeroingAllocator;
 
 mod exports;
+mod passkey_exports;
 mod request_row_exports;
 
 use beebeeb_core::client_meta as cm;

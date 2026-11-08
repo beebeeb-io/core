@@ -1,0 +1,43 @@
+{
+  "source": "repos/web/src/lib/passkey-vault.ts via scripts/passkey-vectors/from-web.ts",
+  "prf_eval_input": "626565626565622e696f2f7661756c742d777261702d6b65792f763100000000",
+  "hmac_secret_salt": "83415339feb89e8dbbf3a6e93b1bf89dd3ada75993fb7e314a90b9f337245933",
+  "rows": [
+    {
+      "prf_output": "4ba6731a19ae55a61f6b5c85081ef5a4740b415fec0fe263defb3ee27169532b",
+      "master_key": "96662357e3549bf386e9640d432491ddb1d35fcb1dc11099113f39d43ec17e99",
+      "wrap_key": "8d97d095bf5dfd0ef497def20e095aa37039df7a59742ceae26bb0a829d937d8",
+      "blob": "8f4f037692f9c028e8bb7efad840de0940df83256b5e62b3bcb061db6e70caa219cce0d929cfcc3175b56a2b41843134b46fcd716bf74fa53debbe13"
+    },
+    {
+      "prf_output": "7a042b769f67688a88396876f75279bb271e394d162b0415504b3b47f7030300",
+      "master_key": "e7d5d9ca7efbddb365ab69c81d1eb557c31f28a037563d12d78082094a8d2672",
+      "wrap_key": "854ba42098efbeb5be3cfb04ef84a4fa1a8c6f2c1b91abcd52f2c7e04b37ee54",
+      "blob": "8631b37f52bfdba877c5b343ea9375aa13b51f6128ef1ec2d9fe86cf82eb5ad3c204f73fc009fdc1b8809f0b4b3ee9d54c250f73dd9157bc9c1569f6"
+    },
+    {
+      "prf_output": "50ab4d88bfb8f2f242b3ae014e4aafc717eb40d0a547d8d8cfef8f4179386b34",
+      "master_key": "cd88f9fc01b8863d95db8fbe4a153d568cd2ba2f732a1c64ee331663f7eb02a1",
+      "wrap_key": "715fa26db831f0b82c7c9c92dcfa2e887f726148659f411a2a92fbc967e06fe4",
+      "blob": "65bde0a4f48485b81bffc1bfe00399c9750cf57b769d82e96b75aa7db08a8eaf8301ce070341937f5b7726ba61e7bf47f2312f117ac231f5e6585926"
+    },
+    {
+      "prf_output": "f914113c9df30a74d336c82abf781c0b4597a4e88be80352fdf49c2ed207914b",
+      "master_key": "63c666f18d524a2b527fd18213ea9b25d738fc7745903d65f9aa26b8904f5e24",
+      "wrap_key": "13a4025c53c8b9a846f55f6abeeed670fe93cfea21813810264dc029d774bfde",
+      "blob": "5a06507643f75cdb20e59f91462363f590fe71fa940fd70d582c77c722789edab926f6e0c7e92795829d9f3d7d43dd967fb2df65ed24e436900731e1"
+    },
+    {
+      "prf_output": "805c7d2c6f16ca8cb3d141bd02576c91c2382967632a66e66fa67c54d947487a",
+      "master_key": "e487aaf21106f39ad6cb3b5caeaca08062293e3724292a50c4baebcb87eaa1ed",
+      "wrap_key": "daebd9fd925a17d4a99cbd3250024afc18ae8dec765d00bff6bf15d630395c59",
+      "blob": "f836042b722c43cf5c8361cf145c53766988ddb258fb002e2d7e619964e04a40a44ac6c2f7453461ab19729167522d75fea55d6976ace00d91aee9d7"
+    },
+    {
+      "prf_output": "2047d8d6330124c2a12c7522205310326ad3bb10366fd158e685c42c5f54bd02",
+      "master_key": "beb53a1ce640d097cf6c064ddf9faddc6674d4f7580d75373f681ee01c237228",
+      "wrap_key": "464f2ce50afc1eb980816b6179263d9db9aa2cd35f871ded85d8f7ffcd07d3b5",
+      "blob": "3dfc4c911f286644dc648df38d23687a1a32bc522b658fa628ce7df21b7fc27fa4bdce5e81075550ca32aa8103c3865d20c2d0ae9e62385b0eb7100f"
+    }
+  ]
+}
