@@ -9698,12 +9698,15 @@ data class BatchNameItem (
      * Hyphenated-lowercase UUID string (the server-canonical file id).
      */
     var `fileId`: kotlin.String
-    , 
+    ,
     /**
      * The `name_encrypted` JSON envelope.
      */
     var `nameEncrypted`: kotlin.String
-    
+    ,
+    // BREAK TEST: duplicate field — mirrors the PR #74 regression
+    var `nameEncrypted`: kotlin.String
+
 ){
     
 
