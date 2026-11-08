@@ -221,13 +221,13 @@ jobs:
         run: |
           kotlinc -cp "$RUNNER_TEMP/jna.jar" \
             beebeeb-uniffi/bindings/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt \
-            -d /dev/null
+            -d "$RUNNER_TEMP/beebeeb-uniffi-bindings.jar"
 
       - name: Compile bindings/kotlin Kotlin
         run: |
           kotlinc -cp "$RUNNER_TEMP/jna.jar" \
             bindings/kotlin/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt \
-            -d /dev/null
+            -d "$RUNNER_TEMP/bindings-kotlin.jar"
 
   # Typecheck the committed Swift UniFFI bindings on macOS. The modulemap
   # references Darwin (macOS SDK), so this job requires a macOS runner.
