@@ -6,7 +6,7 @@ The full list is CHANGELOG `[Unreleased]` → "Changed". Exports whose signature
 
 - **WASM:** `passkeyParseRegistrationStart(answerJson, expectedRpId, allowLocalhost)`,
   `passkeyParseAssertionStart(answerJson, expectedRpId, allowLocalhost)`,
-  `shareRebuildLink(appUrl, masterKey, ownerWrappedKey?, ownerWrappedToken?, wrappedFileKey?)`,
+  `shareRebuildLink(appUrl, masterKey, ownerWrappedKey?, ownerWrappedToken?, wrappedFileKey)` (required), `shareRebuildBundleLink(appUrl, masterKey, ownerWrappedKey?, ownerWrappedToken?)`,
   `AccountFlow.changePassword(current, newPassword, recoveryCheckB64, x25519PublicB64, onboardingStatus,
   onboardingBody, breachCheck?)`; `new AuthStepUp(password, purpose?, cliCode?)` refuses a `cliCode` with another
   purpose. WASM keeps raw key bytes (its convention).
@@ -15,7 +15,7 @@ The full list is CHANGELOG `[Unreleased]` → "Changed". Exports whose signature
   `breach_check: Option<BreachCheckHandle>`); `StepUpFlow::new` refuses a `cli_code` with another purpose; keys as
   handles: `SignupCreatedFfi.master_key`, `RecoveredFfi::SignedIn.master_key`, `DeviceRequestEventFfi::Approved.master_key`,
   `ApprovalFlow::approve`, `MemberInviteFlow::new`, `share_approve_file_invite_request`, `share_open_member_file_key`,
-  `CreateLinkFlow::new` / `bundle` (`BundleItemFfi.file_key`), `share_rebuild_link` (+ `wrapped_file_key`),
+  `CreateLinkFlow::new` / `bundle` (`BundleItemFfi.file_key`), `share_rebuild_link` (+ required `wrapped_file_key`), `share_rebuild_bundle_link`,
   `share_open_link_file_key`, `FolderShareFlow::new` / `link`, `CreateRequestFlow`, `share_rebuild_folder_link` and
   the file-request rebuild take or return `MasterKeyHandle` / `FileKeyHandle`.
 
@@ -44,7 +44,7 @@ Counted from source (unique `js_name = …` under `beebeeb-wasm/src`): base 187,
 | `fileRequestRebuildLink(appUrl, masterKey, token?, wrappedPrivateKey?, wrapNonce?)` (B05c) | Web `handleCopyExisting`: the request's link again, or `undefined`. |
 | `shareCreateBundle(appUrl, fileIds, positions, fileKeys, masterKey, expiresInHours?, maxOpens?, passphrase?)` (B05c) | A `ShareCreateLink` over an ordered set of files (web's bundle branch); `fileKeys` is the 32-byte keys concatenated. |
 | `ShareCreateLink(appUrl, fileId, masterKey, fileKey, expiresInHours?, maxOpens?, passphrase?)` | `start()`, `onResponse(...)` → `{kind: "send"}` (one retry on an untyped 409) / `{kind: "created", shareId, link, display}`. |
-| `shareRebuildLink(appUrl, masterKey, ownerWrappedKey?, ownerWrappedToken?, wrappedFileKey?)` | Web's `buildShareLink`: the owner's link, or `undefined`. |
+| `shareRebuildLink(appUrl, masterKey, ownerWrappedKey?, ownerWrappedToken?, wrappedFileKey)` (required), `shareRebuildBundleLink(appUrl, masterKey, ownerWrappedKey?, ownerWrappedToken?)` | Web's `buildShareLink`: the owner's link, or `undefined`. |
 | `shareOpenMemberFileKey(masterKey, ownerPublicKey, fileId, sealed)` | The recipient side of a person share. |
 
 ## UniFFI

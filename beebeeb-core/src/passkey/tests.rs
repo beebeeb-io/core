@@ -814,7 +814,8 @@ fn passkey_prf_probe_asks_for_the_creations_user_verification() {
     preferred.user_verification = "preferred".into();
     assert_eq!(
         RequestOptions::local_prf_probe(&preferred, &[1u8; 16]).user_verification,
-        "preferred"
+        "required",
+        "the probe forces `required` whatever the options carry"
     );
 }
 

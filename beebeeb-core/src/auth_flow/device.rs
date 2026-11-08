@@ -46,7 +46,10 @@ struct ApprovalPayload<'a> {
 /// Serializes the approval payload straight into one pre-sized wiped buffer: no intermediate
 /// `serde_json::Value` or `String` holds the session token or the encoded master key, and the
 /// buffer never reallocates (a reallocation would free an unwiped copy).
-pub(crate) fn approval_plaintext(session_token: &str, master_key: &[u8; 32]) -> Zeroizing<Vec<u8>> {
+pub(crate) fn approval_plaintext(
+    session_token: &str,
+    master_key: &[u8; 32],
+) -> Result<Zeroizing<Vec<u8>>, AuthFlowError> {
     let master_b64 = Zeroizing::new(b64().encode(master_key));
     // JSON escaping can at most sextuple a byte (`\u00XX`); keys and punctuation are fixed.
     let cap = 64 + 6 * session_token.len() + master_b64.len();
@@ -55,8 +58,8 @@ pub(crate) fn approval_plaintext(session_token: &str, master_key: &[u8; 32]) -> 
         session_token,
         master_key_b64: master_b64.as_str(),
     };
-    serde_json::to_writer(&mut *buf, &payload).expect("serializing borrowed strs cannot fail");
-    buf
+    serde_json::to_writer(&mut *buf, &payload).map_err(|_| AuthFlowError::Protocol("approval payload"))?;
+    Ok(buf)
 }
 
 // ── The requesting side ──────────────────────────────────────────────────────
@@ -404,7 +407,7 @@ impl ApproveRun {
                     return Err(AuthFlowError::from_status(&resp));
                 }
                 let session_token = Zeroizing::new(resp.str_field("session_token")?.to_owned());
-                let plain = approval_plaintext(&session_token, &self.master_key);
+                let plain = approval_plaintext(&session_token, &self.master_key)?;
                 let sealed = encrypt_for_requester(&self.requester_public, &plain)
                     .map_err(|_| AuthFlowError::Protocol("requester key"))?;
                 self.master_key.zeroize();

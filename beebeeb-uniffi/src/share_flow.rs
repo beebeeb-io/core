@@ -261,22 +261,39 @@ impl CreateLinkFlow {
 }
 
 /// The owner's working link from a share's owner blobs; `None` when it can't be rebuilt.
-/// `wrapped_file_key` (a file link's stored `wrapped_file_key`; `None` for a bundle) must open under
-/// the rebuilt link key.
+/// `wrapped_file_key` (the link's stored `wrapped_file_key`, required) must open under the rebuilt
+/// link key. A bundle uses `share_rebuild_bundle_link`.
 #[uniffi::export]
 pub fn share_rebuild_link(
     app_url: String,
     master_key: Arc<MasterKeyHandle>,
     owner_wrapped_key: Option<String>,
     owner_wrapped_token: Option<String>,
-    wrapped_file_key: Option<String>,
+    wrapped_file_key: String,
 ) -> Result<Option<String>, ShareFlowFfiError> {
     Ok(sf::link::rebuild_link(
         &app_url,
         &master(&master_key)?,
         owner_wrapped_key.as_deref(),
         owner_wrapped_token.as_deref(),
-        wrapped_file_key.as_deref(),
+        &wrapped_file_key,
+    )
+    .map(|l| l.to_string()))
+}
+
+/// [`share_rebuild_link`] for a bundle (no single wrapped file key).
+#[uniffi::export]
+pub fn share_rebuild_bundle_link(
+    app_url: String,
+    master_key: Arc<MasterKeyHandle>,
+    owner_wrapped_key: Option<String>,
+    owner_wrapped_token: Option<String>,
+) -> Result<Option<String>, ShareFlowFfiError> {
+    Ok(sf::link::rebuild_bundle_link(
+        &app_url,
+        &master(&master_key)?,
+        owner_wrapped_key.as_deref(),
+        owner_wrapped_token.as_deref(),
     )
     .map(|l| l.to_string()))
 }

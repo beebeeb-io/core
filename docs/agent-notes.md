@@ -375,3 +375,4 @@ its platform's WebAuthn call.
   <repos/web>` must open (and refuse its two bad rows).
 - **Server gaps (not core's):** `GET /api/v1/auth/passkeys` sends neither `last_used_at` nor whether a passkey has an
   escrow; `PasskeyInfo` reads both as `Option` so the server can add them without a core change.
+- **`allow_localhost` (UniFFI / WASM passkey parse):** a host takes the value from its build configuration, never from the server or a user setting.

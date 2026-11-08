@@ -330,7 +330,7 @@ fn a_link_opens_for_the_recipient_and_rebuilds_for_the_owner() {
         &owner,
         body["owner_wrapped_key"].as_str(),
         body["owner_wrapped_token"].as_str(),
-        body["wrapped_file_key"].as_str(),
+        body["wrapped_file_key"].as_str().unwrap(),
     )
     .unwrap();
     assert_eq!(*rebuilt, *link.link);
@@ -342,7 +342,7 @@ fn a_link_opens_for_the_recipient_and_rebuilds_for_the_owner() {
             &owner,
             body["owner_wrapped_key"].as_str(),
             body["owner_wrapped_token"].as_str(),
-            Some(&foreign),
+            &foreign,
         )
         .is_none(),
         "the content key must open under the rebuilt K_c"
@@ -353,11 +353,22 @@ fn a_link_opens_for_the_recipient_and_rebuilds_for_the_owner() {
             &master(2),
             body["owner_wrapped_key"].as_str(),
             body["owner_wrapped_token"].as_str(),
-            None,
+            body["wrapped_file_key"].as_str().unwrap(),
         )
         .is_none()
     );
-    assert!(rebuild_link(APP, &owner, None, body["owner_wrapped_token"].as_str(), None).is_none());
+    assert!(rebuild_link(APP, &owner, None, body["owner_wrapped_token"].as_str(), "x").is_none());
+    // The key is required: an empty one is a refusal, never a skipped check.
+    assert!(
+        rebuild_link(
+            APP,
+            &owner,
+            body["owner_wrapped_key"].as_str(),
+            body["owner_wrapped_token"].as_str(),
+            "",
+        )
+        .is_none()
+    );
     assert!(!format!("{link:?}{flow:?}").contains(&token));
 }
 

@@ -385,7 +385,7 @@ fn deny_posts_the_code_and_maps_not_found() {
 fn the_approval_payload_is_serialized_into_one_presized_buffer() {
     let token = "tok-\"quoted\"-\u{1}-value";
     let master = [7u8; 32];
-    let buf = device::approval_plaintext(token, &master);
+    let buf = device::approval_plaintext(token, &master).unwrap();
     let initial_cap = 64 + 6 * token.len() + b64().encode(master).len();
     // The buffer was never reallocated, so no freed copy of the payload exists.
     assert_eq!(buf.capacity(), initial_cap, "the payload buffer reallocated");

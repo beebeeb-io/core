@@ -257,7 +257,8 @@ pub fn rebuild_folder_link(
     wrapped_folder_key_b64: Option<&str>,
     passphrase_protected: bool,
 ) -> Option<Zeroizing<String>> {
-    use super::super::{b64_decode, split, unwrap_key_from_share};
+    use super::super::{b64_decode, canonical_item_id, split, unwrap_key_from_share};
+    let share_id = canonical_item_id(share_id, "share id").ok()?;
     let owner_key = b64_decode(owner_wrapped_key_b64.filter(|s| !s.is_empty())?).ok()?;
     let owner_token = b64_decode(owner_wrapped_token_b64.filter(|s| !s.is_empty())?).ok()?;
     let k_c = kdf::unwrap_link_owner_key(master, share_id.as_bytes(), &split(&owner_key).ok()?).ok()?;

@@ -31,25 +31,32 @@ API changes, every one a compile error at the call site, none silent:
    `otpauth_uri` are `Zeroizing<String>`, `backup_codes` is `Zeroizing<Vec<String>>` (JSON shape unchanged).
 8. `ApiResponse` (account flows, passkey flows) no longer derives `Debug` over its body: it prints the status only.
    `AccountOutcome::EmailChanged` prints the email redacted.
-9. `share_flow::link::rebuild_link` takes the stored `wrapped_file_key` (`None` for a bundle) and returns `None`
-   when it does not open under the rebuilt `K_c`. UniFFI `share_rebuild_link` / WASM `shareRebuildLink` take it too.
+9. `share_flow::link::rebuild_link` takes the stored `wrapped_file_key` as a required `&str` and returns `None`
+   when it is empty or does not open under the rebuilt `K_c`. Bundles use the new `rebuild_bundle_link`. UniFFI
+   `share_rebuild_link` (required `wrapped_file_key: String`) / `share_rebuild_bundle_link` and WASM
+   `shareRebuildLink` (non-optional in the `.d.ts`) / `shareRebuildBundleLink` follow.
 10. Folder shares refuse a folder or child id that is not already a canonical lower-case UUID (`invalid_input`).
 11. UniFFI: keys cross as handles. Out: `SignupCreatedFfi.master_key`, `RecoveredFfi::SignedIn.master_key`,
     `DeviceRequestEventFfi::Approved.master_key` (`Arc<MasterKeyHandle>`), `share_open_member_file_key`,
     `share_open_link_file_key` (`Arc<FileKeyHandle>`). In: `ApprovalFlow.approve`, `MemberInviteFlow`,
     `CreateLinkFlow::new` / `bundle` (`BundleItemFfi.file_key`), the folder-share constructors,
     `share_rebuild_link`, `share_rebuild_folder_link` and the other share functions that took `master_key: Vec<u8>`.
-12. UniFFI and WASM `passkey_parse_registration_start` / `passkey_parse_assertion_start` take `expected_rp_id` and
+12. UniFFI and WASM `passkey_parse_registration_start / `passkey_parse_assertion_start` take `expected_rp_id` and
     `allow_localhost`.
+13. File person shares refuse an id that is not a canonical lower-case UUID (`invalid_input`) in `MemberInvite::start`,
+    `approve_request`, `seal_file_key_for_member` and `open_member_file_key`; `rebuild_folder_link` returns `None` for one.
+14. Passkeys always ask for `userVerification: "required"` at creation, at the PRF probe and at the assertion, whatever
+    the server's options say.
 
 Also: the device-approval payload is serialized into one pre-sized wiped buffer; the sign-up terms / privacy URL host
-is compared exactly; UniFFI account-flow passwords, codes and link tokens are held in `Zeroizing`.
+is compared exactly and a URL containing `\` is refused; UniFFI account-flow passwords, codes and link tokens are held in `Zeroizing`.
 
 ### Added
 
 - **Desktop v2 B05b: share flows ported** (#99). `share_flow`: person shares of a file, folder invites and folder links
   (the 2133 folder-key rules: random folder keys, custody, L7 child wraps), file links, bundles and file requests, in
-  UniFFI and WASM; the 15 share vectors match web byte for byte.
+  UniFFI and WASM; 13 named vectors in `test-vectors/vectors.json` (counted by name in the share-flow tests), covered by 19 tests,
+  match web byte for byte.
 - **Desktop v2 B10b: server #422's account routes** (#100). `account_flows`: the three-step delete (`delete_account(password,
   code?)` → `POST /auth/account/delete-request` with the second factor on a 2FA account; `delete_confirm` and
   `delete_cancel` with the mailed link's token), `regenerate_backup_codes(code)` (`POST /auth/2fa/backup-codes`; the

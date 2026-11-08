@@ -18,6 +18,10 @@ use zeroize::Zeroizing;
 
 use super::{hmac_secret_salt, prf_eval_input};
 
+/// The user-verification level core asks of every authenticator, whatever the server sends: the
+/// passkey wraps the vault key, so presence alone must never open it.
+const REQUIRED_UV: &str = "required";
+
 /// Why a passkey step failed, as a code a client maps to its own words. Never carries a server body, a key, a token
 /// or a URL.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -291,10 +295,8 @@ pub fn parse_registration_start(answer: &Value, expected: &ExpectedRp) -> Result
             algorithms,
             exclude_credentials: credential_ids(pk.get("excludeCredentials"))?,
             timeout_ms: pk.get("timeout").and_then(Value::as_u64).unwrap_or(60_000) as u32,
-            user_verification: selection
-                .and_then(|s| str_field(s, "userVerification"))
-                .unwrap_or("preferred")
-                .to_string(),
+            // Never the server's choice: a passkey that wraps the vault key always verifies the user.
+            user_verification: REQUIRED_UV.to_string(),
             resident_key,
             attestation: str_field(pk, "attestation").unwrap_or("none").to_string(),
             authenticator_attachment: selection
@@ -386,7 +388,7 @@ impl RequestOptions {
 
     /// Options for a LOCAL assertion whose only purpose is the PRF output of a credential just created (a platform
     /// that cannot evaluate PRF during `create`). Its challenge is random and is never sent to the server. It asks
-    /// for the creation's `user_verification`, never less: `hmac-secret` gives a different output with and without
+    /// for `required` user verification, as the creation does: `hmac-secret` gives a different output with and without
     /// verification, and the sign-in requires it, so a weaker probe would escrow under a PRF output no sign-in
     /// reproduces.
     pub fn local_prf_probe(creation: &CreationOptions, credential_id: &[u8]) -> Self {
@@ -397,7 +399,7 @@ impl RequestOptions {
             challenge,
             allow_credentials: vec![credential_id.to_vec()],
             timeout_ms: creation.timeout_ms,
-            user_verification: creation.user_verification.clone(),
+            user_verification: REQUIRED_UV.to_string(),
             origin: creation.origin.clone(),
             prf: PrfSalts::new(),
         }
@@ -437,7 +439,7 @@ pub fn parse_assertion_start(answer: &Value, expected: &ExpectedRp) -> Result<As
             challenge: from_b64url(str_field(pk, "challenge").ok_or(PasskeyError::Malformed("challenge"))?)?,
             allow_credentials: credential_ids(pk.get("allowCredentials"))?,
             timeout_ms: pk.get("timeout").and_then(Value::as_u64).unwrap_or(60_000) as u32,
-            user_verification: str_field(pk, "userVerification").unwrap_or("preferred").to_string(),
+            user_verification: REQUIRED_UV.to_string(),
             prf: PrfSalts::new(),
         },
     })

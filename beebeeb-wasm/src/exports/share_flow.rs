@@ -165,15 +165,15 @@ impl ShareCreateLink {
 }
 
 /// The owner's working link from a share's owner blobs; `undefined` when it can't be rebuilt.
-/// `wrappedFileKey` (a file link's stored `wrapped_file_key`; `undefined` for a bundle) must open
-/// under the rebuilt link key.
+/// `wrappedFileKey` (the link's stored `wrapped_file_key`, required) must open under the rebuilt link
+/// key. A bundle uses `shareRebuildBundleLink`.
 #[wasm_bindgen(js_name = shareRebuildLink)]
 pub fn share_rebuild_link(
     app_url: &str,
     master_key: &[u8],
     owner_wrapped_key: Option<String>,
     owner_wrapped_token: Option<String>,
-    wrapped_file_key: Option<String>,
+    wrapped_file_key: String,
 ) -> Result<Option<String>, JsError> {
     let master = MasterKey::from_bytes(*key32(master_key)?);
     Ok(sf::link::rebuild_link(
@@ -181,7 +181,25 @@ pub fn share_rebuild_link(
         &master,
         owner_wrapped_key.as_deref(),
         owner_wrapped_token.as_deref(),
-        wrapped_file_key.as_deref(),
+        &wrapped_file_key,
+    )
+    .map(|l| l.to_string()))
+}
+
+/// [`share_rebuild_link`] for a bundle (no single wrapped file key).
+#[wasm_bindgen(js_name = shareRebuildBundleLink)]
+pub fn share_rebuild_bundle_link(
+    app_url: &str,
+    master_key: &[u8],
+    owner_wrapped_key: Option<String>,
+    owner_wrapped_token: Option<String>,
+) -> Result<Option<String>, JsError> {
+    let master = MasterKey::from_bytes(*key32(master_key)?);
+    Ok(sf::link::rebuild_bundle_link(
+        app_url,
+        &master,
+        owner_wrapped_key.as_deref(),
+        owner_wrapped_token.as_deref(),
     )
     .map(|l| l.to_string()))
 }

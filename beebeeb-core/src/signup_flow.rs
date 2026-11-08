@@ -78,10 +78,11 @@ impl Default for SignupPolicy {
 /// An `https` URL on Beebeeb's own domain. The authority ends at the first `/`, `?`, `#` or `\\`
 /// (WHATWG reads `\\` as `/` in an `https` URL), must be a plain host (no `@` credentials, no port,
 /// only ASCII letters, digits, `-` and `.`), and the HOST is compared exactly: `beebeeb.io` or a
-/// subdomain. A URL with whitespace or a control character is refused outright.
+/// subdomain. A URL with whitespace, a control character or a `\\` anywhere is refused outright (browsers
+/// and Android's `Uri` read `\\` differently from this parser).
 pub(crate) fn own_https_url(v: Option<&serde_json::Value>) -> Option<String> {
     let s = v?.as_str()?;
-    if s.chars().any(|c| c.is_whitespace() || c.is_control()) {
+    if s.chars().any(|c| c.is_whitespace() || c.is_control() || c == '\\') {
         return None;
     }
     let rest = s.strip_prefix("https://")?;

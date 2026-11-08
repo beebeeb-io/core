@@ -4,7 +4,7 @@
 use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
-use super::super::link::{LinkOptions, LinkStep, rebuild_link};
+use super::super::link::{LinkOptions, LinkStep, rebuild_bundle_link};
 use super::super::{b64_decode, unwrap_key_from_share};
 use super::*;
 use crate::auth_flow::HttpResponse;
@@ -69,12 +69,11 @@ fn every_item_opens_under_the_links_k_c_and_the_owner_can_rebuild_it() {
             unwrap_key_from_share(&k_c, &b64_decode(item["wrapped_file_key"].as_str().unwrap()).unwrap()).unwrap();
         assert_eq!(opened.as_slice(), keys[i].as_bytes());
     }
-    let rebuilt = rebuild_link(
+    let rebuilt = rebuild_bundle_link(
         APP,
         &m,
         body["owner_wrapped_key"].as_str(),
         body["owner_wrapped_token"].as_str(),
-        None,
     )
     .unwrap();
     assert_eq!(rebuilt.as_str(), created.link.as_str());
