@@ -831,110 +831,161 @@ fn progress_ends_at_exactly_the_total() {
 // LD-0146, lead review of #89: a sink that fails once, folders vs renames, understated sizes, overflowing sizes.
 // ---------------------------------------------------------------------------------------------------------------
 
-/// How [`ScriptedSink`] fails its one bad write.
-#[derive(Clone, Copy, Debug)]
+/// How [`ScriptedSink`] fails its one bad operation.
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum SinkFailure {
-    /// `write` returns an error.
+    /// The operation returns an error.
     Error,
-    /// `write` takes no bytes and returns `Ok(0)`, which `write_all` turns into `WriteZero`.
+    /// A `write` takes no bytes and returns `Ok(0)`, which `write_all` turns into `WriteZero`; any other operation
+    /// returns an error.
     ZeroBytes,
-    /// `write` returns `ErrorKind::Interrupted` (EINTR), which `write_all` retries: not a failure.
+    /// The operation returns `ErrorKind::Interrupted` (EINTR).
     Interrupted,
 }
 
-/// A sink that records every `write` call and can fail exactly one of them (`fail_call`, counted from 0, in the way of
-/// `failure`); every other call, and every call after the failure, goes through. `injected` says whether the failure
-/// really happened.
+/// One call on the sink, in order.
+#[derive(Clone, Debug)]
+enum SinkOp {
+    Write(Vec<u8>),
+    Seek,
+    Flush,
+}
+
+/// A sink that records every `write`, `seek` and `flush` call and can fail exactly one of them (`fail_op`, counted from
+/// 0, in the way of `failure`); every other call, and every call after the failure, goes through. `injected` says
+/// whether the failure really happened.
 struct ScriptedSink<'a> {
     inner: Cursor<&'a mut Vec<u8>>,
-    writes: &'a std::cell::RefCell<Vec<Vec<u8>>>,
-    fail_call: Option<usize>,
+    ops: &'a std::cell::RefCell<Vec<SinkOp>>,
+    fail_op: Option<usize>,
     failure: SinkFailure,
     injected: &'a std::cell::Cell<bool>,
 }
 
+impl ScriptedSink<'_> {
+    /// Records `op` and says whether it is the one that fails.
+    fn next(&self, op: SinkOp) -> Option<SinkFailure> {
+        let index = self.ops.borrow().len();
+        self.ops.borrow_mut().push(op);
+        if self.fail_op == Some(index) {
+            self.injected.set(true);
+            return Some(self.failure);
+        }
+        None
+    }
+
+    fn error_for(failure: SinkFailure) -> std::io::Error {
+        match failure {
+            SinkFailure::Interrupted => std::io::Error::from(std::io::ErrorKind::Interrupted),
+            SinkFailure::Error | SinkFailure::ZeroBytes => std::io::Error::other("sink: one transient failure"),
+        }
+    }
+}
+
 impl std::io::Write for ScriptedSink<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let call = self.writes.borrow().len();
-        self.writes.borrow_mut().push(buf.to_vec());
-        if self.fail_call == Some(call) {
-            self.injected.set(true);
-            return match self.failure {
-                SinkFailure::Error => Err(std::io::Error::other("sink: one transient failure")),
-                SinkFailure::ZeroBytes => Ok(0),
-                SinkFailure::Interrupted => Err(std::io::Error::from(std::io::ErrorKind::Interrupted)),
-            };
+        match self.next(SinkOp::Write(buf.to_vec())) {
+            Some(SinkFailure::ZeroBytes) => Ok(0),
+            Some(failure) => Err(Self::error_for(failure)),
+            None => self.inner.write(buf),
         }
-        self.inner.write(buf)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        self.inner.flush()
+        match self.next(SinkOp::Flush) {
+            Some(failure) => Err(Self::error_for(failure)),
+            None => self.inner.flush(),
+        }
     }
 }
 
 impl std::io::Seek for ScriptedSink<'_> {
     fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
-        self.inner.seek(pos)
+        match self.next(SinkOp::Seek) {
+            Some(failure) => Err(Self::error_for(failure)),
+            None => self.inner.seek(pos),
+        }
     }
 }
 
-/// Runs the two-entry archive into a [`ScriptedSink`] whose one bad write is the last write before the
-/// end-of-central-directory record, found by a dry run. Returns the result, the output, and whether the sink really
-/// failed.
-fn run_with_failure_in_the_central_directory(failure: SinkFailure) -> (Result<(), CoreError>, Vec<u8>, bool) {
+/// The result of one run of the two-entry archive into a [`ScriptedSink`].
+struct SinkRun {
+    result: Result<(), CoreError>,
+    output: Vec<u8>,
+    injected: bool,
+    ops: Vec<SinkOp>,
+}
+
+fn run_into_scripted_sink(fail_op: Option<usize>, failure: SinkFailure) -> SinkRun {
     let (mk, entries, source) = two_entries();
-    let never = std::cell::Cell::new(false);
-
-    let mut dry_buf = Vec::new();
-    let dry_writes = std::cell::RefCell::new(Vec::new());
-    let mut fetch = fetch_from(&source);
-    let dry_sink = ScriptedSink {
-        inner: Cursor::new(&mut dry_buf),
-        writes: &dry_writes,
-        fail_call: None,
-        failure,
-        injected: &never,
-    };
-    stream_folder_zip(&mk, &entries, &mut fetch, dry_sink, &|_| {}, &AtomicBool::new(false)).unwrap();
-    let dry_writes = dry_writes.into_inner();
-    let first_header = dry_writes.iter().position(|w| w.starts_with(b"PK\x01\x02")).unwrap();
-    let footer = dry_writes.iter().position(|w| w.starts_with(b"PK\x05\x06")).unwrap();
-    let fail_call = footer - 1;
-    assert!(
-        fail_call >= first_header,
-        "the failing write ({fail_call}) must be inside the central directory (starts at {first_header})"
-    );
-
-    let mut buf = Vec::new();
-    let writes = std::cell::RefCell::new(Vec::new());
+    let mut output = Vec::new();
+    let ops = std::cell::RefCell::new(Vec::new());
     let injected = std::cell::Cell::new(false);
     let mut fetch = fetch_from(&source);
     let sink = ScriptedSink {
-        inner: Cursor::new(&mut buf),
-        writes: &writes,
-        fail_call: Some(fail_call),
+        inner: Cursor::new(&mut output),
+        ops: &ops,
+        fail_op,
         failure,
         injected: &injected,
     };
     let result = stream_folder_zip(&mk, &entries, &mut fetch, sink, &|_| {}, &AtomicBool::new(false));
-    (result, buf, injected.get())
+    SinkRun {
+        result,
+        output,
+        injected: injected.get(),
+        ops: ops.into_inner(),
+    }
+}
+
+/// Where the central directory starts and where the footer is written, from a dry run: the index of the first
+/// `PK\x01\x02` header write and of the `PK\x05\x06` end-of-central-directory write.
+fn central_directory_ops(ops: &[SinkOp]) -> (usize, usize) {
+    let position = |signature: &[u8]| {
+        ops.iter()
+            .position(|op| matches!(op, SinkOp::Write(w) if w.starts_with(signature)))
+            .unwrap()
+    };
+    (position(b"PK\x01\x02"), position(b"PK\x05\x06"))
+}
+
+/// Runs with the failure on the last write before the end-of-central-directory record, which is inside the central
+/// directory (asserted).
+fn run_with_failure_in_the_central_directory(failure: SinkFailure) -> SinkRun {
+    let dry = run_into_scripted_sink(None, failure);
+    let (first_header, footer) = central_directory_ops(&dry.ops);
+    let fail_op = (0..footer)
+        .rev()
+        .find(|&i| matches!(dry.ops[i], SinkOp::Write(_)))
+        .unwrap();
+    assert!(
+        fail_op >= first_header,
+        "the failing write ({fail_op}) must be inside the central directory (starts at {first_header})"
+    );
+    run_into_scripted_sink(Some(fail_op), failure)
 }
 
 /// Item 2, the zip crate's second chance: `ZipWriter::finish` fails, drops the writer inside, and that `Drop` finalizes
 /// again. If the sink works again by then (a network file system, one EIO), the second central directory and footer
 /// land after the first, partial one, and the output reads as a complete archive while the function returned `Err`.
 fn assert_sink_failure_in_the_central_directory_leaves_no_archive(failure: SinkFailure) {
-    let (result, buf, injected) = run_with_failure_in_the_central_directory(failure);
-    assert!(injected, "{failure:?}: the sink never failed, so this proves nothing");
-    assert!(matches!(result, Err(CoreError::Io(_))), "{failure:?}: got {result:?}");
+    let run = run_with_failure_in_the_central_directory(failure);
     assert!(
-        zip::ZipArchive::new(Cursor::new(&buf)).is_err(),
-        "{failure:?}: a reader accepts the {}-byte output as a complete archive although the function returned Err",
-        buf.len()
+        run.injected,
+        "{failure:?}: the sink never failed, so this proves nothing"
     );
     assert!(
-        !buf.windows(4).any(|w| w == b"PK\x05\x06"),
+        matches!(run.result, Err(CoreError::Io(_))),
+        "{failure:?}: got {:?}",
+        run.result
+    );
+    assert!(
+        zip::ZipArchive::new(Cursor::new(&run.output)).is_err(),
+        "{failure:?}: a reader accepts the {}-byte output as a complete archive although the function returned Err",
+        run.output.len()
+    );
+    assert!(
+        !run.output.windows(4).any(|w| w == b"PK\x05\x06"),
         "{failure:?}: the output holds an end-of-central-directory record"
     );
 }
@@ -949,14 +1000,59 @@ fn sink_taking_no_bytes_in_the_central_directory_leaves_no_readable_archive() {
     assert_sink_failure_in_the_central_directory_leaves_no_archive(SinkFailure::ZeroBytes);
 }
 
-/// An `Interrupted` write is retried by `write_all` and is not a failure: the archive must still finish and open.
+/// An `Interrupted` write is retried and is not a failure: the archive must still finish and open.
 #[test]
 fn interrupted_write_is_retried_and_the_archive_is_complete() {
-    let (result, buf, injected) = run_with_failure_in_the_central_directory(SinkFailure::Interrupted);
-    assert!(injected, "the sink never raised Interrupted, so this proves nothing");
-    assert!(result.is_ok(), "an interrupted write must be retried, got {result:?}");
-    let archive = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let run = run_with_failure_in_the_central_directory(SinkFailure::Interrupted);
+    assert!(
+        run.injected,
+        "the sink never raised Interrupted, so this proves nothing"
+    );
+    assert!(
+        run.result.is_ok(),
+        "an interrupted write must be retried, got {:?}",
+        run.result
+    );
+    let archive = zip::ZipArchive::new(Cursor::new(&run.output)).unwrap();
     assert_eq!(archive.len(), 2);
+}
+
+/// One failure of any single `write`, `seek` or `flush` before the end-of-central-directory record, in each way a sink
+/// fails: either the run is `Ok` and the archive opens complete, or it is `Err` and no reader opens the output. The
+/// sweep must reach seeks, or it would not cover them (zip 9.4.1 never flushes; `SealableWriter::flush` has a unit
+/// test of its own in `zip.rs`).
+#[test]
+fn a_single_sink_failure_before_the_footer_never_leaves_a_readable_archive_with_an_err() {
+    for failure in [SinkFailure::Error, SinkFailure::ZeroBytes, SinkFailure::Interrupted] {
+        let dry = run_into_scripted_sink(None, failure);
+        let (_, footer) = central_directory_ops(&dry.ops);
+        let seeks = dry.ops[..footer].iter().filter(|op| matches!(op, SinkOp::Seek)).count();
+        assert!(seeks > 0, "the sweep reaches {seeks} seeks");
+
+        for fail_op in 0..=footer {
+            let run = run_into_scripted_sink(Some(fail_op), failure);
+            let at = format!("{failure:?} at op {fail_op} ({:?})", dry.ops[fail_op]);
+            assert!(run.injected, "{at}: the sink never failed");
+            match &run.result {
+                Err(_) => {
+                    assert!(
+                        zip::ZipArchive::new(Cursor::new(&run.output)).is_err(),
+                        "{at}: a reader accepts the {}-byte output as a complete archive although the function returned Err",
+                        run.output.len()
+                    );
+                    assert!(
+                        !run.output.windows(4).any(|w| w == b"PK\x05\x06"),
+                        "{at}: the output holds an end-of-central-directory record"
+                    );
+                }
+                Ok(()) => {
+                    let archive = zip::ZipArchive::new(Cursor::new(&run.output))
+                        .unwrap_or_else(|e| panic!("{at}: Ok, but the archive does not open: {e}"));
+                    assert_eq!(archive.len(), 2, "{at}: Ok, but the archive is incomplete");
+                }
+            }
+        }
+    }
 }
 
 /// Item 3: a rename never takes a path that is a folder of another entry, and an entry never keeps a path that is
@@ -1042,4 +1138,52 @@ fn overflowing_sizes_do_not_panic() {
         "an event is above 100%: {events:?}"
     );
     assert_eq!(events.last(), Some(&(13_000, 13_000)), "events {events:?}");
+}
+
+/// Item 4: when an understated entry ends and the declared sizes of the entries still to come are added back, the
+/// fraction done must not fall (it showed 100%, then 69%). Here the 9,000-byte entry declares 0 and comes first.
+#[test]
+fn progress_does_not_fall_back_when_an_understated_entry_ends() {
+    let (mk, mut entries, source) = two_entries_declared([4_000, 0]);
+    entries.reverse(); // second.txt (declares 0, 3 chunks of 3,000) first, then first.txt (declares 4,000)
+    let mut fetch = fetch_from(&source);
+    let mut buf = Vec::new();
+    let events: Mutex<Vec<(u64, u64)>> = Mutex::new(Vec::new());
+    let on_progress = |p: &ZipProgress| events.lock().unwrap().push((p.bytes_done, p.bytes_total));
+    stream_folder_zip(
+        &mk,
+        &entries,
+        &mut fetch,
+        Cursor::new(&mut buf),
+        &on_progress,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    let events = events.into_inner().unwrap();
+    assert_eq!(events.len(), 4, "events {events:?}");
+    assert!(
+        events.iter().all(|(done, total)| done <= total),
+        "an event is above 100%: {events:?}"
+    );
+    assert!(
+        events
+            .windows(2)
+            .all(|w| u128::from(w[0].0) * u128::from(w[1].1) <= u128::from(w[1].0) * u128::from(w[0].1)),
+        "the fraction done falls: {events:?}"
+    );
+    assert_eq!(events.last(), Some(&(13_000, 13_000)), "events {events:?}");
+}
+
+/// Item 3: names compare as the paths an extractor makes: empty components (`a//b`, a leading `/`) do not count.
+#[test]
+fn empty_path_components_do_not_hide_a_collision() {
+    assert_eq!(
+        archive_names(&["a/b.txt", "a//b.txt", "/a/b.txt"]),
+        ["a/b.txt", "a//b (2).txt", "/a/b (3).txt"],
+    );
+    assert_eq!(
+        archive_names(&["a", "a//b.txt"]),
+        ["a (2)", "a//b.txt"],
+        "`a//b.txt` has the folder `a`"
+    );
 }

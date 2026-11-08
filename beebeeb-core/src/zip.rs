@@ -43,13 +43,16 @@ const ZIP64_ENTRY_FROM_BYTES: u64 = 3 << 30;
 /// - `bytes_done` counts plaintext. `bytes_total` starts as the sum of the entries' `size_bytes`, and each entry's
 ///   share is replaced by the plaintext read once its last chunk is in, so the last event is exactly 100% whether
 ///   the uploader declared plaintext or encrypted sizes (the server accepts both). No event reports more than 100%,
-///   whatever the declared sizes say.
+///   whatever the declared sizes say, and an understated size does not make the fraction done fall back later.
 /// - An entry whose path an earlier entry already has (compared as a case- and normalisation-insensitive drive
-///   would) is stored as `name (2).ext`, `name (3).ext`, ...; no entry loses its own name to a rename.
+///   would, without empty components such as `a//b`) is stored as `name (2).ext`, `name (3).ext`, ...; no entry loses
+///   its own name to a rename. Paths are `/`-separated and relative, as the cli's `archive_component` makes them.
 /// - An entry is written as ZIP64 from 3 GiB of declared `size_bytes`. A server that declares less than 3 GiB for an
 ///   entry that streams past 4 GiB fails the archive with an `Err`, never with a corrupt one.
-/// - **On `Err` (or a panic in a callback) the output is not an archive:** the central directory is never written,
-///   so no reader opens it as a complete, shorter archive. The caller deletes it.
+/// - **On `Err` (or a panic in a callback) the output is unfinished:** the writer is sealed at the first failure, so
+///   no central directory follows it and no reader opens the output as a complete, shorter archive. The one
+///   exception is a sink that fails on the last seek after the footer is written: the footer is then already there.
+///   The caller deletes the output on any `Err`.
 #[allow(clippy::type_complexity)]
 pub fn stream_folder_zip<W: Write + Seek>(
     master_key: &MasterKey,
@@ -109,18 +112,27 @@ pub fn stream_folder_zip<W: Write + Seek>(
             zip.write_all(&plaintext).map_err(|e| CoreError::Io(e.to_string()))?;
 
             bytes_done += plaintext.len() as u64;
+            let entry_so_far = bytes_done - entry_start;
+            let last_chunk = chunk_idx + 1 == entry.chunk_count;
             // `size_bytes` is in the unit the uploading client declared (web: plaintext, cli: encrypted; the server
             // accepts both, LD-0147), so once an entry's last chunk is in, its declared size gives way to what was read.
-            if chunk_idx + 1 == entry.chunk_count {
+            if last_chunk {
                 bytes_total = bytes_total
                     .saturating_sub(entry.size_bytes)
-                    .saturating_add(bytes_done - entry_start);
+                    .saturating_add(entry_so_far);
             }
+            // Until then, an entry that already holds more than it declared counts for what it holds: the total grows
+            // with it, so no event is above 100% and the fraction done does not fall back when the entry ends.
+            let overshoot = if last_chunk {
+                0
+            } else {
+                entry_so_far.saturating_sub(entry.size_bytes)
+            };
 
             on_progress(&ZipProgress {
                 bytes_done,
-                // A declared size below what an entry really holds must not show more than 100% before the entry ends.
-                bytes_total: bytes_total.max(bytes_done),
+                // The last guard, for sums that saturated.
+                bytes_total: bytes_total.saturating_add(overshoot).max(bytes_done),
                 file_index,
                 file_count,
                 current_file: entry.path.clone(),
@@ -147,19 +159,25 @@ fn declared_total(entries: &[ZipEntry]) -> u64 {
 
 /// The archive path of each entry, in order. The first entry of a name keeps it; a later one gets ` (2)`, ` (3)`, ...
 /// before the extension of its last path component, the way the cli names a duplicate, and never a name another
-/// entry has, and never a folder of another entry (a file named like one is renamed too). Names compare through
-/// [`crate::backup::fold_name`]: macOS and Windows extract case- and normalisation-insensitively, so `Scan.PDF` would
-/// overwrite `scan.pdf` there.
+/// entry has or a folder of another entry (a file named like one is renamed too). Names compare through
+/// [`path_key`]: macOS and Windows extract case- and normalisation-insensitively, so `Scan.PDF` would overwrite
+/// `scan.pdf` there.
 fn unique_archive_paths(entries: &[ZipEntry]) -> Vec<String> {
     // Every folder of every entry is taken before any file: a file never shares its path with another entry's folder.
-    let mut taken: HashSet<String> = entries
-        .iter()
-        .flat_map(|entry| folder_prefixes(&entry.path))
-        .map(crate::backup::fold_name)
-        .collect();
+    // Entries come folder by folder, so a folder that equals the previous entry's is not looked at again.
+    let mut folders: HashSet<String> = HashSet::new();
+    let mut previous_folder = None;
+    for entry in entries {
+        let folder = entry.path.rsplit_once('/').map(|(folder, _)| folder);
+        if folder != previous_folder {
+            folders.extend(folder.into_iter().flat_map(folder_chain));
+            previous_folder = folder;
+        }
+    }
+    let mut taken: HashSet<String> = folders.iter().map(|folder| crate::backup::fold_name(folder)).collect();
     let keeps_name: Vec<bool> = entries
         .iter()
-        .map(|entry| taken.insert(crate::backup::fold_name(&entry.path)))
+        .map(|entry| taken.insert(path_key(&entry.path)))
         .collect();
     entries
         .iter()
@@ -171,7 +189,7 @@ fn unique_archive_paths(entries: &[ZipEntry]) -> Vec<String> {
             let mut n: u64 = 2;
             loop {
                 let candidate = path_with_suffix(&entry.path, &format!(" ({n})"));
-                if taken.insert(crate::backup::fold_name(&candidate)) {
+                if taken.insert(path_key(&candidate)) {
                     break candidate;
                 }
                 n += 1;
@@ -180,11 +198,24 @@ fn unique_archive_paths(entries: &[ZipEntry]) -> Vec<String> {
         .collect()
 }
 
-/// The folders of `path`: `a/b/c.txt` has `a` and `a/b`.
-fn folder_prefixes(path: &str) -> impl Iterator<Item = &str> {
-    path.match_indices('/')
-        .map(|(i, _)| &path[..i])
-        .filter(|p| !p.is_empty())
+/// How an extractor sees `path` when it compares names: the components without the empty ones (`a//b` is `a/b`, a
+/// leading `/` is dropped), folded by [`crate::backup::fold_name`].
+fn path_key(path: &str) -> String {
+    let components: Vec<&str> = path.split('/').filter(|c| !c.is_empty()).collect();
+    crate::backup::fold_name(&components.join("/"))
+}
+
+/// The folders on the way to `folder`, as unfolded keys without empty components: `a/b` gives `a` and `a/b`.
+fn folder_chain(folder: &str) -> Vec<String> {
+    let mut chain: Vec<String> = Vec::new();
+    for component in folder.split('/').filter(|c| !c.is_empty()) {
+        let next = match chain.last() {
+            Some(parent) => format!("{parent}/{component}"),
+            None => component.to_string(),
+        };
+        chain.push(next);
+    }
+    chain
 }
 
 /// `path` with `suffix` before the extension of its last component (`v1.2/README` has none).
@@ -212,26 +243,31 @@ impl<W> SealableWriter<'_, W> {
         }
         Ok(())
     }
+}
 
-    /// The first failure of the sink seals the writer for good (`Interrupted` is retried by `write_all` and is not a
-    /// failure). `ZipWriter::finish` drops the writer inside itself when it fails and its `Drop` finalizes a second
-    /// time; a sink that works again by then would get a second central directory after the partial first one, and the
-    /// output would read as a complete archive although the caller got an `Err`.
-    fn seal_on_failure<T>(&self, result: std::io::Result<T>) -> std::io::Result<T> {
-        if let Err(e) = &result
-            && e.kind() != std::io::ErrorKind::Interrupted
-        {
-            self.sealed.set(true);
+/// Runs one call on the sink. `Interrupted` is retried here and never surfaces: `write_all` would retry it, but the zip
+/// crate does not retry a seek or a flush, and one that failed would make `ZipWriter::finish` return `Err`. Any other
+/// failure seals the writer for good. `finish` drops the writer inside itself when it fails and its `Drop` finalizes a
+/// second time; a sink that works again by then would get a second central directory after the partial first one, and
+/// the output would read as a complete archive although the caller got an `Err`. (A failure of the zip crate itself, not
+/// of the sink, repeats identically on that second try and writes no footer either.)
+fn run_sealing<T>(sealed: &Cell<bool>, mut call: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    loop {
+        match call() {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => {
+                sealed.set(true);
+                return Err(e);
+            }
+            Ok(value) => return Ok(value),
         }
-        result
     }
 }
 
 impl<W: Write> Write for SealableWriter<'_, W> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.check_open()?;
-        let attempt = self.inner.write(buf);
-        let written = self.seal_on_failure(attempt)?;
+        let written = run_sealing(self.sealed, || self.inner.write(buf))?;
         if written == 0 && !buf.is_empty() {
             // `write_all` turns this into `WriteZero`; the sink is not taking bytes.
             self.sealed.set(true);
@@ -241,16 +277,14 @@ impl<W: Write> Write for SealableWriter<'_, W> {
 
     fn flush(&mut self) -> std::io::Result<()> {
         self.check_open()?;
-        let flushed = self.inner.flush();
-        self.seal_on_failure(flushed)
+        run_sealing(self.sealed, || self.inner.flush())
     }
 }
 
 impl<W: Seek> Seek for SealableWriter<'_, W> {
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
         self.check_open()?;
-        let moved = self.inner.seek(pos);
-        self.seal_on_failure(moved)
+        run_sealing(self.sealed, || self.inner.seek(pos))
     }
 }
 
@@ -260,5 +294,141 @@ struct SealOnExit<'a>(&'a Cell<bool>);
 impl Drop for SealOnExit<'_> {
     fn drop(&mut self) {
         self.0.set(true);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+
+    /// A sink whose next call fails in the way set, then works again.
+    struct Flaky {
+        inner: Cursor<Vec<u8>>,
+        interrupts: u32,
+        fail: Option<std::io::ErrorKind>,
+        zero_bytes: bool,
+        calls: u32,
+    }
+
+    impl Flaky {
+        fn new() -> Self {
+            Self {
+                inner: Cursor::new(Vec::new()),
+                interrupts: 0,
+                fail: None,
+                zero_bytes: false,
+                calls: 0,
+            }
+        }
+
+        fn gate(&mut self) -> std::io::Result<()> {
+            self.calls += 1;
+            if self.interrupts > 0 {
+                self.interrupts -= 1;
+                return Err(std::io::ErrorKind::Interrupted.into());
+            }
+            match self.fail.take() {
+                Some(kind) => Err(kind.into()),
+                None => Ok(()),
+            }
+        }
+    }
+
+    impl Write for Flaky {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.gate()?;
+            if std::mem::take(&mut self.zero_bytes) {
+                return Ok(0);
+            }
+            self.inner.write(buf)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.gate()
+        }
+    }
+
+    impl Seek for Flaky {
+        fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+            self.gate()?;
+            self.inner.seek(pos)
+        }
+    }
+
+    #[test]
+    fn interrupted_calls_are_retried_and_do_not_seal() {
+        let sealed = Cell::new(false);
+        let mut sink = Flaky::new();
+        sink.interrupts = 3;
+        let mut writer = SealableWriter {
+            inner: sink,
+            sealed: &sealed,
+        };
+        assert_eq!(writer.write(b"abc").unwrap(), 3);
+        writer.inner.interrupts = 2;
+        writer.flush().unwrap();
+        writer.inner.interrupts = 2;
+        assert_eq!(writer.seek(SeekFrom::Start(1)).unwrap(), 1);
+        assert!(!sealed.get(), "an interrupted call must not seal the writer");
+        assert!(writer.inner.calls >= 3 + 2 + 2 + 3, "each interrupted call was retried");
+    }
+
+    fn call(writer: &mut SealableWriter<'_, Flaky>, which: &str) -> std::io::Result<()> {
+        match which {
+            "write" => writer.write(b"x").map(drop),
+            "flush" => writer.flush(),
+            _ => writer.seek(SeekFrom::Start(0)).map(drop),
+        }
+    }
+
+    #[test]
+    fn a_failed_write_flush_or_seek_seals_the_writer_for_good() {
+        for name in ["write", "flush", "seek"] {
+            let sealed = Cell::new(false);
+            let mut sink = Flaky::new();
+            sink.fail = Some(std::io::ErrorKind::Other);
+            let mut writer = SealableWriter {
+                inner: sink,
+                sealed: &sealed,
+            };
+            assert!(call(&mut writer, name).is_err(), "{name}: the failure must surface");
+            assert!(sealed.get(), "{name}: a failure of the sink must seal the writer");
+            let calls = writer.inner.calls;
+            // The sink works again, but the writer stays shut and does not touch it.
+            for again in ["write", "flush", "seek"] {
+                assert!(
+                    call(&mut writer, again).is_err(),
+                    "{name}, then {again}: must stay sealed"
+                );
+            }
+            assert_eq!(
+                writer.inner.calls, calls,
+                "{name}: a sealed writer must not call the sink"
+            );
+        }
+    }
+
+    #[test]
+    fn a_write_of_zero_bytes_seals_the_writer() {
+        let sealed = Cell::new(false);
+        let mut sink = Flaky::new();
+        sink.zero_bytes = true;
+        let mut writer = SealableWriter {
+            inner: sink,
+            sealed: &sealed,
+        };
+        assert_eq!(writer.write(b"abc").unwrap(), 0);
+        assert!(sealed.get());
+        assert!(writer.write(b"abc").is_err());
+        // An empty buffer taking zero bytes is not a failure.
+        let sealed = Cell::new(false);
+        let mut writer = SealableWriter {
+            inner: Flaky::new(),
+            sealed: &sealed,
+        };
+        assert_eq!(writer.write(b"").unwrap(), 0);
+        assert!(!sealed.get());
     }
 }
