@@ -1956,7 +1956,8 @@ open class ChunkDecryptorHandle: ChunkDecryptorHandleProtocol, @unchecked Sendab
      * PUSH constructor: the caller feeds wire frames via
      * [`push_frame`](Self::push_frame). Each frame is self-describing, so no chunk
      * size is needed. `metadata` is the version's `NameMetadataDto` from
-     * `decrypt_file_metadata`; its commitment is enforced when present.
+     * `decrypt_file_metadata`; its commitment is enforced, and a record
+     * without one opens v1 content only.
      */
 public static func forPush(masterKey: MasterKeyHandle, fileId: String, metadata: NameMetadataDto)throws  -> ChunkDecryptorHandle  {
     return try  FfiConverterTypeChunkDecryptorHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
@@ -1987,7 +1988,8 @@ public static func forPushWithFileKeyHandle(fileKey: FileKeyHandle, fileId: Stri
     
     /**
      * Current/historical protected read. Pass the fields from the matching
-     * `NameMetadataDto`; omit both only for unprotected legacy metadata.
+     * `NameMetadataDto`; omit both only for legacy metadata, which opens v1
+     * content only (`expected_chunk_format` 2 without them is refused).
      */
 public static func forVersion(masterKey: MasterKeyHandle, fileId: String, expectedChunkFormat: UInt8, versionId: Data?, versionCounter: UInt64?)throws  -> ChunkDecryptorHandle  {
     return try  FfiConverterTypeChunkDecryptorHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
@@ -2004,7 +2006,8 @@ public static func forVersion(masterKey: MasterKeyHandle, fileId: String, expect
     /**
      * [`for_version`](Self::for_version) for key-handle holders (share and
      * shared-link recipients): the fields of that version's own decrypted
-     * metadata record; omit both only for unprotected legacy metadata.
+     * metadata record; omit both only for legacy metadata, which opens v1
+     * content only.
      */
 public static func forVersionWithFileKeyHandle(fileKey: FileKeyHandle, fileId: String, expectedChunkFormat: UInt8, versionId: Data?, versionCounter: UInt64?)throws  -> ChunkDecryptorHandle  {
     return try  FfiConverterTypeChunkDecryptorHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
@@ -2025,7 +2028,7 @@ public static func forVersionWithFileKeyHandle(fileKey: FileKeyHandle, fileId: S
      *
      * `metadata` is the `NameMetadataDto` `decrypt_file_metadata` returned for
      * the version on disk: its `chunk_format`, and its version commitment,
-     * which frame 0 must match when the record carries one.
+     * which frame 0 must match. A record without one opens v1 content only.
      */
 public static func fromFile(masterKey: MasterKeyHandle, fileId: String, metadata: NameMetadataDto, chunkSizeBytes: UInt64, inputPath: String)throws  -> ChunkDecryptorHandle  {
     return try  FfiConverterTypeChunkDecryptorHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
@@ -3150,7 +3153,10 @@ public protocol DeviceServiceHandleProtocol: AnyObject, Sendable {
     /**
      * QR path. `scanned_qr` is the raw text the camera read from the new
      * device's screen. Without a camera use the typed-code path: the code
-     * gives no protection against a substituted key on this one.
+     * gives no protection against a substituted key on this one. A relay
+     * name that differs from the scanned one
+     * ([`Self::scanned_device_link_name`]) is `ServiceError::Authentication`;
+     * nothing is sealed and the link is denied.
      */
     func approveDeviceLink(id: String, scannedQr: String, typedCode: String) throws 
     
@@ -3174,6 +3180,14 @@ public protocol DeviceServiceHandleProtocol: AnyObject, Sendable {
     func pollTypedDeviceLink(receiver: TypedDeviceReceiverHandle) throws  -> DeviceLinkPollData
     
     func revokeAccountSession(id: String) throws 
+    
+    /**
+     * QR path: the new device's name as its scanned QR carries it. Show this
+     * name while the person confirms, never the pending link's
+     * `device_name` (the relay's report). Refuses text that is not a
+     * Beebeeb device-link QR.
+     */
+    func scannedDeviceLinkName(scannedQr: String) throws  -> String
     
     func sendTypedApprovalMessage(id: String, message: Data) throws 
     
@@ -3258,7 +3272,10 @@ open func acknowledgeDeviceLink(approval: DeviceApprovalHandle)throws   {try rus
     /**
      * QR path. `scanned_qr` is the raw text the camera read from the new
      * device's screen. Without a camera use the typed-code path: the code
-     * gives no protection against a substituted key on this one.
+     * gives no protection against a substituted key on this one. A relay
+     * name that differs from the scanned one
+     * ([`Self::scanned_device_link_name`]) is `ServiceError::Authentication`;
+     * nothing is sealed and the link is denied.
      */
 open func approveDeviceLink(id: String, scannedQr: String, typedCode: String)throws   {try rustCallWithError(FfiConverterTypeServiceError_lift) {
     uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_approve_device_link(
@@ -3342,6 +3359,21 @@ open func revokeAccountSession(id: String)throws   {try rustCallWithError(FfiCon
         FfiConverterString.lower(id),$0
     )
 }
+}
+    
+    /**
+     * QR path: the new device's name as its scanned QR carries it. Show this
+     * name while the person confirms, never the pending link's
+     * `device_name` (the relay's report). Refuses text that is not a
+     * Beebeeb device-link QR.
+     */
+open func scannedDeviceLinkName(scannedQr: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeServiceError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_scanned_device_link_name(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(scannedQr),$0
+    )
+})
 }
     
 open func sendTypedApprovalMessage(id: String, message: Data)throws   {try rustCallWithError(FfiConverterTypeServiceError_lift) {
@@ -5141,14 +5173,13 @@ public protocol FileKeyHandleProtocol: AnyObject, Sendable {
      * asked for and `is_last` is `index == chunk_count - 1`; a server that
      * serves another chunk or lies about the count fails the tag.
      *
-     * `format` (1 = v1 legacy, 2 = v2) must come from authenticated data — 2
-     * when the encrypted metadata records v2, else the `chunk_format()` of a
-     * decryptor that opened chunk 0 — never from a server field.
-     * `version_id` (12 bytes, v2 only; ignored for v1) is the `version_id()` of
-     * a decryptor that opened chunk 0, or chunk 0's first 12 bytes: frames of
-     * another upload of the same file id fail.
+     * `metadata` is that version's `NameMetadataDto` from
+     * `decrypt_file_metadata[_with_key]`, never a server field: with a version
+     * commitment only that upload's v2 frames open; a record without one opens
+     * v1 frames only, and a `chunk_format: 2` record without one is refused
+     * (the ruling of 2026-11-07).
      */
-    func decryptChunkFrame(fileId: String, versionId: Data, index: UInt32, isLast: Bool, format: UInt8, frame: Data) throws  -> Data
+    func decryptChunkFrame(fileId: String, metadata: NameMetadataDto, index: UInt32, isLast: Bool, frame: Data) throws  -> Data
     
     /**
      * [`MasterKeyHandle::decrypt_file_metadata`] with this file key: refuses a
@@ -5418,22 +5449,20 @@ open func decryptChunk(nonce: Data, ciphertext: Data)throws  -> Data  {
      * asked for and `is_last` is `index == chunk_count - 1`; a server that
      * serves another chunk or lies about the count fails the tag.
      *
-     * `format` (1 = v1 legacy, 2 = v2) must come from authenticated data — 2
-     * when the encrypted metadata records v2, else the `chunk_format()` of a
-     * decryptor that opened chunk 0 — never from a server field.
-     * `version_id` (12 bytes, v2 only; ignored for v1) is the `version_id()` of
-     * a decryptor that opened chunk 0, or chunk 0's first 12 bytes: frames of
-     * another upload of the same file id fail.
+     * `metadata` is that version's `NameMetadataDto` from
+     * `decrypt_file_metadata[_with_key]`, never a server field: with a version
+     * commitment only that upload's v2 frames open; a record without one opens
+     * v1 frames only, and a `chunk_format: 2` record without one is refused
+     * (the ruling of 2026-11-07).
      */
-open func decryptChunkFrame(fileId: String, versionId: Data, index: UInt32, isLast: Bool, format: UInt8, frame: Data)throws  -> Data  {
+open func decryptChunkFrame(fileId: String, metadata: NameMetadataDto, index: UInt32, isLast: Bool, frame: Data)throws  -> Data  {
     return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_chunk_frame(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(fileId),
-        FfiConverterData.lower(versionId),
+        FfiConverterTypeNameMetadataDto_lower(metadata),
         FfiConverterUInt32.lower(index),
         FfiConverterBool.lower(isLast),
-        FfiConverterUInt8.lower(format),
         FfiConverterData.lower(frame),$0
     )
 })
@@ -6596,10 +6625,12 @@ public protocol MasterKeyHandleProtocol: AnyObject, Sendable {
      * Reads each chunk file (containing `nonce || ciphertext`), decrypts,
      * and writes plaintext to output. Atomic rename at end.
      *
-     * `expected_chunk_format` (task 1908) comes from the file's encrypted
-     * metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
+     * `metadata` is the version's `NameMetadataDto` from
+     * `decrypt_file_metadata` (task 1908): v2 opens only as the upload its
+     * commitment names, and a record without one opens v1 content only (the
+     * ruling of 2026-11-07).
      */
-    func decryptFile(fileId: String, expectedChunkFormat: UInt8, chunkPaths: [String], outputPath: String, callback: FileProgressCallback?) throws  -> DecryptedFileInfo
+    func decryptFile(fileId: String, metadata: NameMetadataDto, chunkPaths: [String], outputPath: String, callback: FileProgressCallback?) throws  -> DecryptedFileInfo
     
     /**
      * The metadata reader for FILES (task 1908 round 3): exactly
@@ -6949,15 +6980,17 @@ open func computeRecoveryCheck()throws  -> Data  {
      * Reads each chunk file (containing `nonce || ciphertext`), decrypts,
      * and writes plaintext to output. Atomic rename at end.
      *
-     * `expected_chunk_format` (task 1908) comes from the file's encrypted
-     * metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
+     * `metadata` is the version's `NameMetadataDto` from
+     * `decrypt_file_metadata` (task 1908): v2 opens only as the upload its
+     * commitment names, and a record without one opens v1 content only (the
+     * ruling of 2026-11-07).
      */
-open func decryptFile(fileId: String, expectedChunkFormat: UInt8, chunkPaths: [String], outputPath: String, callback: FileProgressCallback?)throws  -> DecryptedFileInfo  {
+open func decryptFile(fileId: String, metadata: NameMetadataDto, chunkPaths: [String], outputPath: String, callback: FileProgressCallback?)throws  -> DecryptedFileInfo  {
     return try  FfiConverterTypeDecryptedFileInfo_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_decrypt_file(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(fileId),
-        FfiConverterUInt8.lower(expectedChunkFormat),
+        FfiConverterTypeNameMetadataDto_lower(metadata),
         FfiConverterSequenceString.lower(chunkPaths),
         FfiConverterString.lower(outputPath),
         FfiConverterOptionCallbackInterfaceFileProgressCallback.lower(callback),$0
@@ -26138,7 +26171,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk() != 50441) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk_frame() != 11989) {
+    if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk_frame() != 37168) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_file_metadata() != 61159) {
@@ -26222,7 +26255,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_compute_recovery_check() != 4155) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_decrypt_file() != 46481) {
+    if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_decrypt_file() != 3278) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_decrypt_file_metadata() != 11722) {
@@ -26849,7 +26882,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_acknowledge_device_link() != 20880) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_approve_device_link() != 42861) {
+    if (uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_approve_device_link() != 44268) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_approve_typed_device_link() != 3275) {
@@ -26874,6 +26907,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_revoke_account_session() != 15139) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_scanned_device_link_name() != 33739) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_send_typed_approval_message() != 37068) {
@@ -27023,19 +27059,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_constructor_signupceremonyhandle_new() != 22479) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push() != 14552) {
+    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push() != 60587) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push_with_file_key_handle() != 18199) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version() != 872) {
+    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version() != 58481) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version_with_file_key_handle() != 35155) {
+    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version_with_file_key_handle() != 35404) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_from_file() != 54716) {
+    if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_from_file() != 593) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_nativeclienthandle_new() != 1687) {
