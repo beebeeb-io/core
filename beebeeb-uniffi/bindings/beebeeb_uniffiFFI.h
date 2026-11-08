@@ -287,7 +287,21 @@ typedef void (*UniffiCallbackInterfaceBackupManifestStoreCallbackMethod1)(uint64
 #endif
 #ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_BACKUP_MANIFEST_STORE_CALLBACK_METHOD2
 #define UNIFFI_FFIDEF_CALLBACK_INTERFACE_BACKUP_MANIFEST_STORE_CALLBACK_METHOD2
-typedef void (*UniffiCallbackInterfaceBackupManifestStoreCallbackMethod2)(uint64_t, int8_t* _Nonnull, 
+typedef void (*UniffiCallbackInterfaceBackupManifestStoreCallbackMethod2)(uint64_t, RustBuffer* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_BACKUP_MANIFEST_STORE_CALLBACK_METHOD3
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_BACKUP_MANIFEST_STORE_CALLBACK_METHOD3
+typedef void (*UniffiCallbackInterfaceBackupManifestStoreCallbackMethod3)(uint64_t, RustBuffer, int8_t* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_BACKUP_MANIFEST_STORE_CALLBACK_METHOD4
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_BACKUP_MANIFEST_STORE_CALLBACK_METHOD4
+typedef void (*UniffiCallbackInterfaceBackupManifestStoreCallbackMethod4)(uint64_t, int8_t* _Nonnull, 
         RustCallStatus *_Nonnull uniffiCallStatus
     );
 
@@ -390,7 +404,9 @@ typedef struct UniffiVTableCallbackInterfaceBackupManifestStoreCallback {
     UniffiCallbackInterfaceClone _Nonnull uniffiClone;
     UniffiCallbackInterfaceBackupManifestStoreCallbackMethod0 _Nonnull load;
     UniffiCallbackInterfaceBackupManifestStoreCallbackMethod1 _Nonnull replace;
-    UniffiCallbackInterfaceBackupManifestStoreCallbackMethod2 _Nonnull clear;
+    UniffiCallbackInterfaceBackupManifestStoreCallbackMethod2 _Nonnull loadPassState;
+    UniffiCallbackInterfaceBackupManifestStoreCallbackMethod3 _Nonnull savePassState;
+    UniffiCallbackInterfaceBackupManifestStoreCallbackMethod4 _Nonnull clear;
 } UniffiVTableCallbackInterfaceBackupManifestStoreCallback;
 
 #endif
@@ -1830,6 +1846,11 @@ void uniffi_beebeeb_uniffi_fn_free_backupservicehandle(uint64_t handle, RustCall
 void uniffi_beebeeb_uniffi_fn_method_backupservicehandle_assets_changed(uint64_t ptr, RustBuffer changes, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPSERVICEHANDLE_BACK_UP_AGAIN
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPSERVICEHANDLE_BACK_UP_AGAIN
+void uniffi_beebeeb_uniffi_fn_method_backupservicehandle_back_up_again(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPSERVICEHANDLE_CONFIGURE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPSERVICEHANDLE_CONFIGURE
 void uniffi_beebeeb_uniffi_fn_method_backupservicehandle_configure(uint64_t ptr, RustBuffer configuration, RustCallStatus *_Nonnull out_status
@@ -1843,6 +1864,11 @@ uint64_t uniffi_beebeeb_uniffi_fn_method_backupservicehandle_events(uint64_t ptr
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPSERVICEHANDLE_NEXT_BATCH
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPSERVICEHANDLE_NEXT_BATCH
 RustBuffer uniffi_beebeeb_uniffi_fn_method_backupservicehandle_next_batch(uint64_t ptr, RustBuffer kind, RustBuffer network_name, int64_t now_ms, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPSERVICEHANDLE_STOPPED_REASON
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_BACKUPSERVICEHANDLE_STOPPED_REASON
+RustBuffer uniffi_beebeeb_uniffi_fn_method_backupservicehandle_stopped_reason(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_CLONE_FILEPROVIDERSERVICEHANDLE
@@ -5081,6 +5107,12 @@ uint16_t uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_assets_change
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPSERVICEHANDLE_BACK_UP_AGAIN
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPSERVICEHANDLE_BACK_UP_AGAIN
+uint16_t uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_back_up_again(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPSERVICEHANDLE_CONFIGURE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPSERVICEHANDLE_CONFIGURE
 uint16_t uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_configure(void
@@ -5096,6 +5128,12 @@ uint16_t uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_events(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPSERVICEHANDLE_NEXT_BATCH
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPSERVICEHANDLE_NEXT_BATCH
 uint16_t uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_next_batch(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPSERVICEHANDLE_STOPPED_REASON
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPSERVICEHANDLE_STOPPED_REASON
+uint16_t uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_stopped_reason(void
     
 );
 #endif
@@ -6122,6 +6160,18 @@ uint16_t uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_load(
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPMANIFESTSTORECALLBACK_REPLACE
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPMANIFESTSTORECALLBACK_REPLACE
 uint16_t uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_replace(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPMANIFESTSTORECALLBACK_LOAD_PASS_STATE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPMANIFESTSTORECALLBACK_LOAD_PASS_STATE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_load_pass_state(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPMANIFESTSTORECALLBACK_SAVE_PASS_STATE
+#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_METHOD_BACKUPMANIFESTSTORECALLBACK_SAVE_PASS_STATE
+uint16_t uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_save_pass_state(void
     
 );
 #endif

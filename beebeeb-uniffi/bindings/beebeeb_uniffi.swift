@@ -1875,11 +1875,21 @@ public protocol BackupServiceHandleProtocol: AnyObject, Sendable {
     
     func assetsChanged(changes: [BackupAssetChangeData]) throws 
     
+    /**
+     * "Back up again" after a stop: the backup starts fresh.
+     */
+    func backUpAgain() throws 
+    
     func configure(configuration: BackupConfigurationData) throws 
     
     func events()  -> BackupEventStreamHandle
     
     func nextBatch(kind: AssetKindData, networkName: String, nowMs: Int64) throws  -> BackupBatchData
+    
+    /**
+     * Why the backup is off (a core wire string), or `None` while it is on.
+     */
+    func stoppedReason() throws  -> String?
     
 }
 open class BackupServiceHandle: BackupServiceHandleProtocol, @unchecked Sendable {
@@ -1943,6 +1953,16 @@ open func assetsChanged(changes: [BackupAssetChangeData])throws   {try rustCallW
 }
 }
     
+    /**
+     * "Back up again" after a stop: the backup starts fresh.
+     */
+open func backUpAgain()throws   {try rustCallWithError(FfiConverterTypeServiceError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_backupservicehandle_back_up_again(
+            self.uniffiCloneHandle(),$0
+    )
+}
+}
+    
 open func configure(configuration: BackupConfigurationData)throws   {try rustCallWithError(FfiConverterTypeServiceError_lift) {
     uniffi_beebeeb_uniffi_fn_method_backupservicehandle_configure(
             self.uniffiCloneHandle(),
@@ -1966,6 +1986,17 @@ open func nextBatch(kind: AssetKindData, networkName: String, nowMs: Int64)throw
         FfiConverterTypeAssetKindData_lower(kind),
         FfiConverterString.lower(networkName),
         FfiConverterInt64.lower(nowMs),$0
+    )
+})
+}
+    
+    /**
+     * Why the backup is off (a core wire string), or `None` while it is on.
+     */
+open func stoppedReason()throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeServiceError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_backupservicehandle_stopped_reason(
+            self.uniffiCloneHandle(),$0
     )
 })
 }
@@ -13028,21 +13059,31 @@ public func FfiConverterTypeBackupAssetChangeData_lower(_ value: BackupAssetChan
 }
 
 
+/**
+ * `stopped_reason`: the backup is off (a core wire string; show
+ * `backup_stop_words` and offer "Back up again"). `check_failed`: the
+ * notices could not be read, so nothing was queued (show
+ * `backup_check_failed_words`; the next pass checks again).
+ */
 public struct BackupBatchData: Equatable, Hashable {
     public var kind: AssetKindData
     public var queued: UInt64
     public var alreadyBackedUp: UInt64
     public var deferredForNetwork: Bool
     public var snapshotComplete: Bool
+    public var stoppedReason: String?
+    public var checkFailed: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(kind: AssetKindData, queued: UInt64, alreadyBackedUp: UInt64, deferredForNetwork: Bool, snapshotComplete: Bool) {
+    public init(kind: AssetKindData, queued: UInt64, alreadyBackedUp: UInt64, deferredForNetwork: Bool, snapshotComplete: Bool, stoppedReason: String?, checkFailed: Bool) {
         self.kind = kind
         self.queued = queued
         self.alreadyBackedUp = alreadyBackedUp
         self.deferredForNetwork = deferredForNetwork
         self.snapshotComplete = snapshotComplete
+        self.stoppedReason = stoppedReason
+        self.checkFailed = checkFailed
     }
 
     
@@ -13065,7 +13106,9 @@ public struct FfiConverterTypeBackupBatchData: FfiConverterRustBuffer {
                 queued: FfiConverterUInt64.read(from: &buf), 
                 alreadyBackedUp: FfiConverterUInt64.read(from: &buf), 
                 deferredForNetwork: FfiConverterBool.read(from: &buf), 
-                snapshotComplete: FfiConverterBool.read(from: &buf)
+                snapshotComplete: FfiConverterBool.read(from: &buf), 
+                stoppedReason: FfiConverterOptionString.read(from: &buf), 
+                checkFailed: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -13075,6 +13118,8 @@ public struct FfiConverterTypeBackupBatchData: FfiConverterRustBuffer {
         FfiConverterUInt64.write(value.alreadyBackedUp, into: &buf)
         FfiConverterBool.write(value.deferredForNetwork, into: &buf)
         FfiConverterBool.write(value.snapshotComplete, into: &buf)
+        FfiConverterOptionString.write(value.stoppedReason, into: &buf)
+        FfiConverterBool.write(value.checkFailed, into: &buf)
     }
 }
 
@@ -13097,16 +13142,24 @@ public func FfiConverterTypeBackupBatchData_lower(_ value: BackupBatchData) -> R
 /**
  * `folder_id` is this device's folder under the Backups root (a device or
  * category folder); the service checks that before it queues anything.
+ * `setup_at_ms` (when backups were turned on on this device) and
+ * `legacy_last_backup_ms` (an upgraded device's last backup under the old
+ * engine) are on the server's clock, in milliseconds; they set the first
+ * pass's baseline (core `backup_first_pass_baseline`). Unknown is `None`.
  */
 public struct BackupConfigurationData: Equatable, Hashable {
     public var folderId: String
     public var wifiOnly: Bool
+    public var setupAtMs: Int64?
+    public var legacyLastBackupMs: Int64?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(folderId: String, wifiOnly: Bool) {
+    public init(folderId: String, wifiOnly: Bool, setupAtMs: Int64?, legacyLastBackupMs: Int64?) {
         self.folderId = folderId
         self.wifiOnly = wifiOnly
+        self.setupAtMs = setupAtMs
+        self.legacyLastBackupMs = legacyLastBackupMs
     }
 
     
@@ -13126,13 +13179,17 @@ public struct FfiConverterTypeBackupConfigurationData: FfiConverterRustBuffer {
         return
             try BackupConfigurationData(
                 folderId: FfiConverterString.read(from: &buf), 
-                wifiOnly: FfiConverterBool.read(from: &buf)
+                wifiOnly: FfiConverterBool.read(from: &buf), 
+                setupAtMs: FfiConverterOptionInt64.read(from: &buf), 
+                legacyLastBackupMs: FfiConverterOptionInt64.read(from: &buf)
         )
     }
 
     public static func write(_ value: BackupConfigurationData, into buf: inout [UInt8]) {
         FfiConverterString.write(value.folderId, into: &buf)
         FfiConverterBool.write(value.wifiOnly, into: &buf)
+        FfiConverterOptionInt64.write(value.setupAtMs, into: &buf)
+        FfiConverterOptionInt64.write(value.legacyLastBackupMs, into: &buf)
     }
 }
 
@@ -13842,6 +13899,71 @@ public func FfiConverterTypeBackupPassPlan_lift(_ buf: RustBuffer) throws -> Bac
 #endif
 public func FfiConverterTypeBackupPassPlan_lower(_ value: BackupPassPlan) -> RustBuffer {
     return FfiConverterTypeBackupPassPlan.lower(value)
+}
+
+
+/**
+ * The backup pass gate's state (backup spec Amendments 12 and 12c), stored
+ * by the platform next to the manifest records and removed with them by
+ * `clear`. Times are on the server's clock, in milliseconds. A fresh store
+ * answers all `None`. `stopped_reason` is a core wire string
+ * (`backup_stop_words` renders it); with it, `stopped_through_ms` is set.
+ */
+public struct BackupPassStateData: Equatable, Hashable {
+    public var lastPassAtMs: Int64?
+    public var stoppedReason: String?
+    public var stoppedThroughMs: Int64?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(lastPassAtMs: Int64?, stoppedReason: String?, stoppedThroughMs: Int64?) {
+        self.lastPassAtMs = lastPassAtMs
+        self.stoppedReason = stoppedReason
+        self.stoppedThroughMs = stoppedThroughMs
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension BackupPassStateData: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBackupPassStateData: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BackupPassStateData {
+        return
+            try BackupPassStateData(
+                lastPassAtMs: FfiConverterOptionInt64.read(from: &buf), 
+                stoppedReason: FfiConverterOptionString.read(from: &buf), 
+                stoppedThroughMs: FfiConverterOptionInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BackupPassStateData, into buf: inout [UInt8]) {
+        FfiConverterOptionInt64.write(value.lastPassAtMs, into: &buf)
+        FfiConverterOptionString.write(value.stoppedReason, into: &buf)
+        FfiConverterOptionInt64.write(value.stoppedThroughMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupPassStateData_lift(_ buf: RustBuffer) throws -> BackupPassStateData {
+    return try FfiConverterTypeBackupPassStateData.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBackupPassStateData_lower(_ value: BackupPassStateData) -> RustBuffer {
+    return FfiConverterTypeBackupPassStateData.lower(value)
 }
 
 
@@ -20695,13 +20817,19 @@ public func FfiConverterTypeAuthChallengeKind_lower(_ value: AuthChallengeKind) 
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * `Trashed` and `Deleted`: the person removed the copy on the server, and
+ * the backup never uploads it again by itself. `UploadFailed`: the upload
+ * failed and is tried again (at most three times).
+ */
 
 public enum BackupCopyStateData: Equatable, Hashable {
     
     case active
     case queued
     case trashed
-    case gone
+    case deleted
+    case uploadFailed
 
 
 
@@ -20729,7 +20857,9 @@ public struct FfiConverterTypeBackupCopyStateData: FfiConverterRustBuffer {
         
         case 3: return .trashed
         
-        case 4: return .gone
+        case 4: return .deleted
+        
+        case 5: return .uploadFailed
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -20751,8 +20881,12 @@ public struct FfiConverterTypeBackupCopyStateData: FfiConverterRustBuffer {
             writeInt(&buf, Int32(3))
         
         
-        case .gone:
+        case .deleted:
             writeInt(&buf, Int32(4))
+        
+        
+        case .uploadFailed:
+            writeInt(&buf, Int32(5))
         
         }
     }
@@ -24567,11 +24701,19 @@ public func FfiConverterCallbackInterfaceAssetSourceCallback_lower(_ v: AssetSou
 
 
 
+/**
+ * `None` / `false` means the store failed. `clear` removes the records and
+ * the pass state.
+ */
 public protocol BackupManifestStoreCallback: AnyObject, Sendable {
     
     func load()  -> [BackupManifestRecordData]?
     
     func replace(records: [BackupManifestRecordData])  -> Bool
+    
+    func loadPassState()  -> BackupPassStateData?
+    
+    func savePassState(state: BackupPassStateData)  -> Bool
     
     func clear()  -> Bool
     
@@ -24635,6 +24777,52 @@ fileprivate struct UniffiCallbackInterfaceBackupManifestStoreCallback {
                 }
                 return uniffiObj.replace(
                      records: try FfiConverterSequenceTypeBackupManifestRecordData.lift(records)
+                )
+            }
+
+            
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterBool.lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        loadPassState: { (
+            uniffiHandle: UInt64,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> BackupPassStateData? in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBackupManifestStoreCallback.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.loadPassState(
+                )
+            }
+
+            
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterOptionTypeBackupPassStateData.lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        savePassState: { (
+            uniffiHandle: UInt64,
+            state: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<Int8>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> Bool in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBackupManifestStoreCallback.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.savePassState(
+                     state: try FfiConverterTypeBackupPassStateData_lift(state)
                 )
             }
 
@@ -26161,6 +26349,30 @@ fileprivate struct FfiConverterOptionTypeBackupEventData: FfiConverterRustBuffer
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeBackupEventData.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeBackupPassStateData: FfiConverterRustBuffer {
+    typealias SwiftType = BackupPassStateData?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeBackupPassStateData.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeBackupPassStateData.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -29683,6 +29895,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_assets_changed() != 57850) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_back_up_again() != 10332) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_configure() != 38428) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -29690,6 +29905,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_next_batch() != 31602) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_stopped_reason() != 35021) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_changes_since() != 26542) {
@@ -30205,7 +30423,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_replace() != 10047) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_clear() != 23236) {
+    if (uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_load_pass_state() != 52325) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_save_pass_state() != 37559) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_clear() != 3299) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_domainnotifiercallback_signal_working_set() != 36991) {

@@ -632,6 +632,12 @@ internal interface UniffiCallbackInterfaceBackupManifestStoreCallbackMethod1 : c
     fun callback(`uniffiHandle`: Long,`records`: RustBuffer.ByValue,`uniffiOutReturn`: ByteByReference,uniffiCallStatus: UniffiRustCallStatus,)
 }
 internal interface UniffiCallbackInterfaceBackupManifestStoreCallbackMethod2 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceBackupManifestStoreCallbackMethod3 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`state`: RustBuffer.ByValue,`uniffiOutReturn`: ByteByReference,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceBackupManifestStoreCallbackMethod4 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: ByteByReference,uniffiCallStatus: UniffiRustCallStatus,)
 }
 internal interface UniffiCallbackInterfaceDomainNotifierCallbackMethod0 : com.sun.jna.Callback {
@@ -721,27 +727,33 @@ internal open class UniffiVTableCallbackInterfaceAssetSourceCallback(
     }
 
 }
-@Structure.FieldOrder("uniffiFree", "uniffiClone", "load", "replace", "clear")
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "load", "replace", "loadPassState", "savePassState", "clear")
 internal open class UniffiVTableCallbackInterfaceBackupManifestStoreCallback(
     @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
     @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
     @JvmField internal var `load`: UniffiCallbackInterfaceBackupManifestStoreCallbackMethod0? = null,
     @JvmField internal var `replace`: UniffiCallbackInterfaceBackupManifestStoreCallbackMethod1? = null,
-    @JvmField internal var `clear`: UniffiCallbackInterfaceBackupManifestStoreCallbackMethod2? = null,
+    @JvmField internal var `loadPassState`: UniffiCallbackInterfaceBackupManifestStoreCallbackMethod2? = null,
+    @JvmField internal var `savePassState`: UniffiCallbackInterfaceBackupManifestStoreCallbackMethod3? = null,
+    @JvmField internal var `clear`: UniffiCallbackInterfaceBackupManifestStoreCallbackMethod4? = null,
 ) : Structure() {
     class UniffiByValue(
         `uniffiFree`: UniffiCallbackInterfaceFree? = null,
         `uniffiClone`: UniffiCallbackInterfaceClone? = null,
         `load`: UniffiCallbackInterfaceBackupManifestStoreCallbackMethod0? = null,
         `replace`: UniffiCallbackInterfaceBackupManifestStoreCallbackMethod1? = null,
-        `clear`: UniffiCallbackInterfaceBackupManifestStoreCallbackMethod2? = null,
-    ): UniffiVTableCallbackInterfaceBackupManifestStoreCallback(`uniffiFree`,`uniffiClone`,`load`,`replace`,`clear`,), Structure.ByValue
+        `loadPassState`: UniffiCallbackInterfaceBackupManifestStoreCallbackMethod2? = null,
+        `savePassState`: UniffiCallbackInterfaceBackupManifestStoreCallbackMethod3? = null,
+        `clear`: UniffiCallbackInterfaceBackupManifestStoreCallbackMethod4? = null,
+    ): UniffiVTableCallbackInterfaceBackupManifestStoreCallback(`uniffiFree`,`uniffiClone`,`load`,`replace`,`loadPassState`,`savePassState`,`clear`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceBackupManifestStoreCallback) {
         `uniffiFree` = other.`uniffiFree`
         `uniffiClone` = other.`uniffiClone`
         `load` = other.`load`
         `replace` = other.`replace`
+        `loadPassState` = other.`loadPassState`
+        `savePassState` = other.`savePassState`
         `clear` = other.`clear`
     }
 
@@ -1426,11 +1438,15 @@ external fun uniffi_beebeeb_uniffi_checksum_method_backupeventstreamhandle_next(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_assets_changed(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_back_up_again(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_configure(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_events(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_next_batch(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_stopped_reason(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_changes_since(
 ): Short
@@ -1773,6 +1789,10 @@ external fun uniffi_beebeeb_uniffi_checksum_method_assetsourcecallback_export(
 external fun uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_load(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_replace(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_load_pass_state(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_save_pass_state(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_clear(
 ): Short
@@ -2372,11 +2392,15 @@ external fun uniffi_beebeeb_uniffi_fn_free_backupservicehandle(`handle`: Long,un
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_method_backupservicehandle_assets_changed(`ptr`: Long,`changes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_backupservicehandle_back_up_again(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_beebeeb_uniffi_fn_method_backupservicehandle_configure(`ptr`: Long,`configuration`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_method_backupservicehandle_events(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_method_backupservicehandle_next_batch(`ptr`: Long,`kind`: RustBuffer.ByValue,`networkName`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_backupservicehandle_stopped_reason(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_clone_fileproviderservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
@@ -3844,6 +3868,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_assets_changed() != 57850.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_back_up_again() != 10332.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_configure() != 38428.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -3851,6 +3878,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_next_batch() != 31602.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_stopped_reason() != 35021.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_fileproviderservicehandle_changes_since() != 26542.toShort()) {
@@ -4366,7 +4396,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_replace() != 10047.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_clear() != 23236.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_load_pass_state() != 52325.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_save_pass_state() != 37559.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_backupmanifeststorecallback_clear() != 3299.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_domainnotifiercallback_signal_working_set() != 36991.toShort()) {
@@ -7260,11 +7296,21 @@ public interface BackupServiceHandleInterface {
     
     fun `assetsChanged`(`changes`: List<BackupAssetChangeData>)
     
+    /**
+     * "Back up again" after a stop: the backup starts fresh.
+     */
+    fun `backUpAgain`()
+    
     fun `configure`(`configuration`: BackupConfigurationData)
     
     fun `events`(): BackupEventStreamHandle
     
     fun `nextBatch`(`kind`: AssetKindData, `networkName`: kotlin.String, `nowMs`: kotlin.Long): BackupBatchData
+    
+    /**
+     * Why the backup is off (a core wire string), or `None` while it is on.
+     */
+    fun `stoppedReason`(): kotlin.String?
     
     companion object
 }
@@ -7379,6 +7425,22 @@ open class BackupServiceHandle: Disposable, AutoCloseable, BackupServiceHandleIn
     
 
     
+    /**
+     * "Back up again" after a stop: the backup starts fresh.
+     */
+    @Throws(ServiceException::class)override fun `backUpAgain`()
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(ServiceException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_backupservicehandle_back_up_again(
+        it,
+        _status)
+}
+    }
+    
+    
+
+    
     @Throws(ServiceException::class)override fun `configure`(`configuration`: BackupConfigurationData)
         = 
     callWithHandle {
@@ -7412,6 +7474,23 @@ open class BackupServiceHandle: Disposable, AutoCloseable, BackupServiceHandleIn
     UniffiLib.uniffi_beebeeb_uniffi_fn_method_backupservicehandle_next_batch(
         it,
         FfiConverterTypeAssetKindData.lower(`kind`),FfiConverterString.lower(`networkName`),FfiConverterLong.lower(`nowMs`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Why the backup is off (a core wire string), or `None` while it is on.
+     */
+    @Throws(ServiceException::class)override fun `stoppedReason`(): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ServiceException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_backupservicehandle_stopped_reason(
+        it,
+        _status)
 }
     }
     )
@@ -25159,6 +25238,12 @@ public object FfiConverterTypeBackupAssetChangeData: FfiConverterRustBuffer<Back
 
 
 
+/**
+ * `stopped_reason`: the backup is off (a core wire string; show
+ * `backup_stop_words` and offer "Back up again"). `check_failed`: the
+ * notices could not be read, so nothing was queued (show
+ * `backup_check_failed_words`; the next pass checks again).
+ */
 data class BackupBatchData (
     var `kind`: AssetKindData
     , 
@@ -25169,6 +25254,10 @@ data class BackupBatchData (
     var `deferredForNetwork`: kotlin.Boolean
     , 
     var `snapshotComplete`: kotlin.Boolean
+    , 
+    var `stoppedReason`: kotlin.String?
+    , 
+    var `checkFailed`: kotlin.Boolean
     
 ){
     
@@ -25190,6 +25279,8 @@ public object FfiConverterTypeBackupBatchData: FfiConverterRustBuffer<BackupBatc
             FfiConverterULong.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterBoolean.read(buf),
         )
     }
 
@@ -25198,7 +25289,9 @@ public object FfiConverterTypeBackupBatchData: FfiConverterRustBuffer<BackupBatc
             FfiConverterULong.allocationSize(value.`queued`) +
             FfiConverterULong.allocationSize(value.`alreadyBackedUp`) +
             FfiConverterBoolean.allocationSize(value.`deferredForNetwork`) +
-            FfiConverterBoolean.allocationSize(value.`snapshotComplete`)
+            FfiConverterBoolean.allocationSize(value.`snapshotComplete`) +
+            FfiConverterOptionalString.allocationSize(value.`stoppedReason`) +
+            FfiConverterBoolean.allocationSize(value.`checkFailed`)
     )
 
     override fun write(value: BackupBatchData, buf: ByteBuffer) {
@@ -25207,6 +25300,8 @@ public object FfiConverterTypeBackupBatchData: FfiConverterRustBuffer<BackupBatc
             FfiConverterULong.write(value.`alreadyBackedUp`, buf)
             FfiConverterBoolean.write(value.`deferredForNetwork`, buf)
             FfiConverterBoolean.write(value.`snapshotComplete`, buf)
+            FfiConverterOptionalString.write(value.`stoppedReason`, buf)
+            FfiConverterBoolean.write(value.`checkFailed`, buf)
     }
 }
 
@@ -25215,11 +25310,19 @@ public object FfiConverterTypeBackupBatchData: FfiConverterRustBuffer<BackupBatc
 /**
  * `folder_id` is this device's folder under the Backups root (a device or
  * category folder); the service checks that before it queues anything.
+ * `setup_at_ms` (when backups were turned on on this device) and
+ * `legacy_last_backup_ms` (an upgraded device's last backup under the old
+ * engine) are on the server's clock, in milliseconds; they set the first
+ * pass's baseline (core `backup_first_pass_baseline`). Unknown is `None`.
  */
 data class BackupConfigurationData (
     var `folderId`: kotlin.String
     , 
     var `wifiOnly`: kotlin.Boolean
+    , 
+    var `setupAtMs`: kotlin.Long?
+    , 
+    var `legacyLastBackupMs`: kotlin.Long?
     
 ){
     
@@ -25238,17 +25341,23 @@ public object FfiConverterTypeBackupConfigurationData: FfiConverterRustBuffer<Ba
         return BackupConfigurationData(
             FfiConverterString.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterOptionalLong.read(buf),
+            FfiConverterOptionalLong.read(buf),
         )
     }
 
     override fun allocationSize(value: BackupConfigurationData) = (
             FfiConverterString.allocationSize(value.`folderId`) +
-            FfiConverterBoolean.allocationSize(value.`wifiOnly`)
+            FfiConverterBoolean.allocationSize(value.`wifiOnly`) +
+            FfiConverterOptionalLong.allocationSize(value.`setupAtMs`) +
+            FfiConverterOptionalLong.allocationSize(value.`legacyLastBackupMs`)
     )
 
     override fun write(value: BackupConfigurationData, buf: ByteBuffer) {
             FfiConverterString.write(value.`folderId`, buf)
             FfiConverterBoolean.write(value.`wifiOnly`, buf)
+            FfiConverterOptionalLong.write(value.`setupAtMs`, buf)
+            FfiConverterOptionalLong.write(value.`legacyLastBackupMs`, buf)
     }
 }
 
@@ -25781,6 +25890,56 @@ public object FfiConverterTypeBackupPassPlan: FfiConverterRustBuffer<BackupPassP
             FfiConverterULong.write(value.`deferred`, buf)
             FfiConverterULong.write(value.`held`, buf)
             FfiConverterULong.write(value.`deferredUnknown`, buf)
+    }
+}
+
+
+
+/**
+ * The backup pass gate's state (backup spec Amendments 12 and 12c), stored
+ * by the platform next to the manifest records and removed with them by
+ * `clear`. Times are on the server's clock, in milliseconds. A fresh store
+ * answers all `None`. `stopped_reason` is a core wire string
+ * (`backup_stop_words` renders it); with it, `stopped_through_ms` is set.
+ */
+data class BackupPassStateData (
+    var `lastPassAtMs`: kotlin.Long?
+    , 
+    var `stoppedReason`: kotlin.String?
+    , 
+    var `stoppedThroughMs`: kotlin.Long?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBackupPassStateData: FfiConverterRustBuffer<BackupPassStateData> {
+    override fun read(buf: ByteBuffer): BackupPassStateData {
+        return BackupPassStateData(
+            FfiConverterOptionalLong.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalLong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: BackupPassStateData) = (
+            FfiConverterOptionalLong.allocationSize(value.`lastPassAtMs`) +
+            FfiConverterOptionalString.allocationSize(value.`stoppedReason`) +
+            FfiConverterOptionalLong.allocationSize(value.`stoppedThroughMs`)
+    )
+
+    override fun write(value: BackupPassStateData, buf: ByteBuffer) {
+            FfiConverterOptionalLong.write(value.`lastPassAtMs`, buf)
+            FfiConverterOptionalString.write(value.`stoppedReason`, buf)
+            FfiConverterOptionalLong.write(value.`stoppedThroughMs`, buf)
     }
 }
 
@@ -31523,13 +31682,19 @@ public object FfiConverterTypeAuthChallengeKind: FfiConverterRustBuffer<AuthChal
 
 
 
+/**
+ * `Trashed` and `Deleted`: the person removed the copy on the server, and
+ * the backup never uploads it again by itself. `UploadFailed`: the upload
+ * failed and is tried again (at most three times).
+ */
 
 enum class BackupCopyStateData {
     
     ACTIVE,
     QUEUED,
     TRASHED,
-    GONE;
+    DELETED,
+    UPLOAD_FAILED;
 
     
 
@@ -35129,11 +35294,19 @@ public object FfiConverterTypeAssetSourceCallback: FfiConverterCallbackInterface
 
 
 
+/**
+ * `None` / `false` means the store failed. `clear` removes the records and
+ * the pass state.
+ */
 public interface BackupManifestStoreCallback {
     
     fun `load`(): List<BackupManifestRecordData>?
     
     fun `replace`(`records`: List<BackupManifestRecordData>): kotlin.Boolean
+    
+    fun `loadPassState`(): BackupPassStateData?
+    
+    fun `savePassState`(`state`: BackupPassStateData): kotlin.Boolean
     
     fun `clear`(): kotlin.Boolean
     
@@ -35167,7 +35340,30 @@ internal object uniffiCallbackInterfaceBackupManifestStoreCallback {
             uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
         }
     }
-    internal object `clear`: UniffiCallbackInterfaceBackupManifestStoreCallbackMethod2 {
+    internal object `loadPassState`: UniffiCallbackInterfaceBackupManifestStoreCallbackMethod2 {
+        override fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeBackupManifestStoreCallback.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`loadPassState`(
+                )
+            }
+            val writeReturn = { value: BackupPassStateData? -> uniffiOutReturn.setValue(FfiConverterOptionalTypeBackupPassStateData.lower(value)) }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+    internal object `savePassState`: UniffiCallbackInterfaceBackupManifestStoreCallbackMethod3 {
+        override fun callback(`uniffiHandle`: Long,`state`: RustBuffer.ByValue,`uniffiOutReturn`: ByteByReference,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeBackupManifestStoreCallback.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`savePassState`(
+                    FfiConverterTypeBackupPassStateData.lift(`state`),
+                )
+            }
+            val writeReturn = { value: kotlin.Boolean -> uniffiOutReturn.setValue(FfiConverterBoolean.lower(value)) }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+    internal object `clear`: UniffiCallbackInterfaceBackupManifestStoreCallbackMethod4 {
         override fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: ByteByReference,uniffiCallStatus: UniffiRustCallStatus,) {
             val uniffiObj = FfiConverterTypeBackupManifestStoreCallback.handleMap.get(uniffiHandle)
             val makeCall = { ->
@@ -35196,6 +35392,8 @@ internal object uniffiCallbackInterfaceBackupManifestStoreCallback {
         uniffiClone,
         `load`,
         `replace`,
+        `loadPassState`,
+        `savePassState`,
         `clear`,
     )
 
@@ -36230,6 +36428,38 @@ public object FfiConverterOptionalTypeBackupEventData: FfiConverterRustBuffer<Ba
         } else {
             buf.put(1)
             FfiConverterTypeBackupEventData.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeBackupPassStateData: FfiConverterRustBuffer<BackupPassStateData?> {
+    override fun read(buf: ByteBuffer): BackupPassStateData? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeBackupPassStateData.read(buf)
+    }
+
+    override fun allocationSize(value: BackupPassStateData?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeBackupPassStateData.allocationSize(value)
+        }
+    }
+
+    override fun write(value: BackupPassStateData?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeBackupPassStateData.write(value, buf)
         }
     }
 }
