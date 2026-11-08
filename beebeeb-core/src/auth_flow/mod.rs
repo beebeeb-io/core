@@ -53,6 +53,8 @@ pub enum Method {
     Delete,
     /// Only the folder share flow uses it (registering a folder's custody record).
     Put,
+    /// Only the share flows use it (changing a member's access).
+    Patch,
 }
 
 impl Method {
@@ -62,6 +64,7 @@ impl Method {
             Self::Post => "POST",
             Self::Delete => "DELETE",
             Self::Put => "PUT",
+            Self::Patch => "PATCH",
         }
     }
 }
@@ -110,6 +113,16 @@ impl HttpRequest {
     pub(crate) fn put(path: String, body: serde_json::Value, auth: RequestAuth) -> Self {
         Self {
             method: Method::Put,
+            path,
+            body: Some(body),
+            auth,
+            confirm_token: None,
+        }
+    }
+
+    pub(crate) fn patch(path: String, body: serde_json::Value, auth: RequestAuth) -> Self {
+        Self {
+            method: Method::Patch,
             path,
             body: Some(body),
             auth,

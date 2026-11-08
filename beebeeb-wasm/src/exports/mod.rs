@@ -21,5 +21,6 @@ pub mod retry;
 pub mod share_flow;
 pub mod share_folder;
 pub mod share_link;
+pub mod share_safety;
 pub mod signup_flow;
 pub mod thumbnail;

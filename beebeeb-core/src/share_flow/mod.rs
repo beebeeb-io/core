@@ -42,15 +42,19 @@ use crate::encrypt::{decrypt_chunk, encrypt_chunk};
 use crate::kdf::{FileKey, MasterKey};
 use crate::opaque::{derive_share_key, derive_x25519_private, x25519_shared_secret};
 
+pub mod access;
 pub mod bundle;
 pub mod folder;
 pub mod folder_keys;
 pub mod link;
 pub mod member;
 pub mod request;
+pub mod safety;
 
 #[cfg(test)]
 mod folder_tests;
+#[cfg(test)]
+mod safety_tests;
 #[cfg(test)]
 mod tests;
 
