@@ -1,5 +1,5 @@
-//! Why a backup stops, and its words (spec Amendments 12, 12a, 12b and 12c, LD-0121;
-//! Guus, 2026-11-06: "Stop, say why, offer Back up again").
+//! Why a backup stops, and its words (spec Amendments 12, 12a, 12b, 12c and 12d,
+//! LD-0121; Guus, 2026-11-06: "Stop, say why, offer Back up again").
 //!
 //! When the account's files are removed (the person's own "Erase all files",
 //! the admin reset, the inactive cleanup, the billing wipe or the grace
@@ -7,7 +7,9 @@
 //! and offers "Back up again". A backup never undoes an erase and never fills
 //! the account up again by itself. The server says why through one
 //! `notifications` row ([`BackupNotice`]); the device decides here, from those
-//! notices, the time of its last pass and its own listing.
+//! notices, the time of its last pass and its own listing. Since Amendment 12d
+//! a pass reads with an overlap margin ([`NOTICE_OVERLAP_MS`]) and remembers
+//! the notice ids it acted on ([`backup_pass_gate_v2`]).
 
 use beebeeb_types::backup::{BackupNotice, BackupStopReason, Category, NOTICE_BACKUP_DELETED, NOTICE_FILES_REMOVED};
 use serde_json::Value;
@@ -164,23 +166,40 @@ pub struct StoppedBackup {
 /// hides another folder that is gone without one. The result is in category
 /// key order; empty means nothing changes. It does not depend on the order of
 /// `notices`.
+///
+/// **Superseded by [`backup_stop_v2`]** (spec Amendment 12d, server #415
+/// review finding 1). A notice's `created_at` is the start of the server
+/// transaction that writes it, not its commit; a pass that read the notices
+/// while that transaction was still open records a `last_pass_at_ms` later
+/// than the notice, and this strict filter then never counts it. Kept
+/// unchanged for v0.2.3 callers.
 pub fn backup_stop(notices: &[ReceivedNotice], last_pass_at_ms: i64, listing: &StopListing) -> Vec<StoppedBackup> {
-    let fresh: Vec<&ReceivedNotice> = notices.iter().filter(|n| n.created_at_ms > last_pass_at_ms).collect();
+    let fresh: Vec<(&BackupNotice, i64)> = notices
+        .iter()
+        .filter(|n| n.created_at_ms > last_pass_at_ms)
+        .map(|n| (&n.notice, n.created_at_ms))
+        .collect();
+    stop_for(&fresh, listing)
+}
+
+/// Steps 1-4 of [`backup_stop`] over the notices that count, each with its
+/// `created_at_ms`.
+fn stop_for(fresh: &[(&BackupNotice, i64)], listing: &StopListing) -> Vec<StoppedBackup> {
     // Step 1: the newest files_removed notice; on a tie, the smallest wire
     // string, so the answer does not depend on the order of `notices`.
     let removed = fresh
         .iter()
-        .filter(|n| matches!(n.notice, BackupNotice::FilesRemoved { .. }))
-        .map(|n| (n.created_at_ms, n.notice.reason()))
+        .filter(|(notice, _)| matches!(notice, BackupNotice::FilesRemoved { .. }))
+        .map(|(notice, created_at_ms)| (*created_at_ms, notice.reason()))
         .max_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.as_str().cmp(a.1.as_str())));
 
     let mut device_deleted = false;
     let mut categories_deleted: Vec<Uuid> = Vec::new();
-    for n in &fresh {
+    for (notice, _) in fresh {
         if let BackupNotice::BackupDeleted {
             device_folder_id,
             category_folder_id,
-        } = &n.notice
+        } = notice
         {
             // Only a notice about this device's folder counts; a category
             // notice must name both this device's folder and the category's.
@@ -278,6 +297,9 @@ pub enum BackupPassGate {
 /// else every backup notice since the last pass (as for [`backup_stop`]).
 /// Without them the pass cannot know whether the account was emptied, so it
 /// is skipped ([`BackupPassGate::CheckFailed`]) rather than run.
+///
+/// **Superseded by [`backup_pass_gate_v2`]** (spec Amendment 12d), for the
+/// reason given on [`backup_stop`]. Kept unchanged for v0.2.3 callers.
 pub fn backup_pass_gate(
     notices: Option<&[ReceivedNotice]>,
     last_pass_at_ms: i64,
@@ -288,5 +310,154 @@ pub fn backup_pass_gate(
             stopped: backup_stop(notices, last_pass_at_ms, listing),
         },
         None => BackupPassGate::CheckFailed,
+    }
+}
+
+// ── The overlap margin and acknowledged notices (spec Amendment 12d) ──────
+
+/// How far before `last_pass_at_ms` a notice still counts: 10 minutes (spec
+/// Amendment 12d, server #415 review finding 1).
+///
+/// A notice's `created_at` is the START of the server transaction that writes
+/// it (Amendment 12a: the transaction of the run's first removal), not its
+/// commit. A pass that read the notices while that transaction was still open
+/// did not see the row, yet records a `last_pass_at_ms` later than the row's
+/// `created_at`; a strict `created_at_ms > last_pass_at_ms` would then never
+/// count it, and the backup would upload again the files the server just
+/// removed. So a notice counts when
+/// `created_at_ms > last_pass_at_ms - NOTICE_OVERLAP_MS`, and the ids already
+/// acknowledged keep that overlap from counting one notice twice
+/// ([`backup_stop_v2`]). Ten minutes is far longer than the transactions that
+/// write a notice (one erase batch, one file or one folder delete), and covers
+/// a skew between the API's and the database's clocks and the one-second
+/// resolution of a `Date` header.
+pub const NOTICE_OVERLAP_MS: i64 = 10 * 60 * 1000;
+
+/// The `since` a client sends to `GET /api/v1/notifications` (server LD-0141;
+/// integer milliseconds on the server's clock, inclusive) so the listing holds
+/// every notice [`backup_stop_v2`] can count:
+/// `last_pass_at_ms - NOTICE_OVERLAP_MS`, never below 0. A listing fetched from
+/// `last_pass_at_ms` itself would leave out the overlap.
+pub fn notices_since(last_pass_at_ms: i64) -> i64 {
+    last_pass_at_ms.saturating_sub(NOTICE_OVERLAP_MS).max(0)
+}
+
+/// A backup notice as the device listed it, with the row's id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListedNotice {
+    /// The `notifications` row's `id` as the server lists it (a UUID),
+    /// compared exactly. `None` or empty when the client has no id: such a
+    /// notice is never acknowledged, so it counts on every pass whose window
+    /// holds it (a stop shown twice is safe, a notice skipped is not), and an
+    /// empty id never acknowledges every notice without one at once.
+    pub id: Option<String>,
+    pub notice: BackupNotice,
+    /// When the server wrote it (the row's `created_at`), in milliseconds
+    /// since the epoch, on the server's clock.
+    pub created_at_ms: i64,
+}
+
+impl ListedNotice {
+    fn ack_id(&self) -> Option<&str> {
+        self.id.as_deref().filter(|id| !id.is_empty())
+    }
+}
+
+/// What [`backup_stop_v2`] decided.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StopOutcome {
+    /// The backups that turn off, and why, in category key order (as
+    /// [`backup_stop`]).
+    pub stopped: Vec<StoppedBackup>,
+    /// The acknowledged notice ids to keep, in place of the set passed in:
+    /// the id of every notice in this pass's window, sorted. That is each
+    /// notice this pass acted on and each acknowledged one still in the
+    /// window; an id whose notice has left the window is dropped, so the set
+    /// stays small. Store it in the same write as the stops and the new
+    /// `last_pass_at_ms`, never before them, and keep it when the person
+    /// chooses "Back up again".
+    pub acknowledged: Vec<String>,
+}
+
+/// Which backups turn off on this pass, and why (spec Amendments 12 and 12d):
+/// [`backup_stop`] with the overlap margin and acknowledged ids.
+///
+/// - A notice is in this pass's window when
+///   `created_at_ms > last_pass_at_ms - NOTICE_OVERLAP_MS`. `last_pass_at_ms`
+///   is on the server's clock, as for [`backup_stop`]; the client fetches the
+///   notices from [`notices_since`]`(last_pass_at_ms)`.
+/// - A notice in the window whose id is in `acknowledged` (the set the
+///   previous pass returned) counts for nothing: this device already acted on
+///   it, so a backup the person turned back on with "Back up again" after it
+///   never stops on it again.
+/// - Every other notice in the window counts, and steps 1-4 of
+///   [`backup_stop`] decide; with several `files_removed` notices the newest
+///   that counts wins.
+///
+/// Accepted edge: a backup turned on (or turned back on) within
+/// [`NOTICE_OVERLAP_MS`] after a removal notice this device never acted on
+/// stops once on its next pass, with that notice's words; "Back up again"
+/// then finds it acknowledged. That errs toward stopping: an emptied account
+/// never fills up again by itself.
+///
+/// The answer does not depend on the order of `notices` or `acknowledged`.
+pub fn backup_stop_v2(
+    notices: &[ListedNotice],
+    last_pass_at_ms: i64,
+    acknowledged: &[String],
+    listing: &StopListing,
+) -> StopOutcome {
+    let from = last_pass_at_ms.saturating_sub(NOTICE_OVERLAP_MS);
+    let window: Vec<&ListedNotice> = notices.iter().filter(|n| n.created_at_ms > from).collect();
+    let counted: Vec<(&BackupNotice, i64)> = window
+        .iter()
+        .filter(|n| n.ack_id().is_none_or(|id| !acknowledged.iter().any(|a| a == id)))
+        .map(|n| (&n.notice, n.created_at_ms))
+        .collect();
+    let mut kept: Vec<String> = window.iter().filter_map(|n| n.ack_id()).map(str::to_string).collect();
+    kept.sort();
+    kept.dedup();
+    StopOutcome {
+        stopped: stop_for(&counted, listing),
+        acknowledged: kept,
+    }
+}
+
+/// What one pass does before it uploads anything (spec Amendments 12, 12c
+/// and 12d).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BackupPassGateV2 {
+    /// The notices were read. `stopped` turn off and show their words; every
+    /// other listed backup runs its pass. The client stores, in one write,
+    /// the stops, this pass's start as its next `last_pass_at_ms`, and
+    /// `acknowledged` in place of its acknowledged set
+    /// ([`StopOutcome::acknowledged`]).
+    Run {
+        stopped: Vec<StoppedBackup>,
+        acknowledged: Vec<String>,
+    },
+    /// The notices could not be read completely: as
+    /// [`BackupPassGate::CheckFailed`]. Both `last_pass_at_ms` and the
+    /// acknowledged set stay where they were.
+    CheckFailed,
+}
+
+/// Decide a pass (spec Amendments 12c and 12d): `notices` is `None` when they
+/// could not be read completely (a server or network error, or any page
+/// missing), else every backup notice from [`notices_since`]`(last_pass_at_ms)`
+/// on. `acknowledged` is the set the previous pass returned (empty on a
+/// device's first pass). Otherwise as [`backup_stop_v2`].
+pub fn backup_pass_gate_v2(
+    notices: Option<&[ListedNotice]>,
+    last_pass_at_ms: i64,
+    acknowledged: &[String],
+    listing: &StopListing,
+) -> BackupPassGateV2 {
+    match notices {
+        Some(notices) => {
+            let StopOutcome { stopped, acknowledged } = backup_stop_v2(notices, last_pass_at_ms, acknowledged, listing);
+            BackupPassGateV2::Run { stopped, acknowledged }
+        }
+        None => BackupPassGateV2::CheckFailed,
     }
 }

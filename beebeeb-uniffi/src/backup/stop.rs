@@ -1,5 +1,7 @@
 //! Why a backup stops, and its words, for iOS (and later Android): spec
-//! Amendment 12, LD-0121. Every function forwards to `beebeeb_core::backup`;
+//! Amendment 12, LD-0121; the overlap margin and acknowledged notice ids
+//! (Amendment 12d) in the `_v2` functions. Every function forwards to
+//! `beebeeb_core::backup`;
 //! no rule lives here. A notice row is read leniently (a row of another type
 //! is skipped, a removal with an unknown reason still stops); every other
 //! string this side parses (a category key, an id, a reason) that it does not
@@ -68,6 +70,10 @@ fn parse_reason(reason: &str) -> Result<BackupStopReason, CryptoError> {
 /// last turned a backup on or chose "Back up again" since. Empty means nothing
 /// changes. An unknown category key or an id that is not a UUID in the listing
 /// is `InvalidInput`.
+///
+/// Superseded by `backup_stop_v2` (spec Amendment 12d): this strict filter
+/// misses a notice whose server transaction was still open when the previous
+/// pass read the notices. Kept unchanged for v0.2.3 callers.
 #[uniffi::export]
 pub fn backup_stop(
     notices: Vec<BackupNoticeRow>,
@@ -150,6 +156,9 @@ pub enum BackupPassGate {
 /// Decide a pass. `notices_fetch_ok` is `false` when the notices could not be
 /// read completely (a server or network error, or a page missing); `notices`
 /// is then ignored. Otherwise as `backup_stop`.
+///
+/// Superseded by `backup_pass_gate_v2` (spec Amendment 12d), for the reason
+/// given on `backup_stop`. Kept unchanged for v0.2.3 callers.
 #[uniffi::export]
 pub fn backup_pass_gate(
     notices_fetch_ok: bool,
@@ -178,6 +187,135 @@ pub fn backup_pass_gate(
 #[uniffi::export]
 pub fn backup_check_failed_words() -> String {
     rules::MSG_STOP_CHECK_FAILED.to_string()
+}
+
+// ── The overlap margin and acknowledged notice ids (spec Amendment 12d) ───
+
+/// One `notifications` row as the server lists it, with its `id`.
+#[derive(uniffi::Record)]
+pub struct BackupNoticeRowV2 {
+    /// The row's `id` (a UUID), compared exactly. `None` or empty when the
+    /// client has none: that notice is never acknowledged, so it counts on
+    /// every pass whose window holds it.
+    pub id: Option<String>,
+    /// The row's `type` (`"files_removed"`, `"backup_deleted"`, or any other
+    /// type, which is skipped).
+    pub kind: String,
+    /// The row's `data`, as JSON text. Text that does not parse reads as
+    /// `null`.
+    pub data_json: String,
+    /// The row's `created_at`, in milliseconds since the epoch (server clock).
+    pub created_at_ms: i64,
+}
+
+/// What `backup_stop_v2` decided.
+#[derive(Debug, PartialEq, Eq, uniffi::Record)]
+pub struct BackupStopOutcome {
+    /// The backups that turn off, in category key order.
+    pub stopped: Vec<BackupStopped>,
+    /// The acknowledged notice ids to store in place of the ones passed in
+    /// (sorted): store them in the same write as the stops and the new
+    /// `last_pass_at_ms`, and keep them when the person chooses "Back up
+    /// again".
+    pub acknowledged: Vec<String>,
+}
+
+/// How far before `last_pass_at_ms` a notice still counts, in milliseconds:
+/// 600 000 (10 minutes). A notice's `created_at` is the start of the server
+/// transaction that wrote it, not its commit.
+#[uniffi::export]
+pub fn backup_notice_overlap_ms() -> i64 {
+    rules::NOTICE_OVERLAP_MS
+}
+
+/// The `since` to send to `GET /api/v1/notifications` (integer milliseconds,
+/// inclusive): `last_pass_at_ms` minus the overlap, never below 0.
+#[uniffi::export]
+pub fn backup_notices_since(last_pass_at_ms: i64) -> i64 {
+    rules::notices_since(last_pass_at_ms)
+}
+
+/// The backup notices among the rows, with their ids (another kind is
+/// skipped; data that is not JSON reads as `null`).
+fn listed_notices(rows: &[BackupNoticeRowV2]) -> Vec<rules::ListedNotice> {
+    rows.iter()
+        .filter_map(|row| {
+            rules::parse_backup_notice(&row.kind, &notice_data(&row.data_json)).map(|notice| rules::ListedNotice {
+                id: row.id.clone(),
+                notice,
+                created_at_ms: row.created_at_ms,
+            })
+        })
+        .collect()
+}
+
+/// Which backups turn off on this pass, and why (spec Amendments 12 and
+/// 12d). A notice counts when it is newer than `last_pass_at_ms` minus the
+/// overlap and its id is not in `acknowledged` (the set the previous pass
+/// returned; empty on a first pass). Fetch `notices` from
+/// `backup_notices_since(last_pass_at_ms)`. An unknown category key or an id
+/// that is not a UUID in the listing is `InvalidInput`.
+#[uniffi::export]
+pub fn backup_stop_v2(
+    notices: Vec<BackupNoticeRowV2>,
+    last_pass_at_ms: i64,
+    acknowledged: Vec<String>,
+    listing: BackupStopListing,
+) -> Result<BackupStopOutcome, CryptoError> {
+    let notices = listed_notices(&notices);
+    let listing = stop_listing(listing)?;
+    let outcome = rules::backup_stop_v2(&notices, last_pass_at_ms, &acknowledged, &listing);
+    Ok(BackupStopOutcome {
+        stopped: stopped_dtos(outcome.stopped),
+        acknowledged: outcome.acknowledged,
+    })
+}
+
+/// What one pass does before it uploads anything (spec Amendments 12, 12c,
+/// 12d).
+#[derive(Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum BackupPassGateV2 {
+    /// The notices were read: `stopped` turn off with their words; every
+    /// other listed backup runs. Store in one write the stops, this pass's
+    /// start as the next `last_pass_at_ms`, and `acknowledged` in place of
+    /// the acknowledged set.
+    Run {
+        stopped: Vec<BackupStopped>,
+        acknowledged: Vec<String>,
+    },
+    /// The notices could not be read: upload nothing, turn nothing off, show
+    /// `backup_check_failed_words()`, retry at the next scheduled pass, and
+    /// keep both `last_pass_at_ms` and the acknowledged set.
+    CheckFailed,
+}
+
+/// Decide a pass. `notices_fetch_ok` is `false` when the notices could not be
+/// read completely (a server or network error, or a page missing); `notices`
+/// is then ignored. Otherwise as `backup_stop_v2`.
+#[uniffi::export]
+pub fn backup_pass_gate_v2(
+    notices_fetch_ok: bool,
+    notices: Vec<BackupNoticeRowV2>,
+    last_pass_at_ms: i64,
+    acknowledged: Vec<String>,
+    listing: BackupStopListing,
+) -> Result<BackupPassGateV2, CryptoError> {
+    let listing = stop_listing(listing)?;
+    let notices = listed_notices(&notices);
+    Ok(
+        match rules::backup_pass_gate_v2(
+            notices_fetch_ok.then_some(notices.as_slice()),
+            last_pass_at_ms,
+            &acknowledged,
+            &listing,
+        ) {
+            rules::BackupPassGateV2::Run { stopped, acknowledged } => BackupPassGateV2::Run {
+                stopped: stopped_dtos(stopped),
+                acknowledged,
+            },
+            rules::BackupPassGateV2::CheckFailed => BackupPassGateV2::CheckFailed,
+        },
+    )
 }
 
 /// The reason a `notifications` row gives, or `None` for a row that is not a
@@ -401,5 +539,102 @@ mod tests {
             backup_check_failed_words(),
             of_kind("check_failed_words")[0]["expect"].as_str().unwrap()
         );
+    }
+
+    fn rows_v2(case: &serde_json::Value) -> Vec<BackupNoticeRowV2> {
+        case["notices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| BackupNoticeRowV2 {
+                id: n["id"].as_str().map(str::to_string),
+                kind: n["type"].as_str().unwrap().to_string(),
+                data_json: n["data"].to_string(),
+                created_at_ms: n["created_at_ms"].as_i64().unwrap(),
+            })
+            .collect()
+    }
+
+    fn strings(v: &serde_json::Value) -> Vec<String> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap().to_string())
+            .collect()
+    }
+
+    fn stopped_of(v: &serde_json::Value) -> Vec<BackupStopped> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|s| BackupStopped {
+                category: s["category"].as_str().unwrap().to_string(),
+                reason: s["reason"].as_str().unwrap().to_string(),
+            })
+            .collect()
+    }
+
+    /// Amendment 12d through the binding: every overlap stop and gate case,
+    /// the `since` and the margin.
+    #[test]
+    fn uniffi_backup_stop_v2_and_pass_gate_v2_match_the_vectors() {
+        let stops = of_kind("stop_ack");
+        assert_eq!(stops.len(), 17);
+        for case in &stops {
+            let got = backup_stop_v2(
+                rows_v2(case),
+                case["last_pass_at_ms"].as_i64().unwrap(),
+                strings(&case["acknowledged"]),
+                listing_dto(&case["listing"]),
+            )
+            .unwrap();
+            let want = BackupStopOutcome {
+                stopped: stopped_of(&case["expect"]["stopped"]),
+                acknowledged: strings(&case["expect"]["acknowledged"]),
+            };
+            assert_eq!(got, want, "{}", case["id"]);
+        }
+        let gates = of_kind("gate_ack");
+        assert_eq!(gates.len(), 4);
+        for case in &gates {
+            let got = backup_pass_gate_v2(
+                case["notices_fetch_ok"].as_bool().unwrap(),
+                rows_v2(case),
+                case["last_pass_at_ms"].as_i64().unwrap(),
+                strings(&case["acknowledged"]),
+                listing_dto(&case["listing"]),
+            )
+            .unwrap();
+            let want = match case["expect"]["outcome"].as_str().unwrap() {
+                "check_failed" => BackupPassGateV2::CheckFailed,
+                "run" => BackupPassGateV2::Run {
+                    stopped: stopped_of(&case["expect"]["stopped"]),
+                    acknowledged: strings(&case["expect"]["acknowledged"]),
+                },
+                other => panic!("unknown outcome {other}"),
+            };
+            assert_eq!(got, want, "{}", case["id"]);
+        }
+        let sinces = of_kind("notices_since");
+        assert_eq!(sinces.len(), 4);
+        for case in &sinces {
+            assert_eq!(
+                backup_notices_since(case["last_pass_at_ms"].as_i64().unwrap()),
+                case["expect"].as_i64().unwrap(),
+                "{}",
+                case["id"]
+            );
+        }
+        assert_eq!(
+            backup_notice_overlap_ms(),
+            of_kind("notice_overlap")[0]["expect"].as_i64().unwrap()
+        );
+        // The listing still parses strictly.
+        let mut bad = listing_dto(&stops[0]["listing"]);
+        bad.device_folder_id = "GLegion".to_string();
+        assert!(matches!(
+            backup_pass_gate_v2(true, vec![], 0, vec![], bad),
+            Err(CryptoError::InvalidInput { .. })
+        ));
     }
 }
