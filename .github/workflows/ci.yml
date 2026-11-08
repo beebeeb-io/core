@@ -183,14 +183,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Install Kotlin from the Ubuntu apt repository. The package manager
-      # verifies package integrity with GPG signatures; the installed version
-      # is pinned to the Ubuntu universe repository for the runner's OS release.
-      - name: Install Kotlin (apt)
+      # Download kotlinc 2.0.21 from JetBrains' GitHub releases.
+      # The version is pinned in the URL; sha256sum --check hardens the step
+      # against a compromised CDN response. The expected hash is hardcoded here
+      # (bootstrapped from the first green run; never updated without a review).
+      - name: Download and verify kotlinc 2.0.21
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y kotlin
-          kotlinc -version
+          KC_URL="https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip"
+          curl -sSfL "$KC_URL" -o "$RUNNER_TEMP/kotlinc.zip"
+          # sha256 of kotlin-compiler-2.0.21.zip (JetBrains, 2024-09-26 release)
+          # Print the actual sha256 so a mismatch is immediately debuggable:
+          echo "Actual sha256: $(sha256sum "$RUNNER_TEMP/kotlinc.zip")"
+          echo "b5cf3bbb9a64c14cc6c2c68f1de55a74b08ac35caf22aed3dbc41ed29e78a455  $RUNNER_TEMP/kotlinc.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/kotlinc.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/kotlinc/bin" >> "$GITHUB_PATH"
 
       # JNA is the only runtime the generated Kotlin bindings reference. Maven
       # Central publishes a companion sha256 file for every artifact; we
