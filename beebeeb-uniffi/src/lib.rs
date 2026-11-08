@@ -19,6 +19,7 @@ mod passkey;
 mod request_seal;
 mod share_flow;
 mod share_folder;
+mod signup_flow;
 #[cfg(test)]
 mod folder_link_2237c {
     use super::*;

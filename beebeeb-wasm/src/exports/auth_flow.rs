@@ -48,7 +48,7 @@ pub(crate) fn request_js(req: &HttpRequest) -> RequestJs {
 }
 
 /// A bare request (`start()`, `verifyRequest`, `approve`, `attachConfirmToken`).
-fn out(req: HttpRequest) -> Result<JsValue, JsError> {
+pub(crate) fn out(req: HttpRequest) -> Result<JsValue, JsError> {
     to_js(&request_js(&req))
 }
 
@@ -263,6 +263,7 @@ enum ApprovalState {
     Lookup(af::device::ApprovalLookup),
     Pending(af::device::PendingApproval),
     Running(af::device::ApproveRun),
+    Denying(af::device::Denial),
     Done,
 }
 
@@ -322,6 +323,24 @@ impl AuthApproval {
         let (run, req) = pending.approve(typed_code, password.as_bytes(), key).map_err(err)?;
         self.state = ApprovalState::Running(run);
         out(req)
+    }
+
+    /// Deny the request shown for review (DW-A09); send the request, then `onDenyResponse`.
+    pub fn deny(&mut self) -> Result<JsValue, JsError> {
+        let ApprovalState::Pending(pending) = std::mem::replace(&mut self.state, ApprovalState::Done) else {
+            return Err(wrong_state());
+        };
+        let (denial, req) = pending.deny();
+        self.state = ApprovalState::Denying(denial);
+        out(req)
+    }
+
+    #[wasm_bindgen(js_name = onDenyResponse)]
+    pub fn on_deny_response(&mut self, status: u16, body: &str, retry_after_secs: Option<u32>) -> Result<(), JsError> {
+        let ApprovalState::Denying(denial) = std::mem::replace(&mut self.state, ApprovalState::Done) else {
+            return Err(wrong_state());
+        };
+        denial.on_response(resp(status, body, retry_after_secs)).map_err(err)
     }
 
     #[wasm_bindgen(js_name = onResponse)]

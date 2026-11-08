@@ -162,15 +162,55 @@ impl AccountTransport for MockServer {
                 self.totp_enabled = req.path == PATH_TOTP_ENABLE;
                 ApiResponse::new(200, json!({ "message": "ok" }))
             }
-            PATH_DELETE_ACCOUNT => {
+            PATH_DELETE_REQUEST => {
                 if !self.take_token(req) {
-                    return Ok(ApiResponse::new(403, json!({})));
+                    return Ok(ApiResponse::new(403, json!({ "code": "confirmation_required" })));
                 }
-                assert_eq!(req.body.as_ref().unwrap()["confirmation"], "DELETE");
-                ApiResponse::new(200, json!({ "message": "ok", "shred_after": "2026-11-11T19:42:00Z" }))
+                let code = req.body.as_ref().unwrap().get("code").and_then(Value::as_str);
+                if self.totp_enabled {
+                    match code {
+                        None => return Ok(ApiResponse::new(403, json!({ "code": "second_factor_required" }))),
+                        Some("123456") | Some("11111111") => {}
+                        Some(_) => return Ok(ApiResponse::new(400, json!({ "error": "Invalid code" }))),
+                    }
+                }
+                ApiResponse::new(
+                    200,
+                    json!({ "email_link_sent": true, "link_expires_at": "2026-11-08T21:00:00Z", "scheduled": false }),
+                )
+            }
+            PATH_DELETE_CONFIRM | PATH_DELETE_CANCEL => {
+                if req.body.as_ref().unwrap()["token"] != "linkTok_1" {
+                    return Ok(ApiResponse::new(404, json!({ "code": "delete_link_invalid" })));
+                }
+                if req.path == PATH_DELETE_CONFIRM {
+                    ApiResponse::new(
+                        200,
+                        json!({ "scheduled": true, "shred_after": "2026-11-11T19:42:00Z", "cancel_until": "2026-11-10T19:42:00Z" }),
+                    )
+                } else {
+                    ApiResponse::new(
+                        200,
+                        json!({ "cancelled": true, "not_restored": ["sessions", "share_links"] }),
+                    )
+                }
+            }
+            PATH_BACKUP_CODES => {
+                if req.body.as_ref().unwrap()["code"] != "123456" {
+                    return Ok(ApiResponse::new(400, json!({ "error": "Invalid code" })));
+                }
+                let codes: Vec<String> = (0..8).map(|i| format!("{:08}", 22222222 + i)).collect();
+                ApiResponse::new(200, json!({ "backup_codes": codes }))
+            }
+            PATH_TRACKING => {
+                let off = req.body.as_ref().unwrap()["opted_in"] == false;
+                if off && !self.take_token(req) {
+                    return Ok(ApiResponse::new(403, json!({ "code": "confirmation_required" })));
+                }
+                ApiResponse::new(200, json!({}))
             }
             PATH_REVOKE_OTHERS => ApiResponse::new(200, json!({ "revoked": 3 })),
-            PATH_PROFILE | PATH_TRACKING | PATH_VERIFY_EMAIL => ApiResponse::new(200, json!({})),
+            PATH_PROFILE | PATH_VERIFY_EMAIL => ApiResponse::new(200, json!({})),
             p if p.starts_with(PATH_SESSIONS) => ApiResponse::new(204, Value::Null),
             other => panic!("unexpected path {other}"),
         };
@@ -207,9 +247,9 @@ fn change_password_two_step_ups_then_new_password_logs_in() {
     );
     assert_eq!(server.used_tokens, ["tok0", "tok1"], "one single-use token per leg");
     // The new password now passes a step-up; the old one does not.
-    assert!(run(AccountFlow::delete_account(NEW).unwrap(), &mut server).is_ok());
+    assert!(run(AccountFlow::delete_account(NEW, None).unwrap(), &mut server).is_ok());
     assert_eq!(
-        run(AccountFlow::delete_account(OLD).unwrap(), &mut server).unwrap_err(),
+        run(AccountFlow::delete_account(OLD, None).unwrap(), &mut server).unwrap_err(),
         AccountFlowError::WrongPassword
     );
 }
@@ -247,7 +287,7 @@ fn change_password_policy_is_checked_before_any_request() {
 fn opaque_unavailable_never_falls_back_to_plaintext() {
     let mut server = MockServer::new(OLD.as_bytes());
     server.opaque_unavailable = true;
-    let err = run(AccountFlow::delete_account(OLD).unwrap(), &mut server).unwrap_err();
+    let err = run(AccountFlow::delete_account(OLD, None).unwrap(), &mut server).unwrap_err();
     assert_eq!(err, AccountFlowError::OpaqueUnavailable);
     assert_eq!(server.log, ["POST /api/v1/auth/confirm-opaque-start"]);
 }
@@ -265,7 +305,7 @@ fn change_email_reregisters_under_the_new_address() {
     };
     assert_eq!(email, "new@example.eu");
     // The same password now proves itself under the new username.
-    assert!(run(AccountFlow::delete_account(OLD).unwrap(), &mut server).is_ok());
+    assert!(run(AccountFlow::delete_account(OLD, None).unwrap(), &mut server).is_ok());
     assert!(run(AccountFlow::verify_email("1234 5678").unwrap(), &mut server).is_ok());
     assert_eq!(
         AccountFlow::verify_email("1234").err(),
@@ -355,12 +395,15 @@ fn totp_disable_with_code() {
 #[test]
 fn delete_account_step_up_inside_and_schedule() {
     let mut server = MockServer::new(OLD.as_bytes());
-    let out = run(AccountFlow::delete_account(OLD).unwrap(), &mut server).unwrap();
-    let AccountOutcome::DeletionScheduled { shred_after } = out else {
+    let out = run(AccountFlow::delete_account(OLD, None).unwrap(), &mut server).unwrap();
+    let AccountOutcome::DeletionRequested { link_expires_at } = out else {
         panic!()
     };
-    assert_eq!(shred_after, "2026-11-11T19:42:00Z");
-    assert_eq!(server.log.last().unwrap(), "DELETE /api/v1/auth/account +token");
+    assert_eq!(link_expires_at, "2026-11-08T21:00:00Z");
+    assert_eq!(
+        server.log.last().unwrap(),
+        "POST /api/v1/auth/account/delete-request +token"
+    );
 }
 
 #[test]
@@ -384,7 +427,8 @@ fn sessions_name_and_activity() {
         AccountFlow::set_display_name(&"a".repeat(65)).err(),
         Some(AccountFlowError::NameTooLong)
     );
-    assert!(run(AccountFlow::set_activity_logging(false), &mut server).is_ok());
+    assert!(run(AccountFlow::set_activity_logging(true, None).unwrap(), &mut server).is_ok());
+    assert_eq!(server.log.last().unwrap(), "PUT /api/v1/me/tracking");
 }
 
 #[test]
@@ -463,5 +507,133 @@ fn verify_password_only_steps_up() {
         server.log.iter().all(|l| l.contains("confirm-opaque")),
         "{:?}",
         server.log
+    );
+}
+
+#[test]
+fn delete_request_on_a_2fa_account_needs_the_code() {
+    let mut server = MockServer::new(OLD.as_bytes());
+    server.totp_enabled = true;
+    assert_eq!(
+        run(AccountFlow::delete_account(OLD, None).unwrap(), &mut server).unwrap_err(),
+        AccountFlowError::SecondFactorRequired
+    );
+    assert_eq!(
+        run(AccountFlow::delete_account(OLD, Some("654321")).unwrap(), &mut server).unwrap_err(),
+        AccountFlowError::InvalidCode
+    );
+    for code in ["123 456", "1111-1111"] {
+        let out = run(AccountFlow::delete_account(OLD, Some(code)).unwrap(), &mut server).unwrap();
+        assert!(matches!(out, AccountOutcome::DeletionRequested { .. }), "{out:?}");
+    }
+    assert_eq!(
+        run(
+            AccountFlow::delete_account("wrong password!", Some("123456")).unwrap(),
+            &mut server
+        )
+        .unwrap_err(),
+        AccountFlowError::WrongPassword
+    );
+    assert_eq!(
+        AccountFlow::delete_account(OLD, Some("12ab")).err(),
+        Some(AccountFlowError::InvalidCode)
+    );
+}
+
+#[test]
+fn delete_confirm_and_cancel_take_the_link_token() {
+    let mut server = MockServer::new(OLD.as_bytes());
+    let out = run(AccountFlow::delete_confirm("linkTok_1").unwrap(), &mut server).unwrap();
+    let AccountOutcome::DeletionScheduled {
+        shred_after,
+        cancel_until,
+    } = out
+    else {
+        panic!("{out:?}")
+    };
+    assert_eq!(shred_after, "2026-11-11T19:42:00Z");
+    assert_eq!(cancel_until.as_deref(), Some("2026-11-10T19:42:00Z"));
+    // The whole mailed link may be pasted; the token comes from its fragment.
+    let link = "https://app.beebeeb.io/account/delete#t=linkTok_1";
+    let out = run(AccountFlow::delete_cancel(link).unwrap(), &mut server).unwrap();
+    let AccountOutcome::DeletionCancelled { not_restored } = out else {
+        panic!("{out:?}")
+    };
+    assert_eq!(not_restored, ["sessions", "share_links"]);
+    assert_eq!(
+        run(AccountFlow::delete_cancel("otherTok").unwrap(), &mut server).unwrap_err(),
+        AccountFlowError::LinkInvalid
+    );
+    for bad in ["", "a b", "../x", &"a".repeat(300)] {
+        assert_eq!(
+            AccountFlow::delete_cancel(bad).err(),
+            Some(AccountFlowError::LinkInvalid),
+            "{bad}"
+        );
+    }
+    assert!(server.log.iter().all(|l| !l.ends_with("+token")), "{:?}", server.log);
+}
+
+#[test]
+fn activity_logging_off_steps_up_inside() {
+    let mut server = MockServer::new(OLD.as_bytes());
+    assert_eq!(
+        AccountFlow::set_activity_logging(false, None).err(),
+        Some(AccountFlowError::WrongPassword)
+    );
+    assert!(
+        run(
+            AccountFlow::set_activity_logging(false, Some(OLD)).unwrap(),
+            &mut server
+        )
+        .is_ok()
+    );
+    assert_eq!(server.log.len(), 3);
+    assert_eq!(server.log.last().unwrap(), "PUT /api/v1/me/tracking +token");
+    assert_eq!(
+        run(
+            AccountFlow::set_activity_logging(false, Some(NEW)).unwrap(),
+            &mut server
+        )
+        .unwrap_err(),
+        AccountFlowError::WrongPassword
+    );
+}
+
+#[test]
+fn new_backup_codes_keep_the_authenticator() {
+    let mut server = MockServer::new(OLD.as_bytes());
+    server.totp_enabled = true;
+    let out = run(AccountFlow::regenerate_backup_codes("123456").unwrap(), &mut server).unwrap();
+    let AccountOutcome::BackupCodes(codes) = out else {
+        panic!("{out:?}")
+    };
+    assert_eq!(codes.len(), 8);
+    assert!(server.totp_enabled);
+    assert_eq!(server.log, ["POST /api/v1/auth/2fa/backup-codes"]);
+    assert_eq!(
+        run(AccountFlow::regenerate_backup_codes("000000").unwrap(), &mut server).unwrap_err(),
+        AccountFlowError::InvalidCode
+    );
+    // A backup code is not accepted here: the authenticator proves the person.
+    assert_eq!(
+        AccountFlow::regenerate_backup_codes("11111111").err(),
+        Some(AccountFlowError::InvalidCode)
+    );
+}
+
+#[test]
+fn host_outcome_carries_the_delete_times() {
+    let mut host = HostSession::new();
+    let step = host.begin(AccountFlow::delete_confirm("linkTok_1").unwrap()).unwrap();
+    assert_eq!(step.path, PATH_DELETE_CONFIRM);
+    assert!(step.confirm_token.is_none());
+    let done = host
+        .resume(200, r#"{"scheduled":true,"shred_after":"s","cancel_until":"c"}"#)
+        .unwrap();
+    let o = done.outcome.unwrap();
+    assert_eq!(
+        (o.kind.as_str(), o.shred_after.as_deref(), o.cancel_until.as_deref()),
+        ("deletion_scheduled", Some("s"), Some("c"))
     );
 }
