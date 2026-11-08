@@ -1,5 +1,5 @@
 {
-  "description": "Move 3 addendum - which client can render a preview in-app. One row per extension of the three-way union (123): web's PREVIEWABLE_EXTENSIONS before the consolidation switch (78), the desktop tray's getFileType sets (88) and core's existing is_previewable_by_extension list (90, the mobile column). Every one of the 18 web-only types is restored to Web=true, and every row proves the unchanged existing predicate still answers the Mobile column.",
+  "description": "Move 3 addendum - which client can render a preview in-app. One row per extension of the three-way union (123): web's PREVIEWABLE_EXTENSIONS before the consolidation switch (78), the desktop tray's getFileType sets (88) and core's existing is_previewable_by_extension list (90, the mobile column). Every one of the 18 web-only types is restored to Web=true, and every row proves the unchanged existing predicate still answers the Mobile column. Archives amendment (core archives, 2026-11-08): zip, tar, tgz and gz preview on all three platforms through core's archive reader, so the columns count web 81, desktop 89, mobile 91.",
   "source": "web: git -C oc-split-web show aee93c8e^:src/lib/preview.ts PREVIEWABLE_EXTENSIONS (78, read 2026-11-03); desktop: desktop/src/WindowsTray.tsx getFileType (88 extensions across image/video/audio/code/archive + pdf, read 2026-11-03); mobile: beebeeb-core/src/media.rs is_previewable_by_extension at head 2f5cd8a (90). No Rust side feeds the desktop tray list (grep: 0 matches in desktop/src-tauri).",
   "web_only_restored": [
     "aif",
@@ -22,9 +22,9 @@
     "zip"
   ],
   "counts": {
-    "web": 78,
-    "desktop": 88,
-    "mobile": 90,
+    "web": 81,
+    "desktop": 89,
+    "mobile": 91,
     "union": 123
   },
   "cases": [
@@ -407,7 +407,7 @@
       "kind": "extension",
       "name": "file.gz",
       "expected": {
-        "web": false,
+        "web": true,
         "desktop": true,
         "mobile": true
       },
@@ -1100,7 +1100,7 @@
       "kind": "extension",
       "name": "file.tar",
       "expected": {
-        "web": false,
+        "web": true,
         "desktop": true,
         "mobile": true
       },
@@ -1111,8 +1111,8 @@
       "kind": "extension",
       "name": "file.tgz",
       "expected": {
-        "web": false,
-        "desktop": false,
+        "web": true,
+        "desktop": true,
         "mobile": true
       },
       "extension": "tgz"
@@ -1355,7 +1355,7 @@
       "expected": {
         "web": true,
         "desktop": true,
-        "mobile": false
+        "mobile": true
       },
       "extension": "zip"
     },
@@ -1528,7 +1528,7 @@
         true,
         true,
         true,
-        false,
+        true,
         false,
         true,
         false,

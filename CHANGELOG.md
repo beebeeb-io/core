@@ -73,6 +73,13 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   `SecretBytes`: the same `String` and `Data` / `ByteArray` in Swift and Kotlin, wiped and redacted in
   Rust. New: `safety_number` and `normalize_email`.
 
+- Archives: `list_archive`, `decompress_gzip`, `list_tar_entries` and `ArchiveEntryDto` are removed
+  (the extension-based `beebeeb_core::archive` is deleted). List, preview and extract archives through
+  `NativeClientHandle.archives(...)` → `ArchiveServiceHandle`: `open`, `preview`, `extract`,
+  `supply_password`, `open_entry`, `cancel`, `close`, `observe`. Show core's preview model and words as
+  they are; drive uploads as for any upload (the service enqueues each verified file); keep the app open
+  while it reads (`extract_keep_open`).
+
 ### Rust sync and conflict integrators
 
 - Replace `SyncEngine::load_snapshot` with `apply_complete_snapshot(CompleteSnapshot)` only for an
@@ -208,9 +215,26 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 - WASM `safetyNumber` and `normalizeEmail`: use them; JavaScript's `trim` differs from core's.
 - Regenerate bindings for the protected metadata fields and update the shared vector fixture to version
   18, including the protected metadata and session key-proof vectors.
+- WASM archives: `list_archive`, `decompress_gzip` and `list_tar_entries` are removed. Use
+  `WasmArchiveSession` (range reads through `need_bytes`, the preview model, `openEntry`) and
+  `WasmArchiveExtraction` (stage each file, upload it only on `file_end`, drop it on `file_skipped`).
+  `zip`, `tar`, `tgz` and `gz` now preview on every platform (`previewableBatchFor`), so web shows the
+  archive preview for all four.
 
 ### Added
 
+- `beebeeb_core::archives`: one sans-I/O reader for zip, tar, tgz and gz (format by magic bytes, never
+  the extension), WinZip AES (AE-1, AE-2) and ZipCrypto passwords (`ArchivePassword`: zeroized, not
+  `Clone`, never logged), entry names through one rule set (zip-slip, device names, NFC, limits), the
+  extraction planner (destination, clashes through `numbered_name`, quota, device space, Backups), the
+  extraction step machine (a file is handed over only after its CRC-32 / authentication code passed),
+  the preview screen model and all 63 words. Vectors: `test-vectors/archives_v1.json` and its fixtures,
+  from the independent `gen_archives_v1.py`, under a drift guard. Bindings: `WasmArchiveSession`,
+  `WasmArchiveExtraction`, `WasmExtractionPlan`; UniFFI records, `archive_list` and the native
+  `ArchiveServiceHandle`.
+- `beebeeb_client::downloads::DownloadService::read_range` / `range_reader` / `read_with`: plaintext
+  ranges of v1 and v2 files through core's `RangeOpener` (frame 0 first, one recorded version), and
+  `beebeeb_client::archives::ArchiveService`.
 - `beebeeb_core::name_clash`: `ItemKind`, `TakenNames`, `numbered_name` ("Keep both": `report (2).pdf`,
   then `(3)`), `numbered_candidates` and `drive_conflict_name`. Names clash when their normalised forms
   are equal, and a candidate is cut so that the whole name fits in 255 bytes.
@@ -229,6 +253,8 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 
 ### Fixed
 
+- `zip` moves from 8.6 to 9 (the writer only; `aes-crypto` in tests only), so RUSTSEC-2026-0367,
+  -0368, -0369 and -0429 are no longer ignored in `.cargo/audit.toml`.
 - Native requests declare `file-write-v2` and `version-metadata-v1` exactly where the server checks
   them: upload init, chunk, heartbeat and complete, and the direct upload grant and commit
   (`file-write-v2`), and file update and sync submit (`version-metadata-v1`). The request builder

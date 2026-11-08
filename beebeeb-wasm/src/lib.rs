@@ -1740,48 +1740,6 @@ pub fn generate_recovery_pdf(
 }
 
 // ---------------------------------------------------------------------------
-// Archive parsing
-// ---------------------------------------------------------------------------
-
-/// List entries in a TAR archive from raw bytes.
-/// Returns a JS array of `{ name: string, size: number, is_directory: boolean }`.
-#[wasm_bindgen]
-pub fn list_tar_entries(data: &[u8]) -> Result<JsValue, JsError> {
-    let entries = beebeeb_core::archive::list_tar_entries(data).map_err(|e| JsError::new(&e.to_string()))?;
-    archive_entries_to_js(&entries)
-}
-
-/// Decompress gzip-compressed data. Returns `Uint8Array`.
-#[wasm_bindgen]
-pub fn decompress_gzip(data: &[u8]) -> Result<Vec<u8>, JsError> {
-    beebeeb_core::archive::decompress_gzip(data).map_err(|e| JsError::new(&e.to_string()))
-}
-
-/// List entries in an archive, detecting format from the filename extension.
-/// Supports `.tar`, `.gz`, `.tgz`, `.tar.gz`.
-/// Returns a JS array of `{ name: string, size: number, is_directory: boolean }`.
-#[wasm_bindgen]
-pub fn list_archive(data: &[u8], filename: &str) -> Result<JsValue, JsError> {
-    let entries = beebeeb_core::archive::list_archive(data, filename).map_err(|e| JsError::new(&e.to_string()))?;
-    archive_entries_to_js(&entries)
-}
-
-fn archive_entries_to_js(entries: &[beebeeb_core::archive::ArchiveEntry]) -> Result<JsValue, JsError> {
-    let arr = js_sys::Array::new_with_length(entries.len() as u32);
-    for (i, entry) in entries.iter().enumerate() {
-        let obj = js_sys::Object::new();
-        js_sys::Reflect::set(&obj, &"name".into(), &JsValue::from_str(&entry.name))
-            .map_err(|e| JsError::new(&format!("{e:?}")))?;
-        js_sys::Reflect::set(&obj, &"size".into(), &JsValue::from_f64(entry.size as f64))
-            .map_err(|e| JsError::new(&format!("{e:?}")))?;
-        js_sys::Reflect::set(&obj, &"is_directory".into(), &JsValue::from_bool(entry.is_directory))
-            .map_err(|e| JsError::new(&format!("{e:?}")))?;
-        arr.set(i as u32, obj.into());
-    }
-    Ok(arr.into())
-}
-
-// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

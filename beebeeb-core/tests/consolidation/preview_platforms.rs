@@ -29,6 +29,10 @@ const RESTORED: [&str; 18] = [
     "xls", "zip",
 ];
 
+/// Archives preview on every platform through core's archive reader (core
+/// archives, 2026-11-08), so `zip`, one of the 18, is no longer web-only.
+const ARCHIVES: [&str; 4] = ["zip", "tar", "tgz", "gz"];
+
 /// The rows beyond the union: names, not extensions.
 const SHAPE: [&str; 8] = [
     "preview_platform_uppercase",
@@ -117,18 +121,33 @@ fn preview_platform_cases_match_each_client() {
         names.push(name.to_string());
     }
 
+    // Every archive extension previews on all three platforms.
+    for ext in ARCHIVES {
+        let case = cases
+            .iter()
+            .find(|case| case["extension"] == ext)
+            .unwrap_or_else(|| panic!("missing the archive row `{ext}`"));
+        for (label, _) in PLATFORMS {
+            assert!(expected_one(case, label), "`{ext}` must preview on {label}");
+        }
+    }
+
     // The 18 web types the switch removed are back, and the web-only rows are
-    // exactly that set — no more, none missing.
+    // exactly that set less the archives — no more, none missing.
     let restored = strings(&doc["web_only_restored"], "web_only_restored");
     assert_eq!(RESTORED.len(), 18, "web lost 18 types");
     assert_eq!(restored.len(), RESTORED.len(), "the json names all 18");
     let mut derived = web_only.clone();
     derived.sort();
-    let mut expected_web_only: Vec<String> = RESTORED.iter().map(|ext| ext.to_string()).collect();
+    let mut expected_web_only: Vec<String> = RESTORED
+        .iter()
+        .filter(|ext| !ARCHIVES.contains(ext))
+        .map(|ext| ext.to_string())
+        .collect();
     expected_web_only.sort();
     assert_eq!(
         derived, expected_web_only,
-        "the web-only rows are the 18 restored types"
+        "the web-only rows are the 18 restored types less the archives"
     );
 
     for ext in RESTORED {

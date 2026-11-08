@@ -330,6 +330,21 @@ Vectors: `test-vectors/archives_v1.json` and the fixtures in `test-vectors/archi
 `WasmArchiveSession` / `WasmArchiveExtraction` (`archives.test.cjs` runs every vector row) and the UniFFI
 records in `beebeeb-uniffi/src/archives.rs`.
 
+**The native service** (`beebeeb_client::archives::ArchiveService`, `ArchiveServiceHandle` for Swift) is
+the iOS driver. It reads through `DownloadService::read_with`: a `RangeReader` holds one `RangeOpener`
+for one recorded version (pin and commitment from `decrypt_file_metadata`), opens frame 0 first, and
+starts a new opener (frame 0 again) whenever a chunk would open twice. v1 files are read the same way,
+with v1's I9 gap (no position or version binding), the gap the whole-file read has. Demands are widened
+to whole chunks and supplied to a `SuppliedBytes` that holds the central directory and two chunks. Each
+read first asks the server for the archive's `download_version`: another version fails the run as
+`Changed`. Folders go through the Backups-checked create (a `409 name_conflict` takes the next number);
+each file is staged 0600 as `archive-<run>-<node>.bbtmp` in the service's temp root and enqueued on the
+upload queue only on `FileEnd`; it is deleted when its upload ends, when the entry is skipped, and when
+the run stops or fails (the run then cancels its queued uploads and counts any that finished
+meanwhile). A new service deletes whatever an earlier process left in its temp root. Listing and runs
+are tasks on the caller's runtime (the app's multi-thread runtime; never the File Provider extension).
+Tests: `beebeeb-client/src/tests_svc_archives.rs`, against an in-process file server.
+
 ## Security invariants
 
 - MasterKey and FileKey are NOT Clone — prevents accidental key copies in memory

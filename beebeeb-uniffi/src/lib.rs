@@ -4171,48 +4171,6 @@ pub fn generate_recovery_pdf(
 }
 
 // ---------------------------------------------------------------------------
-// Archive parsing
-// ---------------------------------------------------------------------------
-
-/// A single entry inside an archive (TAR, GZ, TGZ).
-#[derive(uniffi::Record)]
-pub struct ArchiveEntryDto {
-    pub name: String,
-    pub size: u64,
-    pub is_directory: bool,
-}
-
-/// List entries in a TAR archive from raw bytes.
-#[uniffi::export]
-pub fn list_tar_entries(data: Vec<u8>) -> Result<Vec<ArchiveEntryDto>, CryptoError> {
-    let entries = beebeeb_core::archive::list_tar_entries(&data)?;
-    Ok(entries.into_iter().map(archive_entry_to_dto).collect())
-}
-
-/// Decompress gzip-compressed data.
-#[uniffi::export]
-pub fn decompress_gzip(data: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
-    beebeeb_core::archive::decompress_gzip(&data).map_err(CryptoError::from)
-}
-
-/// List entries in an archive, detecting format from the filename extension.
-///
-/// Supported: `.tar`, `.gz`, `.tgz`, `.tar.gz`.
-#[uniffi::export]
-pub fn list_archive(data: Vec<u8>, filename: String) -> Result<Vec<ArchiveEntryDto>, CryptoError> {
-    let entries = beebeeb_core::archive::list_archive(&data, &filename)?;
-    Ok(entries.into_iter().map(archive_entry_to_dto).collect())
-}
-
-fn archive_entry_to_dto(e: beebeeb_core::archive::ArchiveEntry) -> ArchiveEntryDto {
-    ArchiveEntryDto {
-        name: e.name,
-        size: e.size,
-        is_directory: e.is_directory,
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Download + decrypt — synchronous blocking wrapper for Swift/Kotlin
 // ---------------------------------------------------------------------------
 

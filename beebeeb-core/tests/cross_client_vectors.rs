@@ -249,7 +249,9 @@ fn previewable_extensions() {
     assert!(beebeeb_core::media::is_previewable_by_extension("song.mp3"));
     assert!(beebeeb_core::media::is_previewable_by_extension("code.py"));
     assert!(beebeeb_core::media::is_previewable_by_extension("readme.md"));
-    assert!(!beebeeb_core::media::is_previewable_by_extension("archive.zip"));
+    // Archives preview through core's archive reader, on every platform.
+    assert!(beebeeb_core::media::is_previewable_by_extension("archive.zip"));
+    assert!(!beebeeb_core::media::is_previewable_by_extension("setup.exe"));
     assert!(!beebeeb_core::media::is_previewable_by_extension("noext"));
 }
 
