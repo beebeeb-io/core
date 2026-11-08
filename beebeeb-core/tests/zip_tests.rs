@@ -388,14 +388,11 @@ fn text_chunk(label: &str, len: usize) -> Vec<u8> {
 /// serves 65 times (a v1 frame carries no position, so the decryptor takes the same frame again); DEFLATE shrinks
 /// the zeros, so the 4 GiB archive is a few MiB in memory and nothing large touches the disk.
 ///
-/// It decrypts 4 GiB. On aarch64 `aes` 0.8 and `polyval` use their software backends (their ARMv8 backends need
-/// `--cfg aes_armv8` / `--cfg polyval_armv8`, which nothing in this repo sets), so there it takes minutes: run it with
-/// `cargo test -p beebeeb-core --test zip_tests -- --ignored`. On x86_64 (CI, the Legion) it runs with the suite.
+/// It decrypts 4 GiB through a debug build, which takes about five minutes (289 s on an Apple-silicon Mac, 352 s on a
+/// GitHub runner), so it is opt-in: `cargo test -p beebeeb-core --test zip_tests -- --ignored entry_above_4_gib`. Run
+/// it before changing the ZIP64 rules; `zip64_is_chosen_from_three_gib_declared` covers the decision on every run.
 #[test]
-#[cfg_attr(
-    target_arch = "aarch64",
-    ignore = "decrypts 4 GiB with software AES-GCM on aarch64 (minutes); run with --ignored"
-)]
+#[ignore = "decrypts 4 GiB in a debug build (about 5 minutes); run with --ignored"]
 fn entry_above_4_gib_completes_as_zip64() {
     const CHUNK: usize = 64 * 1024 * 1024;
     const CHUNKS: u32 = 65;
