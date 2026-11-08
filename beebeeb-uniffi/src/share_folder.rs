@@ -2,7 +2,6 @@
 //! flow and converts requests and responses; no rule lives here.
 use std::sync::{Arc, Mutex};
 
-use beebeeb_core::kdf::MasterKey;
 use beebeeb_core::share_flow::{
     ShareFlowError, display_form,
     folder::{FolderInviteInput, FolderLinkInput, FolderSend, FolderShare, FolderStep},
@@ -11,6 +10,7 @@ use beebeeb_core::share_flow::{
 };
 use zeroize::Zeroizing;
 
+use crate::MasterKeyHandle;
 use crate::auth_flow::{AuthHttpRequest, AuthHttpResponse, into, out};
 use crate::share_flow::ShareFlowFfiError;
 
@@ -89,14 +89,9 @@ impl FolderShareFlow {
         shared_folders_write: bool,
         custody_seen: Vec<String>,
         custody_unreadable: bool,
-        master_key: Vec<u8>,
+        master_key: Arc<MasterKeyHandle>,
     ) -> Result<Arc<Self>, ShareFlowFfiError> {
-        let master_key = Zeroizing::new(master_key);
-        let bytes: [u8; 32] = master_key
-            .as_slice()
-            .try_into()
-            .map_err(|_| ShareFlowFfiError::from(ShareFlowError::InvalidInput("key length")))?;
-        let master = MasterKey::from_bytes(*Zeroizing::new(bytes));
+        let master = crate::share_flow::master(&master_key)?;
         let input = FolderInviteInput {
             folder_id: &folder_id,
             email: &email,
@@ -124,14 +119,10 @@ impl FolderShareFlow {
         passphrase: Option<String>,
         custody_seen: Vec<String>,
         custody_unreadable: bool,
-        master_key: Vec<u8>,
+        master_key: Arc<MasterKeyHandle>,
     ) -> Result<Arc<Self>, ShareFlowFfiError> {
-        let (master_key, passphrase) = (Zeroizing::new(master_key), passphrase.map(Zeroizing::new));
-        let bytes: [u8; 32] = master_key
-            .as_slice()
-            .try_into()
-            .map_err(|_| ShareFlowFfiError::from(ShareFlowError::InvalidInput("key length")))?;
-        let master = MasterKey::from_bytes(*Zeroizing::new(bytes));
+        let passphrase = passphrase.map(Zeroizing::new);
+        let master = crate::share_flow::master(&master_key)?;
         let input = FolderLinkInput {
             folder_id: &folder_id,
             app_url: &app_url,
@@ -193,14 +184,9 @@ impl CreateRequestFlow {
         max_files: Option<u32>,
         max_total_bytes: Option<u64>,
         expires_in_secs: Option<u64>,
-        master_key: Vec<u8>,
+        master_key: Arc<MasterKeyHandle>,
     ) -> Result<Arc<Self>, ShareFlowFfiError> {
-        let master_key = Zeroizing::new(master_key);
-        let bytes: [u8; 32] = master_key
-            .as_slice()
-            .try_into()
-            .map_err(|_| ShareFlowFfiError::from(ShareFlowError::InvalidInput("key length")))?;
-        let master = MasterKey::from_bytes(*Zeroizing::new(bytes));
+        let master = crate::share_flow::master(&master_key)?;
         let options = beebeeb_core::share_flow::request::RequestOptions {
             title,
             description,
@@ -240,17 +226,12 @@ impl CreateRequestFlow {
 #[uniffi::export]
 pub fn file_request_rebuild_link(
     app_url: String,
-    master_key: Vec<u8>,
+    master_key: Arc<MasterKeyHandle>,
     token: Option<String>,
     wrapped_private_key: Option<String>,
     wrap_nonce: Option<String>,
 ) -> Result<Option<String>, ShareFlowFfiError> {
-    let master_key = Zeroizing::new(master_key);
-    let bytes: [u8; 32] = master_key
-        .as_slice()
-        .try_into()
-        .map_err(|_| ShareFlowFfiError::from(ShareFlowError::InvalidInput("key length")))?;
-    let master = MasterKey::from_bytes(*Zeroizing::new(bytes));
+    let master = crate::share_flow::master(&master_key)?;
     Ok(beebeeb_core::share_flow::request::rebuild_request_link(
         &app_url,
         &master,
@@ -271,19 +252,14 @@ pub fn file_request_close_request(id: String) -> Result<AuthHttpRequest, ShareFl
 #[uniffi::export]
 pub fn share_rebuild_folder_link(
     app_url: String,
-    master_key: Vec<u8>,
+    master_key: Arc<MasterKeyHandle>,
     share_id: String,
     owner_wrapped_key: Option<String>,
     owner_wrapped_token: Option<String>,
     wrapped_folder_key: Option<String>,
     passphrase_protected: bool,
 ) -> Result<Option<String>, ShareFlowFfiError> {
-    let master_key = Zeroizing::new(master_key);
-    let bytes: [u8; 32] = master_key
-        .as_slice()
-        .try_into()
-        .map_err(|_| ShareFlowFfiError::from(ShareFlowError::InvalidInput("key length")))?;
-    let master = MasterKey::from_bytes(*Zeroizing::new(bytes));
+    let master = crate::share_flow::master(&master_key)?;
     Ok(beebeeb_core::share_flow::folder::rebuild_folder_link(
         &app_url,
         &master,

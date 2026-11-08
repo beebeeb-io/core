@@ -18,6 +18,10 @@ use zeroize::Zeroizing;
 
 use super::{hmac_secret_salt, prf_eval_input};
 
+/// The user-verification level core asks of every authenticator, whatever the server sends: the
+/// passkey wraps the vault key, so presence alone must never open it.
+const REQUIRED_UV: &str = "required";
+
 /// Why a passkey step failed, as a code a client maps to its own words. Never carries a server body, a key, a token
 /// or a URL.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -53,6 +57,15 @@ pub enum PasskeyError {
     /// Wrapping the vault key failed.
     #[error("passkey_vault_wrap_failed")]
     VaultWrap,
+    /// The server's relying-party id is not the one the host expects (or is `localhost` outside a development
+    /// build). Nothing was handed to the platform.
+    #[error("passkey_rp_mismatch")]
+    RpMismatch,
+    /// The step-up that guards adding or removing a passkey failed; `code` is [`AuthFlowError::code`].
+    ///
+    /// [`AuthFlowError::code`]: crate::auth_flow::AuthFlowError::code
+    #[error("passkey_step_up_failed")]
+    StepUp { code: &'static str },
 }
 
 impl PasskeyError {
@@ -69,6 +82,8 @@ impl PasskeyError {
             Self::Malformed(_) => "passkey_malformed",
             Self::VaultUnwrap => "passkey_vault_unwrap_failed",
             Self::VaultWrap => "passkey_vault_wrap_failed",
+            Self::RpMismatch => "passkey_rp_mismatch",
+            Self::StepUp { .. } => "passkey_step_up_failed",
         }
     }
 }
@@ -85,13 +100,64 @@ pub fn from_b64url(text: &str) -> Result<Vec<u8>, PasskeyError> {
         .map_err(|_| PasskeyError::Malformed("base64url"))
 }
 
-/// The origin a native client claims in `clientDataJSON`: `https://<rp id>`, except the server's development default
-/// (`localhost`), whose origin is the web dev server `http://localhost:5173` (`build_webauthn` in the server).
-pub fn origin_for_rp(rp_id: &str) -> String {
-    if rp_id == "localhost" {
-        "http://localhost:5173".to_string()
-    } else {
-        format!("https://{rp_id}")
+/// The relying party the HOST expects (its own build configuration, never the server's answer). The server's
+/// `rp.id` / `rpId` must equal it exactly, or the parse refuses with [`PasskeyError::RpMismatch`], so a server can
+/// never make a client claim another origin.
+///
+/// `localhost` (the server's development default) is accepted only in a debug build or when the host passes the
+/// explicit development flag ([`ExpectedRp::development`]); a release build without it never claims
+/// `http://localhost:*`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpectedRp {
+    rp_id: String,
+    allow_localhost: bool,
+}
+
+impl ExpectedRp {
+    /// The production relying party, e.g. `beebeeb.io`.
+    pub fn new(rp_id: impl Into<String>) -> Self {
+        Self {
+            rp_id: rp_id.into(),
+            allow_localhost: false,
+        }
+    }
+
+    /// A development host: `localhost` is accepted even in a release build.
+    pub fn development(rp_id: impl Into<String>) -> Self {
+        Self {
+            rp_id: rp_id.into(),
+            allow_localhost: true,
+        }
+    }
+
+    /// The expected relying-party id.
+    pub fn rp_id(&self) -> &str {
+        &self.rp_id
+    }
+
+    /// Check the server's `rp_id` and return the origin a native client claims in `clientDataJSON`:
+    /// `https://<rp id>`, or for `localhost` the web dev server `http://localhost:5173` (`build_webauthn` in the
+    /// server).
+    pub fn origin_for(&self, server_rp_id: &str) -> Result<String, PasskeyError> {
+        self.origin_for_build(server_rp_id, cfg!(debug_assertions))
+    }
+
+    fn origin_for_build(&self, server_rp_id: &str, debug_build: bool) -> Result<String, PasskeyError> {
+        if self.rp_id.is_empty() || server_rp_id != self.rp_id {
+            return Err(PasskeyError::RpMismatch);
+        }
+        if server_rp_id == "localhost" {
+            if self.allow_localhost || debug_build {
+                return Ok("http://localhost:5173".to_string());
+            }
+            return Err(PasskeyError::RpMismatch);
+        }
+        Ok(format!("https://{server_rp_id}"))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn origin_for_release_build(&self, server_rp_id: &str) -> Result<String, PasskeyError> {
+        self.origin_for_build(server_rp_id, false)
     }
 }
 
@@ -186,13 +252,14 @@ fn credential_ids(list: Option<&Value>) -> Result<Vec<Vec<u8>>, PasskeyError> {
         .collect()
 }
 
-/// Read `POST /api/v1/auth/passkey/register-start`'s answer.
-pub fn parse_registration_start(answer: &Value) -> Result<RegistrationStart, PasskeyError> {
+/// Read `POST /api/v1/auth/passkey/register-start`'s answer. The server's `rp.id` must be `expected`'s.
+pub fn parse_registration_start(answer: &Value, expected: &ExpectedRp) -> Result<RegistrationStart, PasskeyError> {
     let reg_id = str_field(answer, "reg_id").ok_or(PasskeyError::Malformed("reg_id"))?;
     let pk = public_key(answer).ok_or(PasskeyError::Malformed("publicKey"))?;
     let rp = pk.get("rp").ok_or(PasskeyError::Malformed("rp"))?;
     let user = pk.get("user").ok_or(PasskeyError::Malformed("user"))?;
     let rp_id = str_field(rp, "id").ok_or(PasskeyError::Malformed("rp.id"))?.to_string();
+    let origin = expected.origin_for(&rp_id)?;
     let selection = pk.get("authenticatorSelection");
     let algorithms = pk
         .get("pubKeyCredParams")
@@ -218,7 +285,7 @@ pub fn parse_registration_start(answer: &Value) -> Result<RegistrationStart, Pas
     Ok(RegistrationStart {
         reg_id: reg_id.to_string(),
         options: CreationOptions {
-            origin: origin_for_rp(&rp_id),
+            origin,
             rp_name: str_field(rp, "name").unwrap_or("Beebeeb").to_string(),
             rp_id,
             user_id: from_b64url(str_field(user, "id").ok_or(PasskeyError::Malformed("user.id"))?)?,
@@ -228,10 +295,8 @@ pub fn parse_registration_start(answer: &Value) -> Result<RegistrationStart, Pas
             algorithms,
             exclude_credentials: credential_ids(pk.get("excludeCredentials"))?,
             timeout_ms: pk.get("timeout").and_then(Value::as_u64).unwrap_or(60_000) as u32,
-            user_verification: selection
-                .and_then(|s| str_field(s, "userVerification"))
-                .unwrap_or("preferred")
-                .to_string(),
+            // Never the server's choice: a passkey that wraps the vault key always verifies the user.
+            user_verification: REQUIRED_UV.to_string(),
             resident_key,
             attestation: str_field(pk, "attestation").unwrap_or("none").to_string(),
             authenticator_attachment: selection
@@ -322,7 +387,10 @@ impl RequestOptions {
     }
 
     /// Options for a LOCAL assertion whose only purpose is the PRF output of a credential just created (a platform
-    /// that cannot evaluate PRF during `create`). Its challenge is random and is never sent to the server.
+    /// that cannot evaluate PRF during `create`). Its challenge is random and is never sent to the server. It asks
+    /// for `required` user verification, as the creation does: `hmac-secret` gives a different output with and without
+    /// verification, and the sign-in requires it, so a weaker probe would escrow under a PRF output no sign-in
+    /// reproduces.
     pub fn local_prf_probe(creation: &CreationOptions, credential_id: &[u8]) -> Self {
         let mut challenge = vec![0u8; 32];
         rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut challenge);
@@ -331,7 +399,7 @@ impl RequestOptions {
             challenge,
             allow_credentials: vec![credential_id.to_vec()],
             timeout_ms: creation.timeout_ms,
-            user_verification: "discouraged".to_string(),
+            user_verification: REQUIRED_UV.to_string(),
             origin: creation.origin.clone(),
             prf: PrfSalts::new(),
         }
@@ -351,12 +419,13 @@ pub fn login_start_body(email: &str) -> Value {
     json!({ "email": email })
 }
 
-/// Read `POST /api/v1/auth/passkey/login-start`'s answer.
-pub fn parse_assertion_start(answer: &Value) -> Result<AssertionStart, PasskeyError> {
+/// Read `POST /api/v1/auth/passkey/login-start`'s answer. The server's `rpId` must be `expected`'s.
+pub fn parse_assertion_start(answer: &Value, expected: &ExpectedRp) -> Result<AssertionStart, PasskeyError> {
     let pk = public_key(answer).ok_or(PasskeyError::Malformed("publicKey"))?;
     let rp_id = str_field(pk, "rpId")
         .ok_or(PasskeyError::Malformed("rpId"))?
         .to_string();
+    let origin = expected.origin_for(&rp_id)?;
     Ok(AssertionStart {
         auth_state: str_field(answer, "auth_state")
             .ok_or(PasskeyError::Malformed("auth_state"))?
@@ -365,12 +434,12 @@ pub fn parse_assertion_start(answer: &Value) -> Result<AssertionStart, PasskeyEr
             .ok_or(PasskeyError::Malformed("user_id"))?
             .to_string(),
         options: RequestOptions {
-            origin: origin_for_rp(&rp_id),
+            origin,
             rp_id,
             challenge: from_b64url(str_field(pk, "challenge").ok_or(PasskeyError::Malformed("challenge"))?)?,
             allow_credentials: credential_ids(pk.get("allowCredentials"))?,
             timeout_ms: pk.get("timeout").and_then(Value::as_u64).unwrap_or(60_000) as u32,
-            user_verification: str_field(pk, "userVerification").unwrap_or("preferred").to_string(),
+            user_verification: REQUIRED_UV.to_string(),
             prf: PrfSalts::new(),
         },
     })

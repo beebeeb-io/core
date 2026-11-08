@@ -47,20 +47,40 @@ pub fn passkey_unwrap_vault_key(prf_output: &[u8], blob: &[u8]) -> Result<Vec<u8
     unwrap_inner(prf_output, blob).map_err(|e| JsError::new(&e))
 }
 
-/// `register-start`'s answer → `RegistrationStart` JSON.
+fn expected_rp(expected_rp_id: &str, allow_localhost: bool) -> ceremony::ExpectedRp {
+    if allow_localhost {
+        ceremony::ExpectedRp::development(expected_rp_id)
+    } else {
+        ceremony::ExpectedRp::new(expected_rp_id)
+    }
+}
+
+/// `register-start`'s answer → `RegistrationStart` JSON. The server's `rp.id` must equal `expectedRpId`
+/// (`passkey_rp_mismatch` otherwise); `allowLocalhost` is the explicit development flag.
 #[wasm_bindgen(js_name = passkeyParseRegistrationStart)]
-pub fn passkey_parse_registration_start(answer_json: &str) -> Result<String, JsError> {
+pub fn passkey_parse_registration_start(
+    answer_json: &str,
+    expected_rp_id: &str,
+    allow_localhost: bool,
+) -> Result<String, JsError> {
+    let rp = expected_rp(expected_rp_id, allow_localhost);
     json_step(answer_json, |a| {
-        ceremony::parse_registration_start(a).map(|s| serde_json::to_value(s).unwrap_or_default())
+        ceremony::parse_registration_start(a, &rp).map(|s| serde_json::to_value(s).unwrap_or_default())
     })
     .map_err(|e| JsError::new(&e))
 }
 
-/// `login-start`'s answer → `AssertionStart` JSON.
+/// `login-start`'s answer → `AssertionStart` JSON. The server's `rpId` must equal `expectedRpId`
+/// (`passkey_rp_mismatch` otherwise); `allowLocalhost` is the explicit development flag.
 #[wasm_bindgen(js_name = passkeyParseAssertionStart)]
-pub fn passkey_parse_assertion_start(answer_json: &str) -> Result<String, JsError> {
+pub fn passkey_parse_assertion_start(
+    answer_json: &str,
+    expected_rp_id: &str,
+    allow_localhost: bool,
+) -> Result<String, JsError> {
+    let rp = expected_rp(expected_rp_id, allow_localhost);
     json_step(answer_json, |a| {
-        ceremony::parse_assertion_start(a).map(|s| serde_json::to_value(s).unwrap_or_default())
+        ceremony::parse_assertion_start(a, &rp).map(|s| serde_json::to_value(s).unwrap_or_default())
     })
     .map_err(|e| JsError::new(&e))
 }
@@ -83,13 +103,19 @@ mod passkey_export_tests {
         assert!(wrap_inner(&[1u8; 31], &[7u8; 32]).is_err());
         let ok = json_step(
             r#"{"publicKey":{"challenge":"AAAA","rpId":"beebeeb.io"},"auth_state":"s","user_id":"u"}"#,
-            |a| ceremony::parse_assertion_start(a).map(|s| serde_json::to_value(s).unwrap()),
+            |a| {
+                ceremony::parse_assertion_start(a, &expected_rp("beebeeb.io", false))
+                    .map(|s| serde_json::to_value(s).unwrap())
+            },
         )
         .unwrap();
         assert!(ok.contains("\"rp_id\":\"beebeeb.io\""));
         assert_eq!(
-            json_step("{}", |a| ceremony::parse_assertion_start(a)
-                .map(|s| serde_json::to_value(s).unwrap())),
+            json_step("{}", |a| ceremony::parse_assertion_start(
+                a,
+                &expected_rp("beebeeb.io", false)
+            )
+            .map(|s| serde_json::to_value(s).unwrap())),
             Err("passkey_malformed".to_string())
         );
     }

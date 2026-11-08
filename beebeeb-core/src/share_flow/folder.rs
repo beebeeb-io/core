@@ -189,12 +189,11 @@ impl FolderShare {
         master: &MasterKey,
         custody: CustodyMemory,
     ) -> Result<Self, ShareFlowError> {
-        // A folder id that is no UUID refuses (web `parseFolderId`: it counts as seen). The id is
-        // used as given (key derivation and AAD read its bytes); only the memory is canonical.
+        // A folder id that is no UUID refuses (web `parseFolderId`: it counts as seen). Key
+        // derivation, AAD and the invite match read the id's bytes, so a UUID that is not already
+        // canonical lower-case is refused, never normalized.
         canonical_folder_id(folder_id).ok_or(ShareFlowError::FolderKeysUnavailable)?;
-        let folder_id = path_id(folder_id)
-            .map_err(|_| ShareFlowError::InvalidInput("folder id"))?
-            .to_owned();
+        let folder_id = super::canonical_item_id(folder_id, "folder id")?.to_owned();
         Ok(Self {
             folder_id,
             purpose,
@@ -355,8 +354,9 @@ impl FolderShare {
                     let id = file
                         .get("id")
                         .and_then(Value::as_str)
-                        .ok_or(ShareFlowError::Protocol("file id"))?
-                        .to_owned();
+                        .ok_or(ShareFlowError::Protocol("file id"))?;
+                    // The child's id is HKDF info for its key and its wrap.
+                    let id = super::canonical_item_id(id, "child id")?.to_owned();
                     let is_folder = file.get("is_folder").and_then(Value::as_bool).unwrap_or(false);
                     if is_folder {
                         queue.push_back(id.clone());

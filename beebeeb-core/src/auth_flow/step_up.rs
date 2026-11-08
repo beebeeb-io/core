@@ -31,10 +31,33 @@ pub const PURPOSE_CLI_DEVICE_APPROVAL: &str = "cli_device_approval";
 pub enum StepUpPurpose {
     /// The server's generic destructive-action grant (no purpose field sent).
     Generic,
-    /// A named purpose the consuming endpoint checks (`totp_disable`, …).
+    /// A named purpose sent as `purpose`. Today the server accepts only `password_step_up` here
+    /// (the same grant as [`StepUpPurpose::Generic`]) and refuses any other name; device approval
+    /// is [`StepUpPurpose::DeviceApproval`].
     Named(String),
     /// A device approval, bound to this code (purpose `cli_device_approval`).
     DeviceApproval { code: String },
+}
+
+impl StepUpPurpose {
+    /// The purpose from a binding's `(purpose, cli_code)` pair: neither is the generic grant, a
+    /// `cli_code` alone (or with purpose `cli_device_approval`) a device approval, a purpose alone
+    /// a named one. A `cli_code` with any other purpose is refused, never silently replaced, and
+    /// so is `cli_device_approval` without a code. An empty purpose counts as none.
+    pub fn from_parts(purpose: Option<String>, cli_code: Option<String>) -> Result<Self, AuthFlowError> {
+        match (purpose.filter(|p| !p.is_empty()), cli_code) {
+            (None, None) => Ok(Self::Generic),
+            (None, Some(code)) => Ok(Self::DeviceApproval { code }),
+            (Some(p), Some(code)) if p == PURPOSE_CLI_DEVICE_APPROVAL => Ok(Self::DeviceApproval { code }),
+            (Some(_), Some(_)) => Err(AuthFlowError::InvalidInput(
+                "cli_code is only valid with purpose cli_device_approval",
+            )),
+            (Some(p), None) if p == PURPOSE_CLI_DEVICE_APPROVAL => Err(AuthFlowError::InvalidInput(
+                "purpose cli_device_approval needs a cli_code",
+            )),
+            (Some(p), None) => Ok(Self::Named(p)),
+        }
+    }
 }
 
 /// A single-use confirmation token. Wiped on drop; never printed.

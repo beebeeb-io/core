@@ -1,16 +1,47 @@
 //! The account flows' host adapter for the bindings (UniFFI, WASM): a step in plain strings.
 
+use zeroize::Zeroizing;
+
 use super::{AccountFlow, AccountFlowError, AccountOutcome, ApiResponse, Step, TotpEnrollment};
 
-/// A step in plain strings, for UniFFI and WASM hosts that perform the HTTP call.
-/// `confirm_token` must go straight into the `X-Confirm-Token` header and nowhere else.
+/// Serialize wiped strings as plain JSON strings (for WASM's `serde_wasm_bindgen`).
+mod wiped {
+    use serde::Serializer;
+    use zeroize::Zeroizing;
+
+    pub fn opt<S: Serializer>(v: &Option<Zeroizing<String>>, s: S) -> Result<S::Ok, S::Error> {
+        match v {
+            Some(t) => s.serialize_some(t.as_str()),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn string<S: Serializer>(v: &Zeroizing<String>, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(v.as_str())
+    }
+
+    pub fn list<S: Serializer>(v: &Zeroizing<Vec<String>>, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(v.iter())
+    }
+}
+
+/// A step in strings, for UniFFI and WASM hosts that perform the HTTP call. Every field that can
+/// carry a secret (the body, the confirm token, the outcome's session token, TOTP secret,
+/// `otpauth` URI and backup codes) is wiped when the step is dropped; the copy a binding hands
+/// across its boundary is the platform's. `confirm_token` must go straight into the
+/// `X-Confirm-Token` header and nowhere else.
+///
+/// Limit: the flows build and parse JSON bodies with `serde_json::Value`, whose strings are not
+/// wiped; `body_json` is wiped, the intermediate `Value` is not (`docs/agent-notes.md`).
 #[derive(serde::Serialize)]
 pub struct HostStep {
     pub done: bool,
     pub method: String,
     pub path: String,
-    pub body_json: String,
-    pub confirm_token: Option<String>,
+    #[serde(serialize_with = "wiped::string")]
+    pub body_json: Zeroizing<String>,
+    #[serde(serialize_with = "wiped::opt")]
+    pub confirm_token: Option<Zeroizing<String>>,
     pub outcome: Option<HostOutcome>,
 }
 
@@ -22,11 +53,15 @@ pub struct HostStep {
 #[derive(serde::Serialize, Default)]
 pub struct HostOutcome {
     pub kind: String,
-    pub session_token: Option<String>,
+    #[serde(serialize_with = "wiped::opt")]
+    pub session_token: Option<Zeroizing<String>>,
     pub email: Option<String>,
-    pub totp_secret: Option<String>,
-    pub otpauth_uri: Option<String>,
-    pub backup_codes: Vec<String>,
+    #[serde(serialize_with = "wiped::opt")]
+    pub totp_secret: Option<Zeroizing<String>>,
+    #[serde(serialize_with = "wiped::opt")]
+    pub otpauth_uri: Option<Zeroizing<String>>,
+    #[serde(serialize_with = "wiped::list")]
+    pub backup_codes: Zeroizing<Vec<String>>,
     pub revoked: u32,
     pub shred_after: Option<String>,
     pub cancel_until: Option<String>,
@@ -85,8 +120,8 @@ impl HostSession {
                 done: false,
                 method: req.method.as_str().to_string(),
                 path: req.path.clone(),
-                body_json: req.body_json(),
-                confirm_token: req.confirm_token().map(str::to_string),
+                body_json: Zeroizing::new(req.body_json()),
+                confirm_token: req.confirm_token().map(|t| Zeroizing::new(t.to_owned())),
                 outcome: None,
             },
             Step::Done(outcome) => {
@@ -96,7 +131,7 @@ impl HostSession {
                     AccountOutcome::Done => o.kind = "done".into(),
                     AccountOutcome::PasswordChanged { session_token } => {
                         o.kind = "password_changed".into();
-                        o.session_token = Some(session_token.to_string());
+                        o.session_token = Some(session_token);
                     }
                     AccountOutcome::EmailChanged { email } => {
                         o.kind = "email_changed".into();
@@ -104,13 +139,13 @@ impl HostSession {
                     }
                     AccountOutcome::TotpEnrollment(e) => {
                         o.kind = "totp_enrollment".into();
-                        o.totp_secret = Some(e.secret.to_string());
-                        o.otpauth_uri = Some(e.otpauth_uri.to_string());
+                        o.totp_secret = Some(Zeroizing::new(e.secret.to_string()));
+                        o.otpauth_uri = Some(Zeroizing::new(e.otpauth_uri.to_string()));
                         self.enrollment = Some(e);
                     }
                     AccountOutcome::BackupCodes(codes) => {
                         o.kind = "backup_codes".into();
-                        o.backup_codes = codes.to_vec();
+                        o.backup_codes = codes;
                     }
                     AccountOutcome::Revoked { count } => {
                         o.kind = "revoked".into();
@@ -137,7 +172,7 @@ impl HostSession {
                     done: true,
                     method: String::new(),
                     path: String::new(),
-                    body_json: String::new(),
+                    body_json: Zeroizing::new(String::new()),
                     confirm_token: None,
                     outcome: Some(o),
                 }

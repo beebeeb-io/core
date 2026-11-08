@@ -169,6 +169,16 @@ pub(crate) fn path_id(id: &str) -> Result<&str, ShareFlowError> {
     Ok(id)
 }
 
+/// An item id that is HKDF info or an invite match key: it must already be a canonical lower-case
+/// hyphenated UUID, else `InvalidInput(what)`. Never normalized: a different spelling of the same
+/// UUID would derive a different key and miss the server's invite rows (item-id "Never break").
+pub(crate) fn canonical_item_id<'a>(id: &'a str, what: &'static str) -> Result<&'a str, ShareFlowError> {
+    match uuid::Uuid::parse_str(id) {
+        Ok(u) if u.hyphenated().to_string() == id => Ok(id),
+        _ => Err(ShareFlowError::InvalidInput(what)),
+    }
+}
+
 pub(crate) fn frame(blob: EncryptedBlob) -> Vec<u8> {
     let mut out = Vec::with_capacity(blob.nonce.len() + blob.ciphertext.len());
     out.extend_from_slice(&blob.nonce);
@@ -219,6 +229,7 @@ pub fn seal_file_key_for_member(
     file_id: &str,
     file_key: &FileKey,
 ) -> Result<Vec<u8>, ShareFlowError> {
+    let file_id = canonical_item_id(file_id, "file id")?;
     let share_key = member_share_key(master, recipient_public, file_id)?;
     encrypt_chunk(&share_key, file_key.as_bytes())
         .map(frame)
@@ -233,6 +244,7 @@ pub fn open_member_file_key(
     file_id: &str,
     sealed: &[u8],
 ) -> Result<FileKey, ShareFlowError> {
+    let file_id = canonical_item_id(file_id, "file id")?;
     let share_key = member_share_key(master, owner_public, file_id)?;
     let plain = Zeroizing::new(decrypt_chunk(&share_key, &split(sealed)?).map_err(|_| ShareFlowError::Crypto)?);
     let bytes: [u8; 32] = plain.as_slice().try_into().map_err(|_| ShareFlowError::Crypto)?;

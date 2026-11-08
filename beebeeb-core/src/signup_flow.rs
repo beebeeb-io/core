@@ -75,11 +75,24 @@ impl Default for SignupPolicy {
     }
 }
 
-fn own_https_url(v: Option<&serde_json::Value>) -> Option<String> {
+/// An `https` URL on Beebeeb's own domain. The authority ends at the first `/`, `?`, `#` or `\\`
+/// (WHATWG reads `\\` as `/` in an `https` URL), must be a plain host (no `@` credentials, no port,
+/// only ASCII letters, digits, `-` and `.`), and the HOST is compared exactly: `beebeeb.io` or a
+/// subdomain. A URL with whitespace, a control character or a `\\` anywhere is refused outright (browsers
+/// and Android's `Uri` read `\\` differently from this parser).
+pub(crate) fn own_https_url(v: Option<&serde_json::Value>) -> Option<String> {
     let s = v?.as_str()?;
+    if s.chars().any(|c| c.is_whitespace() || c.is_control() || c == '\\') {
+        return None;
+    }
     let rest = s.strip_prefix("https://")?;
-    let host = rest.split('/').next()?;
-    (host == "beebeeb.io" || host.ends_with(".beebeeb.io")).then(|| s.to_owned())
+    let end = rest.find(['/', '?', '#', '\\']).unwrap_or(rest.len());
+    let host = rest[..end].to_ascii_lowercase();
+    let plain = !host.is_empty()
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.');
+    (plain && (host == "beebeeb.io" || host.ends_with(".beebeeb.io"))).then(|| s.to_owned())
 }
 
 fn breach_path(v: Option<&serde_json::Value>) -> Option<String> {
@@ -291,6 +304,36 @@ impl BreachSlot {
     pub(crate) fn get(&self) -> Option<&BreachCheck> {
         self.check.as_ref()
     }
+}
+
+/// The password gate every flow that sets a password runs (sign-up's rules, DW-A49/A67): the
+/// server's minimum (`policy`, already floored by `from_server`), then, when the policy declares a
+/// breach check, the verdict of a `breach` check made for THIS password. `fail_open` is the
+/// policy's: an outage passes only when the server says so, and a check never answered is missing.
+pub fn password_gate(
+    policy: &SignupPolicy,
+    breach: Option<&crate::onboarding::BreachCheck>,
+    password: &str,
+) -> Result<(), SignupError> {
+    let eval = evaluate(policy, password);
+    if !eval.meets_minimum {
+        return Err(SignupError::PasswordTooShort {
+            missing: eval.missing_characters,
+        });
+    }
+    if policy.breach_endpoint.is_some() {
+        let check = breach.ok_or(SignupError::BreachCheckMissing)?;
+        if !check.matches_password(password) {
+            return Err(SignupError::BreachCheckMissing);
+        }
+        match check.verdict(policy.breach_fail_open) {
+            None => return Err(SignupError::BreachCheckMissing),
+            Some(BreachVerdict::Breached { .. }) => return Err(SignupError::PasswordBreached),
+            Some(BreachVerdict::CheckFailedBlocked) => return Err(SignupError::BreachCheckBlocked),
+            Some(_) => {}
+        }
+    }
+    Ok(())
 }
 
 /// The meter and its hint while typing (DW-A36/A37): core's evaluator, so every client agrees.

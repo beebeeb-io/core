@@ -7,6 +7,8 @@
 //!   participant C as client (HTTP + platform call)
 //!   participant K as core flow
 //!   participant S as server
+//!   K->>S: confirm-opaque-start / -finish (step-up from the password)
+//!   S-->>K: single-use confirmation token (kept inside core)
 //!   K->>S: register-start (X-Confirm-Token)
 //!   S-->>K: options + reg_id
 //!   K->>C: make_credential(options)
@@ -25,10 +27,12 @@ use serde_json::Value;
 use zeroize::Zeroizing;
 
 use super::ceremony::{
-    self, AssertionStart, CreationOptions, NativeAssertion, NativeAttestation, PasskeyError, PasskeyInfo,
+    self, AssertionStart, CreationOptions, ExpectedRp, NativeAssertion, NativeAttestation, PasskeyError, PasskeyInfo,
     RequestOptions,
 };
 use super::{PrfOutput, unwrap_vault_key, wrap_vault_key};
+use crate::auth_flow::step_up::{StepUp, StepUpPurpose, StepUpStep};
+use crate::auth_flow::{self, AuthFlowError, RequestAuth};
 use crate::kdf::MasterKey;
 
 /// An HTTP method the passkey routes use.
@@ -60,10 +64,19 @@ impl std::fmt::Debug for ApiRequest {
 }
 
 /// The API's answer: the status and the JSON body (`Value::Null` when there is none).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ApiResponse {
     pub status: u16,
     pub body: Value,
+}
+
+impl std::fmt::Debug for ApiResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Bodies can carry session tokens, TOTP secrets, backup codes and mailed tokens: status only.
+        f.debug_struct("ApiResponse")
+            .field("status", &self.status)
+            .finish_non_exhaustive()
+    }
 }
 
 /// The client's HTTP. A transport failure is [`PasskeyError::Network`]; any status is an `Ok`.
@@ -108,6 +121,55 @@ fn bearer(session: &str) -> Option<Zeroizing<String>> {
     Some(Zeroizing::new(session.to_string()))
 }
 
+fn step_up_error(e: AuthFlowError) -> PasskeyError {
+    PasskeyError::StepUp { code: e.code() }
+}
+
+/// A step-up leg from `auth_flow` in this module's request shape (both legs are session POSTs).
+fn from_auth(request: auth_flow::HttpRequest, session: &str) -> ApiRequest {
+    let method = match request.method {
+        auth_flow::Method::Get => Method::Get,
+        auth_flow::Method::Delete => Method::Delete,
+        auth_flow::Method::Post | auth_flow::Method::Put => Method::Post,
+    };
+    ApiRequest {
+        method,
+        path: request.path,
+        body: request.body,
+        bearer: match request.auth {
+            RequestAuth::Session => bearer(session),
+            RequestAuth::None => None,
+        },
+        confirm_token: request.confirm_token,
+    }
+}
+
+/// Run the OPAQUE step-up (the generic grant) for the signed-in `session` over `http`, then put the minted
+/// single-use token on `consuming`. The token never leaves core: no caller ever holds it.
+async fn with_step_up<H: PasskeyHttp>(
+    http: &H,
+    session: &str,
+    password: &[u8],
+    consuming: ApiRequest,
+) -> Result<ApiRequest, PasskeyError> {
+    let (mut flow, mut next) = StepUp::start(password, StepUpPurpose::Generic).map_err(step_up_error)?;
+    loop {
+        let response = http.send(from_auth(next, session)).await?;
+        match flow
+            .on_response(auth_flow::HttpResponse::new(response.status, response.body))
+            .map_err(step_up_error)?
+        {
+            StepUpStep::Send(request) => next = request,
+            StepUpStep::Confirmed(token) => {
+                return Ok(ApiRequest {
+                    confirm_token: Some(token.into_header_value()),
+                    ..consuming
+                });
+            }
+        }
+    }
+}
+
 /// What adding a passkey did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Added {
@@ -119,31 +181,34 @@ pub struct Added {
     pub escrowed: bool,
 }
 
-/// Add a passkey to the signed-in account (`session`), with a FRESH step-up proof (`confirm_token`, single use,
-/// which the server requires). When `vault_key` is given and the passkey has PRF, the vault key is wrapped under it
+/// Add a passkey to the signed-in account (`session`). The step-up the server requires runs inside, from
+/// `password` (OPAQUE; the single-use token goes straight onto `register-start`). The server's relying party must
+/// be `rp`. When `vault_key` is given and the passkey has PRF, the vault key is wrapped under it
 /// and escrowed, so the passkey can unlock the vault later. The passkey stays added when the escrow step fails (the
 /// web client's rule): the answer then says `escrowed: false`.
 pub async fn add_passkey<H: PasskeyHttp, A: PasskeyAuthenticator>(
     http: &H,
     authenticator: &A,
     session: &str,
-    confirm_token: &str,
+    password: &[u8],
     name: Option<&str>,
     vault_key: Option<&MasterKey>,
+    rp: &ExpectedRp,
 ) -> Result<Added, PasskeyError> {
-    let start = ceremony::parse_registration_start(
-        &call(
-            http,
-            ApiRequest {
-                method: Method::Post,
-                path: "/api/v1/auth/passkey/register-start".into(),
-                body: None,
-                bearer: bearer(session),
-                confirm_token: Some(Zeroizing::new(confirm_token.to_string())),
-            },
-        )
-        .await?,
-    )?;
+    let register_start = with_step_up(
+        http,
+        session,
+        password,
+        ApiRequest {
+            method: Method::Post,
+            path: "/api/v1/auth/passkey/register-start".into(),
+            body: None,
+            bearer: bearer(session),
+            confirm_token: None,
+        },
+    )
+    .await?;
+    let start = ceremony::parse_registration_start(&call(http, register_start).await?, rp)?;
     let registration = authenticator.make_credential(&start.options).await?;
     let id = ceremony::parse_registration_finish(
         &call(
@@ -249,11 +314,13 @@ impl std::fmt::Debug for SignedIn {
     }
 }
 
-/// Sign in with a passkey for `email`, then unlock the vault from the escrow when the passkey has PRF.
+/// Sign in with a passkey for `email`, then unlock the vault from the escrow when the passkey has PRF. The
+/// server's relying party must be `rp`.
 pub async fn sign_in<H: PasskeyHttp, A: PasskeyAuthenticator>(
     http: &H,
     authenticator: &A,
     email: &str,
+    rp: &ExpectedRp,
 ) -> Result<SignedIn, PasskeyError> {
     let start: AssertionStart = ceremony::parse_assertion_start(
         &call(
@@ -267,6 +334,7 @@ pub async fn sign_in<H: PasskeyHttp, A: PasskeyAuthenticator>(
             },
         )
         .await?,
+        rp,
     )?;
     let assertion = authenticator.get_assertion(&start.options).await?;
     let finish = ceremony::parse_login_finish(
@@ -332,23 +400,27 @@ pub async fn list_passkeys<H: PasskeyHttp>(http: &H, session: &str) -> Result<Ve
     )
 }
 
-/// Remove one passkey. `confirm_token` is the caller's fresh step-up proof, sent along so the server can require it.
+/// Remove one passkey. The step-up runs inside, from `password`, and its single-use token goes only onto the
+/// `DELETE` (task 2433 makes the server require it). The id is checked before any request is sent.
 pub async fn remove_passkey<H: PasskeyHttp>(
     http: &H,
     session: &str,
-    confirm_token: Option<&str>,
+    password: &[u8],
     id: &str,
 ) -> Result<(), PasskeyError> {
-    call(
+    let path = ceremony::remove_path(id)?;
+    let request = with_step_up(
         http,
+        session,
+        password,
         ApiRequest {
             method: Method::Delete,
-            path: ceremony::remove_path(id)?,
+            path,
             body: None,
             bearer: bearer(session),
-            confirm_token: confirm_token.map(|t| Zeroizing::new(t.to_string())),
+            confirm_token: None,
         },
     )
-    .await
-    .map(|_| ())
+    .await?;
+    call(http, request).await.map(|_| ())
 }

@@ -168,24 +168,7 @@ impl PhraseRecovery {
         if password != confirmation {
             return Err(SignupError::PasswordMismatch);
         }
-        let eval = self.evaluate(password);
-        if !eval.meets_minimum {
-            return Err(SignupError::PasswordTooShort {
-                missing: eval.missing_characters,
-            });
-        }
-        if self.policy.breach_endpoint.is_some() {
-            let check = self.breach.get().ok_or(SignupError::BreachCheckMissing)?;
-            if !check.matches_password(password) {
-                return Err(SignupError::BreachCheckMissing);
-            }
-            match check.verdict(self.policy.breach_fail_open) {
-                None => return Err(SignupError::BreachCheckMissing),
-                Some(BreachVerdict::Breached { .. }) => return Err(SignupError::PasswordBreached),
-                Some(BreachVerdict::CheckFailedBlocked) => return Err(SignupError::BreachCheckBlocked),
-                Some(_) => {}
-            }
-        }
+        crate::signup_flow::password_gate(&self.policy, self.breach.get(), password)?;
         let token = self.token.as_ref().ok_or(SignupError::WrongState)?;
         let start = opaque_protocol::client_registration_start(password.as_bytes())
             .map_err(|_| SignupError::Protocol("opaque start"))?;

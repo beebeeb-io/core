@@ -39,6 +39,8 @@ pub mod recovery_flow;
 pub mod rename;
 pub mod request_content;
 pub mod retry;
+#[cfg(test)]
+mod review_p3_tests;
 pub mod search_index;
 pub mod search_sync;
 pub mod share_flow;

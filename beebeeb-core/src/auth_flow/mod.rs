@@ -83,10 +83,30 @@ pub struct HttpRequest {
     pub path: String,
     pub body: Option<serde_json::Value>,
     pub auth: RequestAuth,
-    pub confirm_token: Option<Zeroizing<String>>,
+    /// Not readable as a field outside core: only the platform transport reads it, through
+    /// [`HttpRequest::confirm_token_header`], to fill the header.
+    pub(crate) confirm_token: Option<Zeroizing<String>>,
 }
 
 impl HttpRequest {
+    /// A POST on the signed-in session with no confirm token (bindings build the consuming request of
+    /// a step-up with it, then attach the token inside core).
+    pub fn session_post(path: String, body: serde_json::Value) -> Self {
+        Self {
+            method: Method::Post,
+            path,
+            body: Some(body),
+            auth: RequestAuth::Session,
+            confirm_token: None,
+        }
+    }
+
+    /// The `X-Confirm-Token` header value, for the platform transport that sends this request and
+    /// nothing else. It is set only on the request that consumes the token.
+    pub fn confirm_token_header(&self) -> Option<&str> {
+        self.confirm_token.as_ref().map(|t| t.as_str())
+    }
+
     pub(crate) fn post(path: &str, body: serde_json::Value, auth: RequestAuth) -> Self {
         Self {
             method: Method::Post,
