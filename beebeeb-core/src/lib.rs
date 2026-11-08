@@ -1,6 +1,7 @@
 pub mod account_flows;
 pub mod api_error;
 pub mod archive;
+pub mod auth_flow;
 pub mod backup;
 pub mod blob;
 pub mod chunk_stream;
@@ -30,6 +31,7 @@ pub mod onboarding;
 pub mod opaque;
 pub mod opaque_protocol;
 pub mod owned_keys;
+pub mod passkey;
 pub mod path_safety;
 pub mod pdf;
 pub mod recovery;

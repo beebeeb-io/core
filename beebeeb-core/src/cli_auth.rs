@@ -188,6 +188,45 @@ pub fn decrypt_cli_payload(shared_secret: &[u8; 32], nonce: &[u8], ciphertext: &
         .or_else(|_| aes_gcm_decrypt(shared_secret, nonce, ciphertext))
 }
 
+/// What the approving side relays: its ephemeral public key and the sealed payload.
+pub struct CliRelayPayload {
+    /// 12-byte AES-GCM nonce.
+    pub nonce: [u8; 12],
+    /// AES-256-GCM ciphertext with tag.
+    pub ciphertext: Vec<u8>,
+    /// The approver's ephemeral SEC1-uncompressed public key (65 bytes).
+    pub approver_public: Vec<u8>,
+}
+
+/// The approving side of the handshake (what the web client's `ecdhEncryptPayload` does):
+/// a fresh ephemeral P-256 key, ECDH with `requester_public`, HKDF-SHA256 (`beebeeb-cli-auth-v1`),
+/// AES-256-GCM over `plaintext` under a random nonce. Only the HKDF form is ever produced; the
+/// requester's [`decrypt_cli_payload`] opens it. The ephemeral scalar and the derived key are
+/// wiped when this returns.
+pub fn encrypt_for_requester(requester_public: &[u8], plaintext: &[u8]) -> Result<CliRelayPayload, CoreError> {
+    let approver = CliEphemeralKey::generate();
+    let shared = approver.shared_secret(requester_public)?;
+    let key = derive_cli_auth_key(&shared);
+    let mut nonce = [0u8; 12];
+    getrandom_fill(&mut nonce)?;
+    let cipher = Aes256Gcm::new(GenericArray::from_slice(&*key));
+    let ciphertext = cipher
+        .encrypt(GenericArray::from_slice(&nonce), plaintext)
+        .map_err(|_| CoreError::Encryption("cli relay seal".into()))?;
+    Ok(CliRelayPayload {
+        nonce,
+        ciphertext,
+        approver_public: approver.public_key_bytes().to_vec(),
+    })
+}
+
+fn getrandom_fill(buf: &mut [u8]) -> Result<(), CoreError> {
+    use rand::RngCore;
+    rand::rngs::OsRng
+        .try_fill_bytes(buf)
+        .map_err(|_| CoreError::Encryption("os rng".into()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

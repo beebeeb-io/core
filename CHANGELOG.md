@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`auth_flow`: sign-in, step-up and sign in with another device as plain logic** (desktop v2, B10). Sans-IO state
+  machines over the existing API: the OPAQUE password sign-in and second factor (6-digit or 8-digit backup code), the
+  OPAQUE step-up that mints a single-use confirm token (purpose-bound for `cli_device_approval`; no plaintext-password
+  path), the requesting side of the device socket and the approving side (lookup, step-up, claim, relay). Errors are
+  codes; no server body is echoed. Exposed in UniFFI (`SignInFlow`, `StepUpFlow`, `DeviceRequestFlow`, `ApprovalFlow`)
+  and WASM (`AuthSignIn`, `AuthStepUp`, `AuthDeviceRequest`, `AuthApproval`).
+- `cli_auth::encrypt_for_requester`: the approving side of the device handshake (what web's `ecdhEncryptPayload` does),
+  HKDF form only. Additive: nothing is renamed, retyped or removed.
+- `passkey`: the passkey vault primitive in web's format (PRF eval input `beebeeb.io/vault-wrap-key/v1` zero-padded
+  to 32, HKDF-SHA256 info `beebeeb.io/vault-wrap/v1` with an empty salt, AES-256-GCM `nonce || ct || tag`, no AAD),
+  the native hmac-secret salt (the WebAuthn PRF hash applied), the ceremony wire for the server's passkey and
+  escrow routes, and the flows (add, sign in + unlock, list, remove) over an injected HTTP and platform call.
+  UniFFI and WASM exports; vectors generated from web's TS (`test-vectors/passkey_vault.json`) and core vectors
+  web's TS opens (`test-vectors/passkey_vault_core.json`, `scripts/passkey-vectors/`). Additive.
+
 ## [0.2.7] - 2026-11-08
 
 Windows: a create by name never touches a different file that the OS resolves the name to (8.3 alias), task 2404.
