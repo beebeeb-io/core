@@ -14103,23 +14103,29 @@ public func FfiConverterTypeBackupPassPlan_lower(_ value: BackupPassPlan) -> Rus
 
 
 /**
- * The backup pass gate's state (backup spec Amendments 12 and 12c), stored
- * by the platform next to the manifest records and removed with them by
- * `clear`. Times are on the server's clock, in milliseconds. A fresh store
- * answers all `None`. `stopped_reason` is a core wire string
- * (`backup_stop_words` renders it); with it, `stopped_through_ms` is set.
+ * The backup pass gate's state (backup spec Amendments 12, 12c and 12d),
+ * stored by the platform next to the manifest records and removed with them
+ * by `clear`. Times are on the server's clock, in milliseconds. A fresh store
+ * answers all `None` and an empty `acknowledged`. `stopped_reason` is a core
+ * wire string (`backup_stop_words` renders it).
+ *
+ * Store the whole record in ONE write, every field together (Amendment 12d
+ * rule 4): `acknowledged`, the notice ids the last pass acted on, belongs
+ * with the stop and `last_pass_at_ms` it came with. A store that loses
+ * `acknowledged` makes a backup the person turned back on stop again on a
+ * notice it already showed.
  */
 public struct BackupPassStateData: Equatable, Hashable {
     public var lastPassAtMs: Int64?
     public var stoppedReason: String?
-    public var stoppedThroughMs: Int64?
+    public var acknowledged: [String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(lastPassAtMs: Int64?, stoppedReason: String?, stoppedThroughMs: Int64?) {
+    public init(lastPassAtMs: Int64?, stoppedReason: String?, acknowledged: [String]) {
         self.lastPassAtMs = lastPassAtMs
         self.stoppedReason = stoppedReason
-        self.stoppedThroughMs = stoppedThroughMs
+        self.acknowledged = acknowledged
     }
 
     
@@ -14140,14 +14146,14 @@ public struct FfiConverterTypeBackupPassStateData: FfiConverterRustBuffer {
             try BackupPassStateData(
                 lastPassAtMs: FfiConverterOptionInt64.read(from: &buf), 
                 stoppedReason: FfiConverterOptionString.read(from: &buf), 
-                stoppedThroughMs: FfiConverterOptionInt64.read(from: &buf)
+                acknowledged: FfiConverterSequenceString.read(from: &buf)
         )
     }
 
     public static func write(_ value: BackupPassStateData, into buf: inout [UInt8]) {
         FfiConverterOptionInt64.write(value.lastPassAtMs, into: &buf)
         FfiConverterOptionString.write(value.stoppedReason, into: &buf)
-        FfiConverterOptionInt64.write(value.stoppedThroughMs, into: &buf)
+        FfiConverterSequenceString.write(value.acknowledged, into: &buf)
     }
 }
 
