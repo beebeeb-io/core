@@ -154,7 +154,8 @@ impl HttpResponse {
         }
     }
 
-    pub(crate) fn ok(&self) -> bool {
+    /// A 2xx status.
+    pub fn ok(&self) -> bool {
         (200..300).contains(&self.status)
     }
 

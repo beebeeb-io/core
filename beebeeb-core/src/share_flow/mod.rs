@@ -95,7 +95,8 @@ impl ShareFlowError {
         }
     }
 
-    pub(crate) fn from_status(resp: &HttpResponse) -> Self {
+    /// The error for a non-2xx answer: a typed refusal keeps its code; otherwise by status.
+    pub fn from_status(resp: &HttpResponse) -> Self {
         let code = resp
             .body
             .get("code")
