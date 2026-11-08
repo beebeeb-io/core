@@ -84,9 +84,13 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   the account shared one map, and one phone's photo ids hid another's. Never pass a new id: every
   backed-up photo would look new to the server. 1 to 128 visible ASCII characters, or `invalid_input`.
 - Make the backup service right after the upload service and before any transfer resumes: a backup
-  stopped before a crash cancels its uploads when the service starts. One backup service per upload
-  service (a second while the first lives is `unavailable`), and one per manifest store across
-  processes. The manifest store's and the asset source's callbacks run under the service's locks: they
+  stopped before a crash cancels its uploads when the service starts. If that cancel fails (the store
+  fails), no service is made and the error is `ServiceError::BackupStopUnfinished { reason }`: show
+  `backup_stop_words` for `reason` all the same, and make the service again later. One backup service
+  per upload service (a second while the first lives is `unavailable`), and one per manifest store
+  across processes. The backup handle and any service coordinator made with it keep it alive: close
+  both (Kotlin `close()`, Swift: drop the last reference) before making a new backup service, or keep
+  the service and call `configure`. The manifest store's and the asset source's callbacks run under the service's locks: they
   must not call back into the backup service, nor wait on a thread inside `next_batch`.
 - Device link (UniFFI): `approve_device_link(id, scanned_qr, typed_code)` takes the raw text the camera
   scanned; `DeviceLinkQrData` and `DeviceLinkHandle.qr()` are removed (render `qr_payload()`). The QR
@@ -237,8 +241,9 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 
 - `photo_backup::check`, `mark`, `ids`, `identifiers` and `clear_association` take the device id and send
   it as `X-Beebeeb-Device-Id` (`photo_backup::DEVICE_ID_HEADER`); `stats` stays account-wide.
-  `BackupConfiguration::new` takes the device id too, and `BackupError` adds `InvalidDeviceId` and
-  `AlreadyRunning`.
+  `BackupConfiguration::new` takes the device id too, and `BackupConfiguration::device_id` is a
+  `BackupDeviceId`, made only by its checked `BackupDeviceId::new`, so no path sends an unchecked id.
+  `BackupError` adds `InvalidDeviceId`, `AlreadyRunning` and `StopUnfinished { reason, cause }`.
 - `Client::enable_system_service` and `proposed::ServiceEnable` no longer take a `parent_id`: a system
   service folder is always at the top level (LD-0113), and the server answers 400 to a parent.
 
