@@ -113,7 +113,24 @@ const WINDOWS_RESERVED: &[&str] = &[
 ];
 
 /// Check one name (a single path component, never a path).
+///
+/// [`Rules::Portable`] answers the same on every host (a `:` in a timestamp name
+/// is fine for it). [`Rules::Host`] adds the Windows rules on a Windows host.
+/// A caller that WRITES a name to this host's disk must use
+/// [`check_component_to_write`], which also applies the host's rules to a
+/// portable name.
 pub fn check_component(name: &str, rules: Rules) -> Result<(), UnsafeName> {
+    check_component_for(
+        name,
+        rules == Rules::Portable,
+        rules == Rules::Host && cfg!(target_os = "windows"),
+    )
+}
+
+/// [`check_component`] for a name about to be written HERE: the rule set's own
+/// checks plus whatever this host refuses (so a `:` that would open an NTFS
+/// alternate data stream is refused on Windows even under [`Rules::Portable`]).
+pub fn check_component_to_write(name: &str, rules: Rules) -> Result<(), UnsafeName> {
     check_component_for(name, rules == Rules::Portable, cfg!(target_os = "windows"))
 }
 
@@ -224,6 +241,15 @@ fn is_bidi_mark(c: char) -> bool {
 /// Rewriting can make two names equal; the caller de-duplicates afterwards.
 /// The result always satisfies the strictest rule set, or the name is refused.
 pub fn sanitize_component(name: &str, rules: Rules) -> Result<String, UnsafeName> {
+    sanitize_component_for(name, rules == Rules::Portable, cfg!(target_os = "windows"))
+}
+
+/// Testable core of [`sanitize_component`]; `portable` and `windows` as in
+/// [`check_component_for`]. The outcome for a given name never depends on the
+/// host except for the structural checks `windows` adds (separators, control
+/// characters, drive prefixes): the Windows-only name rules are what this
+/// function REWRITES, so they are not applied before the rewrite.
+pub fn sanitize_component_for(name: &str, portable: bool, windows: bool) -> Result<String, UnsafeName> {
     // Strip bidi controls and marks BEFORE the check: they are a rendering
     // hazard the archive rule rewrites, not traversal. The structural checks
     // still see the same name, except that stripping CAN neutralise a name made
@@ -235,7 +261,7 @@ pub fn sanitize_component(name: &str, rules: Rules) -> Result<String, UnsafeName
         .chars()
         .filter(|c| !is_bidi_control(*c) && !is_bidi_mark(*c))
         .collect();
-    check_component(&visible, rules)?;
+    check_component_for(&visible, portable || windows, false)?;
     let mut out: String = visible
         .chars()
         .map(|c| {
@@ -334,7 +360,7 @@ mod native {
     /// location must stay inside `dir`, and it must not reach a different
     /// existing entry through an 8.3 short name ([`super::short_name_alias`]).
     pub fn safe_child(dir: &Path, name: &str, rules: Rules) -> Result<PathBuf, String> {
-        check_component(name, rules).map_err(|e| format!("unsafe name {name:?} ({e})"))?;
+        check_component_to_write(name, rules).map_err(|e| format!("unsafe name {name:?} ({e})"))?;
         let target = dir.join(name);
         debug_assert!(matches!(
             Path::new(name).components().collect::<Vec<_>>().as_slice(),
@@ -359,7 +385,7 @@ mod native {
         }
         let mut target = base.to_path_buf();
         for segment in rel.split('/') {
-            check_component(segment, rules).map_err(|e| format!("unsafe name {rel:?} ({e})"))?;
+            check_component_to_write(segment, rules).map_err(|e| format!("unsafe name {rel:?} ({e})"))?;
             target.push(segment);
         }
         reject_symlink(&target)?;
@@ -371,7 +397,7 @@ mod native {
     /// Default output path for a pulled file without an explicit `-o`: the
     /// server-provided name, relative to the current directory.
     pub fn default_output_path(name: &str) -> Result<PathBuf, String> {
-        check_component(name, Rules::Portable).map_err(|e| {
+        check_component_to_write(name, Rules::Portable).map_err(|e| {
             format!("the server-provided file name {name:?} is unsafe ({e}); pass -o <path> to choose where to save it")
         })?;
         let path = PathBuf::from(name);
@@ -451,5 +477,61 @@ mod symlink_tests {
         let error = safe_rel_join(&root, "dir/file.bin", Rules::Portable)
             .expect_err("a path resolving outside the root must be refused");
         assert!(error.contains("outside"), "unexpected error: {error}");
+    }
+}
+
+#[cfg(test)]
+mod sanitize_tests {
+    use super::*;
+
+    /// Every host rule set must give the same rewrite for these names (task 2430).
+    const REWRITES: &[(&str, &str)] = &[
+        ("CON", "_CON"),
+        ("nul.txt", "_nul.txt"),
+        ("LPT9.log", "_LPT9.log"),
+        ("report.", "report_"),
+        ("trail ", "trail_"),
+        ("ab:c", "ab_c"),
+        ("x.txt:stream", "x.txt_stream"),
+        ("q?<>|*\".txt", "q______.txt"),
+        ("console.txt", "console.txt"),
+    ];
+
+    #[test]
+    fn rewrites_are_the_same_on_every_host_rule_set() {
+        for (portable, windows) in [(true, false), (true, true), (false, false), (false, true)] {
+            for (input, want) in REWRITES {
+                assert_eq!(
+                    sanitize_component_for(input, portable, windows).as_deref(),
+                    Ok(*want),
+                    "{input:?} portable={portable} windows={windows}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn traversal_is_still_refused_on_every_host_rule_set() {
+        for (portable, windows) in [(true, false), (true, true), (false, true)] {
+            for bad in ["", ".", "..", "a/b", "..\\x", "C:x", "a\0b", "line\nbreak"] {
+                assert!(
+                    sanitize_component_for(bad, portable, windows).is_err(),
+                    "{bad:?} portable={portable} windows={windows}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn portable_check_ignores_the_host_but_the_write_check_applies_it() {
+        // A timestamped name is fine as a portable name on any host.
+        assert!(check_component_for("2026-10-04T10:30:00.log", true, false).is_ok());
+        // Writing it on a Windows host is refused (':' opens an alternate data stream).
+        assert!(check_component_for("2026-10-04T10:30:00.log", true, true).is_err());
+        assert!(check_component("2026-10-04T10:30:00.log", Rules::Portable).is_ok());
+        assert_eq!(
+            check_component_to_write("CON", Rules::Portable).is_err(),
+            cfg!(target_os = "windows"),
+        );
     }
 }
