@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-11-08
+
 Windows: a create by name never touches a different file that the OS resolves the name to (8.3 alias), task 2404.
 Additive: no public item is renamed, retyped or removed.
 
