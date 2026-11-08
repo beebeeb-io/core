@@ -635,11 +635,9 @@ async fn every_notice_page_is_read_before_the_pass_runs() {
     assert!(paths[1].ends_with("&cursor=cursor%2B1"), "{paths:?}");
 }
 
-/// Notices from before the setup, less core's overlap, do not apply. One
-/// inside the overlap stops the first pass once (12d's accepted edge: it errs
-/// toward stopping), covered by `the_12d_vectors_hold_through_the_service_decision`.
+/// Notices from before the setup, less core's overlap, do not apply.
 #[tokio::test]
-async fn the_first_pass_ignores_notices_from_before_backups_were_set_up() {
+async fn the_first_pass_ignores_notices_from_before_the_setup_less_the_overlap() {
     let setup_ms = SERVER_NOW_MS - 60_000;
     let h = harness(
         |c| c.with_first_pass(Some(setup_ms), None),
@@ -654,6 +652,29 @@ async fn the_first_pass_ignores_notices_from_before_backups_were_set_up() {
     assert_eq!(batch.stopped, None);
     assert_eq!(batch.queued, 1);
     assert!(h.server.notice_paths()[0].contains(&format!("&since={}&", setup_ms - NOTICE_OVERLAP_MS)));
+}
+
+/// 12d's accepted edge, through the service: a notice inside the overlap
+/// before the setup (a minute before it) stops the first pass once; "Back up
+/// again" then finds it acknowledged.
+#[tokio::test]
+async fn a_notice_just_before_the_setup_stops_the_first_pass_once() {
+    let setup_ms = SERVER_NOW_MS - 60_000;
+    let h = harness(
+        |c| c.with_first_pass(Some(setup_ms), None),
+        &[r#"{"needs_backup":["photo-1"]}"#],
+    );
+    let notice = erased("2026-11-08T03:08:00Z");
+    h.server.push_page(page(json!([notice.clone()]), None));
+    h.snapshot_photo();
+    assert_eq!(h.pass(1).await.stopped, Some(BackupStopReason::EraseRequest));
+
+    h.backup.back_up_again().unwrap();
+    h.server.push_page(page(json!([notice]), None));
+    h.snapshot_photo();
+    let batch = h.pass(2).await;
+    assert_eq!(batch.stopped, None);
+    assert_eq!(batch.queued, 1);
 }
 
 #[tokio::test]
@@ -829,12 +850,19 @@ async fn a_failed_write_keeps_the_old_acknowledged_set_and_last_pass_at_together
         assert_eq!(before.acknowledged, ["n0"]);
         assert_eq!(before.last_pass_at_ms, Some(SERVER_NOW_MS));
 
+        // A queued record, so the stop's cleanup writes once more after the
+        // gate's write (`forget_queued`).
+        h.backup
+            .manifest()
+            .remember("photo-9", "queued-copy", BackupCopyState::Queued)
+            .unwrap();
         // A new notice: the pass stops and acknowledges it, dated later.
         let notices = json!([old.clone(), erased("2026-11-08T03:20:00Z")]);
         h.server.push_page(page_dated(notices.clone(), LATER_DATE));
         h.snapshot_photo();
         h.fail_store_writes_after(writes);
-        let _ = h.backup.next_batch(AssetKind::Photo, NetworkKind::WiFi, 2).await;
+        let refused = h.backup.next_batch(AssetKind::Photo, NetworkKind::WiFi, 2).await;
+        assert!(refused.is_err(), "{writes}: a write was refused: {refused:?}");
         assert_eq!(h.server.notice_paths().len(), 2, "{writes}: the gate read the notices");
 
         let stored = h.store.inner.load_pass_state().unwrap();
@@ -859,6 +887,15 @@ async fn a_failed_write_keeps_the_old_acknowledged_set_and_last_pass_at_together
             assert!(after.stopped.is_some());
         } else {
             assert!(whole_new, "the pass's one write went through: {stored:?}");
+            // The cleanup's record write is the one refused: the store still
+            // holds the queued record.
+            let records = h.store.inner.load().unwrap();
+            assert!(
+                records
+                    .iter()
+                    .any(|record| record.local_identifier == "photo-9" && record.state == BackupCopyState::Queued),
+                "{records:?}"
+            );
         }
     }
 }
