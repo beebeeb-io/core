@@ -3,8 +3,11 @@
 LD-0121, spec `2026-11-06-backup-from-source-design.md` Amendment 12d (server
 #415 review finding 1; Guus 2026-11-08 03:16, "Go w recommended"): a backup
 pass reads the removal notices with a 10-minute overlap and remembers the
-notice ids it acted on. Base: tag `v0.2.3` (`df93011`). Additive only: nothing
-in v0.2.3 is renamed, retyped or removed; `backup_stop` / `backup_pass_gate`
+notice ids it acted on. Ships as core v0.2.5. Measured against tag `v0.2.3`
+(`df93011`); tag `v0.2.4` (`1d1a335`, the zip 8 → 9 bump) changes no file
+under `src/` (`git diff --name-only v0.2.3 v0.2.4 -- '*/src/*'` is empty), so
+every count below holds against v0.2.4 too. Additive only: nothing in v0.2.4
+is renamed, retyped or removed; `backup_stop` / `backup_pass_gate`
 (`backupStop` / `backupPassGate`) keep their behaviour and are documented as
 superseded.
 

@@ -271,3 +271,83 @@ fn empty_file_produces_valid_zip_entry() {
     file.read_to_end(&mut contents).unwrap();
     assert!(contents.is_empty(), "empty file should have empty content");
 }
+
+/// Deterministic bytes that do not compress (xorshift64*), so a DEFLATE stream has to store them.
+fn incompressible(len: usize, seed: u64) -> Vec<u8> {
+    let mut state = seed;
+    let mut out = Vec::with_capacity(len);
+    while out.len() < len {
+        state ^= state >> 12;
+        state ^= state << 25;
+        state ^= state >> 27;
+        out.extend_from_slice(&state.wrapping_mul(0x2545_F491_4F6C_DD1D).to_le_bytes());
+    }
+    out.truncate(len);
+    out
+}
+
+/// The entries of [`mixed_payloads_roundtrip`]: several chunks per file, incompressible and compressible, an empty
+/// file, nested paths. LD-0144: zip 9 reuses its DEFLATE compressor across entries, which the six other tests, with
+/// payloads of a few bytes, cannot show. Core's writer has one compression level, so this does not cover a switch
+/// between levels (where that cache is reset).
+fn mixed_payloads() -> Vec<(&'static str, Vec<Vec<u8>>)> {
+    let text: Vec<u8> = b"the quick brown fox jumps over the lazy dog\n"
+        .iter()
+        .copied()
+        .cycle()
+        .take(64 * 1024)
+        .collect();
+    vec![
+        (
+            "a/random.bin",
+            vec![
+                incompressible(64 * 1024, 1),
+                incompressible(64 * 1024, 2),
+                incompressible(5_000, 3),
+            ],
+        ),
+        ("a/text.txt", vec![text.clone(), text.clone()]),
+        ("empty.bin", vec![Vec::new()]),
+        ("b/c/random2.bin", vec![incompressible(200 * 1024, 4)]),
+        ("b/after-incompressible.txt", vec![text]),
+    ]
+}
+
+#[test]
+fn mixed_payloads_roundtrip() {
+    let mk = test_master_key();
+    let files = mixed_payloads();
+
+    let mut entries = Vec::new();
+    let mut chunks = std::collections::HashMap::new();
+    for (i, (path, parts)) in files.iter().enumerate() {
+        let file_id = format!("mixed-{i}");
+        let refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+        chunks.insert(file_id.clone(), encrypt_chunks(&mk, &file_id, &refs));
+        entries.push(ZipEntry {
+            path: (*path).to_string(),
+            file_id,
+            chunk_count: parts.len() as u32,
+            size_bytes: parts.iter().map(|p| p.len() as u64).sum(),
+            chunk_format: ExpectedChunkFormat::Unrecorded,
+        });
+    }
+
+    let mut buf = Vec::new();
+    let cancel = AtomicBool::new(false);
+    let mut fetch = |fid: &str, idx: u32| -> Result<Vec<u8>, CoreError> { Ok(chunks[fid][idx as usize].clone()) };
+    stream_folder_zip(&mk, &entries, &mut fetch, Cursor::new(&mut buf), &|_| {}, &cancel).unwrap();
+
+    let mut archive = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    assert_eq!(archive.len(), files.len());
+    for (path, parts) in &files {
+        let want: Vec<u8> = parts.concat();
+        let mut file = archive.by_name(path).unwrap();
+        assert_eq!(file.size(), want.len() as u64, "{path}: declared size");
+        assert!(!file.is_dir(), "{path}: a file, not a directory");
+        let mut got = Vec::new();
+        // The reader checks the entry's CRC-32 when it reaches the end, so a corrupt stream fails here.
+        file.read_to_end(&mut got).unwrap();
+        assert!(got == want, "{path}: {} bytes read, {} written", got.len(), want.len());
+    }
+}
