@@ -216,19 +216,44 @@ fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, ArchiveServiceError> {
     mutex.lock().map_err(|_| ArchiveServiceError::State)
 }
 
-/// A staged file's name: `archive-<instance>-<run>-<node>.bbtmp`.
+/// A staged file this service writes: `archive-<instance>-<run>-<node>.bbtmp`
+/// directly in `root`, where `<instance>` is 32 lowercase hex digits (128
+/// random bits, `Uuid::simple`) and `<run>` and `<node>` are decimal. Nothing
+/// else in `root` is the service's, even under a similar name: a platform may
+/// share the directory with photo exports or share-extension imports.
+fn is_staged_in(root: &Path, path: &Path) -> bool {
+    path.parent() == Some(root) && is_staged_name(path)
+}
+
 fn is_staged_name(path: &Path) -> bool {
-    path.file_name()
+    let Some(rest) = path
+        .file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with("archive-") && name.ends_with(".bbtmp"))
+        .and_then(|name| name.strip_prefix("archive-"))
+        .and_then(|name| name.strip_suffix(".bbtmp"))
+    else {
+        return false;
+    };
+    let decimal = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+    let mut parts = rest.split('-');
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some(instance), Some(run), Some(node), None) => {
+            instance.len() == 32
+                && instance.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+                && decimal(run)
+                && decimal(node)
+        }
+        _ => false,
+    }
 }
 
 impl ArchiveService {
-    /// The service owns `temp_root`; one live service per root in a
-    /// process (a second one is refused with `State`). What an earlier
-    /// process left there (an extraction does not outlive the app) goes
-    /// now: its queued uploads are cancelled, then its staged files are
-    /// deleted. Other files in `temp_root` are left alone.
+    /// One live service per `temp_root` in a process (a second one is
+    /// refused with `State`). What an earlier process's service left there
+    /// (an extraction does not outlive the app) goes now: the uploads of its
+    /// staged files are cancelled, then those files are deleted. Every other
+    /// file in `temp_root`, and every other upload from it (a photo export,
+    /// a share-extension import), is left alone.
     pub fn new(
         client: Arc<Client>,
         downloads: Arc<DownloadService>,
@@ -247,11 +272,11 @@ impl ArchiveService {
         }
         let now = transfer_now_ms().unwrap_or(0);
         for root in [&temp_root, &canonical] {
-            let _ = uploads.cancel_sources_under(root, now);
+            let _ = uploads.cancel_sources_matching(&|path| is_staged_in(root, path), now);
         }
         if let Ok(entries) = std::fs::read_dir(&canonical) {
             for path in entries.flatten().map(|entry| entry.path()) {
-                if path.is_file() && is_staged_name(&path) {
+                if path.is_file() && is_staged_in(&canonical, &path) {
                     let _ = std::fs::remove_file(path);
                 }
             }

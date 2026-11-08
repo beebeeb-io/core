@@ -349,8 +349,9 @@ name never repeats across processes) in the service's temp root and enqueued on 
 `FileEnd`; it is deleted when its upload ends, when the entry is skipped, and when the run stops or fails
 (the run then cancels its queued uploads and counts any that finished meanwhile). A stop is never held by
 the staging backpressure. Dropping the service stops its runs; a `Staged` record deletes its file on
-drop. One live service per temp root in a process; a new one cancels the uploads an earlier process left
-under its root (`UploadService::cancel_sources_under`) and deletes only `archive-*.bbtmp` files. The Swift
+drop. One live service per temp root in a process; a new one cancels the uploads of the staged files an
+earlier process left (`UploadService::cancel_sources_matching`) and deletes those files: only
+`archive-<32 hex>-<run>-<node>.bbtmp` directly in the root, never another upload from it. The Swift
 handle refuses the lightweight runtime (its tasks would stall between calls). Listing and runs
 are tasks on the caller's runtime (the app's multi-thread runtime; never the File Provider extension).
 Tests: `beebeeb-client/src/tests_svc_archives.rs`, against an in-process file server.

@@ -278,7 +278,7 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 - `beebeeb_client::downloads::DownloadService::read_range` / `range_reader` / `read_with`: plaintext
   ranges of v1 and v2 files through core's `RangeOpener` (frame 0 first, one recorded version), and
   `beebeeb_client::archives::ArchiveService` (one live service per temp root; it needs the application
-  runtime). `UploadService::cancel_sources_under` and `ClientRuntime::runs_tasks_alone`.
+  runtime). `UploadService::cancel_sources_matching` and `ClientRuntime::runs_tasks_alone`.
 - `beebeeb_core::name_clash`: `ItemKind`, `TakenNames`, `numbered_name` ("Keep both": `report (2).pdf`,
   then `(3)`), `numbered_candidates` and `drive_conflict_name`. Names clash when their normalised forms
   are equal, and a candidate is cut so that the whole name fits in 255 bytes.

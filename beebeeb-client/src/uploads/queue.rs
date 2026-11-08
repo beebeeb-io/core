@@ -468,10 +468,15 @@ impl UploadService {
         Ok(plan)
     }
 
-    /// Cancel every upload not yet done whose source file is under `root`
-    /// (an archive service's staged files, left by an earlier process), and
-    /// delete their staged chunks. How many were cancelled.
-    pub fn cancel_sources_under(&self, root: &std::path::Path, now_ms: i64) -> Result<usize, UploadServiceError> {
+    /// Cancel every upload not yet done whose source file `owned` claims
+    /// (an archive service's own staged files, left by an earlier process),
+    /// and delete their staged chunks. How many were cancelled. Uploads of
+    /// any other file, wherever it is, are left alone.
+    pub fn cancel_sources_matching(
+        &self,
+        owned: &dyn Fn(&std::path::Path) -> bool,
+        now_ms: i64,
+    ) -> Result<usize, UploadServiceError> {
         let ids: Vec<i64> = self
             .store
             .lock()
@@ -480,9 +485,7 @@ impl UploadService {
             .map_err(|_| UploadServiceError::State)?
             .into_iter()
             .filter(|transfer| !matches!(transfer.state, TransferState::Succeeded | TransferState::Cancelled))
-            .filter(|transfer| {
-                decode_record(&transfer.payload).is_ok_and(|record| record.source_path.starts_with(root))
-            })
+            .filter(|transfer| decode_record(&transfer.payload).is_ok_and(|record| owned(&record.source_path)))
             .map(|transfer| transfer.id)
             .collect();
         let mut cancelled = 0;

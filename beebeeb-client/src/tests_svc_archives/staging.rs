@@ -81,16 +81,33 @@ async fn archive_service_temp_files_deleted() {
 
     // What an earlier process left is gone when the service starts: its
     // queued upload is cancelled and its staged file deleted; other files
-    // stay. A second live service on the same root is refused.
+    // stay, and so do their uploads (a photo export the platform wrote into
+    // the same directory, a name that only looks staged). A second live
+    // service on the same root is refused.
     let root = env.root.path().join("archives");
     let leftover = root.join("archive-0123456789abcdef0123456789abcdef-1-1.bbtmp");
     std::fs::write(&leftover, b"plaintext").unwrap();
     let other = root.join("other.txt");
     std::fs::write(&other, b"not the service's").unwrap();
+    let export = root.join("IMG_0001.jpg");
+    std::fs::write(&export, b"a photo export").unwrap();
+    let lookalike = root.join("archive-imported.bbtmp");
+    std::fs::write(&lookalike, b"a file named like a staged one").unwrap();
     let now = transfer_now_ms().unwrap();
     let queued = env
         .uploads
         .enqueue(UploadRequest::new(&leftover, "left.txt", None, None), now)
+        .unwrap();
+    let backup = env
+        .uploads
+        .enqueue(
+            UploadRequest::new(&export, "IMG_0001.jpg", Some("image/jpeg".into()), None).for_backup("photo-1"),
+            now,
+        )
+        .unwrap();
+    let imported = env
+        .uploads
+        .enqueue(UploadRequest::new(&lookalike, "imported.txt", None, None), now)
         .unwrap();
     let new_service = || {
         ArchiveService::new(
@@ -109,15 +126,24 @@ async fn archive_service_temp_files_deleted() {
     let _service = new_service().unwrap();
     assert!(!leftover.exists());
     assert!(other.exists());
-    let state = env
-        .uploads
-        .list()
-        .unwrap()
-        .into_iter()
-        .find(|u| u.id == queued)
-        .unwrap()
-        .state;
-    assert_eq!(state, TransferState::Cancelled);
+    assert!(export.exists());
+    assert!(lookalike.exists());
+    let state = |id| {
+        env.uploads
+            .list()
+            .unwrap()
+            .into_iter()
+            .find(|u| u.id == id)
+            .unwrap()
+            .state
+    };
+    assert_eq!(state(queued), TransferState::Cancelled);
+    assert_eq!(
+        state(backup),
+        TransferState::Queued,
+        "a backup upload from the same directory"
+    );
+    assert_eq!(state(imported), TransferState::Queued, "a name that only looks staged");
 }
 
 #[tokio::test]
