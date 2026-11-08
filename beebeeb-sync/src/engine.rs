@@ -752,3 +752,9 @@ mod tests {
         );
     }
 }
+
+// Windows only: a remote delete never deletes another file through its 8.3
+// short name (task 2404). A file of its own so it applies to the parent as is.
+#[cfg(all(test, windows))]
+#[path = "engine_windows_tests.rs"]
+mod windows_tests;

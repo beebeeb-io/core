@@ -5,6 +5,13 @@ use beebeeb_core::encrypt::{decrypt_chunk, decrypt_metadata, encrypt_chunk, encr
 use beebeeb_core::kdf::{derive_file_key, derive_master_key};
 use beebeeb_core::recovery::{generate_recovery_phrase, recover_from_phrase};
 
+// Windows only: a write by name never reaches another file through its 8.3
+// short name (task 2404). A module of this binary, not a binary of its own, so
+// other hosts gain no empty test binary.
+#[cfg(windows)]
+#[path = "windows/short_names.rs"]
+mod windows_short_names;
+
 // ---------------------------------------------------------------------------
 // E2EE roundtrip: recovery phrase -> master key -> file key -> encrypt -> decrypt
 // ---------------------------------------------------------------------------
