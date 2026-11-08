@@ -198,15 +198,15 @@ jobs:
           unzip -q "$RUNNER_TEMP/kotlinc.zip" -d "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/kotlinc/bin" >> "$GITHUB_PATH"
 
-      # JNA is the only runtime the generated Kotlin bindings reference. Maven
-      # Central publishes a companion sha256 file for every artifact; we
-      # download both and verify before using the jar.
+      # JNA is the only runtime the generated Kotlin bindings reference.
+      # sha256: 34ed1e1f27fa896bca50dbc4e99cf3732967cec387a7a0d5e3486c09673fe8c6
+      #   (lead-verified against Maven Central's published .sha1
+      #    67bf3eaea4f0718cb376a181a629e5f88fa1c9dd)
       - name: Download and verify JNA 5.14.0
         run: |
           JNA_URL="https://repo1.maven.org/maven2/net/java/dev/jna/jna/5.14.0/jna-5.14.0.jar"
-          curl -sSfL "$JNA_URL"       -o "$RUNNER_TEMP/jna.jar"
-          EXPECTED="$(curl -sSfL "${JNA_URL}.sha256")"
-          echo "$EXPECTED  $RUNNER_TEMP/jna.jar" | sha256sum --check
+          curl -sSfL "$JNA_URL" -o "$RUNNER_TEMP/jna.jar"
+          echo "34ed1e1f27fa896bca50dbc4e99cf3732967cec387a7a0d5e3486c09673fe8c6  $RUNNER_TEMP/jna.jar" | sha256sum --check
 
       - name: Compile beebeeb-uniffi/bindings Kotlin
         run: |
