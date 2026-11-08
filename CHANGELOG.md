@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `beebeeb-core` uses `zip` 9.4.1 (was 8.6.0) for `beebeeb_core::zip`. This clears RUSTSEC-2026-0429, -0367, -0368 and
+  -0369, which are about `ZipArchive::extract` and `ZipStreamReader::extract`. Core writes archives (`ZipWriter`) and its
+  tests read them back with `ZipArchive::new`; `git grep` finds no `.extract(` and no `ZipStreamReader` in this workspace,
+  so none of the four was reachable here. A client that calls `zip` itself is not covered by that statement.
+- The archive core writes is byte for byte the one zip 8.6.0 wrote for the same entries (checked on five entries:
+  incompressible, compressible, several chunks, empty, nested paths; 342,915 bytes, `unzip -t` clean). No API of core
+  changes, and `mixed_payloads_roundtrip` is new: the other zip tests use payloads of a few bytes.
+- `zip` 9 brings `nix` (macOS and BSD targets), `libc` (unix), `windows-sys` (Windows), `getrandom` 0.4 and `typed-path`
+  0.13 into the tree. Core uses none of them itself, and every client's lockfile re-resolves when it takes this core.
+
 ## [0.2.3] - 2026-11-07
 
 Additive on v0.2.2: the first pass's baseline and the pass gate when the notices could not be read (LD-0121, spec
