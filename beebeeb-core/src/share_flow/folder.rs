@@ -467,7 +467,7 @@ impl FolderShare {
         &mut self,
         blobs: Vec<String>,
         mut next: usize,
-        rows: Option<Vec<(Vec<u8>, Vec<u8>)>>,
+        rows: Option<super::folder_keys::ProofRows>,
     ) -> Result<FolderStep, ShareFlowError> {
         while next < blobs.len() {
             let bytes = b64_decode(&blobs[next])?;

@@ -207,7 +207,10 @@ pub(crate) fn open_owner_copy(
 
 /// The folder's rows for a legacy proof (`GET …/folder-keys`): `(file_id bytes, wrap bytes)`.
 /// A malformed row reads as an empty id or wrap, which core skips (as the WASM export does).
-pub(crate) fn proof_rows(body: &Value) -> Result<Vec<(Vec<u8>, Vec<u8>)>, ShareFlowError> {
+/// `(file_id bytes, wrap bytes)` rows for core's legacy proof.
+pub(crate) type ProofRows = Vec<(Vec<u8>, Vec<u8>)>;
+
+pub(crate) fn proof_rows(body: &Value) -> Result<ProofRows, ShareFlowError> {
     let keys = body
         .get("keys")
         .and_then(Value::as_array)
