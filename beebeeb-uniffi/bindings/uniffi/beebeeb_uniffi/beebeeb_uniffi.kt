@@ -14244,10 +14244,8 @@ public object FfiConverterTypeThumbnailError : FfiConverterRustBuffer<ThumbnailE
 sealed class UploadException: kotlin.Exception() {
     
     class Network(
-
-        val `detail`: kotlin.String,
-        // BREAK-TEST: duplicate message clashes with Exception.message (simulates core PR #74)
-        val `message`: kotlin.String
+        
+        val `detail`: kotlin.String
         ) : UploadException() {
         override val message
             get() = "detail=${ `detail` }"
