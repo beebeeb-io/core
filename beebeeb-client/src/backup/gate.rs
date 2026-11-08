@@ -1,27 +1,33 @@
-//! The pass gate (backup spec Amendments 12 and 12c, core `CLAUDE.md` Never
-//! break: "a stopped backup never fills the account up again by itself").
+//! The pass gate (backup spec Amendments 12, 12c and 12d, core `CLAUDE.md`
+//! Never break: "a stopped backup never fills the account up again by
+//! itself").
 //!
 //! Before a pass queues anything it reads every `files_removed` and
-//! `backup_deleted` notice written since its last pass (the server's LD-0141
-//! filter), reads whether its device and category folders are still live, and
-//! asks core's [`backup_pass_gate`]:
+//! `backup_deleted` notice from core's [`notices_since`](beebeeb_core::backup::notices_since)`(last_pass_at)` on
+//! (the server's LD-0141 filter; the 10-minute overlap is core's
+//! `NOTICE_OVERLAP_MS`), reads whether its device and category folders are
+//! still live, and asks core's [`backup_pass_gate_v2`] with the notice ids
+//! the last pass acknowledged:
 //!
 //! - `CheckFailed` (a notice page or a folder read failed, or the server did
 //!   not filter): the pass uploads nothing and turns nothing off, and its
-//!   `last_pass_at` stays, so the next pass reads the same notices again.
+//!   `last_pass_at` and acknowledged ids stay, so the next pass reads the same
+//!   notices again.
 //! - `Run` with a stopped backup: the backup turns off with core's reason, its
 //!   queued uploads are cancelled, and nothing uploads until the person
 //!   chooses "Back up again" ([`super::BackupService::back_up_again`]).
-//! - `Run` with nothing stopped: the pass runs, and its start on the server's
-//!   clock becomes the next `last_pass_at`.
+//! - `Run` with nothing stopped: the pass runs.
 //!
-//! The one call into core is [`decide`], so a later core gate (an overlap
-//! margin and acknowledged notice ids, core v0.2.4) changes only that function
-//! and [`next_last_pass_at`].
+//! Either `Run` is stored in ONE write (Amendment 12d rule 4): the stop, this
+//! pass's start on the server's clock as the next `last_pass_at`, and the
+//! acknowledged ids core returned in place of the old set. The set is kept by
+//! "Back up again", so a notice the person has seen never stops the backup
+//! again. There is no overlap rule here: core's is the one rule.
 
 use beebeeb_api::{ApiError, routes::notifications as api};
 use beebeeb_core::backup::{
-    BackupPassGate, ReceivedNotice, StopFolder, StopListing, backup_pass_gate, first_pass_baseline, parse_backup_notice,
+    BackupPassGateV2, ListedNotice, StopFolder, StopListing, backup_pass_gate_v2, first_pass_baseline,
+    parse_backup_notice,
 };
 use beebeeb_types::backup::{BackupStopReason, Category, NOTICE_BACKUP_DELETED, NOTICE_FILES_REMOVED};
 use chrono::DateTime;
@@ -35,36 +41,28 @@ use crate::{Client, ClientError};
 /// not end by then is not complete, so the pass is skipped.
 const MAX_NOTICE_PAGES: usize = 64;
 
-/// How far before the previous pass's start the next pass reads the notices
-/// again. A notice is dated when its job's transaction starts and seen when
-/// it commits, and the server's nodes and database keep their own clocks, so
-/// a pass that starts while a removal is still committing would otherwise
-/// step past its notice. Reading a notice twice is harmless: one that would
-/// stop this backup already stopped it the first time. The client's stand-in
-/// for core's own overlap margin (core v0.2.4).
-pub const NOTICE_OVERLAP_MS: i64 = 10 * 60 * 1000;
-
-/// Why this device's backup is off, and how far the notices were read when it
-/// turned off.
+/// Why this device's backup is off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BackupStop {
     pub reason: BackupStopReason,
-    /// Server clock, milliseconds: the pass's start or the newest notice it
-    /// read, whichever is later. "Back up again" moves `last_pass_at` here,
-    /// so the notices the person has seen do not stop the backup again.
-    pub through_ms: i64,
 }
 
 /// The pass gate's durable state, kept by the platform next to the manifest
-/// ([`super::BackupManifestStore`]).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// ([`super::BackupManifestStore`]). Every field is written together, in one
+/// write: a store that keeps one without the others breaks Amendment 12d.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BackupPassState {
-    /// Server clock, milliseconds: where the next pass starts reading the
-    /// notices. `None` until this device's first pass under this engine;
-    /// [`first_pass_baseline`] stands in for it until then.
+    /// Server clock, milliseconds: the last pass's start. The next pass reads
+    /// the notices from core's [`notices_since`](beebeeb_core::backup::notices_since) of it. `None` until this
+    /// device's first pass under this engine; [`first_pass_baseline`] stands
+    /// in for it until then.
     pub last_pass_at_ms: Option<i64>,
     /// `Some` while the backup is off. A stopped backup queues nothing.
     pub stopped: Option<BackupStop>,
+    /// The notice ids the last pass acknowledged (core's
+    /// [`backup_pass_gate_v2`]), sorted: a notice among them never counts
+    /// again. Kept by "Back up again", unchanged by a failed check.
+    pub acknowledged: Vec<String>,
 }
 
 /// The device and category folders a pass checks, found once per configured
@@ -99,9 +97,22 @@ pub(crate) enum PassDecision {
     CheckFailed,
 }
 
+/// Core's answer for one pass, before it is stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Gate {
+    /// The notices or the folders could not be read: store nothing.
+    CheckFailed,
+    /// Store, in one write, `stop` (when the backup turns off), the pass's
+    /// start as `last_pass_at` and `acknowledged` in place of the old set.
+    Decided {
+        stop: Option<BackupStop>,
+        acknowledged: Vec<String>,
+    },
+}
+
 /// The notices one pass read, all pages.
 pub(crate) struct NoticeRead {
-    notices: Vec<ReceivedNotice>,
+    notices: Vec<ListedNotice>,
     /// The first page's `Date`: this pass's start on the server's clock.
     server_now_ms: Option<i64>,
 }
@@ -123,36 +134,32 @@ pub(crate) fn baseline(state: &BackupPassState, configuration: &BackupConfigurat
         .unwrap_or_else(|| first_pass_baseline(configuration.setup_at_ms, configuration.legacy_last_backup_ms))
 }
 
-/// Core's decision for one pass. `read` is `None` when the notices could not
-/// be read completely, `listing` when the folders could not be read.
-pub(crate) fn decide(read: Option<&NoticeRead>, baseline: i64, listing: Option<&StopListing>) -> PassDecision {
-    let Some(listing) = listing else {
-        return PassDecision::CheckFailed;
+/// Core's decision for one pass ([`backup_pass_gate_v2`]). `read` is `None`
+/// when the notices could not be read completely, `listing` when the folders
+/// could not be read; `acknowledged` is the stored set.
+pub(crate) fn decide(
+    read: Option<&NoticeRead>,
+    baseline: i64,
+    acknowledged: &[String],
+    listing: Option<&StopListing>,
+) -> Gate {
+    let (Some(read), Some(listing)) = (read, listing) else {
+        return Gate::CheckFailed;
     };
-    match backup_pass_gate(read.map(|read| read.notices.as_slice()), baseline, listing) {
-        BackupPassGate::CheckFailed => PassDecision::CheckFailed,
-        BackupPassGate::Run { stopped } => match (stopped.first(), read) {
-            (None, _) => PassDecision::Run,
-            (Some(stop), Some(read)) => PassDecision::Stopped(BackupStop {
-                reason: stop.reason,
-                through_ms: read
-                    .notices
-                    .iter()
-                    .map(|notice| notice.created_at_ms)
-                    .chain(read.server_now_ms)
-                    .fold(baseline, i64::max),
-            }),
-            (Some(_), None) => PassDecision::CheckFailed,
+    match backup_pass_gate_v2(Some(read.notices.as_slice()), baseline, acknowledged, listing) {
+        BackupPassGateV2::CheckFailed => Gate::CheckFailed,
+        BackupPassGateV2::Run { stopped, acknowledged } => Gate::Decided {
+            stop: stopped.first().map(|stop| BackupStop { reason: stop.reason }),
+            acknowledged,
         },
     }
 }
 
-/// The `last_pass_at` after a pass that ran: its start on the server's clock
-/// less [`NOTICE_OVERLAP_MS`], never earlier than the one it read from. Without
-/// the server's clock it stays where it was.
-pub(crate) fn next_last_pass_at(read: &NoticeRead, baseline: i64) -> i64 {
-    read.server_now_ms
-        .map_or(baseline, |now| now.saturating_sub(NOTICE_OVERLAP_MS).max(baseline))
+/// The next `last_pass_at`: this pass's start on the server's clock (core
+/// applies the overlap when the next pass reads), never earlier than the one
+/// it read from. Without the server's clock it stays where it was.
+pub(crate) fn pass_start(read: &NoticeRead, baseline: i64) -> i64 {
+    read.server_now_ms.map_or(baseline, |now| now.max(baseline))
 }
 
 fn rfc3339_ms(value: &str) -> Option<i64> {
@@ -169,8 +176,9 @@ fn http_date_ms(value: &str) -> Option<i64> {
 }
 
 impl Client {
-    /// Every backup notice written at or after `since_ms` (server clock), all
-    /// pages. `None` when any page failed, a row could not be dated, the
+    /// Every backup notice written at or after `since_ms` (server clock; the
+    /// pass sends core's [`notices_since`](beebeeb_core::backup::notices_since) of its `last_pass_at`), all pages,
+    /// each with its row id. `None` when any page failed, a row could not be dated, the
     /// server did not filter (no `next_cursor` key), a cursor repeated, or the
     /// listing ran past [`MAX_NOTICE_PAGES`]: the pass then cannot know
     /// whether the account was emptied.
@@ -191,7 +199,8 @@ impl Client {
                 let Some(notice) = parse_backup_notice(&row.kind, &data) else {
                     continue;
                 };
-                notices.push(ReceivedNotice {
+                notices.push(ListedNotice {
+                    id: Some(row.id),
                     notice,
                     created_at_ms: rfc3339_ms(&row.created_at)?,
                 });
@@ -248,6 +257,7 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use beebeeb_core::backup::{NOTICE_OVERLAP_MS, notices_since};
     use beebeeb_types::backup::BackupNotice;
 
     fn listing() -> StopListing {
@@ -262,8 +272,9 @@ mod tests {
         }
     }
 
-    fn removed(at: i64) -> ReceivedNotice {
-        ReceivedNotice {
+    fn removed(id: &str, at: i64) -> ListedNotice {
+        ListedNotice {
+            id: Some(id.to_owned()),
             notice: BackupNotice::FilesRemoved {
                 reason: BackupStopReason::EraseRequest,
             },
@@ -271,44 +282,72 @@ mod tests {
         }
     }
 
+    fn read(notices: Vec<ListedNotice>, now: Option<i64>) -> NoticeRead {
+        NoticeRead {
+            notices,
+            server_now_ms: now,
+        }
+    }
+
     #[test]
-    fn a_stop_reaches_past_the_newest_notice_and_the_pass_start() {
-        let read = NoticeRead {
-            notices: vec![removed(5_000), removed(9_000)],
-            server_now_ms: Some(8_000),
-        };
+    fn a_notice_inside_the_overlap_stops_and_is_acknowledged() {
+        // Written while the last pass (at 100 minutes) read: dated before it.
+        let late = removed("n1", 100 * 60_000 - 60_000);
         assert_eq!(
-            decide(Some(&read), 1_000, Some(&listing())),
-            PassDecision::Stopped(BackupStop {
-                reason: BackupStopReason::EraseRequest,
-                through_ms: 9_000,
-            })
+            decide(
+                Some(&read(vec![late], Some(110 * 60_000))),
+                100 * 60_000,
+                &[],
+                Some(&listing())
+            ),
+            Gate::Decided {
+                stop: Some(BackupStop {
+                    reason: BackupStopReason::EraseRequest
+                }),
+                acknowledged: vec!["n1".into()],
+            }
+        );
+    }
+
+    #[test]
+    fn an_acknowledged_notice_never_counts_again() {
+        let seen = removed("n1", 100 * 60_000 - 60_000);
+        assert_eq!(
+            decide(
+                Some(&read(vec![seen], Some(110 * 60_000))),
+                100 * 60_000,
+                &["n1".into()],
+                Some(&listing())
+            ),
+            Gate::Decided {
+                stop: None,
+                acknowledged: vec!["n1".into()],
+            }
         );
     }
 
     #[test]
     fn no_notices_or_no_listing_skips_the_pass() {
-        let read = NoticeRead {
-            notices: Vec::new(),
-            server_now_ms: Some(8_000),
-        };
-        assert_eq!(decide(None, 0, Some(&listing())), PassDecision::CheckFailed);
-        assert_eq!(decide(Some(&read), 0, None), PassDecision::CheckFailed);
-        assert_eq!(decide(Some(&read), 0, Some(&listing())), PassDecision::Run);
+        let empty = read(Vec::new(), Some(8_000));
+        assert_eq!(decide(None, 0, &[], Some(&listing())), Gate::CheckFailed);
+        assert_eq!(decide(Some(&empty), 0, &[], None), Gate::CheckFailed);
+        assert_eq!(
+            decide(Some(&empty), 0, &[], Some(&listing())),
+            Gate::Decided {
+                stop: None,
+                acknowledged: Vec::new()
+            }
+        );
     }
 
     #[test]
-    fn the_next_baseline_overlaps_and_never_goes_back() {
-        let read = |now| NoticeRead {
-            notices: Vec::new(),
-            server_now_ms: now,
-        };
+    fn the_next_baseline_is_the_pass_start_and_never_goes_back() {
         assert_eq!(
-            next_last_pass_at(&read(Some(NOTICE_OVERLAP_MS * 3)), 0),
-            NOTICE_OVERLAP_MS * 2
+            pass_start(&read(Vec::new(), Some(NOTICE_OVERLAP_MS * 3)), 0),
+            NOTICE_OVERLAP_MS * 3
         );
-        assert_eq!(next_last_pass_at(&read(Some(NOTICE_OVERLAP_MS)), 5), 5);
-        assert_eq!(next_last_pass_at(&read(None), 42), 42);
+        assert_eq!(pass_start(&read(Vec::new(), Some(4)), 5), 5);
+        assert_eq!(pass_start(&read(Vec::new(), None), 42), 42);
     }
 
     #[test]
@@ -316,5 +355,114 @@ mod tests {
         assert_eq!(http_date_ms("Sun, 08 Nov 2026 03:10:00 GMT"), Some(1_794_107_400_000));
         assert_eq!(rfc3339_ms("2026-11-08T03:10:00.123Z"), Some(1_794_107_400_123));
         assert_eq!(http_date_ms("yesterday"), None);
+    }
+
+    // ── The 12d vectors through the service's own decision ─────────────────
+
+    fn case_listing(v: &Value) -> StopListing {
+        StopListing {
+            device_folder_id: Uuid::parse_str(v["device_folder_id"].as_str().unwrap()).unwrap(),
+            device_folder_live: v["device_folder_live"].as_bool().unwrap(),
+            folders: v["folders"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|f| StopFolder {
+                    category: Category::from_key(f["category"].as_str().unwrap()).unwrap(),
+                    category_folder_id: f["category_folder_id"].as_str().map(|id| Uuid::parse_str(id).unwrap()),
+                    category_folder_live: f["category_folder_live"].as_bool(),
+                })
+                .collect(),
+        }
+    }
+
+    /// The notices as the service reads its rows: an id that is missing or
+    /// not a string is `None`.
+    fn case_read(case: &Value) -> NoticeRead {
+        let notices = case["notices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|n| {
+                parse_backup_notice(n["type"].as_str().unwrap(), &n["data"]).map(|notice| ListedNotice {
+                    id: n["id"].as_str().map(str::to_owned),
+                    notice,
+                    created_at_ms: n["created_at_ms"].as_i64().unwrap(),
+                })
+            })
+            .collect();
+        read(notices, None)
+    }
+
+    /// Every `stop_ack`, `gate_ack`, `notices_since` and `notice_overlap` case
+    /// of `backup_plan.json` (Amendment 12d) through [`decide`], the
+    /// service's one call into core, and the `since` it sends. The service
+    /// stores the first stop's reason (core orders stops by category key).
+    #[test]
+    fn the_12d_vectors_hold_through_the_service_decision() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-vectors/consolidation/backup_plan.json");
+        let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let mut counts = (0, 0, 0, 0);
+        for case in doc["cases"].as_array().unwrap() {
+            let id = case["id"].as_str().unwrap();
+            let kind = case["kind"].as_str().unwrap();
+            match kind {
+                "stop_ack" | "gate_ack" => {
+                    let fetched = case["notices_fetch_ok"].as_bool().unwrap_or(true);
+                    let read = case_read(case);
+                    let acknowledged: Vec<String> = case["acknowledged"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|a| a.as_str().unwrap().to_owned())
+                        .collect();
+                    let got = decide(
+                        fetched.then_some(&read),
+                        case["last_pass_at_ms"].as_i64().unwrap(),
+                        &acknowledged,
+                        Some(&case_listing(&case["listing"])),
+                    );
+                    let expect = &case["expect"];
+                    let want = if expect["outcome"] == "check_failed" {
+                        Gate::CheckFailed
+                    } else {
+                        Gate::Decided {
+                            stop: expect["stopped"].as_array().unwrap().first().map(|stop| BackupStop {
+                                reason: BackupStopReason::parse(stop["reason"].as_str().unwrap()).unwrap(),
+                            }),
+                            acknowledged: expect["acknowledged"]
+                                .as_array()
+                                .unwrap()
+                                .iter()
+                                .map(|a| a.as_str().unwrap().to_owned())
+                                .collect(),
+                        }
+                    };
+                    assert_eq!(got, want, "{id}");
+                    if kind == "stop_ack" {
+                        counts.0 += 1;
+                    } else {
+                        counts.1 += 1;
+                    }
+                }
+                "notices_since" => {
+                    counts.2 += 1;
+                    let got = notices_since(case["last_pass_at_ms"].as_i64().unwrap());
+                    assert_eq!(got, case["expect"].as_i64().unwrap(), "{id}");
+                }
+                "notice_overlap" => {
+                    counts.3 += 1;
+                    assert_eq!(NOTICE_OVERLAP_MS, case["expect"].as_i64().unwrap(), "{id}");
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(
+            doc["cases"].as_array().unwrap().len(),
+            154,
+            "the whole backup_plan file"
+        );
+        assert_eq!(counts, (17, 4, 4, 1), "12d case counts per kind");
     }
 }

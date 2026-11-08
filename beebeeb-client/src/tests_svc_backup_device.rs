@@ -234,7 +234,6 @@ async fn a_stop_saved_before_a_crash_cancels_its_uploads_when_the_service_starts
         .update_pass_state(|state| {
             state.stopped = Some(BackupStop {
                 reason: BackupStopReason::EraseRequest,
-                through_ms: 5,
             });
         })
         .unwrap();
@@ -260,7 +259,6 @@ async fn a_stop_the_service_cannot_finish_at_start_still_names_its_reason() {
         .update_pass_state(|state| {
             state.stopped = Some(BackupStop {
                 reason: BackupStopReason::AccountLapsed,
-                through_ms: 5,
             });
         })
         .unwrap();

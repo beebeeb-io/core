@@ -9,7 +9,7 @@ use std::{
 };
 
 use beebeeb_api::Method;
-use beebeeb_core::kdf::MasterKey;
+use beebeeb_core::{backup::NOTICE_OVERLAP_MS, kdf::MasterKey};
 use beebeeb_types::backup::BackupStopReason;
 use serde_json::{Value, json};
 use tempfile::tempdir;
@@ -19,7 +19,7 @@ use crate::{
     backup::{
         Asset, AssetKind, AssetSnapshot, AssetSource, AssetSourceError, BackupAssetChange, BackupConfiguration,
         BackupCopyState, BackupFolder, BackupManifestRecord, BackupManifestStore, BackupManifestStoreError,
-        BackupPassState, BackupService, BackupStop, MemoryBackupManifestStore, NOTICE_OVERLAP_MS,
+        BackupPassState, BackupService, BackupStop, MemoryBackupManifestStore,
     },
     test_support::{RouteAnswer, RoutedTransport, ScriptedTransport, json_answer},
     uploads::{NetworkKind, UploadService},
@@ -233,6 +233,15 @@ pub(crate) fn page(notices: Value, next_cursor: Option<&str>) -> RouteAnswer {
     ))
 }
 
+/// One filtered page, dated `date`.
+fn page_dated(notices: Value, date: &str) -> RouteAnswer {
+    Ok(json_answer(
+        200,
+        &[("Date", date)],
+        serde_json::to_vec(&json!({"notifications": notices, "unread_count": 0, "next_cursor": null})).unwrap(),
+    ))
+}
+
 pub(crate) fn erased(created_at: &str) -> Value {
     json!({"id": "n1", "type": "files_removed", "title": "t", "body": null,
            "data": {"reason": "erase_request"}, "read": false, "created_at": created_at})
@@ -270,11 +279,13 @@ pub(crate) fn one_photo(path: &Path) -> AssetSnapshot {
     }
 }
 
-/// The platform's manifest store, whose writes can be made to fail.
+/// The platform's manifest store, whose writes can be made to fail: every
+/// write, or every write after the next `writes_left`.
 #[derive(Default)]
 pub(crate) struct FlakyStore {
     inner: MemoryBackupManifestStore,
     fail_writes: std::sync::atomic::AtomicBool,
+    writes_left: Mutex<Option<usize>>,
 }
 
 impl FlakyStore {
@@ -282,7 +293,15 @@ impl FlakyStore {
         if self.fail_writes.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(BackupManifestStoreError::Unavailable);
         }
-        Ok(())
+        let mut left = self.writes_left.lock().unwrap();
+        match left.as_mut() {
+            Some(0) => Err(BackupManifestStoreError::Unavailable),
+            Some(n) => {
+                *n -= 1;
+                Ok(())
+            }
+            None => Ok(()),
+        }
     }
 }
 
@@ -390,6 +409,17 @@ impl Harness {
     /// The platform's store writes fail from now on.
     pub(crate) fn fail_store_writes(&self) {
         self.store.fail_writes.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// The platform's store takes `writes` more writes, then fails.
+    pub(crate) fn fail_store_writes_after(&self, writes: usize) {
+        *self.store.writes_left.lock().unwrap() = Some(writes);
+    }
+
+    /// The platform's store works again.
+    pub(crate) fn allow_store_writes(&self) {
+        self.store.fail_writes.store(false, std::sync::atomic::Ordering::SeqCst);
+        *self.store.writes_left.lock().unwrap() = None;
     }
 
     /// [`Self::restart`], whose new service may be refused.
@@ -549,8 +579,9 @@ async fn an_erase_notice_stops_the_backup_before_anything_is_read_or_queued() {
 
 #[tokio::test]
 async fn a_failed_notice_check_skips_the_pass_and_keeps_its_baseline() {
+    let setup_ms = SERVER_NOW_MS - 60_000;
     let h = harness(
-        |c| c.with_first_pass(Some(1_000), None),
+        |c| c.with_first_pass(Some(setup_ms), None),
         &[r#"{"needs_backup":["photo-1"]}"#],
     );
     h.server
@@ -565,12 +596,13 @@ async fn a_failed_notice_check_skips_the_pass_and_keeps_its_baseline() {
     assert_eq!(*h.source.calls.lock().unwrap(), 0);
     assert_eq!(h.backup.manifest().pass_state().unwrap().last_pass_at_ms, None);
 
-    // The next pass reads from the same baseline.
+    // The next pass reads from the same baseline, less core's overlap.
     let next = h.pass(2).await;
     assert!(!next.check_failed);
     assert_eq!(next.queued, 1);
+    let since = format!("&since={}&", setup_ms - NOTICE_OVERLAP_MS);
     let paths = h.server.notice_paths();
-    assert!(paths.iter().all(|path| path.contains("&since=1000&")), "{paths:?}");
+    assert!(paths.iter().all(|path| path.contains(&since)), "{paths:?}");
 }
 
 #[tokio::test]
@@ -603,21 +635,25 @@ async fn every_notice_page_is_read_before_the_pass_runs() {
     assert!(paths[1].ends_with("&cursor=cursor%2B1"), "{paths:?}");
 }
 
+/// Notices from before the setup, less core's overlap, do not apply. One
+/// inside the overlap stops the first pass once (12d's accepted edge: it errs
+/// toward stopping), covered by `the_12d_vectors_hold_through_the_service_decision`.
 #[tokio::test]
 async fn the_first_pass_ignores_notices_from_before_backups_were_set_up() {
-    let before_setup_ms = SERVER_NOW_MS - 60_000;
+    let setup_ms = SERVER_NOW_MS - 60_000;
     let h = harness(
-        |c| c.with_first_pass(Some(before_setup_ms + 1), None),
+        |c| c.with_first_pass(Some(setup_ms), None),
         &[r#"{"needs_backup":["photo-1"]}"#],
     );
-    h.server.push_page(page(json!([erased("2026-11-08T03:09:00Z")]), None));
+    // 11 minutes before the Date: 10 before the setup, past the overlap.
+    h.server.push_page(page(json!([erased("2026-11-08T02:59:00Z")]), None));
     h.snapshot_photo();
 
     let batch = h.pass(1).await;
 
     assert_eq!(batch.stopped, None);
     assert_eq!(batch.queued, 1);
-    assert!(h.server.notice_paths()[0].contains(&format!("&since={}&", before_setup_ms + 1)));
+    assert!(h.server.notice_paths()[0].contains(&format!("&since={}&", setup_ms - NOTICE_OVERLAP_MS)));
 }
 
 #[tokio::test]
@@ -630,20 +666,20 @@ async fn with_no_baseline_known_any_removal_notice_stops_the_first_pass() {
 }
 
 #[tokio::test]
-async fn a_pass_that_ran_reads_from_its_server_start_less_the_overlap_next_time() {
+async fn a_pass_that_ran_stores_its_server_start_and_reads_from_it_less_the_overlap() {
     let h = harness(|c| c, &[r#"{"needs_backup":["photo-1"]}"#]);
     h.snapshot_photo();
 
     h.pass(1).await;
 
-    let expected = SERVER_NOW_MS - NOTICE_OVERLAP_MS;
     assert_eq!(
         h.backup.manifest().pass_state().unwrap().last_pass_at_ms,
-        Some(expected)
+        Some(SERVER_NOW_MS)
     );
     h.snapshot_photo();
     h.pass(2).await;
-    assert!(h.server.notice_paths()[1].contains(&format!("&since={expected}&")));
+    let since = SERVER_NOW_MS - NOTICE_OVERLAP_MS;
+    assert!(h.server.notice_paths()[1].contains(&format!("&since={since}&")));
 }
 
 #[tokio::test]
@@ -685,8 +721,12 @@ async fn a_stop_cancels_the_queued_uploads_without_counting_a_failure() {
     assert_eq!(h.backup.manifest().retry_count("photo-1"), None);
 }
 
+/// (b) Amendment 12d: "Back up again" keeps the acknowledged ids, so the
+/// notice the person saw never stops the backup again, even served again
+/// inside the overlap and dated after the stop's `Date`; a new notice still
+/// stops it.
 #[tokio::test]
-async fn back_up_again_moves_past_the_seen_notices_and_starts_fresh() {
+async fn back_up_again_after_a_notice_does_not_stop_again_on_it() {
     let h = harness(|c| c, &[r#"{"needs_backup":["photo-1"]}"#]);
     let notice = erased("2026-11-08T03:30:00Z");
     h.server.push_page(page(json!([notice.clone()]), None));
@@ -699,32 +739,128 @@ async fn back_up_again_moves_past_the_seen_notices_and_starts_fresh() {
         .remember("photo-2", "live-copy", BackupCopyState::Active)
         .unwrap();
     assert_eq!(h.pass(1).await.stopped, Some(BackupStopReason::EraseRequest));
-    let through = h.backup.manifest().pass_state().unwrap().stopped.unwrap().through_ms;
-    assert_eq!(
-        through,
-        SERVER_NOW_MS + 20 * 60_000,
-        "the newest notice is later than the Date"
-    );
+    let stopped = h.backup.manifest().pass_state().unwrap();
+    assert_eq!(stopped.last_pass_at_ms, Some(SERVER_NOW_MS), "stored with the stop");
+    assert_eq!(stopped.acknowledged, ["n1"], "stored with the stop");
 
     h.backup.back_up_again().unwrap();
 
     let state = h.backup.manifest().pass_state().unwrap();
     assert_eq!(state.stopped, None);
-    assert_eq!(state.last_pass_at_ms, Some(through));
+    assert_eq!(state.last_pass_at_ms, Some(SERVER_NOW_MS));
+    assert_eq!(state.acknowledged, ["n1"], "kept by Back up again");
     assert_eq!(h.backup.manifest().copy_state("photo-1"), None);
     assert_eq!(
         h.backup.manifest().copy_state("photo-2"),
         None,
         "every record is forgotten"
     );
-    // The notice the person saw is served again (at or after `since`) but no
-    // longer stops the backup; the photo is backed up fresh.
-    h.server.push_page(page(json!([notice]), None));
+    // The notice the person saw is served again but no longer stops the
+    // backup; the photo is backed up fresh.
+    h.server.push_page(page(json!([notice.clone()]), None));
     h.snapshot_photo();
     let batch = h.pass(2).await;
     assert_eq!(batch.stopped, None);
     assert_eq!(batch.queued, 1);
-    assert!(h.server.notice_paths()[1].contains(&format!("&since={through}&")));
+    let since = SERVER_NOW_MS - NOTICE_OVERLAP_MS;
+    assert!(h.server.notice_paths()[1].contains(&format!("&since={since}&")));
+    // A notice written since then stops it.
+    let mut later = erased("2026-11-08T03:40:00Z");
+    later["id"] = json!("n2");
+    h.server.push_page(page(json!([notice, later]), None));
+    assert_eq!(h.pass(3).await.stopped, Some(BackupStopReason::EraseRequest));
+    assert_eq!(h.backup.manifest().pass_state().unwrap().acknowledged, ["n1", "n2"]);
+}
+
+/// (a) Amendment 12d: a notice whose transaction was still open when a pass
+/// read (dated before that pass's start, seen only after) is caught by the
+/// next pass's overlap and acts once: it stops the backup, and two passes
+/// that both read it do not act on it twice.
+#[tokio::test]
+async fn a_late_notice_inside_the_overlap_acts_once_across_two_passes() {
+    let needs = r#"{"needs_backup":["photo-1"]}"#;
+    let h = harness(|c| c, &[needs, needs]);
+    h.snapshot_photo();
+    assert_eq!(h.pass(1).await.queued, 1);
+    assert_eq!(
+        h.backup.manifest().pass_state().unwrap().last_pass_at_ms,
+        Some(SERVER_NOW_MS)
+    );
+
+    // Dated a minute before pass 1's start, committed after pass 1 read.
+    let late = erased("2026-11-08T03:09:00Z");
+    h.server.push_page(page(json!([late.clone()]), None));
+    let batch = h.pass(2).await;
+    assert_eq!(
+        batch.stopped,
+        Some(BackupStopReason::EraseRequest),
+        "the overlap catches it"
+    );
+    let since = SERVER_NOW_MS - NOTICE_OVERLAP_MS;
+    assert!(h.server.notice_paths()[1].contains(&format!("&since={since}&")));
+    assert_eq!(h.backup.manifest().pass_state().unwrap().acknowledged, ["n1"]);
+
+    h.backup.back_up_again().unwrap();
+    h.server.push_page(page(json!([late]), None));
+    h.snapshot_photo();
+    let again = h.pass(3).await;
+    assert_eq!(again.stopped, None, "the same notice does not act twice");
+    assert_eq!(again.queued, 1);
+}
+
+/// (c) Amendment 12d rule 4: the acknowledged ids, the stop and the new
+/// `last_pass_at` are one write. Whichever write the platform refuses (the
+/// first of the pass, or the one after it), the stored state is the old one
+/// whole or the new one whole, never the new ids with the old `last_pass_at`;
+/// memory follows the store; and the next pass decides again.
+#[tokio::test]
+async fn a_failed_write_keeps_the_old_acknowledged_set_and_last_pass_at_together() {
+    const LATER_DATE: &str = "Sun, 08 Nov 2026 03:30:00 GMT";
+    const LATER_MS: i64 = SERVER_NOW_MS + 20 * 60_000;
+    for writes in [0, 1] {
+        let needs = r#"{"needs_backup":["photo-1"]}"#;
+        let h = harness(|c| c, &[needs, needs]);
+        let mut old = erased("2026-11-08T03:05:00Z");
+        old["id"] = json!("n0");
+        h.server.push_page(page(json!([old.clone()]), None));
+        assert_eq!(h.pass(1).await.stopped, Some(BackupStopReason::EraseRequest));
+        h.backup.back_up_again().unwrap();
+        let before = h.backup.manifest().pass_state().unwrap();
+        assert_eq!(before.acknowledged, ["n0"]);
+        assert_eq!(before.last_pass_at_ms, Some(SERVER_NOW_MS));
+
+        // A new notice: the pass stops and acknowledges it, dated later.
+        let notices = json!([old.clone(), erased("2026-11-08T03:20:00Z")]);
+        h.server.push_page(page_dated(notices.clone(), LATER_DATE));
+        h.snapshot_photo();
+        h.fail_store_writes_after(writes);
+        let _ = h.backup.next_batch(AssetKind::Photo, NetworkKind::WiFi, 2).await;
+        assert_eq!(h.server.notice_paths().len(), 2, "{writes}: the gate read the notices");
+
+        let stored = h.store.inner.load_pass_state().unwrap();
+        assert_eq!(
+            h.backup.manifest().pass_state().unwrap(),
+            stored,
+            "{writes}: memory follows the store"
+        );
+        let whole_new =
+            stored.acknowledged == ["n0", "n1"] && stored.last_pass_at_ms == Some(LATER_MS) && stored.stopped.is_some();
+        assert!(stored == before || whole_new, "{writes}: {stored:?}");
+        if writes == 0 {
+            assert_eq!(stored, before, "the pass's one write was refused");
+            assert!(h.uploads.list().unwrap().is_empty());
+            // The store works again: the same notices stop the next pass, stored whole.
+            h.allow_store_writes();
+            h.server.push_page(page_dated(notices, LATER_DATE));
+            assert_eq!(h.pass(3).await.stopped, Some(BackupStopReason::EraseRequest));
+            let after = h.store.inner.load_pass_state().unwrap();
+            assert_eq!(after.acknowledged, ["n0", "n1"]);
+            assert_eq!(after.last_pass_at_ms, Some(LATER_MS));
+            assert!(after.stopped.is_some());
+        } else {
+            assert!(whole_new, "the pass's one write went through: {stored:?}");
+        }
+    }
 }
 
 #[tokio::test]
@@ -883,7 +1019,6 @@ async fn a_stop_written_during_a_pass_sticks() {
             .update_pass_state(|state| {
                 state.stopped = Some(BackupStop {
                     reason: BackupStopReason::AccountReset,
-                    through_ms: 5,
                 });
             })
             .unwrap();

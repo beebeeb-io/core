@@ -177,16 +177,22 @@ impl From<BackupCopyState> for BackupCopyStateData {
     }
 }
 
-/// The backup pass gate's state (backup spec Amendments 12 and 12c), stored
-/// by the platform next to the manifest records and removed with them by
-/// `clear`. Times are on the server's clock, in milliseconds. A fresh store
-/// answers all `None`. `stopped_reason` is a core wire string
-/// (`backup_stop_words` renders it); with it, `stopped_through_ms` is set.
+/// The backup pass gate's state (backup spec Amendments 12, 12c and 12d),
+/// stored by the platform next to the manifest records and removed with them
+/// by `clear`. Times are on the server's clock, in milliseconds. A fresh store
+/// answers all `None` and an empty `acknowledged`. `stopped_reason` is a core
+/// wire string (`backup_stop_words` renders it).
+///
+/// Store the whole record in ONE write, every field together (Amendment 12d
+/// rule 4): `acknowledged`, the notice ids the last pass acted on, belongs
+/// with the stop and `last_pass_at_ms` it came with. A store that loses
+/// `acknowledged` makes a backup the person turned back on stop again on a
+/// notice it already showed.
 #[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
 pub struct BackupPassStateData {
     pub last_pass_at_ms: Option<i64>,
     pub stopped_reason: Option<String>,
-    pub stopped_through_ms: Option<i64>,
+    pub acknowledged: Vec<String>,
 }
 
 impl From<BackupPassState> for BackupPassStateData {
@@ -194,25 +200,24 @@ impl From<BackupPassState> for BackupPassStateData {
         Self {
             last_pass_at_ms: value.last_pass_at_ms,
             stopped_reason: value.stopped.map(|stop| stop.reason.as_str().to_owned()),
-            stopped_through_ms: value.stopped.map(|stop| stop.through_ms),
+            acknowledged: value.acknowledged,
         }
     }
 }
 
-/// A stored state that does not read back whole (an unknown reason, or a
-/// reason without its time) is refused, never read as "not stopped".
+/// A stored state that does not read back whole (an unknown reason) is
+/// refused, never read as "not stopped".
 fn pass_state(value: BackupPassStateData) -> Option<BackupPassState> {
-    let stopped = match (value.stopped_reason, value.stopped_through_ms) {
-        (None, None) => None,
-        (Some(reason), Some(through_ms)) => Some(BackupStop {
+    let stopped = match value.stopped_reason {
+        None => None,
+        Some(reason) => Some(BackupStop {
             reason: beebeeb_types::backup::BackupStopReason::parse(&reason)?,
-            through_ms,
         }),
-        _ => return None,
     };
     Some(BackupPassState {
         last_pass_at_ms: value.last_pass_at_ms,
         stopped,
+        acknowledged: value.acknowledged,
     })
 }
 
@@ -297,7 +302,7 @@ impl BackupManifestStore for BackupManifestStoreAdapter {
 
     fn save_pass_state(&self, state: &BackupPassState) -> Result<(), BackupManifestStoreError> {
         self.callback
-            .save_pass_state((*state).into())
+            .save_pass_state(state.clone().into())
             .then_some(())
             .ok_or(BackupManifestStoreError::Unavailable)
     }

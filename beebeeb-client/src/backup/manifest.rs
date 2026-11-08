@@ -70,11 +70,15 @@ impl BackupManifestStore for MemoryBackupManifestStore {
     }
 
     fn load_pass_state(&self) -> Result<BackupPassState, BackupManifestStoreError> {
-        Ok(*self.pass.lock().map_err(|_| BackupManifestStoreError::Unavailable)?)
+        Ok(self
+            .pass
+            .lock()
+            .map_err(|_| BackupManifestStoreError::Unavailable)?
+            .clone())
     }
 
     fn save_pass_state(&self, state: &BackupPassState) -> Result<(), BackupManifestStoreError> {
-        *self.pass.lock().map_err(|_| BackupManifestStoreError::Unavailable)? = *state;
+        *self.pass.lock().map_err(|_| BackupManifestStoreError::Unavailable)? = state.clone();
         Ok(())
     }
 
@@ -112,7 +116,7 @@ impl BackupManifest {
 
     /// The pass gate's state.
     pub fn pass_state(&self) -> Result<BackupPassState, BackupError> {
-        Ok(*self.pass.lock().map_err(|_| BackupError::State)?)
+        Ok(self.pass.lock().map_err(|_| BackupError::State)?.clone())
     }
 
     /// Change the pass state as it is now, under its lock: persist first,
@@ -124,10 +128,10 @@ impl BackupManifest {
         change: impl FnOnce(&mut BackupPassState),
     ) -> Result<BackupPassState, BackupError> {
         let mut pass = self.pass.lock().map_err(|_| BackupError::State)?;
-        let mut state = *pass;
+        let mut state = pass.clone();
         change(&mut state);
         self.persistence.save_pass_state(&state)?;
-        *pass = state;
+        *pass = state.clone();
         Ok(state)
     }
 

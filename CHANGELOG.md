@@ -59,14 +59,19 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   as `expired`, and the status call returns that state instead of failing. Offer to start a new
   recovery.
 
-- The native backup passes core's pass gate before it queues anything (backup spec Amendments 12 and
-  12c). Each pass reads the `files_removed` and `backup_deleted` notices since its last pass (the
-  server's filtered `GET /api/v1/notifications`, LD-0141) and whether its device and category folders
-  are live. `BackupBatchData.stopped_reason` (a core wire string: show `backup_stop_words`, offer "Back
+- The native backup passes core's pass gate before it queues anything (backup spec Amendments 12,
+  12c and 12d). Each pass reads the `files_removed` and `backup_deleted` notices from
+  `notices_since(last_pass_at)` on (the server's filtered `GET /api/v1/notifications`, LD-0141; the
+  10-minute overlap is core's) and whether its device and category folders are live, and decides with
+  `backup_pass_gate_v2` and the notice ids the last pass acknowledged. `BackupBatchData.stopped_reason` (a core wire string: show `backup_stop_words`, offer "Back
   up again") means the backup is off and its unfinished uploads were cancelled; `check_failed` means
   the notices could not be read and nothing was queued (show `backup_check_failed_words`). A stopped
   backup stays off until `BackupServiceHandle.back_up_again()`. `BackupManifestStoreCallback` adds
-  `load_pass_state` and `save_pass_state` (`BackupPassStateData`, removed by `clear`), and
+  `load_pass_state` and `save_pass_state` (`BackupPassStateData`: `last_pass_at_ms`, `stopped_reason`
+  and `acknowledged`, the notice ids the last pass acted on; removed by `clear`). Store the record in
+  ONE write, every field together (Amendment 12d rule 4): a store that loses `acknowledged` makes a
+  backup turned back on stop again on a notice it already showed. "Back up again" keeps
+  `acknowledged` and `last_pass_at_ms`; a failed check changes neither. And
   `BackupConfigurationData` adds `setup_at_ms` and `legacy_last_backup_ms` (server clock) for the first
   pass's baseline. `BackupCopyStateData::Gone` is split into `Deleted` (removed on the server, never
   uploaded again by the pass) and `UploadFailed` (retried at most three times).

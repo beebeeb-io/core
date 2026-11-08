@@ -4,6 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use beebeeb_core::backup::notices_since;
 use beebeeb_types::backup::BackupStopReason;
 use tokio::sync::broadcast;
 
@@ -18,8 +19,8 @@ use crate::{
 mod gate;
 mod manifest;
 
-pub use gate::{BackupPassState, BackupStop, NOTICE_OVERLAP_MS};
-use gate::{CheckedFolder, PassDecision};
+pub use gate::{BackupPassState, BackupStop};
+use gate::{CheckedFolder, Gate, PassDecision};
 pub use manifest::{
     BackupManifest, BackupManifestRecord, BackupManifestStore, BackupManifestStoreError, MemoryBackupManifestStore,
 };
@@ -499,11 +500,13 @@ impl BackupService {
     }
 
     /// "Back up again", the person's choice after a stop (backup spec
-    /// Amendment 12): the backup starts fresh. The notices it stopped on no
-    /// longer count (`last_pass_at` moves past them, on the server's clock),
-    /// and every record is forgotten, so the next pass asks the server about
-    /// every asset again; a copy still there counts as backed up. Nothing
-    /// changes while the backup is on.
+    /// Amendments 12 and 12d): the backup starts fresh. The notices it stopped
+    /// on no longer count: the pass that stopped stored their ids as
+    /// acknowledged, and they stay acknowledged here (`last_pass_at` stays
+    /// too). Every record is forgotten, so the next pass asks the server about
+    /// every asset again; a copy still there counts as backed up. A notice
+    /// written after that pass still counts. Nothing changes while the backup
+    /// is on.
     ///
     /// After a stop because the backup's folder was deleted (`Unknown` or
     /// `BackupDeleted`), [`Self::configure`] a live folder first: find this
@@ -518,32 +521,12 @@ impl BackupService {
         // person chooses again.
         self.manifest.forget_all()?;
         self.manifest.update_pass_state(|state| {
-            if let Some(stop) = state.stopped.take() {
-                state.last_pass_at_ms = Some(
-                    state
-                        .last_pass_at_ms
-                        .map_or(stop.through_ms, |last| last.max(stop.through_ms)),
-                );
-            }
+            state.stopped = None;
         })?;
         *self.checked_folder.lock().map_err(|_| BackupError::State)? = None;
         self.pages.lock().map_err(|_| BackupError::State)?.clear();
         let _ = self.events.send(BackupEvent::ManifestChanged);
         Ok(())
-    }
-
-    /// Turn the backup off (a stopped backup never fills the account up
-    /// again). The stop is recorded first, so a pass cut off anywhere after it
-    /// is still stopped, and the next pass finishes the stop
-    /// ([`Self::finish_stop`]). A backup already off keeps its first reason,
-    /// which is the stop returned.
-    fn stop(&self, stop: BackupStop, now_ms: i64) -> Result<BackupStop, BackupError> {
-        let state = self.manifest.update_pass_state(|state| {
-            state.stopped.get_or_insert(stop);
-        })?;
-        let _ = self.events.send(BackupEvent::ManifestChanged);
-        self.finish_stop(now_ms)?;
-        Ok(state.stopped.unwrap_or(stop))
     }
 
     /// Cancel every backup upload that is not done, then forget every
@@ -562,8 +545,17 @@ impl BackupService {
         Ok(batch)
     }
 
-    /// The pass gate (backup spec Amendments 12 and 12c): whether this pass
-    /// may queue anything. See [`gate`].
+    /// The pass gate (backup spec Amendments 12, 12c and 12d): whether this
+    /// pass may queue anything. See [`gate`].
+    ///
+    /// Core's answer is stored in ONE write (12d rule 4): a stop, this pass's
+    /// start as the next `last_pass_at` and the acknowledged notice ids,
+    /// together, on the state as it is now (a stop written meanwhile stays,
+    /// `last_pass_at` never moves back). A write the platform refuses changes
+    /// none of them. The stop is recorded before anything is cancelled, so a
+    /// pass cut off after it is still stopped and the next pass finishes the
+    /// stop ([`Self::finish_stop`]); a backup already off keeps its first
+    /// reason. A failed check stores nothing.
     async fn pass_gate(
         &self,
         kind: AssetKind,
@@ -578,32 +570,37 @@ impl BackupService {
         let baseline = gate::baseline(&state, configuration);
         let listing = self.client.backup_stop_listing(folder, kind).await;
         let read = match listing {
-            Some(_) => self.client.backup_notices_since(baseline).await,
+            Some(_) => self.client.backup_notices_since(notices_since(baseline)).await,
             None => None,
         };
-        let decision = gate::decide(read.as_ref(), baseline, listing.as_ref());
-        match (decision, read.as_ref()) {
-            (PassDecision::Stopped(stop), _) => return Ok(PassDecision::Stopped(self.stop(stop, now_ms)?)),
-            (PassDecision::Run, Some(read)) => {
-                // A gone folder is never Run (its device folder is not live);
-                // should the rule ever say so, nothing is queued into it.
-                if folder.gone {
-                    return Err(BackupError::NotInBackups);
-                }
-                let next = gate::next_last_pass_at(read, baseline);
-                // Written on the state as it is now: a stop written meanwhile
-                // stays, and `last_pass_at` never moves back.
-                let now = self.manifest.update_pass_state(|state| {
-                    state.last_pass_at_ms = Some(state.last_pass_at_ms.map_or(next, |last| last.max(next)));
-                })?;
-                if let Some(stop) = now.stopped {
-                    self.finish_stop(now_ms)?;
-                    return Ok(PassDecision::Stopped(stop));
-                }
-            }
-            _ => {}
+        let (stop, acknowledged, read) = match (
+            gate::decide(read.as_ref(), baseline, &state.acknowledged, listing.as_ref()),
+            read,
+        ) {
+            (Gate::Decided { stop, acknowledged }, Some(read)) => (stop, acknowledged, read),
+            _ => return Ok(PassDecision::CheckFailed),
+        };
+        // A gone folder never runs (its device folder is not live); should the
+        // rule ever say so, nothing is queued into it and nothing is stored.
+        if stop.is_none() && folder.gone {
+            return Err(BackupError::NotInBackups);
         }
-        Ok(decision)
+        let next = gate::pass_start(&read, baseline);
+        let now = self.manifest.update_pass_state(|state| {
+            if let Some(stop) = stop {
+                state.stopped.get_or_insert(stop);
+            }
+            state.last_pass_at_ms = Some(state.last_pass_at_ms.map_or(next, |last| last.max(next)));
+            state.acknowledged = acknowledged;
+        })?;
+        match now.stopped {
+            Some(stop) => {
+                let _ = self.events.send(BackupEvent::ManifestChanged);
+                self.finish_stop(now_ms)?;
+                Ok(PassDecision::Stopped(stop))
+            }
+            None => Ok(PassDecision::Run),
+        }
     }
 
     pub async fn next_batch(

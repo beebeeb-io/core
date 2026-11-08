@@ -17,39 +17,32 @@ fn an_unfinished_stop_reaches_the_app_with_its_reason() {
     );
 }
 
+/// Amendment 12d: the acknowledged notice ids cross the seam with the stop
+/// and `last_pass_at_ms`, in the one record the platform stores.
 #[test]
-fn a_stored_pass_state_round_trips_and_a_partial_one_is_refused() {
+fn a_stored_pass_state_round_trips_and_an_unknown_reason_is_refused() {
     let stopped = BackupPassState {
         last_pass_at_ms: Some(10),
         stopped: Some(BackupStop {
             reason: BackupStopReason::AccountLapsed,
-            through_ms: 20,
         }),
+        acknowledged: vec!["n1".into(), "n2".into()],
     };
-    let data = BackupPassStateData::from(stopped);
+    let data = BackupPassStateData::from(stopped.clone());
     assert_eq!(data.stopped_reason.as_deref(), Some("account_lapsed"));
+    assert_eq!(data.acknowledged, ["n1", "n2"]);
     assert_eq!(pass_state(data), Some(stopped));
     assert_eq!(
         pass_state(BackupPassStateData::default()),
         Some(BackupPassState::default())
     );
-    for partial in [
-        BackupPassStateData {
-            stopped_reason: Some("account_lapsed".into()),
-            ..Default::default()
-        },
-        BackupPassStateData {
-            stopped_through_ms: Some(20),
-            ..Default::default()
-        },
-        BackupPassStateData {
+    assert_eq!(
+        pass_state(BackupPassStateData {
             stopped_reason: Some("a_reason_from_later".into()),
-            stopped_through_ms: Some(20),
             ..Default::default()
-        },
-    ] {
-        assert_eq!(pass_state(partial), None);
-    }
+        }),
+        None
+    );
 }
 
 /// Review r5, P2-1: what a record saw of its asset (rule 11's baseline)
