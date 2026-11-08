@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-11-08
+
 ### Changed (review hardening before v0.2.8; desktop v2 and mobile adapt to these)
 
 API changes, every one a compile error at the call site, none silent:
