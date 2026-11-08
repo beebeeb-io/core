@@ -8,6 +8,14 @@ impl UploadService {
         session_key: &crate::SessionKey,
         now_ms: i64,
     ) -> Result<BackgroundUploadPlanner, UploadServiceError> {
+        // The session is sized from the source as it is now, never as it was
+        // when it was queued: a file that grew while it waited is uploaded
+        // whole (nothing is staged yet, so nothing restarts).
+        let current_source = source_identity(&record.source_path)?;
+        if current_source != record.source_identity {
+            record.source_identity = current_source;
+            self.emit(UploadEvent::SourceChanged { id });
+        }
         // Every upload but the backup pass's own asks core's Backups rule
         // first: a new file is a create in its folder, a new version is a
         // write to the file.
@@ -171,15 +179,16 @@ impl UploadService {
         Ok(session_key.generation())
     }
 
-    async fn complete(
+    /// The sealed name and version metadata `complete` publishes, under the
+    /// planner's version commitment.
+    fn completion_metadata(
         &self,
-        id: i64,
         record: &UploadRecord,
         planner: &BackgroundUploadPlanner,
-    ) -> Result<(), UploadServiceError> {
+    ) -> Result<String, UploadServiceError> {
         let session_key = self.client.session_key()?;
         let version = planner.version_commitment().ok_or(UploadServiceError::Encryption)?;
-        let name_encrypted = if record.replacement.is_some() {
+        if record.replacement.is_some() {
             #[allow(deprecated)]
             beebeeb_core::encrypt::encrypt_name_with_version(
                 session_key.master_key(),
@@ -189,7 +198,7 @@ impl UploadService {
                 ExpectedChunkFormat::V2,
                 version,
             )
-            .map_err(|_| UploadServiceError::Encryption)?
+            .map_err(|_| UploadServiceError::Encryption)
         } else {
             let item = NewItemId::resume(session_key.master_key(), &record.file_id, &record.item_tag)
                 .map_err(|_| UploadServiceError::Encryption)?;
@@ -201,13 +210,23 @@ impl UploadService {
                 ExpectedChunkFormat::V2,
                 version,
             )
-            .map_err(|_| UploadServiceError::Encryption)?
-        };
+            .map_err(|_| UploadServiceError::Encryption)
+        }
+    }
+
+    /// Send `complete` with the persisted metadata. The server answers a
+    /// session it already completed with that file's id
+    /// (`already_completed`), so the request sent again after a crash is
+    /// idempotent. An answer naming another file is never taken as done; one
+    /// that names none is taken as before.
+    async fn complete(&self, record: &UploadRecord, name_encrypted: &str) -> Result<(), UploadServiceError> {
+        let session_key = self.client.session_key()?;
         let request = CompleteRequest {
-            name_encrypted: Some(name_encrypted.clone()),
-            version_metadata_encrypted: Some(name_encrypted),
+            name_encrypted: Some(name_encrypted.to_owned()),
+            version_metadata_encrypted: Some(name_encrypted.to_owned()),
         };
-        self.client
+        let answer = self
+            .client
             .execute_for_generation(
                 &beebeeb_api::routes::uploads::complete(record.session_id.as_deref().ok_or(UploadServiceError::State)?),
                 &request,
@@ -217,22 +236,56 @@ impl UploadService {
         if !session_key.is_current(&self.client) {
             return Err(ClientError::StaleAccount.into());
         }
-        let _ = std::fs::remove_dir(self.upload_directory(id));
+        if answer
+            .get("id")
+            .is_some_and(|id| id.as_str() != Some(record.file_id.as_str()))
+        {
+            return Err(UploadServiceError::HostileChunkPlan);
+        }
         Ok(())
     }
 
+    /// Publish a fully committed upload and hand a backup's completion over.
+    /// `planner` is `None` when the completion was already sent: the same
+    /// request goes again. Before the first request the source, if it is
+    /// still there, must be the one staged; a source that changed restarts
+    /// the upload, so a mismatch is never published (a source the platform
+    /// removed may still finish: its staged plaintext hash is committed).
     pub(super) async fn finish_completed_upload(
         &self,
         id: i64,
         record: &mut UploadRecord,
-        planner: &BackgroundUploadPlanner,
+        planner: Option<&BackgroundUploadPlanner>,
         now_ms: i64,
     ) -> Result<(), UploadServiceError> {
         let generation = self.client.generation();
         if !record.remote_completed {
-            self.complete(id, record, planner).await?;
+            let name_encrypted = match record.complete_name_encrypted.clone() {
+                Some(sealed) => sealed,
+                None => {
+                    let planner = planner.ok_or(UploadServiceError::State)?;
+                    if let Ok(current) = source_identity(&record.source_path)
+                        && current != record.source_identity
+                    {
+                        let plan = planner.restart_plan();
+                        self.begin_restart(id, record, &plan, current, now_ms).await?;
+                        self.release(id, now_ms)?;
+                        self.emit(UploadEvent::SourceChanged { id });
+                        return Err(UploadServiceError::SourceChangedRestarted);
+                    }
+                    let sealed = self.completion_metadata(record, planner)?;
+                    // The intent is durable before the request: a crash after
+                    // the server accepted it sends the same request again.
+                    record.complete_name_encrypted = Some(sealed.clone());
+                    self.persist(id, record, now_ms)?;
+                    sealed
+                }
+            };
+            self.complete(record, &name_encrypted).await?;
             record.remote_completed = true;
             self.persist(id, record, now_ms)?;
+            // The staging goes only once the completion is recorded.
+            let _ = std::fs::remove_dir(self.upload_directory(id));
         }
         if generation != self.client.generation() {
             return Err(ClientError::StaleAccount.into());
@@ -256,6 +309,22 @@ impl UploadService {
             }
         }
         self.mark_succeeded(id, now_ms)
+    }
+
+    /// Record a failed completion: an upgrade stops the upload for good, a
+    /// restart for a changed source is no failure, anything else is one
+    /// attempt.
+    pub(super) fn completion_failed(
+        &self,
+        id: i64,
+        error: &UploadServiceError,
+        now_ms: i64,
+    ) -> Result<(), UploadServiceError> {
+        match error {
+            UploadServiceError::SourceChangedRestarted => Ok(()),
+            error if upload_upgrade_required(error) => self.mark_upgrade_required(id, now_ms),
+            _ => self.record_attempt_failure(id, "upload completion failed", now_ms),
+        }
     }
 
     pub(super) async fn begin_restart(

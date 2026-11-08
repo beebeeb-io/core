@@ -104,6 +104,7 @@ impl UploadService {
             replacement: request.replacement,
             restart_intent: None,
             remote_completed: false,
+            complete_name_encrypted: None,
             backup_outcome_applied: false,
         };
         let payload = encode_record(&record)?;
@@ -157,6 +158,19 @@ impl UploadService {
             return Ok(Some((transfer.id, Vec::new())));
         }
 
+        // An upload whose completion was sent (or done) finishes from its
+        // record alone: its staging may already be gone, and its source may
+        // have changed since, but the server may have published it.
+        if record.remote_completed || record.complete_name_encrypted.is_some() {
+            if let Err(error) = self
+                .finish_completed_upload(transfer.id, &mut record, None, now_ms)
+                .await
+            {
+                self.completion_failed(transfer.id, &error, now_ms)?;
+                return Err(error);
+            }
+            return Ok(Some((transfer.id, Vec::new())));
+        }
         if record.restart_intent.is_some() {
             let _current_source = match source_identity(&record.source_path) {
                 Ok(source) => source,
@@ -283,14 +297,10 @@ impl UploadService {
         };
         if planner.all_chunks_staged() && planner.remaining_chunks() == 0 {
             if let Err(error) = self
-                .finish_completed_upload(transfer.id, &mut record, &planner, now_ms)
+                .finish_completed_upload(transfer.id, &mut record, Some(&planner), now_ms)
                 .await
             {
-                if upload_upgrade_required(&error) {
-                    self.mark_upgrade_required(transfer.id, now_ms)?;
-                } else {
-                    self.record_attempt_failure(transfer.id, "upload completion failed", now_ms)?;
-                }
+                self.completion_failed(transfer.id, &error, now_ms)?;
                 return Err(error);
             }
             return Ok(Some((transfer.id, Vec::new())));
@@ -392,12 +402,11 @@ impl UploadService {
         {
             record.planner = Some(planner.to_bytes().map_err(map_background)?);
             self.persist(id, &record, now_ms)?;
-            if let Err(error) = self.finish_completed_upload(id, &mut record, &planner, now_ms).await {
-                if upload_upgrade_required(&error) {
-                    self.mark_upgrade_required(id, now_ms)?;
-                } else {
-                    self.record_attempt_failure(id, "upload completion failed", now_ms)?;
-                }
+            if let Err(error) = self
+                .finish_completed_upload(id, &mut record, Some(&planner), now_ms)
+                .await
+            {
+                self.completion_failed(id, &error, now_ms)?;
                 return Err(error);
             }
         } else {

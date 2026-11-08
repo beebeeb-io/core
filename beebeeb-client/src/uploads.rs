@@ -216,6 +216,13 @@ struct UploadRecord {
     restart_intent: Option<RestartIntent>,
     #[serde(default)]
     remote_completed: bool,
+    /// The sealed name and version metadata `complete` sends, persisted
+    /// before the request (ciphertext). Once set, the upload finishes by
+    /// sending the same request again, which the server answers
+    /// `already_completed` for a session it completed: never a restart of an
+    /// upload the server may already have published.
+    #[serde(default)]
+    complete_name_encrypted: Option<String>,
     #[serde(default)]
     backup_outcome_applied: bool,
 }

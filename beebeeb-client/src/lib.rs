@@ -87,3 +87,5 @@ mod tests_svc_platform;
 mod tests_svc_sync_names;
 #[cfg(test)]
 mod tests_svc_transfer;
+#[cfg(test)]
+mod tests_svc_upload_source;
