@@ -132,19 +132,19 @@ impl Client {
         .map(|_| ())
     }
 
+    /// Turn a system service on with its folder, always at the top level
+    /// (LD-0113: a system folder never has a parent).
     pub async fn enable_system_service(
         &self,
         service: Service,
         folder_id: String,
         name_encrypted: String,
-        parent_id: Option<String>,
     ) -> Result<proposed::ServiceFolder, ClientError> {
         self.execute(
             &proposed::enable_service(service),
             &proposed::ServiceEnable {
                 folder_id,
                 name_encrypted,
-                parent_id,
             },
         )
         .await

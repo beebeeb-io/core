@@ -323,12 +323,17 @@ fn service_and_upload_token_shapes_match_the_server() {
             &proposed::ServiceEnable {
                 folder_id: "11111111-2222-4333-8444-555555555555".into(),
                 name_encrypted: "sealed".into(),
-                parent_id: None,
             },
         )
         .unwrap();
     let json: serde_json::Value = serde_json::from_slice(enable.body()).unwrap();
     assert_eq!(json["folder_id"], "11111111-2222-4333-8444-555555555555");
+    // LD-0113: a system folder is always at the top level; the server
+    // answers 400 to a parent, so the request never carries one.
+    assert_eq!(
+        json.as_object().unwrap().keys().collect::<Vec<_>>(),
+        ["folder_id", "name_encrypted"]
+    );
 
     let disabled = proposed::disable_service(Service::MailBackup)
         .parse(beebeeb_api::Answer::new(

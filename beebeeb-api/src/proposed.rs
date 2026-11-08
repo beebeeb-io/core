@@ -500,12 +500,13 @@ impl std::fmt::Debug for RecoveryCompleteResponse {
     }
 }
 
+/// A system service folder is always at the top level (LD-0113: the server's
+/// live CHECK refuses a parent, and answers 400 to one), so the request has
+/// no `parent_id`.
 #[derive(Debug, Clone, Serialize)]
 pub struct ServiceEnable {
     pub folder_id: String,
     pub name_encrypted: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

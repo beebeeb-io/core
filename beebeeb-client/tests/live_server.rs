@@ -1253,7 +1253,7 @@ async fn system_service_enable_marks_its_folder_and_refuses_normal_mutation() ->
     )?;
     let enabled = account
         .client
-        .enable_system_service(Service::MailBackup, item.as_str().to_owned(), sealed_name, None)
+        .enable_system_service(Service::MailBackup, item.as_str().to_owned(), sealed_name)
         .await
         .map_err(|error| format!("mail-backup service enable failed: {error}"))?;
     assert!(enabled.enabled, "service enable response did not report enabled");
