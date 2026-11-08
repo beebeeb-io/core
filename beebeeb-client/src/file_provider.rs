@@ -364,7 +364,10 @@ impl FileProviderService {
     }
 
     /// Queue the local delete intent used by offline File Provider requests.
-    /// A missing item is a terminal failure, never a permanent "syncing" row.
+    /// A Files-app delete moves the item to the Trash (`file_trash`, the op
+    /// the server accepts from a client and the one the Backups rule checked),
+    /// never a permanent delete. A missing item is a terminal failure, never a
+    /// permanent "syncing" row.
     pub async fn delete_local(&self, client: &Client, id: Uuid) -> Result<(), FileProviderError> {
         self.set_state(id, ItemWorkState::Running)?;
         let result = async {
@@ -387,7 +390,7 @@ impl FileProviderService {
                     return Err(FileProviderError::NotFound);
                 }
                 let device_id = engine.device_id().to_owned();
-                let pending = engine.apply_local_op("file_delete", json!({"id": id.to_string()}))?;
+                let pending = engine.apply_local_op("file_trash", json!({"id": id.to_string()}))?;
                 (pending, device_id)
             };
             let request = beebeeb_api::routes::sync::Submit {

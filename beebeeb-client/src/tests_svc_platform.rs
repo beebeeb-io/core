@@ -767,7 +767,13 @@ async fn file_provider_create_modify_delete_use_core_file_services_and_finish() 
     assert_eq!(provider.work_state(id), Some(ItemWorkState::Succeeded));
 }
 
-struct SyncSubmitTransport;
+/// Answers `POST /sync/ops` as the server does (`routes/sync/apply.rs`): a
+/// client-submitted `file_create`, `file_update` or `file_delete` is
+/// rejected as `unsupported op_type`, so it has no `applied` entry.
+#[derive(Default)]
+struct SyncSubmitTransport {
+    op_types: Mutex<Vec<String>>,
+}
 
 impl crate::Transport for SyncSubmitTransport {
     fn send<'a>(&'a self, request: beebeeb_api::Request, _limit: usize) -> crate::TransportFuture<'a> {
@@ -784,13 +790,21 @@ impl crate::Transport for SyncSubmitTransport {
             assert_eq!(request.path(), "/api/v1/sync/ops");
             let body: serde_json::Value = serde_json::from_slice(request.body()).unwrap();
             let client_op_id = body["ops"][0]["client_op_id"].as_str().unwrap();
+            let op_type = body["ops"][0]["op_type"].as_str().unwrap().to_owned();
+            self.op_types.lock().unwrap().push(op_type.clone());
+            let answer = if matches!(op_type.as_str(), "file_create" | "file_update" | "file_delete") {
+                serde_json::json!({
+                    "rejected": [{"client_op_id": client_op_id, "reason": format!("unsupported op_type: {op_type}")}]
+                })
+            } else {
+                serde_json::json!({
+                    "applied": [{"client_op_id": client_op_id, "seq_id": 1, "user_seq": 1}]
+                })
+            };
             Ok(Answer::new(
                 200,
                 vec![Header::new("Content-Type", "application/json")],
-                serde_json::to_vec(&serde_json::json!({
-                    "applied": [{"client_op_id": client_op_id, "seq_id": 1, "user_seq": 1}]
-                }))
-                .unwrap(),
+                serde_json::to_vec(&answer).unwrap(),
             ))
         })
     }
@@ -810,11 +824,14 @@ async fn file_provider_local_delete_submits_before_reporting_success() {
         )
         .unwrap();
     let provider = FileProviderService::new(engine, Arc::new(Notifier::default()));
-    let client = Client::new(ClientConfig::for_tests(), Arc::new(SyncSubmitTransport)).unwrap();
+    let transport = Arc::new(SyncSubmitTransport::default());
+    let client = Client::new(ClientConfig::for_tests(), transport.clone()).unwrap();
     client.set_authentication("token", "owner").unwrap();
 
     provider.delete_local(&client, id).await.unwrap();
 
+    // A Files-app delete is a move to the Trash, the op the server accepts.
+    assert_eq!(*transport.op_types.lock().unwrap(), vec!["file_trash".to_owned()]);
     assert!(provider.item(id).unwrap().is_none());
     assert_eq!(provider.work_state(id), Some(ItemWorkState::Succeeded));
 }
