@@ -106,12 +106,13 @@ pub fn encrypt_file_to_chunks(
     // Safe cast: from_reader already validated chunk_count fits in u32.
     let chunk_count = plan.chunk_count as u32;
 
-    // Before any chunk is written, no chunk name or its temp name may reach a
-    // DIFFERENT existing file through an 8.3 short name (task 2404), so a
-    // refusal leaves no partial chunk set behind.
+    // Before any chunk is written, no chunk name may reach a DIFFERENT existing
+    // file through an 8.3 short name (task 2404), so this refusal leaves no
+    // partial chunk set behind. (A temp name is never opened if taken, so it
+    // needs no check; a name that starts to reach another file during the run
+    // is refused at its publish, after the chunks before it.)
     for index in 0..chunk_count {
         crate::path_safety::refuse_alias_at(&output_dir.join(format!("{index}.enc")))?;
-        crate::path_safety::refuse_alias_at(&output_dir.join(format!("{index}.enc.tmp")))?;
     }
 
     let mut chunks = Vec::with_capacity(chunk_count as usize);
@@ -125,24 +126,19 @@ pub fn encrypt_file_to_chunks(
         let nonce = encrypted[..NONCE_LEN].to_vec();
         let plaintext_size = ciphertext_size - (NONCE_LEN + TAG_LEN) as u64;
 
-        // Write to .tmp then atomic rename to .enc
+        // Write a temp sibling (`{N}.enc.tmp`), then publish it as `{N}.enc`
+        // (task 2404: `TempSibling` never opens or replaces another entry).
         let enc_path = output_dir.join(format!("{chunk_index}.enc"));
-        let tmp_path = output_dir.join(format!("{chunk_index}.enc.tmp"));
-
-        let mut writer =
-            BufWriter::new(File::create(&tmp_path).map_err(|e| CoreError::Io(format!("create chunk file: {e}")))?);
+        let (temp, file) = crate::path_safety::TempSibling::create(&enc_path)
+            .map_err(|e| crate::path_safety::core_error("create chunk file", e))?;
+        let mut writer = BufWriter::new(file);
         writer
             .write_all(&encrypted)
             .map_err(|e| CoreError::Io(format!("write chunk: {e}")))?;
         writer.flush().map_err(|e| CoreError::Io(format!("flush chunk: {e}")))?;
         drop(writer);
-
-        // Atomic rename, after checking the final name once more (task 2404).
-        if let Err(refused) = crate::path_safety::refuse_alias_at(&enc_path) {
-            fs::remove_file(&tmp_path).ok();
-            return Err(refused);
-        }
-        fs::rename(&tmp_path, &enc_path).map_err(|e| CoreError::Io(format!("rename chunk: {e}")))?;
+        temp.publish()
+            .map_err(|e| crate::path_safety::core_error("rename chunk", e))?;
 
         total_plaintext += plaintext_size;
         total_ciphertext += ciphertext_size;
@@ -227,16 +223,12 @@ pub fn decrypt_chunks_to_file(
         fs::create_dir_all(parent).map_err(|e| CoreError::Io(format!("create output parent dir: {e}")))?;
     }
 
-    // Stream into a sibling .tmp, renamed over output_path on success only;
-    // on ANY Err the .tmp is removed so no partial plaintext survives.
-    // `{output_path}.tmp`, as documented above. (It was `with_extension("tmp")`,
-    // which IS the output for `notes.tmp`, so a failed decrypt truncated and
-    // then deleted that file, and `a.pdf` and `a.doc` shared one temp file.)
-    let mut tmp_name = output_path.as_os_str().to_owned();
-    tmp_name.push(".tmp");
-    let tmp_path = PathBuf::from(tmp_name);
-    let (total_bytes, chunks_processed) = crate::path_safety::write_through_tmp(output_path, &tmp_path, || {
-        decrypt_chunks_to_tmp(&file_key, file_id, expected, chunk_paths, &tmp_path, callback)
+    // Stream into a sibling `{output_path}.tmp`, published as output_path on
+    // success only; on ANY Err the temp is removed so no partial plaintext
+    // survives. (The temp was `with_extension("tmp")`, which IS the output for
+    // `notes.tmp`: a failed decrypt truncated and then deleted that file.)
+    let (total_bytes, chunks_processed) = crate::path_safety::write_through_tmp(output_path, |file| {
+        decrypt_chunks_to_tmp(&file_key, file_id, expected, chunk_paths, file, callback)
     })?;
     Ok(DecryptedFileResult {
         output_path: output_path.to_path_buf(),
@@ -245,7 +237,7 @@ pub fn decrypt_chunks_to_file(
     })
 }
 
-/// Streaming decrypt of chunk files → `tmp_path`. Helper for
+/// Streaming decrypt of chunk files into the temp `output_file`. Helper for
 /// [`decrypt_chunks_to_file`] so the caller can guarantee `.tmp` cleanup on
 /// every error path. Returns `(total_bytes, chunks_processed)` on success.
 fn decrypt_chunks_to_tmp(
@@ -253,12 +245,11 @@ fn decrypt_chunks_to_tmp(
     file_id: &str,
     expected: ExpectedChunkFormat,
     chunk_paths: &[&Path],
-    tmp_path: &Path,
+    output_file: File,
     callback: Option<&dyn FileProgressCallback>,
 ) -> Result<(u64, u32), CoreError> {
     let chunks_total = chunk_paths.len() as u32;
 
-    let output_file = File::create(tmp_path).map_err(|e| CoreError::Io(format!("create output file: {e}")))?;
     let mut writer = BufWriter::new(output_file);
 
     let mut total_bytes: u64 = 0;

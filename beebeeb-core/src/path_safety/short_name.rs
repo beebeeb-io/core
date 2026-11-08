@@ -50,6 +50,14 @@ impl std::error::Error for ShortNameAlias {}
 /// `SS`) or whose uppercase lies outside the Basic Multilingual Plane stays as
 /// it is, and so does a surrogate (characters outside the BMP are compared
 /// exactly).
+///
+/// A known limit: NTFS compares with the volume's own `$UpCase` table, written
+/// when the volume was formatted, while this uses Rust's current Unicode
+/// tables. The default table maps `ı` (U+0131) and `ſ` (U+017F) to themselves
+/// where `char` maps them to `I` and `S`, and tables written by older Windows
+/// versions lack case pairs added to Unicode since. Folding more than the
+/// volume errs toward "own name", but only for a long name equal to the
+/// requested short name but for such letters, which needs a contrived name.
 #[cfg_attr(not(windows), allow(dead_code))] // the Windows lookup; tests everywhere
 fn upcase_unit(unit: u16) -> u16 {
     // The 27 BMP letters whose full uppercase is two letters but whose simple
@@ -80,71 +88,120 @@ fn is_own_name(requested: impl Iterator<Item = u16>, existing_long: impl Iterato
     requested.map(upcase_unit).eq(existing_long.map(upcase_unit))
 }
 
-/// What one component names in its directory.
-#[cfg(windows)]
-enum Lookup {
-    /// Nothing: a create makes exactly this name.
-    Missing,
-    /// An entry whose own long name is this name.
-    Own,
-    /// A different entry, reached through another of its names.
-    Alias(ShortNameAlias),
+/// Whether `name` has the shape of an 8.3 name: 1 to 8 code units, then
+/// optionally a dot and 1 to 3 more, and no other dot. It only selects the
+/// extra listing check in [`judge`]; it never decides.
+#[cfg_attr(not(windows), allow(dead_code))] // the Windows lookup; tests everywhere
+fn has_short_shape(name: &[u16]) -> bool {
+    let mut parts = name.split(|&unit| unit == u16::from(b'.'));
+    let base = parts.next().unwrap_or_default();
+    let extension = parts.next();
+    parts.next().is_none()
+        && (1..=8).contains(&base.len())
+        && extension.is_none_or(|extension| (1..=3).contains(&extension.len()))
 }
 
-/// Look `name` up in `dir` and compare the entry it reaches with its own long
-/// name.
+/// What the lookup decides about one existing entry.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))] // the Windows lookup; tests everywhere
+enum Verdict {
+    /// The entry's own long name is the requested name.
+    Own,
+    /// A different entry, with this long name when it is known.
+    Alias(Option<Vec<u16>>),
+}
+
+/// The lookup's decision for an entry that `requested` reaches, from what the
+/// file system answered: `canonical` is the long name the handle reports
+/// (`None` for a link, which the handle opens through, or when the handle
+/// could not be opened), and `listed` says whether the directory listing holds
+/// an entry whose long name is `requested`.
+///
+/// A handle that reports another long name is final. One that reports the
+/// requested name itself is final too, unless that name has the shape of an
+/// 8.3 name: some file systems and redirectors (older SMB dialects,
+/// third-party drivers) answer with the name as opened, so the listing
+/// confirms it. Without a handle answer the listing decides. (The listing
+/// holds every long name, and a directory never holds a short name equal to
+/// another entry's long name, so an entry listed under `requested` is the
+/// entry it reaches. In a folder made case-sensitive, a short name could still
+/// match another entry's long name in a different case: a limit of the
+/// listing.)
+#[cfg_attr(not(windows), allow(dead_code))] // the Windows lookup; tests everywhere
+fn judge(
+    requested: &[u16],
+    canonical: Option<&[u16]>,
+    listed: impl FnOnce() -> io::Result<bool>,
+) -> io::Result<Verdict> {
+    let own = |long: &[u16]| is_own_name(requested.iter().copied(), long.iter().copied());
+    match canonical {
+        Some(long) if !own(long) => return Ok(Verdict::Alias(Some(long.to_vec()))),
+        Some(_) if !has_short_shape(requested) => return Ok(Verdict::Own),
+        Some(_) | None => {}
+    }
+    Ok(if listed()? { Verdict::Own } else { Verdict::Alias(None) })
+}
+
+/// What a path's components name on disk ([`walk`]).
+#[derive(Debug)]
+#[cfg_attr(not(windows), allow(dead_code))] // only Windows looks names up
+pub(crate) enum Walk {
+    /// A component does not exist: a create makes exactly this name.
+    Missing,
+    /// Every component exists under its own long name.
+    Own,
+    /// A component reaches a different entry.
+    Alias(ShortNameAlias),
+    /// Not looked up: this host never resolves a name to another entry.
+    Unchecked,
+}
+
+/// Look `name` up in `dir`.
 #[cfg(windows)]
-fn lookup(dir: &Path, name: &std::ffi::OsStr) -> io::Result<Lookup> {
+fn lookup(dir: &Path, name: &std::ffi::OsStr) -> io::Result<Walk> {
     use std::os::windows::ffi::OsStrExt as _;
     let path = dir.join(name);
     let meta = match std::fs::symlink_metadata(&path) {
         Ok(meta) => meta,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Lookup::Missing),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Walk::Missing),
         Err(error) => return Err(error),
     };
-    let own = |long: &std::ffi::OsStr| is_own_name(name.encode_wide(), long.encode_wide());
+    let requested: Vec<u16> = name.encode_wide().collect();
     // `canonicalize` opens the entry the name reaches and asks that handle for
     // its normalized path (GetFinalPathNameByHandleW), whose last component is
-    // the entry's own long name: that answer is final. It opens THROUGH a
-    // link, so a link's own name is not in it: a link, or an entry the handle
-    // cannot be opened for, goes to the listing instead.
-    if !meta.file_type().is_symlink()
-        && let Ok(canonical) = std::fs::canonicalize(&path)
-        && let Some(long) = canonical.file_name()
-    {
-        return Ok(if own(long) {
-            Lookup::Own
-        } else {
-            Lookup::Alias(ShortNameAlias {
-                requested: name.to_string_lossy().into_owned(),
-                existing: Some(long.to_string_lossy().into_owned()),
-            })
-        });
-    }
-    // The listing holds every entry's long name. An entry listed under `name`
-    // is the entry `name` reaches (a directory never holds a short name equal
-    // to another entry's long name); with none, `name` reached another entry.
-    // (In a folder made case-sensitive, a link's short name could still match
-    // another entry's long name in a different case: a limit of the listing.)
-    let listed = if dir.as_os_str().is_empty() {
-        Path::new(".")
+    // the entry's own long name.
+    let canonical: Option<Vec<u16>> = if meta.file_type().is_symlink() {
+        None
     } else {
-        dir
+        std::fs::canonicalize(&path)
+            .ok()
+            .and_then(|canonical| canonical.file_name().map(|long| long.encode_wide().collect()))
     };
-    for entry in std::fs::read_dir(listed)? {
-        if own(&entry?.file_name()) {
-            return Ok(Lookup::Own);
+    let listed = || -> io::Result<bool> {
+        let listed_dir = if dir.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            dir
+        };
+        for entry in std::fs::read_dir(listed_dir)? {
+            if is_own_name(requested.iter().copied(), entry?.file_name().encode_wide()) {
+                return Ok(true);
+            }
         }
-    }
-    Ok(Lookup::Alias(ShortNameAlias {
-        requested: name.to_string_lossy().into_owned(),
-        existing: None,
-    }))
+        Ok(false)
+    };
+    Ok(match judge(&requested, canonical.as_deref(), listed)? {
+        Verdict::Own => Walk::Own,
+        Verdict::Alias(existing) => Walk::Alias(ShortNameAlias {
+            requested: name.to_string_lossy().into_owned(),
+            existing: existing.map(|long| String::from_utf16_lossy(&long)),
+        }),
+    })
 }
 
-/// [`short_name_alias`] on every target, for core's own write paths (which
-/// build for wasm too, where nothing is looked up).
-pub(crate) fn alias_below(base: &Path, rel: &Path) -> io::Result<Option<ShortNameAlias>> {
+/// Walk `rel` below `base` one component at a time (`base` is trusted), on
+/// every target: core's own write paths build for wasm too.
+pub(crate) fn walk(base: &Path, rel: &Path) -> io::Result<Walk> {
     let names: Vec<&std::ffi::OsStr> = rel
         .components()
         .filter(|component| !matches!(component, Component::CurDir))
@@ -161,16 +218,35 @@ pub(crate) fn alias_below(base: &Path, rel: &Path) -> io::Result<Option<ShortNam
         let mut dir = base.to_path_buf();
         for name in names {
             match lookup(&dir, name)? {
+                Walk::Own => dir.push(name),
                 // Nothing below a missing entry exists either.
-                Lookup::Missing => return Ok(None),
-                Lookup::Own => dir.push(name),
-                Lookup::Alias(alias) => return Ok(Some(alias)),
+                other => return Ok(other),
             }
         }
+        Ok(Walk::Own)
     }
     #[cfg(not(windows))]
-    let _ = (base, names);
-    Ok(None)
+    {
+        let _ = (base, names);
+        Ok(Walk::Unchecked)
+    }
+}
+
+/// [`walk`] for the last component of `path`, the one name a write to `path`
+/// creates or replaces (its directory is the caller's). A path that names no
+/// entry (`/`, `..`) is not looked up.
+pub(crate) fn walk_last(path: &Path) -> io::Result<Walk> {
+    let Some(name) = path.file_name() else {
+        return Ok(Walk::Unchecked);
+    };
+    walk(path.parent().unwrap_or(Path::new("")), Path::new(name))
+}
+
+fn alias_only(walked: Walk) -> Option<ShortNameAlias> {
+    match walked {
+        Walk::Alias(conflict) => Some(conflict),
+        Walk::Missing | Walk::Own | Walk::Unchecked => None,
+    }
 }
 
 /// Whether creating, truncating, replacing or deleting `base/rel` would touch
@@ -193,24 +269,18 @@ pub(crate) fn alias_below(base: &Path, rel: &Path) -> io::Result<Option<ShortNam
 /// Only Windows resolves a name to a differently named entry, so on every
 /// other host this answers `Ok(None)` (after checking `rel`) without touching
 /// the disk. [`super::safe_child`], [`super::safe_rel_join`] and
-/// [`super::default_output_path`] already refuse such a name.
+/// [`super::default_output_path`] already refuse such a name, and
+/// [`super::TempSibling`] writes a file without ever touching such an entry.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn short_name_alias(base: &Path, rel: &Path) -> io::Result<Option<ShortNameAlias>> {
-    alias_below(base, rel)
-}
-
-/// `path` as a directory and its last component: the one name a write to
-/// `path` creates or replaces. `None` when `path` names no entry (`/`, `..`).
-fn split_last(path: &Path) -> Option<(&Path, &Path)> {
-    let name = path.file_name()?;
-    Some((path.parent().unwrap_or(Path::new("")), Path::new(name)))
+    walk(base, rel).map(alias_only)
 }
 
 /// The `String` refusal of [`super::safe_child`], [`super::safe_rel_join`] and
 /// [`super::default_output_path`].
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn refuse_alias(base: &Path, rel: &Path) -> Result<(), String> {
-    match alias_below(base, rel) {
+    match walk(base, rel).map(alias_only) {
         Ok(None) => Ok(()),
         Ok(Some(conflict)) => Err(conflict.to_string()),
         Err(error) => Err(format!(
@@ -225,10 +295,7 @@ pub(crate) fn refuse_alias(base: &Path, rel: &Path) -> Result<(), String> {
 /// type cannot grow a variant in a patch release), a failed check is
 /// [`CoreError::Io`].
 pub(crate) fn refuse_alias_at(path: &Path) -> Result<(), CoreError> {
-    let Some((dir, name)) = split_last(path) else {
-        return Ok(());
-    };
-    match alias_below(dir, name) {
+    match walk_last(path).map(alias_only) {
         Ok(None) => Ok(()),
         Ok(Some(conflict)) => Err(CoreError::InvalidInput(conflict.to_string())),
         Err(error) => Err(CoreError::Io(format!(
@@ -236,32 +303,6 @@ pub(crate) fn refuse_alias_at(path: &Path) -> Result<(), CoreError> {
             path.display()
         ))),
     }
-}
-
-/// Write `output` through its sibling `tmp`: `write` fills `tmp`, which is
-/// then renamed over `output`; on any error after `tmp` may exist, `tmp` is
-/// removed, so no partial plaintext survives at either name.
-///
-/// Before `tmp` is created, neither name may reach a different existing entry
-/// ([`refuse_alias_at`]), and `output` is checked again just before the
-/// rename, since a decrypt can take a while.
-pub(crate) fn write_through_tmp<T>(
-    output: &Path,
-    tmp: &Path,
-    write: impl FnOnce() -> Result<T, CoreError>,
-) -> Result<T, CoreError> {
-    refuse_alias_at(output)?;
-    refuse_alias_at(tmp)?;
-    let result = write().and_then(|value| {
-        refuse_alias_at(output)?;
-        std::fs::rename(tmp, output).map_err(|e| CoreError::Io(format!("rename output: {e}")))?;
-        Ok(value)
-    });
-    if result.is_err() {
-        // Drop the temp so it can't poison a cache.
-        std::fs::remove_file(tmp).ok();
-    }
-    result
 }
 
 #[cfg(test)]
@@ -336,6 +377,87 @@ mod tests {
             "name conflict: \"REPORT~1.PDF\" reaches a different existing entry through an 8.3 short name or \
              another alias; refusing to touch it"
         );
+    }
+
+    fn wide(text: &str) -> Vec<u16> {
+        text.encode_utf16().collect()
+    }
+
+    fn listing_not_asked() -> io::Result<bool> {
+        panic!("the handle's answer is final here; the listing must not be read")
+    }
+
+    /// A handle that reports another long name is final, and so is one that
+    /// reports a requested name without an 8.3 shape.
+    #[test]
+    fn a_final_handle_answer_needs_no_listing() {
+        assert_eq!(
+            judge(
+                &wide("REPORT~1.PDF"),
+                Some(&wide("Report for 2026.pdf")),
+                listing_not_asked
+            )
+            .unwrap(),
+            Verdict::Alias(Some(wide("Report for 2026.pdf")))
+        );
+        assert_eq!(
+            judge(
+                &wide("report FOR 2026.PDF"),
+                Some(&wide("Report for 2026.pdf")),
+                listing_not_asked
+            )
+            .unwrap(),
+            Verdict::Own
+        );
+    }
+
+    /// Some redirectors (older SMB dialects) and third-party drivers answer with
+    /// the name as opened: an 8.3-shaped name the handle reports as its own is
+    /// confirmed against the listing.
+    #[test]
+    fn an_eight_three_name_the_handle_reports_as_its_own_is_confirmed_by_the_listing() {
+        assert_eq!(
+            judge(&wide("REPORT~1.PDF"), Some(&wide("REPORT~1.PDF")), || Ok(false)).unwrap(),
+            Verdict::Alias(None),
+            "the listing holds no entry with that long name: it reached another entry"
+        );
+        assert_eq!(
+            judge(&wide("IMG_0001.JPG"), Some(&wide("IMG_0001.JPG")), || Ok(true)).unwrap(),
+            Verdict::Own
+        );
+        let failed = judge(&wide("A.TXT"), Some(&wide("A.TXT")), || {
+            Err(io::Error::other("listing failed"))
+        });
+        assert_eq!(failed.unwrap_err().to_string(), "listing failed");
+    }
+
+    /// Without a handle answer (a link, or an entry the handle cannot open),
+    /// the listing decides.
+    #[test]
+    fn without_a_handle_answer_the_listing_decides() {
+        assert_eq!(judge(&wide("Photos link"), None, || Ok(true)).unwrap(), Verdict::Own);
+        assert_eq!(
+            judge(&wide("PHOTOS~1"), None, || Ok(false)).unwrap(),
+            Verdict::Alias(None)
+        );
+    }
+
+    #[test]
+    fn the_eight_three_shape() {
+        for name in ["A", "REPORT~1", "REPORT~1.PDF", "IMG_0001.JPG", "a.b", "12345678.123"] {
+            assert!(has_short_shape(&wide(name)), "{name}");
+        }
+        for name in [
+            "",
+            ".pdf",
+            "name.",
+            "123456789",
+            "REPORT~1.PDFX",
+            "a.b.c",
+            "Report for 2026.pdf",
+        ] {
+            assert!(!has_short_shape(&wide(name)), "{name}");
+        }
     }
 
     /// The check takes a relative path of plain names on every host: a `..`,

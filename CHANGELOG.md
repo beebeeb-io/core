@@ -19,9 +19,14 @@ Additive: no public item is renamed, retyped or removed.
   - `path_safety::safe_child`, `safe_rel_join` (every existing segment) and `default_output_path` refuse it (their
     `String` error names the conflict).
   - `encrypt::decrypt_chunks_to_file`, `encrypt::decrypt_contiguous_to_file`, `file_encrypt::decrypt_chunks_to_file`
-    and `file_encrypt::encrypt_file_to_chunks` refuse it before creating anything, for the output and for its temp
-    file: `CoreError::InvalidInput` naming the conflict. beebeeb-upload's downloads do the same
-    (`UploadError::InvalidInput`).
+    and `file_encrypt::encrypt_file_to_chunks` refuse such an output before creating anything
+    (`CoreError::InvalidInput` naming the conflict), and so do beebeeb-upload's downloads (`UploadError::InvalidInput`).
+    Their temp file is created exclusively: `{output}.tmp`, or `{output}.{16 hex}.tmp` when that name is taken (a temp
+    left by a crash, or a file of the user's own), so an existing entry is never opened, truncated or deleted. On
+    Windows, an output that did not exist is published without replacing (a hard link, or on a volume without hard
+    links an exclusive create and a rename over it): an entry created there meanwhile fails the write.
+  - An 8.3-shaped name that the file's handle reports as its own long name is confirmed against the directory listing
+    (some network redirectors and third-party drivers report the name as opened).
   - beebeeb-sync's remote delete never deletes the file such a name reaches.
   - Other hosts: no extra file-system calls, and no change but two: beebeeb-sync's remote delete drops a state row that
     is not a relative path of plain names (`..`, absolute) instead of deleting `vault/<path>`, and the item below.
@@ -34,6 +39,15 @@ Additive: no public item is renamed, retyped or removed.
 - `path_safety::short_name_alias(base, rel) -> io::Result<Option<ShortNameAlias>>` (native targets) and
   `path_safety::ShortNameAlias { requested, existing }` (`#[non_exhaustive]`): the typed answer for a caller that has a
   conflict path ("(2)", a conflict copy) and takes it instead of refusing.
+- `path_safety::TempSibling` (native targets): `create(output) -> io::Result<(TempSibling, File)>`, then
+  `publish(self) -> io::Result<()>`; dropped unpublished, it removes its temp. The write-then-publish step every core
+  writer and beebeeb-upload use, for a client that writes a file by name itself.
+
+### Known limits
+
+- The case-insensitive comparison uses Rust's Unicode tables; NTFS uses the volume's `$UpCase` table, written at format
+  time (it maps `ı` and `ſ` to themselves; older tables lack newer case pairs). Erring needs a long name equal to the
+  requested short name but for such letters.
 
 ## [0.2.6] - 2026-11-08
 

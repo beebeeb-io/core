@@ -172,3 +172,17 @@ fn a_link_is_judged_by_its_own_long_name() {
     );
     assert_eq!(short_name_alias(base, Path::new("photos LINK 2026")).unwrap(), None);
 }
+
+/// An 8.3-shaped long name that the handle reports as its own is confirmed by
+/// the listing, which finds it: the entry's own name, in any case, is fine.
+#[test]
+fn an_eight_three_shaped_own_name_is_confirmed_by_the_listing() {
+    let scratch = Scratch::new("shape");
+    let dir = scratch.path();
+    for name in ["IMG_0001.JPG", "a.txt", "README"] {
+        std::fs::write(dir.join(name), b"own").unwrap();
+    }
+    for own in ["IMG_0001.JPG", "img_0001.jpg", "a.txt", "A.TXT", "README", "readme"] {
+        assert_eq!(short_name_alias(dir, Path::new(own)).unwrap(), None, "{own}");
+    }
+}

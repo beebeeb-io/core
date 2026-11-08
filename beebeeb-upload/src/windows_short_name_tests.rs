@@ -125,15 +125,56 @@ fn a_download_never_replaces_another_file_through_its_short_name() {
     assert_refused("replace", "Report for 2026.pdf", str::to_owned);
 }
 
+/// The download's temp sibling `{output}.tmp` reaches another file through its
+/// short name: the temp name is the download's own choice, so a taken one is
+/// skipped. The download succeeds through a fresh temp name and never opens
+/// that file.
 #[test]
 fn a_download_never_truncates_another_file_through_its_tmp_name() {
-    // The download writes `{output}.tmp` first: `REPORT~1` writes `REPORT~1.tmp`.
-    assert_refused("tmp", "Report for 2026.tmp", |alias| {
-        alias
-            .strip_suffix(".TMP")
-            .unwrap_or_else(|| panic!("{alias}: a short name keeps the TMP extension"))
-            .to_owned()
-    });
+    let dir = Scratch::new("tmp");
+    let existing_path = dir.path().join("Report for 2026.tmp");
+    std::fs::write(&existing_path, PRECIOUS).expect("write the existing file");
+    let Some(alias) = short_name(&existing_path) else {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "the volume made no 8.3 short name, so this test proves nothing here"
+        );
+        eprintln!("skipped: the volume makes no 8.3 names");
+        return;
+    };
+    // `REPORT~1.TMP` gives the output `REPORT~1`, whose temp is `REPORT~1.tmp`.
+    let output_name = alias
+        .strip_suffix(".TMP")
+        .unwrap_or_else(|| panic!("{alias}: a short name keeps the TMP extension"))
+        .to_owned();
+    assert_eq!(
+        std::fs::read(dir.path().join(format!("{output_name}.tmp"))).expect("read through the temp name"),
+        PRECIOUS,
+        "the fixture must alias: {output_name}.tmp reaches Report for 2026.tmp"
+    );
+    let key = FileKey::from_bytes([7u8; 32]);
+    let body = encrypt_chunk_raw(&key, WRITTEN).expect("encrypt");
+    let output = dir.path().join(&output_name);
+
+    let result = decrypt_downloaded_bytes(
+        &key,
+        "short-name-test",
+        Unrecorded,
+        &body,
+        1,
+        output.to_str().expect("UTF-8 path"),
+        None,
+    );
+    assert_eq!(
+        std::fs::read(&existing_path).ok().as_deref(),
+        Some(PRECIOUS),
+        "Report for 2026.tmp must stay untouched by a download to {output_name}"
+    );
+    result.map(drop).expect("the output name itself is free");
+    assert_eq!(std::fs::read(&output).unwrap(), WRITTEN);
+    let mut expected = vec!["Report for 2026.tmp".to_owned(), output_name];
+    expected.sort();
+    assert_eq!(entries(dir.path()), expected, "no temp file may remain");
 }
 
 /// The control: the existing file's own long name in another case is that

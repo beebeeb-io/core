@@ -1057,15 +1057,14 @@ pub fn decrypt_chunks_to_file(
     chunks: Vec<(Vec<u8>, Vec<u8>)>, // Vec of (nonce, ciphertext) pairs
     output_path: &str,
 ) -> Result<u64, CoreError> {
-    // Stream into a sibling .tmp, renamed over output_path on success only;
+    // Stream into a sibling .tmp, published as output_path on success only;
     // on ANY Err the .tmp is removed so no partial plaintext survives.
-    let tmp_path = format!("{output_path}.tmp");
-    crate::path_safety::write_through_tmp(output_path.as_ref(), tmp_path.as_ref(), || {
-        decrypt_chunks_to_tmp(key, file_id, expected, chunks, &tmp_path)
+    crate::path_safety::write_through_tmp(output_path.as_ref(), |file| {
+        decrypt_chunks_to_tmp(key, file_id, expected, chunks, file)
     })
 }
 
-/// Streaming decrypt of `(nonce, ciphertext)` chunks → `tmp_path`. Helper for
+/// Streaming decrypt of `(nonce, ciphertext)` chunks into the temp `file`. Helper for
 /// [`decrypt_chunks_to_file`] so the caller can guarantee `.tmp` cleanup on
 /// every error path.
 fn decrypt_chunks_to_tmp(
@@ -1073,12 +1072,10 @@ fn decrypt_chunks_to_tmp(
     file_id: &str,
     expected: crate::chunk_stream::ExpectedChunkFormat,
     chunks: Vec<(Vec<u8>, Vec<u8>)>,
-    tmp_path: &str,
+    mut file: std::fs::File,
 ) -> Result<u64, CoreError> {
-    use std::fs::File;
     use std::io::Write;
 
-    let mut file = File::create(tmp_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
     let mut opener = crate::chunk_stream::StreamOpener::new(key, file_id, expected);
     let mut total: u64 = 0;
     for (nonce, ciphertext) in chunks {
@@ -1157,15 +1154,14 @@ pub fn decrypt_contiguous_to_file(
         .and_then(|v| v.checked_add(TAG_LEN))
         .ok_or_else(|| CoreError::InvalidInput("chunk_size overflows".into()))?;
 
-    // Stream into a sibling .tmp, renamed over output_path on success only;
+    // Stream into a sibling .tmp, published as output_path on success only;
     // on ANY Err the .tmp is removed so no partial plaintext survives.
-    let tmp_path = format!("{output_path}.tmp");
-    crate::path_safety::write_through_tmp(output_path.as_ref(), tmp_path.as_ref(), || {
-        decrypt_contiguous_to_tmp(key, file_id, expected, body, encrypted_chunk_len, &tmp_path)
+    crate::path_safety::write_through_tmp(output_path.as_ref(), |file| {
+        decrypt_contiguous_to_tmp(key, file_id, expected, body, encrypted_chunk_len, file)
     })
 }
 
-/// Streaming decrypt body → `tmp_path`. Helper for [`decrypt_contiguous_to_file`]
+/// Streaming decrypt body into the temp `file`. Helper for [`decrypt_contiguous_to_file`]
 /// so the caller can guarantee `.tmp` cleanup on every error path.
 fn decrypt_contiguous_to_tmp(
     key: &FileKey,
@@ -1173,12 +1169,10 @@ fn decrypt_contiguous_to_tmp(
     expected: crate::chunk_stream::ExpectedChunkFormat,
     body: &[u8],
     encrypted_chunk_len: usize,
-    tmp_path: &str,
+    mut file: std::fs::File,
 ) -> Result<u64, CoreError> {
-    use std::fs::File;
     use std::io::Write;
 
-    let mut file = File::create(tmp_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
     let mut opener = crate::chunk_stream::StreamOpener::new(key, file_id, expected);
     let mut total: u64 = 0;
     let mut offset = 0usize;

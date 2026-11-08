@@ -160,6 +160,35 @@ fn assert_refused(
 /// One of core's write paths: write a decrypted file at the given output.
 type WritePath = fn(&Path) -> Result<(), String>;
 
+/// `write(output)` writes a decrypted file at `output`, whose `.tmp` sibling
+/// name reaches `existing` (holding [`PRECIOUS`]) through its short name. The
+/// temp name is the writer's own choice, so a taken one is skipped: the write
+/// succeeds through a fresh temp name and never opens `existing`.
+fn assert_written_beside(label: &str, existing: &str, write: impl Fn(&Path) -> Result<(), String>) {
+    let scratch = Scratch::new(label);
+    let dir = scratch.path();
+    let Some(alias) = aliased_file(dir, existing) else {
+        return;
+    };
+    let output_name = stem_of_tmp_alias(&alias);
+    assert_eq!(
+        std::fs::read(dir.join(format!("{output_name}.tmp"))).expect("read through the temp name"),
+        PRECIOUS,
+        "the fixture must alias: {output_name}.tmp reaches {existing}"
+    );
+    let result = write(&dir.join(&output_name));
+    assert_eq!(
+        std::fs::read(dir.join(existing)).ok().as_deref(),
+        Some(PRECIOUS),
+        "{label}: {existing} must stay untouched by a write to {output_name}"
+    );
+    result.unwrap_or_else(|error| panic!("{label}: the output name itself is free: {error}"));
+    assert_eq!(std::fs::read(dir.join(&output_name)).unwrap(), WRITTEN, "{label}");
+    let mut expected = vec![existing.to_owned(), output_name];
+    expected.sort();
+    assert_eq!(entries(dir), expected, "{label}: no temp file may remain");
+}
+
 fn contiguous_to(output: &Path) -> Result<(), String> {
     let key = file_key();
     let blob = encrypt_chunk(&key, WRITTEN).map_err(|e| e.to_string())?;
@@ -311,12 +340,7 @@ fn decrypt_contiguous_to_file_never_replaces_another_file_through_its_short_name
 
 #[test]
 fn decrypt_contiguous_to_file_never_truncates_another_file_through_its_tmp_name() {
-    assert_refused(
-        "contiguous-tmp",
-        "Report for 2026.tmp",
-        stem_of_tmp_alias,
-        contiguous_to,
-    );
+    assert_written_beside("contiguous-tmp", "Report for 2026.tmp", contiguous_to);
 }
 
 #[test]
@@ -326,7 +350,7 @@ fn decrypt_chunks_to_file_never_replaces_another_file_through_its_short_name() {
 
 #[test]
 fn decrypt_chunks_to_file_never_truncates_another_file_through_its_tmp_name() {
-    assert_refused("chunks-tmp", "Report for 2026.tmp", stem_of_tmp_alias, chunks_to);
+    assert_written_beside("chunks-tmp", "Report for 2026.tmp", chunks_to);
 }
 
 #[test]
@@ -338,12 +362,7 @@ fn file_decrypt_chunks_to_file_never_replaces_another_file_through_its_short_nam
 fn file_decrypt_chunks_to_file_never_truncates_another_file_through_its_tmp_name() {
     // The temp file is `{output}.tmp` (v0.2.6 wrote `output.with_extension("tmp")`,
     // which is the same name for an output without an extension).
-    assert_refused(
-        "chunk-files-tmp",
-        "Report for 2026.tmp",
-        stem_of_tmp_alias,
-        chunk_files_to,
-    );
+    assert_written_beside("chunk-files-tmp", "Report for 2026.tmp", chunk_files_to);
 }
 
 /// The control: the existing file's own long name, in another case, is that

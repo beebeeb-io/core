@@ -27,17 +27,25 @@
 //! short name (`REPORT~1.PDF` for `Report for 2026.pdf`). [`safe_child`],
 //! [`safe_rel_join`] and [`default_output_path`] refuse such a name, and core's
 //! own file writes do too; [`short_name_alias`] answers the question with a
-//! typed [`ShortNameAlias`] for a caller that has a conflict path (task 2404).
+//! typed [`ShortNameAlias`] for a caller that has a conflict path, and
+//! [`TempSibling`] writes a file through a temp sibling without ever touching
+//! such an entry (task 2404).
 
 use std::fmt;
 
 use crate::invisible::is_display_invisible;
 
 mod short_name;
+mod temp_sibling;
 pub use short_name::ShortNameAlias;
+pub(crate) use short_name::refuse_alias_at;
 #[cfg(not(target_arch = "wasm32"))]
 pub use short_name::short_name_alias;
-pub(crate) use short_name::{refuse_alias_at, write_through_tmp};
+#[cfg(not(target_arch = "wasm32"))]
+pub use temp_sibling::TempSibling;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use temp_sibling::TempSibling;
+pub(crate) use temp_sibling::{core_error, write_through_tmp};
 
 /// Which rule set to apply; see the module docs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
