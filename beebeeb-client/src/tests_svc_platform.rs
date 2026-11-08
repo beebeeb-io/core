@@ -69,6 +69,8 @@ fn asset(id: &str, path: PathBuf) -> Asset {
         export_path: path,
         name: format!("{id}.jpg"),
         mime_type: Some("image/jpeg".into()),
+        modified_ms: None,
+        size_bytes: None,
     }
 }
 

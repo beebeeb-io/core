@@ -74,6 +74,21 @@ pub(crate) struct CheckedFolder {
     pub(crate) id: String,
     pub(crate) device_folder_id: String,
     pub(crate) category_folder_id: Option<String>,
+    /// The server no longer has the configured folder: it stands in for the
+    /// device folder, never live, so the gate can only stop or skip the pass.
+    pub(crate) gone: bool,
+}
+
+impl CheckedFolder {
+    /// A configured folder the server no longer has.
+    pub(crate) fn gone(id: &str) -> Self {
+        Self {
+            id: id.to_owned(),
+            device_folder_id: id.to_owned(),
+            category_folder_id: None,
+            gone: true,
+        }
+    }
 }
 
 /// What a pass does.
@@ -210,7 +225,7 @@ impl Client {
     /// server id.
     pub(crate) async fn backup_stop_listing(&self, folder: &CheckedFolder, kind: AssetKind) -> Option<StopListing> {
         let device_folder_id = Uuid::parse_str(&folder.device_folder_id).ok()?;
-        let device_folder_live = self.backup_row_live(&folder.device_folder_id).await.ok()?;
+        let device_folder_live = !folder.gone && self.backup_row_live(&folder.device_folder_id).await.ok()?;
         let (category_folder_id, category_folder_live) = match folder.category_folder_id.as_deref() {
             Some(id) => (
                 Some(Uuid::parse_str(id).ok()?),

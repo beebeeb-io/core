@@ -69,11 +69,19 @@ impl From<AssetKind> for AssetKindData {
     }
 }
 
+/// `modified_ms` (when the asset last changed on the device, in
+/// milliseconds) and `size_bytes`, `None` when unknown: a copy removed from the
+/// backup is uploaded again only when one of them changes (backup spec §4.2
+/// rule 11). With neither known, a removed copy never comes back by itself.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct AssetData {
     pub local_identifier: String,
     pub name: String,
     pub mime_type: Option<String>,
+    #[uniffi(default = None)]
+    pub modified_ms: Option<i64>,
+    #[uniffi(default = None)]
+    pub size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -110,6 +118,8 @@ impl AssetSource for AssetSourceAdapter {
                     export_path: PathBuf::new(),
                     name: asset.name,
                     mime_type: asset.mime_type,
+                    modified_ms: asset.modified_ms,
+                    size_bytes: asset.size_bytes,
                 })
                 .collect(),
             next_cursor: value.next_cursor,
@@ -124,9 +134,11 @@ impl AssetSource for AssetSourceAdapter {
     }
 }
 
-/// `Trashed` and `Deleted`: the person removed the copy on the server, and
-/// the backup never uploads it again by itself. `UploadFailed`: the upload
-/// failed and is tried again (at most three times).
+/// `Trashed` and `Deleted` (as the platform reported) and `RemovedElsewhere`
+/// (the server's check asked again for a copy this device had backed up): the
+/// copy was removed on the server, and it is uploaded again only once the
+/// asset changes on the device (backup spec §4.2 rule 11). `UploadFailed`: the
+/// upload failed and is tried again (at most three times).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum BackupCopyStateData {
     Active,
@@ -134,6 +146,7 @@ pub enum BackupCopyStateData {
     Trashed,
     Deleted,
     UploadFailed,
+    RemovedElsewhere,
 }
 
 impl From<BackupCopyStateData> for BackupCopyState {
@@ -144,6 +157,7 @@ impl From<BackupCopyStateData> for BackupCopyState {
             BackupCopyStateData::Trashed => Self::Trashed,
             BackupCopyStateData::Deleted => Self::Deleted,
             BackupCopyStateData::UploadFailed => Self::UploadFailed,
+            BackupCopyStateData::RemovedElsewhere => Self::RemovedElsewhere,
         }
     }
 }
@@ -156,6 +170,7 @@ impl From<BackupCopyState> for BackupCopyStateData {
             BackupCopyState::Trashed => Self::Trashed,
             BackupCopyState::Deleted => Self::Deleted,
             BackupCopyState::UploadFailed => Self::UploadFailed,
+            BackupCopyState::RemovedElsewhere => Self::RemovedElsewhere,
         }
     }
 }
@@ -199,6 +214,9 @@ fn pass_state(value: BackupPassStateData) -> Option<BackupPassState> {
     })
 }
 
+/// `modified_ms` and `size_bytes`: the asset as the record last saw it.
+/// Store them with the record; a store that drops them only makes a removed
+/// copy wait for a second change before it comes back.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct BackupManifestRecordData {
     pub local_identifier: String,
@@ -206,6 +224,10 @@ pub struct BackupManifestRecordData {
     pub state: BackupCopyStateData,
     pub local_present: bool,
     pub retry_count: u32,
+    #[uniffi(default = None)]
+    pub modified_ms: Option<i64>,
+    #[uniffi(default = None)]
+    pub size_bytes: Option<u64>,
 }
 
 /// `None` / `false` means the store failed. `clear` removes the records and
@@ -237,6 +259,8 @@ impl BackupManifestStore for BackupManifestStoreAdapter {
                         state: record.state.into(),
                         local_present: record.local_present,
                         retry_count: record.retry_count,
+                        modified_ms: record.modified_ms,
+                        size_bytes: record.size_bytes,
                     })
                     .collect()
             })
@@ -251,6 +275,8 @@ impl BackupManifestStore for BackupManifestStoreAdapter {
                 state: record.state.into(),
                 local_present: record.local_present,
                 retry_count: record.retry_count,
+                modified_ms: record.modified_ms,
+                size_bytes: record.size_bytes,
             })
             .collect();
         self.callback
@@ -435,7 +461,13 @@ impl BackupServiceHandle {
             .map_err(map_client_error)
     }
 
-    /// "Back up again" after a stop: the backup starts fresh.
+    /// "Back up again" after a stop: the backup starts fresh (every record
+    /// is forgotten; a copy still on the server counts as backed up). After a
+    /// stop because the backup's folder was deleted (`unknown` or
+    /// `backup_deleted`), call `configure` with a live folder first: this
+    /// device's folder found again (`find_device_folder`; one restored from
+    /// Trash is found again) or a new one. With the deleted folder still
+    /// configured, the next pass stops again.
     pub fn back_up_again(&self) -> Result<(), ServiceError> {
         self.service.back_up_again().map_err(map_client_error)
     }
@@ -1052,5 +1084,74 @@ mod backup_pass_state_tests {
         ] {
             assert_eq!(pass_state(partial), None);
         }
+    }
+
+    /// Review r5, P2-1: what a record saw of its asset (rule 11's baseline)
+    /// crosses the platform both ways, with the `RemovedElsewhere` state.
+    #[test]
+    fn what_a_record_saw_of_its_asset_crosses_the_platform() {
+        struct Records(std::sync::Mutex<Vec<BackupManifestRecordData>>);
+        impl BackupManifestStoreCallback for Records {
+            fn load(&self) -> Option<Vec<BackupManifestRecordData>> {
+                Some(self.0.lock().unwrap().clone())
+            }
+            fn replace(&self, records: Vec<BackupManifestRecordData>) -> bool {
+                *self.0.lock().unwrap() = records;
+                true
+            }
+            fn load_pass_state(&self) -> Option<BackupPassStateData> {
+                Some(BackupPassStateData::default())
+            }
+            fn save_pass_state(&self, _: BackupPassStateData) -> bool {
+                true
+            }
+            fn clear(&self) -> bool {
+                true
+            }
+        }
+        struct Photos;
+        impl AssetSourceCallback for Photos {
+            fn snapshot(&self, _: AssetKindData, _: Option<String>, _: u64) -> Option<AssetSnapshotData> {
+                Some(AssetSnapshotData {
+                    complete: true,
+                    assets: vec![AssetData {
+                        local_identifier: "photo".into(),
+                        name: "photo.jpg".into(),
+                        mime_type: None,
+                        modified_ms: Some(7),
+                        size_bytes: Some(9),
+                    }],
+                    next_cursor: None,
+                })
+            }
+            fn export(&self, _: AssetKindData, _: String) -> Option<String> {
+                None
+            }
+        }
+
+        let snapshot = AssetSourceAdapter {
+            callback: Box::new(Photos),
+        }
+        .snapshot(AssetKind::Photo, None, 1)
+        .unwrap();
+        assert_eq!(
+            (snapshot.assets[0].modified_ms, snapshot.assets[0].size_bytes),
+            (Some(7), Some(9))
+        );
+
+        let store = BackupManifestStoreAdapter {
+            callback: Box::new(Records(std::sync::Mutex::new(Vec::new()))),
+        };
+        let record = BackupManifestRecord {
+            local_identifier: "photo".into(),
+            file_id: "copy".into(),
+            state: BackupCopyState::RemovedElsewhere,
+            local_present: true,
+            retry_count: 0,
+            modified_ms: Some(7),
+            size_bytes: Some(9),
+        };
+        store.replace(std::slice::from_ref(&record)).unwrap();
+        assert_eq!(store.load().unwrap(), vec![record]);
     }
 }

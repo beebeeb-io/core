@@ -17,8 +17,8 @@ use tempfile::tempdir;
 use crate::{
     Client, ClientConfig,
     backup::{
-        Asset, AssetKind, AssetSnapshot, AssetSource, AssetSourceError, BackupConfiguration, BackupCopyState,
-        BackupFolder, BackupService, NOTICE_OVERLAP_MS,
+        Asset, AssetKind, AssetSnapshot, AssetSource, AssetSourceError, BackupAssetChange, BackupConfiguration,
+        BackupCopyState, BackupFolder, BackupService, BackupStop, NOTICE_OVERLAP_MS,
     },
     test_support::{RouteAnswer, RoutedTransport, ScriptedTransport, json_answer},
     uploads::{NetworkKind, UploadService},
@@ -39,6 +39,8 @@ pub(crate) enum Row {
     Gone,
 }
 
+type Hook = Box<dyn FnMut() + Send>;
+
 #[derive(Default)]
 struct ServerState {
     device: Row,
@@ -46,6 +48,9 @@ struct ServerState {
     /// Answers to notice requests, in order; when empty, one complete empty page.
     pages: VecDeque<RouteAnswer>,
     notice_paths: Vec<String>,
+    /// Run while a notice request is served: another writer acting while a
+    /// pass waits on the gate.
+    on_notice: Option<Hook>,
 }
 
 /// The rows and notices the backup gate reads. Everything else goes to the
@@ -89,6 +94,9 @@ impl BackupServer {
                     Some(row_answer(CATEGORY, Some(DEVICE), state.category))
                 } else if path.starts_with("/api/v1/notifications?") {
                     state.notice_paths.push(path.to_owned());
+                    if let Some(hook) = state.on_notice.as_mut() {
+                        hook();
+                    }
                     Some(state.pages.pop_front().unwrap_or_else(|| page(json!([]), None)))
                 } else {
                     None
@@ -112,6 +120,10 @@ impl BackupServer {
 
     fn notice_paths(&self) -> Vec<String> {
         self.state.lock().unwrap().notice_paths.clone()
+    }
+
+    fn on_notice(&self, hook: impl FnMut() + Send + 'static) {
+        self.state.lock().unwrap().on_notice = Some(Box::new(hook));
     }
 }
 
@@ -154,6 +166,8 @@ fn one_photo(path: &Path) -> AssetSnapshot {
             export_path: path.to_path_buf(),
             name: "photo-1.jpg".into(),
             mime_type: Some("image/jpeg".into()),
+            modified_ms: Some(1_000),
+            size_bytes: Some(5),
         }],
         next_cursor: None,
     }
@@ -462,6 +476,10 @@ async fn back_up_again_moves_past_the_seen_notices_and_starts_fresh() {
         .manifest()
         .remember("photo-1", "trashed-copy", BackupCopyState::Trashed)
         .unwrap();
+    h.backup
+        .manifest()
+        .remember("photo-2", "live-copy", BackupCopyState::Active)
+        .unwrap();
     assert_eq!(h.pass(1).await.stopped, Some(BackupStopReason::EraseRequest));
     let through = h.backup.manifest().pass_state().unwrap().stopped.unwrap().through_ms;
     assert_eq!(
@@ -476,6 +494,11 @@ async fn back_up_again_moves_past_the_seen_notices_and_starts_fresh() {
     assert_eq!(state.stopped, None);
     assert_eq!(state.last_pass_at_ms, Some(through));
     assert_eq!(h.backup.manifest().copy_state("photo-1"), None);
+    assert_eq!(
+        h.backup.manifest().copy_state("photo-2"),
+        None,
+        "every record is forgotten"
+    );
     // The notice the person saw is served again (at or after `since`) but no
     // longer stops the backup; the photo is backed up fresh.
     h.server.push_page(page(json!([notice]), None));
@@ -501,4 +524,237 @@ async fn back_up_again_while_on_changes_nothing() {
         Some(BackupCopyState::Trashed)
     );
     assert_eq!(h.backup.manifest().pass_state().unwrap().last_pass_at_ms, None);
+}
+
+// ── Review r5 ───────────────────────────────────────────────────────────────
+
+/// The asset snapshot of `count` photos, `photo-0` up.
+fn photos(path: &Path, count: usize) -> AssetSnapshot {
+    AssetSnapshot {
+        complete: true,
+        assets: (0..count)
+            .map(|index| Asset {
+                local_identifier: format!("photo-{index}"),
+                export_path: path.to_path_buf(),
+                name: format!("photo-{index}.jpg"),
+                mime_type: Some("image/jpeg".into()),
+                modified_ms: None,
+                size_bytes: None,
+            })
+            .collect(),
+        next_cursor: None,
+    }
+}
+
+/// P2-1 (spec §4.2 rule 11): the person trashes the copy on the web. The
+/// phone hears nothing (no `assets_changed`), and no notice is written for
+/// one file, so the gate runs. The server's check counts only live copies, so
+/// it asks for the photo again.
+#[tokio::test]
+async fn a_copy_trashed_elsewhere_is_not_uploaded_again() {
+    let h = harness(|c| c, &[r#"{"needs_backup":["photo-1"]}"#]);
+    h.backup
+        .manifest()
+        .remember("photo-1", "copy-1", BackupCopyState::Active)
+        .unwrap();
+    h.snapshot_photo();
+
+    let batch = h.pass(1).await;
+
+    assert_eq!(batch.queued, 0);
+    assert!(h.uploads.list().unwrap().is_empty());
+    assert_eq!(
+        h.backup.manifest().copy_state("photo-1"),
+        Some(BackupCopyState::RemovedElsewhere)
+    );
+    // Unchanged, it stays removed and is not even asked about again.
+    h.snapshot_photo();
+    assert_eq!(h.pass(2).await.queued, 0);
+    assert_eq!(h.scripted.request_count(), 1);
+}
+
+/// Rule 11: only a new modification time or size uploads it again.
+#[tokio::test]
+async fn a_copy_removed_elsewhere_comes_back_once_the_photo_changes() {
+    let needs = r#"{"needs_backup":["photo-1"]}"#;
+    let h = harness(|c| c, &[needs, needs]);
+    h.backup
+        .manifest()
+        .remember("photo-1", "copy-1", BackupCopyState::Active)
+        .unwrap();
+    h.snapshot_photo();
+    assert_eq!(h.pass(1).await.queued, 0);
+
+    let mut edited = one_photo(&h.photo);
+    edited.assets[0].modified_ms = Some(2_000);
+    h.source.snapshots.lock().unwrap().push_back(edited);
+    let batch = h.pass(2).await;
+
+    assert_eq!(batch.queued, 1);
+    assert_eq!(h.backup.manifest().copy_state("photo-1"), Some(BackupCopyState::Queued));
+}
+
+/// A copy the platform reports trashed is measured against the photo as it
+/// is after the removal: an edit made before it does not bring the copy back,
+/// a later one does (the safer reading of rule 11).
+#[tokio::test]
+async fn a_copy_reported_trashed_comes_back_only_after_a_later_change() {
+    let h = harness(
+        |c| c,
+        &[
+            r#"{"backed_up":[{"local_identifier":"photo-1","file_id":"copy-1"}]}"#,
+            r#"{"needs_backup":["photo-1"]}"#,
+        ],
+    );
+    h.snapshot_photo();
+    assert_eq!(h.pass(1).await.queued, 0);
+    assert_eq!(h.backup.manifest().copy_state("photo-1"), Some(BackupCopyState::Active));
+    h.backup
+        .assets_changed(&[BackupAssetChange {
+            file_id: "copy-1".into(),
+            state: BackupCopyState::Trashed,
+        }])
+        .unwrap();
+
+    let mut edited = one_photo(&h.photo);
+    edited.assets[0].size_bytes = Some(6);
+    h.source.snapshots.lock().unwrap().push_back(edited.clone());
+    assert_eq!(h.pass(2).await.queued, 0, "the edit came before the removal");
+    assert_eq!(h.scripted.request_count(), 1);
+
+    edited.assets[0].size_bytes = Some(7);
+    h.source.snapshots.lock().unwrap().push_back(edited);
+    assert_eq!(h.pass(3).await.queued, 1);
+}
+
+/// P2-2: a stop cancels the upload, then the app dies before the manifest is
+/// written, so the record is still `Queued` with no live upload.
+#[tokio::test]
+async fn a_stop_cut_off_after_its_cancel_never_strands_a_photo() {
+    let h = harness(
+        |c| c,
+        &[r#"{"needs_backup":["photo-1"]}"#, r#"{"needs_backup":["photo-1"]}"#],
+    );
+    h.snapshot_photo();
+    assert_eq!(h.pass(1).await.queued, 1);
+    h.uploads.cancel_backup_uploads(2).unwrap();
+    h.server.push_page(page(json!([erased("2026-11-08T03:30:00Z")]), None));
+
+    assert_eq!(h.pass(3).await.stopped, Some(BackupStopReason::EraseRequest));
+    assert_eq!(
+        h.backup.manifest().copy_state("photo-1"),
+        None,
+        "no queued record outlives a stop"
+    );
+
+    h.backup.back_up_again().unwrap();
+    h.snapshot_photo();
+    assert_eq!(h.pass(4).await.queued, 1);
+}
+
+/// P3-1: a stop written while a pass waits on the gate's requests (another
+/// kind's pass, or any other writer) is never written over by that pass.
+#[tokio::test]
+async fn a_stop_written_during_a_pass_sticks() {
+    let h = harness(|c| c, &[r#"{"needs_backup":["photo-1"]}"#]);
+    let manifest = h.backup.manifest();
+    h.server.on_notice(move || {
+        manifest
+            .update_pass_state(|state| {
+                state.stopped = Some(BackupStop {
+                    reason: BackupStopReason::AccountReset,
+                    through_ms: 5,
+                });
+            })
+            .unwrap();
+    });
+    h.snapshot_photo();
+
+    let batch = h.pass(1).await;
+
+    assert_eq!(h.backup.stopped().unwrap(), Some(BackupStopReason::AccountReset));
+    assert_eq!(batch.stopped, Some(BackupStopReason::AccountReset));
+    assert_eq!(batch.queued, 0);
+    assert!(h.uploads.list().unwrap().is_empty());
+}
+
+/// P3-3: after a deleted-folder stop, "Back up again" needs a live folder
+/// configured first; with the deleted one still configured it stops again.
+#[tokio::test]
+async fn back_up_again_after_a_deleted_folder_needs_a_live_folder_first() {
+    let h = harness(|c| c, &[r#"{"needs_backup":["photo-1"]}"#]);
+    h.server.set_category(Row::Trashed);
+    assert_eq!(h.pass(1).await.stopped, Some(BackupStopReason::Unknown));
+
+    h.backup.back_up_again().unwrap();
+    assert_eq!(
+        h.pass(2).await.stopped,
+        Some(BackupStopReason::Unknown),
+        "the deleted folder is still configured"
+    );
+
+    // The platform finds this device's folder again (Amendment 12), then the
+    // person chooses again.
+    h.backup
+        .configure(BackupConfiguration::new(BackupFolder { id: DEVICE.into() }, false).unwrap())
+        .unwrap();
+    h.backup.back_up_again().unwrap();
+    h.snapshot_photo();
+    let batch = h.pass(3).await;
+    assert_eq!(batch.stopped, None);
+    assert_eq!(batch.queued, 1);
+}
+
+/// P3-2: after a restart nothing is cached, and the configured folder is gone
+/// for good (404). The pass reaches the gate, stops and says why.
+#[tokio::test]
+async fn a_configured_folder_deleted_for_good_stops_the_backup_and_says_why() {
+    let h = harness(|c| c, &[]);
+    h.server.set_category(Row::Gone);
+    h.snapshot_photo();
+
+    let batch = h.pass(1).await;
+
+    assert_eq!(batch.stopped, Some(BackupStopReason::Unknown));
+    assert_eq!(h.backup.stopped().unwrap(), Some(BackupStopReason::Unknown));
+    assert!(h.uploads.list().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_device_folder_deleted_for_good_from_another_device_says_so() {
+    let h = harness(
+        |c| BackupConfiguration {
+            folder: BackupFolder { id: DEVICE.into() },
+            ..c
+        },
+        &[],
+    );
+    h.server.set_device(Row::Gone);
+    h.server.push_page(page(
+        json!([{"id": "n2", "type": "backup_deleted", "title": "t", "body": null,
+                "data": {"device_folder_id": DEVICE}, "read": false,
+                "created_at": "2026-11-08T03:00:00Z"}]),
+        None,
+    ));
+    h.snapshot_photo();
+
+    assert_eq!(h.pass(1).await.stopped, Some(BackupStopReason::BackupDeleted));
+}
+
+/// P3-4: with the upload queue full, the gate still runs, so a stop cancels
+/// the uploads in flight instead of letting them land after an erase.
+#[tokio::test]
+async fn the_gate_runs_while_the_upload_queue_is_full() {
+    let identifiers: Vec<String> = (0..64).map(|index| format!("photo-{index}")).collect();
+    let reply = json!({ "needs_backup": identifiers }).to_string();
+    let h = harness(|c| c, &[&reply]);
+    h.source.snapshots.lock().unwrap().push_back(photos(&h.photo, 64));
+    assert_eq!(h.pass(1).await.queued, 64);
+    assert_eq!(h.uploads.active_backup_count().unwrap(), 64);
+    h.server.push_page(page(json!([erased("2026-11-08T03:30:00Z")]), None));
+
+    let batch = h.pass(2).await;
+
+    assert_eq!(batch.stopped, Some(BackupStopReason::EraseRequest));
+    assert_eq!(h.uploads.active_backup_count().unwrap(), 0);
 }

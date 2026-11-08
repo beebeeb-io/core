@@ -566,7 +566,9 @@ impl UploadService {
     /// Cancel every backup upload that is not done, delete its staged
     /// chunks, and mark its outcome applied, so a stop is never counted as a
     /// failed upload (a stopped backup never fills the account up again, core
-    /// Never break). The cancelled uploads' local identifiers.
+    /// Never break). The cancelled uploads' local identifiers. Every upload
+    /// is tried; one that fails does not stop the others, and the first error
+    /// is returned once all were tried.
     pub fn cancel_backup_uploads(&self, now_ms: i64) -> Result<Vec<String>, UploadServiceError> {
         let active: Vec<(i64, String)> = self
             .store
@@ -587,27 +589,36 @@ impl UploadService {
             })
             .collect();
         let mut cancelled = Vec::with_capacity(active.len());
+        let mut first_error = None;
         for (id, local_identifier) in active {
-            match self.cancel(id, now_ms) {
-                Ok(plan) => remove_planned_files(&plan),
-                // Its planner could not be read: it is cancelled all the same,
-                // so it never completes; its staged chunks stay until sign-out.
-                Err(_) => {
-                    self.store
-                        .lock()
-                        .map_err(|_| UploadServiceError::State)?
-                        .cancel_transfer(id, now_ms)
-                        .map_err(|_| UploadServiceError::State)?;
-                    self.emit(UploadEvent::Changed {
-                        id,
-                        state: TransferState::Cancelled,
-                    });
+            match self.cancel_backup_upload(id, now_ms) {
+                Ok(()) => cancelled.push(local_identifier),
+                Err(error) => {
+                    first_error.get_or_insert(error);
                 }
             }
-            self.mark_backup_outcome_applied(id, now_ms)?;
-            cancelled.push(local_identifier);
         }
-        Ok(cancelled)
+        first_error.map_or(Ok(cancelled), Err)
+    }
+
+    fn cancel_backup_upload(&self, id: i64, now_ms: i64) -> Result<(), UploadServiceError> {
+        match self.cancel(id, now_ms) {
+            Ok(plan) => remove_planned_files(&plan),
+            // Its planner could not be read: it is cancelled all the same,
+            // so it never completes; its staged chunks stay until sign-out.
+            Err(_) => {
+                self.store
+                    .lock()
+                    .map_err(|_| UploadServiceError::State)?
+                    .cancel_transfer(id, now_ms)
+                    .map_err(|_| UploadServiceError::State)?;
+                self.emit(UploadEvent::Changed {
+                    id,
+                    state: TransferState::Cancelled,
+                });
+            }
+        }
+        self.mark_backup_outcome_applied(id, now_ms)
     }
 
     pub fn active_backup_count(&self) -> Result<usize, UploadServiceError> {

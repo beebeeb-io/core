@@ -56,6 +56,12 @@ pub struct Asset {
     pub export_path: PathBuf,
     pub name: String,
     pub mime_type: Option<String>,
+    /// When the asset last changed on the device (ms) and its size in bytes,
+    /// as the platform reports them; `None` when unknown. A copy removed from
+    /// the backup is uploaded again only when one of them changes (backup
+    /// spec §4.2 rule 11).
+    pub modified_ms: Option<i64>,
+    pub size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,27 +139,32 @@ impl BackupConfiguration {
 }
 
 /// Where an asset's backup copy stands. Only [`Self::UploadFailed`] and an
-/// asset with no record are uploaded (again); a copy the person trashed or
-/// deleted is never uploaded again by the pass (core Never break: a stopped
-/// backup never fills the account up again by itself), until they choose
-/// "Back up again" after a stop.
+/// asset with no record are uploaded (again). A removed copy
+/// ([`Self::removed`]) stays removed until the asset changes on the device
+/// again: a new modification time or size (backup spec §4.2 rule 11; core
+/// Never break: a stopped backup never fills the account up again by itself).
+/// "Back up again" after a stop forgets every record and starts fresh.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackupCopyState {
     Active,
     Queued,
-    /// In the Trash on the server.
+    /// In the Trash on the server, as the platform reported.
     Trashed,
-    /// Deleted on the server.
+    /// Deleted on the server, as the platform reported.
     Deleted,
+    /// Gone from the server without a word here (trashed or deleted on the
+    /// web or another device): the server's check asked for a copy this
+    /// device had backed up (spec §4.2 rule 11, `removed_elsewhere`).
+    RemovedElsewhere,
     /// The upload failed or was cancelled; it is tried again, at most
     /// three times.
     UploadFailed,
 }
 
 impl BackupCopyState {
-    /// The person removed this copy on the server.
+    /// The copy was removed on the server.
     pub fn removed(self) -> bool {
-        matches!(self, Self::Trashed | Self::Deleted)
+        matches!(self, Self::Trashed | Self::Deleted | Self::RemovedElsewhere)
     }
 }
 
@@ -164,6 +175,19 @@ pub struct BackupManifestRecord {
     pub state: BackupCopyState,
     pub local_present: bool,
     pub retry_count: u32,
+    /// The asset's [`Asset::modified_ms`] and [`Asset::size_bytes`] as this
+    /// record last saw them. A removed copy comes back only when the asset no
+    /// longer matches; a side not known yet is taken from the asset at the
+    /// next pass, which is not a change.
+    pub modified_ms: Option<i64>,
+    pub size_bytes: Option<u64>,
+}
+
+/// Whether `asset` changed on the device since `record` saw it: a side both
+/// know that differs.
+fn asset_changed(record: &BackupManifestRecord, asset: &Asset) -> bool {
+    matches!((record.modified_ms, asset.modified_ms), (Some(was), Some(now)) if was != now)
+        || matches!((record.size_bytes, asset.size_bytes), (Some(was), Some(now)) if was != now)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -248,46 +272,81 @@ impl BackupManifest {
         Ok(*self.pass.lock().map_err(|_| BackupError::State)?)
     }
 
-    /// Persist first, then remember: a state the platform could not store is
-    /// never acted on.
-    fn set_pass_state(&self, state: BackupPassState) -> Result<(), BackupError> {
+    /// Change the pass state as it is now, under its lock: persist first,
+    /// then remember, so a state the platform could not store is never acted
+    /// on. Every write goes through here, so one writer never puts back a copy
+    /// it read before another wrote (a stop sticks). Returns the new state.
+    pub(crate) fn update_pass_state(
+        &self,
+        change: impl FnOnce(&mut BackupPassState),
+    ) -> Result<BackupPassState, BackupError> {
         let mut pass = self.pass.lock().map_err(|_| BackupError::State)?;
+        let mut state = *pass;
+        change(&mut state);
         self.persistence.save_pass_state(&state)?;
         *pass = state;
-        Ok(())
+        Ok(state)
     }
 
-    /// Forget the records of `local_identifiers` that are still `Queued`
-    /// (their uploads were cancelled by a stop), so a pass after "Back up
-    /// again" asks the server about them afresh.
-    fn forget_queued(&self, local_identifiers: &[String]) -> Result<(), BackupError> {
+    /// Forget every `Queued` record. Run once a stopped backup's uploads are
+    /// cancelled, so none of them can be live; a pass after "Back up again"
+    /// asks the server about them afresh.
+    fn forget_queued(&self) -> Result<(), BackupError> {
         let mut entries = self.entries.lock().map_err(|_| BackupError::State)?;
-        for identifier in local_identifiers {
-            if entries
-                .get(identifier)
-                .is_some_and(|entry| entry.state == BackupCopyState::Queued)
-            {
-                entries.remove(identifier);
-            }
+        let before = entries.len();
+        entries.retain(|_, entry| entry.state != BackupCopyState::Queued);
+        if entries.len() == before {
+            return Ok(());
         }
         self.persist(&entries)
     }
 
-    /// "Back up again": forget every copy that is not `Active` or `Queued`
-    /// (trashed, deleted, failed), so the backup starts fresh.
-    fn forget_removed_and_failed(&self) -> Result<(), BackupError> {
+    /// "Back up again": forget every record, so the backup starts fresh. A
+    /// copy still on the server is found again by the server's check and
+    /// counts as backed up (spec rules 3 and 10).
+    fn forget_all(&self) -> Result<(), BackupError> {
         let mut entries = self.entries.lock().map_err(|_| BackupError::State)?;
-        entries.retain(|_, entry| matches!(entry.state, BackupCopyState::Active | BackupCopyState::Queued));
+        entries.clear();
         self.persist(&entries)
     }
 
+    /// Record a copy's state. The record keeps what it last saw of the asset;
+    /// [`Self::remember_asset`] records that too.
     pub fn remember(&self, local_identifier: &str, file_id: &str, state: BackupCopyState) -> Result<(), BackupError> {
+        self.record(local_identifier, file_id, state, None)
+    }
+
+    /// Record a copy's state, with the asset as the pass sees it now.
+    pub(crate) fn remember_asset(
+        &self,
+        asset: &Asset,
+        file_id: &str,
+        state: BackupCopyState,
+    ) -> Result<(), BackupError> {
+        self.record(
+            &asset.local_identifier,
+            file_id,
+            state,
+            Some((asset.modified_ms, asset.size_bytes)),
+        )
+    }
+
+    fn record(
+        &self,
+        local_identifier: &str,
+        file_id: &str,
+        state: BackupCopyState,
+        seen: Option<(Option<i64>, Option<u64>)>,
+    ) -> Result<(), BackupError> {
         let mut entries = self.entries.lock().map_err(|_| BackupError::State)?;
+        let existing = entries.get(local_identifier);
         let retry_count = if state == BackupCopyState::Active {
             0
         } else {
-            entries.get(local_identifier).map_or(0, |entry| entry.retry_count)
+            existing.map_or(0, |entry| entry.retry_count)
         };
+        let (modified_ms, size_bytes) =
+            seen.unwrap_or_else(|| existing.map_or((None, None), |entry| (entry.modified_ms, entry.size_bytes)));
         entries.insert(
             local_identifier.to_owned(),
             BackupManifestRecord {
@@ -296,8 +355,55 @@ impl BackupManifest {
                 state,
                 local_present: true,
                 retry_count,
+                modified_ms,
+                size_bytes,
             },
         );
+        self.persist(&entries)
+    }
+
+    /// Whether a pass may consider `asset` for an upload: it has no record,
+    /// its upload failed, its copy is on the server and `check_active` (the
+    /// server's check runs again), or its copy was removed and the asset
+    /// changed on the device since (spec §4.2 rule 11). A removed record that
+    /// does not know a side of the asset yet takes it now: that is the
+    /// baseline a later change is measured against, never a change itself.
+    fn may_back_up(&self, asset: &Asset, check_active: bool) -> Result<bool, BackupError> {
+        let mut entries = self.entries.lock().map_err(|_| BackupError::State)?;
+        let Some(entry) = entries.get_mut(&asset.local_identifier) else {
+            return Ok(true);
+        };
+        match entry.state {
+            BackupCopyState::UploadFailed => Ok(true),
+            BackupCopyState::Active => Ok(check_active),
+            BackupCopyState::Queued => Ok(false),
+            BackupCopyState::Trashed | BackupCopyState::Deleted | BackupCopyState::RemovedElsewhere => {
+                if asset_changed(entry, asset) {
+                    return Ok(true);
+                }
+                let learns = (entry.modified_ms.is_none() && asset.modified_ms.is_some())
+                    || (entry.size_bytes.is_none() && asset.size_bytes.is_some());
+                if learns {
+                    entry.modified_ms = entry.modified_ms.or(asset.modified_ms);
+                    entry.size_bytes = entry.size_bytes.or(asset.size_bytes);
+                    self.persist(&entries)?;
+                }
+                Ok(false)
+            }
+        }
+    }
+
+    /// The server's check asked for a copy this device had backed up: it was
+    /// removed elsewhere. It stays removed until the asset changes after now
+    /// (the safer reading of rule 11: a change made before the removal does
+    /// not bring the copy back).
+    fn mark_removed_elsewhere(&self, asset: &Asset) -> Result<(), BackupError> {
+        let mut entries = self.entries.lock().map_err(|_| BackupError::State)?;
+        if let Some(entry) = entries.get_mut(&asset.local_identifier) {
+            entry.state = BackupCopyState::RemovedElsewhere;
+            entry.modified_ms = asset.modified_ms;
+            entry.size_bytes = asset.size_bytes;
+        }
         self.persist(&entries)
     }
 
@@ -344,6 +450,8 @@ impl BackupManifest {
                 state: BackupCopyState::UploadFailed,
                 local_present: true,
                 retry_count: 0,
+                modified_ms: None,
+                size_bytes: None,
             });
         entry.file_id = file_id.to_owned();
         entry.state = BackupCopyState::UploadFailed;
@@ -351,9 +459,16 @@ impl BackupManifest {
         self.persist(&entries)
     }
 
+    /// The platform reports a copy's state. A copy reported removed forgets
+    /// what it saw of the asset, so the next pass takes the asset as it is
+    /// then: only a change after the removal brings it back (rule 11).
     fn update_copy_state(&self, file_id: &str, state: BackupCopyState) -> Result<(), BackupError> {
         let mut entries = self.entries.lock().map_err(|_| BackupError::State)?;
         if let Some(entry) = entries.values_mut().find(|entry| entry.file_id == file_id) {
+            if state.removed() && !entry.state.removed() {
+                entry.modified_ms = None;
+                entry.size_bytes = None;
+            }
             entry.state = state;
         }
         self.persist(&entries)
@@ -461,6 +576,9 @@ pub struct BackupService {
     manifest: BackupManifest,
     pages: Mutex<BTreeMap<AssetKind, BackupPageState>>,
     events: broadcast::Sender<BackupEvent>,
+    /// One pass at a time, whatever the kind or the calling thread: a pass
+    /// that read the gate's state never runs alongside one that stops it.
+    pass_lock: tokio::sync::Mutex<()>,
 }
 
 #[derive(Default)]
@@ -487,6 +605,7 @@ impl BackupService {
             manifest: BackupManifest::default(),
             pages: Mutex::new(BTreeMap::new()),
             events,
+            pass_lock: tokio::sync::Mutex::new(()),
         };
         service.install_completion_handler()?;
         Ok(service)
@@ -509,6 +628,7 @@ impl BackupService {
             manifest: BackupManifest::open(manifest_store)?,
             pages: Mutex::new(BTreeMap::new()),
             events,
+            pass_lock: tokio::sync::Mutex::new(()),
         };
         service.install_completion_handler()?;
         Ok(service)
@@ -534,6 +654,13 @@ impl BackupService {
     /// `backups_root`. Anything else (outside the tree, or the root itself)
     /// queues nothing. Checked once per configured folder; the device and
     /// category folders found on the way are the ones each pass's gate reads.
+    ///
+    /// A folder the server no longer has (404, or 403 once it is not this
+    /// account's) is gone for good: the gate reads it as a gone device folder,
+    /// so the pass stops and says why instead of failing every time. Its
+    /// device folder is not known then (nothing is cached across a restart),
+    /// so a `backup_deleted` notice that names the device folder of a gone
+    /// category folder is not matched, and the stop says `Unknown`'s words.
     async fn check_backup_folder(&self, folder: &BackupFolder) -> Result<CheckedFolder, BackupError> {
         if let Some(checked) = self
             .checked_folder
@@ -544,7 +671,15 @@ impl BackupService {
         {
             return Ok(checked.clone());
         }
-        let row = self.client.get_file(&folder.id).await?;
+        let row = match self.client.get_file(&folder.id).await {
+            Ok(row) => row,
+            Err(crate::ClientError::Api(beebeeb_api::ApiError::Server(server)))
+                if matches!(server.status, 403 | 404) =>
+            {
+                return Ok(CheckedFolder::gone(&folder.id));
+            }
+            Err(error) => return Err(error.into()),
+        };
         let chain = match self.client.backup_chain_of(&row).await {
             Ok(chain) => chain,
             Err(crate::backup_guard::GuardError::Client(error)) => return Err(error.into()),
@@ -559,6 +694,7 @@ impl BackupService {
             id: folder.id.clone(),
             device_folder_id: chain[chain.len() - 2].id.clone(),
             category_folder_id: (chain.len() >= 3).then(|| chain[chain.len() - 3].id.clone()),
+            gone: false,
         };
         *self.checked_folder.lock().map_err(|_| BackupError::State)? = Some(checked.clone());
         Ok(checked)
@@ -588,36 +724,59 @@ impl BackupService {
     /// "Back up again", the person's choice after a stop (backup spec
     /// Amendment 12): the backup starts fresh. The notices it stopped on no
     /// longer count (`last_pass_at` moves past them, on the server's clock),
-    /// and copies that were trashed, deleted or failed are forgotten, so the
-    /// next pass asks the server about them again. Nothing changes while the
-    /// backup is on.
+    /// and every record is forgotten, so the next pass asks the server about
+    /// every asset again; a copy still there counts as backed up. Nothing
+    /// changes while the backup is on.
+    ///
+    /// After a stop because the backup's folder was deleted (`Unknown` or
+    /// `BackupDeleted`), [`Self::configure`] a live folder first: find this
+    /// device's folder again (Amendment 12, `find_device_folder`; one restored
+    /// from Trash is found again) or create a new one, then call this. Called
+    /// with the deleted folder still configured, the next pass stops again.
     pub fn back_up_again(&self) -> Result<(), BackupError> {
-        let mut state = self.manifest.pass_state()?;
-        let Some(stop) = state.stopped.take() else {
+        if self.manifest.pass_state()?.stopped.is_none() {
             return Ok(());
-        };
-        state.last_pass_at_ms = Some(
-            state
-                .last_pass_at_ms
-                .map_or(stop.through_ms, |last| last.max(stop.through_ms)),
-        );
-        self.manifest.forget_removed_and_failed()?;
-        self.manifest.set_pass_state(state)?;
+        }
+        // Records first: cut off after this, the backup is still off and the
+        // person chooses again.
+        self.manifest.forget_all()?;
+        self.manifest.update_pass_state(|state| {
+            if let Some(stop) = state.stopped.take() {
+                state.last_pass_at_ms = Some(
+                    state
+                        .last_pass_at_ms
+                        .map_or(stop.through_ms, |last| last.max(stop.through_ms)),
+                );
+            }
+        })?;
+        *self.checked_folder.lock().map_err(|_| BackupError::State)? = None;
         self.pages.lock().map_err(|_| BackupError::State)?.clear();
         let _ = self.events.send(BackupEvent::ManifestChanged);
         Ok(())
     }
 
-    /// Turn the backup off: cancel its uploads that are not done (a stopped
-    /// backup never fills the account up again), then record why. Cancelling
-    /// first means a crash in between only stops it again on the next pass.
-    fn stop(&self, stop: BackupStop, now_ms: i64) -> Result<(), BackupError> {
-        let cancelled = self.uploads.cancel_backup_uploads(now_ms)?;
-        self.manifest.forget_queued(&cancelled)?;
-        let mut state = self.manifest.pass_state()?;
-        state.stopped = Some(stop);
-        self.manifest.set_pass_state(state)?;
+    /// Turn the backup off (a stopped backup never fills the account up
+    /// again). The stop is recorded first, so a pass cut off anywhere after it
+    /// is still stopped, and the next pass finishes the stop
+    /// ([`Self::finish_stop`]). A backup already off keeps its first reason,
+    /// which is the stop returned.
+    fn stop(&self, stop: BackupStop, now_ms: i64) -> Result<BackupStop, BackupError> {
+        let state = self.manifest.update_pass_state(|state| {
+            state.stopped.get_or_insert(stop);
+        })?;
         let _ = self.events.send(BackupEvent::ManifestChanged);
+        self.finish_stop(now_ms)?;
+        Ok(state.stopped.unwrap_or(stop))
+    }
+
+    /// Cancel every backup upload that is not done, then forget every
+    /// `Queued` record: none of them has a live upload any more. Run by every
+    /// pass while the backup is off, so a stop cut off part-way (or a cancel
+    /// that failed for one upload) is finished by the next pass.
+    fn finish_stop(&self, now_ms: i64) -> Result<(), BackupError> {
+        let cancelled = self.uploads.cancel_backup_uploads(now_ms);
+        self.manifest.forget_queued()?;
+        cancelled?;
         Ok(())
     }
 
@@ -635,7 +794,7 @@ impl BackupService {
         folder: &CheckedFolder,
         now_ms: i64,
     ) -> Result<PassDecision, BackupError> {
-        let mut state = self.manifest.pass_state()?;
+        let state = self.manifest.pass_state()?;
         if let Some(stop) = state.stopped {
             return Ok(PassDecision::Stopped(stop));
         }
@@ -647,10 +806,23 @@ impl BackupService {
         };
         let decision = gate::decide(read.as_ref(), baseline, listing.as_ref());
         match (decision, read.as_ref()) {
-            (PassDecision::Stopped(stop), _) => self.stop(stop, now_ms)?,
+            (PassDecision::Stopped(stop), _) => return Ok(PassDecision::Stopped(self.stop(stop, now_ms)?)),
             (PassDecision::Run, Some(read)) => {
-                state.last_pass_at_ms = Some(gate::next_last_pass_at(read, baseline));
-                self.manifest.set_pass_state(state)?;
+                // A gone folder is never Run (its device folder is not live);
+                // should the rule ever say so, nothing is queued into it.
+                if folder.gone {
+                    return Err(BackupError::NotInBackups);
+                }
+                let next = gate::next_last_pass_at(read, baseline);
+                // Written on the state as it is now: a stop written meanwhile
+                // stays, and `last_pass_at` never moves back.
+                let now = self.manifest.update_pass_state(|state| {
+                    state.last_pass_at_ms = Some(state.last_pass_at_ms.map_or(next, |last| last.max(next)));
+                })?;
+                if let Some(stop) = now.stopped {
+                    self.finish_stop(now_ms)?;
+                    return Ok(PassDecision::Stopped(stop));
+                }
             }
             _ => {}
         }
@@ -663,12 +835,12 @@ impl BackupService {
         network: NetworkKind,
         now_ms: i64,
     ) -> Result<BackupBatch, BackupError> {
+        let _pass = self.pass_lock.lock().await;
         self.reconcile_upload_outcomes(now_ms).await?;
         // A stopped backup queues nothing and keeps nothing queued, whatever
         // the network: only "Back up again" turns it on.
         if let Some(stop) = self.manifest.pass_state()?.stopped {
-            let cancelled = self.uploads.cancel_backup_uploads(now_ms)?;
-            self.manifest.forget_queued(&cancelled)?;
+            self.finish_stop(now_ms)?;
             return self.finish_batch(BackupBatch {
                 stopped: Some(stop.reason),
                 ..BackupBatch::empty(kind)
@@ -687,10 +859,8 @@ impl BackupService {
             });
         }
 
-        let available = MAX_QUEUED_BACKUP_UPLOADS.saturating_sub(self.uploads.active_backup_count()?);
-        if available == 0 {
-            return self.finish_batch(BackupBatch::empty(kind));
-        }
+        // The gate runs even with the upload queue full, so a stop cancels the
+        // uploads in flight.
         let folder = self.check_backup_folder(&configuration.folder).await?;
         match self.pass_gate(kind, &configuration, &folder, now_ms).await? {
             PassDecision::Run => {}
@@ -706,6 +876,10 @@ impl BackupService {
                     ..BackupBatch::empty(kind)
                 });
             }
+        }
+        let available = MAX_QUEUED_BACKUP_UPLOADS.saturating_sub(self.uploads.active_backup_count()?);
+        if available == 0 {
+            return self.finish_batch(BackupBatch::empty(kind));
         }
         let cursor = self
             .pages
@@ -725,17 +899,13 @@ impl BackupService {
         let candidates: BTreeSet<String> = if kind == AssetKind::Photo {
             self.photo_candidates(&snapshot).await?
         } else {
-            snapshot
-                .assets
-                .iter()
-                .filter(|asset| {
-                    matches!(
-                        self.manifest.copy_state(&asset.local_identifier),
-                        None | Some(BackupCopyState::UploadFailed)
-                    ) && self.retry_allowed(&asset.local_identifier)
-                })
-                .map(|asset| asset.local_identifier.clone())
-                .collect()
+            let mut candidates = BTreeSet::new();
+            for asset in &snapshot.assets {
+                if self.retry_allowed(&asset.local_identifier) && self.manifest.may_back_up(asset, false)? {
+                    candidates.insert(asset.local_identifier.clone());
+                }
+            }
+            candidates
         };
         let mut queued = 0usize;
         for asset in &snapshot.assets {
@@ -762,7 +932,7 @@ impl BackupService {
                 .find(|item| item.id == upload_id)
                 .ok_or(BackupError::State)?;
             self.manifest
-                .remember(&asset.local_identifier, &summary.file_id, BackupCopyState::Queued)?;
+                .remember_asset(asset, &summary.file_id, BackupCopyState::Queued)?;
             queued = queued.checked_add(1).ok_or(BackupError::TooManyAssets)?;
         }
         let snapshot_complete = snapshot.complete && snapshot.next_cursor.is_none();
@@ -795,21 +965,28 @@ impl BackupService {
     }
 
     /// The photos to upload: those the server says need a backup, never one
-    /// queued, out of retries, or whose copy the person trashed or deleted
-    /// (core Never break: a stopped backup never fills the account up again;
-    /// a removed copy comes back only after "Back up again").
+    /// queued or out of retries. A removed copy is not even asked about until
+    /// its photo changes on the device (spec §4.2 rule 11). The server's check
+    /// counts only live copies, so a copy this device backed up (`Active`)
+    /// that it asks for again was removed elsewhere: it becomes
+    /// `RemovedElsewhere` and is not uploaded (core Never break: a removed
+    /// file never comes back unchanged).
     async fn photo_candidates(&self, snapshot: &AssetSnapshot) -> Result<BTreeSet<String>, BackupError> {
-        let identifiers: Vec<String> = snapshot
+        let assets: BTreeMap<&str, &Asset> = snapshot
             .assets
             .iter()
-            .filter(|asset| {
-                !matches!(
-                    self.manifest.copy_state(&asset.local_identifier),
-                    Some(BackupCopyState::Queued | BackupCopyState::Trashed | BackupCopyState::Deleted)
-                ) && self.retry_allowed(&asset.local_identifier)
-            })
-            .map(|asset| asset.local_identifier.clone())
+            .map(|asset| (asset.local_identifier.as_str(), asset))
             .collect();
+        let mut identifiers = Vec::new();
+        let mut backed_up = BTreeSet::new();
+        for asset in &snapshot.assets {
+            if self.retry_allowed(&asset.local_identifier) && self.manifest.may_back_up(asset, true)? {
+                if self.manifest.copy_state(&asset.local_identifier) == Some(BackupCopyState::Active) {
+                    backed_up.insert(asset.local_identifier.clone());
+                }
+                identifiers.push(asset.local_identifier.clone());
+            }
+        }
         let mut candidates = BTreeSet::new();
         for page in identifiers.chunks(MAX_ASSETS_PER_PAGE) {
             let page = page.to_vec();
@@ -837,11 +1014,23 @@ impl BackupService {
                 return Err(BackupError::IncompleteDeduplicationAnswer);
             }
             for (identifier, file_id) in mapped {
-                if page.contains(&identifier) {
-                    self.manifest.remember(&identifier, &file_id, BackupCopyState::Active)?;
+                if page.contains(&identifier)
+                    && let Some(asset) = assets.get(identifier.as_str())
+                {
+                    self.manifest.remember_asset(asset, &file_id, BackupCopyState::Active)?;
                 }
             }
-            candidates.extend(page.into_iter().filter(|identifier| needs.contains(identifier)));
+            for identifier in page.into_iter().filter(|identifier| needs.contains(identifier)) {
+                match assets.get(identifier.as_str()) {
+                    Some(asset) if backed_up.contains(&identifier) => {
+                        self.manifest.mark_removed_elsewhere(asset)?;
+                        let _ = self.events.send(BackupEvent::ManifestChanged);
+                    }
+                    _ => {
+                        candidates.insert(identifier);
+                    }
+                }
+            }
         }
         Ok(candidates)
     }
