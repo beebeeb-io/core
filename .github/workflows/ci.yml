@@ -183,15 +183,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # SDKMAN is pre-installed on GitHub ubuntu-latest runners. Installing via
-      # SDKMAN pins an exact version number; the HTTPS download provides
-      # transport-layer integrity.
-      - name: Install Kotlin 2.0.21 via SDKMAN
-        shell: bash
+      # Download kotlinc 2.0.21 directly from JetBrains GitHub releases.
+      # The release page publishes a companion .sha256 file for every artifact
+      # so we can verify after downloading. Version is pinned in the URL.
+      - name: Download and verify kotlinc 2.0.21
         run: |
-          source "$HOME/.sdkman/bin/sdkman-init.sh"
-          sdk install kotlin 2.0.21 </dev/null
-          echo "$HOME/.sdkman/candidates/kotlin/current/bin" >> "$GITHUB_PATH"
+          KC_URL="https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip"
+          curl -sSfL "$KC_URL"            -o "$RUNNER_TEMP/kotlinc.zip"
+          EXPECTED="$(curl -sSfL "${KC_URL}.sha256")"
+          echo "$EXPECTED  $RUNNER_TEMP/kotlinc.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/kotlinc.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/kotlinc/bin" >> "$GITHUB_PATH"
 
       # JNA is the only runtime the generated Kotlin bindings reference. Maven
       # Central publishes a companion sha256 file for every artifact; we
