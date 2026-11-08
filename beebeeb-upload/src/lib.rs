@@ -13,6 +13,8 @@ mod error;
 mod retry;
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, windows))]
+mod windows_short_name_tests;
 
 pub use download::{download_and_decrypt_file, DownloadClient, DownloadProgressCallback, DownloadResult};
 pub use error::UploadError;

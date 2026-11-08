@@ -287,6 +287,35 @@ A range session serves reads at any offset while the download runs (desktop Wind
 - Recovery phrase IS the master secret — password wraps it, doesn't replace it
 - No panics in crypto paths — everything returns Result
 
+## Path safety on Windows: short-name aliases (task 2404)
+
+Windows resolves a name against both the long names and the 8.3 short names of a directory, so a server name can reach
+an existing entry with a different long name. `path_safety::short_name_alias(base, rel)` walks `rel` below `base` and
+returns a typed `ShortNameAlias` for the first existing component whose entry's own long name differs (NTFS
+comparison: Unicode simple uppercase per UTF-16 unit; `char` has only the full mapping, so the 27 Greek letters with
+ypogegrammeni are mapped by hand; the volume's own `$UpCase` table can differ for `ı`, `ſ` and newer pairs). The long
+name comes from the file system: `canonicalize` on the opened handle, whose answer is final, except that an 8.3-shaped
+name it reports as its own is confirmed against the directory listing (some redirectors report the name as opened); a
+link (opened through) or an entry that cannot be opened goes to the listing. The decision is the pure `judge` (unit
+tested with stubbed answers). Never from the shape of the name alone. `base` is trusted: a user-chosen root may be
+written in short form. On every other host it is `Ok(None)` without disk access.
+
+- `safe_child`, `safe_rel_join` (every segment) and `default_output_path` refuse such a name (their `String` error).
+- Core's own writes and beebeeb-upload's downloads go through `path_safety::TempSibling`: `create` refuses an output
+  alias, then creates the temp exclusively (`{output}.tmp`, else `{output}.{16 hex}.tmp`: a taken name, such as a
+  crash's leftover, is never opened); `publish` checks the output again, renames over the output's own name, and on
+  Windows publishes a missing output without replacing (`hard_link` + remove the temp; without hard links an exclusive
+  create of the output and a rename over it). `encrypt_file_to_chunks` also checks every `{N}.enc` before the first
+  write. In `CoreError` a conflict is `InvalidInput` naming it (no new variant in a patch release). beebeeb-sync's
+  remote delete never deletes the entry an alias reaches.
+- A caller with a conflict path ("(2)", a conflict copy) calls `short_name_alias` first and takes that path on
+  `Some`. Output paths built from remote names must come from `safe_rel_join` (per segment), since a write path only
+  checks its last component.
+- Windows tests: `tests/windows/short_names.rs` (a module of `integration`), `path_safety/short_name_windows_tests.rs`,
+  `path_safety/temp_sibling_windows_tests.rs`, beebeeb-upload `windows_short_name_tests.rs`, beebeeb-sync
+  `engine_windows_tests.rs`. Each proves its fixture
+  aliases first; no 8.3 names on the volume skips, or fails with `CI` set.
+
 ## Design references
 
 Design files live in the workspace root `../../design/hifi/` — never copy them into this public repo (a snapshot once published a false external-audit claim; the Claims guard CI job now fails on those strings).

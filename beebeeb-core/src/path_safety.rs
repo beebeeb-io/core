@@ -20,11 +20,32 @@
 //!   Linux file named `a\b`); refusing those would look like a remote delete.
 //!
 //! The pure naming rules build for wasm too; the filesystem part
-//! ([`ensure_contained`], [`safe_child`], [`safe_rel_join`]) is native-only.
+//! ([`ensure_contained`], [`safe_child`], [`safe_rel_join`],
+//! [`short_name_alias`]) is native-only.
+//!
+//! On Windows a name can also reach a DIFFERENT existing entry through its 8.3
+//! short name (`REPORT~1.PDF` for `Report for 2026.pdf`). [`safe_child`],
+//! [`safe_rel_join`] and [`default_output_path`] refuse such a name, and core's
+//! own file writes do too; [`short_name_alias`] answers the question with a
+//! typed [`ShortNameAlias`] for a caller that has a conflict path, and
+//! [`TempSibling`] writes a file through a temp sibling without ever touching
+//! such an entry (task 2404).
 
 use std::fmt;
 
 use crate::invisible::is_display_invisible;
+
+mod short_name;
+mod temp_sibling;
+pub use short_name::ShortNameAlias;
+pub(crate) use short_name::refuse_alias_at;
+#[cfg(not(target_arch = "wasm32"))]
+pub use short_name::short_name_alias;
+#[cfg(not(target_arch = "wasm32"))]
+pub use temp_sibling::TempSibling;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use temp_sibling::TempSibling;
+pub(crate) use temp_sibling::{core_error, write_through_tmp};
 
 /// Which rule set to apply; see the module docs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -309,8 +330,9 @@ mod native {
     }
 
     /// `dir/name` for ONE server-provided name: the name is validated as a
-    /// single safe component, the target must not be a symlink, and its
-    /// resolved location must stay inside `dir`.
+    /// single safe component, the target must not be a symlink, its resolved
+    /// location must stay inside `dir`, and it must not reach a different
+    /// existing entry through an 8.3 short name ([`super::short_name_alias`]).
     pub fn safe_child(dir: &Path, name: &str, rules: Rules) -> Result<PathBuf, String> {
         check_component(name, rules).map_err(|e| format!("unsafe name {name:?} ({e})"))?;
         let target = dir.join(name);
@@ -320,11 +342,14 @@ mod native {
         ));
         reject_symlink(&target)?;
         ensure_contained(dir, &target)?;
+        short_name::refuse_alias(dir, Path::new(name))?;
         Ok(target)
     }
 
     /// `base/rel` for a `/`-separated remote-relative path: every segment is
-    /// validated, and the resolved location must stay inside `base`.
+    /// validated, the resolved location must stay inside `base`, and no
+    /// existing segment may reach a different entry through an 8.3 short name
+    /// ([`super::short_name_alias`]).
     pub fn safe_rel_join(base: &Path, rel: &str, rules: Rules) -> Result<PathBuf, String> {
         if rel.is_empty() {
             return Err("unsafe name \"\" (empty path)".to_string());
@@ -339,6 +364,7 @@ mod native {
         }
         reject_symlink(&target)?;
         ensure_contained(base, &target)?;
+        short_name::refuse_alias(base, Path::new(rel))?;
         Ok(target)
     }
 
@@ -350,6 +376,8 @@ mod native {
         })?;
         let path = PathBuf::from(name);
         reject_symlink(&path)?;
+        short_name::refuse_alias(Path::new("."), &path)
+            .map_err(|e| format!("{e}; pass -o <path> to choose where to save it"))?;
         Ok(path)
     }
 }

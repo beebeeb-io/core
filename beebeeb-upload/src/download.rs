@@ -26,48 +26,47 @@ fn map_download_failure(failure: DownloadFailure) -> UploadError {
     }
 }
 
-/// The `{output}.tmp` file a download writes into before the atomic rename.
+/// The temp file a download writes into before it is published as the output:
+/// core's [`beebeeb_core::path_safety::TempSibling`] (`{output}.tmp`, or a
+/// fresh name when that one is taken), which never opens, truncates or
+/// replaces an existing entry the output name was not meant for (task 2404).
 ///
-/// `Drop` removes it unless [`Self::commit`] renamed it into place, so every
+/// `Drop` removes the temp unless [`Self::commit`] published it, so every
 /// error path in unwind builds — a `?` while reading the body, a decryption
-/// failure, a flush error, a failed rename — leaves no decrypted frames
-/// behind. (The old explicit `remove_file` at each `return` missed the `?`
-/// exits.) This holds only where unwinding runs `Drop`: the workspace sets
+/// failure, a flush error, a failed publish — leaves no decrypted frames
+/// behind. This holds only where unwinding runs `Drop`: the workspace sets
 /// `panic = "abort"` for release builds (`Cargo.toml`), so a panic does not
 /// unwind there and the temp file can remain. The guard is error cleanup, not
 /// a panic safety net.
-struct TempOutput {
-    path: std::path::PathBuf,
-    renamed: bool,
-}
+struct TempOutput(beebeeb_core::path_safety::TempSibling);
 
 impl TempOutput {
-    /// Create the parent directory and the temp file; the guard removes the
-    /// file on drop until it is committed.
+    /// Create the parent directory and the temp file.
     fn create(output_path: &str) -> Result<(Self, std::fs::File), UploadError> {
-        let path = std::path::PathBuf::from(format!("{output_path}.tmp"));
-        if let Some(parent) = std::path::Path::new(output_path).parent() {
+        let output = std::path::Path::new(output_path);
+        if let Some(parent) = output.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| UploadError::IoError(format!("create output parent dir: {e}")))?;
         }
-        let file =
-            std::fs::File::create(&path).map_err(|e| UploadError::IoError(format!("create output file: {e}")))?;
-        Ok((Self { path, renamed: false }, file))
+        let (temp, file) = beebeeb_core::path_safety::TempSibling::create(output)
+            .map_err(|e| upload_error("create output file", e))?;
+        Ok((Self(temp), file))
     }
 
-    /// Rename the temp file into place and disarm the guard.
-    fn commit(mut self, output_path: &str) -> Result<(), UploadError> {
-        std::fs::rename(&self.path, output_path).map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
-        self.renamed = true;
-        Ok(())
+    /// Publish the temp file as the output (the output name is checked again
+    /// first: the download may have taken a while).
+    fn commit(self) -> Result<(), UploadError> {
+        self.0.publish().map_err(|e| upload_error("rename output", e))
     }
 }
 
-impl Drop for TempOutput {
-    fn drop(&mut self) {
-        if !self.renamed {
-            let _ = std::fs::remove_file(&self.path);
-        }
+/// A [`beebeeb_core::path_safety::TempSibling`] error as this crate's: a name
+/// conflict is `InvalidInput` naming it, anything else `IoError`.
+fn upload_error(context: &str, e: std::io::Error) -> UploadError {
+    if e.kind() == std::io::ErrorKind::AlreadyExists {
+        UploadError::InvalidInput(e.to_string())
+    } else {
+        UploadError::IoError(format!("{context}: {e}"))
     }
 }
 
@@ -353,7 +352,7 @@ impl DownloadClient {
             .flush()
             .map_err(|e| UploadError::IoError(format!("flush output: {e}")))?;
         drop(writer);
-        tmp.commit(output_path)?;
+        tmp.commit()?;
 
         if let Some(cb) = callback {
             cb.on_complete(output_path);
@@ -446,7 +445,7 @@ pub fn decrypt_downloaded_bytes(
     drop(writer);
 
     // Atomic rename
-    tmp.commit(output_path)?;
+    tmp.commit()?;
 
     if let Some(cb) = callback {
         cb.on_complete(output_path);

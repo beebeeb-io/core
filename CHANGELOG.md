@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Windows: a create by name never touches a different file that the OS resolves the name to (8.3 alias), task 2404.
+Additive: no public item is renamed, retyped or removed.
+
+### Fixed
+
+- **Windows: a create, truncate, replace or delete by name only ever touches the entry with that exact long name.**
+  Windows also resolves a name through the 8.3 short names of a directory, so a name could reach a different existing
+  file. Such a name is now a name conflict, decided from the existing entry's own long name as the file system reports
+  it (case-insensitive, as NTFS compares), never from the shape of the name.
+  - `path_safety::safe_child`, `safe_rel_join` (every existing segment) and `default_output_path` refuse it (their
+    `String` error names the conflict).
+  - `encrypt::decrypt_chunks_to_file`, `encrypt::decrypt_contiguous_to_file`, `file_encrypt::decrypt_chunks_to_file`
+    and `file_encrypt::encrypt_file_to_chunks` refuse such an output before creating anything
+    (`CoreError::InvalidInput` naming the conflict), and so do beebeeb-upload's downloads (`UploadError::InvalidInput`).
+    Their temp file is created exclusively: `{output}.tmp`, or `{output}.{16 hex}.tmp` when that name is taken (a temp
+    left by a crash, or a file of the user's own), so an existing entry is never opened, truncated or deleted. On
+    Windows, an output that did not exist is published without replacing (a hard link, or on a volume without hard
+    links an exclusive create and a rename over it): an entry created there meanwhile fails the write.
+  - An 8.3-shaped name that the file's handle reports as its own long name is confirmed against the directory listing
+    (some network redirectors and third-party drivers report the name as opened).
+  - beebeeb-sync's remote delete never deletes the file such a name reaches.
+  - Other hosts: no extra file-system calls, and no change but two: beebeeb-sync's remote delete drops a state row that
+    is not a relative path of plain names (`..`, absolute) instead of deleting `vault/<path>`, and the item below.
+- **`file_encrypt::decrypt_chunks_to_file` writes `{output_path}.tmp`, as its docs say** (it wrote
+  `output_path.with_extension("tmp")`, which is the output itself for `notes.tmp`: a failed decrypt truncated and then
+  deleted that file, and `a.pdf` and `a.doc` in one folder shared one temp file).
+
+### Added
+
+- `path_safety::short_name_alias(base, rel) -> io::Result<Option<ShortNameAlias>>` (native targets) and
+  `path_safety::ShortNameAlias { requested, existing }` (`#[non_exhaustive]`): the typed answer for a caller that has a
+  conflict path ("(2)", a conflict copy) and takes it instead of refusing.
+- `path_safety::TempSibling` (native targets): `create(output) -> io::Result<(TempSibling, File)>`, then
+  `publish(self) -> io::Result<()>`; dropped unpublished, it removes its temp. The write-then-publish step every core
+  writer and beebeeb-upload use, for a client that writes a file by name itself.
+
+### Known limits
+
+- The case-insensitive comparison uses Rust's Unicode tables; NTFS uses the volume's `$UpCase` table, written at format
+  time (it maps `ı` and `ſ` to themselves; older tables lack newer case pairs). Erring needs a long name equal to the
+  requested short name but for such letters.
+
 ## [0.2.6] - 2026-11-08
 
 Fixes to the folder-zip writer `zip::stream_folder_zip` (LD-0146, core #89, #90 and #91): an entry of 4 GiB or more is
