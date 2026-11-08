@@ -52,19 +52,29 @@ pub struct IdPage {
     pub next_cursor: Option<String>,
 }
 
-pub fn check() -> Endpoint<Check, CheckResult> {
-    Endpoint::new(Method::Post, "/api/v1/files/photo-backup/check", true)
+/// The header the server keys every photo-backup association by
+/// (`photo_backup_state (user_id, device_id, local_identifier)`). A request
+/// without it lands in the account's shared `''` map, where one device's
+/// photo ids collide with another's, so every keyed route below takes the
+/// device id: the platform's canonical one, never one core makes up. The
+/// server trims it and reads one over 128 bytes as missing.
+pub const DEVICE_ID_HEADER: &str = "X-Beebeeb-Device-Id";
+
+pub fn check(device_id: &str) -> Endpoint<Check, CheckResult> {
+    Endpoint::new(Method::Post, "/api/v1/files/photo-backup/check", true).header(DEVICE_ID_HEADER, device_id)
 }
-pub fn mark() -> Endpoint<Mark, MarkResult> {
-    Endpoint::new(Method::Post, "/api/v1/files/photo-backup/mark", true)
+pub fn mark(device_id: &str) -> Endpoint<Mark, MarkResult> {
+    Endpoint::new(Method::Post, "/api/v1/files/photo-backup/mark", true).header(DEVICE_ID_HEADER, device_id)
 }
 pub fn stats() -> Endpoint<(), Stats> {
     Endpoint::new(Method::Get, "/api/v1/files/photo-backup/stats", false)
 }
-pub fn identifiers() -> Endpoint<(), Identifiers> {
-    Endpoint::new(Method::Get, "/api/v1/files/photo-backup/identifiers", false).limits(0, 16 * 1024 * 1024)
+pub fn identifiers(device_id: &str) -> Endpoint<(), Identifiers> {
+    Endpoint::new(Method::Get, "/api/v1/files/photo-backup/identifiers", false)
+        .limits(0, 16 * 1024 * 1024)
+        .header(DEVICE_ID_HEADER, device_id)
 }
-pub fn ids(cursor: Option<&str>, limit: u16) -> Endpoint<(), IdPage> {
+pub fn ids(device_id: &str, cursor: Option<&str>, limit: u16) -> Endpoint<(), IdPage> {
     let path = cursor.map_or_else(
         || format!("/api/v1/files/photo-backup/ids?limit={limit}"),
         |cursor| {
@@ -74,12 +84,15 @@ pub fn ids(cursor: Option<&str>, limit: u16) -> Endpoint<(), IdPage> {
             )
         },
     );
-    Endpoint::new(Method::Get, path, false).limits(0, 16 * 1024 * 1024)
+    Endpoint::new(Method::Get, path, false)
+        .limits(0, 16 * 1024 * 1024)
+        .header(DEVICE_ID_HEADER, device_id)
 }
-pub fn clear_association(file_id: &str) -> Endpoint<(), super::Empty> {
+pub fn clear_association(device_id: &str, file_id: &str) -> Endpoint<(), super::Empty> {
     Endpoint::new(
         Method::Post,
         format!("/api/v1/files/{}/photo-backup/clear-association", component(file_id)),
         false,
     )
+    .header(DEVICE_ID_HEADER, device_id)
 }

@@ -189,10 +189,16 @@ pub(crate) fn map_client_error(error: impl std::error::Error + 'static) -> Servi
                 _ => {}
             }
         }
-        if let Some(beebeeb_client::backup::BackupError::NotInBackups) =
-            current.downcast_ref::<beebeeb_client::backup::BackupError>()
-        {
-            return ServiceError::InvalidInput;
+        match current.downcast_ref::<beebeeb_client::backup::BackupError>() {
+            Some(
+                beebeeb_client::backup::BackupError::NotInBackups
+                | beebeeb_client::backup::BackupError::InvalidDeviceId,
+            ) => return ServiceError::InvalidInput,
+            // One backup service per upload service, until the first is dropped.
+            Some(beebeeb_client::backup::BackupError::AlreadyRunning) => {
+                return ServiceError::new(ServiceErrorKind::Unavailable);
+            }
+            _ => {}
         }
         if let Some(beebeeb_client::uploads::UploadServiceError::Protected(protected)) =
             current.downcast_ref::<beebeeb_client::uploads::UploadServiceError>()

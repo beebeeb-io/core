@@ -266,10 +266,47 @@ fn parses_recorded_photo_backup_shapes() {
     assert_eq!(stats.total_backed_up, 4210);
     assert_eq!(stats.total_size_bytes, 999);
 
-    let identifiers = photo_backup::identifiers()
+    let identifiers = photo_backup::identifiers("device")
         .parse(answer(r#"{"identifiers":{"file-a":"asset-a"}}"#))
         .unwrap();
     assert_eq!(identifiers.identifiers["file-a"], "asset-a");
+}
+
+/// Review r5, P1-1: the server keys every photo-backup association by
+/// `X-Beebeeb-Device-Id` and puts a request without it in the account's
+/// shared `''` map. Every keyed route carries it; `stats` is account-wide.
+#[test]
+fn photo_backup_routes_carry_the_device_id() {
+    use beebeeb_api::{ClientIdentity, RequestBuilder};
+    let builder = RequestBuilder::new(ClientIdentity::new("mobile-ios", "1")).with_auth("token", "user");
+    let check = photo_backup::Check {
+        identifiers: vec!["photo".into()],
+    };
+    let mark = photo_backup::Mark {
+        local_identifier: "photo".into(),
+        file_id: "file".into(),
+    };
+    let keyed = [
+        photo_backup::check("phone-a").build(&builder, &check).unwrap(),
+        photo_backup::mark("phone-a").build(&builder, &mark).unwrap(),
+        photo_backup::identifiers("phone-a").build(&builder, &()).unwrap(),
+        photo_backup::ids("phone-a", Some("next"), 100)
+            .build(&builder, &())
+            .unwrap(),
+        photo_backup::clear_association("phone-a", "file")
+            .build(&builder, &())
+            .unwrap(),
+    ];
+    for request in &keyed {
+        assert_eq!(
+            request.header(photo_backup::DEVICE_ID_HEADER),
+            Some("phone-a"),
+            "{}",
+            request.path()
+        );
+    }
+    let stats = photo_backup::stats().build(&builder, &()).unwrap();
+    assert_eq!(stats.header(photo_backup::DEVICE_ID_HEADER), None);
 }
 
 #[test]

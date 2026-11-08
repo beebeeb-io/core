@@ -23,6 +23,13 @@ use gate::{CheckedFolder, PassDecision};
 const MAX_ASSETS_PER_PAGE: usize = 500;
 const MAX_QUEUED_BACKUP_UPLOADS: usize = 64;
 const MAX_BACKUP_FAILURES: u32 = 3;
+/// The most backed-up copies one pass looks up on the server (one page: a
+/// pass reads at most [`MAX_QUEUED_BACKUP_UPLOADS`] assets). Any more stay
+/// `Active`, upload nothing and are looked up when the snapshot reaches them
+/// again.
+const MAX_COPY_LOOKUPS_PER_PASS: usize = MAX_QUEUED_BACKUP_UPLOADS;
+/// The server reads a longer `X-Beebeeb-Device-Id` as missing.
+const MAX_DEVICE_ID_BYTES: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BackupPolicy {
@@ -84,6 +91,8 @@ pub enum AssetSourceError {
 
 /// Platform seam for PhotoKit, Contacts and Calendar. Export paths are
 /// platform-created inputs; core decides whether and where they are queued.
+/// Called during [`BackupService::next_batch`], under its pass lock: never
+/// call back into the service, nor wait on a thread inside `next_batch`.
 pub trait AssetSource: Send + Sync {
     fn snapshot(&self, kind: AssetKind, cursor: Option<&str>, limit: usize) -> Result<AssetSnapshot, AssetSourceError>;
 
@@ -107,6 +116,13 @@ pub struct BackupFolder {
 pub struct BackupConfiguration {
     pub folder: BackupFolder,
     pub wifi_only: bool,
+    /// This device's canonical id, the one the app already sends as
+    /// `X-Beebeeb-Device-Id` (mobile: `getDeviceId()`). The server keys this
+    /// device's photo-backup map by it; without it every device of the
+    /// account would share one map, and one phone's photo ids would hide
+    /// another's. Core never makes one up. Checked by [`Self::new`]: 1 to 128
+    /// visible ASCII characters.
+    pub device_id: String,
     /// When backups were turned on on this device, server clock, ms (backup
     /// spec Amendment 12c). With no pass yet, only notices newer than core's
     /// `first_pass_baseline` of this and [`Self::legacy_last_backup_ms`]
@@ -118,13 +134,18 @@ pub struct BackupConfiguration {
 }
 
 impl BackupConfiguration {
-    pub fn new(folder: BackupFolder, wifi_only: bool) -> Result<Self, BackupError> {
+    pub fn new(folder: BackupFolder, wifi_only: bool, device_id: impl Into<String>) -> Result<Self, BackupError> {
         if folder.id.is_empty() {
             return Err(BackupError::NotInBackups);
+        }
+        let device_id = device_id.into();
+        if !valid_device_id(&device_id) {
+            return Err(BackupError::InvalidDeviceId);
         }
         Ok(Self {
             folder,
             wifi_only,
+            device_id,
             setup_at_ms: None,
             legacy_last_backup_ms: None,
         })
@@ -136,6 +157,14 @@ impl BackupConfiguration {
         self.legacy_last_backup_ms = legacy_last_backup_ms;
         self
     }
+}
+
+/// A device id the server keys by as sent: 1 to 128 visible ASCII
+/// characters (nothing it would trim, nothing a header cannot carry).
+fn valid_device_id(device_id: &str) -> bool {
+    !device_id.is_empty()
+        && device_id.len() <= MAX_DEVICE_ID_BYTES
+        && device_id.bytes().all(|byte| byte.is_ascii_graphic())
 }
 
 /// Where an asset's backup copy stands. Only [`Self::UploadFailed`] and an
@@ -196,6 +225,9 @@ pub enum BackupManifestStoreError {
     Unavailable,
 }
 
+/// The platform's durable copy of the manifest and the pass state. Its
+/// methods run while the [`BackupService`] holds its manifest or pass-state
+/// lock: they must not call back into the service.
 pub trait BackupManifestStore: Send + Sync {
     fn load(&self) -> Result<Vec<BackupManifestRecord>, BackupManifestStoreError>;
     fn replace(&self, records: &[BackupManifestRecord]) -> Result<(), BackupManifestStoreError>;
@@ -549,6 +581,10 @@ pub enum BackupError {
     ManifestStore(#[from] BackupManifestStoreError),
     #[error("the backup folder is not a device folder inside the Backups folder")]
     NotInBackups,
+    #[error("the device id is missing or invalid")]
+    InvalidDeviceId,
+    #[error("another backup service is running on this upload service")]
+    AlreadyRunning,
     #[error("the Backups folder could not be checked")]
     Client(#[from] crate::ClientError),
     #[error("the asset source failed")]
@@ -565,11 +601,29 @@ pub enum BackupError {
     InvalidAnswer,
 }
 
+/// The native backup.
+///
+/// **One service per manifest store**, across processes too. The manifest
+/// and the pass state are read from the store once, when the service is made,
+/// and every write puts back the service's whole copy, so a second service on
+/// the same store would write over the first one's stop, "Back up again" or
+/// forgotten records. Within a process this is enforced per
+/// [`UploadService`]: a second service on it is refused
+/// ([`BackupError::AlreadyRunning`]) until the first is dropped. An app
+/// extension or a second process must never open the same store while the
+/// app's service lives.
+///
+/// **Re-entrancy.** The store's callbacks ([`BackupManifestStore`]) run while
+/// the service holds its manifest or pass-state lock, and the asset source's
+/// ([`AssetSource`]) while it holds the pass lock. A callback must not call
+/// back into this service (`stopped`, `manifest().copy_state`,
+/// `next_batch`, ...), and must not wait on a thread that is inside
+/// [`Self::next_batch`]: either deadlocks.
 pub struct BackupService {
     client: Arc<Client>,
     uploads: Arc<UploadService>,
     source: Arc<dyn AssetSource>,
-    configuration: Mutex<BackupConfiguration>,
+    configuration: Arc<Mutex<BackupConfiguration>>,
     /// The folder whose place in the Backups tree has been checked, with its
     /// device and category folders.
     checked_folder: Mutex<Option<CheckedFolder>>,
@@ -579,6 +633,8 @@ pub struct BackupService {
     /// One pass at a time, whatever the kind or the calling thread: a pass
     /// that read the gate's state never runs alongside one that stops it.
     pass_lock: tokio::sync::Mutex<()>,
+    /// Held while this service lives: the upload service refuses a second.
+    _lease: Arc<()>,
 }
 
 #[derive(Default)]
@@ -595,20 +651,7 @@ impl BackupService {
         source: Arc<dyn AssetSource>,
         configuration: BackupConfiguration,
     ) -> Result<Self, BackupError> {
-        let (events, _) = broadcast::channel(64);
-        let service = Self {
-            client,
-            uploads,
-            source,
-            configuration: Mutex::new(configuration),
-            checked_folder: Mutex::new(None),
-            manifest: BackupManifest::default(),
-            pages: Mutex::new(BTreeMap::new()),
-            events,
-            pass_lock: tokio::sync::Mutex::new(()),
-        };
-        service.install_completion_handler()?;
-        Ok(service)
+        Self::start(client, uploads, source, configuration, BackupManifest::default())
     }
 
     pub fn with_manifest_store(
@@ -618,19 +661,39 @@ impl BackupService {
         configuration: BackupConfiguration,
         manifest_store: Arc<dyn BackupManifestStore>,
     ) -> Result<Self, BackupError> {
+        let manifest = BackupManifest::open(manifest_store)?;
+        Self::start(client, uploads, source, configuration, manifest)
+    }
+
+    /// Make the service. Create it when the upload service is made, before
+    /// any upload resumes: a backup stopped before a crash (its stop saved,
+    /// its uploads not yet cancelled) cancels them here, before they can
+    /// publish.
+    fn start(
+        client: Arc<Client>,
+        uploads: Arc<UploadService>,
+        source: Arc<dyn AssetSource>,
+        configuration: BackupConfiguration,
+        manifest: BackupManifest,
+    ) -> Result<Self, BackupError> {
+        let lease = uploads.lease_backup()?.ok_or(BackupError::AlreadyRunning)?;
         let (events, _) = broadcast::channel(64);
         let service = Self {
             client,
             uploads,
             source,
-            configuration: Mutex::new(configuration),
+            configuration: Arc::new(Mutex::new(configuration)),
             checked_folder: Mutex::new(None),
-            manifest: BackupManifest::open(manifest_store)?,
+            manifest,
             pages: Mutex::new(BTreeMap::new()),
             events,
             pass_lock: tokio::sync::Mutex::new(()),
+            _lease: lease,
         };
         service.install_completion_handler()?;
+        if service.manifest.pass_state()?.stopped.is_some() {
+            service.finish_stop(crate::uploads::transfer_now_ms()?)?;
+        }
         Ok(service)
     }
 
@@ -638,9 +701,19 @@ impl BackupService {
         self.uploads.set_completion_handler(Arc::new(BackupUploadCompletion {
             client: self.client.clone(),
             manifest: self.manifest.clone(),
+            configuration: self.configuration.clone(),
             events: self.events.clone(),
         }))?;
         Ok(())
+    }
+
+    fn device_id(&self) -> Result<String, BackupError> {
+        Ok(self
+            .configuration
+            .lock()
+            .map_err(|_| BackupError::State)?
+            .device_id
+            .clone())
     }
 
     pub fn configure(&self, configuration: BackupConfiguration) -> Result<(), BackupError> {
@@ -966,11 +1039,11 @@ impl BackupService {
 
     /// The photos to upload: those the server says need a backup, never one
     /// queued or out of retries. A removed copy is not even asked about until
-    /// its photo changes on the device (spec §4.2 rule 11). The server's check
-    /// counts only live copies, so a copy this device backed up (`Active`)
-    /// that it asks for again was removed elsewhere: it becomes
-    /// `RemovedElsewhere` and is not uploaded (core Never break: a removed
-    /// file never comes back unchanged).
+    /// its photo changes on the device (spec §4.2 rule 11). A copy this device
+    /// backed up (`Active`) that the check asks for again is never uploaded
+    /// from that answer: its own file decides
+    /// ([`Self::look_up_backed_up_copy`]; core Never break: a removed file
+    /// never comes back unchanged). Every call carries this device's id.
     async fn photo_candidates(&self, snapshot: &AssetSnapshot) -> Result<BTreeSet<String>, BackupError> {
         let assets: BTreeMap<&str, &Asset> = snapshot
             .assets
@@ -987,13 +1060,15 @@ impl BackupService {
                 identifiers.push(asset.local_identifier.clone());
             }
         }
+        let device_id = self.device_id()?;
         let mut candidates = BTreeSet::new();
+        let mut lookups = 0usize;
         for page in identifiers.chunks(MAX_ASSETS_PER_PAGE) {
             let page = page.to_vec();
             let answer: beebeeb_api::routes::photo_backup::CheckResult = self
                 .client
                 .execute(
-                    &beebeeb_api::routes::photo_backup::check(),
+                    &beebeeb_api::routes::photo_backup::check(&device_id),
                     &beebeeb_api::routes::photo_backup::Check {
                         identifiers: page.clone(),
                     },
@@ -1022,9 +1097,13 @@ impl BackupService {
             }
             for identifier in page.into_iter().filter(|identifier| needs.contains(identifier)) {
                 match assets.get(identifier.as_str()) {
+                    // Backed up by this device: never uploaded again from the
+                    // check's answer alone. Its own copy decides.
                     Some(asset) if backed_up.contains(&identifier) => {
-                        self.manifest.mark_removed_elsewhere(asset)?;
-                        let _ = self.events.send(BackupEvent::ManifestChanged);
+                        if lookups < MAX_COPY_LOOKUPS_PER_PASS {
+                            lookups += 1;
+                            self.look_up_backed_up_copy(asset, &device_id).await?;
+                        }
                     }
                     _ => {
                         candidates.insert(identifier);
@@ -1033,6 +1112,46 @@ impl BackupService {
             }
         }
         Ok(candidates)
+    }
+
+    /// The server's check no longer has a row for a copy this device backed
+    /// up (`Active`). The row alone proves nothing: it is keyed by this
+    /// device's id and can go while the file stays (a device id that changed,
+    /// `clear-association`). Spec rule 11's signal is the record's own copy
+    /// (lead ruling, decision 2394):
+    ///
+    /// - live: still backed up. It stays `Active` and `mark` is sent again to
+    ///   repair the row; nothing is uploaded.
+    /// - in the Trash, or gone (404): removed elsewhere, `RemovedElsewhere`.
+    /// - anything else (another error, an answer about another file): nothing
+    ///   changes and nothing is uploaded for it this pass.
+    async fn look_up_backed_up_copy(&self, asset: &Asset, device_id: &str) -> Result<(), BackupError> {
+        let Some(file_id) = self.manifest.file_id(&asset.local_identifier) else {
+            return Ok(());
+        };
+        let removed = match self.client.get_file(&file_id).await {
+            Ok(row) if !row.id.eq_ignore_ascii_case(&file_id) => return Ok(()),
+            Ok(row) => row.is_trashed,
+            Err(crate::ClientError::Api(beebeeb_api::ApiError::Server(server))) if server.status == 404 => true,
+            Err(_) => return Ok(()),
+        };
+        if removed {
+            self.manifest.mark_removed_elsewhere(asset)?;
+            let _ = self.events.send(BackupEvent::ManifestChanged);
+        } else {
+            // A failed repair changes nothing: the record stays `Active`, and
+            // the next pass that meets it looks again.
+            let _ = mark_upload_completed(
+                &self.client,
+                &self.manifest,
+                &self.events,
+                device_id,
+                &asset.local_identifier,
+                &file_id,
+            )
+            .await;
+        }
+        Ok(())
     }
 
     fn retry_allowed(&self, local_identifier: &str) -> bool {
@@ -1058,7 +1177,16 @@ impl BackupService {
     }
 
     pub async fn upload_completed(&self, local_identifier: &str, file_id: &str) -> Result<(), BackupError> {
-        mark_upload_completed(&self.client, &self.manifest, &self.events, local_identifier, file_id).await
+        let device_id = self.device_id()?;
+        mark_upload_completed(
+            &self.client,
+            &self.manifest,
+            &self.events,
+            &device_id,
+            local_identifier,
+            file_id,
+        )
+        .await
     }
 
     pub fn sign_out(&self) -> Result<(), BackupError> {
@@ -1071,6 +1199,7 @@ impl BackupService {
 struct BackupUploadCompletion {
     client: Arc<Client>,
     manifest: BackupManifest,
+    configuration: Arc<Mutex<BackupConfiguration>>,
     events: broadcast::Sender<BackupEvent>,
 }
 
@@ -1081,9 +1210,17 @@ impl UploadCompletionHandler for BackupUploadCompletion {
         file_id: &'a str,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ()>> + Send + 'a>> {
         Box::pin(async move {
-            mark_upload_completed(&self.client, &self.manifest, &self.events, local_identifier, file_id)
-                .await
-                .map_err(|_| ())
+            let device_id = self.configuration.lock().map_err(|_| ())?.device_id.clone();
+            mark_upload_completed(
+                &self.client,
+                &self.manifest,
+                &self.events,
+                &device_id,
+                local_identifier,
+                file_id,
+            )
+            .await
+            .map_err(|_| ())
         })
     }
 }
@@ -1092,13 +1229,14 @@ async fn mark_upload_completed(
     client: &Client,
     manifest: &BackupManifest,
     events: &broadcast::Sender<BackupEvent>,
+    device_id: &str,
     local_identifier: &str,
     file_id: &str,
 ) -> Result<(), BackupError> {
     let generation = client.generation();
     let result: beebeeb_api::routes::photo_backup::MarkResult = client
         .execute(
-            &beebeeb_api::routes::photo_backup::mark(),
+            &beebeeb_api::routes::photo_backup::mark(device_id),
             &beebeeb_api::routes::photo_backup::Mark {
                 local_identifier: local_identifier.to_owned(),
                 file_id: file_id.to_owned(),
@@ -1106,7 +1244,9 @@ async fn mark_upload_completed(
         )
         .await
         .map_err(|_| BackupError::InvalidAnswer)?;
-    if result.local_identifier != local_identifier || result.file_id != file_id {
+    // The server echoes the device id it keyed the row by: anything else
+    // means the row landed in another device's map (or the shared `''` one).
+    if result.local_identifier != local_identifier || result.file_id != file_id || result.device_id != device_id {
         return Err(BackupError::InvalidAnswer);
     }
     if generation != client.generation() {

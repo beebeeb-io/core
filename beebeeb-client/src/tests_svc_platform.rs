@@ -167,7 +167,7 @@ fn backup_service(
         )
         .unwrap(),
     );
-    let config = BackupConfiguration::new(BackupFolder { id: CATEGORY.into() }, true).unwrap();
+    let config = BackupConfiguration::new(BackupFolder { id: CATEGORY.into() }, true, "device").unwrap();
     (
         BackupService::new(client, Arc::clone(&uploads), source, config).unwrap(),
         uploads,
@@ -373,6 +373,7 @@ async fn completion_without_a_handler_is_durable_and_applied_by_a_later_backup_s
                 id: "backup-folder".into(),
             },
             true,
+            "device",
         )
         .unwrap(),
     )

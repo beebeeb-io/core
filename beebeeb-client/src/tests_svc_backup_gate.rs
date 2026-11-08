@@ -3,7 +3,7 @@
 //! again by itself"), and the copy states it relies on.
 
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -18,7 +18,7 @@ use crate::{
     Client, ClientConfig,
     backup::{
         Asset, AssetKind, AssetSnapshot, AssetSource, AssetSourceError, BackupAssetChange, BackupConfiguration,
-        BackupCopyState, BackupFolder, BackupService, BackupStop, NOTICE_OVERLAP_MS,
+        BackupCopyState, BackupFolder, BackupService, BackupStop, MemoryBackupManifestStore, NOTICE_OVERLAP_MS,
     },
     test_support::{RouteAnswer, RoutedTransport, ScriptedTransport, json_answer},
     uploads::{NetworkKind, UploadService},
@@ -27,8 +27,10 @@ use crate::{
 pub(crate) const ROOT: &str = "b0000000-0000-4000-8000-000000000001";
 pub(crate) const DEVICE: &str = "b0000000-0000-4000-8000-000000000002";
 pub(crate) const CATEGORY: &str = "b0000000-0000-4000-8000-000000000003";
+/// This device's canonical id, as the app supplies it.
+pub(crate) const THIS_DEVICE: &str = "this-device";
 /// The `Date` every gate answer carries, and the same time in ms.
-const SERVER_DATE: &str = "Sun, 08 Nov 2026 03:10:00 GMT";
+pub(crate) const SERVER_DATE: &str = "Sun, 08 Nov 2026 03:10:00 GMT";
 const SERVER_NOW_MS: i64 = 1_794_107_400_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -41,6 +43,15 @@ pub(crate) enum Row {
 
 type Hook = Box<dyn FnMut() + Send>;
 
+/// What `GET /files/{id}` answers for a backed-up copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CopyRow {
+    Live,
+    Trashed,
+    Gone,
+    Fails,
+}
+
 #[derive(Default)]
 struct ServerState {
     device: Row,
@@ -51,6 +62,14 @@ struct ServerState {
     /// Run while a notice request is served: another writer acting while a
     /// pass waits on the gate.
     on_notice: Option<Hook>,
+    /// Backed-up copies `GET /files/{id}` answers for.
+    copies: BTreeMap<String, CopyRow>,
+    copy_reads: Vec<String>,
+    /// The server's photo-backup map, `(X-Beebeeb-Device-Id or "", local id)
+    /// → file id`, when this server answers `check` and `mark` itself.
+    rows: Option<BTreeMap<(String, String), String>>,
+    /// The device id each `check` and `mark` carried, in order.
+    keyed_by: Vec<Option<String>>,
 }
 
 /// The rows and notices the backup gate reads. Everything else goes to the
@@ -81,11 +100,22 @@ impl BackupServer {
         let state = Arc::clone(&self.state);
         RoutedTransport::new(
             Arc::new(move |request| {
+                let path = request.path();
+                let mut state = state.lock().unwrap();
+                if request.method() == Method::Post {
+                    return photo_backup_answer(&mut state, request);
+                }
                 if request.method() != Method::Get {
                     return None;
                 }
-                let path = request.path();
-                let mut state = state.lock().unwrap();
+                if let Some(copy) = path
+                    .strip_prefix("/api/v1/files/")
+                    .and_then(|id| state.copies.get(id).copied())
+                {
+                    let id = path.trim_start_matches("/api/v1/files/").to_owned();
+                    state.copy_reads.push(id.clone());
+                    return Some(Ok(copy_answer(&id, copy)));
+                }
                 if path == format!("/api/v1/files/{ROOT}") {
                     Some(row_answer(ROOT, None, Row::Live))
                 } else if path == format!("/api/v1/files/{DEVICE}") {
@@ -125,10 +155,76 @@ impl BackupServer {
     fn on_notice(&self, hook: impl FnMut() + Send + 'static) {
         self.state.lock().unwrap().on_notice = Some(Box::new(hook));
     }
+
+    pub(crate) fn set_copy(&self, file_id: &str, copy: CopyRow) {
+        self.state.lock().unwrap().copies.insert(file_id.to_owned(), copy);
+    }
+
+    pub(crate) fn copy_reads(&self) -> Vec<String> {
+        self.state.lock().unwrap().copy_reads.clone()
+    }
+
+    /// Answer `check` and `mark` from a map keyed like the server's.
+    pub(crate) fn keep_rows(&self) {
+        self.state.lock().unwrap().rows = Some(BTreeMap::new());
+    }
+
+    pub(crate) fn rows(&self) -> BTreeMap<(String, String), String> {
+        self.state.lock().unwrap().rows.clone().unwrap_or_default()
+    }
+
+    pub(crate) fn keyed_by(&self) -> Vec<Option<String>> {
+        self.state.lock().unwrap().keyed_by.clone()
+    }
+}
+
+fn copy_answer(id: &str, copy: CopyRow) -> beebeeb_api::Answer {
+    let row = |trashed: bool| {
+        serde_json::to_vec(&json!({"id": id, "parent_id": CATEGORY, "is_folder": false, "is_trashed": trashed}))
+            .unwrap()
+    };
+    match copy {
+        CopyRow::Live => json_answer(200, &[], row(false)),
+        CopyRow::Trashed => json_answer(200, &[], row(true)),
+        CopyRow::Gone => json_answer(404, &[], br#"{"code":"not_found","message":"not found"}"#.to_vec()),
+        CopyRow::Fails => json_answer(500, &[], br#"{"code":"internal","message":"try later"}"#.to_vec()),
+    }
+}
+
+/// The server's `check` and `mark` (`routes/photo_backup.rs`): rows keyed by
+/// `(user, X-Beebeeb-Device-Id, local id)`, with `""` for a request without
+/// the header. Only while [`BackupServer::keep_rows`] is on.
+fn photo_backup_answer(state: &mut ServerState, request: &beebeeb_api::Request) -> Option<RouteAnswer> {
+    let path = request.path();
+    if path != "/api/v1/files/photo-backup/check" && path != "/api/v1/files/photo-backup/mark" {
+        return None;
+    }
+    let header = request.header("X-Beebeeb-Device-Id").map(str::to_owned);
+    let device = header.clone().unwrap_or_default();
+    let rows = state.rows.as_mut()?;
+    let body: Value = serde_json::from_slice(request.body()).unwrap();
+    let answer = if path.ends_with("/check") {
+        let (mut needs, mut backed_up) = (Vec::new(), Vec::new());
+        for id in body["identifiers"].as_array().unwrap() {
+            let id = id.as_str().unwrap().to_owned();
+            match rows.get(&(device.clone(), id.clone())) {
+                Some(file_id) => backed_up.push(json!({"local_identifier": id, "file_id": file_id})),
+                None => needs.push(id),
+            }
+        }
+        json!({"needs_backup": needs, "backed_up": backed_up})
+    } else {
+        let id = body["local_identifier"].as_str().unwrap().to_owned();
+        let file_id = body["file_id"].as_str().unwrap().to_owned();
+        rows.insert((device.clone(), id.clone()), file_id.clone());
+        json!({"local_identifier": id, "file_id": file_id, "device_id": device, "status": "recorded"})
+    };
+    state.keyed_by.push(header);
+    Some(Ok(json_answer(200, &[], serde_json::to_vec(&answer).unwrap())))
 }
 
 /// One filtered page, dated [`SERVER_DATE`].
-fn page(notices: Value, next_cursor: Option<&str>) -> RouteAnswer {
+pub(crate) fn page(notices: Value, next_cursor: Option<&str>) -> RouteAnswer {
     Ok(json_answer(
         200,
         &[("Date", SERVER_DATE)],
@@ -136,14 +232,14 @@ fn page(notices: Value, next_cursor: Option<&str>) -> RouteAnswer {
     ))
 }
 
-fn erased(created_at: &str) -> Value {
+pub(crate) fn erased(created_at: &str) -> Value {
     json!({"id": "n1", "type": "files_removed", "title": "t", "body": null,
            "data": {"reason": "erase_request"}, "read": false, "created_at": created_at})
 }
 
 #[derive(Default)]
-struct Source {
-    snapshots: Mutex<VecDeque<AssetSnapshot>>,
+pub(crate) struct Source {
+    pub(crate) snapshots: Mutex<VecDeque<AssetSnapshot>>,
     calls: Mutex<usize>,
 }
 
@@ -158,7 +254,7 @@ impl AssetSource for Source {
     }
 }
 
-fn one_photo(path: &Path) -> AssetSnapshot {
+pub(crate) fn one_photo(path: &Path) -> AssetSnapshot {
     AssetSnapshot {
         complete: true,
         assets: vec![Asset {
@@ -173,19 +269,34 @@ fn one_photo(path: &Path) -> AssetSnapshot {
     }
 }
 
-struct Harness {
+pub(crate) struct Harness {
     _root: tempfile::TempDir,
-    photo: PathBuf,
-    server: BackupServer,
-    scripted: ScriptedTransport,
-    source: Arc<Source>,
-    uploads: Arc<UploadService>,
-    backup: BackupService,
+    pub(crate) photo: PathBuf,
+    pub(crate) server: BackupServer,
+    pub(crate) scripted: ScriptedTransport,
+    pub(crate) source: Arc<Source>,
+    pub(crate) uploads: Arc<UploadService>,
+    pub(crate) backup: BackupService,
+    client: Arc<Client>,
+    store: Arc<MemoryBackupManifestStore>,
+    configuration: BackupConfiguration,
 }
 
 /// A backup into the category folder, with `snapshots` photo snapshots and
 /// the scripted (non-gate) answers `replies`.
-fn harness(configuration: impl FnOnce(BackupConfiguration) -> BackupConfiguration, replies: &[&str]) -> Harness {
+pub(crate) fn harness(
+    configuration: impl FnOnce(BackupConfiguration) -> BackupConfiguration,
+    replies: &[&str],
+) -> Harness {
+    harness_on(BackupServer::default(), configuration, replies)
+}
+
+/// [`harness`] on a server shared with another device.
+pub(crate) fn harness_on(
+    server: BackupServer,
+    configuration: impl FnOnce(BackupConfiguration) -> BackupConfiguration,
+    replies: &[&str],
+) -> Harness {
     let root = tempdir().unwrap();
     let photo = root.path().join("photo.jpg");
     std::fs::write(&photo, b"photo").unwrap();
@@ -193,7 +304,6 @@ fn harness(configuration: impl FnOnce(BackupConfiguration) -> BackupConfiguratio
     for reply in replies.iter().skip(1) {
         scripted.push_json(200, reply.as_bytes().to_vec());
     }
-    let server = BackupServer::default();
     let client =
         Arc::new(Client::new(ClientConfig::for_tests(), Arc::new(server.transport(scripted.clone()))).unwrap());
     client.set_authentication("token", "owner").unwrap();
@@ -207,8 +317,17 @@ fn harness(configuration: impl FnOnce(BackupConfiguration) -> BackupConfiguratio
         .unwrap(),
     );
     let source = Arc::new(Source::default());
-    let config = configuration(BackupConfiguration::new(BackupFolder { id: CATEGORY.into() }, false).unwrap());
-    let backup = BackupService::new(client, Arc::clone(&uploads), source.clone(), config).unwrap();
+    let config =
+        configuration(BackupConfiguration::new(BackupFolder { id: CATEGORY.into() }, false, THIS_DEVICE).unwrap());
+    let store = Arc::new(MemoryBackupManifestStore::default());
+    let backup = BackupService::with_manifest_store(
+        Arc::clone(&client),
+        Arc::clone(&uploads),
+        source.clone(),
+        config.clone(),
+        store.clone(),
+    )
+    .unwrap();
     Harness {
         _root: root,
         photo,
@@ -217,15 +336,67 @@ fn harness(configuration: impl FnOnce(BackupConfiguration) -> BackupConfiguratio
         source,
         uploads,
         backup,
+        client,
+        store,
+        configuration: config,
     }
 }
 
 impl Harness {
-    fn snapshot_photo(&self) {
+    /// The app restarts: the service is dropped and made again on the same
+    /// manifest store and upload service.
+    pub(crate) fn restart(self) -> Self {
+        let Self {
+            _root,
+            photo,
+            server,
+            scripted,
+            source,
+            uploads,
+            backup,
+            client,
+            store,
+            configuration,
+        } = self;
+        drop(backup);
+        let backup = BackupService::with_manifest_store(
+            Arc::clone(&client),
+            Arc::clone(&uploads),
+            source.clone(),
+            configuration.clone(),
+            store.clone(),
+        )
+        .unwrap();
+        Self {
+            _root,
+            photo,
+            server,
+            scripted,
+            source,
+            uploads,
+            backup,
+            client,
+            store,
+            configuration,
+        }
+    }
+
+    /// A second backup service on the same upload service.
+    pub(crate) fn second_service(&self) -> Result<BackupService, crate::backup::BackupError> {
+        BackupService::with_manifest_store(
+            Arc::clone(&self.client),
+            Arc::clone(&self.uploads),
+            self.source.clone(),
+            self.configuration.clone(),
+            self.store.clone(),
+        )
+    }
+
+    pub(crate) fn snapshot_photo(&self) {
         self.source.snapshots.lock().unwrap().push_back(one_photo(&self.photo));
     }
 
-    async fn pass(&self, now_ms: i64) -> crate::backup::BackupBatch {
+    pub(crate) async fn pass(&self, now_ms: i64) -> crate::backup::BackupBatch {
         self.backup
             .next_batch(AssetKind::Photo, NetworkKind::WiFi, now_ms)
             .await
@@ -549,10 +720,11 @@ fn photos(path: &Path, count: usize) -> AssetSnapshot {
 /// P2-1 (spec §4.2 rule 11): the person trashes the copy on the web. The
 /// phone hears nothing (no `assets_changed`), and no notice is written for
 /// one file, so the gate runs. The server's check counts only live copies, so
-/// it asks for the photo again.
+/// it asks for the photo again; the copy itself (r6 P1-2) is in the Trash.
 #[tokio::test]
 async fn a_copy_trashed_elsewhere_is_not_uploaded_again() {
     let h = harness(|c| c, &[r#"{"needs_backup":["photo-1"]}"#]);
+    h.server.set_copy("copy-1", CopyRow::Trashed);
     h.backup
         .manifest()
         .remember("photo-1", "copy-1", BackupCopyState::Active)
@@ -578,6 +750,7 @@ async fn a_copy_trashed_elsewhere_is_not_uploaded_again() {
 async fn a_copy_removed_elsewhere_comes_back_once_the_photo_changes() {
     let needs = r#"{"needs_backup":["photo-1"]}"#;
     let h = harness(|c| c, &[needs, needs]);
+    h.server.set_copy("copy-1", CopyRow::Trashed);
     h.backup
         .manifest()
         .remember("photo-1", "copy-1", BackupCopyState::Active)
@@ -696,7 +869,7 @@ async fn back_up_again_after_a_deleted_folder_needs_a_live_folder_first() {
     // The platform finds this device's folder again (Amendment 12), then the
     // person chooses again.
     h.backup
-        .configure(BackupConfiguration::new(BackupFolder { id: DEVICE.into() }, false).unwrap())
+        .configure(BackupConfiguration::new(BackupFolder { id: DEVICE.into() }, false, THIS_DEVICE).unwrap())
         .unwrap();
     h.backup.back_up_again().unwrap();
     h.snapshot_photo();

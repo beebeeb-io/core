@@ -15,7 +15,22 @@ impl UploadService {
             staging_root,
             events,
             completion_handler: Mutex::new(None),
+            backup_lease: Mutex::new(std::sync::Weak::new()),
         })
+    }
+
+    /// One backup service per upload service: the lease, or `None` while
+    /// another backup service holds it. The lease ends when its holder is
+    /// dropped. Two would steal each other's completion handler and write over
+    /// each other's manifest.
+    pub(crate) fn lease_backup(&self) -> Result<Option<Arc<()>>, UploadServiceError> {
+        let mut lease = self.backup_lease.lock().map_err(|_| UploadServiceError::State)?;
+        if lease.upgrade().is_some() {
+            return Ok(None);
+        }
+        let held = Arc::new(());
+        *lease = Arc::downgrade(&held);
+        Ok(Some(held))
     }
 
     pub fn set_completion_handler(&self, handler: Arc<dyn UploadCompletionHandler>) -> Result<(), UploadServiceError> {

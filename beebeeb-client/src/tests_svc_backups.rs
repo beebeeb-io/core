@@ -311,7 +311,7 @@ async fn the_backup_pass_queues_nothing_into_a_folder_outside_backups() {
         )
         .unwrap(),
     );
-    let configuration = BackupConfiguration::new(BackupFolder { id: ORDINARY.into() }, false).unwrap();
+    let configuration = BackupConfiguration::new(BackupFolder { id: ORDINARY.into() }, false, "device").unwrap();
     let backup = BackupService::new(client, Arc::clone(&uploads), Arc::new(NoAssets), configuration).unwrap();
 
     let error = backup

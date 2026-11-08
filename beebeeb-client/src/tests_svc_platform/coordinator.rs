@@ -124,7 +124,7 @@ async fn coordinator_purges_everything_even_when_platform_cancellation_fails() {
             Arc::clone(&client),
             Arc::clone(&uploads),
             backup_source,
-            BackupConfiguration::new(BackupFolder { id: "managed".into() }, true).unwrap(),
+            BackupConfiguration::new(BackupFolder { id: "managed".into() }, true, "device").unwrap(),
         )
         .unwrap(),
     );
@@ -213,7 +213,7 @@ fn sign_out_coordinator(client: Arc<Client>, root: &std::path::Path) -> ServiceC
             Arc::clone(&client),
             Arc::clone(&uploads),
             Arc::new(Source::default()),
-            BackupConfiguration::new(BackupFolder { id: "managed".into() }, true).unwrap(),
+            BackupConfiguration::new(BackupFolder { id: "managed".into() }, true, "device").unwrap(),
         )
         .unwrap(),
     );

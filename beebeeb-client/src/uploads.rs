@@ -257,6 +257,8 @@ pub struct UploadService {
     staging_root: PathBuf,
     events: broadcast::Sender<UploadEvent>,
     completion_handler: Mutex<Option<Arc<dyn UploadCompletionHandler>>>,
+    /// The live backup service's lease ([`Self::lease_backup`]).
+    backup_lease: Mutex<std::sync::Weak<()>>,
 }
 
 fn source_identity(path: &Path) -> Result<UploadSourceIdentity, UploadServiceError> {

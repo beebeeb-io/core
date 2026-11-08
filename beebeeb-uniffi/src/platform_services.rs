@@ -91,6 +91,8 @@ pub struct AssetSnapshotData {
     pub next_cursor: Option<String>,
 }
 
+/// Called during `next_batch`, under its pass lock: never call back into the
+/// backup service from here, nor wait on a thread that is inside `next_batch`.
 #[uniffi::export(callback_interface)]
 pub trait AssetSourceCallback: Send + Sync {
     /// Return metadata only. Export is requested separately for selected rows.
@@ -231,7 +233,8 @@ pub struct BackupManifestRecordData {
 }
 
 /// `None` / `false` means the store failed. `clear` removes the records and
-/// the pass state.
+/// the pass state. Called while the backup service holds its locks: never
+/// call back into the backup service from here.
 #[uniffi::export(callback_interface)]
 pub trait BackupManifestStoreCallback: Send + Sync {
     fn load(&self) -> Option<Vec<BackupManifestRecordData>>;
@@ -313,16 +316,23 @@ impl BackupManifestStore for BackupManifestStoreAdapter {
 /// `legacy_last_backup_ms` (an upgraded device's last backup under the old
 /// engine) are on the server's clock, in milliseconds; they set the first
 /// pass's baseline (core `backup_first_pass_baseline`). Unknown is `None`.
+/// `device_id` is this device's canonical id, the one the app already sends
+/// as `X-Beebeeb-Device-Id` (mobile: `getDeviceId()`, and only an id that was
+/// read from secure storage or durably saved): the server keys this device's
+/// photo-backup map by it. Never a new one: a different id makes every
+/// backed-up photo look new to the server. 1 to 128 visible ASCII characters,
+/// or `invalid_input`.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct BackupConfigurationData {
     pub folder_id: String,
     pub wifi_only: bool,
+    pub device_id: String,
     pub setup_at_ms: Option<i64>,
     pub legacy_last_backup_ms: Option<i64>,
 }
 
 fn backup_configuration(value: BackupConfigurationData) -> Result<BackupConfiguration, ServiceError> {
-    BackupConfiguration::new(BackupFolder { id: value.folder_id }, value.wifi_only)
+    BackupConfiguration::new(BackupFolder { id: value.folder_id }, value.wifi_only, value.device_id)
         .map(|configuration| configuration.with_first_pass(value.setup_at_ms, value.legacy_last_backup_ms))
         .map_err(|_| invalid())
 }
@@ -475,6 +485,16 @@ impl BackupServiceHandle {
 
 #[uniffi::export]
 impl NativeClientHandle {
+    /// The native backup. Make it right after the upload service, before any
+    /// transfer resumes: a backup stopped before a crash cancels its uploads
+    /// here, before they can publish.
+    ///
+    /// One per upload service, and one per manifest store across processes
+    /// too: a second while the first lives is refused (`unavailable`), and an
+    /// extension or a second process must never open the same store. Its
+    /// callbacks run while the service holds its locks: `manifest_store`'s
+    /// and `source`'s must not call back into this backup service, nor wait
+    /// on a thread that is inside `next_batch`. Either deadlocks.
     pub fn backup(
         self: &Arc<Self>,
         uploads: Arc<UploadServiceHandle>,

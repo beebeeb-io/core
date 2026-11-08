@@ -124,6 +124,7 @@ fn advanced_account_and_platform_services_are_opaque_handles() {
         "fn save_pass_state",
         "BackupPassStateData",
         "RemovedElsewhere",
+        "pub device_id: String",
         "pub modified_ms: Option<i64>",
         "pub size_bytes: Option<u64>",
         "FileProviderServiceHandle",
