@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Windows: a create by name never touches a different file that the OS resolves the name to (8.3 alias), task 2404.
+Additive: no public item is renamed, retyped or removed.
+
+### Fixed
+
+- **Windows: a create, truncate, replace or delete by name only ever touches the entry with that exact long name.**
+  Windows also resolves a name through the 8.3 short names of a directory, so a name could reach a different existing
+  file. Such a name is now a name conflict, decided from the existing entry's own long name as the file system reports
+  it (case-insensitive, as NTFS compares), never from the shape of the name.
+  - `path_safety::safe_child`, `safe_rel_join` (every existing segment) and `default_output_path` refuse it (their
+    `String` error names the conflict).
+  - `encrypt::decrypt_chunks_to_file`, `encrypt::decrypt_contiguous_to_file`, `file_encrypt::decrypt_chunks_to_file`
+    and `file_encrypt::encrypt_file_to_chunks` refuse it before creating anything, for the output and for its temp
+    file: `CoreError::InvalidInput` naming the conflict. beebeeb-upload's downloads do the same
+    (`UploadError::InvalidInput`).
+  - beebeeb-sync's remote delete never deletes the file such a name reaches.
+  - Other hosts: no change and no extra file-system calls.
+
+### Added
+
+- `path_safety::short_name_alias(base, rel) -> io::Result<Option<ShortNameAlias>>` (native targets) and
+  `path_safety::ShortNameAlias { requested, existing }` (`#[non_exhaustive]`): the typed answer for a caller that has a
+  conflict path ("(2)", a conflict copy) and takes it instead of refusing.
+
 ## [0.2.6] - 2026-11-08
 
 Fixes to the folder-zip writer `zip::stream_folder_zip` (LD-0146, core #89, #90 and #91): an entry of 4 GiB or more is

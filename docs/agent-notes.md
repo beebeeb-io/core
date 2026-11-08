@@ -287,6 +287,28 @@ A range session serves reads at any offset while the download runs (desktop Wind
 - Recovery phrase IS the master secret — password wraps it, doesn't replace it
 - No panics in crypto paths — everything returns Result
 
+## Path safety on Windows: short-name aliases (task 2404)
+
+Windows resolves a name against both the long names and the 8.3 short names of a directory, so a server name can reach
+an existing entry with a different long name. `path_safety::short_name_alias(base, rel)` walks `rel` below `base` and
+returns a typed `ShortNameAlias` for the first existing component whose entry's own long name differs (NTFS
+comparison: case-insensitive per UTF-16 unit). The long name comes from the file system (`canonicalize` on the opened
+handle, else the directory listing; a link always goes to the listing), never from the shape of the name. `base` is
+trusted: a user-chosen root may be written in short form. On every other host it is `Ok(None)` without disk access.
+
+- `safe_child`, `safe_rel_join` (every segment) and `default_output_path` refuse such a name (their `String` error).
+- Core's own writes refuse it before creating anything: `encrypt::decrypt_chunks_to_file` /
+  `decrypt_contiguous_to_file` and `file_encrypt::decrypt_chunks_to_file` (through `path_safety::write_through_tmp`,
+  which checks the output and the `.tmp`, and the output again before the rename), `file_encrypt::encrypt_file_to_chunks`,
+  and beebeeb-upload's `{output}.tmp`. In `CoreError` it is `InvalidInput` naming the conflict (no new variant in a
+  patch release). beebeeb-sync's remote delete never deletes the entry an alias reaches.
+- A caller with a conflict path ("(2)", a conflict copy) calls `short_name_alias` first and takes that path on
+  `Some`. Output paths built from remote names must come from `safe_rel_join` (per segment), since a write path only
+  checks its last component.
+- Windows tests: `tests/windows/short_names.rs` (a module of `integration`), `path_safety/short_name_windows_tests.rs`,
+  beebeeb-upload `windows_short_name_tests.rs`, beebeeb-sync `engine_windows_tests.rs`. Each proves its fixture
+  aliases first; no 8.3 names on the volume skips, or fails with `CI` set.
+
 ## Design references
 
 Design files live in the workspace root `../../design/hifi/` — never copy them into this public repo (a snapshot once published a false external-audit claim; the Claims guard CI job now fails on those strings).

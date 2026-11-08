@@ -175,6 +175,9 @@ fn assert_refused(
     assert!(error.contains("8.3"), "{label}: not the short-name refusal: {error}");
 }
 
+/// One of core's write paths: write a decrypted file at the given output.
+type WritePath = fn(&Path) -> Result<(), String>;
+
 fn contiguous_to(output: &Path) -> Result<(), String> {
     let key = file_key();
     let blob = encrypt_chunk(&key, WRITTEN).map_err(|e| e.to_string())?;
@@ -323,7 +326,7 @@ fn file_decrypt_chunks_to_file_never_truncates_another_file_through_its_tmp_name
 /// file, and each write path still replaces it as before.
 #[test]
 fn decrypting_to_the_existing_files_own_name_still_replaces_it() {
-    let writes: [(&str, fn(&Path) -> Result<(), String>); 3] = [
+    let writes: [(&str, WritePath); 3] = [
         ("contiguous", contiguous_to),
         ("chunks", chunks_to),
         ("chunk-files", chunk_files_to),

@@ -43,9 +43,13 @@ struct TempOutput {
 
 impl TempOutput {
     /// Create the parent directory and the temp file; the guard removes the
-    /// file on drop until it is committed.
+    /// file on drop until it is committed. On Windows neither the output nor
+    /// the temp name may reach a DIFFERENT existing file through its 8.3 short
+    /// name (task 2404): that is refused before anything is created.
     fn create(output_path: &str) -> Result<(Self, std::fs::File), UploadError> {
         let path = std::path::PathBuf::from(format!("{output_path}.tmp"));
+        refuse_short_name_alias(std::path::Path::new(output_path))?;
+        refuse_short_name_alias(&path)?;
         if let Some(parent) = std::path::Path::new(output_path).parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| UploadError::IoError(format!("create output parent dir: {e}")))?;
@@ -55,11 +59,28 @@ impl TempOutput {
         Ok((Self { path, renamed: false }, file))
     }
 
-    /// Rename the temp file into place and disarm the guard.
+    /// Rename the temp file into place and disarm the guard. The output name
+    /// is checked again first: the download may have taken a while.
     fn commit(mut self, output_path: &str) -> Result<(), UploadError> {
+        refuse_short_name_alias(std::path::Path::new(output_path))?;
         std::fs::rename(&self.path, output_path).map_err(|e| UploadError::IoError(format!("rename output: {e}")))?;
         self.renamed = true;
         Ok(())
+    }
+}
+
+/// Refuse a write to `path` whose last component reaches a different existing
+/// entry ([`beebeeb_core::path_safety::short_name_alias`]): the conflict as
+/// `InvalidInput` naming it, a failed check as `IoError`.
+fn refuse_short_name_alias(path: &std::path::Path) -> Result<(), UploadError> {
+    let Some(name) = path.file_name() else {
+        return Ok(());
+    };
+    let dir = path.parent().unwrap_or(std::path::Path::new(""));
+    match beebeeb_core::path_safety::short_name_alias(dir, std::path::Path::new(name)) {
+        Ok(None) => Ok(()),
+        Ok(Some(conflict)) => Err(UploadError::InvalidInput(conflict.to_string())),
+        Err(e) => Err(UploadError::IoError(format!("check output name: {e}"))),
     }
 }
 

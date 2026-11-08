@@ -411,8 +411,23 @@ impl SyncEngine {
     ///
     /// Never panics: a `NotFound` is treated as success (the user may have already
     /// removed it); any other error is logged and reported as a non-removal.
+    ///
+    /// On Windows `rel` may reach a DIFFERENT file through an 8.3 short name
+    /// (task 2404). That file is never deleted: `rel`'s own file is not on disk,
+    /// which is success, as `NotFound` is.
     fn delete_local_file(&self, rel: &Path) -> bool {
         let abs = self.config.vault_path.join(rel);
+        match beebeeb_core::path_safety::short_name_alias(&self.config.vault_path, rel) {
+            Ok(None) => {}
+            Ok(Some(conflict)) => {
+                warn!(path = %abs.display(), %conflict, "not deleting: the name reaches a different file");
+                return true;
+            }
+            Err(e) => {
+                warn!(path = %abs.display(), error = %e, "could not check the name before deleting; will retry");
+                return false;
+            }
+        }
         match std::fs::remove_file(&abs) {
             Ok(()) => true,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,

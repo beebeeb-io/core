@@ -117,9 +117,12 @@ pub fn encrypt_file_to_chunks(
         let nonce = encrypted[..NONCE_LEN].to_vec();
         let plaintext_size = ciphertext_size - (NONCE_LEN + TAG_LEN) as u64;
 
-        // Write to .tmp then atomic rename to .enc
+        // Write to .tmp then atomic rename to .enc. On Windows neither name may
+        // reach a DIFFERENT existing file through an 8.3 short name (task 2404).
         let enc_path = output_dir.join(format!("{chunk_index}.enc"));
         let tmp_path = output_dir.join(format!("{chunk_index}.enc.tmp"));
+        crate::path_safety::refuse_alias_at(&enc_path)?;
+        crate::path_safety::refuse_alias_at(&tmp_path)?;
 
         let mut writer =
             BufWriter::new(File::create(&tmp_path).map_err(|e| CoreError::Io(format!("create chunk file: {e}")))?);
@@ -194,7 +197,9 @@ pub fn encrypt_file_to_chunks(
 /// plaintext ever appears at `output_path` and no `.tmp` artifact survives —
 /// an existence-based cache cannot serve a truncated decrypt as if complete.
 /// (Same `.tmp` + atomic-rename + remove-on-error pattern as
-/// [`crate::encrypt::decrypt_contiguous_to_file`].)
+/// [`crate::encrypt::decrypt_contiguous_to_file`].) On Windows an `output_path`
+/// or `.tmp` whose name reaches a DIFFERENT existing file through its 8.3 short
+/// name is refused (`InvalidInput`) and nothing is written.
 ///
 /// `expected` comes from the file's encrypted metadata
 /// ([`crate::encrypt::decrypt_file_metadata`]) — task 1908.
@@ -213,32 +218,17 @@ pub fn decrypt_chunks_to_file(
         fs::create_dir_all(parent).map_err(|e| CoreError::Io(format!("create output parent dir: {e}")))?;
     }
 
-    // Write to a sibling .tmp, then atomically rename on success only.
+    // Stream into a sibling .tmp, renamed over output_path on success only;
+    // on ANY Err the .tmp is removed so no partial plaintext survives.
     let tmp_path = output_path.with_extension("tmp");
-
-    // Inner helper does the streaming decrypt into the .tmp; on ANY Err the
-    // outer code removes the .tmp so no partial plaintext survives at output_path.
-    let result = decrypt_chunks_to_tmp(&file_key, file_id, expected, chunk_paths, &tmp_path, callback);
-
-    match result {
-        Ok((total_bytes, chunks_processed)) => {
-            fs::rename(&tmp_path, output_path).map_err(|e| {
-                // Rename failed: drop the temp so it can't poison a cache.
-                fs::remove_file(&tmp_path).ok();
-                CoreError::Io(format!("rename output: {e}"))
-            })?;
-            Ok(DecryptedFileResult {
-                output_path: output_path.to_path_buf(),
-                total_bytes,
-                chunks_processed,
-            })
-        }
-        Err(e) => {
-            // Remove the partial temp on every failure path.
-            fs::remove_file(&tmp_path).ok();
-            Err(e)
-        }
-    }
+    let (total_bytes, chunks_processed) = crate::path_safety::write_through_tmp(output_path, &tmp_path, || {
+        decrypt_chunks_to_tmp(&file_key, file_id, expected, chunk_paths, &tmp_path, callback)
+    })?;
+    Ok(DecryptedFileResult {
+        output_path: output_path.to_path_buf(),
+        total_bytes,
+        chunks_processed,
+    })
 }
 
 /// Streaming decrypt of chunk files → `tmp_path`. Helper for
