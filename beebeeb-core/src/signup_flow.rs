@@ -75,19 +75,23 @@ impl Default for SignupPolicy {
     }
 }
 
-/// An `https` URL on Beebeeb's own domain: parsed, no credentials or port, and the HOST compared
-/// exactly (`beebeeb.io` or a subdomain), so `?`, `#`, `\\` or `@` tricks never pass a foreign host.
+/// An `https` URL on Beebeeb's own domain. The authority ends at the first `/`, `?`, `#` or `\\`
+/// (WHATWG reads `\\` as `/` in an `https` URL), must be a plain host (no `@` credentials, no port,
+/// only ASCII letters, digits, `-` and `.`), and the HOST is compared exactly: `beebeeb.io` or a
+/// subdomain. A URL with whitespace or a control character is refused outright.
 pub(crate) fn own_https_url(v: Option<&serde_json::Value>) -> Option<String> {
     let s = v?.as_str()?;
-    let url = url::Url::parse(s).ok()?;
-    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() || url.port().is_some() {
+    if s.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return None;
     }
-    let host = match url.host()? {
-        url::Host::Domain(d) => d,
-        _ => return None,
-    };
-    (host == "beebeeb.io" || host.ends_with(".beebeeb.io")).then(|| s.to_owned())
+    let rest = s.strip_prefix("https://")?;
+    let end = rest.find(['/', '?', '#', '\\']).unwrap_or(rest.len());
+    let host = rest[..end].to_ascii_lowercase();
+    let plain = !host.is_empty()
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.');
+    (plain && (host == "beebeeb.io" || host.ends_with(".beebeeb.io"))).then(|| s.to_owned())
 }
 
 fn breach_path(v: Option<&serde_json::Value>) -> Option<String> {
