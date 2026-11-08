@@ -31,6 +31,12 @@ impl ClientRuntime {
     pub fn handle(&self) -> tokio::runtime::Handle {
         self.runtime.handle().clone()
     }
+
+    /// Whether spawned tasks run on their own. On the lightweight runtime
+    /// they run only while a `block_on` call is in progress.
+    pub fn runs_tasks_alone(&self) -> bool {
+        self.runtime.handle().runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread
+    }
 }
 
 impl Clone for ClientRuntime {
@@ -38,5 +44,17 @@ impl Clone for ClientRuntime {
         Self {
             runtime: self.runtime.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ClientRuntime;
+
+    #[test]
+    fn only_the_multi_thread_runtime_runs_tasks_alone() {
+        assert!(!ClientRuntime::lightweight().unwrap().runs_tasks_alone());
+        #[cfg(feature = "runtime-multi-thread")]
+        assert!(ClientRuntime::multi_thread().unwrap().runs_tasks_alone());
     }
 }

@@ -4045,7 +4045,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sign_out_this_app() != 21684.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_archives() != 10038.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_archives() != 21689.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_auth() != 15199.toShort()) {
@@ -17267,7 +17267,10 @@ public interface NativeClientHandleInterface {
     
     /**
      * The archive service (`platform`: `"mobile_app"` on the phone). It owns
-     * `temp_root`, where extracted files wait for their uploads.
+     * `temp_root`, where extracted files wait for their uploads; one live
+     * service per `temp_root`. It needs the application runtime: on the
+     * lightweight one (a File Provider extension) listing and extraction
+     * would stall between calls, so it is refused (`unavailable`).
      */
     fun `archives`(`downloads`: DownloadServiceHandle, `uploads`: UploadServiceHandle, `tempRoot`: kotlin.String, `platform`: kotlin.String): ArchiveServiceHandle
     
@@ -17481,7 +17484,10 @@ open class NativeClientHandle: Disposable, AutoCloseable, NativeClientHandleInte
     
     /**
      * The archive service (`platform`: `"mobile_app"` on the phone). It owns
-     * `temp_root`, where extracted files wait for their uploads.
+     * `temp_root`, where extracted files wait for their uploads; one live
+     * service per `temp_root`. It needs the application runtime: on the
+     * lightweight one (a File Provider extension) listing and extraction
+     * would stall between calls, so it is refused (`unavailable`).
      */
     @Throws(ServiceException::class)override fun `archives`(`downloads`: DownloadServiceHandle, `uploads`: UploadServiceHandle, `tempRoot`: kotlin.String, `platform`: kotlin.String): ArchiveServiceHandle {
             return FfiConverterTypeArchiveServiceHandle.lift(

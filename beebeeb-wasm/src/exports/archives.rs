@@ -1034,7 +1034,8 @@ impl WasmArchiveExtraction {
         Ok(())
     }
 
-    /// The password the person entered for `need_password`.
+    /// The password the person entered for `need_password`. Supplied at
+    /// any other time it is dropped.
     #[wasm_bindgen(js_name = supplyPassword)]
     pub fn supply_password(&mut self, password: String) {
         self.extraction.supply_password(ArchivePassword::new(password));

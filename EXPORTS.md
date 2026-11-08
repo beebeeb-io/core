@@ -438,7 +438,7 @@ the head minus the names below.
 | --- | --- |
 | `new WasmArchiveSession(len, platform)` | A push session for an archive of `len` (bigint) bytes on `"native"`, `"browser"` or `"mobile_app"`. `step()` → `{kind: "need_bytes", start, end}` (answer with `supply(offset, bytes)`, then step again), `{kind: "listed"}`, `{kind: "refused", refusal, format, text}` or `{kind: "io", message}`. `releaseBefore(offset)`; `listing()` → `{format, entries, totals, protection, uses_zipcrypto, complete}`; `checkPassword(index, password)` → `need_bytes` / `accepted` / `wrong` / `damaged` (the entry's headers are damaged; reading it reports `corrupt`) / `not_needed` / `io`; `preview(input)` and `previewWithPlan(input, plan)` → the screen model; `plan(request)` → a `WasmExtractionPlan` or `{kind: "refused", refusal, text}`; `startExtraction(identity, plan, password?)` → a `WasmArchiveExtraction` (the session moves into it; later calls throw); `openEntry(index, password?)` → `need_bytes` / `{kind: "bytes", bytes}` (after its check passed) / `corrupt` / `wrong` / `skipped` / `too_large` / `io`. |
 | `WasmExtractionPlan` | Core's plan, opaque, so the run uses it unedited: `kind` (`"planned"`), `view()` → `{target, nodes, skipped, renamed, totals, notices}`. |
-| `WasmArchiveExtraction` | `step()` → `need_bytes`, `need_password`, `create_folder`, `file_begin`, `file_data` (`bytes`: a `Uint8Array`, not yet verified), `file_end` (verified: upload it), `file_skipped` (drop what was staged; a protected file whose password passed its check byte but failed its CRC is skipped once, asked for again with `need_password` and begun again under the same `node`), `progress` (with its `text`), `waiting` or `finished` (outcome, reason, counts, skipped, renamed, `text`). Reports: `supply`, `releaseBefore`, `folderCreated(node, id)`, `folderNameTaken(node)`, `uploadFinished(node, ok)`, `identitySeen({file_id, object_version_id})`, `runFailed(reason)`, `supplyPassword(password)`, `cancel()`; `preview(input)` while it runs and after. |
+| `WasmArchiveExtraction` | `step()` → `need_bytes`, `need_password`, `create_folder`, `file_begin`, `file_data` (`bytes`: a `Uint8Array`, not yet verified), `file_end` (verified: upload it), `file_skipped` (drop what was staged; a protected file whose password passed its check byte but failed its CRC is skipped once, asked for again with `need_password` and begun again under the same `node`), `progress` (with its `text`), `waiting` or `finished` (outcome, reason, counts, skipped, renamed, `text`). Reports: `supply`, `releaseBefore`, `folderCreated(node, id)`, `folderNameTaken(node)`, `uploadFinished(node, ok)`, `identitySeen({file_id, object_version_id})`, `runFailed(reason)`, `supplyPassword(password)` (taken only right after `need_password`; any other time it is dropped), `cancel()`; `preview(input)` while it runs and after. |
 | `archiveText(key, args)` | Core's words: `{key, text, args}`; an unknown key throws. |
 | `archiveCountLabel(n)` | `1,234`. |
 | `archiveSizeLabel(bytes)` | `3.4 MB` (core's compact formatter, one decimal). |
@@ -473,18 +473,21 @@ Records and enums mirror core field for field: `ArchivePreviewModel` (`ArchivePr
 #### The archive service (`ArchiveServiceHandle`)
 
 `NativeClientHandle.archives(downloads, uploads, temp_root, platform)` → `ArchiveServiceHandle` over
-`beebeeb_client::archives::ArchiveService` (`platform`: `"mobile_app"` on the phone; the service owns
-`temp_root` and deletes what an earlier process left there). The archive is read by range
-(`DownloadService::read_range`, v1 and v2 through core's `RangeOpener`); each verified file is staged
-0600 in `temp_root`, enqueued on the upload queue only after its own check passed, and deleted when its
-upload ends, the entry is skipped or the run stops or fails.
+`beebeeb_client::archives::ArchiveService` (`platform`: `"mobile_app"` on the phone). It needs the
+application runtime (`unavailable` on the lightweight one) and one live service per `temp_root` (a second
+is refused until the first is dropped). The service owns `temp_root`: at start it cancels the queued
+uploads an earlier process left there and deletes their staged files; other files stay. The archive is
+read by range (`DownloadService::read_range`, v1 and v2 through core's `RangeOpener`); each file is staged
+0600 as `archive-<instance>-<run>-<node>.bbtmp`, enqueued on the upload queue only after its own check
+passed, and deleted when its upload ends, the entry is skipped, or the run stops, fails or its service is
+dropped (a dropped service stops its runs).
 
 | Method | What |
 | --- | --- |
 | `open(file: DownloadData, name, parent_id)` | `throws ArchiveError -> u64`: starts listing; the listing arrives as a `model` event |
 | `preview(archive_id, folder, selection)` | `throws -> ArchivePreviewModel` for one folder of the archive |
 | `extract(archive_id, ArchiveExtractOptions, password?)` | `throws -> u64` (the extraction); `ArchiveError.Refused { reason, text }` when the planner refuses (nothing written); uploads follow the device's upload settings |
-| `supply_password(extraction_id, password)` | answers a `model` event in `needs_password` |
+| `supply_password(extraction_id, password)` | answers a `model` event in `needs_password` (dropped if the run is not asking) |
 | `open_entry(archive_id, index, password?)` | `throws -> bytes` after the entry's own check passed, up to the platform's in-memory budget |
 | `cancel(extraction_id)` / `close(archive_id)` | stop a run (finished uploads stay) / close the archive and wipe its passwords |
 | `observe()` | `ArchiveEventStreamHandle.next(timeout_ms) -> ArchiveEventData?` (`model`, `read_failed`, `finished`) |

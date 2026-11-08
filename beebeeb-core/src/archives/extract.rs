@@ -254,6 +254,9 @@ pub struct Extraction<S: ByteSource> {
     password: Option<ArchivePassword>,
     password_proven: bool,
     ask_wrong: bool,
+    /// Whether the last step asked for the password (`NeedPassword`): only
+    /// then is a supplied password taken.
+    asking: bool,
     /// Protected entries already read again after a password that passed
     /// their check byte failed their CRC (each is read again once).
     retried: HashSet<u32>,
@@ -295,6 +298,7 @@ impl<S: ByteSource> Extraction<S> {
             password,
             password_proven: false,
             ask_wrong: false,
+            asking: false,
             retried: HashSet::new(),
             folders: VecDeque::new(),
             awaiting: None,
@@ -423,8 +427,19 @@ impl<S: ByteSource> Extraction<S> {
         self.fail(reason);
     }
 
+    /// The password the last step asked for (`NeedPassword`). A password
+    /// supplied at any other time (a doubled or stale answer) is dropped:
+    /// it would replace the one an open entry is being read with.
     pub fn supply_password(&mut self, password: ArchivePassword) {
-        self.password = Some(password);
+        if std::mem::take(&mut self.asking) {
+            self.password = Some(password);
+        }
+    }
+
+    /// Whether the run is ending (stopped, failed or finished): the next
+    /// step is `Finished`, so a driver must not wait for uploads first.
+    pub fn is_stopping(&self) -> bool {
+        self.stop.is_some() || self.finished.is_some()
     }
 
     /// Stop. Files whose upload finished stay (A7). The password is wiped
@@ -509,6 +524,12 @@ impl<S: ByteSource> Extraction<S> {
     }
 
     pub fn step(&mut self) -> ExtractStep {
+        let step = self.next_step();
+        self.asking = matches!(step, ExtractStep::NeedPassword { .. });
+        step
+    }
+
+    fn next_step(&mut self) -> ExtractStep {
         if let Some(summary) = &self.finished {
             return ExtractStep::Finished(summary.clone());
         }

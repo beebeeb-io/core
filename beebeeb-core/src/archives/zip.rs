@@ -629,8 +629,10 @@ impl ZipDecoder {
         self.opened_with
     }
 
-    /// Whether the entry is ZipCrypto with no data under it: its CRC
-    /// covers nothing, so only the one check byte guards the password.
+    /// Whether this entry passing its own check proves the password: an
+    /// AES entry (its authentication code), or a ZipCrypto entry whose CRC
+    /// covers at least `ZIPCRYPTO_PROOF_BYTES`. A shorter ZipCrypto entry
+    /// is guarded by its one check byte and little else.
     pub(crate) fn proves_password(&self) -> bool {
         match self.loc.cipher {
             EntryCipher::None => false,

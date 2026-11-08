@@ -344,10 +344,14 @@ with v1's I9 gap (no position or version binding), the gap the whole-file read h
 to whole chunks and supplied to a `SuppliedBytes` that holds the central directory and two chunks. Each
 read first asks the server for the archive's `download_version`: another version fails the run as
 `Changed`. Folders go through the Backups-checked create (a `409 name_conflict` takes the next number);
-each file is staged 0600 as `archive-<run>-<node>.bbtmp` in the service's temp root and enqueued on the
-upload queue only on `FileEnd`; it is deleted when its upload ends, when the entry is skipped, and when
-the run stops or fails (the run then cancels its queued uploads and counts any that finished
-meanwhile). A new service deletes whatever an earlier process left in its temp root. Listing and runs
+each file is staged 0600 as `archive-<instance>-<run>-<node>.bbtmp` (128 random bits per service, so a
+name never repeats across processes) in the service's temp root and enqueued on the upload queue only on
+`FileEnd`; it is deleted when its upload ends, when the entry is skipped, and when the run stops or fails
+(the run then cancels its queued uploads and counts any that finished meanwhile). A stop is never held by
+the staging backpressure. Dropping the service stops its runs; a `Staged` record deletes its file on
+drop. One live service per temp root in a process; a new one cancels the uploads an earlier process left
+under its root (`UploadService::cancel_sources_under`) and deletes only `archive-*.bbtmp` files. The Swift
+handle refuses the lightweight runtime (its tasks would stall between calls). Listing and runs
 are tasks on the caller's runtime (the app's multi-thread runtime; never the File Provider extension).
 Tests: `beebeeb-client/src/tests_svc_archives.rs`, against an in-process file server.
 

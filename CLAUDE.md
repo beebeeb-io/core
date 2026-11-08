@@ -104,13 +104,13 @@ Secrets, input and bindings:
   own, and a tgz's gzip CRC-32 covers the whole stream, so a mismatch fails the run as `Damaged`
   after the files before it were published); a driver stages extracted bytes under a name the sync
   engine ignores (`<name>.bbtmp`, never the final name), renames or uploads only on `FileEnd`, and
-  deletes on `FileSkipped`, cancel or failure (the native service stages
-  `archive-<run>-<node>.bbtmp`, 0600); `PieceStep::Data` and `ExtractStep::FileData` print their
-  length, never bytes; a ZipCrypto entry proves a password only when its CRC covers 4 bytes or more
+  deletes on `FileSkipped`, cancel or failure (the native service stages 0600
+  `archive-<instance>-<run>-<node>.bbtmp`); `PieceStep::Data` and `ExtractStep::FileData` print
+  their length, never bytes; a ZipCrypto entry proves a password only when its CRC covers 4 bytes or more
   (an empty one passes any key its check byte lets through); a password is an `ArchivePassword`
-  (zeroized, not `Clone`, never logged, never stored); the limits in `archives::limits` are core's, never raised by a
-  client; hostile numbers use checked arithmetic. The old extension-based `archive` reader is gone;
-  never bring back a second archive parser.
+  (zeroized, not `Clone`, never logged, never stored); the limits in `archives::limits` are core's,
+  never raised by a client; hostile numbers use checked arithmetic. The old extension-based `archive`
+  reader is gone; never bring back a second archive parser.
 - `MasterKey` and `FileKey` are not `Clone`; intermediate key buffers are `Zeroizing`; crypto paths
   return `Result` and never panic. Secrets are wiped on drop and never appear in errors or debug output.
 - Hostile sizes and counts use checked arithmetic and return errors; `MAX_CHUNK_SIZE` (256 MiB) rejects

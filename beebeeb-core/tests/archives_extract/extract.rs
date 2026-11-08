@@ -714,3 +714,35 @@ fn plaintext_steps_debug_shows_lengths_only() {
     }
     assert!(step.contains("node: 3"), "{step}");
 }
+
+#[test]
+fn a_password_supplied_while_not_asked_for_is_dropped() {
+    // A doubled or stale answer (no prompt open) must not replace the
+    // password an open entry is read with: that entry would credit its
+    // proof to the new password, and the next entry would be skipped as
+    // "uses another password".
+    let bytes = crate::support::fixture("zipcrypto-cp437-quick-check.zip");
+    let mut x = start(
+        Blocking(bytes),
+        "q.zip",
+        Some(crate::support::CP437_TEST_PASSWORD),
+        |_, r| panic!("{r:?}"),
+    );
+    let mut supplied = false;
+    let out = run(
+        &mut x,
+        |_, r| panic!("{r:?}"),
+        vec![],
+        |x, step| {
+            if !supplied && matches!(step, ExtractStep::FileBegin { .. }) {
+                supplied = true;
+                x.supply_password(ArchivePassword::new("not-it".into()));
+            }
+        },
+    );
+    assert!(supplied);
+    let summary = out.summary.unwrap();
+    assert!(summary.skipped.is_empty(), "{:?} {:?}", summary.skipped, out.log);
+    assert_eq!(out.published["q/first.txt"], b"First.\n".repeat(20));
+    assert_eq!(out.published["q/second.txt"], b"Second.\n".repeat(20));
+}

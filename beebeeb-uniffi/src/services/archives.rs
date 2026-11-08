@@ -299,7 +299,10 @@ impl ArchiveServiceHandle {
 #[uniffi::export]
 impl NativeClientHandle {
     /// The archive service (`platform`: `"mobile_app"` on the phone). It owns
-    /// `temp_root`, where extracted files wait for their uploads.
+    /// `temp_root`, where extracted files wait for their uploads; one live
+    /// service per `temp_root`. It needs the application runtime: on the
+    /// lightweight one (a File Provider extension) listing and extraction
+    /// would stall between calls, so it is refused (`unavailable`).
     pub fn archives(
         self: &Arc<Self>,
         downloads: Arc<DownloadServiceHandle>,
@@ -307,6 +310,9 @@ impl NativeClientHandle {
         temp_root: String,
         platform: String,
     ) -> Result<Arc<ArchiveServiceHandle>, ServiceError> {
+        if !self.runtime.runs_tasks_alone() {
+            return Err(ServiceError::new(ServiceErrorKind::Unavailable));
+        }
         let platform =
             ArchivePlatform::parse(&platform).ok_or_else(|| ServiceError::new(ServiceErrorKind::InvalidInput))?;
         let service = ArchiveService::new(

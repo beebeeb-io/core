@@ -8018,7 +8018,10 @@ public protocol NativeClientHandleProtocol: AnyObject, Sendable {
     
     /**
      * The archive service (`platform`: `"mobile_app"` on the phone). It owns
-     * `temp_root`, where extracted files wait for their uploads.
+     * `temp_root`, where extracted files wait for their uploads; one live
+     * service per `temp_root`. It needs the application runtime: on the
+     * lightweight one (a File Provider extension) listing and extraction
+     * would stall between calls, so it is refused (`unavailable`).
      */
     func archives(downloads: DownloadServiceHandle, uploads: UploadServiceHandle, tempRoot: String, platform: String) throws  -> ArchiveServiceHandle
     
@@ -8180,7 +8183,10 @@ open func signOutThisApp(coordinator: ServiceCoordinatorHandle, canceller: Platf
     
     /**
      * The archive service (`platform`: `"mobile_app"` on the phone). It owns
-     * `temp_root`, where extracted files wait for their uploads.
+     * `temp_root`, where extracted files wait for their uploads; one live
+     * service per `temp_root`. It needs the application runtime: on the
+     * lightweight one (a File Provider extension) listing and extraction
+     * would stall between calls, so it is refused (`unavailable`).
      */
 open func archives(downloads: DownloadServiceHandle, uploads: UploadServiceHandle, tempRoot: String, platform: String)throws  -> ArchiveServiceHandle  {
     return try  FfiConverterTypeArchiveServiceHandle_lift(try rustCallWithError(FfiConverterTypeServiceError_lift) {
@@ -29876,7 +29882,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_sign_out_this_app() != 21684) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_archives() != 10038) {
+    if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_archives() != 21689) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_auth() != 15199) {
