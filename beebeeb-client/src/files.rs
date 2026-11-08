@@ -326,6 +326,17 @@ impl Client {
         self.execute(&api::restore(id), &()).await.map(|_| ())
     }
 
+    /// Restore from the Trash. Deliberately not asked of core's Backups rule
+    /// (review r4, decided): a restore writes nothing new, it undoes a trash
+    /// the app rule allowed (a backup's device or category folder, or one
+    /// file, rule 11). The server puts the item back where it was, or at the
+    /// top of the drive when that folder is gone, never anywhere else, so
+    /// nothing reaches the Backups tree that the device's own pass did not
+    /// write. The backup spec relies on it: a folder restored before the pass
+    /// "changes nothing: the records still match" (§4.2 rule 11), and
+    /// "Back up again" finds a restored device folder (Amendment 12). A copy
+    /// the pass recorded as trashed stays recorded so; it is never uploaded
+    /// twice.
     pub async fn restore_entry(&self, entry: &FileEntry) -> Result<(), FileServiceError> {
         refuse_managed(entry)?;
         self.restore_file(&entry.id).await.map_err(map_client_error)?;

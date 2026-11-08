@@ -141,6 +141,26 @@ async fn app_may_delete_a_device_backup() {
     );
 }
 
+/// A restore from the Trash undoes a trash the app rule allowed (rule 11): a
+/// photo trashed from a backup goes back where it was, with no Backups check
+/// (review r4, decided in `restore_entry`'s comment). Asking the create rule
+/// of its category folder would refuse it.
+#[tokio::test]
+async fn a_photo_trashed_from_a_backup_is_restored_where_it_was() {
+    // The rows a Backups check would read come first: the restore must not.
+    let mut replies = ancestors(CATEGORY);
+    replies.push(br#"{"restored":true}"#.to_vec());
+    let transport = scripted(replies);
+    let client = client(&transport);
+    let mut trashed = entry(PHOTO, Some(CATEGORY), false);
+    trashed.is_trashed = true;
+
+    let result = client.restore_entry(&trashed).await;
+
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(paths(&transport), vec![format!("Post /api/v1/files/{PHOTO}/restore")]);
+}
+
 /// Outside the tree a rename, which the app rule refuses everywhere under the
 /// root, goes ahead as before.
 #[tokio::test]
