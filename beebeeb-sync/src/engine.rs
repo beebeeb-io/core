@@ -414,7 +414,8 @@ impl SyncEngine {
     ///
     /// On Windows `rel` may reach a DIFFERENT file through an 8.3 short name
     /// (task 2404). That file is never deleted: `rel`'s own file is not on disk,
-    /// which is success, as `NotFound` is.
+    /// which is success, as `NotFound` is. On every host a `rel` that is not a
+    /// relative path of plain names (`..`, absolute) is never deleted either.
     fn delete_local_file(&self, rel: &Path) -> bool {
         let abs = self.config.vault_path.join(rel);
         match beebeeb_core::path_safety::short_name_alias(&self.config.vault_path, rel) {
@@ -686,6 +687,34 @@ mod tests {
 
         assert!(ops.contains(&SyncOp::Upload(path.clone())));
         assert!(!ops.contains(&SyncOp::DeleteLocal(path)));
+    }
+
+    /// A state path that climbs out of the vault is never deleted (task 2404:
+    /// the delete checks its path below the vault before it unlinks anything).
+    #[test]
+    fn a_remote_delete_never_deletes_outside_the_vault() {
+        let dir = TempDir::new().unwrap();
+        let vault = dir.path().join("vault");
+        fs::create_dir(&vault).unwrap();
+        let outside = dir.path().join("outside.txt");
+        fs::write(&outside, "keep").unwrap();
+
+        let mut cfg = test_config(&vault);
+        cfg.sync_mode = crate::config::SyncMode::Full;
+        let mut engine = SyncEngine::new(cfg);
+        let rel = PathBuf::from("../outside.txt");
+        engine.state.files.insert(rel.clone(), FileState::Synced);
+
+        let ops = engine.sync_once().unwrap();
+        assert!(
+            ops.contains(&SyncOp::DeleteLocal(rel.clone())),
+            "the fixture must reach the delete: {ops:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(&outside).unwrap(),
+            "keep",
+            "a file outside the vault must survive"
+        );
     }
 
     /// (c) The exec path removes the file from disk AND clears it from state.

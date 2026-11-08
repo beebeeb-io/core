@@ -23,7 +23,8 @@ Additive: no public item is renamed, retyped or removed.
     file: `CoreError::InvalidInput` naming the conflict. beebeeb-upload's downloads do the same
     (`UploadError::InvalidInput`).
   - beebeeb-sync's remote delete never deletes the file such a name reaches.
-  - Other hosts: no change and no extra file-system calls.
+  - Other hosts: no extra file-system calls, and no change but one: beebeeb-sync's remote delete now refuses a state
+    path that is not a relative path of plain names (`..`, absolute) instead of deleting `vault/<path>`.
 
 ### Added
 
