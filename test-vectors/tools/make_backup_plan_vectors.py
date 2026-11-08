@@ -422,6 +422,123 @@ gate("gate_first_pass_upgraded_device_catches_a_notice_the_old_engine_missed", T
      last=LEGACY)
 cases.append({"id": "check_failed_words", "kind": "check_failed_words", "expect": "Couldn't check \u2014 will retry."})
 
+# Amendment 12d (server #415 review finding 1; Guus 2026-11-08 03:16, "Go w recommended"). A notice's created_at is the
+# START of the server transaction that writes it (Amendment 12a), not its commit, so a pass that read the notices while
+# that transaction was open never saw it, and a strict created_at > last_pass_at would never count it afterwards. The
+# pass therefore reads with a 10-minute overlap: a notice is in the window when created_at > last_pass_at - 10 min. A
+# notice in the window whose id the device already acknowledged counts for nothing (so "Back up again" after it never
+# stops on it again); every other notice in the window counts, and steps 1-4 decide as before (the newest files_removed
+# notice that counts wins). The pass returns the ids to keep: every id in its window, sorted and once each; an id whose
+# notice left the window is dropped. A notice without an id (missing, null or empty) is never acknowledged.
+OVERLAP = 600_000
+
+
+def nid(n: int) -> str:
+    return f"{n:08x}-0000-4000-8000-0000000000bb"
+
+
+N1, N2, N3 = nid(1), nid(2), nid(3)
+
+
+def with_id(id_, row):
+    return {"id": id_, **row}
+
+
+def stop_ack(id_, notices, acknowledged, listing_, stopped, kept, last=LAST):
+    cases.append({"id": id_, "kind": "stop_ack", "notices": notices, "last_pass_at_ms": last,
+                  "acknowledged": acknowledged, "listing": listing_,
+                  "expect": {"stopped": stopped, "acknowledged": kept}})
+
+
+# The gap itself: the grace clock's transaction started 30 s before the previous pass read the notices and committed
+# after it. The strict rule never counts this row; the overlap does.
+stop_ack("overlap_notice_whose_transaction_was_open_at_the_last_pass_still_stops",
+         [with_id(N1, removed("account_lapsed", LAST - 30_000))], [], listing(), both("account_lapsed"), [N1])
+# The window's edges: strict at last_pass_at - 10 min, as the old rule was strict at last_pass_at.
+stop_ack("overlap_notice_at_the_start_of_the_margin_is_old",
+         [with_id(N1, removed("erase_request", LAST - OVERLAP))], [], listing(), [], [])
+stop_ack("overlap_notice_just_inside_the_margin_counts",
+         [with_id(N1, removed("erase_request", LAST - OVERLAP + 1))], [], listing(), both("erase_request"), [N1])
+stop_ack("overlap_notices_older_than_the_margin_are_ignored",
+         [with_id(N1, removed("erase_request", LAST - OVERLAP - 1)), with_id(N2, deleted(DEV, PICS, LAST - 2 * OVERLAP))],
+         [], listing(), [], [])
+stop_ack("overlap_notice_after_the_last_pass_stops_as_before",
+         [with_id(N1, removed("inactive_cleanup", LAST + 1))], [], listing(), both("inactive_cleanup"), [N1])
+# Acknowledged ids: last_pass_at is the moment the person chose "Back up again", after the pass that acted on N1.
+stop_ack("overlap_acknowledged_notice_never_stops_again_after_back_up_again",
+         [with_id(N1, removed("erase_request", LAST - 60_000))], [N1], listing(), [], [N1])
+stop_ack("overlap_acknowledged_notice_after_the_last_pass_counts_for_nothing",
+         [with_id(N1, removed("erase_request", LAST + 1))], [N1], listing(), [], [N1])
+stop_ack("overlap_acknowledged_backup_deleted_never_stops_the_restored_folder",
+         [with_id(N1, deleted(DEV, PICS, LAST - 1))], [N1], listing(), [], [N1])
+stop_ack("overlap_new_notice_stops_beside_an_acknowledged_one",
+         [with_id(N1, removed("erase_request", LAST - 60_000)), with_id(N2, removed("account_lapsed", LAST - 1_000))],
+         [N1], listing(), both("account_lapsed"), [N1, N2])
+# N2's transaction started before N1's and committed after the pass that acted on N1: N2 still stops (the newest notice
+# that COUNTS wins, never an acknowledged one).
+stop_ack("overlap_unacknowledged_older_notice_still_stops_after_an_acknowledged_newer_one",
+         [with_id(N1, removed("erase_request", LAST - 5)), with_id(N2, removed("account_lapsed", LAST - 120_000))],
+         [N1], listing(), both("account_lapsed"), [N1, N2])
+stop_ack("overlap_backup_deleted_in_the_margin_stops_its_folder",
+         [with_id(N1, deleted(DEV, PICS, LAST - 1))], [], listing(pics=False), [off("pictures", "backup_deleted")], [N1])
+# Every notice in the window is acknowledged, the one step 1 beat and another device's too: after "Back up again"
+# none of them may stop this device.
+stop_ack("overlap_every_notice_in_the_window_is_acknowledged",
+         [with_id(N1, removed("erase_request", LAST - 10)), with_id(N2, deleted(DEV, PICS, LAST - 5)),
+          with_id(N3, deleted(OTHER_DEV, None, LAST - 1))],
+         [], listing(pics=False), both("erase_request"), [N1, N2, N3])
+stop_ack("overlap_acknowledged_ids_outside_the_window_are_dropped",
+         [with_id(N1, removed("erase_request", LAST - 1)), with_id(N2, removed("account_reset", LAST - OVERLAP - 1))],
+         [N1, N2, N3], listing(), [], [N1])
+# A notice without an id (no key, null, or empty) is never acknowledged, and an empty acknowledged id matches nothing:
+# here the empty-id notice is the newest, so it decides.
+stop_ack("overlap_notice_without_an_id_is_never_acknowledged",
+         [removed("erase_request", LAST - 3), with_id(None, removed("inactive_cleanup", LAST - 2)),
+          with_id("", removed("account_reset", LAST - 1))],
+         [""], listing(), both("account_reset"), [])
+stop_ack("overlap_a_notice_listed_twice_is_acknowledged_once",
+         [with_id(N1, removed("erase_request", LAST - 1)), with_id(N1, removed("erase_request", LAST - 1))],
+         [], listing(), both("erase_request"), [N1])
+stop_ack("overlap_other_notice_types_are_not_acknowledged",
+         [with_id(N1, {"type": "share_received", "data": {"reason": "erase_request"}, "created_at_ms": LAST - 1})],
+         [], listing(), [], [])
+# Accepted edge: the first pass after a fresh setup stops once on a removal notice written within the margin before the
+# setup (the earlier-erring side: an emptied account never fills up again by itself); "Back up again" then finds it
+# acknowledged.
+stop_ack("overlap_first_pass_after_a_fresh_setup_stops_once_on_a_notice_just_before_it",
+         [with_id(N1, removed("erase_request", SETUP - 60_000))], [], listing(), both("erase_request"), [N1], last=SETUP)
+
+
+def gate_ack(id_, fetch_ok, notices, acknowledged, listing_, expect, last=LAST):
+    cases.append({"id": id_, "kind": "gate_ack", "notices_fetch_ok": fetch_ok, "notices": notices,
+                  "last_pass_at_ms": last, "acknowledged": acknowledged, "listing": listing_, "expect": expect})
+
+
+gate_ack("gate_ack_runs_with_the_margin_and_returns_the_ids", True,
+         [with_id(N1, removed("account_lapsed", LAST - 30_000))], [], listing(),
+         {"outcome": "run", "stopped": both("account_lapsed"), "acknowledged": [N1]})
+gate_ack("gate_ack_back_up_again_after_the_notice_runs", True,
+         [with_id(N1, removed("account_lapsed", LAST - 30_000))], [N1], listing(),
+         {"outcome": "run", "stopped": [], "acknowledged": [N1]})
+gate_ack("gate_ack_nothing_in_the_window_runs_and_keeps_no_ids", True, [], [N2], listing(),
+         {"outcome": "run", "stopped": [], "acknowledged": []})
+# A failed fetch decides nothing: last_pass_at and the acknowledged set stay where they were.
+gate_ack("gate_ack_check_failed_keeps_last_pass_and_the_acknowledged_set", False,
+         [with_id(N1, removed("account_lapsed", LAST - 30_000))], [N1], listing(pics=False), {"outcome": "check_failed"})
+
+
+# The `since` a client sends to GET /api/v1/notifications (server LD-0141, inclusive): last_pass_at - 10 min, never
+# below 0.
+def since(id_, last, expect):
+    cases.append({"id": id_, "kind": "notices_since", "last_pass_at_ms": last, "expect": expect})
+
+
+since("since_is_the_margin_before_the_last_pass", LAST, LAST - OVERLAP)
+since("since_for_a_first_pass_with_no_baseline_is_zero", 0, 0)
+since("since_never_goes_below_zero", OVERLAP - 1, 0)
+since("since_at_exactly_the_margin_is_zero", OVERLAP, 0)
+cases.append({"id": "notice_overlap_is_ten_minutes", "kind": "notice_overlap", "expect": OVERLAP})
+
 doc = {
     "description": "LD-0113 backup pass planner (spec 2026-11-06-backup-from-source §4.2 rules 9-11): new, changed "
     "(size or mtime), unchanged, gone (stays in the backup), unique moves (same size, mtime and case-folded name, "
@@ -430,8 +547,9 @@ doc = {
     "from the remote tree (uploaded after the last change by the device clock's measured offset and margin, or the "
     "one-sided 10-minute floor when no offset is known: LD-0123), and why a backup stops with its words (spec "
     "Amendments 12, 12a, 12b and 12c, LD-0121): the first pass's baseline and the pass gate when the notices could "
-    "not be read.",
-    "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\") + LD-0123 + Amendments 12/12a/12b/12c (LD-0121); written by "
+    "not be read; and since Amendment 12d the 10-minute overlap a pass reads notices with, the acknowledged notice ids "
+    "that keep the overlap from counting a notice twice, and the `since` a client fetches from.",
+    "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\") + LD-0123 + Amendments 12/12a/12b/12c/12d (LD-0121); written by "
     "test-vectors/tools/make_backup_plan_vectors.py (independent of core)",
     "cases": cases,
 }

@@ -1,6 +1,6 @@
 {
-  "description": "LD-0113 backup pass planner (spec 2026-11-06-backup-from-source §4.2 rules 9-11): new, changed (size or mtime), unchanged, gone (stays in the backup), unique moves (same size, mtime and case-folded name, unique both ways), the per-pass budget (a prefix; the first upload always fits), parent folders parents-first, removed elsewhere (stays deleted until it changes), folder presence, key normalisation, and rebuilding records from the remote tree (uploaded after the last change by the device clock's measured offset and margin, or the one-sided 10-minute floor when no offset is known: LD-0123), and why a backup stops with its words (spec Amendments 12, 12a, 12b and 12c, LD-0121): the first pass's baseline and the pass gate when the notices could not be read.",
-  "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\") + LD-0123 + Amendments 12/12a/12b/12c (LD-0121); written by test-vectors/tools/make_backup_plan_vectors.py (independent of core)",
+  "description": "LD-0113 backup pass planner (spec 2026-11-06-backup-from-source §4.2 rules 9-11): new, changed (size or mtime), unchanged, gone (stays in the backup), unique moves (same size, mtime and case-folded name, unique both ways), the per-pass budget (a prefix; the first upload always fits), parent folders parents-first, removed elsewhere (stays deleted until it changes), folder presence, key normalisation, and rebuilding records from the remote tree (uploaded after the last change by the device clock's measured offset and margin, or the one-sided 10-minute floor when no offset is known: LD-0123), and why a backup stops with its words (spec Amendments 12, 12a, 12b and 12c, LD-0121): the first pass's baseline and the pass gate when the notices could not be read; and since Amendment 12d the 10-minute overlap a pass reads notices with, the acknowledged notice ids that keep the overlap from counting a notice twice, and the `since` a client fetches from.",
+  "source": "spec §4.2 rules 9-11 + plan Task A5 + Guus 2026-11-06 15:00 (\"A\") + LD-0123 + Amendments 12/12a/12b/12c/12d (LD-0121); written by test-vectors/tools/make_backup_plan_vectors.py (independent of core)",
   "cases": [
     {
       "id": "plan_new_file",
@@ -4357,6 +4357,1014 @@
       "id": "check_failed_words",
       "kind": "check_failed_words",
       "expect": "Couldn't check — will retry."
+    },
+    {
+      "id": "overlap_notice_whose_transaction_was_open_at_the_last_pass_still_stops",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "account_lapsed"
+          },
+          "created_at_ms": 1762430370000
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [
+          {
+            "category": "documents",
+            "reason": "account_lapsed"
+          },
+          {
+            "category": "pictures",
+            "reason": "account_lapsed"
+          }
+        ],
+        "acknowledged": [
+          "00000001-0000-4000-8000-0000000000bb"
+        ]
+      }
+    },
+    {
+      "id": "overlap_notice_at_the_start_of_the_margin_is_old",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "erase_request"
+          },
+          "created_at_ms": 1762429800000
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [],
+        "acknowledged": []
+      }
+    },
+    {
+      "id": "overlap_notice_just_inside_the_margin_counts",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "erase_request"
+          },
+          "created_at_ms": 1762429800001
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [
+          {
+            "category": "documents",
+            "reason": "erase_request"
+          },
+          {
+            "category": "pictures",
+            "reason": "erase_request"
+          }
+        ],
+        "acknowledged": [
+          "00000001-0000-4000-8000-0000000000bb"
+        ]
+      }
+    },
+    {
+      "id": "overlap_notices_older_than_the_margin_are_ignored",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "erase_request"
+          },
+          "created_at_ms": 1762429799999
+        },
+        {
+          "id": "00000002-0000-4000-8000-0000000000bb",
+          "type": "backup_deleted",
+          "data": {
+            "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa"
+          },
+          "created_at_ms": 1762429200000
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [],
+        "acknowledged": []
+      }
+    },
+    {
+      "id": "overlap_notice_after_the_last_pass_stops_as_before",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "inactive_cleanup"
+          },
+          "created_at_ms": 1762430400001
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [
+          {
+            "category": "documents",
+            "reason": "inactive_cleanup"
+          },
+          {
+            "category": "pictures",
+            "reason": "inactive_cleanup"
+          }
+        ],
+        "acknowledged": [
+          "00000001-0000-4000-8000-0000000000bb"
+        ]
+      }
+    },
+    {
+      "id": "overlap_acknowledged_notice_never_stops_again_after_back_up_again",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "erase_request"
+          },
+          "created_at_ms": 1762430340000
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [
+        "00000001-0000-4000-8000-0000000000bb"
+      ],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [],
+        "acknowledged": [
+          "00000001-0000-4000-8000-0000000000bb"
+        ]
+      }
+    },
+    {
+      "id": "overlap_acknowledged_notice_after_the_last_pass_counts_for_nothing",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "erase_request"
+          },
+          "created_at_ms": 1762430400001
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [
+        "00000001-0000-4000-8000-0000000000bb"
+      ],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [],
+        "acknowledged": [
+          "00000001-0000-4000-8000-0000000000bb"
+        ]
+      }
+    },
+    {
+      "id": "overlap_acknowledged_backup_deleted_never_stops_the_restored_folder",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "backup_deleted",
+          "data": {
+            "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa"
+          },
+          "created_at_ms": 1762430399999
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [
+        "00000001-0000-4000-8000-0000000000bb"
+      ],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [],
+        "acknowledged": [
+          "00000001-0000-4000-8000-0000000000bb"
+        ]
+      }
+    },
+    {
+      "id": "overlap_new_notice_stops_beside_an_acknowledged_one",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "erase_request"
+          },
+          "created_at_ms": 1762430340000
+        },
+        {
+          "id": "00000002-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "account_lapsed"
+          },
+          "created_at_ms": 1762430399000
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [
+        "00000001-0000-4000-8000-0000000000bb"
+      ],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [
+          {
+            "category": "documents",
+            "reason": "account_lapsed"
+          },
+          {
+            "category": "pictures",
+            "reason": "account_lapsed"
+          }
+        ],
+        "acknowledged": [
+          "00000001-0000-4000-8000-0000000000bb",
+          "00000002-0000-4000-8000-0000000000bb"
+        ]
+      }
+    },
+    {
+      "id": "overlap_unacknowledged_older_notice_still_stops_after_an_acknowledged_newer_one",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "erase_request"
+          },
+          "created_at_ms": 1762430399995
+        },
+        {
+          "id": "00000002-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "account_lapsed"
+          },
+          "created_at_ms": 1762430280000
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [
+        "00000001-0000-4000-8000-0000000000bb"
+      ],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [
+          {
+            "category": "documents",
+            "reason": "account_lapsed"
+          },
+          {
+            "category": "pictures",
+            "reason": "account_lapsed"
+          }
+        ],
+        "acknowledged": [
+          "00000001-0000-4000-8000-0000000000bb",
+          "00000002-0000-4000-8000-0000000000bb"
+        ]
+      }
+    },
+    {
+      "id": "overlap_backup_deleted_in_the_margin_stops_its_folder",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "backup_deleted",
+          "data": {
+            "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa"
+          },
+          "created_at_ms": 1762430399999
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": false
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [
+          {
+            "category": "pictures",
+            "reason": "backup_deleted"
+          }
+        ],
+        "acknowledged": [
+          "00000001-0000-4000-8000-0000000000bb"
+        ]
+      }
+    },
+    {
+      "id": "overlap_every_notice_in_the_window_is_acknowledged",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "erase_request"
+          },
+          "created_at_ms": 1762430399990
+        },
+        {
+          "id": "00000002-0000-4000-8000-0000000000bb",
+          "type": "backup_deleted",
+          "data": {
+            "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa"
+          },
+          "created_at_ms": 1762430399995
+        },
+        {
+          "id": "00000003-0000-4000-8000-0000000000bb",
+          "type": "backup_deleted",
+          "data": {
+            "device_folder_id": "000000c8-0000-4000-8000-0000000000aa"
+          },
+          "created_at_ms": 1762430399999
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": false
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [
+          {
+            "category": "documents",
+            "reason": "erase_request"
+          },
+          {
+            "category": "pictures",
+            "reason": "erase_request"
+          }
+        ],
+        "acknowledged": [
+          "00000001-0000-4000-8000-0000000000bb",
+          "00000002-0000-4000-8000-0000000000bb",
+          "00000003-0000-4000-8000-0000000000bb"
+        ]
+      }
+    },
+    {
+      "id": "overlap_acknowledged_ids_outside_the_window_are_dropped",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "erase_request"
+          },
+          "created_at_ms": 1762430399999
+        },
+        {
+          "id": "00000002-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "account_reset"
+          },
+          "created_at_ms": 1762429799999
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [
+        "00000001-0000-4000-8000-0000000000bb",
+        "00000002-0000-4000-8000-0000000000bb",
+        "00000003-0000-4000-8000-0000000000bb"
+      ],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [],
+        "acknowledged": [
+          "00000001-0000-4000-8000-0000000000bb"
+        ]
+      }
+    },
+    {
+      "id": "overlap_notice_without_an_id_is_never_acknowledged",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "type": "files_removed",
+          "data": {
+            "reason": "erase_request"
+          },
+          "created_at_ms": 1762430399997
+        },
+        {
+          "id": null,
+          "type": "files_removed",
+          "data": {
+            "reason": "inactive_cleanup"
+          },
+          "created_at_ms": 1762430399998
+        },
+        {
+          "id": "",
+          "type": "files_removed",
+          "data": {
+            "reason": "account_reset"
+          },
+          "created_at_ms": 1762430399999
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [
+        ""
+      ],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [
+          {
+            "category": "documents",
+            "reason": "account_reset"
+          },
+          {
+            "category": "pictures",
+            "reason": "account_reset"
+          }
+        ],
+        "acknowledged": []
+      }
+    },
+    {
+      "id": "overlap_a_notice_listed_twice_is_acknowledged_once",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "erase_request"
+          },
+          "created_at_ms": 1762430399999
+        },
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "erase_request"
+          },
+          "created_at_ms": 1762430399999
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [
+          {
+            "category": "documents",
+            "reason": "erase_request"
+          },
+          {
+            "category": "pictures",
+            "reason": "erase_request"
+          }
+        ],
+        "acknowledged": [
+          "00000001-0000-4000-8000-0000000000bb"
+        ]
+      }
+    },
+    {
+      "id": "overlap_other_notice_types_are_not_acknowledged",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "share_received",
+          "data": {
+            "reason": "erase_request"
+          },
+          "created_at_ms": 1762430399999
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [],
+        "acknowledged": []
+      }
+    },
+    {
+      "id": "overlap_first_pass_after_a_fresh_setup_stops_once_on_a_notice_just_before_it",
+      "kind": "stop_ack",
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "erase_request"
+          },
+          "created_at_ms": 1762433940000
+        }
+      ],
+      "last_pass_at_ms": 1762434000000,
+      "acknowledged": [],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "stopped": [
+          {
+            "category": "documents",
+            "reason": "erase_request"
+          },
+          {
+            "category": "pictures",
+            "reason": "erase_request"
+          }
+        ],
+        "acknowledged": [
+          "00000001-0000-4000-8000-0000000000bb"
+        ]
+      }
+    },
+    {
+      "id": "gate_ack_runs_with_the_margin_and_returns_the_ids",
+      "kind": "gate_ack",
+      "notices_fetch_ok": true,
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "account_lapsed"
+          },
+          "created_at_ms": 1762430370000
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "run",
+        "stopped": [
+          {
+            "category": "documents",
+            "reason": "account_lapsed"
+          },
+          {
+            "category": "pictures",
+            "reason": "account_lapsed"
+          }
+        ],
+        "acknowledged": [
+          "00000001-0000-4000-8000-0000000000bb"
+        ]
+      }
+    },
+    {
+      "id": "gate_ack_back_up_again_after_the_notice_runs",
+      "kind": "gate_ack",
+      "notices_fetch_ok": true,
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "account_lapsed"
+          },
+          "created_at_ms": 1762430370000
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [
+        "00000001-0000-4000-8000-0000000000bb"
+      ],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "run",
+        "stopped": [],
+        "acknowledged": [
+          "00000001-0000-4000-8000-0000000000bb"
+        ]
+      }
+    },
+    {
+      "id": "gate_ack_nothing_in_the_window_runs_and_keeps_no_ids",
+      "kind": "gate_ack",
+      "notices_fetch_ok": true,
+      "notices": [],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [
+        "00000002-0000-4000-8000-0000000000bb"
+      ],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "run",
+        "stopped": [],
+        "acknowledged": []
+      }
+    },
+    {
+      "id": "gate_ack_check_failed_keeps_last_pass_and_the_acknowledged_set",
+      "kind": "gate_ack",
+      "notices_fetch_ok": false,
+      "notices": [
+        {
+          "id": "00000001-0000-4000-8000-0000000000bb",
+          "type": "files_removed",
+          "data": {
+            "reason": "account_lapsed"
+          },
+          "created_at_ms": 1762430370000
+        }
+      ],
+      "last_pass_at_ms": 1762430400000,
+      "acknowledged": [
+        "00000001-0000-4000-8000-0000000000bb"
+      ],
+      "listing": {
+        "device_folder_id": "00000064-0000-4000-8000-0000000000aa",
+        "device_folder_live": true,
+        "folders": [
+          {
+            "category": "pictures",
+            "category_folder_id": "00000065-0000-4000-8000-0000000000aa",
+            "category_folder_live": false
+          },
+          {
+            "category": "documents",
+            "category_folder_id": "00000066-0000-4000-8000-0000000000aa",
+            "category_folder_live": true
+          }
+        ]
+      },
+      "expect": {
+        "outcome": "check_failed"
+      }
+    },
+    {
+      "id": "since_is_the_margin_before_the_last_pass",
+      "kind": "notices_since",
+      "last_pass_at_ms": 1762430400000,
+      "expect": 1762429800000
+    },
+    {
+      "id": "since_for_a_first_pass_with_no_baseline_is_zero",
+      "kind": "notices_since",
+      "last_pass_at_ms": 0,
+      "expect": 0
+    },
+    {
+      "id": "since_never_goes_below_zero",
+      "kind": "notices_since",
+      "last_pass_at_ms": 599999,
+      "expect": 0
+    },
+    {
+      "id": "since_at_exactly_the_margin_is_zero",
+      "kind": "notices_since",
+      "last_pass_at_ms": 600000,
+      "expect": 0
+    },
+    {
+      "id": "notice_overlap_is_ten_minutes",
+      "kind": "notice_overlap",
+      "expect": 600000
     }
   ]
 }

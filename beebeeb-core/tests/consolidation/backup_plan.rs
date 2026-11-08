@@ -1,7 +1,7 @@
 //! LD-0113 — the backup pass planner, removed-elsewhere, folder presence and
 //! rebuilding records (spec §4.2 rules 9-11), with the rebuild's clock rule
 //! (LD-0123), and why a backup stops with its words (spec Amendments 12 and
-//! 12a, LD-0121).
+//! 12a, LD-0121), read with the overlap margin and acknowledged ids (12d).
 //!
 //! Cases live in `test-vectors/consolidation/backup_plan.json`, written by
 //! `test-vectors/tools/make_backup_plan_vectors.py`. The two Review Focus tests
@@ -10,11 +10,12 @@
 use std::collections::HashSet;
 
 use beebeeb_core::backup::{
-    BackupPassGate, BackupRecord, FolderPresence, MSG_BACK_UP_AGAIN, MSG_STOP_CHECK_FAILED, PassBudget, PassPlan,
-    REBUILD_FLOOR_MS, RebuildClock, ReceivedNotice, RecordRef, RecordState, RemoteEntry, SourceEntry, StopFolder,
-    StopListing, StoppedBackup, UploadReason, backup_pass_gate, backup_stop, backup_stop_words, first_pass_baseline,
-    folder_presence, normalize_key, parse_backup_notice, plan_pass, rebuild_clock_from_date, records_from_remote,
-    records_from_remote_with_clock,
+    BackupPassGate, BackupPassGateV2, BackupRecord, FolderPresence, ListedNotice, MSG_BACK_UP_AGAIN,
+    MSG_STOP_CHECK_FAILED, NOTICE_OVERLAP_MS, PassBudget, PassPlan, REBUILD_FLOOR_MS, RebuildClock, ReceivedNotice,
+    RecordRef, RecordState, RemoteEntry, SourceEntry, StopFolder, StopListing, StopOutcome, StoppedBackup,
+    UploadReason, backup_pass_gate, backup_pass_gate_v2, backup_stop, backup_stop_v2, backup_stop_words,
+    first_pass_baseline, folder_presence, normalize_key, notices_since, parse_backup_notice, plan_pass,
+    rebuild_clock_from_date, records_from_remote, records_from_remote_with_clock,
 };
 use beebeeb_types::backup::{BackupNotice, BackupStopReason, Category};
 use serde_json::{Value, json};
@@ -113,11 +114,12 @@ fn run_plan_case(case: &Value) -> Value {
 #[test]
 fn backup_plan_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 128, "every named backup_plan case is present");
+    assert_eq!(cases.len(), 154, "every named backup_plan case is present");
 
     let (mut plans, mut keys, mut presences, mut rebuilds) = (0, 0, 0, 0);
     let (mut stops, mut notices, mut words, mut actions) = (0, 0, 0, 0);
     let (mut baselines, mut gates, mut check_failed) = (0, 0, 0);
+    let (mut stop_acks, mut gate_acks, mut sinces, mut overlaps) = (0, 0, 0, 0);
     for case in &cases {
         let id = case["id"].as_str().expect("case id");
         match case["kind"].as_str().expect("case kind") {
@@ -227,13 +229,51 @@ fn backup_plan_cases_match_core() {
                 check_failed += 1;
                 assert_eq!(MSG_STOP_CHECK_FAILED, s(&case["expect"]), "{id}");
             }
+            "stop_ack" => {
+                stop_acks += 1;
+                assert_eq!(run_stop_ack_case(case), case["expect"], "{id}");
+                // The answer does not depend on the order of the notices or
+                // of the acknowledged ids.
+                let mut reversed = case.clone();
+                for field in ["notices", "acknowledged"] {
+                    reversed[field].as_array_mut().expect("array").reverse();
+                }
+                assert_eq!(run_stop_ack_case(&reversed), case["expect"], "{id}: reversed inputs");
+            }
+            "gate_ack" => {
+                gate_acks += 1;
+                let notices = listed(case);
+                let fetched = case["notices_fetch_ok"].as_bool().expect("notices_fetch_ok");
+                let got = match backup_pass_gate_v2(
+                    fetched.then_some(notices.as_slice()),
+                    case["last_pass_at_ms"].as_i64().expect("last_pass_at_ms"),
+                    &acknowledged(case),
+                    &stop_listing(&case["listing"]),
+                ) {
+                    BackupPassGateV2::Run { stopped, acknowledged } => {
+                        json!({"outcome": "run", "stopped": stopped_json(&stopped), "acknowledged": acknowledged})
+                    }
+                    BackupPassGateV2::CheckFailed => json!({"outcome": "check_failed"}),
+                };
+                assert_eq!(got, case["expect"], "{id}");
+            }
+            "notices_since" => {
+                sinces += 1;
+                let got = notices_since(case["last_pass_at_ms"].as_i64().expect("last_pass_at_ms"));
+                assert_eq!(got, case["expect"].as_i64().expect("expect"), "{id}");
+            }
+            "notice_overlap" => {
+                overlaps += 1;
+                assert_eq!(NOTICE_OVERLAP_MS, case["expect"].as_i64().expect("expect"), "{id}");
+            }
             other => panic!("{id}: unknown kind `{other}`"),
         }
     }
     println!(
         "backup_plan: {} cases ({plans} plan, {keys} normalize_key, {presences} presence, {rebuilds} rebuild, \
          {stops} stop, {notices} notice, {words} stop_words, {actions} stop_action, {baselines} baseline, \
-         {gates} gate, {check_failed} check_failed_words)",
+         {gates} gate, {check_failed} check_failed_words, {stop_acks} stop_ack, {gate_acks} gate_ack, \
+         {sinces} notices_since, {overlaps} notice_overlap)",
         cases.len()
     );
     assert_eq!(
@@ -247,6 +287,11 @@ fn backup_plan_cases_match_core() {
         "stop case counts per kind"
     );
     assert_eq!((baselines, gates, check_failed), (5, 5, 1), "12c case counts per kind");
+    assert_eq!(
+        (stop_acks, gate_acks, sinces, overlaps),
+        (17, 4, 4, 1),
+        "12d case counts per kind"
+    );
 }
 
 /// The notices of a stop case, read the way a client reads its rows.
@@ -285,6 +330,37 @@ fn stopped_json(stopped: &[StoppedBackup]) -> Value {
             .map(|s| json!({"category": s.category.key(), "reason": s.reason.as_str()}))
             .collect(),
     )
+}
+
+/// The notices of a 12d case with their ids, read the way a client reads its
+/// rows: an id that is missing or not a string is `None`.
+fn listed(case: &Value) -> Vec<ListedNotice> {
+    case["notices"]
+        .as_array()
+        .expect("notices")
+        .iter()
+        .filter_map(|n| {
+            parse_backup_notice(n["type"].as_str().expect("type"), &n["data"]).map(|notice| ListedNotice {
+                id: n["id"].as_str().map(str::to_string),
+                notice,
+                created_at_ms: n["created_at_ms"].as_i64().expect("created_at_ms"),
+            })
+        })
+        .collect()
+}
+
+fn acknowledged(case: &Value) -> Vec<String> {
+    list(&case["acknowledged"], s)
+}
+
+fn run_stop_ack_case(case: &Value) -> Value {
+    let StopOutcome { stopped, acknowledged } = backup_stop_v2(
+        &listed(case),
+        case["last_pass_at_ms"].as_i64().expect("last_pass_at_ms"),
+        &acknowledged(case),
+        &stop_listing(&case["listing"]),
+    );
+    json!({"stopped": stopped_json(&stopped), "acknowledged": acknowledged})
 }
 
 fn run_stop_case(case: &Value) -> Value {
@@ -984,6 +1060,155 @@ fn pass_gate_check_failed_uploads_nothing_and_stops_nothing() {
     // With the notices read, the same listing stops both backups.
     match backup_pass_gate(Some(&[]), LAST, &two_backups(false, false)) {
         BackupPassGate::Run { stopped } => assert_eq!(stopped.len(), 2),
+        other => panic!("{other:?}"),
+    }
+}
+
+// ── Amendment 12d: the overlap margin and acknowledged notice ids ─────────
+
+fn with_id(id: &str, n: ReceivedNotice) -> ListedNotice {
+    ListedNotice {
+        id: Some(id.to_string()),
+        notice: n.notice,
+        created_at_ms: n.created_at_ms,
+    }
+}
+
+/// The gap (server #415 review finding 1), as a story. The previous pass
+/// started at `pass` and read the notices while the grace clock's transaction
+/// was still open, so it saw none; that transaction's notice carries its
+/// START, 30 s before the pass. The strict rule never counts it; the overlap
+/// does, once: after "Back up again" the acknowledged id keeps it from
+/// stopping the backup again.
+#[test]
+fn stop_v2_counts_a_notice_whose_transaction_was_open_at_the_read_once() {
+    let pass = LAST;
+    let notice = files_removed(BackupStopReason::AccountLapsed, pass - 30_000);
+    let backups = two_backups(true, true);
+
+    // The old rule: missed for good, and the pass would fill the account up again.
+    assert_eq!(backup_stop(std::slice::from_ref(&notice), pass, &backups), []);
+
+    // The new rule: the next pass stops both backups and acknowledges the notice.
+    let listed = [with_id("n1", notice)];
+    let first = backup_stop_v2(&listed, pass, &[], &backups);
+    assert_eq!(
+        first.stopped,
+        stopped(&[
+            (Category::Documents, BackupStopReason::AccountLapsed),
+            (Category::Pictures, BackupStopReason::AccountLapsed),
+        ])
+    );
+    assert_eq!(first.acknowledged, ["n1"]);
+
+    // The person chooses "Back up again" two minutes later: last_pass_at moves
+    // there, and the notice is still inside the margin.
+    let back_up_again = pass + 120_000;
+    let again = backup_stop_v2(&listed, back_up_again, &first.acknowledged, &backups);
+    assert_eq!(again.stopped, [], "an acknowledged notice never stops a backup again");
+    assert_eq!(again.acknowledged, ["n1"], "still in the window, so still kept");
+    // Without the acknowledged id it would stop again.
+    assert_eq!(backup_stop_v2(&listed, back_up_again, &[], &backups).stopped.len(), 2);
+    // Once the notice has left the window, its id is dropped.
+    let later = back_up_again + NOTICE_OVERLAP_MS;
+    assert_eq!(
+        backup_stop_v2(&listed, later, &first.acknowledged, &backups),
+        StopOutcome {
+            stopped: vec![],
+            acknowledged: vec![],
+        }
+    );
+}
+
+/// With nothing acknowledged, the new rule is the old rule moved back by the
+/// margin: every stop case of the shared vector, ids or not.
+#[test]
+fn stop_v2_is_the_old_rule_moved_back_by_the_margin() {
+    let cases: Vec<Value> = super::cases(CONCEPT)
+        .into_iter()
+        .filter(|c| c["kind"] == "stop")
+        .collect();
+    assert_eq!(cases.len(), 22);
+    for case in &cases {
+        let id = case["id"].as_str().unwrap();
+        let last = case["last_pass_at_ms"].as_i64().unwrap();
+        let listing = stop_listing(&case["listing"]);
+        let old = received(case);
+        for with_ids in [false, true] {
+            let new: Vec<ListedNotice> = old
+                .iter()
+                .enumerate()
+                .map(|(i, n)| ListedNotice {
+                    id: with_ids.then(|| format!("n{i:02}")),
+                    notice: n.notice.clone(),
+                    created_at_ms: n.created_at_ms,
+                })
+                .collect();
+            let got = backup_stop_v2(&new, last + NOTICE_OVERLAP_MS, &[], &listing);
+            assert_eq!(stopped_json(&got.stopped), case["expect"], "{id} (ids: {with_ids})");
+            let want: Vec<String> = new
+                .iter()
+                .filter(|n| with_ids && n.created_at_ms > last)
+                .filter_map(|n| n.id.clone())
+                .collect();
+            assert_eq!(got.acknowledged, want, "{id} (ids: {with_ids})");
+        }
+    }
+}
+
+/// The `since` a client fetches from holds every notice the window counts:
+/// fetched from `last_pass_at_ms` itself, the overlap would be left out.
+#[test]
+fn notices_since_fetches_every_notice_the_window_counts() {
+    let backups = two_backups(true, true);
+    for last in [0, 1, NOTICE_OVERLAP_MS - 1, NOTICE_OVERLAP_MS, LAST, i64::MAX] {
+        let since = notices_since(last);
+        assert!(since >= 0, "{last}");
+        for created_at_ms in [
+            0,
+            1,
+            since - 1,
+            since,
+            since + 1,
+            last - 1,
+            last,
+            last.saturating_add(1),
+        ] {
+            if created_at_ms < 0 {
+                continue;
+            }
+            let notice = [with_id(
+                "n",
+                files_removed(BackupStopReason::EraseRequest, created_at_ms),
+            )];
+            let counted = !backup_stop_v2(&notice, last, &[], &backups).stopped.is_empty();
+            // The server's `since` is inclusive.
+            assert!(
+                !counted || created_at_ms >= since,
+                "last {last}: a counted notice at {created_at_ms} is outside since {since}"
+            );
+        }
+    }
+    assert_eq!(notices_since(LAST), LAST - 600_000);
+    assert_eq!(notices_since(i64::MIN), 0);
+}
+
+/// The pass gate with the margin: a failed fetch decides nothing, so both
+/// `last_pass_at_ms` and the acknowledged set stay; otherwise as
+/// `backup_stop_v2`.
+#[test]
+fn pass_gate_v2_check_failed_decides_nothing() {
+    let ack = ["n1".to_string()];
+    assert_eq!(
+        backup_pass_gate_v2(None, LAST, &ack, &two_backups(false, false)),
+        BackupPassGateV2::CheckFailed
+    );
+    let listed = [with_id("n2", files_removed(BackupStopReason::EraseRequest, LAST - 1))];
+    match backup_pass_gate_v2(Some(&listed), LAST, &ack, &two_backups(true, true)) {
+        BackupPassGateV2::Run { stopped, acknowledged } => {
+            assert_eq!(stopped.len(), 2);
+            assert_eq!(acknowledged, ["n2"], "n1 is not in this listing, so it is dropped");
+        }
         other => panic!("{other:?}"),
     }
 }

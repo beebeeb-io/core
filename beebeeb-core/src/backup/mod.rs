@@ -20,7 +20,8 @@
 //!   rebuilt from the server after a reinstall (with the device clock's
 //!   offset, LD-0123);
 //! - stop: which backups turn off when the account's files were removed or a
-//!   backup was deleted, and the words they show (spec Amendment 12).
+//!   backup was deleted, and the words they show (spec Amendment 12), read
+//!   with an overlap margin and acknowledged notice ids (Amendment 12d).
 //!
 //! The root is never located by path or name: it is the folder whose server
 //! row carries [`beebeeb_types::backup::SystemRole::BackupsRoot`].

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Additive on v0.2.3: a backup pass reads the removal notices with an overlap margin and remembers the notice ids it
+acted on (LD-0121, spec `2026-11-06-backup-from-source-design.md` Amendment 12d, server #415 review finding 1; Guus
+2026-11-08 03:16, "Go w recommended"). No v0.2.3 API is renamed, retyped or removed.
+
+### Fixed
+
+- **A backup pass could miss a removal notice because of transaction timing.** A notice's `created_at` is the start
+  of the server transaction that writes it, not its commit. A pass that read the notices while that transaction was
+  still open did not see it, then recorded a `last_pass_at_ms` later than the notice, and the strict
+  `created_at_ms > last_pass_at_ms` of `backup_stop` / `backup_pass_gate` never counted it afterwards. In the worst
+  case (row 10, the billing grace clock) the backup uploaded again the files the server had just deleted. The v0.2.3
+  functions keep that behaviour, now documented as superseded; clients move to the v2 functions below.
+
+### Added
+
+- **`beebeeb_core::backup`**: `NOTICE_OVERLAP_MS` (10 minutes); `notices_since(last_pass_at_ms)`, the inclusive
+  `since` to send to `GET /api/v1/notifications` (`last_pass_at_ms - NOTICE_OVERLAP_MS`, never below 0);
+  `ListedNotice { id, notice, created_at_ms }`; `backup_stop_v2(notices, last_pass_at_ms, acknowledged, listing)`
+  returning `StopOutcome { stopped, acknowledged }`; and `backup_pass_gate_v2(notices, last_pass_at_ms, acknowledged,
+  listing)` with `BackupPassGateV2::{Run { stopped, acknowledged }, CheckFailed}`. A notice counts when
+  `created_at_ms > last_pass_at_ms - NOTICE_OVERLAP_MS` and its id is not acknowledged. `acknowledged` in the
+  answer replaces the stored set: every id in the window, sorted, once each. It is stored in the same write as the
+  stops and the new `last_pass_at_ms`, and kept when the person chooses "Back up again". A notice with no id, or an
+  empty one, is never acknowledged.
+- **Bindings**: uniffi `backup_notice_overlap_ms`, `backup_notices_since`, `backup_stop_v2` (`BackupNoticeRowV2`,
+  `BackupStopOutcome`) and `backup_pass_gate_v2` (`BackupPassGateV2`), 4 in all; wasm `backupNoticeOverlapMs`,
+  `backupNoticesSince`, `backupStopV2` and `backupPassGateV2`, 4 in all.
+- **Vectors**: `backup_plan.json` goes from 128 to 154 cases (17 `stop_ack`, 4 `gate_ack`, 4 `notices_since`,
+  1 `notice_overlap`).
+
 ## [0.2.3] - 2026-11-07
 
 Additive on v0.2.2: the first pass's baseline and the pass gate when the notices could not be read (LD-0121, spec
