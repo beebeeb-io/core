@@ -285,7 +285,7 @@ fn passkey_list_remove_and_errors_keep_to_codes() {
     );
     let e = ceremony::server_error(
         400,
-        &json!({ "error": "Bad thing at https://x", "message": "secret detail" }),
+        &json!({ "error": "Bad thing at https://api.beebeeb.test", "message": "secret detail" }),
     );
     assert_eq!(
         e,
