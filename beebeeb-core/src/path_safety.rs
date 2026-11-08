@@ -219,7 +219,11 @@ pub fn sanitize_component(name: &str, rules: Rules) -> Result<String, UnsafeName
         .chars()
         .filter(|c| !is_bidi_control(*c) && !is_bidi_mark(*c))
         .collect();
-    check_component(&visible, rules)?;
+    // The structural checks only, never the host's Windows rules: on a Windows
+    // host those refuse the very characters, trailing dots and device names
+    // this function rewrites (`CON.txt` must become `_CON.txt` there too, as
+    // the cross-client vectors say). Elsewhere this is `check_component`.
+    check_component_for(&visible, rules == Rules::Portable, false)?;
     let mut out: String = visible
         .chars()
         .map(|c| {

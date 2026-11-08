@@ -259,15 +259,41 @@ fn a_255_byte_name_publishes_and_a_longer_one_is_refused() {
 
 #[test]
 fn the_temp_create_never_opens_or_follows_a_planted_link() {
+    use std::os::windows::fs::MetadataExt as _;
     let scratch = Scratch::new("planted");
     let elsewhere = Scratch::new("planted-elsewhere");
     let planted = scratch.path().join(".bbtmp-planted");
     junction(&planted, elsewhere.path());
+    std::fs::write(scratch.path().join(".bbtmp-taken"), b"keep").unwrap();
     let directory = TrustedDirectory::open(scratch.path()).unwrap();
 
+    // NTFS answers a create over a directory junction with "access denied"
+    // (windows-latest), not "exists": either way nothing is opened or followed.
     let error = create_in(&directory.directory, ".bbtmp-planted").expect_err("an existing name is never opened");
-    assert_eq!(error.kind(), io::ErrorKind::AlreadyExists, "{error}");
+    assert!(
+        matches!(
+            error.kind(),
+            io::ErrorKind::AlreadyExists | io::ErrorKind::PermissionDenied
+        ),
+        "{error}"
+    );
     assert!(entries(elsewhere.path()).is_empty());
+    let attributes = std::fs::symlink_metadata(&planted).unwrap().file_attributes();
+    assert_ne!(
+        attributes & FILE_ATTRIBUTE_REPARSE_POINT,
+        0,
+        "the junction is still there"
+    );
+    // A plain file at the name: refused, and left as it was.
+    let error = create_in(&directory.directory, ".bbtmp-taken").expect_err("an existing file is never opened");
+    assert!(
+        matches!(
+            error.kind(),
+            io::ErrorKind::AlreadyExists | io::ErrorKind::PermissionDenied
+        ),
+        "{error}"
+    );
+    assert_eq!(std::fs::read(scratch.path().join(".bbtmp-taken")).unwrap(), b"keep");
     // A fresh name is created, as a plain file.
     drop(create_in(&directory.directory, ".bbtmp-fresh").unwrap());
     assert!(
