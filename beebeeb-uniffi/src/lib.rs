@@ -1153,7 +1153,7 @@ impl MasterKeyHandle {
     }
 
     fn with_key<T, F: FnOnce(&kdf::MasterKey) -> T>(&self, f: F) -> Result<T, CryptoError> {
-        let guard = self.inner.lock().unwrap();
+        let guard = chunk_decryptor::lock_handle(&self.inner)?;
         guard.as_ref().map(f).ok_or(CryptoError::InvalidInput {
             detail: "key handle has been cleared".into(),
         })
@@ -1906,7 +1906,7 @@ impl FileKeyHandle {
     }
 
     fn with_key<T, F: FnOnce(&kdf::FileKey) -> T>(&self, f: F) -> Result<T, CryptoError> {
-        let guard = self.inner.lock().unwrap();
+        let guard = chunk_decryptor::lock_handle(&self.inner)?;
         guard.as_ref().map(f).ok_or(CryptoError::InvalidInput {
             detail: "key handle has been cleared".into(),
         })
@@ -2590,7 +2590,7 @@ pub struct ChunkEncryptorHandle {
 impl ChunkEncryptorHandle {
     /// Run `f` against the live encryptor, or error if it has been finished.
     fn with_inner<T, F: FnOnce(&mut ChunkEncryptor) -> T>(&self, f: F) -> Result<T, CryptoError> {
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = chunk_decryptor::lock_handle(&self.inner)?;
         let enc = guard.as_mut().ok_or(CryptoError::InvalidInput {
             detail: "chunk encryptor handle has been finished or cleared".into(),
         })?;
@@ -2749,7 +2749,7 @@ impl ChunkEncryptorHandle {
     /// legacy history while the replacement itself is still written as v2.
     pub fn apply_recorded_pin(&self, recorded_pin: u8) -> Result<(), CryptoError> {
         let pin = ExpectedChunkFormat::from_u8(recorded_pin)?;
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = chunk_decryptor::lock_handle(&self.inner)?;
         let enc = guard.as_ref().ok_or(CryptoError::InvalidInput {
             detail: "chunk encryptor handle has been finished or cleared".into(),
         })?;
@@ -2783,7 +2783,7 @@ impl ChunkEncryptorHandle {
     /// Consume the encryptor (by value) and return the summary after the integrity
     /// guard (detects a source that shrank). The handle is unusable afterwards.
     pub fn finish(&self) -> Result<ChunkEncryptorSummaryDto, CryptoError> {
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = chunk_decryptor::lock_handle(&self.inner)?;
         let enc = guard.take().ok_or(CryptoError::InvalidInput {
             detail: "chunk encryptor handle has been finished or cleared".into(),
         })?;

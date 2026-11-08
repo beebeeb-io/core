@@ -2,7 +2,7 @@
 //! constructors began to take the decrypted metadata (crypto review,
 //! P2-4): every constructor applies the version commitment the record carries.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkFormat, ExpectedChunkFormat, VersionCommitment};
 use beebeeb_core::encrypt::{self, NameMetadata};
@@ -13,6 +13,19 @@ use crate::{
     ChunkDecryptorSummaryDto, CryptoError, DecryptedChunkDto, EncryptedChunkData, FileKeyHandle, MasterKeyHandle,
     NameMetadataDto, file_key_from_slice, version_commitment_from_parts,
 };
+
+/// Lock a handle's state. A poisoned lock (a panic while the handle was in
+/// use) leaves the state untrusted: it is dropped (a key is wiped, an
+/// encryptor or decryptor ends), so nothing more is written or released
+/// through it, and the call fails instead of panicking across FFI.
+pub(crate) fn lock_handle<T>(mutex: &Mutex<Option<T>>) -> Result<MutexGuard<'_, Option<T>>, CryptoError> {
+    mutex.lock().map_err(|poisoned| {
+        *poisoned.into_inner() = None;
+        CryptoError::InvalidInput {
+            detail: "the handle failed while in use and cannot be used again".into(),
+        }
+    })
+}
 
 /// The format pin and commitment a content reader enforces. A record with a
 /// commitment binds frame 0 to it. A record with neither field is legacy
@@ -69,7 +82,7 @@ pub struct ChunkDecryptorHandle {
 
 impl ChunkDecryptorHandle {
     fn with_inner<T, F: FnOnce(&mut ChunkDecryptor) -> T>(&self, f: F) -> Result<T, CryptoError> {
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = lock_handle(&self.inner)?;
         let dec = guard.as_mut().ok_or(CryptoError::InvalidInput {
             detail: "chunk decryptor handle has been cleared".into(),
         })?;
@@ -218,7 +231,7 @@ impl ChunkDecryptorHandle {
     /// before its last chunk (truncation). Treat an `Err` as a failed download
     /// and discard the plaintext. The pull form runs the same check at EOF.
     pub fn finish(&self) -> Result<ChunkDecryptorSummaryDto, CryptoError> {
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = lock_handle(&self.inner)?;
         let dec = guard.take().ok_or(CryptoError::InvalidInput {
             detail: "chunk decryptor handle has been finished or cleared".into(),
         })?;
@@ -348,4 +361,63 @@ pub fn decrypt_contiguous_to_file(
     let (expected, version) = metadata_pin(metadata)?;
     encrypt::decrypt_contiguous_to_file(&fk, &file_id, expected, version, &body, chunk_size, &output_path)
         .map_err(CryptoError::from)
+}
+
+#[cfg(test)]
+mod poisoned_handle_tests {
+    use super::*;
+
+    /// Poison a handle's lock the way a panic during another call would: the
+    /// guard is held while the thread unwinds.
+    macro_rules! poison {
+        ($handle:expr) => {{
+            let clone = Arc::clone(&$handle);
+            let panicked = std::thread::spawn(move || {
+                let _guard = clone.inner.lock();
+                panic!("a panic while the handle is locked");
+            })
+            .join();
+            assert!(panicked.is_err());
+            assert!($handle.inner.is_poisoned());
+        }};
+    }
+
+    #[test]
+    fn a_poisoned_handle_answers_with_an_error_never_a_panic_across_ffi() {
+        let decryptor = Arc::new(ChunkDecryptorHandle {
+            inner: Mutex::new(None),
+        });
+        poison!(decryptor);
+        assert!(matches!(
+            decryptor.chunk_format(),
+            Err(CryptoError::InvalidInput { .. })
+        ));
+        assert!(matches!(decryptor.finish(), Err(CryptoError::InvalidInput { .. })));
+
+        let encryptor = Arc::new(crate::ChunkEncryptorHandle {
+            inner: Mutex::new(None),
+        });
+        poison!(encryptor);
+        assert!(matches!(
+            encryptor.resume_policy(None),
+            Err(CryptoError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            encryptor.apply_recorded_pin(2),
+            Err(CryptoError::InvalidInput { .. })
+        ));
+        assert!(matches!(encryptor.finish(), Err(CryptoError::InvalidInput { .. })));
+
+        let master = MasterKeyHandle::new(kdf::MasterKey::from_bytes([3; 32]));
+        poison!(master);
+        assert!(matches!(master.with_key(|_| ()), Err(CryptoError::InvalidInput { .. })));
+        assert!(
+            master
+                .inner
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_none(),
+            "the key was wiped"
+        );
+    }
 }
