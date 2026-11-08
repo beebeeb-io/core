@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+- **`auth_flow`: sign-in, step-up and sign in with another device as plain logic** (desktop v2, B10). Sans-IO state
+  machines over the existing API: the OPAQUE password sign-in and second factor (6-digit or 8-digit backup code), the
+  OPAQUE step-up that mints a single-use confirm token (purpose-bound for `cli_device_approval`; no plaintext-password
+  path), the requesting side of the device socket and the approving side (lookup, step-up, claim, relay). Errors are
+  codes; no server body is echoed. Exposed in UniFFI (`SignInFlow`, `StepUpFlow`, `DeviceRequestFlow`, `ApprovalFlow`)
+  and WASM (`AuthSignIn`, `AuthStepUp`, `AuthDeviceRequest`, `AuthApproval`).
+- `cli_auth::encrypt_for_requester`: the approving side of the device handshake (what web's `ecdhEncryptPayload` does),
+  HKDF form only. Additive: nothing is renamed, retyped or removed.
+- `account_flows`: password change, email change, TOTP set-up / confirm / disable, session revoke, display name,
+  activity logging and account deletion as sans-IO flows (desktop v2, B14), in UniFFI and WASM. Every step-up inside
+  them runs through `auth_flow::step_up` (generic purpose; the confirm token goes on exactly the next request).
 - `passkey`: the passkey vault primitive in web's format (PRF eval input `beebeeb.io/vault-wrap-key/v1` zero-padded
   to 32, HKDF-SHA256 info `beebeeb.io/vault-wrap/v1` with an empty salt, AES-256-GCM `nonce || ct || tag`, no AAD),
   the native hmac-secret salt (the WebAuthn PRF hash applied), the ceremony wire for the server's passkey and

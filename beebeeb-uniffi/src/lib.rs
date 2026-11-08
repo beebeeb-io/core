@@ -12,6 +12,8 @@ use beebeeb_core::recovery;
 use beebeeb_types::{CipherSuite, EncryptedBlob};
 
 uniffi::setup_scaffolding!();
+mod account_flows;
+mod auth_flow;
 mod backup;
 mod passkey;
 mod request_seal;
