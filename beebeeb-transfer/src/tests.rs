@@ -4,7 +4,7 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor, ChunkFormat, ExpectedChunkFormat};
+use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor, ChunkFormat, ExpectedChunkFormat, VersionCommitment};
 use beebeeb_core::direct_transfer::{
     CAP_OBJECT_DOWNLOAD_V1, DISCOVERY_PATH, Direction, Discovery, DownloadGrantRequest, Lookup, MemoryClass, Outcome,
     pinned_chunk_path, storage_get_total,
@@ -23,6 +23,9 @@ use crate::shared::{DirectShared, DirectStore, DiscoveryFlightResult, DiscoveryS
 use crate::test_support::scripted::{Clock, Gate, Recorded, Reply, Request, ScriptedIo, WALL_START_MS};
 
 mod round3;
+mod sink_contract;
+
+use sink_contract::run_with_sink;
 
 const FILE_ID: &str = "11111111-2222-4333-8444-555555555555";
 const VERSION: &str = "22222222-3333-4444-8555-666666666666";
@@ -105,6 +108,25 @@ impl Fixture {
             original_size,
             encrypted_size: original_size + 28 * u64::from(chunk_count),
         }
+    }
+
+    /// The decryptor for the record this file's writer sealed: committed to its
+    /// frame 0 (every v2 version's record carries the commitment). A synthetic
+    /// fixture has no frames and so no commitment.
+    fn decryptor(&self) -> ChunkDecryptor {
+        ChunkDecryptor::for_version_with_file_key(
+            FileKey::from_bytes(KEY),
+            FILE_ID,
+            ExpectedChunkFormat::Unrecorded,
+            self.version(),
+        )
+    }
+
+    /// The commitment the writer's record carries: frame 0's nonce, counter 1.
+    fn version(&self) -> Option<VersionCommitment> {
+        self.frames
+            .first()
+            .map(|frame0| VersionCommitment::new(frame0[..12].try_into().unwrap(), 1).unwrap())
     }
 
     fn chunk_len(&self, index: u32) -> u64 {
@@ -386,7 +408,7 @@ async fn a_valid_frame_too_large_for_this_context_is_handed_off_before_fetch() {
     request.memory = MemoryClass::MobileExtension;
     request.budget = MemoryBudget::MOBILE_EXTENSION;
 
-    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request).await;
+    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request, &fx).await;
     assert!(matches!(
         outcome,
         Ok(DownloadOutcome::HandOff {
@@ -403,9 +425,9 @@ async fn run_download(
     io: &ScriptedIo,
     shared: &DirectShared,
     request: DownloadRequest,
+    fx: &Fixture,
 ) -> (Result<DownloadOutcome, DownloadError>, VecSink, Events) {
-    let decryptor =
-        ChunkDecryptor::for_push_with_file_key(FileKey::from_bytes(KEY), FILE_ID, ExpectedChunkFormat::Unrecorded);
+    let decryptor = fx.decryptor();
     let mut sink = VecSink::default();
     let events = Events::default();
     let outcome = download(io, shared, request, decryptor, &mut sink, &events).await;
@@ -443,7 +465,7 @@ async fn a_file_downloads_direct_with_one_discovery_and_one_window() {
     let io = ScriptedIo::new(standard_handler(fx.clone()));
     let shared = DirectShared::new();
 
-    let (outcome, sink, _events) = run_download(&io, &shared, request_for(&fx)).await;
+    let (outcome, sink, _events) = run_download(&io, &shared, request_for(&fx), &fx).await;
     let DownloadOutcome::Done(stats) = outcome.expect("a direct download completes") else {
         panic!("expected Done");
     };
@@ -466,7 +488,7 @@ async fn a_file_downloads_direct_with_one_discovery_and_one_window() {
 async fn the_capability_header_rides_on_grants_only() {
     let fx = Arc::new(Fixture::new(&vec![3u8; 3 * 1024], 1024));
     let io = ScriptedIo::new(standard_handler(fx.clone()));
-    let (outcome, _, _) = run_download(&io, &DirectShared::new(), request_for(&fx)).await;
+    let (outcome, _, _) = run_download(&io, &DirectShared::new(), request_for(&fx), &fx).await;
     assert!(matches!(outcome, Ok(DownloadOutcome::Done(_))));
 
     let requests = io.requests();
@@ -534,7 +556,7 @@ async fn a_failed_get_is_renewed_then_served_by_the_pinned_route() {
             other => panic!("unexpected request {other:?}"),
         }
     });
-    let (outcome, sink, events) = run_download(&io, &DirectShared::new(), request_for(&fx)).await;
+    let (outcome, sink, events) = run_download(&io, &DirectShared::new(), request_for(&fx), &fx).await;
     let DownloadOutcome::Done(stats) = outcome.expect("the pinned route completes the file") else {
         panic!("expected Done");
     };
@@ -569,7 +591,7 @@ async fn storage_that_never_answers_trips_the_breaker_and_holds_downloads() {
         }
     });
     let shared = DirectShared::new();
-    let (outcome, sink, events) = run_download(&io, &shared, request_for(&fx)).await;
+    let (outcome, sink, events) = run_download(&io, &shared, request_for(&fx), &fx).await;
     let DownloadOutcome::Done(stats) = outcome.expect("the pinned route completes the file") else {
         panic!("expected Done");
     };
@@ -594,7 +616,7 @@ async fn storage_that_never_answers_trips_the_breaker_and_holds_downloads() {
     let second = ScriptedIo::new(|_: &Request, _: i64, _: i64| panic!("a held download made a request"));
     second.set_wall(io.wall_now() + 1_000);
     second.set_mono(io.mono_now() + 1_000);
-    let (outcome, sink, _) = run_download(&second, &shared, request_for(&fx)).await;
+    let (outcome, sink, _) = run_download(&second, &shared, request_for(&fx), &fx).await;
     assert!(matches!(
         outcome,
         Ok(DownloadOutcome::UseApi(UseApiReason::BreakerHold))
@@ -621,7 +643,7 @@ async fn a_replaced_file_is_file_changed() {
     });
     let mut request = request_for(&fx);
     request.pinned_version = Some(VERSION.to_string());
-    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request).await;
+    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request, &fx).await;
     assert!(matches!(outcome, Err(DownloadError::FileChanged)), "{outcome:?}");
     assert!(sink.0.is_empty());
     assert_eq!(storage_gets(&io), 0, "nothing is fetched for another version");
@@ -656,7 +678,7 @@ async fn an_unauthentic_chunk_ends_as_unauthentic_after_the_planners_retry() {
             other => panic!("unexpected request {other:?}"),
         }
     });
-    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request_for(&good)).await;
+    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request_for(&good), &good).await;
     assert!(
         matches!(outcome, Err(DownloadError::Unauthentic { index: 0 })),
         "{outcome:?}"
@@ -671,7 +693,7 @@ async fn a_zero_byte_file_downloads_empty() {
     assert_eq!(fx.frames.len(), 1);
     assert_eq!(fx.frames[0].len(), 28, "one empty frame");
     let io = ScriptedIo::new(standard_handler(fx.clone()));
-    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request_for(&fx)).await;
+    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request_for(&fx), &fx).await;
     let DownloadOutcome::Done(stats) = outcome.expect("an empty file completes") else {
         panic!("expected Done");
     };
@@ -710,7 +732,7 @@ async fn links_that_expired_during_a_suspend_are_renewed_without_a_failure() {
             other => panic!("unexpected request {other:?}"),
         }
     });
-    let (outcome, sink, events) = run_download(&io, &DirectShared::new(), request_for(&fx)).await;
+    let (outcome, sink, events) = run_download(&io, &DirectShared::new(), request_for(&fx), &fx).await;
     let DownloadOutcome::Done(stats) = outcome.expect("the renewed links complete the file") else {
         panic!("expected Done");
     };
@@ -730,7 +752,7 @@ async fn a_clock_ten_minutes_off_still_completes() {
         let fx = Arc::new(Fixture::new(&plain, 1024));
         let io = ScriptedIo::new(standard_handler(fx.clone()));
         io.set_wall(1_700_000_000_000 + offset);
-        let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request_for(&fx)).await;
+        let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request_for(&fx), &fx).await;
         let DownloadOutcome::Done(_) = outcome.expect("a clock ten minutes off still completes") else {
             panic!("expected Done for offset {offset}");
         };
@@ -765,7 +787,7 @@ async fn the_memory_class_bounds_ciphertext_in_flight() {
         .with_gate(gate.clone());
         let mut request = request_for(&fx);
         request.memory = memory;
-        let _ = run_download(&io, &DirectShared::new(), request).await;
+        let _ = run_download(&io, &DirectShared::new(), request, &fx).await;
         gate.max_live()
     }
 
@@ -779,7 +801,7 @@ async fn forced_api_is_use_api_with_zero_requests() {
     let io = ScriptedIo::new(|_: &Request, _: i64, _: i64| panic!("a forced API download made a request"));
     let mut request = request_for(&fx);
     request.forced_api = true;
-    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request).await;
+    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request, &fx).await;
     assert!(matches!(outcome, Ok(DownloadOutcome::UseApi(UseApiReason::ForcedApi))));
     assert!(sink.0.is_empty());
     assert!(io.requests().is_empty());
@@ -793,7 +815,7 @@ async fn not_supported_is_cached_across_files() {
     });
     let shared = DirectShared::new();
     let fx = Fixture::new(&vec![1u8; 1024], 1024);
-    let (first, sink, first_events) = run_download(&io, &shared, request_for(&fx)).await;
+    let (first, sink, first_events) = run_download(&io, &shared, request_for(&fx), &fx).await;
     assert!(matches!(first, Ok(DownloadOutcome::UseApi(UseApiReason::NotSupported))));
     assert!(sink.0.is_empty());
     assert!(
@@ -807,7 +829,7 @@ async fn not_supported_is_cached_across_files() {
 
     let io2 = ScriptedIo::new(|_: &Request, _: i64, _: i64| panic!("the cached answer made a request"));
     io2.set_wall(io.wall_now());
-    let (second, _, second_events) = run_download(&io2, &shared, request_for(&fx)).await;
+    let (second, _, second_events) = run_download(&io2, &shared, request_for(&fx), &fx).await;
     assert!(matches!(
         second,
         Ok(DownloadOutcome::UseApi(UseApiReason::NotSupported))
@@ -832,7 +854,7 @@ async fn a_401_on_the_grant_is_unauthorized_not_use_api() {
         Request::Api(_) => json_reply(401, serde_json::json!({"error": "unauthorized"})),
         other => panic!("unexpected request {other:?}"),
     });
-    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request_for(&fx)).await;
+    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request_for(&fx), &fx).await;
     assert!(matches!(outcome, Err(DownloadError::Unauthorized)), "{outcome:?}");
     assert!(sink.0.is_empty());
     assert_eq!(storage_gets(&io), 0);
@@ -878,7 +900,7 @@ async fn pacing_holds_the_kbps_limit() {
     let io = ScriptedIo::new(standard_handler(fx.clone()));
     let mut request = request_for(&fx);
     request.kbps_limit = Some(512);
-    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request).await;
+    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request, &fx).await;
     assert!(matches!(outcome, Ok(DownloadOutcome::Done(_))), "{outcome:?}");
     assert_eq!(sink.0, plain);
     assert!(
@@ -940,7 +962,7 @@ async fn no_url_reaches_an_event_an_error_or_a_debug_string() {
 async fn storage_gets_use_the_core_total() {
     let fx = Arc::new(Fixture::new(&vec![5u8; 3 * 2048], 2048));
     let io = ScriptedIo::new(standard_handler(fx.clone()));
-    let (outcome, _, _) = run_download(&io, &DirectShared::new(), request_for(&fx)).await;
+    let (outcome, _, _) = run_download(&io, &DirectShared::new(), request_for(&fx), &fx).await;
     assert!(matches!(outcome, Ok(DownloadOutcome::Done(_))));
     let gets: Vec<_> = io
         .requests()
@@ -962,343 +984,6 @@ async fn storage_gets_use_the_core_total() {
     }
 }
 
-// ----------------------- round 2: the sink contract -----------------------
-
-async fn run_with_sink(
-    io: &ScriptedIo,
-    shared: &DirectShared,
-    request: DownloadRequest,
-    sink: &mut dyn PlaintextSink,
-    events: &Events,
-) -> Result<DownloadOutcome, DownloadError> {
-    let decryptor =
-        ChunkDecryptor::for_push_with_file_key(FileKey::from_bytes(KEY), FILE_ID, ExpectedChunkFormat::Unrecorded);
-    download(io, shared, request, decryptor, sink, events).await
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Trigger {
-    PinnedGiveUp,
-    Refill404,
-    PinnedRestart,
-    Pinned401,
-    VersionChanged,
-    SinkWriteError,
-}
-
-/// A 12-chunk file whose attempt writes chunk 0 and then fails at the trigger.
-/// The first window holds 8 chunks, so the refill happens only after chunks
-/// 0..3 are consumed: every trigger has plaintext in the sink.
-fn scenario(trigger: Trigger) -> (ScriptedIo, DownloadRequest, Arc<Fixture>) {
-    let plain: Vec<u8> = (0..12 * 1024).map(|i| (i % 241) as u8).collect();
-    let fx = Arc::new(Fixture::new(&plain, 1024));
-    let storage_fails = matches!(
-        trigger,
-        Trigger::PinnedGiveUp | Trigger::PinnedRestart | Trigger::Pinned401
-    );
-    let io = ScriptedIo::new({
-        let fx = fx.clone();
-        move |req, wall, _mono| match req {
-            Request::Api(call) if call.path == DISCOVERY_PATH => discovery_reply_window(8),
-            Request::Api(call) if call.path == beebeeb_core::direct_transfer::download_grants_path(FILE_ID) => {
-                let request = grant_body(call);
-                if trigger == Trigger::Refill404 && request.start_index > 0 {
-                    return json_reply(404, serde_json::json!({"error": "not_found"}));
-                }
-                let mut window = fx.window(request.start_index, request.count, wall);
-                if trigger == Trigger::VersionChanged && request.start_index > 0 {
-                    window["object_version_id"] = serde_json::json!("33333333-4444-4555-8666-777777777777");
-                }
-                json_reply(200, window)
-            }
-            Request::StorageGet { url, .. } => {
-                if storage_fails && url_index(url) > 0 {
-                    Reply::Storage(StorageReply {
-                        status: 0,
-                        content_length: None,
-                        body: None,
-                    })
-                } else {
-                    fx.storage_reply(url)
-                }
-            }
-            Request::Api(call) if pinned_index(&call.path).is_some() => match trigger {
-                Trigger::PinnedGiveUp => json_reply(503, serde_json::json!({"error": "busy"})),
-                Trigger::PinnedRestart => Reply::Api(ApiReply {
-                    status: 409,
-                    content_type: None,
-                    retry_after: None,
-                    body: Vec::new(),
-                }),
-                Trigger::Pinned401 => json_reply(401, serde_json::json!({"error": "unauthorized"})),
-                _ => bytes_reply(200, fx.frames[pinned_index(&call.path).unwrap() as usize].clone()),
-            },
-            other => panic!("unexpected request {other:?}"),
-        }
-    });
-    let mut request = request_for(&fx);
-    request.jitter_seed = 231;
-    (io, request, fx)
-}
-
-fn sink_for(trigger: Trigger, discardable: bool) -> MockSink {
-    let mut sink = if discardable {
-        MockSink::discardable()
-    } else {
-        MockSink::non_discardable()
-    };
-    if trigger == Trigger::SinkWriteError {
-        sink.partial_error_on_write = Some(2);
-    }
-    sink
-}
-
-#[tokio::test]
-async fn every_failure_after_a_write_follows_the_sink_table() {
-    for trigger in [
-        Trigger::PinnedGiveUp,
-        Trigger::Refill404,
-        Trigger::PinnedRestart,
-        Trigger::Pinned401,
-        Trigger::VersionChanged,
-        Trigger::SinkWriteError,
-    ] {
-        // Discardable: the original outcome stands and the sink is emptied.
-        let (io, request, _) = scenario(trigger);
-        let mut sink = sink_for(trigger, true);
-        let outcome = run_with_sink(&io, &DirectShared::new(), request, &mut sink, &Events::default()).await;
-        assert_eq!(sink.discard_calls, 1, "{trigger:?}: discard called exactly once");
-        assert!(sink.data.is_empty(), "{trigger:?}: the sink is empty");
-        match trigger {
-            Trigger::PinnedGiveUp | Trigger::Refill404 => assert!(
-                matches!(outcome, Ok(DownloadOutcome::UseApi(UseApiReason::ApiForFile))),
-                "{trigger:?}: {outcome:?}"
-            ),
-            Trigger::PinnedRestart | Trigger::VersionChanged => {
-                assert!(
-                    matches!(outcome, Err(DownloadError::FileChanged)),
-                    "{trigger:?}: {outcome:?}"
-                )
-            }
-            Trigger::Pinned401 => {
-                assert!(
-                    matches!(outcome, Err(DownloadError::Unauthorized)),
-                    "{trigger:?}: {outcome:?}"
-                )
-            }
-            Trigger::SinkWriteError => {
-                assert!(
-                    matches!(outcome, Err(DownloadError::Sink(_))),
-                    "{trigger:?}: {outcome:?}"
-                )
-            }
-        }
-
-        // Non-discardable: an honest failure, the original cause inside.
-        let (io, request, _) = scenario(trigger);
-        let mut sink = sink_for(trigger, false);
-        let outcome = run_with_sink(&io, &DirectShared::new(), request, &mut sink, &Events::default()).await;
-        let Err(DownloadError::DirectFailedAfterWrite {
-            written_plaintext_bytes,
-            chunks_written,
-            cause,
-        }) = outcome
-        else {
-            panic!("{trigger:?}: expected DirectFailedAfterWrite, got {outcome:?}");
-        };
-        assert!(written_plaintext_bytes > 0, "{trigger:?}: bytes counted");
-        assert!(chunks_written >= 1, "{trigger:?}: chunks counted");
-        assert_eq!(sink.discard_calls, 0, "{trigger:?}: discard never called");
-        let cause_is_api = matches!(cause, AfterWriteCause::ApiNeeded(_));
-        assert_eq!(
-            cause_is_api,
-            matches!(trigger, Trigger::PinnedGiveUp | Trigger::Refill404),
-            "{trigger:?}: cause {cause:?}"
-        );
-    }
-}
-
-#[tokio::test]
-async fn a_cancelled_download_discards_a_discardable_sink_and_never_the_other() {
-    let plain: Vec<u8> = (0..4 * 1024).map(|i| (i % 199) as u8).collect();
-    let fx = Arc::new(Fixture::new(&plain, 1024));
-    let make_io = || {
-        ScriptedIo::new({
-            let fx = fx.clone();
-            move |req, wall, _mono| match req {
-                Request::Api(call) if call.path == DISCOVERY_PATH => discovery_reply(),
-                Request::Api(call) if call.path == beebeeb_core::direct_transfer::download_grants_path(FILE_ID) => {
-                    let request = grant_body(call);
-                    json_reply(200, fx.window(request.start_index, request.count, wall))
-                }
-                Request::StorageGet { url, .. } => fx.storage_reply(url),
-                other => panic!("unexpected request {other:?}"),
-            }
-        })
-        .with_storage_delay_for(1, 10_000)
-    };
-
-    let io = make_io();
-    let mut sink = MockSink::discardable();
-    let events = Events::default();
-    let request = request_for(&fx);
-    let decryptor =
-        ChunkDecryptor::for_push_with_file_key(FileKey::from_bytes(KEY), FILE_ID, ExpectedChunkFormat::Unrecorded);
-    let shared = DirectShared::new();
-    let future = download(&io, &shared, request, decryptor, &mut sink, &events);
-    assert!(future.now_or_never().is_none(), "the download is pending");
-    assert_eq!(sink.discard_calls, 1, "a cancelled attempt discards");
-
-    let io = make_io();
-    let mut sink = MockSink::non_discardable();
-    let request = request_for(&fx);
-    let events = Events::default();
-    let decryptor =
-        ChunkDecryptor::for_push_with_file_key(FileKey::from_bytes(KEY), FILE_ID, ExpectedChunkFormat::Unrecorded);
-    let shared = DirectShared::new();
-    let future = download(&io, &shared, request, decryptor, &mut sink, &events);
-    assert!(future.now_or_never().is_none(), "the download is pending");
-    assert_eq!(sink.discard_calls, 0, "a non-discardable sink is left alone");
-}
-
-#[tokio::test]
-async fn a_discarded_sink_refuses_writes() {
-    let mut sink = MockSink::discardable();
-    sink.write(b"abc").unwrap();
-    sink.discard().unwrap();
-    assert!(sink.write(b"d").is_err(), "a discarded sink refuses writes");
-}
-
-#[tokio::test]
-async fn a_sink_whose_discard_fails_still_refuses_writes() {
-    let mut sink = MockSink::failing_discard();
-    sink.write(b"abc").unwrap();
-    assert!(sink.discard().is_err());
-    assert!(sink.write(b"d").is_err(), "a failed discard still marks the sink dead");
-}
-
-#[tokio::test]
-async fn a_failed_discard_keeps_the_original_error() {
-    let (io, request, _) = scenario(Trigger::Pinned401);
-    let mut sink = MockSink::failing_discard();
-    let events = Events::default();
-    let outcome = run_with_sink(&io, &DirectShared::new(), request, &mut sink, &events).await;
-    assert!(matches!(outcome, Err(DownloadError::Unauthorized)), "{outcome:?}");
-    assert_eq!(sink.discard_calls, 1);
-    let events = events.0.lock().unwrap().clone();
-    assert!(
-        events.iter().any(|e| matches!(e, TransferEvent::DiscardFailed { .. })),
-        "a failed discard is reported as its own event: {events:?}"
-    );
-    assert!(
-        !events.iter().any(|e| matches!(e, TransferEvent::Discarded { .. })),
-        "a failed discard is never reported as a successful rollback: {events:?}"
-    );
-}
-
-#[tokio::test]
-async fn a_partial_write_error_counts_as_written() {
-    // The FIRST write fails after accepting half of its bytes: no full byte
-    // was counted, but the sink is dirty and must not be treated as untouched.
-    let fx = Arc::new(Fixture::new(&vec![9u8; 1024], 1024));
-    let io = ScriptedIo::new(standard_handler(fx.clone()));
-    let mut sink = MockSink::non_discardable();
-    sink.partial_error_on_write = Some(1);
-    let outcome = run_with_sink(
-        &io,
-        &DirectShared::new(),
-        request_for(&fx),
-        &mut sink,
-        &Events::default(),
-    )
-    .await;
-    let Err(DownloadError::DirectFailedAfterWrite {
-        written_plaintext_bytes,
-        chunks_written,
-        cause,
-    }) = outcome
-    else {
-        panic!("a partial write counts as written: {outcome:?}");
-    };
-    assert_eq!(
-        written_plaintext_bytes, 1024,
-        "the bytes handed to the failing write may be on the output"
-    );
-    assert_eq!(chunks_written, 1, "the failing write counts");
-    assert!(matches!(cause, AfterWriteCause::Failed(_)));
-    assert_eq!(sink.discard_calls, 0);
-}
-
-#[tokio::test]
-async fn no_message_after_a_write_says_nothing_was_written() {
-    let errors = [
-        DownloadError::Unauthorized,
-        DownloadError::Forbidden,
-        DownloadError::FileChanged,
-        DownloadError::Unauthentic { index: 3 },
-        DownloadError::Truncated,
-        DownloadError::Sink(std::io::Error::other("closed")),
-        DownloadError::DirectFailedAfterWrite {
-            written_plaintext_bytes: 1024,
-            chunks_written: 1,
-            cause: AfterWriteCause::ApiNeeded(UseApiReason::ApiForFile),
-        },
-        DownloadError::DirectFailedAfterWrite {
-            written_plaintext_bytes: 1024,
-            chunks_written: 1,
-            cause: AfterWriteCause::Failed(Box::new(DownloadError::FileChanged)),
-        },
-        DownloadError::DirectFailedAfterWrite {
-            written_plaintext_bytes: 0,
-            chunks_written: 1,
-            cause: AfterWriteCause::ApiNeeded(UseApiReason::ApiForFile),
-        },
-    ];
-    for error in errors {
-        let text = format!("{error} {error:?}");
-        assert!(!text.to_ascii_lowercase().contains("nothing was written"), "{text}");
-        if let DownloadError::DirectFailedAfterWrite { chunks_written, .. } = &error
-            && *chunks_written > 0
-        {
-            assert!(
-                !text.contains("after 0 bytes"),
-                "a write was attempted, so the message must not claim zero bytes: {text}"
-            );
-        }
-    }
-}
-
-#[tokio::test]
-async fn discarded_events_carry_the_rolled_back_bytes() {
-    let (io, request, _) = scenario(Trigger::Refill404);
-    let mut sink = MockSink::discardable();
-    let events = Events::default();
-    let outcome = run_with_sink(&io, &DirectShared::new(), request, &mut sink, &events).await;
-    assert!(matches!(outcome, Ok(DownloadOutcome::UseApi(_))), "{outcome:?}");
-    let discarded: Vec<TransferEvent> = events
-        .0
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|e| matches!(e, TransferEvent::Discarded { .. }))
-        .cloned()
-        .collect();
-    assert_eq!(discarded.len(), 1, "{discarded:?}");
-    let TransferEvent::Discarded {
-        plaintext_bytes,
-        ciphertext_bytes,
-    } = discarded[0]
-    else {
-        unreachable!()
-    };
-    assert!(plaintext_bytes > 0);
-    assert_eq!(
-        ciphertext_bytes,
-        plaintext_bytes + 28 * (plaintext_bytes / 1024),
-        "the rolled-back ciphertext includes the per-chunk overhead"
-    );
-}
-
 // ----------------------- round 2: the driver findings -----------------------
 
 #[tokio::test]
@@ -1307,7 +992,7 @@ async fn a_v1_file_whose_geometry_has_fewer_chunks_is_refused_not_done() {
     let io = ScriptedIo::new(standard_handler(fx.clone()));
     let mut request = request_for(&fx);
     request.chunk_count = fx.chunk_count + 1;
-    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request).await;
+    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request, &fx).await;
     assert!(matches!(outcome, Err(DownloadError::FileChanged)), "{outcome:?}");
     assert!(sink.0.is_empty(), "zero bytes written");
 }
@@ -1335,7 +1020,7 @@ async fn pacing_holds_new_starts_and_polls_in_flight_replies() {
     let mut request = request_for(&fx);
     request.kbps_limit = Some(256);
     let events = Events::default();
-    let outcome = run_with_sink(&io, &DirectShared::new(), request, &mut sink, &events).await;
+    let outcome = run_with_sink(&io, &DirectShared::new(), request, &fx, &mut sink, &events).await;
     assert!(
         matches!(outcome, Ok(DownloadOutcome::Done(_))),
         "{outcome:?} events {:?} requests {:?} mono {}",
@@ -1417,7 +1102,7 @@ async fn a_renewal_due_while_gets_run_is_requested_on_time() {
             }
         })
     };
-    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request).await;
+    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request, &fx).await;
     advance.abort();
     assert!(matches!(outcome, Ok(DownloadOutcome::Done(_))), "{outcome:?}");
     assert_eq!(sink.0, plain);
@@ -1450,7 +1135,7 @@ async fn discovery_outcomes_are_classified_by_status() {
             Request::Api(call) if call.path == DISCOVERY_PATH => reply.clone(),
             other => panic!("unexpected request {other:?}"),
         });
-        let (outcome, _, _) = run_download(&io, shared, request_for(&fx)).await;
+        let (outcome, _, _) = run_download(&io, shared, request_for(&fx), &fx).await;
         outcome
     }
     let bare_404 = Reply::Api(ApiReply {
@@ -1495,7 +1180,7 @@ async fn discovery_outcomes_are_classified_by_status() {
     shared.record_discovery(&Outcome::UseApiNow, None, WALL_START_MS - 10);
     let io = ScriptedIo::new(|_: &Request, _: i64, _: i64| panic!("a parked lookup made a request"));
     let fx = Fixture::new(&vec![7u8; 1024], 1024);
-    let (outcome, _, _) = run_download(&io, &shared, request_for(&fx)).await;
+    let (outcome, _, _) = run_download(&io, &shared, request_for(&fx), &fx).await;
     assert!(matches!(
         outcome,
         Ok(DownloadOutcome::UseApi(UseApiReason::DiscoveryUnavailable))
@@ -1529,7 +1214,7 @@ async fn a_breaker_trip_survives_a_pinned_restart() {
         }
     });
     let shared = DirectShared::new();
-    let (outcome, sink, events) = run_download(&io, &shared, request_for(&fx)).await;
+    let (outcome, sink, events) = run_download(&io, &shared, request_for(&fx), &fx).await;
     assert!(matches!(outcome, Err(DownloadError::FileChanged)), "{outcome:?}");
     assert!(sink.0.is_empty());
     assert!(
@@ -1544,7 +1229,7 @@ async fn a_breaker_trip_survives_a_pinned_restart() {
     let second = ScriptedIo::new(|_: &Request, _: i64, _: i64| panic!("a held download made a request"));
     second.set_wall(io.wall_now() + 1_000);
     second.set_mono(io.mono_now() + 1_000);
-    let (held, _, _) = run_download(&second, &shared, request_for(&fx)).await;
+    let (held, _, _) = run_download(&second, &shared, request_for(&fx), &fx).await;
     assert!(matches!(held, Ok(DownloadOutcome::UseApi(UseApiReason::BreakerHold))));
     assert!(second.requests().is_empty());
 }
@@ -1575,7 +1260,7 @@ async fn the_version_check_ignores_ascii_case() {
     let io = ScriptedIo::new(standard_handler(fx.clone()));
     let mut request = request_for(&fx);
     request.pinned_version = Some(VERSION.to_ascii_uppercase());
-    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request).await;
+    let (outcome, sink, _) = run_download(&io, &DirectShared::new(), request, &fx).await;
     assert!(matches!(outcome, Ok(DownloadOutcome::Done(_))), "{outcome:?}");
     assert_eq!(sink.0, vec![5u8; 1024]);
 }
@@ -1585,8 +1270,7 @@ async fn concurrent_downloads_share_one_discovery_and_one_failure() {
     async fn one(io: &ScriptedIo, shared: &DirectShared, fx: &Fixture) -> Result<DownloadOutcome, DownloadError> {
         let mut sink = VecSink::default();
         let events = Events::default();
-        let decryptor =
-            ChunkDecryptor::for_push_with_file_key(FileKey::from_bytes(KEY), FILE_ID, ExpectedChunkFormat::Unrecorded);
+        let decryptor = fx.decryptor();
         download(io, shared, request_for(fx), decryptor, &mut sink, &events).await
     }
 

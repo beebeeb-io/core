@@ -257,52 +257,63 @@ test('a request-row content reader range-reads, retries and exposes no key', () 
   const contentKey = wasm.derive_file_key(master(), new TextEncoder().encode(O_ID));
   const wrap = wasm.wrap_request_private(master(), new Uint8Array(0), rPriv);
   const sealed = wasm.seal_to_request(rPub, new TextEncoder().encode(O_ID), contentKey);
+  const resolve = (name) =>
+    wasm.resolveRequestRow(master(), O_ID, new Uint8Array(0), wrap.wrapped, wrap.nonce, sealed.e_pub, sealed.wrapped_key, name);
 
-  // A BOUND row whose name is sealed under the legacy binary convention, so its
-  // name key differs from C: building the reader from the name key (a mutant)
-  // cannot open these frames.
-  const binaryId = Uint8Array.from(Buffer.from(O_ID.replace(/-/g, ''), 'hex'));
-  const binaryKey = wasm.derive_file_key(master(), binaryId);
-  assert.notEqual(hex(binaryKey), hex(contentKey));
-  const name = wasm.encrypt_name_for(binaryKey, 'upload.bin', null, 2);
-
-  const row = wasm.resolveRequestRow(
-    master(),
-    O_ID,
-    new Uint8Array(0),
-    wrap.wrapped,
-    wrap.nonce,
-    sealed.e_pub,
-    sealed.wrapped_key,
-    name,
-  );
-  assert.equal(row.seal, 'bound');
-  assert.equal(row.nameOrigin, 'derived_binary');
-  assert.equal(row.chunkFormat, 2);
-
-  // The reader exposes no key. `row` has exactly its documented keys.
-  assert.deepEqual(Object.keys(row).sort(), [
-    'chunkFormat',
-    'content',
-    'mimeType',
-    'name',
-    'nameOrigin',
-    'renameTarget',
-    'seal',
-  ]);
-  for (const keyName of ['key', 'contentKey', 'nameKey', 'rawKey', 'keyBytes']) {
-    assert.equal(row.content[keyName], undefined, keyName);
-  }
-  assert.equal(row.content.fileId, O_ID);
-  assert.equal(row.content.chunkFormat, 2);
-
-  // One v2 upload under C, bound to O_ID.
+  // One v2 upload under C, bound to O_ID, and the commitment its name seals.
   const plaintext = new TextEncoder().encode('0123456789abcdef0123456789abcdef0123456789abcdef');
   const enc = wasm.WasmChunkEncryptor.withChunkSize(master(), O_ID, BigInt(plaintext.length), 16n).withRecordedPin(2);
   const frames = [];
   for (let i = 0; i < plaintext.length; i += 16) frames.push(enc.pushChunk(plaintext.slice(i, i + 16)));
+  const version = enc.versionCommitment(undefined);
   enc.finish();
   const versionId = frames[0].slice(0, 12);
+  assert.equal(hex(version.versionId), hex(versionId));
+
+  // A BOUND row whose legacy name is sealed under the binary convention, so its
+  // name key differs from C: building the reader from the name key (a mutant)
+  // cannot open a frame sealed under C. Legacy names carry no commitment, so
+  // the content is v1, and the v2 upload is refused (Guus's ruling of
+  // 2026-11-07: v2 content opens only against a version commitment).
+  const binaryId = Uint8Array.from(Buffer.from(O_ID.replace(/-/g, ''), 'hex'));
+  const binaryKey = wasm.derive_file_key(master(), binaryId);
+  assert.notEqual(hex(binaryKey), hex(contentKey));
+  const legacy = resolve(wasm.encrypt_name_for(binaryKey, 'upload.bin', null, 0));
+  assert.equal(legacy.seal, 'bound');
+  assert.equal(legacy.nameOrigin, 'derived_binary');
+  assert.equal(legacy.chunkFormat, 0);
+  const v1Plain = new TextEncoder().encode('a legacy request upload');
+  const v1 = wasm.encrypt_chunk(contentKey, v1Plain);
+  const v1Frame = new Uint8Array([...v1.nonce, ...v1.ciphertext]);
+  assert.equal(hex(legacy.content.openFrame(new Uint8Array(0), 0, true, 1, v1Frame)), hex(v1Plain));
+  assert.equal(hex(legacy.content.decryptor().pushFrame(v1Frame)), hex(v1Plain));
+  assert.throws(() => legacy.content.openFrame(versionId, 0, false, 2, frames[0]), /version commitment/);
+  assert.throws(() => legacy.content.decryptor().pushFrame(frames[0]), /version commitment/);
+
+  // The row whose name seals the upload's commitment reads the v2 content.
+  const row = resolve(
+    wasm.encrypt_name_with_version(master(), O_ID, 'upload.bin', null, 2, version.versionId, version.versionCounter),
+  );
+  assert.equal(row.seal, 'bound');
+  assert.equal(row.chunkFormat, 2);
+
+  // The reader exposes no key. `row` has exactly its documented keys.
+  for (const r of [legacy, row]) {
+    assert.deepEqual(Object.keys(r).sort(), [
+      'chunkFormat',
+      'content',
+      'mimeType',
+      'name',
+      'nameOrigin',
+      'renameTarget',
+      'seal',
+    ]);
+    for (const keyName of ['key', 'contentKey', 'nameKey', 'rawKey', 'keyBytes']) {
+      assert.equal(r.content[keyName], undefined, keyName);
+    }
+    assert.equal(r.content.fileId, O_ID);
+  }
+  assert.equal(row.content.chunkFormat, 2);
 
   // Range read frame 2 without opening frames 0 and 1.
   assert.equal(

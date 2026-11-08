@@ -21,6 +21,16 @@ fn pin(chunk_format: u8) -> NameMetadataDto {
     }
 }
 
+/// The record a writer seals for the upload whose frame 0 is `frame0`: its
+/// nonce is the version id (first version, counter 1).
+fn committed(chunk_format: u8, frame0: &[u8]) -> NameMetadataDto {
+    NameMetadataDto {
+        version_id: Some(frame0[..12].to_vec()),
+        version_counter: Some(1),
+        ..pin(chunk_format)
+    }
+}
+
 #[test]
 fn push_roundtrip_via_handles() {
     let mk = mk_handle();
@@ -37,7 +47,7 @@ fn push_roundtrip_via_handles() {
     assert_eq!(summary.chunk_count, 1);
     assert_eq!(summary.total_plaintext, data.len() as u64);
 
-    let dec = ChunkDecryptorHandle::for_push(&mk, file_id, pin(default_expected())).unwrap();
+    let dec = ChunkDecryptorHandle::for_push(&mk, file_id, committed(default_expected(), &frame.data)).unwrap();
     let out = dec.push_frame(frame.data).unwrap();
     assert_eq!(out.index, 0);
     assert_eq!(out.data, data);
@@ -75,11 +85,11 @@ fn handle_rejects_reorder_and_truncation() {
 
     for expected in [0u8, 2] {
         // Out of order: chunk 1 pushed first.
-        let dec = ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into(), pin(expected)).unwrap();
+        let dec = ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into(), committed(expected, &frames[0])).unwrap();
         assert!(dec.push_frame(frames[1].clone()).is_err());
 
         // Truncated: only chunk 0, then finish.
-        let dec = ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into(), pin(expected)).unwrap();
+        let dec = ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into(), committed(expected, &frames[0])).unwrap();
         dec.push_frame(frames[0].clone()).unwrap();
         assert!(
             dec.finish().is_err(),
@@ -105,7 +115,8 @@ fn handle_v2_pin_refuses_name_blob_as_frame0() {
     assert_eq!((meta.name.as_str(), meta.chunk_format), ("a.pdf", 2));
     let blob = parse_name_blob(&ne);
     let forged = [blob.nonce, blob.ciphertext].concat();
-    let dec = ChunkDecryptorHandle::for_push(&mk, id.into(), pin(meta.chunk_format)).unwrap();
+    // Even a commitment naming the forged frame's own nonce opens nothing.
+    let dec = ChunkDecryptorHandle::for_push(&mk, id.into(), committed(meta.chunk_format, &forged)).unwrap();
     assert!(dec.push_frame(forged).is_err());
     // A name written without a format reads back as 0 (unrecorded).
     let legacy = mk.encrypt_name(id.into(), "a.pdf".into(), None).unwrap();
@@ -170,7 +181,22 @@ fn handle_replace_of_a_v2_pinned_file_uses_the_recorded_pin() {
     enc.apply_recorded_pin(recorded.chunk_format).unwrap();
     assert_eq!(enc.chunk_format().unwrap(), 2, "a v2-pinned file must be written as v2");
     let frame = enc.push_chunk(data.clone()).unwrap();
+    let version = enc.version_commitment(None).unwrap();
     enc.finish().unwrap();
+    // The new version's record carries the pin and its commitment; the old
+    // record (no commitment) opens nothing of it.
+    assert!(ChunkDecryptorHandle::for_push(&mk, id.into(), recorded).is_err());
+    let name = mk
+        .encrypt_name_with_version(
+            id.into(),
+            "a.pdf".into(),
+            None,
+            2,
+            version.version_id,
+            version.version_counter,
+        )
+        .unwrap();
+    let recorded = mk.decrypt_file_metadata(id.into(), name).unwrap();
     let dec = ChunkDecryptorHandle::for_push(&mk, id.into(), recorded).unwrap();
     assert_eq!(dec.push_frame(frame.data).unwrap().data, data);
     dec.finish().unwrap();
@@ -334,8 +360,9 @@ fn handle_with_file_key_and_random_access_frame_open() {
 
     // File-key decryptors (share recipient path): raw bytes and handle.
     for dec in [
-        ChunkDecryptorHandle::for_push_with_file_key(fk_bytes.clone(), "ffi-fk".into(), pin(2)).unwrap(),
-        ChunkDecryptorHandle::for_push_with_file_key_handle(&fk, "ffi-fk".into(), pin(2)).unwrap(),
+        ChunkDecryptorHandle::for_push_with_file_key(fk_bytes.clone(), "ffi-fk".into(), committed(2, &frames[0]))
+            .unwrap(),
+        ChunkDecryptorHandle::for_push_with_file_key_handle(&fk, "ffi-fk".into(), committed(2, &frames[0])).unwrap(),
     ] {
         let mut out = Vec::new();
         for f in &frames {
@@ -347,28 +374,30 @@ fn handle_with_file_key_and_random_access_frame_open() {
     }
 
     // Wrong file id with the right key fails.
-    let dec = ChunkDecryptorHandle::for_push_with_file_key_handle(&fk, "other".into(), pin(2)).unwrap();
+    let dec =
+        ChunkDecryptorHandle::for_push_with_file_key_handle(&fk, "other".into(), committed(2, &frames[0])).unwrap();
     assert!(dec.push_frame(frames[0].clone()).is_err());
 
-    // Random access: right position + version opens; wrong position, last
-    // flag, version or format fails.
-    let vid = frames[0][..12].to_vec();
+    // Random access: the record's commitment and the right position open;
+    // a wrong position, last flag or upload, a record of another upload, an
+    // unknown format and a record without a commitment fail.
+    let record = committed(2, &frames[0]);
     assert_eq!(
-        fk.decrypt_chunk_frame("ffi-fk".into(), vid.clone(), 1, true, 2, frames[1].clone())
+        fk.decrypt_chunk_frame("ffi-fk".into(), record.clone(), 1, true, frames[1].clone())
             .unwrap(),
         data[4 * 1024 * 1024..]
     );
     let (_, other_upload) = two_v2_frames(&mk, "ffi-fk");
-    for (v, i, last, fmt, frame) in [
-        (vid.clone(), 0, false, 2, frames[1].clone()),
-        (vid.clone(), 1, false, 2, frames[1].clone()),
-        (vid.clone(), 1, true, 1, frames[1].clone()),
-        (vid.clone(), 1, true, 9, frames[1].clone()),
-        (vid.clone(), 1, true, 2, other_upload[1].clone()),
-        (other_upload[0][..12].to_vec(), 1, true, 2, frames[1].clone()),
-        (vid[..11].to_vec(), 1, true, 2, frames[1].clone()),
+    for (rec, i, last, frame) in [
+        (record.clone(), 0, false, frames[1].clone()),
+        (record.clone(), 1, false, frames[1].clone()),
+        (record.clone(), 1, true, other_upload[1].clone()),
+        (committed(2, &other_upload[0]), 1, true, frames[1].clone()),
+        (committed(9, &frames[0]), 1, true, frames[1].clone()),
+        (pin(2), 1, true, frames[1].clone()),
+        (pin(0), 1, true, frames[1].clone()),
     ] {
-        assert!(fk.decrypt_chunk_frame("ffi-fk".into(), v, i, last, fmt, frame).is_err());
+        assert!(fk.decrypt_chunk_frame("ffi-fk".into(), rec, i, last, frame).is_err());
     }
 }
 
@@ -388,7 +417,7 @@ fn contiguous_to_file_binds_file_id_and_rejects_swap() {
     let n = decrypt_contiguous_to_file(
         fk_bytes.clone(),
         "ffi-contig".into(),
-        2,
+        committed(2, &frames[0]),
         frames.concat(),
         cs,
         out.clone(),
@@ -402,7 +431,7 @@ fn contiguous_to_file_binds_file_id_and_rejects_swap() {
         decrypt_contiguous_to_file(
             fk_bytes.clone(),
             "ffi-contig".into(),
-            2,
+            committed(2, &frames[0]),
             frames[0].clone(),
             cs,
             out.clone()
@@ -421,9 +450,10 @@ fn contiguous_to_file_binds_file_id_and_rejects_swap() {
             })
             .collect()
     };
-    assert!(decrypt_chunks_to_file(fk_bytes.clone(), "not-the-id".into(), 2, pairs(), out.clone()).is_err());
+    let record = || committed(2, &frames[0]);
+    assert!(decrypt_chunks_to_file(fk_bytes.clone(), "not-the-id".into(), record(), pairs(), out.clone()).is_err());
     assert_eq!(
-        decrypt_chunks_to_file(fk_bytes, "ffi-contig".into(), 2, pairs(), out.clone()).unwrap(),
+        decrypt_chunks_to_file(fk_bytes, "ffi-contig".into(), record(), pairs(), out.clone()).unwrap(),
         data.len() as u64
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -446,7 +476,8 @@ fn wrong_key_decrypt_errors() {
     let enc = ChunkEncryptorHandle::for_push(&mk, "secret".into(), 5, "mobile".into()).unwrap();
     let frame = enc.push_chunk(b"hello".to_vec()).unwrap();
     let wrong = MasterKeyHandle::from_keychain_bytes(vec![9u8; 32]).unwrap();
-    let dec = ChunkDecryptorHandle::for_push(&wrong, "secret".into(), pin(default_expected())).unwrap();
+    let dec =
+        ChunkDecryptorHandle::for_push(&wrong, "secret".into(), committed(default_expected(), &frame.data)).unwrap();
     assert!(dec.push_frame(frame.data).is_err());
 }
 
@@ -475,7 +506,11 @@ fn pull_file_roundtrip_via_handles() {
     let enc_path = dir.join("in.enc");
     let mut out_file = std::fs::File::create(&enc_path).unwrap();
     let mut frames = 0u32;
+    let mut frame0 = Vec::new();
     while let Some(c) = enc.next_chunk().unwrap() {
+        if c.index == 0 {
+            frame0 = c.data.clone();
+        }
         out_file.write_all(&c.data).unwrap();
         frames += 1;
     }
@@ -488,7 +523,7 @@ fn pull_file_roundtrip_via_handles() {
     let dec = ChunkDecryptorHandle::from_file(
         &mk,
         "pullfile".into(),
-        pin(default_expected()),
+        committed(default_expected(), &frame0),
         chunk_size,
         enc_path.to_string_lossy().into_owned(),
     )
@@ -567,4 +602,109 @@ fn decryptors_from_metadata_refuse_another_upload_of_the_same_file() {
             .is_err(),
         "half a commitment is refused"
     );
+}
+
+/// Guus's ruling of 2026-11-07, "refuse v2 without commitment": a record with
+/// no version commitment opens no v2 content through any UniFFI reader. A
+/// `chunk_format: 2` record is refused when the reader is built; an
+/// unrecorded one is refused at the v2 frame 0 (by core), and still opens v1.
+/// Mutant: `version_pin` and core's no-commitment arm accept v2 again: every
+/// assertion below fails.
+#[test]
+fn v2_records_without_a_commitment_are_refused_on_every_decryptor() {
+    let mk = mk_handle();
+    let id = "ffi-bare-v2";
+    let (_, frames) = two_v2_frames(&mk, id);
+    let fk = mk.derive_file_key(id.as_bytes().to_vec()).unwrap();
+    let fk_bytes = mk
+        .with_key(|m| kdf::derive_file_key(m, id.as_bytes()).as_bytes().to_vec())
+        .unwrap();
+
+    // A `chunk_format: 2` record without a commitment: refused at construction.
+    assert!(ChunkDecryptorHandle::for_push(&mk, id.into(), pin(2)).is_err());
+    assert!(ChunkDecryptorHandle::for_push_with_file_key_handle(&fk, id.into(), pin(2)).is_err());
+    assert!(ChunkDecryptorHandle::for_push_with_file_key(fk_bytes.clone(), id.into(), pin(2)).is_err());
+    assert!(ChunkDecryptorHandle::for_version(&mk, id.into(), 2, None, None).is_err());
+    assert!(ChunkDecryptorHandle::for_version_with_file_key_handle(&fk, id.into(), 2, None, None).is_err());
+
+    // An unrecorded record without a commitment: the v2 frame 0 is refused.
+    for dec in [
+        ChunkDecryptorHandle::for_push(&mk, id.into(), pin(0)).unwrap(),
+        ChunkDecryptorHandle::for_push_with_file_key_handle(&fk, id.into(), pin(0)).unwrap(),
+        ChunkDecryptorHandle::for_push_with_file_key(fk_bytes.clone(), id.into(), pin(0)).unwrap(),
+        ChunkDecryptorHandle::for_version(&mk, id.into(), 0, None, None).unwrap(),
+        ChunkDecryptorHandle::for_version_with_file_key_handle(&fk, id.into(), 0, None, None).unwrap(),
+    ] {
+        assert!(dec.push_frame(frames[0].clone()).is_err());
+    }
+
+    // Random access, the pull form, and the disk helpers.
+    for record in [pin(2), pin(0)] {
+        assert!(
+            fk.decrypt_chunk_frame(id.into(), record, 1, true, frames[1].clone())
+                .is_err()
+        );
+    }
+    let dir = std::env::temp_dir().join(format!("bb_uniffi_bare_v2_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let body = dir.join("body.enc");
+    std::fs::write(&body, frames.concat()).unwrap();
+    let body_path = body.to_string_lossy().into_owned();
+    let cs = 4 * 1024 * 1024u64;
+    assert!(ChunkDecryptorHandle::from_file(&mk, id.into(), pin(2), cs, body_path.clone()).is_err());
+    let pull = ChunkDecryptorHandle::from_file(&mk, id.into(), pin(0), cs, body_path).unwrap();
+    assert!(pull.next_chunk().is_err());
+    let chunk_paths: Vec<String> = frames
+        .iter()
+        .enumerate()
+        .map(|(i, frame)| {
+            let path = dir.join(format!("{i}.enc"));
+            std::fs::write(&path, frame).unwrap();
+            path.to_string_lossy().into_owned()
+        })
+        .collect();
+    let out = dir.join("out.bin").to_string_lossy().into_owned();
+    for record in [pin(2), pin(0)] {
+        assert!(
+            mk.decrypt_file(id.into(), record.clone(), chunk_paths.clone(), out.clone(), None)
+                .is_err()
+        );
+        assert!(
+            decrypt_contiguous_to_file(
+                fk_bytes.clone(),
+                id.into(),
+                record.clone(),
+                frames.concat(),
+                cs,
+                out.clone()
+            )
+            .is_err()
+        );
+        let pairs: Vec<EncryptedChunkData> = frames
+            .iter()
+            .map(|f| EncryptedChunkData {
+                nonce: f[..12].to_vec(),
+                ciphertext: f[12..].to_vec(),
+            })
+            .collect();
+        assert!(decrypt_chunks_to_file(fk_bytes.clone(), id.into(), record, pairs, out.clone()).is_err());
+        assert!(!std::path::Path::new(&out).exists());
+    }
+
+    // The same frames open against their commitment, and an unrecorded record
+    // still opens a v1 file.
+    let dec = ChunkDecryptorHandle::for_push(&mk, id.into(), committed(0, &frames[0])).unwrap();
+    for frame in &frames {
+        dec.push_frame(frame.clone()).unwrap();
+    }
+    dec.finish().unwrap();
+    let v1 = beebeeb_core::encrypt::encrypt_chunk_raw(
+        &kdf::derive_file_key(&kdf::MasterKey::from_bytes([7u8; 32]), id.as_bytes()),
+        b"legacy",
+    )
+    .unwrap();
+    let dec = ChunkDecryptorHandle::for_push(&mk, id.into(), pin(0)).unwrap();
+    assert_eq!(dec.push_frame(v1).unwrap().data, b"legacy");
+    let _ = std::fs::remove_dir_all(&dir);
 }

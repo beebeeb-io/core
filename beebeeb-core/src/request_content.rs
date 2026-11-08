@@ -92,7 +92,8 @@ impl RequestContentReader {
     /// `format` and `version_id` must come from authenticated data, exactly as
     /// [`open_chunk`] documents. When the row's pin is
     /// [`ExpectedChunkFormat::V2`], a v1 `format` is refused: the name already
-    /// authenticated v2 for this row.
+    /// authenticated v2 for this row. A reader built without a version
+    /// commitment ([`Self::new`], or a record with none) refuses every v2 frame.
     pub fn open_frame(
         &self,
         version_id: &[u8],
@@ -106,10 +107,13 @@ impl RequestContentReader {
                 "request content reader: the row records chunk format 2; a v1 frame cannot be its content".into(),
             ));
         }
-        if let Some(committed) = self.version {
-            if format != ChunkFormat::V2 || version_id != committed.version_id {
+        match self.version {
+            Some(committed) if format != ChunkFormat::V2 || version_id != committed.version_id => {
                 return Err(CoreError::Decryption);
             }
+            // The ruling of 2026-11-07: v2 content opens only against a commitment.
+            None if format == ChunkFormat::V2 => return Err(crate::chunk_stream::uncommitted_v2()),
+            _ => {}
         }
         open_chunk(&self.file_key, &self.file_id, version_id, index, is_last, format, frame)
     }

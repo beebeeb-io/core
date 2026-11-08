@@ -50,8 +50,9 @@
 //! [`ExpectedChunkFormat`] that the caller MUST take from the file's
 //! authenticated (encrypted) metadata via
 //! [`crate::encrypt::decrypt_file_metadata`]: a file whose metadata records v2
-//! opens ONLY as v2. Detection from frame 0 is used only for files whose
-//! metadata records no format (written before protected metadata).
+//! opens ONLY as v2. v2 content also opens only against the version commitment
+//! of the same record; a record with none opens v1 content only (Guus's ruling
+//! of 2026-11-07, "refuse v2 without commitment").
 //!
 //! A newly-created writer asks [`ChunkEncryptor::resume_policy`] whether it may
 //! continue an unrelated old server session. A persisted v2 upload can instead
@@ -276,10 +277,12 @@ pub fn check_version_counter(counter: u64, remembered_highest: Option<u64>) -> V
 ///   v2 frames are accepted — no detection, no v1 fallback.
 /// - [`Unrecorded`](Self::Unrecorded): the metadata records no format — a file
 ///   written before task 1908 (or before the v2 write switch), or metadata
-///   rewritten by a pre-1908 client. The format is detected from frame 0 (v2
-///   tried first, then v1). This is the only path on which a downgrade is still
-///   possible, and only for such files — the residual risk of keeping v1 files
-///   readable.
+///   rewritten by a pre-1908 client, or a v2 version of a file with v1 history
+///   (the kept unrecorded pin), which carries a version commitment. With a
+///   commitment frame 0 opens only as that v2 upload; without one it opens only
+///   as v1 (the ruling of 2026-11-07). This is the only path on which a v1 read
+///   is still possible, and only for such files — the residual risk of keeping
+///   v1 files readable.
 ///
 /// Read it with [`crate::encrypt::decrypt_file_metadata`] (or
 /// `decrypt_file_metadata_with_key`), never from a server field. The file
@@ -435,14 +438,15 @@ fn version_id_of(frame: &[u8]) -> Option<[u8; VERSION_ID_LEN]> {
 /// about which chunk is last), fails the tag — so even an unauthenticated
 /// chunk count cannot be used to truncate or extend a v2 file.
 ///
-/// `format` and `version_id` must be established from authenticated data:
-/// - `format`: [`ChunkFormat::V2`] when the encrypted metadata records v2
-///   ([`ExpectedChunkFormat::V2`]); for a file whose metadata records nothing,
-///   the [`ChunkDecryptor::format`] of a decryptor that opened chunk 0.
-/// - `version_id`: [`ChunkDecryptor::version_id`] after chunk 0 opened (or the
-///   first 12 bytes of chunk 0: if a server lies about them, only frames of the
-///   one version they belong to can open, so the reader sees that version
-///   consistently or nothing). Must be 12 bytes for v2; ignored for v1.
+/// This is the low-level primitive: it applies no version commitment. A reader
+/// with a metadata record uses [`open_recorded_chunk`] (or
+/// [`open_version_chunk`]), which does. `format` and `version_id` must come
+/// from authenticated data:
+/// - `format`: [`ChunkFormat::V2`] when the record carries a version
+///   commitment; [`ChunkFormat::V1Legacy`] only for a record with none.
+/// - `version_id`: the commitment's `version_id`, never chunk 0's first 12
+///   bytes (those could name an older complete upload). Must be 12 bytes for
+///   v2; ignored for v1.
 ///
 /// For [`ChunkFormat::V1Legacy`] the position arguments are ignored (v1 binds
 /// nothing).
@@ -468,6 +472,76 @@ pub fn open_chunk(
                 &chunk_aad_v2(file_id.as_bytes(), version_id, index, is_last),
             )
         }
+    }
+}
+
+/// The refusal of v2 content whose metadata carries no version commitment
+/// (Guus's ruling of 2026-11-07, "refuse v2 without commitment"). Every v2
+/// version is written with one, and no released core ever wrote v2, so the
+/// only files this refuses are development and test files.
+pub(crate) fn uncommitted_v2() -> CoreError {
+    CoreError::InvalidInput(
+        "v2 file content opens only against the version commitment in its metadata, and this record has none".into(),
+    )
+}
+
+/// Whether `frame` authenticates as frame 0 of a v1 or a v2 file under
+/// `file_key`. A key probe for owner-key resolution: it publishes no plaintext
+/// and applies no commitment, so it is never a content reader.
+pub(crate) fn frame0_authenticates(file_key: &FileKey, file_id: &str, frame: &[u8]) -> bool {
+    let opener = StreamOpener::new(file_key, file_id, ExpectedChunkFormat::Unrecorded);
+    opener.try_v2_frame0(frame).is_some() || open_raw_with_aad(file_key, frame, &[]).is_ok()
+}
+
+/// TEST ONLY: the first-version commitment of the upload whose frame 0 is
+/// `frame0`, as its writer seals it (`version_id` = frame 0's nonce).
+#[cfg(test)]
+pub(crate) fn first_commitment(frame0: &[u8]) -> VersionCommitment {
+    VersionCommitment::new(version_id_of(frame0).expect("a frame"), 1).expect("counter 1")
+}
+
+/// TEST ONLY: a push decryptor committed to the SERVED frame 0 when it
+/// authenticates as v2, and to nothing otherwise. The stream-rule tests (order,
+/// truncation, splicing, pins) written before the ruling of 2026-11-07 run
+/// through it unchanged; it is never a model for a reader, whose commitment
+/// comes from the metadata record.
+#[cfg(test)]
+pub(crate) fn self_committed_decryptor(
+    mk: &MasterKey,
+    file_id: &str,
+    expected: ExpectedChunkFormat,
+    frame0: Option<&[u8]>,
+) -> ChunkDecryptor {
+    let commitment = self_commitment(mk, file_id, frame0);
+    ChunkDecryptor::for_version_with_file_key(derive_file_key(mk, file_id.as_bytes()), file_id, expected, commitment)
+}
+
+/// TEST ONLY: the commitment [`self_committed_decryptor`] applies.
+#[cfg(test)]
+pub(crate) fn self_commitment(mk: &MasterKey, file_id: &str, frame0: Option<&[u8]>) -> Option<VersionCommitment> {
+    let file_key = derive_file_key(mk, file_id.as_bytes());
+    let opener = StreamOpener::new(&file_key, file_id, ExpectedChunkFormat::Unrecorded);
+    frame0
+        .filter(|frame| opener.try_v2_frame0(frame).is_some())
+        .map(first_commitment)
+}
+
+/// Random-access open of chunk `index` of the version `metadata` names, the
+/// record-driven form of [`open_chunk`] (seeking readers in the bindings). With
+/// a commitment it opens only that v2 upload's frames; without one it opens v1
+/// frames only, and a `V2` record opens nothing (the ruling of 2026-11-07).
+pub fn open_recorded_chunk(
+    file_key: &FileKey,
+    file_id: &str,
+    metadata: &crate::encrypt::NameMetadata,
+    index: u32,
+    is_last: bool,
+    frame: &[u8],
+) -> Result<Vec<u8>, CoreError> {
+    match (metadata.version, metadata.chunk_format) {
+        (Some(_), _) => open_version_chunk(file_key, file_id, metadata, index, is_last, frame),
+        (None, ExpectedChunkFormat::V2) => Err(uncommitted_v2()),
+        (None, ExpectedChunkFormat::Unrecorded) => open_raw_with_aad(file_key, frame, &[]),
     }
 }
 
@@ -514,6 +588,10 @@ pub fn open_version_chunk(
 /// 5. v2: [`finish`](Self::finish) fails unless the last frame was seen —
 ///    truncation detection. v1 has no last marker; it cannot detect truncation
 ///    (the legacy weakness this task fixes for new files).
+/// 6. A v2 frame 0 opens only against a version commitment from the same
+///    metadata (Guus's ruling of 2026-11-07, "refuse v2 without commitment").
+///    Without one, a `V2` pin opens nothing and an `Unrecorded` pin opens v1
+///    only; the refusal is [`uncommitted_v2`]'s `InvalidInput`.
 pub(crate) struct StreamOpener {
     file_id: Vec<u8>,
     /// v2 chunk subkey, derived once from the per-file key at construction.
@@ -612,26 +690,21 @@ impl StreamOpener {
                 self.version_id = Some(vid);
                 (pt, ChunkFormat::V2, last)
             }
+            // Rule 6: no commitment. Metadata that records v2 opens nothing; an
+            // unrecorded pin opens v1 only. A v2 frame 0 is refused even when it
+            // authenticates: every v2 version is written with a commitment, and
+            // no released core wrote v2, so only development files lack one.
             (None, _) => match self.expected {
-                // Rule 3: metadata says v2 — v2 or nothing. A no-AAD blob under
-                // the file key (name, thumbnail, a v1 frame) never gets here as v1.
-                ExpectedChunkFormat::V2 => {
-                    let (pt, last, vid) = self.try_v2_frame0(frame).ok_or(CoreError::Decryption)?;
-                    self.version_id = Some(vid);
-                    (pt, ChunkFormat::V2, last)
-                }
-                // Legacy metadata: detect. Unambiguous between v1 and v2 FRAMES
-                // (a v2 frame never opens without its AAD and subkey, a v1 frame
-                // never opens as v2) — but NOT against other no-AAD blobs under
-                // the same key, which is why metadata that records v2 must use
-                // the arm above.
+                ExpectedChunkFormat::V2 => return Err(uncommitted_v2()),
+                // Legacy metadata: v1. Unambiguous between v1 and v2 FRAMES (a
+                // v2 frame never opens without its AAD and subkey, a v1 frame
+                // never opens as v2), but NOT against other no-AAD blobs under
+                // the same key: the residual of keeping v1 files readable.
                 ExpectedChunkFormat::Unrecorded => {
-                    if let Some((pt, last, vid)) = self.try_v2_frame0(frame) {
-                        self.version_id = Some(vid);
-                        (pt, ChunkFormat::V2, last)
-                    } else {
-                        (open_raw_with_aad(key, frame, &[])?, ChunkFormat::V1Legacy, false)
+                    if self.try_v2_frame0(frame).is_some() {
+                        return Err(uncommitted_v2());
                     }
+                    (open_raw_with_aad(key, frame, &[])?, ChunkFormat::V1Legacy, false)
                 }
             },
         };
@@ -1172,12 +1245,15 @@ impl ChunkEncryptor {
     /// pin remains meaningful when the file has legacy history. Only before
     /// the first chunk, so a file can never mix formats. Pair it with
     /// `encrypt::encrypt_thumbnail_for(.., pin)`,
-    /// `encrypt::encrypt_note_for(.., pin)` and, when the name is rewritten,
-    /// `encrypt_name_with_chunk_format(.., pin)`.
+    /// `encrypt::encrypt_note_for(.., pin)` and the new version's name sealed
+    /// with `encrypt_name_with_version(.., pin, successor)`, where `successor`
+    /// is [`version_commitment`](Self::version_commitment) of the current one:
+    /// every version is read against its own commitment (Guus's ruling of
+    /// 2026-11-07, "refuse v2 without commitment").
     ///
     /// ```
     /// use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor, ExpectedChunkFormat, WRITE_FORMAT};
-    /// use beebeeb_core::encrypt::{decrypt_file_metadata, encrypt_name_with_chunk_format};
+    /// use beebeeb_core::encrypt::{decrypt_file_metadata, encrypt_name_with_version};
     /// use beebeeb_core::kdf::MasterKey;
     ///
     /// let mk = MasterKey::from_bytes([7u8; 32]);
@@ -1185,35 +1261,43 @@ impl ChunkEncryptor {
     /// let v1 = b"first version".to_vec();
     ///
     /// // NEW file: no pin exists. Plain constructor (= WRITE_FORMAT), then
-    /// // record what the encryptor actually wrote. Never `with_recorded_pin(V2)`.
+    /// // record what the encryptor actually wrote, with its commitment. Never
+    /// // `with_recorded_pin(V2)`.
     /// let mut enc = ChunkEncryptor::for_push_with_chunk_size(&mk, id, v1.len() as u64, 16).unwrap();
     /// assert_eq!(enc.format(), WRITE_FORMAT);
     /// let frames: Vec<Vec<u8>> = v1.chunks(16).map(|c| enc.push_chunk(c).unwrap().data).collect();
     /// let recorded = ExpectedChunkFormat::recorded_for(enc.format());
+    /// let first = enc.version_commitment(None).unwrap();
     /// enc.finish().unwrap();
-    /// let name_encrypted = encrypt_name_with_chunk_format(&mk, id, "a.txt", None, recorded).unwrap();
+    /// let name_v1 = encrypt_name_with_version(&mk, id, "a.txt", None, recorded, first).unwrap();
     ///
-    /// // REPLACE (new version of that file): the pin comes from the file's own
-    /// // authenticated metadata (never a server field), and the writer obeys it.
-    /// let pin = decrypt_file_metadata(&mk, id, &name_encrypted).unwrap().chunk_format;
+    /// // REPLACE (new version of that file): the pin and the current
+    /// // commitment come from the file's own authenticated metadata (never a
+    /// // server field), and the writer obeys the pin.
+    /// let meta_v1 = decrypt_file_metadata(&mk, id, &name_v1).unwrap();
     /// let v2 = b"second version".to_vec();
     /// let mut enc = ChunkEncryptor::for_push_with_chunk_size(&mk, id, v2.len() as u64, 16)
     ///     .unwrap()
-    ///     .with_recorded_pin(pin)
+    ///     .with_recorded_pin(meta_v1.chunk_format)
     ///     .unwrap();
     /// let frames2: Vec<Vec<u8>> = v2.chunks(16).map(|c| enc.push_chunk(c).unwrap().data).collect();
+    /// let successor = enc.version_commitment(meta_v1.version).unwrap();
     /// enc.finish().unwrap();
+    /// let name_v2 = encrypt_name_with_version(&mk, id, "a.txt", None, meta_v1.chunk_format, successor).unwrap();
+    /// let meta_v2 = decrypt_file_metadata(&mk, id, &name_v2).unwrap();
     ///
-    /// // Both versions read back under the one metadata blob the server keeps.
-    /// for (frames, want) in [(frames, v1), (frames2, v2)] {
-    ///     let mut dec = ChunkDecryptor::for_push(&mk, id, pin);
+    /// // Each version reads back against its own record, and only that one.
+    /// for (frames, meta, want) in [(&frames, &meta_v1, &v1), (&frames2, &meta_v2, &v2)] {
+    ///     let mut dec = ChunkDecryptor::for_historical_version(&mk, id, meta);
     ///     let mut out = Vec::new();
-    ///     for f in &frames {
+    ///     for f in frames {
     ///         out.extend_from_slice(&dec.push_frame(f).unwrap().data);
     ///     }
     ///     dec.finish().unwrap();
-    ///     assert_eq!(out, want);
+    ///     assert_eq!(&out, want);
     /// }
+    /// let mut stale = ChunkDecryptor::for_current_version(&mk, id, &meta_v2);
+    /// assert!(stale.push_frame(&frames[0]).is_err(), "the older upload is refused");
     /// ```
     pub fn with_recorded_pin(mut self, pin: ExpectedChunkFormat) -> Result<Self, CoreError> {
         if self.emitted_chunks != 0 {
@@ -1395,10 +1479,14 @@ enum DecSource {
 /// Streaming chunk decryptor — the symmetric counterpart to [`ChunkEncryptor`].
 ///
 /// Reads v2 (position-bound) and v1 (legacy) files. Every constructor takes
-/// the [`ExpectedChunkFormat`] from the file's authenticated metadata: `V2`
-/// accepts only v2 frames; `Unrecorded` (legacy metadata) lets frame 0 decide.
-/// The format is then locked for the rest of the stream; see `StreamOpener`
-/// for the full rules. In v2 every frame must be the next index in order and
+/// the [`ExpectedChunkFormat`] from the file's authenticated metadata. A v2
+/// file opens only against the version commitment of the same record
+/// ([`for_current_version`](Self::for_current_version),
+/// [`for_version_with_file_key`](Self::for_version_with_file_key)); without
+/// one, only a v1 file opens (Guus's ruling of 2026-11-07, "refuse v2 without
+/// commitment"), so the constructors that take no commitment read legacy v1
+/// content only. The format is then locked for the rest of the stream; see
+/// `StreamOpener` for the full rules. In v2 every frame must be the next index in order and
 /// from the same upload (version) as frame 0, nothing may follow the last
 /// chunk, and the stream must reach its last chunk: call
 /// [`finish`](Self::finish) (push form) or read to `Ok(None)` (pull form,
@@ -1420,6 +1508,9 @@ impl ChunkDecryptor {
     /// at encryption — the read frame size is `nonce(12) + chunk_size + tag(16)`.
     ///
     /// Returns `Err` if `chunk_size_bytes == 0` or the frame size overflows.
+    ///
+    /// No commitment: legacy v1 content only, a v2 frame 0 is refused. Read v2
+    /// with [`from_reader_for_current_version`](Self::from_reader_for_current_version).
     pub fn from_reader<R: Read + Send + 'static>(
         mk: &MasterKey,
         file_id: &str,
@@ -1489,13 +1580,16 @@ impl ChunkDecryptor {
     /// **Push** constructor: the caller feeds wire frames via
     /// [`push_frame`](Self::push_frame). Infallible — no buffer is allocated and
     /// no chunk size is needed (each frame is self-describing).
+    ///
+    /// No commitment: legacy v1 content only, a v2 frame 0 is refused. Read v2
+    /// with [`for_current_version`](Self::for_current_version).
     pub fn for_push(mk: &MasterKey, file_id: &str, expected: ExpectedChunkFormat) -> Self {
         Self::for_push_with_file_key(derive_file_key(mk, file_id.as_bytes()), file_id, expected)
     }
 
     /// Read the file currently named by `metadata`. Protected metadata forces
-    /// v2 and rejects frame 0 unless its version id matches. Older metadata is
-    /// still readable through the unprotected compatibility rule.
+    /// v2 and rejects frame 0 unless its version id matches. A record with no
+    /// commitment opens a v1 file only; its v2 content is refused.
     pub fn for_current_version(mk: &MasterKey, file_id: &str, metadata: &crate::encrypt::NameMetadata) -> Self {
         Self::for_version_with_file_key(
             derive_file_key(mk, file_id.as_bytes()),
@@ -1524,6 +1618,9 @@ impl ChunkDecryptor {
     /// callers that hold the file key but not the owner's master key (shared-link
     /// and share recipients, file-request content keys). `file_id` must be the
     /// id the file was uploaded under (it is bound into every v2 frame).
+    ///
+    /// No commitment: legacy v1 content only, a v2 frame 0 is refused. Read v2
+    /// with [`for_version_with_file_key`](Self::for_version_with_file_key).
     pub fn for_push_with_file_key(file_key: FileKey, file_id: &str, expected: ExpectedChunkFormat) -> Self {
         let opener = StreamOpener::new(&file_key, file_id, expected);
         Self {
@@ -1535,7 +1632,8 @@ impl ChunkDecryptor {
     }
 
     /// Known-key counterpart used by current and historical readers after they
-    /// have opened the matching metadata record.
+    /// have opened the matching metadata record. `commitment` is that record's;
+    /// with `None` only a v1 file opens.
     pub fn for_version_with_file_key(
         file_key: FileKey,
         file_id: &str,
@@ -1712,7 +1810,7 @@ mod binding_tests {
         expected: ExpectedChunkFormat,
         frames: &[Vec<u8>],
     ) -> Result<Vec<u8>, CoreError> {
-        let mut dec = ChunkDecryptor::for_push(m, file_id, expected);
+        let mut dec = super::self_committed_decryptor(m, file_id, expected, frames.first().map(Vec::as_slice));
         let mut out = Vec::new();
         for f in frames {
             out.extend_from_slice(&dec.push_frame(f)?.data);
@@ -1729,7 +1827,9 @@ mod binding_tests {
         frames: &[Vec<u8>],
     ) -> Result<Vec<u8>, CoreError> {
         let body: Vec<u8> = frames.concat();
-        let mut dec = ChunkDecryptor::from_reader(m, file_id, expected, CS, Cursor::new(body))?;
+        let commitment = super::self_commitment(m, file_id, frames.first().map(Vec::as_slice));
+        let mut dec =
+            ChunkDecryptor::from_reader_with_commitment(m, file_id, expected, commitment, CS, Cursor::new(body))?;
         let mut out = Vec::new();
         while let Some(c) = dec.next_chunk()? {
             out.extend_from_slice(&c.data);
@@ -1902,15 +2002,24 @@ mod binding_tests {
         let frames = v2_frames(&m, "owner-id", &data);
         let key_bytes = *derive_file_key(&m, b"owner-id").as_bytes();
 
-        let mut right =
-            ChunkDecryptor::for_push_with_file_key(FileKey::from_bytes(key_bytes), "owner-id", ExpectedChunkFormat::V2);
+        let version = Some(super::first_commitment(&frames[0]));
+        let mut right = ChunkDecryptor::for_version_with_file_key(
+            FileKey::from_bytes(key_bytes),
+            "owner-id",
+            ExpectedChunkFormat::V2,
+            version,
+        );
         for f in &frames {
             right.push_frame(f).unwrap();
         }
         right.finish().unwrap();
 
-        let mut wrong =
-            ChunkDecryptor::for_push_with_file_key(FileKey::from_bytes(key_bytes), "other-id", ExpectedChunkFormat::V2);
+        let mut wrong = ChunkDecryptor::for_version_with_file_key(
+            FileKey::from_bytes(key_bytes),
+            "other-id",
+            ExpectedChunkFormat::V2,
+            version,
+        );
         assert!(
             wrong.push_frame(&frames[0]).is_err(),
             "same key, other file id must not open"
@@ -2004,14 +2113,20 @@ mod binding_tests {
 
         // Metadata records v2: a v1 copy under the same key is refused — at
         // frame 0 (no detection) and therefore as a whole stream.
-        let mut dec = ChunkDecryptor::for_push(&m, "pin", ExpectedChunkFormat::V2);
+        let mut dec = ChunkDecryptor::for_version_with_file_key(
+            derive_file_key(&m, b"pin"),
+            "pin",
+            ExpectedChunkFormat::V2,
+            Some(super::first_commitment(&v2[0])),
+        );
         assert!(dec.push_frame(&v1[0]).is_err());
         assert!(push_with(&m, "pin", ExpectedChunkFormat::V2, &v1).is_err());
 
         // Metadata records v2 and the file is v2: opens.
         assert_eq!(push_with(&m, "pin", ExpectedChunkFormat::V2, &v2).unwrap(), data);
 
-        // Legacy metadata (unrecorded): frame 0 decides, both formats open.
+        // Legacy metadata (unrecorded): v1 opens without a commitment, v2 with
+        // the commitment of its record (the ruling of 2026-11-07).
         assert_eq!(
             push_with(&m, "pin", ExpectedChunkFormat::Unrecorded, &v1).unwrap(),
             data
@@ -2101,7 +2216,7 @@ mod binding_tests {
         let data = pattern(64, 20);
         let a = v2_frames(&m, "vid", &data);
         let b = v2_frames(&m, "vid", &data);
-        let mut dec = ChunkDecryptor::for_push(&m, "vid", ExpectedChunkFormat::V2);
+        let mut dec = super::self_committed_decryptor(&m, "vid", ExpectedChunkFormat::V2, Some(&a[0]));
         assert_eq!(dec.version_id(), None);
         dec.push_frame(&a[0]).unwrap();
         assert_eq!(dec.version_id().unwrap().as_slice(), &a[0][..VERSION_ID_LEN]);
@@ -2190,184 +2305,7 @@ mod binding_tests {
 /// review demonstrated (P1-1 downgrade via a same-key no-AAD blob at frame 0,
 /// P1-2 splicing frames across versions of one file id). Red first.
 #[cfg(test)]
-mod review_round2_tests {
-    #![allow(deprecated)]
-    use super::*;
-    use crate::kdf::derive_master_key;
-
-    fn mk() -> MasterKey {
-        derive_master_key("round2-password", b"round2-salt-16by").unwrap()
-    }
-
-    const CS: u64 = 16;
-
-    fn pattern(len: usize, seed: u8) -> Vec<u8> {
-        (0..len)
-            .map(|i| (i as u8).wrapping_mul(17).wrapping_add(seed))
-            .collect()
-    }
-
-    /// One upload (= one version) of `data` under `file_id`, v2 frames.
-    fn v2_upload(m: &MasterKey, file_id: &str, data: &[u8]) -> Vec<Vec<u8>> {
-        let mut enc = ChunkEncryptor::for_push_with_chunk_size(m, file_id, data.len() as u64, CS)
-            .unwrap()
-            .with_format(ChunkFormat::V2)
-            .unwrap();
-        let frames: Vec<Vec<u8>> = data
-            .chunks(CS as usize)
-            .map(|c| enc.push_chunk(c).unwrap().data)
-            .collect();
-        enc.finish().unwrap();
-        frames
-    }
-
-    /// The metadata a v2 upload writes: `name_encrypted` recording v2.
-    fn v2_name_encrypted(m: &MasterKey, file_id: &str) -> String {
-        crate::encrypt::encrypt_name_with_chunk_format(
-            m,
-            file_id,
-            "report.pdf",
-            Some("application/pdf"),
-            ExpectedChunkFormat::V2,
-        )
-        .unwrap()
-    }
-
-    /// A client reading a file: the pin comes from the decrypted metadata (the
-    /// FILE reader, which refuses plaintext names — round 3), then frames are
-    /// opened in order and the stream must finish.
-    fn read_file(m: &MasterKey, file_id: &str, name_encrypted: &str, frames: &[Vec<u8>]) -> Result<Vec<u8>, CoreError> {
-        let meta = crate::encrypt::decrypt_file_metadata(m, file_id, name_encrypted)?;
-        let mut dec = ChunkDecryptor::for_push(m, file_id, meta.chunk_format);
-        let mut out = Vec::new();
-        for f in frames {
-            out.extend_from_slice(&dec.push_frame(f)?.data);
-        }
-        dec.finish()?;
-        Ok(out)
-    }
-
-    /// The reader for a file uploaded as v2 (metadata records v2).
-    fn read_v2(m: &MasterKey, file_id: &str, frames: &[Vec<u8>]) -> Result<Vec<u8>, CoreError> {
-        read_file(m, file_id, &v2_name_encrypted(m, file_id), frames)
-    }
-
-    /// A `name_encrypted` JSON envelope (no AAD, same per-file key) as a wire
-    /// frame `nonce || ct || tag`.
-    fn blob_frame(name_encrypted: &str) -> Vec<u8> {
-        let blob: beebeeb_types::EncryptedBlob = serde_json::from_str(name_encrypted).unwrap();
-        [blob.nonce, blob.ciphertext].concat()
-    }
-
-    #[test]
-    fn p1_1_name_blob_served_as_frame0_of_a_v2_file_is_rejected() {
-        let m = mk();
-        let id = "fresh-v2-file";
-        let real = v2_upload(&m, id, &pattern(64, 1));
-        let name_encrypted = v2_name_encrypted(&m, id);
-        assert_eq!(read_file(&m, id, &name_encrypted, &real).unwrap(), pattern(64, 1));
-        // The server serves the file's OWN name blob as its single frame.
-        let forged = vec![blob_frame(&name_encrypted)];
-        let got = read_file(&m, id, &name_encrypted, &forged);
-        assert!(
-            got.is_err(),
-            "a v2 file must not be downgradable to v1 by serving its own name blob as frame 0 (got {} plaintext bytes)",
-            got.map(|p| p.len()).unwrap_or(0)
-        );
-    }
-
-    #[test]
-    fn p1_1_thumbnail_blob_served_as_frame0_of_a_v2_file_is_rejected() {
-        let m = mk();
-        let id = "fresh-v2-photo";
-        let _real = v2_upload(&m, id, &pattern(64, 2));
-        // Thumbnails are a no-AAD seal under the raw per-file key (web thumbnail.ts).
-        let fk = derive_file_key(&m, id.as_bytes());
-        let thumb = crate::encrypt::encrypt_chunk_raw(&fk, b"\xff\xd8\xff\xe0 fake jpeg thumbnail").unwrap();
-        assert!(
-            read_v2(&m, id, &[thumb]).is_err(),
-            "a same-key thumbnail blob must not be accepted as a complete v1 file"
-        );
-    }
-
-    #[test]
-    fn residual_unrecorded_metadata_still_detects_documented() {
-        // The residual risk, pinned so a change to it is visible: a file whose
-        // metadata records NO format (pre-1908 metadata, or rewritten by a
-        // pre-1908 client) is read with detection, and detection cannot tell a
-        // genuine one-frame v1 file from another no-AAD blob under the same
-        // key. This is why every v2 upload records `chunk_format: 2` and why
-        // renames must carry it forward (see encrypt_name_with_chunk_format).
-        // Round 3 narrows it to LEGACY-sealed blobs (names/thumbnails sealed
-        // under the raw file key: every one written before the metadata seal
-        // switch); subkey-sealed ones never open as content
-        // (`review_round3_tests::p1b_*`). Decision on the rest: workspace task
-        // 1912.
-        let m = mk();
-        let id = "legacy-metadata-file";
-        let legacy_name = crate::encrypt::encrypt_name_sealed(
-            &m,
-            id,
-            "old.txt",
-            None,
-            ExpectedChunkFormat::Unrecorded,
-            crate::encrypt::MetadataSeal::Legacy,
-        )
-        .unwrap();
-        let meta = crate::encrypt::decrypt_name_metadata(&m, id, &legacy_name).unwrap();
-        assert_eq!(meta.chunk_format, ExpectedChunkFormat::Unrecorded);
-        let forged = vec![blob_frame(&legacy_name)];
-        let got = read_file(&m, id, &legacy_name, &forged).unwrap();
-        assert!(
-            got.starts_with(b"{"),
-            "detection accepts a same-key blob as v1 — the documented residual"
-        );
-    }
-
-    #[test]
-    fn p1_2_middle_splice_from_another_version_is_rejected() {
-        // Version A and version B of ONE file id (a replace keeps the id, so
-        // both versions share the per-file key). Same sizes, every frame valid.
-        let m = mk();
-        let id = "versioned-doc";
-        let a = v2_upload(&m, id, &pattern(96, 3)); // 6 chunks
-        let b = v2_upload(&m, id, &pattern(96, 4)); // 6 chunks
-        let mut spliced = b.clone();
-        spliced[1] = a[1].clone();
-        assert!(
-            read_v2(&m, id, &spliced).is_err(),
-            "version A's chunk 1 spliced into version B must be rejected"
-        );
-    }
-
-    #[test]
-    fn p1_2_truncation_with_another_versions_last_frame_is_rejected() {
-        // Version A has 4 chunks (A3 sealed as last); version B has 6. Serving
-        // B0 B1 B2 + A3 looks like a complete 4-chunk file.
-        let m = mk();
-        let id = "versioned-doc-2";
-        let a = v2_upload(&m, id, &pattern(64, 5)); // 4 chunks
-        let b = v2_upload(&m, id, &pattern(96, 6)); // 6 chunks
-        let forged = vec![b[0].clone(), b[1].clone(), b[2].clone(), a[3].clone()];
-        assert!(
-            read_v2(&m, id, &forged).is_err(),
-            "B truncated with A's last-sealed frame must be rejected"
-        );
-    }
-
-    #[test]
-    fn p1_2_tail_from_another_version_is_rejected() {
-        let m = mk();
-        let id = "versioned-doc-3";
-        let a = v2_upload(&m, id, &pattern(64, 7));
-        let b = v2_upload(&m, id, &pattern(64, 8));
-        let forged = vec![b[0].clone(), b[1].clone(), a[2].clone(), a[3].clone()];
-        assert!(
-            read_v2(&m, id, &forged).is_err(),
-            "B's head with A's tail must be rejected"
-        );
-    }
-}
+mod review_round2_tests;
 
 /// Task 1908 review round 3: P1-A (a resumed v2 upload must never complete as
 /// a mix of two version ids) and P1-B (a name/thumbnail blob must never open as
@@ -2465,7 +2403,7 @@ mod review_round3_tests {
     }
 
     fn read(m: &MasterKey, id: &str, expected: ExpectedChunkFormat, frames: &[Vec<u8>]) -> Result<Vec<u8>, CoreError> {
-        let mut dec = ChunkDecryptor::for_push(m, id, expected);
+        let mut dec = super::self_committed_decryptor(m, id, expected, frames.first().map(Vec::as_slice));
         let mut out = Vec::new();
         for f in frames {
             out.extend_from_slice(&dec.push_frame(f)?.data);
@@ -2809,7 +2747,7 @@ mod review_round4_tests {
     }
 
     fn read(m: &MasterKey, id: &str, expected: ExpectedChunkFormat, frames: &[Vec<u8>]) -> Result<Vec<u8>, CoreError> {
-        let mut dec = ChunkDecryptor::for_push(m, id, expected);
+        let mut dec = super::self_committed_decryptor(m, id, expected, frames.first().map(Vec::as_slice));
         let mut out = Vec::new();
         for f in frames {
             out.extend_from_slice(&dec.push_frame(f)?.data);
@@ -3090,7 +3028,7 @@ mod review_round5_tests {
     }
 
     fn read(m: &MasterKey, id: &str, expected: ExpectedChunkFormat, frames: &[Vec<u8>]) -> Result<Vec<u8>, CoreError> {
-        let mut dec = ChunkDecryptor::for_push(m, id, expected);
+        let mut dec = super::self_committed_decryptor(m, id, expected, frames.first().map(Vec::as_slice));
         let mut out = Vec::new();
         for f in frames {
             out.extend_from_slice(&dec.push_frame(f)?.data);

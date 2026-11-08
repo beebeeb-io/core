@@ -1,7 +1,8 @@
 'use strict';
 // The device-link surface a web client sees (crypto review, P2-3 and
-// P2-1): the QR path takes the raw scanned text, never fingerprint bytes; the
-// typed-code path runs both roles with the approver's confirmation check
+// P2-1): the QR path takes the raw scanned text, never fingerprint bytes, and
+// carries the device name the approver shows (Guus's ruling of 2026-11-07);
+// the typed-code path runs both roles with the approver's confirmation check
 // before anything is sealed.
 const assert = require('node:assert/strict');
 const nodeTest = require('node:test');
@@ -19,15 +20,26 @@ nodeTest('QR path: core parses the scanned text and seals to the scanned key onl
   const link = new wasm.WasmNewDeviceLink(SESSION, '  Web laptop ');
   const fields = link.publicFields();
   assert.equal(fields.device_name, 'Web laptop');
-  assert.ok(fields.qr_payload.startsWith('beebeeb-link:v1:'));
+  assert.ok(fields.qr_payload.startsWith('beebeeb-link:v2:'));
   assert.equal(fields.fingerprint, undefined, 'no fingerprint bytes leave core');
+  assert.equal(wasm.scannedDeviceLinkName(fields.qr_payload), 'Web laptop', 'the name to show comes from the scan');
+  assert.throws(() => wasm.scannedDeviceLinkName(fields.qr_payload.replace('v2:', 'v1:')));
 
   // A QR text built from anything but a scan is not accepted as bytes.
-  assert.throws(() => wasm.sealDeviceLink(MASTER, hex(fields.session_id), fields.public_key, link.typedCode()));
+  assert.throws(() =>
+    wasm.sealDeviceLink(MASTER, hex(fields.session_id), fields.public_key, 'Web laptop', link.typedCode()),
+  );
   // The right text but a substituted key: refused before sealing.
-  assert.throws(() => wasm.sealDeviceLink(MASTER, fields.qr_payload, new Uint8Array(32).fill(9), link.typedCode()));
+  assert.throws(() =>
+    wasm.sealDeviceLink(MASTER, fields.qr_payload, new Uint8Array(32).fill(9), 'Web laptop', link.typedCode()),
+  );
+  // The right text and key, but the relay rewrote the name: refused before sealing.
+  assert.throws(
+    () => wasm.sealDeviceLink(MASTER, fields.qr_payload, fields.public_key, 'Attacker phone', link.typedCode()),
+    (error) => error.message === 'device_name_changed',
+  );
 
-  const sealed = wasm.sealDeviceLink(MASTER, fields.qr_payload, fields.public_key, link.typedCode());
+  const sealed = wasm.sealDeviceLink(MASTER, fields.qr_payload, fields.public_key, 'Web laptop', link.typedCode());
   const material = link.open(sealed.approver_public, sealed.nonce, sealed.ciphertext);
   assert.ok(material);
   assert.throws(() => link.typedCode(), /consumed/);

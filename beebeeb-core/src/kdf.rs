@@ -344,15 +344,10 @@ pub fn owner_file_key_for_content(
     resolve_owner_key(
         master_key,
         file_id,
-        |key| {
-            crate::chunk_stream::ChunkDecryptor::for_push_with_file_key(
-                FileKey::from_bytes(*key.as_bytes()),
-                file_id,
-                crate::chunk_stream::ExpectedChunkFormat::Unrecorded,
-            )
-            .push_frame(first_chunk_frame)
-            .is_ok()
-        },
+        // A key probe, not a content read: it releases no plaintext, so it
+        // recognises a v2 frame 0 without the version commitment the readers
+        // require.
+        |key| crate::chunk_stream::frame0_authenticates(key, file_id, first_chunk_frame),
         "first chunk frame does not authenticate under any known owner key convention",
     )
 }

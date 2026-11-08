@@ -21,9 +21,11 @@ pub(crate) struct DecryptorMetadataJs {
 }
 
 /// The format pin and version commitment a decryptor enforces. A record with
-/// a commitment binds frame 0 to it; a record with neither field is legacy
-/// metadata, readable but unprotected (core's compatibility rule); a record
-/// with only one of the two is refused.
+/// a commitment binds frame 0 to it. A record with neither field is legacy
+/// metadata: it opens v1 content only, and a `chunk_format: 2` record without
+/// a commitment is refused here (Guus's ruling of 2026-11-07, "refuse v2
+/// without commitment"; core refuses its v2 frames too). A record with only
+/// one of the two fields is refused.
 pub(crate) fn metadata_pin(
     metadata: &DecryptorMetadataJs,
 ) -> Result<(ExpectedChunkFormat, Option<VersionCommitment>), String> {
@@ -43,6 +45,9 @@ pub(crate) fn metadata_pin(
         }
         _ => return Err("version_id and version_counter must be supplied together".into()),
     };
+    if expected == ExpectedChunkFormat::V2 && version.is_none() {
+        return Err("a chunk_format 2 record without a version commitment is refused".into());
+    }
     Ok((expected, version))
 }
 
@@ -58,7 +63,7 @@ fn decode_version_id(text: &str) -> Option<[u8; 12]> {
     Some(bytes)
 }
 
-fn metadata_from_js(metadata: JsValue) -> Result<(ExpectedChunkFormat, Option<VersionCommitment>), JsError> {
+pub(crate) fn metadata_from_js(metadata: JsValue) -> Result<(ExpectedChunkFormat, Option<VersionCommitment>), JsError> {
     if metadata.is_undefined() || metadata.is_null() {
         return Err(JsError::new(
             "metadata is required: pass what decrypt_file_metadata returned",
@@ -78,7 +83,7 @@ fn metadata_from_js(metadata: JsValue) -> Result<(ExpectedChunkFormat, Option<Ve
 /// when the record carries one, its version commitment, which frame 0 must
 /// match, so the server cannot serve another upload in its place. A missing
 /// object, or one with only half a commitment, is refused; a legacy record
-/// with no commitment stays readable but unprotected. In v2 every frame must
+/// with no commitment opens v1 content only (the ruling of 2026-11-07). In v2 every frame must
 /// be the next chunk in order and from the same upload as chunk 0, and nothing
 /// may follow the last one; [`finish`] fails if the file ended before its last
 /// chunk (truncation). JS must treat any thrown error — from `pushFrame` or
@@ -184,6 +189,35 @@ impl WasmChunkDecryptor {
             format: summary.format.as_u8(),
         })?)
     }
+}
+
+/// Random-access open of ONE file-content frame at a known position (seeking
+/// readers: video, range previews). `index` is the chunk requested and
+/// `is_last = index == chunk_count - 1`; a server that serves another chunk or
+/// lies about the count fails the tag. `metadata` is what
+/// `decrypt_file_metadata` returned for this version, never a server field:
+/// with a version commitment only that upload's v2 frames open; a record
+/// without one opens v1 frames only, and a `chunk_format: 2` record without
+/// one is refused (the ruling of 2026-11-07).
+#[wasm_bindgen]
+pub fn decrypt_chunk_frame(
+    file_key: &[u8],
+    file_id: &str,
+    metadata: JsValue,
+    index: u32,
+    is_last: bool,
+    frame: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    let fk = file_key_from_slice(file_key)?;
+    let (chunk_format, version) = metadata_from_js(metadata)?;
+    let record = beebeeb_core::encrypt::NameMetadata {
+        name: String::new(),
+        mime_type: None,
+        chunk_format,
+        version,
+    };
+    beebeeb_core::chunk_stream::open_recorded_chunk(&fk, file_id, &record, index, is_last, frame)
+        .map_err(|e| JsError::new(&e.to_string()))
 }
 
 impl WasmChunkDecryptor {

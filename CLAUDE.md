@@ -56,7 +56,9 @@ Formats and keys:
   `chunk_format` on, and prefer `version_id()` over re-reading chunk 0's first 12 bytes. They finish
   authentication before publishing plaintext: call `finish()` and discard all plaintext on any `Err`.
   Every binding decryptor takes that decrypted record (`WasmChunkDecryptor`, `ChunkDecryptorHandle`) or
-  its fields (`for_version*`); a missing record or half a commitment is refused.
+  its fields (`for_version*`); a missing record or half a commitment is refused. A v2 version opens only
+  against its record's commitment (Guus's ruling of 2026-11-07): a `chunk_format: 2` record without one
+  opens nothing, an unrecorded one opens v1 only, and the commitment-less constructors read v1 only.
   The one exception is `beebeeb_transfer::range_session`: it releases only frames that `RangeOpener`
   authenticated at the requested index, for one recorded version, and only its `RangeOutcome::Whole`
   result means whole content; after any failure its sink is not reused until it is verifiably empty.
@@ -125,9 +127,10 @@ Secrets, input and bindings:
   `derive_request_wrap_key`, `recover_from_phrase`, `derive_share_key`, `derive_x25519_private`,
   `x25519_shared_secret`, `transfer_derive_key` and `MasterKeyHandle::export_for_keychain`: a migration
   target, not precedent. A handle is an ordered cursor driven from one sequence.
-- Device link: the QR path takes only the scanned text (`DeviceLinkQr::parse`), never session or
-  fingerprint bytes from a host or the server; on that path the typed code gives no protection against
-  a substituted key. The typed-code path is SPAKE2 with key confirmation bound to the session, a fresh
+- Device link: the QR path takes only the scanned text (`DeviceLinkQr::parse`), never session,
+  fingerprint or name bytes from a host or the server; on that path the typed code gives no protection
+  against a substituted key. The QR (`beebeeb-link:v2:`) carries the canonical device name: the approver
+  shows the scanned name, never the relay's, and `seal_for_new_device` refuses a relayed name that differs. The typed-code path is SPAKE2 with key confirmation bound to the session, a fresh
   salt and the canonical device name (`canonical_device_name`): the approver checks the new device's
   tag before it seals anything and denies the link when it fails; the new device checks the approver's
   tag before it opens. spake2 0.4 keeps unwiped copies of the code and its scalars (a recorded

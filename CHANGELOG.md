@@ -58,7 +58,15 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   as `expired`, and the status call returns that state instead of failing. Offer to start a new
   recovery.
 - Device link (UniFFI): `approve_device_link(id, scanned_qr, typed_code)` takes the raw text the camera
-  scanned; `DeviceLinkQrData` and `DeviceLinkHandle.qr()` are removed (render `qr_payload()`). The
+  scanned; `DeviceLinkQrData` and `DeviceLinkHandle.qr()` are removed (render `qr_payload()`). The QR
+  now carries the device name: show `scanned_device_link_name(scanned_qr)` while the person confirms,
+  never the pending link's `device_name`. A relay name that differs from the scanned one is
+  `ServiceError::Authentication`, and the link is denied (Guus's ruling of 2026-11-07).
+- Content readers (UniFFI): `FileKeyHandle.decrypt_chunk_frame(file_id, metadata, index, is_last,
+  frame)` and `MasterKeyHandle.decrypt_file(file_id, metadata, …)` take the `NameMetadataDto` instead of
+  a format code (and a version id). A `chunk_format: 2` record without a version commitment is refused;
+  one with neither field opens v1 content only (Guus's ruling of 2026-11-07, "refuse v2 without
+  commitment"). The
   typed-code path now starts at the approver: `begin_typed_device_approval` → relay its message → the
   new device's `answer_typed_path(approver_message)` → relay its answer →
   `approve_typed_device_link`, which checks the new device's confirmation before it seals and returns
@@ -120,8 +128,12 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   and transfer shared secrets now use `Zeroizing` guards. The transfer helper is fallible and rejects
   low-order keys. Generic SAS derivation is fallible and rejects output above 8,160 bytes.
 - Device link, QR path: `DeviceLinkQr::parse(scanned_text)` is the only constructor (`from_parts` is
-  removed and `fingerprint()` is crate-private); `seal_for_new_device` takes the typed code and the
-  new format; `NewDeviceLink::generate(session_id, device_name)` canonicalises the name
+  removed and `fingerprint()` is crate-private); the payload is `beebeeb-link:v2:` with the canonical
+  device name after the session id and fingerprint (`DeviceLinkQr::device_name`,
+  `matches_relayed_name`), and the unshipped `v1` is refused; `seal_for_new_device(qr, relayed_public,
+  relayed_device_name, typed_code, material)` refuses a relayed name that differs from the scanned one
+  before it seals; `beebeeb_client::devices::DeviceError::DeviceNameChanged`; the seal takes the new
+  format; `NewDeviceLink::generate(session_id, device_name)` canonicalises the name
   (`canonical_device_name`), and `NewDeviceLink::open(sealed)` no longer takes the code.
 - Device link, typed-code path: SPAKE2 with key confirmation in both directions over a transcript that
   binds the session, a fresh salt and the canonical device name (labels `…/v2`). The approver starts
@@ -149,6 +161,16 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   `NameMetadata` adds `version`. Current-version readers must match frames to the authenticated
   metadata commitment; use the historical-version path for history. Raw-key metadata claiming v2 is
   rejected.
+- A v2 version opens only against its record's commitment (Guus's ruling of 2026-11-07): every reader
+  (`ChunkDecryptor`, `RangeOpener`, `RequestContentReader`) refuses a v2 frame 0 without one, with
+  `CoreError::InvalidInput`. No released core wrote v2, so only development and test files are
+  affected. `ChunkDecryptor::for_push`, `from_reader` and `for_push_with_file_key` read legacy v1 only.
+  The commitment is threaded through `download::decrypt_frames_to` / `decrypt_chunks_to`,
+  `encrypt::decrypt_chunks_to_file` / `decrypt_contiguous_to_file`, `file_encrypt::decrypt_chunks_to_file`,
+  `zip::ZipEntry::version` and the `beebeeb-upload` download functions (`version:
+  Option<VersionCommitment>`). New: `chunk_stream::open_recorded_chunk`,
+  `EncryptedFileResult::version_commitment`, `RangeSessionError::MissingVersionCommitment` (refused
+  before any request); `DownloadServiceError::MissingVersionCommitment` is now returned before any fetch.
 - Production v2 upload resume always restarts: abandon the old session, initialize again, and upload
   from chunk zero. The one exception is `BackgroundUploadPlanner` continuing its own persisted v2
   version (same session, version id and counter) after the source and the staged-plaintext hash
@@ -205,13 +227,17 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 
 - WASM `formatCompact` throws above precision 2; pass 0 through 2 and handle the exception. Rust's
   infallible formatter clamps instead.
-- WASM device link: `sealDeviceLink(masterKey, scannedQr, relayedPublic, typedCode)` takes the raw
-  text the camera scanned, never session or fingerprint bytes; without a camera use the typed-code
+- WASM device link: `sealDeviceLink(masterKey, scannedQr, relayedPublic, relayedDeviceName, typedCode)`
+  takes the raw text the camera scanned, never session or fingerprint bytes, and throws
+  `device_name_changed` when the relay's name differs from the scanned one (deny the link); show
+  `scannedDeviceLinkName(scannedQr)`, never the relay's name; without a camera use the typed-code
   path, now exported: `WasmTypedApproval` (approver) and `WasmNewDeviceLink.answerTypedCode` →
   `WasmTypedReceiver` (new device). `new WasmNewDeviceLink(sessionId, deviceName)`; `publicFields()`
   returns `qr_payload` and `device_name` and no fingerprint; `open(approverPublic, nonce, ciphertext)`.
 - WASM content decryptors take the object `decrypt_file_metadata[_with_key]` returned:
-  `new WasmChunkDecryptor(masterKey, fileId, metadata)` and `fromFileKey(fileKey, fileId, metadata)`.
+  `new WasmChunkDecryptor(masterKey, fileId, metadata)` and `fromFileKey(fileKey, fileId, metadata)`,
+  and so does `decrypt_chunk_frame(fileKey, fileId, metadata, index, isLast, frame)`. A
+  `chunk_format: 2` record without a version commitment throws; one with neither field opens v1 only.
 - WASM `safetyNumber` and `normalizeEmail`: use them; JavaScript's `trim` differs from core's.
 - Regenerate bindings for the protected metadata fields and update the shared vector fixture to version
   18, including the protected metadata and session key-proof vectors.

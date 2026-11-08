@@ -7,7 +7,7 @@
 
 use std::io::{BufWriter, Write};
 
-use beebeeb_core::chunk_stream::{ChunkDecryptor, ExpectedChunkFormat};
+use beebeeb_core::chunk_stream::{ChunkDecryptor, ExpectedChunkFormat, VersionCommitment};
 use beebeeb_core::download::DownloadFailure;
 use beebeeb_types::limits::MemoryBudget;
 
@@ -267,15 +267,16 @@ impl DownloadClient {
     /// `total / chunk_count`, matching [`compute_chunk_boundaries`]. The file
     /// key is derived via `HKDF(master_key, file_id)`.
     ///
-    /// `expected` (task 1908) comes from the file's encrypted metadata
-    /// ([`beebeeb_core::encrypt::decrypt_name_metadata`]), never from a server
-    /// field: `V2` accepts only v2 frames; `Unrecorded` (legacy metadata) lets
-    /// chunk 0 decide.
+    /// `expected` (task 1908) and `version` come from the file's encrypted
+    /// metadata ([`beebeeb_core::encrypt::decrypt_file_metadata`]), never from a
+    /// server field: a v2 file opens only as the upload `version` names, and
+    /// with no `version` only a v1 file opens (core's ruling of 2026-11-07).
     pub async fn download_and_decrypt(
         &self,
         master_key: &beebeeb_core::kdf::MasterKey,
         file_id: &str,
         expected: ExpectedChunkFormat,
+        version: Option<VersionCommitment>,
         output_path: &str,
         callback: Option<&dyn DownloadProgressCallback>,
     ) -> Result<DownloadResult, UploadError> {
@@ -347,6 +348,7 @@ impl DownloadClient {
             master_key,
             file_id,
             expected,
+            version,
             chunk_count,
             total,
             chunk_size,
@@ -364,6 +366,7 @@ impl DownloadClient {
         master_key: &beebeeb_core::kdf::MasterKey,
         file_id: &str,
         expected: ExpectedChunkFormat,
+        version: Option<VersionCommitment>,
         chunk_count: u32,
         total: u64,
         chunk_size: Option<u64>,
@@ -391,7 +394,12 @@ impl DownloadClient {
         let (tmp, output_file) = TempOutput::create(output_path)?;
         let mut writer = BufWriter::new(output_file);
 
-        let mut decryptor = ChunkDecryptor::for_push(master_key, file_id, expected);
+        let mut decryptor = ChunkDecryptor::for_version_with_file_key(
+            beebeeb_core::kdf::derive_file_key(master_key, file_id.as_bytes()),
+            file_id,
+            expected,
+            version,
+        );
         let mut carry: Vec<u8> = Vec::new();
         let mut total_plaintext: u64 = 0;
         let mut chunks_decrypted: u32 = 0;
@@ -495,10 +503,12 @@ impl DownloadClient {
 /// position-bound or v1 legacy, decided by chunk 0). `file_id` is the id the
 /// file was uploaded under; it is bound into every v2 frame. `expected` comes
 /// from the file's encrypted metadata (see [`DownloadClient::download_and_decrypt`]).
+#[allow(clippy::too_many_arguments)]
 pub fn decrypt_downloaded_bytes(
     file_key: &beebeeb_core::kdf::FileKey,
     file_id: &str,
     expected: ExpectedChunkFormat,
+    version: Option<VersionCommitment>,
     encrypted_bytes: &[u8],
     chunk_count: u32,
     output_path: &str,
@@ -518,6 +528,7 @@ pub fn decrypt_downloaded_bytes(
         file_key,
         file_id,
         expected,
+        version,
         chunk_count,
         encrypted_bytes,
         &mut writer,
@@ -575,12 +586,14 @@ pub fn compute_chunk_boundaries(total_len: usize, chunk_count: u32) -> Result<Ve
 /// Creates a tokio runtime internally and blocks until complete.
 /// Designed to be called from Swift `Task { }` or Kotlin
 /// `withContext(Dispatchers.IO) { }`.
+#[allow(clippy::too_many_arguments)]
 pub fn download_and_decrypt_file<'a>(
     api_url: &str,
     token: &str,
     master_key: &beebeeb_core::kdf::MasterKey,
     file_id: &str,
     expected: ExpectedChunkFormat,
+    version: Option<VersionCommitment>,
     output_path: &str,
     callback: Option<Box<dyn DownloadProgressCallback + 'a>>,
 ) -> Result<DownloadResult, UploadError> {
@@ -596,6 +609,7 @@ pub fn download_and_decrypt_file<'a>(
                 master_key,
                 file_id,
                 expected,
+                version,
                 output_path,
                 callback.as_ref().map(|b| b.as_ref() as &dyn DownloadProgressCallback),
             )
@@ -701,6 +715,7 @@ mod tests {
             &fk,
             "file-001",
             ExpectedChunkFormat::Unrecorded,
+            None,
             &encrypted,
             1,
             output_str,
@@ -765,6 +780,7 @@ mod tests {
             &fk,
             "file-002",
             ExpectedChunkFormat::Unrecorded,
+            None,
             &payload,
             2,
             output_str,
@@ -805,6 +821,7 @@ mod tests {
             &wrong_fk,
             "file-003",
             ExpectedChunkFormat::Unrecorded,
+            None,
             &encrypted,
             1,
             output_str,
@@ -835,6 +852,7 @@ mod tests {
             &fk,
             "file-empty",
             ExpectedChunkFormat::Unrecorded,
+            None,
             &encrypted,
             1,
             output_str,
@@ -866,6 +884,7 @@ mod tests {
             &fk,
             "file-zero",
             ExpectedChunkFormat::Unrecorded,
+            None,
             &[0u8; 100],
             0,
             output_str,
@@ -878,7 +897,7 @@ mod tests {
 
     /// v2 frames as every client writes them after task 1908 (32-byte chunks).
     #[allow(deprecated)] // a test fixture: the id comes from the test, not from core
-    fn v2_payload(mk: &beebeeb_core::kdf::MasterKey, file_id: &str, data: &[u8]) -> Vec<Vec<u8>> {
+    fn v2_payload(mk: &beebeeb_core::kdf::MasterKey, file_id: &str, data: &[u8]) -> (Vec<Vec<u8>>, VersionCommitment) {
         use beebeeb_core::chunk_stream::{ChunkEncryptor, ChunkFormat};
         // WRITE_FORMAT is still v1 (read-only rollout phase), so these tests
         // ask for v2 explicitly via the dev-only `test-support` feature.
@@ -888,8 +907,9 @@ mod tests {
             .unwrap();
         let frames: Vec<Vec<u8>> = data.chunks(32).map(|c| enc.push_chunk(c).unwrap().data).collect();
         assert_eq!(enc.format(), ChunkFormat::V2, "v2_payload requires a v2 writer");
+        let version = enc.version_commitment(None).unwrap();
         enc.finish().unwrap();
-        frames
+        (frames, version)
     }
 
     #[test]
@@ -897,7 +917,8 @@ mod tests {
         use beebeeb_core::kdf::{derive_file_key, derive_master_key};
         let mk = derive_master_key("test-password", b"test-salt-16bytes").unwrap();
         let data: Vec<u8> = (0..96u8).collect(); // 3 equal 32-byte chunks
-        let frames = v2_payload(&mk, "file-v2", &data);
+        let (frames, version) = v2_payload(&mk, "file-v2", &data);
+        let v = Some(version);
         let fk = derive_file_key(&mk, b"file-v2");
 
         let dir = std::env::temp_dir().join("beebeeb_download_v2");
@@ -906,20 +927,31 @@ mod tests {
         let output = dir.join("output.bin");
         let out = output.to_str().unwrap();
 
-        let ok =
-            decrypt_downloaded_bytes(&fk, "file-v2", ExpectedChunkFormat::V2, &frames.concat(), 3, out, None).unwrap();
+        let ok = decrypt_downloaded_bytes(
+            &fk,
+            "file-v2",
+            ExpectedChunkFormat::V2,
+            v,
+            &frames.concat(),
+            3,
+            out,
+            None,
+        )
+        .unwrap();
         assert_eq!(ok.plaintext_size, 96);
         assert_eq!(std::fs::read(&output).unwrap(), data);
         std::fs::remove_file(&output).unwrap();
 
         // Server swaps two equal-size chunks.
         let swapped = [frames[1].clone(), frames[0].clone(), frames[2].clone()].concat();
-        assert!(decrypt_downloaded_bytes(&fk, "file-v2", ExpectedChunkFormat::V2, &swapped, 3, out, None).is_err());
+        assert!(decrypt_downloaded_bytes(&fk, "file-v2", ExpectedChunkFormat::V2, v, &swapped, 3, out, None).is_err());
         assert!(!output.exists());
 
         // Server withholds the last chunk and reports chunk_count = 2.
         let truncated = [frames[0].clone(), frames[1].clone()].concat();
-        assert!(decrypt_downloaded_bytes(&fk, "file-v2", ExpectedChunkFormat::V2, &truncated, 2, out, None).is_err());
+        assert!(
+            decrypt_downloaded_bytes(&fk, "file-v2", ExpectedChunkFormat::V2, v, &truncated, 2, out, None).is_err()
+        );
         assert!(!output.exists(), "a truncated download must not be renamed into place");
         assert!(!dir.join("output.bin.tmp").exists());
 
@@ -1046,6 +1078,7 @@ mod tests {
                 &mk,
                 "file-partial",
                 ExpectedChunkFormat::Unrecorded,
+                None,
                 out,
                 Some(&callback),
             )

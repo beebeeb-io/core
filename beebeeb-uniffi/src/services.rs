@@ -176,7 +176,8 @@ pub(crate) fn map_client_error(error: impl std::error::Error + 'static) -> Servi
         }
         if let Some(device) = current.downcast_ref::<beebeeb_client::devices::DeviceError>() {
             match device {
-                beebeeb_client::devices::DeviceError::ConfirmationFailed => return ServiceError::Authentication,
+                beebeeb_client::devices::DeviceError::ConfirmationFailed
+                | beebeeb_client::devices::DeviceError::DeviceNameChanged => return ServiceError::Authentication,
                 beebeeb_client::devices::DeviceError::Crypto => return ServiceError::Crypto,
                 beebeeb_client::devices::DeviceError::MalformedAnswer => return ServiceError::InvalidInput,
                 beebeeb_client::devices::DeviceError::Client(client) => {

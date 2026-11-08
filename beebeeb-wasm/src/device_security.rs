@@ -16,6 +16,9 @@ use zeroize::Zeroizing;
 pub const CONFIRMATION_FAILED: &str = "confirmation_failed";
 /// Stable error text for a relayed message that is not a typed-code message.
 pub const MALFORMED_ANSWER: &str = "malformed_answer";
+/// Stable error text on the QR path when the relay reports another name than
+/// the scanned QR carries: nothing was sealed. Deny the link.
+pub const DEVICE_NAME_CHANGED: &str = "device_name_changed";
 
 #[derive(Serialize)]
 struct DeviceLinkPublicJs {
@@ -287,24 +290,41 @@ impl WasmAccountKeyMaterial {
     }
 }
 
+/// QR path, approver side: the new device's name as its scanned QR carries
+/// it. Show this name while the person confirms, never the relay's
+/// `device_name`. Throws for text that is not a Beebeeb device-link QR.
+#[wasm_bindgen(js_name = scannedDeviceLinkName)]
+pub fn scanned_device_link_name(scanned_qr: &str) -> Result<String, JsError> {
+    DeviceLinkQr::parse(scanned_qr)
+        .map(|qr| qr.device_name().to_owned())
+        .map_err(|_| JsError::new("not a Beebeeb device-link QR"))
+}
+
 #[wasm_bindgen(js_name = sealDeviceLink)]
 /// QR path, approver side. `scanned_qr` is the raw text the camera read from
-/// the new device's screen; core parses it, so no fingerprint bytes come from
-/// JavaScript. Never build that text from server data: the typed code gives no
-/// protection against a substituted key on this path. Without a camera, use
-/// `WasmTypedApproval`.
+/// the new device's screen; core parses it, so no fingerprint or name bytes
+/// come from JavaScript. Never build that text from server data: the typed
+/// code gives no protection against a substituted key on this path. Without a
+/// camera, use `WasmTypedApproval`. `relayed_device_name` is the name the
+/// relay reports for the link: a name that differs from the scanned one
+/// throws `device_name_changed` before anything is sealed; deny the link.
 pub fn seal_device_link(
     master_key: &[u8],
     scanned_qr: &str,
     relayed_public: &[u8],
+    relayed_device_name: &str,
     typed_code: &str,
 ) -> Result<JsValue, JsError> {
     let master_key = master(master_key)?;
     let qr = DeviceLinkQr::parse(scanned_qr).map_err(|_| JsError::new("not a Beebeeb device-link QR"))?;
+    if !qr.matches_relayed_name(relayed_device_name) {
+        return Err(JsError::new(DEVICE_NAME_CHANGED));
+    }
     let relayed_public = fixed(relayed_public, "relayed public key")?;
     let sealed = seal_for_new_device(
         &qr,
         &relayed_public,
+        relayed_device_name,
         typed_code,
         AccountKeyMaterial::from_master_key(master_key),
     )

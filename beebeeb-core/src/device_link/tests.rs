@@ -28,26 +28,82 @@ fn exchange(
     (approver.confirm(&new_device_message), receiver)
 }
 
+/// A `v2` QR body from raw parts, as a device would encode it.
+fn qr_text(name: &[u8]) -> String {
+    let mut bytes = vec![4u8; 16];
+    bytes.extend_from_slice(&[5u8; 32]);
+    bytes.extend_from_slice(name);
+    format!("{QR_PAYLOAD_PREFIX}{}", URL_SAFE_NO_PAD.encode(bytes))
+}
+
 #[test]
 fn qr_payload_round_trips_and_parse_is_strict() {
     let new_device = NewDeviceLink::generate([4u8; 16], NAME).unwrap();
     let payload = new_device.qr_payload();
-    assert!(payload.starts_with(QR_PAYLOAD_PREFIX));
+    assert!(payload.starts_with("beebeeb-link:v2:"));
     assert_eq!(DeviceLinkQr::parse(&payload).unwrap(), new_device.qr());
     assert_eq!(DeviceLinkQr::parse(&format!(" {payload}\n")).unwrap(), new_device.qr());
+    assert_eq!(DeviceLinkQr::parse(&payload).unwrap().device_name(), NAME);
+    // 40 four-byte scalars: the byte limit binds before the 64-scalar one.
+    let longest = "\u{1D11E}".repeat(MAX_DEVICE_NAME_BYTES / 4);
+    assert_eq!(
+        canonical_device_name(&longest).unwrap(),
+        longest,
+        "a canonical 160-byte name"
+    );
+    assert_eq!(
+        DeviceLinkQr::parse(&qr_text(longest.as_bytes())).unwrap().device_name(),
+        longest
+    );
     let body = &payload[QR_PAYLOAD_PREFIX.len()..];
     for refused in [
         String::new(),
         body.to_owned(),
-        format!("beebeeb-link:v2:{body}"),
+        format!("beebeeb-link:v1:{body}"),
         format!("{QR_PAYLOAD_PREFIX}{}", &body[1..]),
         format!("{QR_PAYLOAD_PREFIX}{body}A"),
         format!("{QR_PAYLOAD_PREFIX}{body}=="),
         format!("{QR_PAYLOAD_PREFIX}{} {}", &body[..10], &body[10..]),
         format!("{QR_PAYLOAD_PREFIX}{}", "A".repeat(4096)),
+        // The name the ruling of 2026-11-07 binds: absent (the old v1 body),
+        // not canonical, too long, or not UTF-8.
+        qr_text(b""),
+        qr_text(b" Guus's laptop"),
+        qr_text("Guus\u{200D}laptop".as_bytes()),
+        qr_text(format!("{longest}x").as_bytes()),
+        qr_text(&[0xff, 0xfe]),
     ] {
         assert!(DeviceLinkQr::parse(&refused).is_err(), "{refused:?} was accepted");
     }
+}
+
+/// Guus's ruling of 2026-11-07, "bind the name into the QR now": the approver
+/// reads the name from the scanned QR, and the seal refuses a relayed name that
+/// differs, before anything is sealed. Mutant: `matches_relayed_name` returns
+/// true: the rewritten name seals.
+#[test]
+fn the_seal_refuses_a_relayed_name_that_differs_from_the_scanned_one() {
+    let new_device = NewDeviceLink::generate([4u8; 16], NAME).unwrap();
+    let qr = DeviceLinkQr::parse(&new_device.qr_payload()).unwrap();
+    assert_eq!(qr.device_name(), new_device.device_name());
+    for rewritten in ["Attacker's phone", "Guus's laptop ", "guus's laptop", ""] {
+        assert!(!qr.matches_relayed_name(rewritten), "{rewritten:?}");
+        let error = seal_for_new_device(
+            &qr,
+            new_device.public_key(),
+            rewritten,
+            new_device.typed_code(),
+            material(8),
+        )
+        .expect_err("a rewritten name must not seal");
+        assert!(matches!(error, CoreError::InvalidInput(_)), "{rewritten:?}: {error:?}");
+    }
+    let code = new_device.typed_code().to_owned();
+    let sealed = seal_for_new_device(&qr, new_device.public_key(), NAME, &code, material(8)).unwrap();
+    assert_eq!(
+        new_device.open(sealed).unwrap().into_master_key().as_bytes(),
+        &[8u8; 32]
+    );
 }
 
 #[test]
@@ -57,10 +113,10 @@ fn qr_path_seals_to_the_scanned_key_only() {
     assert!(qr.verify_public_key(new_device.public_key()));
     assert!(!qr.verify_public_key(&[9u8; 32]));
     let alternate = new_device.typed_code().to_ascii_lowercase().replace('-', " ");
-    let sealed = seal_for_new_device(&qr, new_device.public_key(), &alternate, material(8)).unwrap();
+    let sealed = seal_for_new_device(&qr, new_device.public_key(), NAME, &alternate, material(8)).unwrap();
     let opened = new_device.open(sealed).unwrap().into_master_key();
     assert_eq!(opened.as_bytes(), &[8u8; 32]);
-    assert!(seal_for_new_device(&qr, &[9u8; 32], "K7QM-4WTD", material(8)).is_err());
+    assert!(seal_for_new_device(&qr, &[9u8; 32], NAME, "K7QM-4WTD", material(8)).is_err());
 }
 
 #[test]
@@ -68,7 +124,7 @@ fn qr_seal_rejects_wrong_code_like_a_forged_blob() {
     let new_device = NewDeviceLink::generate([4u8; 16], NAME).unwrap();
     let qr = new_device.qr();
     let wrong_code = other_code(new_device.typed_code());
-    let sealed = seal_for_new_device(&qr, new_device.public_key(), &wrong_code, material(8)).unwrap();
+    let sealed = seal_for_new_device(&qr, new_device.public_key(), NAME, &wrong_code, material(8)).unwrap();
     assert!(matches!(new_device.open(sealed), Err(CoreError::Decryption)));
 }
 
@@ -77,7 +133,7 @@ fn qr_seal_rejects_forgery_with_the_same_error() {
     let new_device = NewDeviceLink::generate([4u8; 16], NAME).unwrap();
     let qr = new_device.qr();
     let code = new_device.typed_code().to_owned();
-    let sealed = seal_for_new_device(&qr, new_device.public_key(), &code, material(8)).unwrap();
+    let sealed = seal_for_new_device(&qr, new_device.public_key(), NAME, &code, material(8)).unwrap();
     let mut ciphertext = sealed.ciphertext().to_vec();
     ciphertext[0] ^= 1;
     let forged = SealedAccountKeyMaterial::from_parts(
@@ -96,8 +152,9 @@ fn low_order_recipient_is_rejected() {
     let qr = DeviceLinkQr {
         session_id: [4u8; 16],
         fingerprint: fingerprint(&[0u8; 32]),
+        device_name: NAME.to_owned(),
     };
-    assert!(seal_for_new_device(&qr, &[0u8; 32], "K7QM-4WTD", material(8)).is_err());
+    assert!(seal_for_new_device(&qr, &[0u8; 32], NAME, "K7QM-4WTD", material(8)).is_err());
 }
 
 #[test]

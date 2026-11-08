@@ -6,7 +6,7 @@
 //! from the item id, never `C`.
 
 use beebeeb_core::chunk_stream::{ChunkEncryptor, ExpectedChunkFormat};
-use beebeeb_core::kdf::FileKey;
+use beebeeb_core::kdf::{FileKey, MasterKey};
 use beebeeb_uniffi::{
     FileKeyHandle, MasterKeyHandle, derive_master_key, derive_x25519_public, seal_to_request, wrap_request_private,
 };
@@ -61,16 +61,23 @@ fn request_row_results_never_hand_back_a_sealing_key() {
     assert_eq!(legacy.name_origin, "request_content");
     assert_eq!(legacy.chunk_format, 0);
 
-    // The reader actually reads: a v1 push under C opens through a fresh
+    // The reader actually reads: a v1 upload under C opens through a fresh
     // decryptor (the old assertion only checked a format that is None for any
-    // decryptor and never used `legacy.content`).
+    // decryptor and never used `legacy.content`). The row's record carries no
+    // version commitment, so only v1 content opens (Guus's ruling of
+    // 2026-11-07); its v2 content is refused below.
     let plaintext: Vec<u8> = (0..96u8).collect();
+    let frames: Vec<Vec<u8>> = plaintext
+        .chunks(32)
+        .map(|c| beebeeb_core::encrypt::encrypt_chunk_raw(&FileKey::from_bytes([0x22u8; 32]), c).unwrap())
+        .collect();
     let mut enc =
         ChunkEncryptor::for_push_with_file_key(FileKey::from_bytes([0x22u8; 32]), O_ID, plaintext.len() as u64, 32)
             .unwrap();
-    let frames: Vec<Vec<u8>> = plaintext.chunks(32).map(|c| enc.push_chunk(c).unwrap().data).collect();
+    let v2_frames: Vec<Vec<u8>> = plaintext.chunks(32).map(|c| enc.push_chunk(c).unwrap().data).collect();
     enc.finish().unwrap();
     for reader in [&detailed.content, &legacy.content] {
+        assert!(reader.decryptor().unwrap().push_frame(v2_frames[0].clone()).is_err());
         let dec = reader.decryptor().unwrap();
         let mut out = Vec::new();
         for frame in &frames {
@@ -115,9 +122,30 @@ fn a_bound_request_row_reads_v2_content_through_both_readers() {
     let wrap = wrap_request_private(mk.key.clone(), Vec::new(), r_priv.to_vec()).unwrap();
     // Bound: the content key is sealed to the row's O id.
     let sealed = seal_to_request(r_pub, O_ID.as_bytes().to_vec(), content_key.to_vec()).unwrap();
-    // The name is under the string-derived key and records v2.
-    let derived = owner.derive_file_key(O_ID.as_bytes().to_vec()).unwrap();
-    let name = derived.encrypt_name_for("upload.bin".into(), None, 2).unwrap();
+    // v2 frames under C, bound to the O id.
+    let plaintext: Vec<u8> = (0..96u8).collect();
+    let mut enc =
+        ChunkEncryptor::for_push_with_file_key(FileKey::from_bytes(content_key), O_ID, plaintext.len() as u64, 32)
+            .unwrap()
+            .with_recorded_pin(ExpectedChunkFormat::V2)
+            .unwrap();
+    let frames: Vec<Vec<u8>> = plaintext.chunks(32).map(|c| enc.push_chunk(c).unwrap().data).collect();
+    let version = enc.version_commitment(None).unwrap();
+    enc.finish().unwrap();
+    // The name is under the string-derived key, records v2 and commits to
+    // that upload (without the commitment no reader would open it).
+    let derived_key = beebeeb_core::kdf::derive_file_key(
+        &MasterKey::from_bytes(mk.key.clone().try_into().unwrap()),
+        O_ID.as_bytes(),
+    );
+    let name = beebeeb_core::encrypt::encrypt_name_for_version(
+        &derived_key,
+        "upload.bin",
+        None,
+        ExpectedChunkFormat::V2,
+        version,
+    )
+    .unwrap();
 
     let detailed = owner
         .resolve_request_row_detailed(
@@ -148,17 +176,8 @@ fn a_bound_request_row_reads_v2_content_through_both_readers() {
         .unwrap();
     assert_eq!(legacy.chunk_format, 2);
 
-    // v2 frames under C, bound to the O id. A reader built from the name key
-    // (a mutant) or with a wrong file id cannot open them.
-    let plaintext: Vec<u8> = (0..96u8).collect();
-    let mut enc =
-        ChunkEncryptor::for_push_with_file_key(FileKey::from_bytes(content_key), O_ID, plaintext.len() as u64, 32)
-            .unwrap()
-            .with_recorded_pin(ExpectedChunkFormat::V2)
-            .unwrap();
-    let frames: Vec<Vec<u8>> = plaintext.chunks(32).map(|c| enc.push_chunk(c).unwrap().data).collect();
-    enc.finish().unwrap();
-
+    // A reader built from the name key (a mutant) or with a wrong file id
+    // cannot open the frames.
     for reader in [&detailed.content, &legacy.content] {
         let dec = reader.decryptor().unwrap();
         let mut out = Vec::new();

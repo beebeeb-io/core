@@ -25,7 +25,7 @@ use crate::{
         PasswordAccepted, RecoveryCancelToken, RecoveryChanges, RecoveryKitOutput, RecoveryState, SessionKeyState,
         SignInChallenge, SignupService, TwoFactorChallenge, canonical_email, sign_in_state,
     },
-    devices::{DeviceError, DeviceLinkPoll},
+    devices::{DeviceError, DeviceLinkPoll, DeviceLinkQr},
     test_support::ScriptedTransport,
     transport::{Transport, TransportError, TransportFuture},
 };

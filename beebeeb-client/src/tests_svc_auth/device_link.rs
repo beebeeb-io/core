@@ -35,6 +35,7 @@ async fn wrong_typed_code_consumes_the_device_link_attempt() {
     let sealed = beebeeb_core::device_link::seal_for_new_device(
         &qr,
         &public_key,
+        qr.device_name(),
         &wrong_code,
         AccountKeyMaterial::from_master_key(MasterKey::from_bytes([7; 32])),
     )
@@ -60,6 +61,7 @@ async fn approved_device_link_cannot_be_opened_twice() {
     let sealed = beebeeb_core::device_link::seal_for_new_device(
         &qr,
         &public_key,
+        qr.device_name(),
         &code,
         AccountKeyMaterial::from_master_key(MasterKey::from_bytes([7; 32])),
     )
@@ -197,6 +199,47 @@ async fn approver_sees_a_device_name_the_relay_rewrote() {
     let (_, transport, approved, _) = typed_exchange(None, "Attacker's phone").await;
     assert!(matches!(approved, Err(DeviceError::ConfirmationFailed)));
     assert!(transport.requests().last().unwrap().path().ends_with("/deny"));
+}
+
+/// Guus's ruling of 2026-11-07, "bind the name into the QR now": on the QR
+/// path a relay name that differs from the scanned one denies the link before
+/// anything is sealed. Mutant: the client's name check removed (and core's
+/// `matches_relayed_name` returning true): the master key is sealed and
+/// approved under the rewritten name.
+#[tokio::test]
+async fn qr_approver_denies_a_device_name_the_relay_rewrote() {
+    let (client, transport, pending, public_key) = started_link().await;
+    let id = pending.id().to_owned();
+    let qr = DeviceLinkQr::parse(&pending.qr_payload().unwrap()).unwrap();
+    assert_eq!(
+        qr.device_name(),
+        "reported device",
+        "the approver shows the scanned name"
+    );
+    let code = pending.typed_code().unwrap().to_owned();
+    let session_id = STANDARD.encode(qr.session_id());
+    transport.push_json(200, link_detail(&id, &session_id, &public_key, "Attacker's phone"));
+    transport.push_json(200, br#"{"ok":true}"#.to_vec());
+    assert!(matches!(
+        client.approve_device_link(&id, &qr, &code).await,
+        Err(DeviceError::DeviceNameChanged)
+    ));
+    let requests = transport.requests();
+    assert!(requests.last().unwrap().path().ends_with("/deny"));
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.path().ends_with("/approve"))
+            .count(),
+        0,
+        "nothing was sealed or sent"
+    );
+
+    // The same scan approves when the relay reports the scanned name.
+    transport.push_json(200, link_detail(&id, &session_id, &public_key, "reported device"));
+    transport.push_json(200, br#"{"ok":true}"#.to_vec());
+    client.approve_device_link(&id, &qr, &code).await.unwrap();
+    assert!(transport.requests().last().unwrap().path().ends_with("/approve"));
 }
 
 #[tokio::test]

@@ -785,18 +785,23 @@ async fn truncated_download_is_never_published() {
 }
 
 #[tokio::test]
-async fn v2_metadata_without_a_version_commitment_stays_readable_until_a_counter_was_seen() {
+async fn metadata_without_a_version_commitment_never_opens_v2_content() {
+    // Guus's ruling of 2026-11-07, "refuse v2 without commitment". Mutant:
+    // `check_counter_before_authentication` and core's no-commitment arm accept
+    // the record again: the first open is `Ready` and the second fetches.
     use crate::downloads::{DownloadFile, DownloadResult, DownloadService, DownloadServiceError};
     use beebeeb_core::chunk_stream::{ChunkEncryptor, ExpectedChunkFormat};
     #[allow(deprecated)]
-    use beebeeb_core::encrypt::encrypt_name_with_chunk_format;
+    use beebeeb_core::encrypt::{encrypt_name, encrypt_name_with_chunk_format};
     use beebeeb_types::limits::MemoryBudget;
 
     const FILE_ID: &str = "11111111-2222-4333-8444-555555555555";
     let master = Arc::new(MasterKey::from_bytes([0x72; 32]));
     #[allow(deprecated)]
-    let name =
+    let pinned =
         encrypt_name_with_chunk_format(&master, FILE_ID, "uncommitted.bin", None, ExpectedChunkFormat::V2).unwrap();
+    #[allow(deprecated)]
+    let unrecorded = encrypt_name(&master, FILE_ID, "uncommitted.bin", None).unwrap();
     #[allow(deprecated)]
     let mut encryptor = ChunkEncryptor::for_push_with_chunk_size(&master, FILE_ID, 4, 4).unwrap();
     let frame = encryptor.push_chunk(b"data").unwrap().data;
@@ -814,25 +819,41 @@ async fn v2_metadata_without_a_version_commitment_stays_readable_until_a_counter
         MemoryBudget::NATIVE,
     )
     .unwrap();
-    let file = DownloadFile {
+    let file = |name_encrypted: String| DownloadFile {
         file_id: FILE_ID.into(),
-        name_encrypted: name,
+        name_encrypted,
         size_bytes: 4,
         chunk_size_bytes: 4,
         chunk_count: 1,
         object_version_id: "v".into(),
     };
-    assert!(matches!(service.open(&file, 1).await, Ok(DownloadResult::Ready(_))));
 
-    store.lock().unwrap().observe_file_version(FILE_ID, 5).unwrap();
+    // A record that pins v2 and has no commitment: refused before any fetch.
     assert!(matches!(
-        service.open(&file, 2).await,
+        service.open(&file(pinned), 1).await,
+        Err(DownloadServiceError::MissingVersionCommitment)
+    ));
+    assert_eq!(transport.request_count(), 0, "refused before fetching content");
+
+    // An unrecorded record without a commitment: core refuses the v2 frame 0.
+    let result = service.open(&file(unrecorded.clone()), 2).await;
+    assert!(
+        !matches!(result, Ok(DownloadResult::Ready(_))),
+        "v2 content opened without a commitment: {result:?}"
+    );
+
+    // Once a counter was seen, the same record is a rollback, refused before
+    // a fetch.
+    store.lock().unwrap().observe_file_version(FILE_ID, 5).unwrap();
+    let fetched = transport.request_count();
+    assert!(matches!(
+        service.open(&file(unrecorded), 3).await,
         Err(DownloadServiceError::VersionRollback)
     ));
     assert_eq!(
         transport.request_count(),
-        1,
-        "stripped metadata must be refused before fetching content"
+        fetched,
+        "stripped metadata is refused before fetching content"
     );
 }
 

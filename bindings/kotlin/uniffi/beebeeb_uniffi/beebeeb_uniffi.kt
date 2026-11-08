@@ -1646,6 +1646,8 @@ external fun uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_poll_type
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_revoke_account_session(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_scanned_device_link_name(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_send_typed_approval_message(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_send_typed_new_device_message(
@@ -1980,7 +1982,7 @@ external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_child_wrap_matches(`p
 ): Byte
 external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_chunk(`ptr`: Long,`nonce`: RustBuffer.ByValue,`ciphertext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_chunk_frame(`ptr`: Long,`fileId`: RustBuffer.ByValue,`versionId`: RustBuffer.ByValue,`index`: Int,`isLast`: Byte,`format`: Byte,`frame`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_chunk_frame(`ptr`: Long,`fileId`: RustBuffer.ByValue,`metadata`: RustBuffer.ByValue,`index`: Int,`isLast`: Byte,`frame`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_file_metadata(`ptr`: Long,`nameEncrypted`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -2048,7 +2050,7 @@ external fun uniffi_beebeeb_uniffi_fn_constructor_masterkeyhandle_from_recovery_
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_compute_recovery_check(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_decrypt_file(`ptr`: Long,`fileId`: RustBuffer.ByValue,`expectedChunkFormat`: Byte,`chunkPaths`: RustBuffer.ByValue,`outputPath`: RustBuffer.ByValue,`callback`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_decrypt_file(`ptr`: Long,`fileId`: RustBuffer.ByValue,`metadata`: RustBuffer.ByValue,`chunkPaths`: RustBuffer.ByValue,`outputPath`: RustBuffer.ByValue,`callback`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_decrypt_file_metadata(`ptr`: Long,`fileId`: RustBuffer.ByValue,`nameEncrypted`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -2668,6 +2670,8 @@ external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_poll_typed_devi
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_revoke_account_session(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_scanned_device_link_name(`ptr`: Long,`scannedQr`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_send_typed_approval_message(`ptr`: Long,`id`: RustBuffer.ByValue,`message`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_send_typed_new_device_message(`ptr`: Long,`id`: RustBuffer.ByValue,`message`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -3402,7 +3406,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk() != 50441.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk_frame() != 11989.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_chunk_frame() != 37168.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_filekeyhandle_decrypt_file_metadata() != 61159.toShort()) {
@@ -3486,7 +3490,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_compute_recovery_check() != 4155.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_decrypt_file() != 46481.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_decrypt_file() != 3278.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_masterkeyhandle_decrypt_file_metadata() != 11722.toShort()) {
@@ -4143,7 +4147,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_acknowledge_device_link() != 20880.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_approve_device_link() != 42861.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_approve_device_link() != 44268.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_approve_typed_device_link() != 3275.toShort()) {
@@ -4168,6 +4172,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_revoke_account_session() != 15139.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_scanned_device_link_name() != 33739.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_deviceservicehandle_send_typed_approval_message() != 37068.toShort()) {
@@ -4317,19 +4324,19 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_signupceremonyhandle_new() != 22479.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push() != 14552.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push() != 60587.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push_with_file_key_handle() != 18199.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version() != 872.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version() != 58481.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version_with_file_key_handle() != 35155.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_version_with_file_key_handle() != 35404.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_from_file() != 54716.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_from_file() != 593.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_nativeclienthandle_new() != 1687.toShort()) {
@@ -8116,7 +8123,8 @@ open class ChunkDecryptorHandle: Disposable, AutoCloseable, ChunkDecryptorHandle
      * PUSH constructor: the caller feeds wire frames via
      * [`push_frame`](Self::push_frame). Each frame is self-describing, so no chunk
      * size is needed. `metadata` is the version's `NameMetadataDto` from
-     * `decrypt_file_metadata`; its commitment is enforced when present.
+     * `decrypt_file_metadata`; its commitment is enforced, and a record
+     * without one opens v1 content only.
      */
     @Throws(CryptoException::class) fun `forPush`(`masterKey`: MasterKeyHandle, `fileId`: kotlin.String, `metadata`: NameMetadataDto): ChunkDecryptorHandle {
             return FfiConverterTypeChunkDecryptorHandle.lift(
@@ -8151,7 +8159,8 @@ open class ChunkDecryptorHandle: Disposable, AutoCloseable, ChunkDecryptorHandle
         
     /**
      * Current/historical protected read. Pass the fields from the matching
-     * `NameMetadataDto`; omit both only for unprotected legacy metadata.
+     * `NameMetadataDto`; omit both only for legacy metadata, which opens v1
+     * content only (`expected_chunk_format` 2 without them is refused).
      */
     @Throws(CryptoException::class) fun `forVersion`(`masterKey`: MasterKeyHandle, `fileId`: kotlin.String, `expectedChunkFormat`: kotlin.UByte, `versionId`: kotlin.ByteArray?, `versionCounter`: kotlin.ULong?): ChunkDecryptorHandle {
             return FfiConverterTypeChunkDecryptorHandle.lift(
@@ -8168,7 +8177,8 @@ open class ChunkDecryptorHandle: Disposable, AutoCloseable, ChunkDecryptorHandle
     /**
      * [`for_version`](Self::for_version) for key-handle holders (share and
      * shared-link recipients): the fields of that version's own decrypted
-     * metadata record; omit both only for unprotected legacy metadata.
+     * metadata record; omit both only for legacy metadata, which opens v1
+     * content only.
      */
     @Throws(CryptoException::class) fun `forVersionWithFileKeyHandle`(`fileKey`: FileKeyHandle, `fileId`: kotlin.String, `expectedChunkFormat`: kotlin.UByte, `versionId`: kotlin.ByteArray?, `versionCounter`: kotlin.ULong?): ChunkDecryptorHandle {
             return FfiConverterTypeChunkDecryptorHandle.lift(
@@ -8189,7 +8199,7 @@ open class ChunkDecryptorHandle: Disposable, AutoCloseable, ChunkDecryptorHandle
      *
      * `metadata` is the `NameMetadataDto` `decrypt_file_metadata` returned for
      * the version on disk: its `chunk_format`, and its version commitment,
-     * which frame 0 must match when the record carries one.
+     * which frame 0 must match. A record without one opens v1 content only.
      */
     @Throws(CryptoException::class) fun `fromFile`(`masterKey`: MasterKeyHandle, `fileId`: kotlin.String, `metadata`: NameMetadataDto, `chunkSizeBytes`: kotlin.ULong, `inputPath`: kotlin.String): ChunkDecryptorHandle {
             return FfiConverterTypeChunkDecryptorHandle.lift(
@@ -10095,7 +10105,10 @@ public interface DeviceServiceHandleInterface {
     /**
      * QR path. `scanned_qr` is the raw text the camera read from the new
      * device's screen. Without a camera use the typed-code path: the code
-     * gives no protection against a substituted key on this one.
+     * gives no protection against a substituted key on this one. A relay
+     * name that differs from the scanned one
+     * ([`Self::scanned_device_link_name`]) is `ServiceError::Authentication`;
+     * nothing is sealed and the link is denied.
      */
     fun `approveDeviceLink`(`id`: kotlin.String, `scannedQr`: kotlin.String, `typedCode`: kotlin.String)
     
@@ -10119,6 +10132,14 @@ public interface DeviceServiceHandleInterface {
     fun `pollTypedDeviceLink`(`receiver`: TypedDeviceReceiverHandle): DeviceLinkPollData
     
     fun `revokeAccountSession`(`id`: kotlin.String)
+    
+    /**
+     * QR path: the new device's name as its scanned QR carries it. Show this
+     * name while the person confirms, never the pending link's
+     * `device_name` (the relay's report). Refuses text that is not a
+     * Beebeeb device-link QR.
+     */
+    fun `scannedDeviceLinkName`(`scannedQr`: kotlin.String): kotlin.String
     
     fun `sendTypedApprovalMessage`(`id`: kotlin.String, `message`: kotlin.ByteArray)
     
@@ -10254,7 +10275,10 @@ open class DeviceServiceHandle: Disposable, AutoCloseable, DeviceServiceHandleIn
     /**
      * QR path. `scanned_qr` is the raw text the camera read from the new
      * device's screen. Without a camera use the typed-code path: the code
-     * gives no protection against a substituted key on this one.
+     * gives no protection against a substituted key on this one. A relay
+     * name that differs from the scanned one
+     * ([`Self::scanned_device_link_name`]) is `ServiceError::Authentication`;
+     * nothing is sealed and the link is denied.
      */
     @Throws(ServiceException::class)override fun `approveDeviceLink`(`id`: kotlin.String, `scannedQr`: kotlin.String, `typedCode`: kotlin.String)
         = 
@@ -10380,6 +10404,26 @@ open class DeviceServiceHandle: Disposable, AutoCloseable, DeviceServiceHandleIn
 }
     }
     
+    
+
+    
+    /**
+     * QR path: the new device's name as its scanned QR carries it. Show this
+     * name while the person confirms, never the pending link's
+     * `device_name` (the relay's report). Refuses text that is not a
+     * Beebeeb device-link QR.
+     */
+    @Throws(ServiceException::class)override fun `scannedDeviceLinkName`(`scannedQr`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ServiceException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_deviceservicehandle_scanned_device_link_name(
+        it,
+        FfiConverterString.lower(`scannedQr`),_status)
+}
+    }
+    )
+    }
     
 
     
@@ -13602,14 +13646,13 @@ public interface FileKeyHandleInterface {
      * asked for and `is_last` is `index == chunk_count - 1`; a server that
      * serves another chunk or lies about the count fails the tag.
      *
-     * `format` (1 = v1 legacy, 2 = v2) must come from authenticated data — 2
-     * when the encrypted metadata records v2, else the `chunk_format()` of a
-     * decryptor that opened chunk 0 — never from a server field.
-     * `version_id` (12 bytes, v2 only; ignored for v1) is the `version_id()` of
-     * a decryptor that opened chunk 0, or chunk 0's first 12 bytes: frames of
-     * another upload of the same file id fail.
+     * `metadata` is that version's `NameMetadataDto` from
+     * `decrypt_file_metadata[_with_key]`, never a server field: with a version
+     * commitment only that upload's v2 frames open; a record without one opens
+     * v1 frames only, and a `chunk_format: 2` record without one is refused
+     * (the ruling of 2026-11-07).
      */
-    fun `decryptChunkFrame`(`fileId`: kotlin.String, `versionId`: kotlin.ByteArray, `index`: kotlin.UInt, `isLast`: kotlin.Boolean, `format`: kotlin.UByte, `frame`: kotlin.ByteArray): kotlin.ByteArray
+    fun `decryptChunkFrame`(`fileId`: kotlin.String, `metadata`: NameMetadataDto, `index`: kotlin.UInt, `isLast`: kotlin.Boolean, `frame`: kotlin.ByteArray): kotlin.ByteArray
     
     /**
      * [`MasterKeyHandle::decrypt_file_metadata`] with this file key: refuses a
@@ -13894,20 +13937,19 @@ open class FileKeyHandle: Disposable, AutoCloseable, FileKeyHandleInterface
      * asked for and `is_last` is `index == chunk_count - 1`; a server that
      * serves another chunk or lies about the count fails the tag.
      *
-     * `format` (1 = v1 legacy, 2 = v2) must come from authenticated data — 2
-     * when the encrypted metadata records v2, else the `chunk_format()` of a
-     * decryptor that opened chunk 0 — never from a server field.
-     * `version_id` (12 bytes, v2 only; ignored for v1) is the `version_id()` of
-     * a decryptor that opened chunk 0, or chunk 0's first 12 bytes: frames of
-     * another upload of the same file id fail.
+     * `metadata` is that version's `NameMetadataDto` from
+     * `decrypt_file_metadata[_with_key]`, never a server field: with a version
+     * commitment only that upload's v2 frames open; a record without one opens
+     * v1 frames only, and a `chunk_format: 2` record without one is refused
+     * (the ruling of 2026-11-07).
      */
-    @Throws(CryptoException::class)override fun `decryptChunkFrame`(`fileId`: kotlin.String, `versionId`: kotlin.ByteArray, `index`: kotlin.UInt, `isLast`: kotlin.Boolean, `format`: kotlin.UByte, `frame`: kotlin.ByteArray): kotlin.ByteArray {
+    @Throws(CryptoException::class)override fun `decryptChunkFrame`(`fileId`: kotlin.String, `metadata`: NameMetadataDto, `index`: kotlin.UInt, `isLast`: kotlin.Boolean, `frame`: kotlin.ByteArray): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
     callWithHandle {
     uniffiRustCallWithError(CryptoException) { _status ->
     UniffiLib.uniffi_beebeeb_uniffi_fn_method_filekeyhandle_decrypt_chunk_frame(
         it,
-        FfiConverterString.lower(`fileId`),FfiConverterByteArray.lower(`versionId`),FfiConverterUInt.lower(`index`),FfiConverterBoolean.lower(`isLast`),FfiConverterUByte.lower(`format`),FfiConverterByteArray.lower(`frame`),_status)
+        FfiConverterString.lower(`fileId`),FfiConverterTypeNameMetadataDto.lower(`metadata`),FfiConverterUInt.lower(`index`),FfiConverterBoolean.lower(`isLast`),FfiConverterByteArray.lower(`frame`),_status)
 }
     }
     )
@@ -15928,10 +15970,12 @@ public interface MasterKeyHandleInterface {
      * Reads each chunk file (containing `nonce || ciphertext`), decrypts,
      * and writes plaintext to output. Atomic rename at end.
      *
-     * `expected_chunk_format` (task 1908) comes from the file's encrypted
-     * metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
+     * `metadata` is the version's `NameMetadataDto` from
+     * `decrypt_file_metadata` (task 1908): v2 opens only as the upload its
+     * commitment names, and a record without one opens v1 content only (the
+     * ruling of 2026-11-07).
      */
-    fun `decryptFile`(`fileId`: kotlin.String, `expectedChunkFormat`: kotlin.UByte, `chunkPaths`: List<kotlin.String>, `outputPath`: kotlin.String, `callback`: FileProgressCallback?): DecryptedFileInfo
+    fun `decryptFile`(`fileId`: kotlin.String, `metadata`: NameMetadataDto, `chunkPaths`: List<kotlin.String>, `outputPath`: kotlin.String, `callback`: FileProgressCallback?): DecryptedFileInfo
     
     /**
      * The metadata reader for FILES (task 1908 round 3): exactly
@@ -16322,16 +16366,18 @@ open class MasterKeyHandle: Disposable, AutoCloseable, MasterKeyHandleInterface
      * Reads each chunk file (containing `nonce || ciphertext`), decrypts,
      * and writes plaintext to output. Atomic rename at end.
      *
-     * `expected_chunk_format` (task 1908) comes from the file's encrypted
-     * metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
+     * `metadata` is the version's `NameMetadataDto` from
+     * `decrypt_file_metadata` (task 1908): v2 opens only as the upload its
+     * commitment names, and a record without one opens v1 content only (the
+     * ruling of 2026-11-07).
      */
-    @Throws(CryptoException::class)override fun `decryptFile`(`fileId`: kotlin.String, `expectedChunkFormat`: kotlin.UByte, `chunkPaths`: List<kotlin.String>, `outputPath`: kotlin.String, `callback`: FileProgressCallback?): DecryptedFileInfo {
+    @Throws(CryptoException::class)override fun `decryptFile`(`fileId`: kotlin.String, `metadata`: NameMetadataDto, `chunkPaths`: List<kotlin.String>, `outputPath`: kotlin.String, `callback`: FileProgressCallback?): DecryptedFileInfo {
             return FfiConverterTypeDecryptedFileInfo.lift(
     callWithHandle {
     uniffiRustCallWithError(CryptoException) { _status ->
     UniffiLib.uniffi_beebeeb_uniffi_fn_method_masterkeyhandle_decrypt_file(
         it,
-        FfiConverterString.lower(`fileId`),FfiConverterUByte.lower(`expectedChunkFormat`),FfiConverterSequenceString.lower(`chunkPaths`),FfiConverterString.lower(`outputPath`),FfiConverterOptionalTypeFileProgressCallback.lower(`callback`),_status)
+        FfiConverterString.lower(`fileId`),FfiConverterTypeNameMetadataDto.lower(`metadata`),FfiConverterSequenceString.lower(`chunkPaths`),FfiConverterString.lower(`outputPath`),FfiConverterOptionalTypeFileProgressCallback.lower(`callback`),_status)
 }
     }
     )
