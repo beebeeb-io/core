@@ -16,9 +16,15 @@ hkdf = "0.12"
 # hkdf already depends on, so the lockfile gains no new package.
 hmac = "0.12"
 sha2 = "0.10"
-# SHA-1 ONLY to address the k-anonymity breach corpus (onboarding::breach): the corpus is
-# keyed by SHA-1 prefix. Never used for integrity or authentication.
+# SHA-1 for the k-anonymity breach corpus (onboarding::breach): the corpus is keyed by
+# SHA-1 prefix. Not used for integrity or authentication.
 sha1 = "0.10"
+# HMAC-SHA1 for WinZip AES archive entries only (archives::winzip_aes): PBKDF2-HMAC-SHA1
+# turns an archive password into its keys, and HMAC-SHA1 authenticates each entry, as
+# the format fixes. These are the versions p256 and zip already lock, so the lockfile
+# gains no package; `zeroize` wipes each hash state and input buffer on drop.
+archive-hmac = { package = "hmac", version = "0.13", features = ["zeroize"] }
+archive-sha1 = { package = "sha1", version = "0.11", default-features = false, features = ["zeroize"] }
 zeroize = { version = "1", features = ["derive"] }
 # Constant-time key comparison (task 2255, L9 legacy folder-key proof).
 subtle = "2.6"

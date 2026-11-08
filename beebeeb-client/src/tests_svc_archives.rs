@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use beebeeb_api::{Answer, Header, Method};
 use beebeeb_core::archives::{
-    ArchivePassword, ArchivePlatform, ExtractOutcome, ExtractSummary, FailReason, PlanRefusal, PreviewState, Selection,
-    SkipReason,
+    ArchivePassword, ArchivePlatform, ArchiveSession, ByteSource, ExtractOutcome, ExtractSummary, FailReason,
+    PasswordStep, PlanRefusal, PreviewState, Selection, SessionStep, SkipReason, SourceError,
 };
 use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor, ExpectedChunkFormat};
 use beebeeb_core::encrypt::{decrypt_file_metadata, decrypt_name_metadata, encrypt_chunk, encrypt_name_with_version};
@@ -1039,6 +1039,79 @@ async fn archive_service_temp_files_deleted() {
     )
     .unwrap();
     assert!(!leftover.exists());
+}
+
+/// A wrong password that passes entry `index`'s check byte: found by a
+/// fixed search, so the same one every run.
+fn quick_check_candidate(data: &[u8], index: u32) -> String {
+    /// The archive's bytes, all at hand.
+    struct Whole(Vec<u8>);
+    impl ByteSource for Whole {
+        fn len(&self) -> u64 {
+            self.0.len() as u64
+        }
+        fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize, SourceError> {
+            let start = (offset as usize).min(self.0.len());
+            let n = buf.len().min(self.0.len() - start);
+            buf[..n].copy_from_slice(&self.0[start..start + n]);
+            Ok(n)
+        }
+    }
+    let mut session = ArchiveSession::open(Whole(data.to_vec()), ArchivePlatform::Native);
+    assert_eq!(session.step(), SessionStep::Listed);
+    (0..100_000)
+        .map(|i| format!("candidate-{i}"))
+        .find(|c| session.check_password(index, &ArchivePassword::new(c.clone())) == PasswordStep::Accepted)
+        .expect("about one in 256 candidates passes a check byte")
+}
+
+#[tokio::test]
+async fn archive_service_failed_attempt_leaves_no_staged_file() {
+    // A wrong password that passes the entry's check byte is read to the
+    // end and fails its CRC: what it staged is deleted before the person
+    // is asked again, and the entry is read again with the new password.
+    let data = fixture("zipcrypto-crc-check.zip");
+    let wrong = quick_check_candidate(&data, 1);
+    let server = Server::new();
+    let file = put_v2(
+        &server,
+        "bbbbbbbb-0000-4000-8000-00000000000c",
+        "crc.zip",
+        None,
+        &data,
+        256,
+    );
+    let mut env = Env::with_server(server.clone());
+    let id = env.open_listed(&file, "crc.zip", None).await;
+    let options = ExtractOptions {
+        selection: Selection::Paths(vec!["secret.txt".into()]),
+        ..options(ExtractDestination::NextToArchive)
+    };
+    let run = env
+        .service
+        .extract(id, options, Some(ArchivePassword::new(wrong)))
+        .await
+        .unwrap();
+    loop {
+        if let ArchiveEvent::Model { model, .. } = env.next_event().await
+            && let PreviewState::NeedsPassword { wrong } = model.state
+        {
+            assert!(wrong, "asked again after the CRC failed");
+            break;
+        }
+    }
+    assert_eq!(env.temp_files(), 0, "the failed attempt's staged bytes are gone");
+    env.service.supply_password(run, ArchivePassword::new(PASSWORD.into()));
+    let summary = env.pump_until_finished(run).await;
+    assert_eq!(summary.outcome, ExtractOutcome::Done);
+    assert_eq!((summary.files_done, summary.files_total), (1, 1));
+    assert!(summary.skipped.is_empty(), "{:?}", summary.skipped);
+    let secret = b"The protected test file.\n".repeat(40);
+    assert_eq!(
+        tree(&server, None),
+        expected(&[("crc/", b""), ("crc/secret.txt", &secret)])
+    );
+    assert_eq!(env.temp_files(), 0);
 }
 
 #[tokio::test]

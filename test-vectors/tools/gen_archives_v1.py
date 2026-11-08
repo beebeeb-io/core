@@ -14,7 +14,12 @@ well-formed archive and not something only this file and core agree on.
 
 The password fixtures (aes128.zip ... two-passwords.zip) are made by 7-Zip and Info-ZIP
 (make_archive_password_fixtures.sh), salted at random, so they are not written here; their rows
-come from the files that script archives.
+come from the files that script archives. Two ZipCrypto fixtures ARE written here (APPNOTE 6.1
+encryption below, deterministic headers), because Info-ZIP always sets the data-descriptor flag:
+zipcrypto-crc-check.zip has the flag clear, so its check byte is the CRC's high byte, and starts with
+an empty entry; zipcrypto-cp437-quick-check.zip is encrypted with the CP437 bytes of `caf\u00e9-test`,
+and its second entry's header is chosen so that the password's UTF-8 bytes also pass its check byte
+(a 1-in-256 quick-check false positive, made on purpose). Python's `zipfile` decrypts both back.
 
 Expected listings follow the design:
 - names (§6.1): zip names are UTF-8 when flag bit 11 is set (invalid UTF-8 cannot be used), else
@@ -50,6 +55,7 @@ that rounds to 1000.0 carried into the next unit, below 1,000 bytes `N B`, and a
 """
 import binascii
 import gzip
+import hashlib
 import io
 import json
 import os
@@ -70,6 +76,11 @@ FILE_MODE, DIR_MODE = 0o100644, 0o040755
 SECRET = ("secret.txt", 1000)  # "The protected test file.\n" x 40
 PLAIN = ("plain.txt", 15)  # "Not protected.\n"
 OTHER = ("other.txt", 1000)
+
+
+# The ZipCrypto fixtures' password, as the person types it.
+TEST_PASSWORD = b"beebeeb-test-password"
+CP437_PASSWORD_TEXT = "caf\u00e9-test"
 
 
 def crc32(data):
@@ -128,6 +139,63 @@ def gzip_member(data, name=None, mtime=0):
     return header + deflate_fixed(data) + struct.pack("<II", crc32(data), len(data) & 0xFFFFFFFF)
 
 
+# ---------------------------------------------------------------- ZipCrypto (APPNOTE 6.1)
+
+
+CRC_TABLE = []
+for _n in range(256):
+    _c = _n
+    for _ in range(8):
+        _c = (0xEDB88320 ^ (_c >> 1)) if _c & 1 else _c >> 1
+    CRC_TABLE.append(_c)
+
+
+class ZipCryptoKeys:
+    def __init__(self, password):
+        self.k0, self.k1, self.k2 = 0x12345678, 0x23456789, 0x34567890
+        for b in password:
+            self.update(b)
+
+    def update(self, b):
+        self.k0 = (self.k0 >> 8) ^ CRC_TABLE[(self.k0 ^ b) & 0xFF]
+        self.k1 = ((self.k1 + (self.k0 & 0xFF)) * 134775813 + 1) & 0xFFFFFFFF
+        self.k2 = (self.k2 >> 8) ^ CRC_TABLE[(self.k2 ^ (self.k1 >> 24)) & 0xFF]
+
+    def stream(self):
+        t = (self.k2 | 2) & 0xFFFF
+        return ((t * (t ^ 1)) >> 8) & 0xFF
+
+    def encrypt(self, data):
+        out = bytearray()
+        for p in data:
+            out.append(p ^ self.stream())
+            self.update(p)
+        return bytes(out)
+
+    def decrypt(self, data):
+        out = bytearray()
+        for c in data:
+            p = c ^ self.stream()
+            self.update(p)
+            out.append(p)
+        return bytes(out)
+
+
+def zipcrypto_payload(password, check, data, label, other=None, other_passes=False):
+    """The 12-byte encryption header and `data`, encrypted under `password`. The header's first 11
+    bytes are the first SHA-256-derived candidate for `label` whose header passes (or, by default,
+    fails) the check byte when decrypted under `other`."""
+    for n in range(100_000):
+        head = hashlib.sha256(f"{label}-{n}".encode()).digest()[:11] + bytes([check])
+        encrypted_head = ZipCryptoKeys(password).encrypt(head)
+        if other is not None:
+            passes = ZipCryptoKeys(other).decrypt(encrypted_head)[11] == check
+            if passes != other_passes:
+                continue
+        return ZipCryptoKeys(password).encrypt(head + data)
+    raise AssertionError(f"no header for {label}")
+
+
 # ---------------------------------------------------------------- zip
 
 
@@ -135,7 +203,7 @@ class Z:
     """One zip member, as written and as the design reads it."""
 
     def __init__(self, name, data=b"", *, utf8=False, method=0, host=UNIX, mode=FILE_MODE, dos_attr=0,
-                 upath=None, payload=None, size=None, flags=0):
+                 upath=None, payload=None, size=None, flags=0, zipcrypto=None):
         self.name = name.encode("utf-8") if isinstance(name, str) else name
         self.data = data
         self.utf8 = utf8
@@ -147,6 +215,11 @@ class Z:
         self.payload = payload if payload is not None else (deflate_fixed(data) if method == 8 else data)
         self.size = len(data) if size is None else size
         self.flags = flags | (0x0800 if utf8 else 0)
+        # (password bytes, the payload `zipcrypto_payload` wrote): stored, flag bit 0 set.
+        self.zipcrypto = zipcrypto
+        if zipcrypto is not None:
+            self.payload = zipcrypto[1]
+            self.flags |= 0x01
 
     def extra(self):
         if self.upath is None:
@@ -218,7 +291,8 @@ def zip_entry(m):
             skip = "device"
         elif kind == "file" and m.method not in (0, 8):
             skip = "method:" + ZIP_METHODS.get(m.method, f"method {m.method}")
-    return entry(shown(decoded), path, kind, 0 if kind == "folder" else m.size, "none", skip)
+    cipher = "zipcrypto" if m.zipcrypto is not None else "none"
+    return entry(shown(decoded), path, kind, 0 if kind == "folder" else m.size, cipher, skip)
 
 
 # ---------------------------------------------------------------- tar
@@ -501,6 +575,28 @@ def fixtures():
     for bits in (128, 192, 256):
         add(f"aes{bits}.zip", None, "zip", [entry(SECRET[0], [SECRET[0]], "file", SECRET[1], f"aes{bits}_ae2", None)])
     add("aes256-stored.zip", None, "zip", [entry(SECRET[0], [SECRET[0]], "file", SECRET[1], "aes256_ae2", None)])
+    # ZipCrypto with the data-descriptor flag clear: the check byte is the CRC's high byte (the
+    # DOS time's high byte differs, so reading the wrong one refuses the right password).
+    secret = b"The protected test file.\n" * 40
+    assert crc32(secret) >> 24 != DOS_TIME >> 8
+    crc_check = [
+        Z("empty.txt", b"", zipcrypto=(TEST_PASSWORD, zipcrypto_payload(TEST_PASSWORD, 0, b"", "empty"))),
+        Z("secret.txt", secret,
+          zipcrypto=(TEST_PASSWORD, zipcrypto_payload(TEST_PASSWORD, crc32(secret) >> 24, secret, "secret"))),
+    ]
+    add("zipcrypto-crc-check.zip", zip_bytes(crc_check), "zip", [zip_entry(m) for m in crc_check],
+        check=("zip", crc_check))
+    # The CP437 password; its UTF-8 bytes fail the first entry's check byte and pass the second's.
+    cp437, utf8 = CP437_PASSWORD_TEXT.encode("cp437"), CP437_PASSWORD_TEXT.encode("utf-8")
+    first, second = b"First.\n" * 20, b"Second.\n" * 20
+    quick = [
+        Z("first.txt", first, zipcrypto=(cp437, zipcrypto_payload(cp437, crc32(first) >> 24, first, "first",
+                                                                  other=utf8))),
+        Z("second.txt", second, zipcrypto=(cp437, zipcrypto_payload(cp437, crc32(second) >> 24, second,
+                                                                    "second", other=utf8, other_passes=True))),
+    ]
+    add("zipcrypto-cp437-quick-check.zip", zip_bytes(quick), "zip", [zip_entry(m) for m in quick],
+        check=("zip", quick))
     for file in ("zipcrypto.zip", "zipcrypto-cp437.zip"):
         add(file, None, "zip", [entry(SECRET[0], [SECRET[0]], "file", SECRET[1], "zipcrypto", None)])
     add("mixed.zip", None, "zip", [entry(PLAIN[0], [PLAIN[0]], "file", PLAIN[1], "none", None),
@@ -569,7 +665,8 @@ def stdlib_check(file, data, check):
         assert [i.CRC for i in infos] == [crc32(m.data) for m in expected], file
         for info, m in zip(infos, expected):
             if m.method in (0, 8):
-                assert zipfile.ZipFile(io.BytesIO(data)).read(info) == m.data, file
+                pwd = m.zipcrypto[0] if m.zipcrypto is not None else None
+                assert zipfile.ZipFile(io.BytesIO(data)).read(info, pwd=pwd) == m.data, file
     elif kind in ("tar", "tgz"):
         mode = "r:gz" if kind == "tgz" else "r:"
         with tarfile.open(fileobj=io.BytesIO(data), mode=mode) as archive:

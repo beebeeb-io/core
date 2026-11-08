@@ -615,3 +615,102 @@ fn extract_tgz_tail_entry_joins_a_renamed_planned_folder() {
     names.sort();
     assert_eq!(names, vec!["t/a", "t/a (2)/x.txt", "t/a (2)/y.txt", "t/big.bin"]);
 }
+
+/// A wrong password that passes entry `pass`'s check byte and fails entry
+/// `fail`'s: found by a fixed search, so the same one every run.
+fn quick_check_candidate(bytes: &[u8], pass: u32, fail: u32) -> String {
+    use beebeeb_core::archives::PasswordStep;
+    let mut session = ArchiveSession::open(Blocking(bytes.to_vec()), ArchivePlatform::Native);
+    assert_eq!(drive(&mut session, |_, r| panic!("{r:?}")), SessionStep::Listed);
+    let mut check =
+        |index: u32, candidate: &str| session.check_password(index, &ArchivePassword::new(candidate.into()));
+    (0..100_000)
+        .map(|i| format!("candidate-{i}"))
+        .find(|c| check(pass, c) == PasswordStep::Accepted && check(fail, c) == PasswordStep::Wrong)
+        .expect("about one in 256 candidates passes one check byte and not the other")
+}
+
+#[test]
+fn empty_zipcrypto_entry_never_proves_a_password() {
+    // An empty ZipCrypto entry is guarded by its check byte alone (the CRC
+    // of no data matches anything): a wrong password that passes it must
+    // not count as proven, so the next protected entry asks again instead
+    // of being skipped as "uses another password".
+    let bytes = crate::support::fixture("zipcrypto-crc-check.zip");
+    let wrong = quick_check_candidate(&bytes, 0, 1);
+    let out = blocking_run(bytes, "c.zip", vec![&wrong, TEST_PASSWORD]);
+    let asked: Vec<_> = out.log.iter().filter(|l| l.starts_with("password?")).cloned().collect();
+    assert_eq!(
+        asked,
+        vec!["password? 0 wrong=false", "password? 1 wrong=true"],
+        "{:?}",
+        out.log
+    );
+    assert_eq!(out.published["c/secret.txt"], crate::support::fixture_secret());
+    assert_eq!(out.published["c/empty.txt"], b"");
+    assert!(out.summary.unwrap().skipped.is_empty());
+}
+
+#[test]
+fn extract_tries_the_encoding_that_verified_first() {
+    // The archive was made with the password's CP437 bytes; its UTF-8 bytes
+    // pass the second entry's check byte too. Once the first entry verified
+    // with CP437, the second must be read with CP437 first, not decoded as
+    // garbage under UTF-8 and skipped as damaged.
+    let bytes = crate::support::fixture("zipcrypto-cp437-quick-check.zip");
+    let out = blocking_run(bytes, "q.zip", vec![crate::support::CP437_TEST_PASSWORD]);
+    assert_eq!(out.published["q/first.txt"], b"First.\n".repeat(20), "{:?}", out.log);
+    assert_eq!(out.published["q/second.txt"], b"Second.\n".repeat(20), "{:?}", out.log);
+    assert!(out.summary.unwrap().skipped.is_empty());
+}
+
+#[test]
+fn wrong_password_passing_quick_check_asks_again_and_retries_the_entry() {
+    // The first protected entry, read with a wrong password that passed its
+    // check byte, fails its CRC: its staged bytes are dropped, the person is
+    // asked again, and the same entry is read again with the new password.
+    let bytes = crate::support::fixture("zipcrypto-crc-check.zip");
+    let wrong = quick_check_candidate(&bytes, 1, 0);
+    let mut x = start_selected(
+        ArchivePlatform::Native,
+        Blocking(bytes),
+        "r.zip",
+        Selection::Paths(vec!["secret.txt".into()]),
+        Some(&wrong),
+        |_, r| panic!("{r:?}"),
+    );
+    let out = run(&mut x, |_, r| panic!("{r:?}"), vec![TEST_PASSWORD], |_, _| {});
+    let summary = out.summary.unwrap();
+    assert_eq!(
+        out.published["r/secret.txt"],
+        crate::support::fixture_secret(),
+        "{:?}",
+        out.log
+    );
+    assert_eq!((summary.files_done, summary.files_total), (1, 1));
+    assert!(summary.skipped.is_empty(), "{:?}", summary.skipped);
+    let begins = out.log.iter().filter(|l| l.starts_with("begin")).count();
+    assert_eq!(begins, 2, "read once with each password: {:?}", out.log);
+    assert!(out.log.contains(&"password? 1 wrong=true".to_string()), "{:?}", out.log);
+}
+
+#[test]
+fn plaintext_steps_debug_shows_lengths_only() {
+    use beebeeb_core::archives::PieceStep;
+    let plaintext = b"the person's file".to_vec();
+    let listed = format!("{:?}", plaintext);
+    let piece = format!("{:?}", PieceStep::Data(plaintext.clone()));
+    let step = format!(
+        "{:?}",
+        ExtractStep::FileData {
+            node: 3,
+            bytes: plaintext.clone()
+        }
+    );
+    for shown in [&piece, &step] {
+        assert!(!shown.contains(&listed), "{shown}");
+        assert!(!shown.contains("person"), "{shown}");
+        assert!(shown.contains("17 bytes"), "{shown}");
+    }
+    assert!(step.contains("node: 3"), "{step}");
+}

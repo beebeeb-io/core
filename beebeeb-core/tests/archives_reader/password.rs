@@ -256,3 +256,47 @@ fn check_password_reports_a_read_error_not_accepted() {
     let step = session.check_password(0, &ArchivePassword::new("any-password".into()));
     assert_eq!(step, PasswordStep::Io("the disk went away".into()));
 }
+
+#[test]
+fn zipcrypto_crc_high_byte_check_with_the_descriptor_flag_clear() {
+    // Info-ZIP always sets the data-descriptor flag (check byte: the DOS
+    // time's high byte). This fixture has it clear: the check byte is the
+    // CRC's high byte, which differs from the time's.
+    let mut session = listed(fixture("zipcrypto-crc-check.zip"));
+    let secret = index_of(&session, "secret.txt");
+    let empty = index_of(&session, "empty.txt");
+    assert_eq!(
+        read(&mut session, secret, Some(TEST_PASSWORD)),
+        (fixture_secret(), PieceStep::Verified)
+    );
+    assert_eq!(
+        read(&mut session, empty, Some(TEST_PASSWORD)),
+        (Vec::new(), PieceStep::Verified)
+    );
+    let mut refused = 0;
+    for i in 0..16 {
+        let candidate = format!("wrong-{i}");
+        if check(&mut session, secret, &candidate) == PasswordStep::Wrong {
+            assert_eq!(
+                read(&mut session, secret, Some(&candidate)),
+                (Vec::new(), PieceStep::WrongPassword)
+            );
+            refused += 1;
+        }
+    }
+    assert!(
+        refused >= 14,
+        "only {refused} of 16 wrong passwords were refused at once"
+    );
+}
+
+#[test]
+fn check_password_on_a_damaged_header_is_damaged() {
+    // A local header that disagrees with the central directory cannot be
+    // judged: the check says so, never "accepted".
+    let mut bytes = fixture("zipcrypto.zip");
+    let name_at = 30;
+    bytes[name_at] ^= 0x20;
+    let mut session = listed(bytes);
+    assert_eq!(check(&mut session, 0, TEST_PASSWORD), PasswordStep::Damaged);
+}

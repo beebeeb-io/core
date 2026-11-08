@@ -219,7 +219,10 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   `WasmArchiveSession` (range reads through `need_bytes`, the preview model, `openEntry`) and
   `WasmArchiveExtraction` (stage each file, upload it only on `file_end`, drop it on `file_skipped`).
   `zip`, `tar`, `tgz` and `gz` now preview on every platform (`previewableBatchFor`), so web shows the
-  archive preview for all four.
+  archive preview for all four. `checkPassword` can answer `damaged` (the entry's headers are damaged;
+  the password cannot be judged). A protected file whose password passed its check byte but failed its
+  CRC comes back as `file_skipped`, then `need_password` (`wrong`), then `file_begin` again for the
+  same `node`: drop what was staged on `file_skipped` and stage afresh on the next `file_begin`.
 
 ### Added
 

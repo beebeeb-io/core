@@ -233,6 +233,7 @@ enum PasswordStepJs {
     NeedBytes { start: u64, end: u64 },
     Accepted,
     Wrong,
+    Damaged,
     NotNeeded,
     Io { message: String },
 }
@@ -781,8 +782,9 @@ impl WasmArchiveSession {
     }
 
     /// Whether `password` opens entry `index`: `{kind: "need_bytes", start,
-    /// end}`, `"accepted"`, `"wrong"`, `"not_needed"` or `{kind: "io",
-    /// message}`.
+    /// end}`, `"accepted"`, `"wrong"`, `"damaged"` (the entry's headers
+    /// are damaged: the password cannot be judged), `"not_needed"` or
+    /// `{kind: "io", message}`.
     #[wasm_bindgen(js_name = checkPassword)]
     pub fn check_password(&mut self, index: u32, password: String) -> Result<JsValue, JsError> {
         let password = ArchivePassword::new(password);
@@ -793,6 +795,7 @@ impl WasmArchiveSession {
             },
             PasswordStep::Accepted => PasswordStepJs::Accepted,
             PasswordStep::Wrong => PasswordStepJs::Wrong,
+            PasswordStep::Damaged => PasswordStepJs::Damaged,
             PasswordStep::NotNeeded => PasswordStepJs::NotNeeded,
             PasswordStep::Io(message) => PasswordStepJs::Io { message },
         };

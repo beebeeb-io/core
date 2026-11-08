@@ -39,6 +39,13 @@ const FLAG_STRONG_ENCRYPTION: u16 = 1 << 6;
 const FLAG_UTF8: u16 = 1 << 11;
 const FLAG_CD_ENCRYPTED: u16 = 1 << 13;
 
+/// A ZipCrypto entry proves a password only when its CRC-32 covers at
+/// least this much data: CRC-32 is one-to-one on four bytes, so a wrong
+/// key's garbage then matches by chance about once in 2^32 entries. With
+/// less data the CRC can only be matched by a few values, and with none
+/// it matches anything; the one check byte (1 in 256) is all that is left.
+const ZIPCRYPTO_PROOF_BYTES: u64 = 4;
+
 const METHOD_STORED: u16 = 0;
 const METHOD_DEFLATE: u16 = 8;
 const METHOD_AES: u16 = 99;
@@ -597,8 +604,11 @@ struct Body {
 /// One zip entry's decoder.
 pub(crate) struct ZipDecoder {
     loc: ZipLocator,
-    /// The password's encodings to try, in order (UTF-8, then CP437).
+    /// The password's encodings to try, in order
+    /// ([`super::password::ArchivePassword::candidates`]).
     passwords: Vec<Zeroizing<Vec<u8>>>,
+    /// Which of `passwords` opened the cipher.
+    opened_with: Option<usize>,
     state: DecState,
 }
 
@@ -607,16 +617,26 @@ impl ZipDecoder {
         Self {
             loc,
             passwords,
+            opened_with: None,
             state: DecState::Local,
         }
     }
 
-    /// Whether the password opens this entry's encryption header: `true`
-    /// once the cipher is open (or the local header cannot even be read,
-    /// which the read itself reports as corrupt), `false` when no encoding
-    /// passes the quick check.
-    pub(crate) fn check<S: ByteSource + ?Sized>(&mut self, source: &mut S) -> Result<bool, Miss> {
-        Ok(!matches!(self.open(source)?, Some(PieceStep::WrongPassword)))
+    /// Which password encoding opened the cipher (an index into the
+    /// candidates it was made with); `None` for a plain entry or before
+    /// the cipher is open.
+    pub(crate) fn opened_with(&self) -> Option<usize> {
+        self.opened_with
+    }
+
+    /// Whether the entry is ZipCrypto with no data under it: its CRC
+    /// covers nothing, so only the one check byte guards the password.
+    pub(crate) fn proves_password(&self) -> bool {
+        match self.loc.cipher {
+            EntryCipher::None => false,
+            EntryCipher::ZipCrypto => self.loc.uncompressed_size >= ZIPCRYPTO_PROOF_BYTES,
+            EntryCipher::Aes { .. } => true,
+        }
     }
 
     pub(crate) fn next_piece<S: ByteSource + ?Sized>(&mut self, source: &mut S) -> PieceStep {
@@ -727,9 +747,13 @@ impl ZipDecoder {
                 match self
                     .passwords
                     .iter()
-                    .find_map(|p| zipcrypto::open_header(p, &fixed, check))
+                    .enumerate()
+                    .find_map(|(i, p)| zipcrypto::open_header(p, &fixed, check).map(|keys| (i, keys)))
                 {
-                    Some(keys) => (Decryption::Zip(keys), data_start + 12, data_end),
+                    Some((i, keys)) => {
+                        self.opened_with = Some(i);
+                        (Decryption::Zip(keys), data_start + 12, data_end)
+                    }
                     None => return Ok(Err(PieceStep::WrongPassword)),
                 }
             }
@@ -747,13 +771,17 @@ impl ZipDecoder {
                 match self
                     .passwords
                     .iter()
-                    .find_map(|p| winzip_aes::open(p, bits, salt, verifier))
+                    .enumerate()
+                    .find_map(|(i, p)| winzip_aes::open(p, bits, salt, verifier).map(|aes| (i, aes)))
                 {
-                    Some(aes) => (
-                        Decryption::Aes(Box::new(aes)),
-                        data_start + salt_len as u64 + 2,
-                        data_end - AUTH_CODE_LEN as u64,
-                    ),
+                    Some((i, aes)) => {
+                        self.opened_with = Some(i);
+                        (
+                            Decryption::Aes(Box::new(aes)),
+                            data_start + salt_len as u64 + 2,
+                            data_end - AUTH_CODE_LEN as u64,
+                        )
+                    }
                     None => return Ok(Err(PieceStep::WrongPassword)),
                 }
             }

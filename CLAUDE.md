@@ -100,8 +100,13 @@ Secrets, input and bindings:
   local header that disagrees with it is refused); a file is published only after its entry reads
   `Verified` (zip: CRC-32, and for AES the authentication code; a tar entry has no checksum of its
   own, and a tgz's gzip CRC-32 covers the whole stream, so a mismatch fails the run as `Damaged`
-  after the files before it were published); a password is an `ArchivePassword` (zeroized, not
-  `Clone`, never logged, never stored); the limits in `archives::limits` are core's, never raised by a
+  after the files before it were published); a driver stages extracted bytes under a name the sync
+  engine ignores (`<name>.bbtmp`, never the final name), renames or uploads only on `FileEnd`, and
+  deletes on `FileSkipped`, cancel or failure (the native service stages
+  `archive-<run>-<node>.bbtmp`, 0600); `PieceStep::Data` and `ExtractStep::FileData` print their
+  length, never bytes; a ZipCrypto entry proves a password only when its CRC covers 4 bytes or more
+  (an empty one passes any key its check byte lets through); a password is an `ArchivePassword`
+  (zeroized, not `Clone`, never logged, never stored); the limits in `archives::limits` are core's, never raised by a
   client; hostile numbers use checked arithmetic. The old extension-based `archive` reader is gone;
   never bring back a second archive parser.
 - `MasterKey` and `FileKey` are not `Clone`; intermediate key buffers are `Zeroizing`; crypto paths

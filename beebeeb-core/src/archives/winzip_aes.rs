@@ -6,15 +6,28 @@
 //! salt into the AES key, the HMAC key and the verifier. The data is
 //! AES-CTR with a little-endian counter starting at 1, and the code is the
 //! first 10 bytes of HMAC-SHA1 over the ciphertext. Built on core's own
-//! `aes`, `hmac`, `sha1` and `subtle`; every derived key is wiped on drop.
+//! `aes` (key schedule wiped on drop), `subtle`, and `hmac` 0.13 with
+//! `sha1` 0.11, both with their `zeroize` feature: each HMAC's inner and
+//! outer SHA-1 states and its input buffer are wiped on drop. Every
+//! derived key is held in `Zeroizing`.
+//!
+//! Residual: `hmac` 0.13's `new_from_slice` builds the padded key block
+//! (the key XOR ipad, then XOR opad) in a stack local it does not wipe,
+//! once per PBKDF2 run (the password) and once per entry (the MAC key);
+//! intermediate digest outputs are stack copies too.
 
-use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
-use hmac::{Hmac, Mac};
-use sha1::Sha1;
+use aes::cipher::{BlockEncrypt, KeyInit as _, generic_array::GenericArray};
+use archive_hmac::{Hmac, KeyInit, Mac};
+use archive_sha1::Sha1;
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, Zeroizing};
 
 type HmacSha1 = Hmac<Sha1>;
+
+/// PBKDF2 refused its inputs (HMAC takes keys of any length, so this does
+/// not happen; it is answered, never ignored).
+#[derive(Debug)]
+pub(crate) struct KeyRefused;
 
 pub(crate) const AUTH_CODE_LEN: usize = 10;
 const ITERATIONS: u32 = 1000;
@@ -49,7 +62,7 @@ pub(crate) struct AesDecryptor {
 pub(crate) fn open(password: &[u8], bits: u16, salt: &[u8], verifier: [u8; 2]) -> Option<AesDecryptor> {
     let key_len = usize::from(bits / 8);
     let mut derived = Zeroizing::new(vec![0u8; 2 * key_len + 2]);
-    pbkdf2_hmac_sha1(password, salt, ITERATIONS, &mut derived);
+    pbkdf2_hmac_sha1(password, salt, ITERATIONS, &mut derived).ok()?;
     if !bool::from(derived[2 * key_len..].ct_eq(&verifier)) {
         return None;
     }
@@ -60,7 +73,7 @@ pub(crate) fn open(password: &[u8], bits: u16, salt: &[u8], verifier: [u8; 2]) -
         256 => Cipher::Aes256(aes::Aes256::new_from_slice(key).ok()?),
         _ => return None,
     };
-    let mac = <HmacSha1 as Mac>::new_from_slice(&derived[key_len..2 * key_len]).ok()?;
+    let mac = <HmacSha1 as KeyInit>::new_from_slice(&derived[key_len..2 * key_len]).ok()?;
     Some(AesDecryptor {
         cipher,
         mac,
@@ -100,11 +113,10 @@ impl AesDecryptor {
     }
 }
 
-/// PBKDF2 (RFC 8018) with HMAC-SHA1 as the PRF.
-fn pbkdf2_hmac_sha1(password: &[u8], salt: &[u8], iterations: u32, out: &mut [u8]) {
-    let Ok(keyed) = <HmacSha1 as Mac>::new_from_slice(password) else {
-        return;
-    };
+/// PBKDF2 (RFC 8018) with HMAC-SHA1 as the PRF. On `Err` nothing was
+/// derived and `out` must not be used.
+fn pbkdf2_hmac_sha1(password: &[u8], salt: &[u8], iterations: u32, out: &mut [u8]) -> Result<(), KeyRefused> {
+    let keyed = <HmacSha1 as KeyInit>::new_from_slice(password).map_err(|_| KeyRefused)?;
     for (block_index, chunk) in out.chunks_mut(20).enumerate() {
         let mut mac = keyed.clone();
         mac.update(salt);
@@ -121,11 +133,24 @@ fn pbkdf2_hmac_sha1(password: &[u8], salt: &[u8], iterations: u32, out: &mut [u8
         }
         chunk.copy_from_slice(&t[..chunk.len()]);
     }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::pbkdf2_hmac_sha1;
+
+    /// The HMAC-SHA1 states (the PBKDF2 key, as good as the password, and
+    /// each entry's MAC key) wipe themselves when dropped: an HMAC is two
+    /// keyed SHA-1 states (inner, outer) and a buffer of input not yet
+    /// hashed.
+    #[test]
+    fn hmac_sha1_states_wipe_on_drop() {
+        fn wipes_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+        wipes_on_drop::<archive_sha1::block_api::Sha1Core>();
+        wipes_on_drop::<archive_hmac::digest::block_api::Buffer<archive_hmac::block_api::HmacCore<archive_sha1::Sha1>>>(
+        );
+    }
 
     /// RFC 6070's PBKDF2-HMAC-SHA1 vectors.
     #[test]
@@ -142,7 +167,7 @@ mod tests {
         ];
         for (password, salt, iterations, expected) in rows {
             let mut out = vec![0u8; expected.len() / 2];
-            pbkdf2_hmac_sha1(password, salt, iterations, &mut out);
+            pbkdf2_hmac_sha1(password, salt, iterations, &mut out).expect("HMAC takes any key");
             assert_eq!(hex::encode(out), expected, "{iterations} iterations");
         }
     }

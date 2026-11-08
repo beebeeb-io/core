@@ -1004,9 +1004,55 @@
       "refusal": null
     },
     {
+      "file": "zipcrypto-cp437-quick-check.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "first.txt",
+          "path": "first.txt",
+          "kind": "file",
+          "size": "140",
+          "cipher": "zipcrypto",
+          "skip": null
+        },
+        {
+          "display_path": "second.txt",
+          "path": "second.txt",
+          "kind": "file",
+          "size": "160",
+          "cipher": "zipcrypto",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
       "file": "zipcrypto-cp437.zip",
       "format": "zip",
       "entries": [
+        {
+          "display_path": "secret.txt",
+          "path": "secret.txt",
+          "kind": "file",
+          "size": "1000",
+          "cipher": "zipcrypto",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "zipcrypto-crc-check.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "empty.txt",
+          "path": "empty.txt",
+          "kind": "file",
+          "size": "0",
+          "cipher": "zipcrypto",
+          "skip": null
+        },
         {
           "display_path": "secret.txt",
           "path": "secret.txt",

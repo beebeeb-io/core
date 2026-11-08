@@ -17,26 +17,67 @@ use super::source::ByteRange;
 /// let password = ArchivePassword::new("typed by the person".to_string());
 /// let copy = password.clone();
 /// ```
-pub struct ArchivePassword(Zeroizing<String>);
+pub struct ArchivePassword {
+    secret: Zeroizing<String>,
+    /// The encoding an entry's own CRC or authentication code proved;
+    /// tried first from then on.
+    proven: Option<Encoding>,
+}
+
+/// One way to turn the typed password into bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Encoding {
+    Utf8,
+    Cp437,
+}
 
 impl ArchivePassword {
     pub fn new(secret: String) -> Self {
-        Self(Zeroizing::new(secret))
+        Self {
+            secret: Zeroizing::new(secret),
+            proven: None,
+        }
     }
 
-    /// The byte encodings to try, in order, each wiped when dropped: the
+    /// The encodings to try, in order: the proven one first, then the
     /// UTF-8 bytes, then, when the password has a non-ASCII character, its
-    /// CP437 bytes once (old Windows ZipCrypto tools used the OEM code
-    /// page). No trimming and no normalisation: the password is used as
-    /// typed.
-    pub(crate) fn candidates(&self) -> Vec<Zeroizing<Vec<u8>>> {
-        let mut candidates = vec![Zeroizing::new(self.0.as_bytes().to_vec())];
-        if !self.0.is_ascii()
-            && let Some(cp437) = encode_cp437(&self.0)
-        {
-            candidates.push(cp437);
+    /// CP437 bytes (old Windows ZipCrypto tools used the OEM code page).
+    fn order(&self) -> Vec<Encoding> {
+        let mut order = vec![Encoding::Utf8];
+        if !self.secret.is_ascii() {
+            order.push(Encoding::Cp437);
         }
-        candidates
+        if self.proven == Some(Encoding::Cp437) {
+            order.reverse();
+        }
+        order
+    }
+
+    /// The byte encodings to try, in [`Self::order`], each wiped when
+    /// dropped. No trimming and no normalisation: the password is used as
+    /// typed. A CP437 encoding the password cannot have is left out.
+    pub(crate) fn candidates(&self) -> Vec<Zeroizing<Vec<u8>>> {
+        self.order()
+            .into_iter()
+            .filter_map(|encoding| match encoding {
+                Encoding::Utf8 => Some(Zeroizing::new(self.secret.as_bytes().to_vec())),
+                Encoding::Cp437 => encode_cp437(&self.secret),
+            })
+            .collect()
+    }
+
+    /// An entry read with candidate `tried` (an index into this
+    /// password's [`Self::candidates`]) passed its own CRC or
+    /// authentication code: try that encoding first from now on.
+    pub(crate) fn note_proven(&mut self, tried: usize) {
+        let available: Vec<Encoding> = self
+            .order()
+            .into_iter()
+            .filter(|encoding| *encoding == Encoding::Utf8 || encode_cp437(&self.secret).is_some())
+            .collect();
+        if let Some(encoding) = available.get(tried) {
+            self.proven = Some(*encoding);
+        }
     }
 }
 
@@ -56,6 +97,10 @@ pub enum PasswordStep {
     Accepted,
     /// The password does not open the entry.
     Wrong,
+    /// The entry's headers are damaged (they disagree with the central
+    /// directory, or end early): the password cannot be judged, and
+    /// reading the entry reports it damaged.
+    Damaged,
     /// The entry is not protected.
     NotNeeded,
     /// The source failed (a disk or network error): the password was not

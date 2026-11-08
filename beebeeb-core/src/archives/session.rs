@@ -321,13 +321,12 @@ impl<S: ByteSource> ArchiveSession<S> {
             return PasswordStep::NotNeeded;
         }
         let mut decoder = ZipDecoder::new((**locator).clone(), password.candidates());
-        match decoder.check(&mut self.source) {
-            Ok(true) => PasswordStep::Accepted,
-            Ok(false) => PasswordStep::Wrong,
+        match decoder.open(&mut self.source) {
+            Ok(None) => PasswordStep::Accepted,
+            Ok(Some(PieceStep::WrongPassword)) => PasswordStep::Wrong,
+            Ok(Some(_)) | Err(Miss::Truncated) => PasswordStep::Damaged,
             Err(Miss::Need(range)) => PasswordStep::NeedBytes(range),
             Err(Miss::Io(e)) => PasswordStep::Io(e),
-            // A damaged entry cannot be judged; its read reports Corrupt.
-            Err(Miss::Truncated) => PasswordStep::Accepted,
         }
     }
 
@@ -417,8 +416,9 @@ pub(crate) fn tar_entry(header: &TarHeader) -> (ArchiveEntry, Locator) {
     (entry, locator)
 }
 
-/// What an entry reader gives next.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What an entry reader gives next. `Debug` shows a piece's length, never
+/// the person's plaintext.
+#[derive(Clone, PartialEq, Eq)]
 pub enum PieceStep {
     /// Plaintext, at most 64 KiB. Not yet verified: stage it, never
     /// publish it before `Verified`.
@@ -436,6 +436,20 @@ pub enum PieceStep {
     Skipped(SkipReason),
     /// The source failed.
     Io(String),
+}
+
+impl std::fmt::Debug for PieceStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PieceStep::Data(bytes) => write!(f, "Data({} bytes)", bytes.len()),
+            PieceStep::NeedBytes(range) => f.debug_tuple("NeedBytes").field(range).finish(),
+            PieceStep::Verified => f.write_str("Verified"),
+            PieceStep::Corrupt => f.write_str("Corrupt"),
+            PieceStep::WrongPassword => f.write_str("WrongPassword"),
+            PieceStep::Skipped(reason) => f.debug_tuple("Skipped").field(reason).finish(),
+            PieceStep::Io(message) => f.debug_tuple("Io").field(message).finish(),
+        }
+    }
 }
 
 pub(crate) enum EntryDecoder {
@@ -458,6 +472,24 @@ pub(crate) enum EntryDecoder {
 }
 
 impl EntryDecoder {
+    /// Which password encoding opened the entry's cipher (an index into
+    /// the candidates it was made with), once open.
+    pub(crate) fn opened_with(&self) -> Option<usize> {
+        match self {
+            EntryDecoder::Zip(decoder) => decoder.opened_with(),
+            _ => None,
+        }
+    }
+
+    /// Whether this entry passing its own check proves the password: an
+    /// AES entry, or a ZipCrypto entry whose CRC covers enough data.
+    pub(crate) fn proves_password(&self) -> bool {
+        match self {
+            EntryDecoder::Zip(decoder) => decoder.proves_password(),
+            _ => false,
+        }
+    }
+
     /// Open the entry before its first byte (a zip's local header and
     /// encryption header): `None` when it can be read, else the step that
     /// ends or delays it.

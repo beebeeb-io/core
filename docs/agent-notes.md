@@ -319,9 +319,14 @@ List, preview and extract zip, tar, tgz and gz (`2026-11-07-core-archives-design
 sans-I/O over a `ByteSource`: native sources block (`ReadSeekSource`); push drivers (web) answer
 `NeedBytes` through `SuppliedBytes`, at most `MAX_SUPPLIED_BYTES`, and every step is atomic, so a miss is
 retried, never half-applied. Detection is by magic bytes, never the extension. Zip entries are decoded by
-core's own push pipeline (raw inflate, CRC-32, WinZip AES on `aes`/`hmac`/`sha1`, ZipCrypto) because zip 9's
-readers borrow the archive and collapse duplicate names; zip 9 is the writer and the tests' reference
-reader. Names go through `archives::names` (design §6.1); the planner numbers clashes with
+core's own push pipeline (raw inflate, CRC-32, WinZip AES on `aes` 0.8 and `hmac` 0.13 / `sha1` 0.11 with
+`zeroize`, ZipCrypto) because zip 9's readers borrow the archive and collapse duplicate names; zip 9 is
+the writer and the tests' reference reader. Passwords: `ArchivePassword` tries UTF-8, then CP437, and
+once an entry proved one encoding it tries that one first. An entry proves the password only when its
+own check covers data (AES; ZipCrypto with 4 or more bytes under its CRC). A protected entry that passed
+its check byte and failed its CRC, before any entry proved the password, is skipped once
+(`FileSkipped`), the person is asked again, and the entry is read again; `check_password` answers
+`Damaged` for headers it cannot judge. Names go through `archives::names` (design §6.1); the planner numbers clashes with
 `name_clash::numbered_name`; `Extraction` hands a file over (`FileEnd`) only after it verified, and binds
 the run to one archive version. The preview model and every word (`ArchiveText`, 63 keys) are core's.
 Vectors: `test-vectors/archives_v1.json` and the fixtures in `test-vectors/archives/`, written by

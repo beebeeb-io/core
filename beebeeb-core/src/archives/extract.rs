@@ -103,8 +103,9 @@ pub struct ExtractSummary {
     pub renamed: Vec<(String, String)>,
 }
 
-/// What the driver does next.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What the driver does next. `Debug` shows a piece's length, never the
+/// person's plaintext.
+#[derive(Clone, PartialEq, Eq)]
 pub enum ExtractStep {
     /// Supply these bytes to the source, then step again.
     NeedBytes(ByteRange),
@@ -137,7 +138,11 @@ pub enum ExtractStep {
     FileEnd {
         node: u32,
     },
-    /// Drop whatever was staged for this file.
+    /// Drop whatever was staged for this file. A protected file whose
+    /// password passed its check byte but not its CRC is skipped this way
+    /// once, then asked for again (`NeedPassword` with `wrong`) and begun
+    /// again (`FileBegin`, same `node`); the summary counts only the
+    /// final outcome.
     FileSkipped {
         node: u32,
         reason: SkipReason,
@@ -147,6 +152,51 @@ pub enum ExtractStep {
     /// `upload_finished`.
     Waiting,
     Finished(ExtractSummary),
+}
+
+impl std::fmt::Debug for ExtractStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExtractStep::NeedBytes(range) => f.debug_tuple("NeedBytes").field(range).finish(),
+            ExtractStep::NeedPassword { entry, wrong } => f
+                .debug_struct("NeedPassword")
+                .field("entry", entry)
+                .field("wrong", wrong)
+                .finish(),
+            ExtractStep::CreateFolder { node, parent, name } => f
+                .debug_struct("CreateFolder")
+                .field("node", node)
+                .field("parent", parent)
+                .field("name", name)
+                .finish(),
+            ExtractStep::FileBegin {
+                node,
+                parent,
+                name,
+                size,
+            } => f
+                .debug_struct("FileBegin")
+                .field("node", node)
+                .field("parent", parent)
+                .field("name", name)
+                .field("size", size)
+                .finish(),
+            ExtractStep::FileData { node, bytes } => f
+                .debug_struct("FileData")
+                .field("node", node)
+                .field("bytes", &format_args!("{} bytes", bytes.len()))
+                .finish(),
+            ExtractStep::FileEnd { node } => f.debug_struct("FileEnd").field("node", node).finish(),
+            ExtractStep::FileSkipped { node, reason } => f
+                .debug_struct("FileSkipped")
+                .field("node", node)
+                .field("reason", reason)
+                .finish(),
+            ExtractStep::Progress(progress) => f.debug_tuple("Progress").field(progress).finish(),
+            ExtractStep::Waiting => f.write_str("Waiting"),
+            ExtractStep::Finished(summary) => f.debug_tuple("Finished").field(summary).finish(),
+        }
+    }
 }
 
 /// The archive the extraction is bound to: one file at one version.
@@ -164,6 +214,29 @@ struct Current {
     /// For a tgz entry: whether the shared walker reached its header.
     tgz_found: bool,
     began: bool,
+    /// Once the cipher is open: which password encoding opened it, and
+    /// whether the entry passing its check proves the password.
+    opened_with: Option<usize>,
+    proves_password: bool,
+    /// Bytes given out for this entry so far (taken back if it is read
+    /// again).
+    bytes: u64,
+}
+
+impl Current {
+    fn new(node: u32, entry: u32, encrypted: bool) -> Self {
+        Self {
+            node,
+            entry,
+            encrypted,
+            decoder: None,
+            tgz_found: false,
+            began: false,
+            opened_with: None,
+            proves_password: false,
+            bytes: 0,
+        }
+    }
 }
 
 /// Naming state for entries a tgz holds past its (incomplete) listing.
@@ -181,6 +254,9 @@ pub struct Extraction<S: ByteSource> {
     password: Option<ArchivePassword>,
     password_proven: bool,
     ask_wrong: bool,
+    /// Protected entries already read again after a password that passed
+    /// their check byte failed their CRC (each is read again once).
+    retried: HashSet<u32>,
     folders: VecDeque<u32>,
     awaiting: Option<u32>,
     tried: HashMap<u32, TakenNames>,
@@ -219,6 +295,7 @@ impl<S: ByteSource> Extraction<S> {
             password,
             password_proven: false,
             ask_wrong: false,
+            retried: HashSet::new(),
             folders: VecDeque::new(),
             awaiting: None,
             tried: HashMap::new(),
@@ -457,14 +534,7 @@ impl<S: ByteSource> Extraction<S> {
                     .listing()
                     .and_then(|l| l.entries.get(entry as usize))
                     .is_some_and(|e| e.cipher.is_encrypted());
-                self.current = Some(Current {
-                    node,
-                    entry,
-                    encrypted,
-                    decoder: None,
-                    tgz_found: false,
-                    began: false,
-                });
+                self.current = Some(Current::new(node, entry, encrypted));
             } else if let Some(step) = self.after_planned_files() {
                 return step;
             } else if !self.uploading.is_empty() {
@@ -521,6 +591,10 @@ impl<S: ByteSource> Extraction<S> {
             }
             let current = self.current.as_mut().expect("current file");
             current.began = true;
+            if let Some(decoder) = current.decoder.as_ref() {
+                current.opened_with = decoder.opened_with();
+                current.proves_password = decoder.proves_password();
+            }
             let planned = &self.plan.nodes[node as usize];
             return ExtractStep::FileBegin {
                 node,
@@ -540,12 +614,23 @@ impl<S: ByteSource> Extraction<S> {
                     return self.skip_current(SkipReason::Bomb);
                 }
                 self.bytes_done = total;
+                if let Some(current) = self.current.as_mut() {
+                    current.bytes += bytes.len() as u64;
+                }
                 ExtractStep::FileData { node, bytes }
             }
             PieceStep::Verified => {
-                let encrypted = self.current.as_ref().is_some_and(|c| c.encrypted);
-                if encrypted {
+                if let Some(current) = self.current.as_ref()
+                    && current.encrypted
+                    && current.proves_password
+                {
+                    // Only a check over real data proves the password: an
+                    // empty ZipCrypto entry passes under any key that
+                    // passes its check byte.
                     self.password_proven = true;
+                    if let (Some(tried), Some(password)) = (current.opened_with, self.password.as_mut()) {
+                        password.note_proven(tried);
+                    }
                 }
                 self.current = None;
                 self.uploading.insert(node);
@@ -556,11 +641,11 @@ impl<S: ByteSource> Extraction<S> {
             PieceStep::WrongPassword => self.wrong_password(),
             PieceStep::Corrupt => {
                 let encrypted = self.current.as_ref().is_some_and(|c| c.encrypted);
-                if encrypted && !self.password_proven {
-                    // A wrong password that passed the quick check: never
-                    // published, and the next protected entry asks again.
-                    self.password = None;
-                    self.ask_wrong = true;
+                if encrypted && !self.password_proven && self.retried.insert(node) {
+                    // A wrong password that passed the check byte: the
+                    // staged bytes are dropped, the person is asked again,
+                    // and this entry is read again with the new password.
+                    return self.retry_current();
                 }
                 if tgz {
                     // A damaged gzip stream cannot be read past this point.
@@ -624,6 +709,24 @@ impl<S: ByteSource> Extraction<S> {
         ExtractStep::NeedPassword { entry, wrong: true }
     }
 
+    /// Drop the current entry's attempt (the driver deletes what it
+    /// staged on `FileSkipped`, which is not counted as a skip), forget
+    /// the password, and queue the entry to be read first once a new
+    /// password arrives.
+    fn retry_current(&mut self) -> ExtractStep {
+        let Some(current) = self.current.take() else {
+            return ExtractStep::Waiting;
+        };
+        self.bytes_done = self.bytes_done.saturating_sub(current.bytes);
+        self.files.push_front(current.node);
+        self.password = None;
+        self.ask_wrong = true;
+        ExtractStep::FileSkipped {
+            node: current.node,
+            reason: SkipReason::Corrupt,
+        }
+    }
+
     fn skip_current(&mut self, reason: SkipReason) -> ExtractStep {
         let Some(current) = self.current.take() else {
             return ExtractStep::Waiting;
@@ -653,12 +756,9 @@ impl<S: ByteSource> Extraction<S> {
             if let Some(node) = self.tail.as_mut().and_then(|t| t.pending.take()) {
                 let planned = &self.plan.nodes[node as usize];
                 self.current = Some(Current {
-                    node,
-                    entry: u32::MAX,
-                    encrypted: false,
-                    decoder: None,
                     tgz_found: true,
                     began: true,
+                    ..Current::new(node, u32::MAX, false)
                 });
                 return Some(ExtractStep::FileBegin {
                     node,
