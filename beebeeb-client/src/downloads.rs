@@ -8,10 +8,7 @@ use std::{
 };
 
 use beebeeb_core::{
-    chunk_stream::{
-        ChunkDecryptor, ExpectedChunkFormat, RangeOpener, VersionCounterStatus, check_version_counter,
-        open_version_chunk,
-    },
+    chunk_stream::{ChunkDecryptor, ExpectedChunkFormat, RangeOpener, VersionCounterStatus, check_version_counter},
     direct_transfer::{Geometry, Outcome, PinnedRetry, RetryDecision},
     download::{DownloadFailure, checked_frame_size_with_budget},
     encrypt::{NameMetadata, decrypt_file_metadata},
@@ -235,6 +232,12 @@ impl DownloadService {
             .await
     }
 
+    /// Plaintext bytes `range` of a v2 file for a video player, up to the
+    /// archive output budget. The one release path of [`Self::read_range`]
+    /// (core Never break): core's `RangeOpener` opens frame 0 first (I3),
+    /// refuses a geometry no real version has before anything is fetched (I2)
+    /// and releases only frames it authenticated at their index, for the one
+    /// version the file's authenticated metadata commits to.
     pub async fn video_range(&self, file: &DownloadFile, range: Range<u64>) -> Result<Vec<u8>, DownloadServiceError> {
         validate_description(file)?;
         if range.start > range.end || range.end > file.size_bytes {
@@ -243,73 +246,15 @@ impl DownloadService {
         if range.is_empty() {
             return Ok(Vec::new());
         }
-        if file.chunk_size_bytes == 0
-            || file.chunk_count == 0
-            || range.end.saturating_sub(range.start) > self.budget.archive_output_bytes
-        {
+        if file.chunk_size_bytes == 0 || file.chunk_count == 0 {
             return Err(DownloadServiceError::InvalidDescription);
         }
-        let session_key = self.client.session_key()?;
-        let metadata = self.metadata(file, &session_key)?;
-        self.check_counter_before_authentication(file, &metadata)?;
-        if metadata.chunk_format != ExpectedChunkFormat::V2 || metadata.version.is_none() {
+        let mut reader = self.range_reader(file)?;
+        if reader.metadata.chunk_format != ExpectedChunkFormat::V2 || reader.metadata.version.is_none() {
             return Err(DownloadServiceError::InvalidDescription);
         }
-        if let Some(DownloadResult::HandOff {
-            frame_size,
-            context_limit,
-        }) = self.check_budget(file)?
-        {
-            return Err(DownloadServiceError::HandOff {
-                frame_size,
-                context_limit,
-            });
-        }
-        let first =
-            u32::try_from(range.start / file.chunk_size_bytes).map_err(|_| DownloadServiceError::InvalidDescription)?;
-        let last = u32::try_from((range.end - 1) / file.chunk_size_bytes)
-            .map_err(|_| DownloadServiceError::InvalidDescription)?;
-        let file_key = derive_file_key(session_key.master_key(), file.file_id.as_bytes());
-        let mut selected = Vec::new();
-        for index in first..=last {
-            let expected_frame = share_frame_len(index, file.chunk_count, file.size_bytes, file.chunk_size_bytes)?;
-            let frame = self
-                .fetch_chunk(file, index, expected_frame, session_key.generation())
-                .await?;
-            if frame.len() as u64 != expected_frame {
-                return Err(DownloadServiceError::Truncated);
-            }
-            let plain = open_version_chunk(
-                &file_key,
-                &file.file_id,
-                &metadata,
-                index,
-                index + 1 == file.chunk_count,
-                &frame,
-            )
-            .map_err(|_| DownloadServiceError::Truncated)?;
-            let expected_plain = expected_frame
-                .checked_sub(28)
-                .ok_or(DownloadServiceError::InvalidDescription)?;
-            if plain.len() as u64 != expected_plain {
-                return Err(DownloadServiceError::Truncated);
-            }
-            selected.extend_from_slice(&plain);
-        }
-        let start_offset = usize::try_from(range.start % file.chunk_size_bytes)
-            .map_err(|_| DownloadServiceError::InvalidDescription)?;
-        let wanted = usize::try_from(range.end - range.start).map_err(|_| DownloadServiceError::InvalidDescription)?;
-        let end = start_offset
-            .checked_add(wanted)
-            .ok_or(DownloadServiceError::InvalidDescription)?;
-        if end > selected.len() {
-            return Err(DownloadServiceError::Truncated);
-        }
-        if !session_key.is_current(&self.client) {
-            return Err(ClientError::StaleAccount.into());
-        }
-        self.observe_authenticated_counter(file, &metadata)?;
-        Ok(selected[start_offset..end].to_vec())
+        self.read_with_cap(&mut reader, range, self.budget.archive_output_bytes)
+            .await
     }
 
     /// Plaintext bytes `range` of `file`, v1 or v2, through core's `RangeOpener` (core Never
@@ -371,6 +316,17 @@ impl DownloadService {
         reader: &mut RangeReader,
         range: Range<u64>,
     ) -> Result<Vec<u8>, DownloadServiceError> {
+        let cap = range_read_cap(&reader.file);
+        self.read_with_cap(reader, range, cap).await
+    }
+
+    /// [`Self::read_with`] for a range of at most `cap` bytes.
+    async fn read_with_cap(
+        &self,
+        reader: &mut RangeReader,
+        range: Range<u64>,
+        cap: u64,
+    ) -> Result<Vec<u8>, DownloadServiceError> {
         let file = reader.file.clone();
         if range.start > range.end || range.end > file.size_bytes {
             return Err(DownloadServiceError::InvalidDescription);
@@ -378,7 +334,7 @@ impl DownloadService {
         if range.is_empty() {
             return Ok(Vec::new());
         }
-        if range.end - range.start > range_read_cap(&file) {
+        if range.end - range.start > cap {
             return Err(DownloadServiceError::InvalidDescription);
         }
         let session_key = self.client.session_key()?;

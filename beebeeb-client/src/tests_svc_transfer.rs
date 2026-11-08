@@ -965,8 +965,11 @@ async fn replaying_authenticated_version_four_after_five_is_refused() {
     ));
 }
 
+/// `video_range` releases plaintext only through core's `RangeOpener` (core
+/// Never break): frame 0 is opened first (I3), even for a range in chunk 1,
+/// and a geometry no real version has is refused before anything is fetched.
 #[tokio::test]
-async fn video_range_refuses_zero_stride_and_fetches_only_selected_v2_chunks() {
+async fn video_range_opens_frame_zero_first_and_refuses_a_false_geometry() {
     use crate::downloads::{DownloadFile, DownloadService, DownloadServiceError};
     use beebeeb_core::{
         chunk_stream::{ChunkEncryptor, ExpectedChunkFormat},
@@ -978,13 +981,14 @@ async fn video_range_refuses_zero_stride_and_fetches_only_selected_v2_chunks() {
     let master = Arc::new(MasterKey::from_bytes([0x71; 32]));
     #[allow(deprecated)]
     let mut encryptor = ChunkEncryptor::for_push_with_chunk_size(&master, FILE_ID, 8, 4).unwrap();
-    let _first = encryptor.push_chunk(b"abcd").unwrap().data;
+    let first = encryptor.push_chunk(b"abcd").unwrap().data;
     let second = encryptor.push_chunk(b"efgh").unwrap().data;
     let commitment = encryptor.version_commitment_after(None).unwrap();
     encryptor.finish().unwrap();
     let metadata =
         encrypt_name_with_version(&master, FILE_ID, "video.bin", None, ExpectedChunkFormat::V2, commitment).unwrap();
-    let transport = Arc::new(ScriptedTransport::json(200, second));
+    let transport = Arc::new(ScriptedTransport::json(200, first));
+    transport.push_json(200, second);
     let client = Arc::new(Client::new(ClientConfig::for_tests(), transport.clone()).unwrap());
     client.set_authentication("token", "owner").unwrap();
     let root = tempdir().unwrap();
@@ -1007,8 +1011,15 @@ async fn video_range_refuses_zero_stride_and_fetches_only_selected_v2_chunks() {
     };
     assert_eq!(service.video_range(&file, 4..8).await.unwrap(), b"efgh");
     let requests = transport.requests();
-    assert_eq!(requests.len(), 1);
-    assert!(requests[0].path().contains("/chunks/1?"));
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0].path().contains("/chunks/0?"), "frame 0 first");
+    assert!(requests[1].path().contains("/chunks/1?"));
+
+    // Three chunks of 4 bytes cannot hold 8 bytes: refused before a fetch.
+    let mut false_geometry = file.clone();
+    false_geometry.chunk_count = 3;
+    assert!(service.video_range(&false_geometry, 4..8).await.is_err());
+    assert_eq!(transport.requests().len(), 2);
 
     file.chunk_size_bytes = 0;
     assert!(matches!(
