@@ -124,9 +124,8 @@ pub struct BackupConfiguration {
     /// `X-Beebeeb-Device-Id` (mobile: `getDeviceId()`). The server keys this
     /// device's photo-backup map by it; without it every device of the
     /// account would share one map, and one phone's photo ids would hide
-    /// another's. Core never makes one up. Checked by [`Self::new`]: 1 to 128
-    /// visible ASCII characters.
-    pub device_id: String,
+    /// another's. Core never makes one up.
+    pub device_id: BackupDeviceId,
     /// When backups were turned on on this device, server clock, ms (backup
     /// spec Amendment 12c). With no pass yet, only notices newer than core's
     /// `first_pass_baseline` of this and [`Self::legacy_last_backup_ms`]
@@ -142,14 +141,10 @@ impl BackupConfiguration {
         if folder.id.is_empty() {
             return Err(BackupError::NotInBackups);
         }
-        let device_id = device_id.into();
-        if !valid_device_id(&device_id) {
-            return Err(BackupError::InvalidDeviceId);
-        }
         Ok(Self {
             folder,
             wifi_only,
-            device_id,
+            device_id: BackupDeviceId::new(device_id)?,
             setup_at_ms: None,
             legacy_last_backup_ms: None,
         })
@@ -163,12 +158,28 @@ impl BackupConfiguration {
     }
 }
 
-/// A device id the server keys by as sent: 1 to 128 visible ASCII
-/// characters (nothing it would trim, nothing a header cannot carry).
-fn valid_device_id(device_id: &str) -> bool {
-    !device_id.is_empty()
-        && device_id.len() <= MAX_DEVICE_ID_BYTES
-        && device_id.bytes().all(|byte| byte.is_ascii_graphic())
+/// A device id the server keys by exactly as sent: 1 to 128 visible ASCII
+/// characters, nothing it would trim and nothing a header cannot carry (the
+/// server reads anything else as missing, the account's shared `''` map).
+/// Only [`Self::new`] makes one, so no path sends an unchecked id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupDeviceId(String);
+
+impl BackupDeviceId {
+    pub fn new(device_id: impl Into<String>) -> Result<Self, BackupError> {
+        let device_id = device_id.into();
+        let valid = !device_id.is_empty()
+            && device_id.len() <= MAX_DEVICE_ID_BYTES
+            && device_id.bytes().all(|byte| byte.is_ascii_graphic());
+        if !valid {
+            return Err(BackupError::InvalidDeviceId);
+        }
+        Ok(Self(device_id))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Where an asset's backup copy stands. Only [`Self::UploadFailed`] and an
@@ -256,6 +267,15 @@ pub enum BackupError {
     InvalidDeviceId,
     #[error("another backup service is running on this upload service")]
     AlreadyRunning,
+    /// The backup is off (`reason`: show core's `backup_stop_words`), and the
+    /// service could not finish the stop when it started, so it was not made.
+    /// Making it again retries.
+    #[error("the backup is off and its uploads could not be cancelled yet")]
+    StopUnfinished {
+        reason: BackupStopReason,
+        #[source]
+        cause: Box<BackupError>,
+    },
     #[error("the Backups folder could not be checked")]
     Client(#[from] crate::ClientError),
     #[error("the asset source failed")]
@@ -339,7 +359,9 @@ impl BackupService {
     /// Make the service. Create it when the upload service is made, before
     /// any upload resumes: a backup stopped before a crash (its stop saved,
     /// its uploads not yet cancelled) cancels them here, before they can
-    /// publish.
+    /// publish. When that cancel fails (the store fails), there is no service:
+    /// [`BackupError::StopUnfinished`] carries the stop's reason, so the app
+    /// can still show its words; making the service again retries it.
     fn start(
         client: Arc<Client>,
         uploads: Arc<UploadService>,
@@ -361,10 +383,20 @@ impl BackupService {
             pass_lock: tokio::sync::Mutex::new(()),
             _lease: lease,
         };
-        service.install_completion_handler()?;
-        if service.manifest.pass_state()?.stopped.is_some() {
-            service.finish_stop(crate::uploads::transfer_now_ms()?)?;
+        if let Some(stop) = service.manifest.pass_state()?.stopped {
+            let finished = crate::uploads::transfer_now_ms()
+                .map_err(BackupError::from)
+                .and_then(|now_ms| service.finish_stop(now_ms));
+            if let Err(cause) = finished {
+                return Err(BackupError::StopUnfinished {
+                    reason: stop.reason,
+                    cause: Box::new(cause),
+                });
+            }
         }
+        // Only a service that started takes the completions over: a refused
+        // or failed one leaves the previous handler in place.
+        service.install_completion_handler()?;
         Ok(service)
     }
 
@@ -384,7 +416,8 @@ impl BackupService {
             .lock()
             .map_err(|_| BackupError::State)?
             .device_id
-            .clone())
+            .as_str()
+            .to_owned())
     }
 
     pub fn configure(&self, configuration: BackupConfiguration) -> Result<(), BackupError> {
@@ -881,7 +914,7 @@ impl UploadCompletionHandler for BackupUploadCompletion {
         file_id: &'a str,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ()>> + Send + 'a>> {
         Box::pin(async move {
-            let device_id = self.configuration.lock().map_err(|_| ())?.device_id.clone();
+            let device_id = self.configuration.lock().map_err(|_| ())?.device_id.as_str().to_owned();
             mark_upload_completed(
                 &self.client,
                 &self.manifest,

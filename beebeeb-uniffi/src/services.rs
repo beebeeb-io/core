@@ -66,6 +66,7 @@ pub enum ServiceErrorKind {
     AnchorExpired,
     AnotherAccountOnDevice,
     Unavailable,
+    BackupStopUnfinished,
 }
 
 impl ServiceErrorKind {
@@ -86,6 +87,7 @@ impl ServiceErrorKind {
             Self::AnchorExpired => "anchor_expired",
             Self::AnotherAccountOnDevice => "another_account_on_device",
             Self::Unavailable => "unavailable",
+            Self::BackupStopUnfinished => "backup_stop_unfinished",
         }
     }
 }
@@ -129,6 +131,12 @@ pub enum ServiceError {
     AnotherAccountOnDevice,
     #[error("the service is unavailable")]
     Unavailable,
+    /// The backup is off and could not finish its stop when the backup
+    /// service was made, so none was made. `reason` is the stop's core wire
+    /// string: show `backup_stop_words` for it as for a stopped batch, then
+    /// make the service again later.
+    #[error("the backup is off ({reason}) and could not finish stopping")]
+    BackupStopUnfinished { reason: String },
 }
 
 impl ServiceError {
@@ -152,6 +160,7 @@ impl ServiceError {
             ServiceErrorKind::AnchorExpired => Self::AnchorExpired,
             ServiceErrorKind::AnotherAccountOnDevice => Self::AnotherAccountOnDevice,
             ServiceErrorKind::Unavailable => Self::Unavailable,
+            ServiceErrorKind::BackupStopUnfinished => Self::BackupStopUnfinished { reason: String::new() },
         }
     }
 
@@ -197,6 +206,11 @@ pub(crate) fn map_client_error(error: impl std::error::Error + 'static) -> Servi
             // One backup service per upload service, until the first is dropped.
             Some(beebeeb_client::backup::BackupError::AlreadyRunning) => {
                 return ServiceError::new(ServiceErrorKind::Unavailable);
+            }
+            Some(beebeeb_client::backup::BackupError::StopUnfinished { reason, .. }) => {
+                return ServiceError::BackupStopUnfinished {
+                    reason: reason.as_str().to_owned(),
+                };
             }
             _ => {}
         }

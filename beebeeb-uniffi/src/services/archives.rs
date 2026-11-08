@@ -98,6 +98,7 @@ fn service_kind(error: ServiceError) -> ServiceErrorKind {
         ServiceError::AnchorExpired => ServiceErrorKind::AnchorExpired,
         ServiceError::AnotherAccountOnDevice => ServiceErrorKind::AnotherAccountOnDevice,
         ServiceError::Unavailable => ServiceErrorKind::Unavailable,
+        ServiceError::BackupStopUnfinished { .. } => ServiceErrorKind::BackupStopUnfinished,
     }
 }
 

@@ -18,7 +18,8 @@ use crate::{
     Client, ClientConfig,
     backup::{
         Asset, AssetKind, AssetSnapshot, AssetSource, AssetSourceError, BackupAssetChange, BackupConfiguration,
-        BackupCopyState, BackupFolder, BackupService, BackupStop, MemoryBackupManifestStore, NOTICE_OVERLAP_MS,
+        BackupCopyState, BackupFolder, BackupManifestRecord, BackupManifestStore, BackupManifestStoreError,
+        BackupPassState, BackupService, BackupStop, MemoryBackupManifestStore, NOTICE_OVERLAP_MS,
     },
     test_support::{RouteAnswer, RoutedTransport, ScriptedTransport, json_answer},
     uploads::{NetworkKind, UploadService},
@@ -269,6 +270,43 @@ pub(crate) fn one_photo(path: &Path) -> AssetSnapshot {
     }
 }
 
+/// The platform's manifest store, whose writes can be made to fail.
+#[derive(Default)]
+pub(crate) struct FlakyStore {
+    inner: MemoryBackupManifestStore,
+    fail_writes: std::sync::atomic::AtomicBool,
+}
+
+impl FlakyStore {
+    fn write(&self) -> Result<(), BackupManifestStoreError> {
+        if self.fail_writes.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(BackupManifestStoreError::Unavailable);
+        }
+        Ok(())
+    }
+}
+
+impl BackupManifestStore for FlakyStore {
+    fn load(&self) -> Result<Vec<BackupManifestRecord>, BackupManifestStoreError> {
+        self.inner.load()
+    }
+    fn replace(&self, records: &[BackupManifestRecord]) -> Result<(), BackupManifestStoreError> {
+        self.write()?;
+        self.inner.replace(records)
+    }
+    fn load_pass_state(&self) -> Result<BackupPassState, BackupManifestStoreError> {
+        self.inner.load_pass_state()
+    }
+    fn save_pass_state(&self, state: &BackupPassState) -> Result<(), BackupManifestStoreError> {
+        self.write()?;
+        self.inner.save_pass_state(state)
+    }
+    fn clear(&self) -> Result<(), BackupManifestStoreError> {
+        self.write()?;
+        self.inner.clear()
+    }
+}
+
 pub(crate) struct Harness {
     _root: tempfile::TempDir,
     pub(crate) photo: PathBuf,
@@ -278,7 +316,7 @@ pub(crate) struct Harness {
     pub(crate) uploads: Arc<UploadService>,
     pub(crate) backup: BackupService,
     client: Arc<Client>,
-    store: Arc<MemoryBackupManifestStore>,
+    store: Arc<FlakyStore>,
     configuration: BackupConfiguration,
 }
 
@@ -319,7 +357,7 @@ pub(crate) fn harness_on(
     let source = Arc::new(Source::default());
     let config =
         configuration(BackupConfiguration::new(BackupFolder { id: CATEGORY.into() }, false, THIS_DEVICE).unwrap());
-    let store = Arc::new(MemoryBackupManifestStore::default());
+    let store = Arc::new(FlakyStore::default());
     let backup = BackupService::with_manifest_store(
         Arc::clone(&client),
         Arc::clone(&uploads),
@@ -346,6 +384,16 @@ impl Harness {
     /// The app restarts: the service is dropped and made again on the same
     /// manifest store and upload service.
     pub(crate) fn restart(self) -> Self {
+        self.try_restart().unwrap()
+    }
+
+    /// The platform's store writes fail from now on.
+    pub(crate) fn fail_store_writes(&self) {
+        self.store.fail_writes.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// [`Self::restart`], whose new service may be refused.
+    pub(crate) fn try_restart(self) -> Result<Self, crate::backup::BackupError> {
         let Self {
             _root,
             photo,
@@ -365,9 +413,8 @@ impl Harness {
             source.clone(),
             configuration.clone(),
             store.clone(),
-        )
-        .unwrap();
-        Self {
+        )?;
+        Ok(Self {
             _root,
             photo,
             server,
@@ -378,7 +425,7 @@ impl Harness {
             client,
             store,
             configuration,
-        }
+        })
     }
 
     /// A second backup service on the same upload service.

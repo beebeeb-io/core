@@ -487,14 +487,23 @@ impl BackupServiceHandle {
 impl NativeClientHandle {
     /// The native backup. Make it right after the upload service, before any
     /// transfer resumes: a backup stopped before a crash cancels its uploads
-    /// here, before they can publish.
+    /// here, before they can publish. When that cancel fails (the store
+    /// fails), no service is made and the error is `BackupStopUnfinished`:
+    /// its `reason` is the stop's core wire string, so show
+    /// `backup_stop_words` for it all the same, then try again later.
     ///
     /// One per upload service, and one per manifest store across processes
     /// too: a second while the first lives is refused (`unavailable`), and an
-    /// extension or a second process must never open the same store. Its
-    /// callbacks run while the service holds its locks: `manifest_store`'s
-    /// and `source`'s must not call back into this backup service, nor wait
-    /// on a thread that is inside `next_batch`. Either deadlocks.
+    /// extension or a second process must never open the same store. "Lives"
+    /// means while any handle holds it: this backup handle, and a service
+    /// coordinator made with it. Before making a new backup service on the
+    /// same upload service (after a sign-out and sign-in, or in a worker),
+    /// close the old coordinator and the old backup handle (Kotlin `close()`,
+    /// Swift: drop the last reference), or keep the service and call
+    /// `configure` on it. Its callbacks run while the service holds its
+    /// locks: `manifest_store`'s and `source`'s must not call back into this
+    /// backup service, nor wait on a thread that is inside `next_batch`.
+    /// Either deadlocks.
     pub fn backup(
         self: &Arc<Self>,
         uploads: Arc<UploadServiceHandle>,
@@ -894,6 +903,10 @@ impl ServiceCoordinatorHandle {
 
 #[uniffi::export]
 impl NativeClientHandle {
+    /// The coordinator keeps the backup service alive while it lives: close
+    /// it (Kotlin `close()`, Swift: drop the last reference) together with
+    /// the backup handle before making a new backup service on the same
+    /// upload service, or that is refused (`unavailable`).
     pub fn service_coordinator(
         self: &Arc<Self>,
         uploads: Arc<UploadServiceHandle>,
@@ -1067,111 +1080,4 @@ mod purge_callback_tests {
 }
 
 #[cfg(test)]
-mod backup_pass_state_tests {
-    use super::*;
-    use beebeeb_types::backup::BackupStopReason;
-
-    #[test]
-    fn a_stored_pass_state_round_trips_and_a_partial_one_is_refused() {
-        let stopped = BackupPassState {
-            last_pass_at_ms: Some(10),
-            stopped: Some(BackupStop {
-                reason: BackupStopReason::AccountLapsed,
-                through_ms: 20,
-            }),
-        };
-        let data = BackupPassStateData::from(stopped);
-        assert_eq!(data.stopped_reason.as_deref(), Some("account_lapsed"));
-        assert_eq!(pass_state(data), Some(stopped));
-        assert_eq!(
-            pass_state(BackupPassStateData::default()),
-            Some(BackupPassState::default())
-        );
-        for partial in [
-            BackupPassStateData {
-                stopped_reason: Some("account_lapsed".into()),
-                ..Default::default()
-            },
-            BackupPassStateData {
-                stopped_through_ms: Some(20),
-                ..Default::default()
-            },
-            BackupPassStateData {
-                stopped_reason: Some("a_reason_from_later".into()),
-                stopped_through_ms: Some(20),
-                ..Default::default()
-            },
-        ] {
-            assert_eq!(pass_state(partial), None);
-        }
-    }
-
-    /// Review r5, P2-1: what a record saw of its asset (rule 11's baseline)
-    /// crosses the platform both ways, with the `RemovedElsewhere` state.
-    #[test]
-    fn what_a_record_saw_of_its_asset_crosses_the_platform() {
-        struct Records(std::sync::Mutex<Vec<BackupManifestRecordData>>);
-        impl BackupManifestStoreCallback for Records {
-            fn load(&self) -> Option<Vec<BackupManifestRecordData>> {
-                Some(self.0.lock().unwrap().clone())
-            }
-            fn replace(&self, records: Vec<BackupManifestRecordData>) -> bool {
-                *self.0.lock().unwrap() = records;
-                true
-            }
-            fn load_pass_state(&self) -> Option<BackupPassStateData> {
-                Some(BackupPassStateData::default())
-            }
-            fn save_pass_state(&self, _: BackupPassStateData) -> bool {
-                true
-            }
-            fn clear(&self) -> bool {
-                true
-            }
-        }
-        struct Photos;
-        impl AssetSourceCallback for Photos {
-            fn snapshot(&self, _: AssetKindData, _: Option<String>, _: u64) -> Option<AssetSnapshotData> {
-                Some(AssetSnapshotData {
-                    complete: true,
-                    assets: vec![AssetData {
-                        local_identifier: "photo".into(),
-                        name: "photo.jpg".into(),
-                        mime_type: None,
-                        modified_ms: Some(7),
-                        size_bytes: Some(9),
-                    }],
-                    next_cursor: None,
-                })
-            }
-            fn export(&self, _: AssetKindData, _: String) -> Option<String> {
-                None
-            }
-        }
-
-        let snapshot = AssetSourceAdapter {
-            callback: Box::new(Photos),
-        }
-        .snapshot(AssetKind::Photo, None, 1)
-        .unwrap();
-        assert_eq!(
-            (snapshot.assets[0].modified_ms, snapshot.assets[0].size_bytes),
-            (Some(7), Some(9))
-        );
-
-        let store = BackupManifestStoreAdapter {
-            callback: Box::new(Records(std::sync::Mutex::new(Vec::new()))),
-        };
-        let record = BackupManifestRecord {
-            local_identifier: "photo".into(),
-            file_id: "copy".into(),
-            state: BackupCopyState::RemovedElsewhere,
-            local_present: true,
-            retry_count: 0,
-            modified_ms: Some(7),
-            size_bytes: Some(9),
-        };
-        store.replace(std::slice::from_ref(&record)).unwrap();
-        assert_eq!(store.load().unwrap(), vec![record]);
-    }
-}
+mod backup_pass_state_tests;

@@ -6,7 +6,7 @@
 use beebeeb_types::backup::BackupStopReason;
 
 use crate::{
-    backup::{BackupConfiguration, BackupCopyState, BackupError, BackupFolder, BackupStop},
+    backup::{BackupConfiguration, BackupCopyState, BackupDeviceId, BackupError, BackupFolder, BackupStop},
     tests_svc_backup_gate::{BackupServer, CATEGORY, CopyRow, THIS_DEVICE, harness, harness_on, one_photo},
 };
 
@@ -45,7 +45,7 @@ async fn a_photo_another_device_backed_up_under_the_same_id_is_still_uploaded() 
     let phone_a = harness_on(
         server.clone(),
         |c| BackupConfiguration {
-            device_id: "phone-a".into(),
+            device_id: BackupDeviceId::new("phone-a").unwrap(),
             ..c
         },
         &[],
@@ -57,7 +57,7 @@ async fn a_photo_another_device_backed_up_under_the_same_id_is_still_uploaded() 
     let phone_b = harness_on(
         server.clone(),
         |c| BackupConfiguration {
-            device_id: "phone-b".into(),
+            device_id: BackupDeviceId::new("phone-b").unwrap(),
             ..c
         },
         &[],
@@ -74,7 +74,10 @@ async fn a_photo_another_device_backed_up_under_the_same_id_is_still_uploaded() 
 }
 
 /// The server drops an id it would trim or one over 128 bytes, and files the
-/// rows under `""`: such an id is refused before anything is sent.
+/// rows under `""`: such an id is refused before anything is sent. The id is
+/// a `BackupDeviceId`, made only by its checked constructor, so a struct
+/// literal or `configure` cannot skip the check either (review r6, P3-1:
+/// `" phone"` reached the server through a struct literal).
 #[test]
 fn a_device_id_the_server_would_not_key_by_is_refused() {
     let folder = || BackupFolder { id: CATEGORY.into() };
@@ -85,6 +88,10 @@ fn a_device_id_the_server_would_not_key_by_is_refused() {
         "x".repeat(129),
         "tel\u{e9}fono".into(),
     ] {
+        assert!(
+            matches!(BackupDeviceId::new(bad.clone()), Err(BackupError::InvalidDeviceId)),
+            "{bad:?}"
+        );
         assert!(
             matches!(
                 BackupConfiguration::new(folder(), false, bad.clone()),
@@ -238,4 +245,37 @@ async fn a_stop_saved_before_a_crash_cancels_its_uploads_when_the_service_starts
     assert_eq!(h.uploads.active_backup_count().unwrap(), 0);
     assert_eq!(h.backup.manifest().copy_state("photo-1"), None);
     assert_eq!(h.backup.stopped().unwrap(), Some(BackupStopReason::EraseRequest));
+}
+
+/// Review r6, P3-3: the stop cannot be finished when the service starts (the
+/// store fails), so no service is made; the error still names the stop, so
+/// the app can show its words.
+#[tokio::test]
+async fn a_stop_the_service_cannot_finish_at_start_still_names_its_reason() {
+    let h = harness(|c| c, &[NEEDS]);
+    h.snapshot_photo();
+    assert_eq!(h.pass(1).await.queued, 1);
+    h.backup
+        .manifest()
+        .update_pass_state(|state| {
+            state.stopped = Some(BackupStop {
+                reason: BackupStopReason::AccountLapsed,
+                through_ms: 5,
+            });
+        })
+        .unwrap();
+    h.fail_store_writes();
+
+    let refused = h.try_restart().err().expect("no service while the stop cannot finish");
+
+    assert!(
+        matches!(
+            refused,
+            BackupError::StopUnfinished {
+                reason: BackupStopReason::AccountLapsed,
+                ..
+            }
+        ),
+        "{refused:?}"
+    );
 }
