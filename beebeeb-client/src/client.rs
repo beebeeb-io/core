@@ -356,6 +356,28 @@ impl Client {
             .await
     }
 
+    /// [`Self::execute`], with the answer's `Date` header: the server's clock
+    /// when it answered (second precision), `None` when the answer had none.
+    #[cfg(feature = "backup")]
+    pub(crate) async fn execute_with_date<Req, Res>(
+        &self,
+        endpoint: &Endpoint<Req, Res>,
+        body: &Req,
+    ) -> Result<(Res, Option<String>), ClientError>
+    where
+        Req: Serialize,
+        Res: DeserializeOwned,
+    {
+        let (answer, headers) = self
+            .execute_inner_with_headers(endpoint, body, None, RequestAuthentication::CurrentSession, None)
+            .await?;
+        let date = headers
+            .into_iter()
+            .find(|header| header.name.eq_ignore_ascii_case("date"))
+            .map(|header| header.value);
+        Ok((answer, date))
+    }
+
     async fn execute_inner<Req, Res>(
         &self,
         endpoint: &Endpoint<Req, Res>,
@@ -364,6 +386,29 @@ impl Client {
         request_authentication: RequestAuthentication<'_>,
         required_generation: Option<u64>,
     ) -> Result<Res, ClientError>
+    where
+        Req: Serialize,
+        Res: DeserializeOwned,
+    {
+        self.execute_inner_with_headers(
+            endpoint,
+            body,
+            confirmation,
+            request_authentication,
+            required_generation,
+        )
+        .await
+        .map(|(answer, _)| answer)
+    }
+
+    async fn execute_inner_with_headers<Req, Res>(
+        &self,
+        endpoint: &Endpoint<Req, Res>,
+        body: &Req,
+        confirmation: Option<&str>,
+        request_authentication: RequestAuthentication<'_>,
+        required_generation: Option<u64>,
+    ) -> Result<(Res, Vec<beebeeb_api::Header>), ClientError>
     where
         Req: Serialize,
         Res: DeserializeOwned,
@@ -395,6 +440,7 @@ impl Client {
         if captured_generation != self.generation() {
             return Err(ClientError::StaleAccount);
         }
+        let headers = answer.headers.clone();
         match endpoint.parse(answer) {
             Err(ApiError::Server(error)) if error.is_code("account_mismatch") => {
                 self.events.emit(EngineEvent::AccountMismatch);
@@ -404,7 +450,7 @@ impl Client {
                 self.events.emit(EngineEvent::SessionExpired);
                 Err(ClientError::Api(ApiError::Server(error)))
             }
-            result => result.map_err(ClientError::Api),
+            result => result.map(|parsed| (parsed, headers)).map_err(ClientError::Api),
         }
     }
 

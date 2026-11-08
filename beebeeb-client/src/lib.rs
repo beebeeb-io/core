@@ -76,6 +76,8 @@ mod tests_svc_archives;
 #[cfg(test)]
 mod tests_svc_auth;
 #[cfg(test)]
+mod tests_svc_backup_gate;
+#[cfg(test)]
 mod tests_svc_backups;
 #[cfg(test)]
 mod tests_svc_data;

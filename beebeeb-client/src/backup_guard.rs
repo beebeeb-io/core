@@ -71,21 +71,26 @@ impl Client {
     /// The depth below the flagged Backups root of the row `row` (`Some(0)`
     /// for the root itself, `None` for a row outside the tree).
     pub(crate) async fn backup_depth_of(&self, row: &FileEntry) -> Result<Option<usize>, GuardError> {
-        let mut steps = 0usize;
-        let mut current = row.clone();
+        Ok(self.backup_chain_of(row).await?.map(|chain| chain.len() - 1))
+    }
+
+    /// The rows from `row` up to the flagged Backups root, both included
+    /// (`[row]` for the root itself), or `None` for a row outside the tree.
+    pub(crate) async fn backup_chain_of(&self, row: &FileEntry) -> Result<Option<Vec<FileEntry>>, GuardError> {
+        let mut chain = vec![row.clone()];
         loop {
-            if system_role(&current) == Some(SystemRole::BackupsRoot) {
-                return Ok(Some(steps));
+            let current = chain.last().ok_or(GuardError::Unknown)?;
+            if system_role(current) == Some(SystemRole::BackupsRoot) {
+                return Ok(Some(chain));
             }
             let Some(parent) = current.parent_id.clone() else {
                 return Ok(None);
             };
-            steps = steps.checked_add(1).ok_or(GuardError::Unknown)?;
-            if steps > MAX_ANCESTORS {
+            if chain.len() > MAX_ANCESTORS {
                 return Err(GuardError::Unknown);
             }
-            current = match self.get_file(&parent).await {
-                Ok(parent) => parent,
+            match self.get_file(&parent).await {
+                Ok(parent) => chain.push(parent),
                 // Above a folder shared with this account sits the sharer's
                 // own folder, which this account cannot read. A shared tree is
                 // not this account's Backups tree: its root has no parent.
@@ -93,7 +98,7 @@ impl Client {
                     return Ok(None);
                 }
                 Err(error) => return Err(GuardError::Client(error)),
-            };
+            }
         }
     }
 

@@ -58,6 +58,18 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 - `RecoveryStateData` adds `Expired`: the server reports an attempt whose window to complete has passed
   as `expired`, and the status call returns that state instead of failing. Offer to start a new
   recovery.
+
+- The native backup passes core's pass gate before it queues anything (backup spec Amendments 12 and
+  12c). Each pass reads the `files_removed` and `backup_deleted` notices since its last pass (the
+  server's filtered `GET /api/v1/notifications`, LD-0141) and whether its device and category folders
+  are live. `BackupBatchData.stopped_reason` (a core wire string: show `backup_stop_words`, offer "Back
+  up again") means the backup is off and its unfinished uploads were cancelled; `check_failed` means
+  the notices could not be read and nothing was queued (show `backup_check_failed_words`). A stopped
+  backup stays off until `BackupServiceHandle.back_up_again()`. `BackupManifestStoreCallback` adds
+  `load_pass_state` and `save_pass_state` (`BackupPassStateData`, removed by `clear`), and
+  `BackupConfigurationData` adds `setup_at_ms` and `legacy_last_backup_ms` (server clock) for the first
+  pass's baseline. `BackupCopyStateData::Gone` is split into `Deleted` (removed on the server, never
+  uploaded again by the pass) and `UploadFailed` (retried at most three times).
 - Device link (UniFFI): `approve_device_link(id, scanned_qr, typed_code)` takes the raw text the camera
   scanned; `DeviceLinkQrData` and `DeviceLinkHandle.qr()` are removed (render `qr_payload()`). The QR
   now carries the device name: show `scanned_device_link_name(scanned_qr)` while the person confirms,
@@ -305,6 +317,10 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 - Backup scans page, deduplicate, export and enqueue lazily with a 64-upload cap. Failed and cancelled
   photo uploads retry at most three times, and successful completion is durable even when no backup
   completion handler is alive during a background wake.
+- The native backup no longer uploads again a copy the person trashed or deleted, and no longer runs
+  when the account was emptied: it stops on a `files_removed` or `backup_deleted` notice, or on a
+  device or category folder that is trashed or gone, and skips the pass when the notices cannot be
+  read. Before, trashing backup photos, or an emptied account, filled the account up again by itself.
 - Durable uploads remove safe orphan ciphertext, count invalid saved state as a terminal attempt, keep
   partial staging resumable, and can finish after the platform removes the plaintext export once all
   chunks and the staged hash are committed.

@@ -118,6 +118,11 @@ fn advanced_account_and_platform_services_are_opaque_handles() {
     }
     for symbol in [
         "BackupServiceHandle",
+        "pub fn back_up_again",
+        "pub fn stopped_reason",
+        "fn load_pass_state",
+        "fn save_pass_state",
+        "BackupPassStateData",
         "FileProviderServiceHandle",
         "AssetSourceCallback",
         "BackupManifestStoreCallback",

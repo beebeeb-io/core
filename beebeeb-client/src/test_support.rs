@@ -142,3 +142,52 @@ impl Transport for ScriptedTransport {
         })
     }
 }
+
+/// The answer a [`RoutedTransport`] route gives a request it handles.
+pub type RouteAnswer = Result<Answer, TransportError>;
+
+/// A route: `Some` answers the request, `None` passes it to the fallback.
+pub type Route = Arc<dyn Fn(&Request) -> Option<RouteAnswer> + Send + Sync>;
+
+/// A transport that answers what `route` handles and sends everything else to
+/// a [`ScriptedTransport`], whose request log then holds only those.
+#[derive(Clone)]
+pub struct RoutedTransport {
+    route: Route,
+    fallback: ScriptedTransport,
+    routed: Arc<Mutex<Vec<Request>>>,
+}
+
+impl RoutedTransport {
+    pub fn new(route: Route, fallback: ScriptedTransport) -> Self {
+        Self {
+            route,
+            fallback,
+            routed: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// The requests the route answered, in order.
+    pub fn routed(&self) -> Vec<Request> {
+        self.routed.lock().map(|routed| routed.clone()).unwrap_or_default()
+    }
+}
+
+impl Transport for RoutedTransport {
+    fn send<'a>(&'a self, request: Request, max_response_bytes: usize) -> TransportFuture<'a> {
+        match (self.route)(&request) {
+            Some(answer) => Box::pin(async move {
+                self.routed.lock().map_err(|_| TransportError::Network)?.push(request);
+                answer
+            }),
+            None => self.fallback.send(request, max_response_bytes),
+        }
+    }
+}
+
+/// A JSON answer with extra headers.
+pub fn json_answer(status: u16, headers: &[(&str, &str)], body: Vec<u8>) -> Answer {
+    let mut all = vec![Header::new("Content-Type", "application/json")];
+    all.extend(headers.iter().map(|(name, value)| Header::new(*name, *value)));
+    Answer::new(status, all, body)
+}

@@ -34,6 +34,7 @@ use crate::{
     },
     search::SearchService,
     test_support::ScriptedTransport,
+    tests_svc_backup_gate::{BackupServer, CATEGORY},
     thumbnails::{ImageCodec, ImageCodecError, ThumbnailService},
     uploads::{NetworkKind, UploadService},
 };
@@ -126,9 +127,8 @@ async fn backup_pages_a_hundred_thousand_assets_and_duplicate_checks() {
     assert_eq!(batch.queued, 0);
     assert!(!batch.snapshot_complete);
     assert_eq!(source.calls.load(Ordering::Relaxed), 1);
-    // Three reads place the backup folder in the Backups tree (once per
-    // service), then one duplicate check.
-    assert_eq!(transport.request_count(), 4);
+    // Past the folder and the gate (the backup server), one duplicate check.
+    assert_eq!(transport.request_count(), 1);
     assert!(uploads.list().unwrap().is_empty());
 }
 
@@ -144,25 +144,18 @@ fn backup_manifest_reopens_through_the_platform_persistence_seam() {
     assert_eq!(reopened.file_id("photo").as_deref(), Some("remote"));
 }
 
-/// The rows the backup service reads once to place its folder: a category
-/// folder, its device folder, and the flagged Backups root.
-fn answer_backup_folder_check(transport: &ScriptedTransport) {
-    for row in [
-        serde_json::json!({"id": "backups-root", "parent_id": null, "is_folder": true, "system_role": "backups_root"}),
-        serde_json::json!({"id": "device-folder", "parent_id": "backups-root", "is_folder": true}),
-        serde_json::json!({"id": "backup-folder", "parent_id": "device-folder", "is_folder": true}),
-    ] {
-        transport.respond_next_json(200, serde_json::to_vec(&row).unwrap());
-    }
-}
-
+/// A backup service writing into a category folder. The folder's place in
+/// the Backups tree and each pass's gate (its folders and the notices) are
+/// answered by a [`BackupServer`]; everything else by `transport`, whose log
+/// therefore holds only those requests.
 fn backup_service(
     transport: ScriptedTransport,
     source: Arc<dyn AssetSource>,
     root: &std::path::Path,
 ) -> (BackupService, Arc<UploadService>) {
-    answer_backup_folder_check(&transport);
-    let client = authenticated_client(transport);
+    let routed = BackupServer::default().transport(transport);
+    let client = Arc::new(Client::new(ClientConfig::for_tests(), Arc::new(routed)).unwrap());
+    client.set_authentication("token", "owner").unwrap();
     let uploads = Arc::new(
         UploadService::new_for_test(
             Arc::clone(&client),
@@ -172,13 +165,7 @@ fn backup_service(
         )
         .unwrap(),
     );
-    let config = BackupConfiguration::new(
-        BackupFolder {
-            id: "backup-folder".into(),
-        },
-        true,
-    )
-    .unwrap();
+    let config = BackupConfiguration::new(BackupFolder { id: CATEGORY.into() }, true).unwrap();
     (
         BackupService::new(client, Arc::clone(&uploads), source, config).unwrap(),
         uploads,
@@ -232,30 +219,6 @@ async fn incomplete_backup_snapshot_never_marks_missing_assets_deleted() {
 }
 
 #[tokio::test]
-async fn trashed_backup_copy_is_uploaded_again_even_if_it_was_seen_before() {
-    let root = tempdir().unwrap();
-    let path = root.path().join("photo.jpg");
-    std::fs::write(&path, b"photo").unwrap();
-    let transport = ScriptedTransport::json(200, br#"{"already_backed_up":["photo-1"]}"#.to_vec());
-    let source = Arc::new(Source::default());
-    source.snapshots.lock().unwrap().push_back(Ok(AssetSnapshot {
-        complete: true,
-        assets: vec![asset("photo-1", path)],
-        next_cursor: None,
-    }));
-    let (backup, uploads) = backup_service(transport, source, root.path());
-    backup
-        .manifest()
-        .remember("photo-1", "old-copy", BackupCopyState::Trashed)
-        .unwrap();
-
-    let batch = backup.next_batch(AssetKind::Photo, NetworkKind::WiFi, 1).await.unwrap();
-
-    assert_eq!(batch.queued, 1);
-    assert_eq!(uploads.list().unwrap().len(), 1);
-}
-
-#[tokio::test]
 async fn queued_backup_asset_is_not_enqueued_again() {
     let root = tempdir().unwrap();
     let path = root.path().join("photo.jpg");
@@ -281,8 +244,8 @@ async fn queued_backup_asset_is_not_enqueued_again() {
 
     assert_eq!(second.queued, 0);
     assert_eq!(uploads.list().unwrap().len(), 1);
-    // The folder is placed once (three reads) for both batches.
-    assert_eq!(transport.request_count(), 4);
+    // One duplicate check: the second batch has nothing to ask about.
+    assert_eq!(transport.request_count(), 1);
 }
 
 #[tokio::test]

@@ -9,6 +9,7 @@ pub mod file_requests;
 pub mod files;
 pub mod folder_links;
 pub mod invites;
+pub mod notifications;
 pub mod onboarding;
 pub mod photo_backup;
 pub mod previews;

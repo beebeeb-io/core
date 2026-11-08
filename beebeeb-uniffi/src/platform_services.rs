@@ -11,7 +11,7 @@ use beebeeb_client::{
     backup::{
         Asset, AssetKind, AssetSnapshot, AssetSource, AssetSourceError, BackupAssetChange, BackupBatch,
         BackupConfiguration, BackupCopyState, BackupEvent, BackupFolder, BackupManifestRecord, BackupManifestStore,
-        BackupManifestStoreError, BackupService,
+        BackupManifestStoreError, BackupPassState, BackupService, BackupStop,
     },
     file_provider::{
         DomainNotifier, DomainNotifierError, FileProviderChanges, FileProviderItem, FileProviderOutcome,
@@ -124,12 +124,16 @@ impl AssetSource for AssetSourceAdapter {
     }
 }
 
+/// `Trashed` and `Deleted`: the person removed the copy on the server, and
+/// the backup never uploads it again by itself. `UploadFailed`: the upload
+/// failed and is tried again (at most three times).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum BackupCopyStateData {
     Active,
     Queued,
     Trashed,
-    Gone,
+    Deleted,
+    UploadFailed,
 }
 
 impl From<BackupCopyStateData> for BackupCopyState {
@@ -138,7 +142,8 @@ impl From<BackupCopyStateData> for BackupCopyState {
             BackupCopyStateData::Active => Self::Active,
             BackupCopyStateData::Queued => Self::Queued,
             BackupCopyStateData::Trashed => Self::Trashed,
-            BackupCopyStateData::Gone => Self::Gone,
+            BackupCopyStateData::Deleted => Self::Deleted,
+            BackupCopyStateData::UploadFailed => Self::UploadFailed,
         }
     }
 }
@@ -149,9 +154,49 @@ impl From<BackupCopyState> for BackupCopyStateData {
             BackupCopyState::Active => Self::Active,
             BackupCopyState::Queued => Self::Queued,
             BackupCopyState::Trashed => Self::Trashed,
-            BackupCopyState::Gone => Self::Gone,
+            BackupCopyState::Deleted => Self::Deleted,
+            BackupCopyState::UploadFailed => Self::UploadFailed,
         }
     }
+}
+
+/// The backup pass gate's state (backup spec Amendments 12 and 12c), stored
+/// by the platform next to the manifest records and removed with them by
+/// `clear`. Times are on the server's clock, in milliseconds. A fresh store
+/// answers all `None`. `stopped_reason` is a core wire string
+/// (`backup_stop_words` renders it); with it, `stopped_through_ms` is set.
+#[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
+pub struct BackupPassStateData {
+    pub last_pass_at_ms: Option<i64>,
+    pub stopped_reason: Option<String>,
+    pub stopped_through_ms: Option<i64>,
+}
+
+impl From<BackupPassState> for BackupPassStateData {
+    fn from(value: BackupPassState) -> Self {
+        Self {
+            last_pass_at_ms: value.last_pass_at_ms,
+            stopped_reason: value.stopped.map(|stop| stop.reason.as_str().to_owned()),
+            stopped_through_ms: value.stopped.map(|stop| stop.through_ms),
+        }
+    }
+}
+
+/// A stored state that does not read back whole (an unknown reason, or a
+/// reason without its time) is refused, never read as "not stopped".
+fn pass_state(value: BackupPassStateData) -> Option<BackupPassState> {
+    let stopped = match (value.stopped_reason, value.stopped_through_ms) {
+        (None, None) => None,
+        (Some(reason), Some(through_ms)) => Some(BackupStop {
+            reason: beebeeb_types::backup::BackupStopReason::parse(&reason)?,
+            through_ms,
+        }),
+        _ => return None,
+    };
+    Some(BackupPassState {
+        last_pass_at_ms: value.last_pass_at_ms,
+        stopped,
+    })
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -163,10 +208,14 @@ pub struct BackupManifestRecordData {
     pub retry_count: u32,
 }
 
+/// `None` / `false` means the store failed. `clear` removes the records and
+/// the pass state.
 #[uniffi::export(callback_interface)]
 pub trait BackupManifestStoreCallback: Send + Sync {
     fn load(&self) -> Option<Vec<BackupManifestRecordData>>;
     fn replace(&self, records: Vec<BackupManifestRecordData>) -> bool;
+    fn load_pass_state(&self) -> Option<BackupPassStateData>;
+    fn save_pass_state(&self, state: BackupPassStateData) -> bool;
     fn clear(&self) -> bool;
 }
 
@@ -210,6 +259,20 @@ impl BackupManifestStore for BackupManifestStoreAdapter {
             .ok_or(BackupManifestStoreError::Unavailable)
     }
 
+    fn load_pass_state(&self) -> Result<BackupPassState, BackupManifestStoreError> {
+        self.callback
+            .load_pass_state()
+            .and_then(pass_state)
+            .ok_or(BackupManifestStoreError::Unavailable)
+    }
+
+    fn save_pass_state(&self, state: &BackupPassState) -> Result<(), BackupManifestStoreError> {
+        self.callback
+            .save_pass_state((*state).into())
+            .then_some(())
+            .ok_or(BackupManifestStoreError::Unavailable)
+    }
+
     fn clear(&self) -> Result<(), BackupManifestStoreError> {
         self.callback
             .clear()
@@ -220,14 +283,22 @@ impl BackupManifestStore for BackupManifestStoreAdapter {
 
 /// `folder_id` is this device's folder under the Backups root (a device or
 /// category folder); the service checks that before it queues anything.
+/// `setup_at_ms` (when backups were turned on on this device) and
+/// `legacy_last_backup_ms` (an upgraded device's last backup under the old
+/// engine) are on the server's clock, in milliseconds; they set the first
+/// pass's baseline (core `backup_first_pass_baseline`). Unknown is `None`.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct BackupConfigurationData {
     pub folder_id: String,
     pub wifi_only: bool,
+    pub setup_at_ms: Option<i64>,
+    pub legacy_last_backup_ms: Option<i64>,
 }
 
 fn backup_configuration(value: BackupConfigurationData) -> Result<BackupConfiguration, ServiceError> {
-    BackupConfiguration::new(BackupFolder { id: value.folder_id }, value.wifi_only).map_err(|_| invalid())
+    BackupConfiguration::new(BackupFolder { id: value.folder_id }, value.wifi_only)
+        .map(|configuration| configuration.with_first_pass(value.setup_at_ms, value.legacy_last_backup_ms))
+        .map_err(|_| invalid())
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -236,6 +307,10 @@ pub struct BackupAssetChangeData {
     pub state: BackupCopyStateData,
 }
 
+/// `stopped_reason`: the backup is off (a core wire string; show
+/// `backup_stop_words` and offer "Back up again"). `check_failed`: the
+/// notices could not be read, so nothing was queued (show
+/// `backup_check_failed_words`; the next pass checks again).
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct BackupBatchData {
     pub kind: AssetKindData,
@@ -243,6 +318,8 @@ pub struct BackupBatchData {
     pub already_backed_up: u64,
     pub deferred_for_network: bool,
     pub snapshot_complete: bool,
+    pub stopped_reason: Option<String>,
+    pub check_failed: bool,
 }
 
 impl From<BackupBatch> for BackupBatchData {
@@ -253,6 +330,8 @@ impl From<BackupBatch> for BackupBatchData {
             already_backed_up: value.already_backed_up as u64,
             deferred_for_network: value.deferred_for_network,
             snapshot_complete: value.snapshot_complete,
+            stopped_reason: value.stopped.map(|reason| reason.as_str().to_owned()),
+            check_failed: value.check_failed,
         }
     }
 }
@@ -346,6 +425,19 @@ impl BackupServiceHandle {
             .block_on(self.service.next_batch(kind.into(), network(&network_name)?, now_ms))
             .map(Into::into)
             .map_err(map_client_error)
+    }
+
+    /// Why the backup is off (a core wire string), or `None` while it is on.
+    pub fn stopped_reason(&self) -> Result<Option<String>, ServiceError> {
+        self.service
+            .stopped()
+            .map(|reason| reason.map(|reason| reason.as_str().to_owned()))
+            .map_err(map_client_error)
+    }
+
+    /// "Back up again" after a stop: the backup starts fresh.
+    pub fn back_up_again(&self) -> Result<(), ServiceError> {
+        self.service.back_up_again().map_err(map_client_error)
     }
 }
 
@@ -919,5 +1011,46 @@ mod purge_callback_tests {
         let callback = RefusesPurge;
         let adapter = AccountDataPurgerAdapter { callback: &callback };
         assert!(adapter.purge_account_data().is_err());
+    }
+}
+
+#[cfg(test)]
+mod backup_pass_state_tests {
+    use super::*;
+    use beebeeb_types::backup::BackupStopReason;
+
+    #[test]
+    fn a_stored_pass_state_round_trips_and_a_partial_one_is_refused() {
+        let stopped = BackupPassState {
+            last_pass_at_ms: Some(10),
+            stopped: Some(BackupStop {
+                reason: BackupStopReason::AccountLapsed,
+                through_ms: 20,
+            }),
+        };
+        let data = BackupPassStateData::from(stopped);
+        assert_eq!(data.stopped_reason.as_deref(), Some("account_lapsed"));
+        assert_eq!(pass_state(data), Some(stopped));
+        assert_eq!(
+            pass_state(BackupPassStateData::default()),
+            Some(BackupPassState::default())
+        );
+        for partial in [
+            BackupPassStateData {
+                stopped_reason: Some("account_lapsed".into()),
+                ..Default::default()
+            },
+            BackupPassStateData {
+                stopped_through_ms: Some(20),
+                ..Default::default()
+            },
+            BackupPassStateData {
+                stopped_reason: Some("a_reason_from_later".into()),
+                stopped_through_ms: Some(20),
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(pass_state(partial), None);
+        }
     }
 }
