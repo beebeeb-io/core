@@ -1,3 +1,33 @@
+# beebeeb-wasm / uniffi exports — branch `feat/v2-auth-wiring`
+
+Desktop v2 B10b: server PR #422's routes wired into `account_flows` and `auth_flow`, and the bindings for B11's
+`signup_flow` / `recovery_flow` (crypto rule 0). Measured against `main` at `e3eeb8b`.
+
+**Not additive: 2 signatures change** (the server now asks for more). Both in Rust, UniFFI and WASM:
+- `AccountFlow::delete_account(password)` → `delete_account(password, code?)`: it now calls
+  `POST /auth/account/delete-request` (the server mails a link; nothing is scheduled), outcome `deletion_requested`.
+- `AccountFlow::set_activity_logging(on)` → `set_activity_logging(on, password?)`: turning it off steps up inside.
+
+## WASM
+
+- **removed: 0; changed: 2** (`AccountFlow.deleteAccount`, `AccountFlow.setActivityLogging`)
+- **added:** classes `SignupFlow`, `PhraseRecovery`; functions `signupPolicyRequest`, `recoveryUnknownWordPositions`;
+  methods `AccountFlow.regenerateBackupCodes`, `deleteConfirm`, `deleteCancel`; `AuthApproval.deny`, `onDenyResponse`.
+- Outcome kinds added: `deletion_requested` (`link_expires_at`), `deletion_cancelled` (`not_restored`);
+  `deletion_scheduled` gains `cancel_until`. Error codes added: `second_factor_required`, `link_invalid`,
+  `confirmation_required`.
+
+## UniFFI
+
+- **removed: 0; changed: 2** (`AccountFlowHandle.delete_account`, `set_activity_logging`; record
+  `AccountFlowOutcome` gains `cancel_until`, `link_expires_at`, `not_restored`)
+- **added:** objects `SignupFlowHandle`, `PhraseRecoveryHandle`; record `SignupCreatedFfi`; enum `RecoveredFfi`;
+  error `SignupFlowFfiError::Flow { code, retry_after_secs }`; functions `signup_policy_request`,
+  `recovery_unknown_word_positions`; methods `AccountFlowHandle.regenerate_backup_codes`, `delete_confirm`,
+  `delete_cancel`; `ApprovalFlow.deny`, `on_deny_response`.
+
+---
+
 # beebeeb-wasm / uniffi exports — branch `feat/v2-auth-flows`
 
 Desktop v2 B10 (`docs/superpowers/specs/2026-11-08-desktop-v2-design.md`, crypto review rule 0): the sign-in,

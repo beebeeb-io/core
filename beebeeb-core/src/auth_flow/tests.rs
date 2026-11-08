@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 use base64::Engine;
 use serde_json::{Value, json};
 
-use super::device::{Approval, ApproveStep, DeviceFacts, DeviceRequest, DeviceRequestEvent};
+use super::device::{Approval, ApproveStep, DENY_PATH, DeviceFacts, DeviceRequest, DeviceRequestEvent};
 use super::sign_in::{SignIn, SignInStep, can_submit};
 use super::step_up::{StepUp, StepUpPurpose, StepUpStep};
 use super::*;
@@ -354,4 +354,29 @@ fn device_codes_normalize_like_the_server() {
     assert_eq!(normalize_device_code("K7QM4WTD").as_deref(), Some("K7QM-4WTD"));
     assert!(normalize_device_code("K7QM-4WT").is_none());
     assert!(normalize_device_code("K7QM-4WT!").is_none());
+}
+
+#[test]
+fn deny_posts_the_code_and_maps_not_found() {
+    let (denial, req) = Approval::deny(" k7qm-4wtd ").unwrap();
+    assert_eq!((req.method, req.path.as_str()), (Method::Post, DENY_PATH));
+    assert_eq!(req.auth, RequestAuth::Session);
+    assert!(req.confirm_token.is_none());
+    assert_eq!(req.body.as_ref().unwrap()["user_code"], "K7QM-4WTD");
+    assert!(
+        denial
+            .on_response(HttpResponse::new(200, json!({ "denied": true })))
+            .is_ok()
+    );
+    let (denial, _) = Approval::deny("K7QM-4WTD").unwrap();
+    assert_eq!(
+        denial.on_response(HttpResponse::new(404, json!({}))).err(),
+        Some(AuthFlowError::RequestNotFound)
+    );
+    let (denial, _) = Approval::deny("K7QM-4WTD").unwrap();
+    assert!(denial.on_response(HttpResponse::new(200, json!({}))).is_err());
+    assert_eq!(
+        Approval::deny("nope").err().map(|e| e.code()),
+        Some("request_not_found")
+    );
 }

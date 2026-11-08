@@ -31,6 +31,9 @@ pub struct AccountFlowOutcome {
     pub backup_codes: Vec<String>,
     pub revoked: u32,
     pub shred_after: Option<String>,
+    pub cancel_until: Option<String>,
+    pub link_expires_at: Option<String>,
+    pub not_restored: Vec<String>,
 }
 
 #[derive(uniffi::Record)]
@@ -59,6 +62,9 @@ fn step(s: af::HostStep) -> AccountFlowStep {
             backup_codes: o.backup_codes,
             revoked: o.revoked,
             shred_after: o.shred_after,
+            cancel_until: o.cancel_until,
+            link_expires_at: o.link_expires_at,
+            not_restored: o.not_restored,
         }),
     }
 }
@@ -157,16 +163,41 @@ impl AccountFlowHandle {
         self.begin(AccountFlow::set_display_name(&name))
     }
 
-    pub fn set_activity_logging(&self, on: bool) -> Result<AccountFlowStep, AccountFlowFfiError> {
-        self.begin(Ok(AccountFlow::set_activity_logging(on)))
+    /// Turning it off takes the password (a step-up inside); turning it on ignores it.
+    pub fn set_activity_logging(
+        &self,
+        on: bool,
+        password: Option<String>,
+    ) -> Result<AccountFlowStep, AccountFlowFfiError> {
+        self.begin(AccountFlow::set_activity_logging(on, password.as_deref()))
+    }
+
+    /// New backup codes with the current authenticator code; the authenticator stays.
+    pub fn regenerate_backup_codes(&self, code: String) -> Result<AccountFlowStep, AccountFlowFfiError> {
+        self.begin(AccountFlow::regenerate_backup_codes(&code))
     }
 
     pub fn verify_password(&self, password: String) -> Result<AccountFlowStep, AccountFlowFfiError> {
         self.begin(AccountFlow::verify_password(&password))
     }
 
-    pub fn delete_account(&self, password: String) -> Result<AccountFlowStep, AccountFlowFfiError> {
-        self.begin(AccountFlow::delete_account(&password))
+    /// Delete step 2: step-up + the second factor on a 2FA account; the server mails a link.
+    pub fn delete_account(
+        &self,
+        password: String,
+        code: Option<String>,
+    ) -> Result<AccountFlowStep, AccountFlowFfiError> {
+        self.begin(AccountFlow::delete_account(&password, code.as_deref()))
+    }
+
+    /// Delete step 3: the mailed link's token (or the whole link).
+    pub fn delete_confirm(&self, link_token: String) -> Result<AccountFlowStep, AccountFlowFfiError> {
+        self.begin(AccountFlow::delete_confirm(&link_token))
+    }
+
+    /// Undo a scheduled deletion with the same link.
+    pub fn delete_cancel(&self, link_token: String) -> Result<AccountFlowStep, AccountFlowFfiError> {
+        self.begin(AccountFlow::delete_cancel(&link_token))
     }
 
     pub fn resume(&self, status: u16, body_text: String) -> Result<AccountFlowStep, AccountFlowFfiError> {

@@ -34,6 +34,7 @@ pub const DEVICE_SOCKET_PATH: &str = "/api/v1/auth/cli";
 pub const PUBKEY_PATH: &str = "/api/v1/auth/cli-pubkey";
 pub const CLAIM_PATH: &str = "/api/v1/auth/cli-session";
 pub const RELAY_PATH: &str = "/api/v1/auth/cli-authorize";
+pub const DENY_PATH: &str = "/api/v1/auth/cli-deny";
 
 // ── The requesting side ──────────────────────────────────────────────────────
 
@@ -221,6 +222,35 @@ impl Approval {
     }
 }
 
+impl Approval {
+    /// Deny a waiting request by its code (DW-A09 "Denied"). The requesting device's socket
+    /// gets `{"error":"denied"}`. No step-up: denying grants nothing.
+    pub fn deny(code: &str) -> Result<(Denial, HttpRequest), AuthFlowError> {
+        let code = normalize_device_code(code).ok_or(AuthFlowError::RequestNotFound)?;
+        let req = HttpRequest::post(DENY_PATH, json!({ "user_code": code }), RequestAuth::Session);
+        Ok((Denial, req))
+    }
+}
+
+/// A sent denial, waiting for the server's answer.
+pub struct Denial;
+
+impl Denial {
+    /// `404` covers an unknown, expired or already-claimed code (the server counts each as a guess).
+    pub fn on_response(self, resp: HttpResponse) -> Result<(), AuthFlowError> {
+        if resp.status == 404 {
+            return Err(AuthFlowError::RequestNotFound);
+        }
+        if !resp.ok() {
+            return Err(AuthFlowError::from_status(&resp));
+        }
+        if resp.body.get("denied").and_then(|d| d.as_bool()) != Some(true) {
+            return Err(AuthFlowError::Protocol("deny not confirmed"));
+        }
+        Ok(())
+    }
+}
+
 pub struct ApprovalLookup {
     code: String,
 }
@@ -268,6 +298,12 @@ impl PendingApproval {
     /// Approve stays disabled until the typed code matches the request (DW-A13).
     pub fn code_matches(&self, typed: &str) -> bool {
         normalize_device_code(typed).as_deref() == Some(self.code.as_str())
+    }
+
+    /// Deny the request shown for review.
+    pub fn deny(self) -> (Denial, HttpRequest) {
+        let req = HttpRequest::post(DENY_PATH, json!({ "user_code": self.code }), RequestAuth::Session);
+        (Denial, req)
     }
 
     /// Approve: step up with the password (purpose `cli_device_approval`, bound to the code),
