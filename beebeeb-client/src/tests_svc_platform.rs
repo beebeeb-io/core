@@ -293,6 +293,19 @@ async fn successful_backup_transfer_marks_manifest_without_platform_callback() {
 
     let (upload_id, requests) = uploads.next_transfers(1, NetworkKind::WiFi, 2).await.unwrap().unwrap();
     assert_eq!(requests.len(), 1);
+    // Server task 1944 answers 426 to a chunk without the client labels the
+    // foreground requests carry (#74 r6, from server #417).
+    let label = |name: &str| {
+        requests[0]
+            .headers
+            .iter()
+            .find(|(header, _)| header == name)
+            .map(|(_, value)| value.as_str())
+    };
+    assert_eq!(
+        (label("X-Beebeeb-Client"), label("X-Beebeeb-Client-Version")),
+        (Some("test-client"), Some("1"))
+    );
     uploads
         .transfer_finished(upload_id, &requests[0].ticket, 200, None, None, &[], 3)
         .await

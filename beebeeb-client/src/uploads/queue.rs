@@ -19,6 +19,31 @@ impl UploadService {
         })
     }
 
+    /// Background chunk PUTs carry the client labels every foreground request
+    /// carries (`X-Beebeeb-Client`, `-Version`, `-OS`): the server's
+    /// minimum-version gate answers 426 to a replacement chunk without them.
+    /// Set when a request is handed out, so a chunk an older build staged
+    /// carries this build's labels. API routes only: a presigned storage URL
+    /// gets nothing extra.
+    fn label_transfers(&self, requests: &mut [TransferRequest]) {
+        let identity = self.client.identity();
+        let labels = [
+            ("X-Beebeeb-Client", Some(identity.name())),
+            ("X-Beebeeb-Client-Version", Some(identity.version())),
+            ("X-Beebeeb-Client-OS", identity.os()),
+        ];
+        for request in requests.iter_mut().filter(|request| request.url.starts_with("/api/")) {
+            request
+                .headers
+                .retain(|(name, _)| !labels.iter().any(|(label, _)| name.eq_ignore_ascii_case(label)));
+            for (label, value) in labels {
+                if let Some(value) = value {
+                    request.headers.push((label.to_owned(), value.to_owned()));
+                }
+            }
+        }
+    }
+
     /// One backup service per upload service: the lease, or `None` while
     /// another backup service holds it. The lease ends when its holder is
     /// dropped. Two would steal each other's completion handler and write over
@@ -345,7 +370,8 @@ impl UploadService {
             self.record_attempt_failure(transfer.id, "upload token did not match its session", now_ms)?;
             return Err(UploadServiceError::HostileChunkPlan);
         }
-        let requests = planner.next_transfers(limit, &token.token, u64::try_from(now_ms).unwrap_or(0));
+        let mut requests = planner.next_transfers(limit, &token.token, u64::try_from(now_ms).unwrap_or(0));
+        self.label_transfers(&mut requests);
         record.planner = Some(planner.to_bytes().map_err(map_background)?);
         self.persist(transfer.id, &record, now_ms)?;
         if requests.is_empty() {

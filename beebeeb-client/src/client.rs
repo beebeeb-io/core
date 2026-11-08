@@ -114,6 +114,11 @@ pub enum ClientError {
 }
 
 impl Client {
+    /// The client labels every request carries.
+    pub(crate) fn identity(&self) -> &beebeeb_api::ClientIdentity {
+        &self.config.identity
+    }
+
     fn request_builder(&self) -> RequestBuilder {
         RequestBuilder::new(self.config.identity.clone()).with_capabilities(NATIVE_CAPABILITIES)
     }
