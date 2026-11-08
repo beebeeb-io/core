@@ -468,6 +468,37 @@ impl UploadService {
         Ok(plan)
     }
 
+    /// Cancel every upload not yet done whose source file is under `root`
+    /// (an archive service's staged files, left by an earlier process), and
+    /// delete their staged chunks. How many were cancelled.
+    pub fn cancel_sources_under(&self, root: &std::path::Path, now_ms: i64) -> Result<usize, UploadServiceError> {
+        let ids: Vec<i64> = self
+            .store
+            .lock()
+            .map_err(|_| UploadServiceError::State)?
+            .transfers(Some(UPLOAD_KIND))
+            .map_err(|_| UploadServiceError::State)?
+            .into_iter()
+            .filter(|transfer| !matches!(transfer.state, TransferState::Succeeded | TransferState::Cancelled))
+            .filter(|transfer| {
+                decode_record(&transfer.payload).is_ok_and(|record| record.source_path.starts_with(root))
+            })
+            .map(|transfer| transfer.id)
+            .collect();
+        let mut cancelled = 0;
+        for id in ids {
+            // One that cannot be cancelled now fails on its own: its source
+            // is deleted next.
+            if let Ok(plan) = self.cancel(id, now_ms) {
+                cancelled += 1;
+                for path in plan.delete_files {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+        Ok(cancelled)
+    }
+
     pub fn list(&self) -> Result<Vec<UploadSummary>, UploadServiceError> {
         self.store
             .lock()

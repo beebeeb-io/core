@@ -16,9 +16,16 @@ hkdf = "0.12"
 # hkdf already depends on, so the lockfile gains no new package.
 hmac = "0.12"
 sha2 = "0.10"
-# SHA-1 ONLY to address the k-anonymity breach corpus (onboarding::breach): the corpus is
-# keyed by SHA-1 prefix. Never used for integrity or authentication.
+# SHA-1 for the k-anonymity breach corpus (onboarding::breach): the corpus is keyed by
+# SHA-1 prefix. Not used for integrity or authentication.
 sha1 = "0.10"
+# HMAC-SHA1 for WinZip AES archive entries only (archives::winzip_aes): PBKDF2-HMAC-SHA1
+# turns an archive password into its keys, and HMAC-SHA1 authenticates each entry, as
+# the format fixes. The lockfile gains no package: p256 already builds hmac 0.13, and
+# sha1 0.11 was locked for the tests (zip 9's `aes-crypto`) and now builds in production
+# too. `zeroize` wipes each hash state and input buffer on drop.
+archive-hmac = { package = "hmac", version = "0.13", features = ["zeroize"] }
+archive-sha1 = { package = "sha1", version = "0.11", default-features = false, features = ["zeroize"] }
 zeroize = { version = "1", features = ["derive"] }
 # Constant-time key comparison (task 2255, L9 legacy folder-key proof).
 subtle = "2.6"
@@ -52,7 +59,7 @@ chrono = { version = "0.4", features = ["serde"] }
 blake3 = "1"
 unicode-normalization = "0.1"
 flate2 = "1"
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 webp = { version = "0.3", optional = true, default-features = false }
 
@@ -84,3 +91,8 @@ test-support = []
 hex = "0.4"
 # Differential test only: the authority check must agree with the WHATWG parser reqwest connects with.
 url = "2"
+# Archive tests only: zip 9's AES and ZipCrypto writers build the encrypted
+# fixtures, and its reader is the independent one-shot reference that the
+# archive reader's output is compared with. Production never decodes
+# through zip (it only writes folder downloads).
+zip = { version = "9", default-features = false, features = ["deflate", "aes-crypto"] }

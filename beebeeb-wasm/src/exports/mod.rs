@@ -10,6 +10,7 @@
 //! It is a separate tree on purpose: `lib.rs` is baseline-capped, so it only
 //! declares `mod exports;` and the new surface grows here.
 
+pub mod archives;
 pub mod backup;
 pub mod contacts;
 pub mod format;

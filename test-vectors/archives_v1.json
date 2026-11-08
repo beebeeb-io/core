@@ -1,0 +1,1669 @@
+{
+  "version": 1,
+  "platform": "native",
+  "fixtures": [
+    {
+      "file": "aes128.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "secret.txt",
+          "path": "secret.txt",
+          "kind": "file",
+          "size": "1000",
+          "cipher": "aes128_ae2",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "aes192.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "secret.txt",
+          "path": "secret.txt",
+          "kind": "file",
+          "size": "1000",
+          "cipher": "aes192_ae2",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "aes256-stored.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "secret.txt",
+          "path": "secret.txt",
+          "kind": "file",
+          "size": "1000",
+          "cipher": "aes256_ae2",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "aes256.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "secret.txt",
+          "path": "secret.txt",
+          "kind": "file",
+          "size": "1000",
+          "cipher": "aes256_ae2",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "archive.7z",
+      "format": null,
+      "entries": [],
+      "refusal": "foreign:7z"
+    },
+    {
+      "file": "archive.bz2",
+      "format": null,
+      "entries": [],
+      "refusal": "foreign:bzip2"
+    },
+    {
+      "file": "archive.rar",
+      "format": null,
+      "entries": [],
+      "refusal": "foreign:rar"
+    },
+    {
+      "file": "archive.xz",
+      "format": null,
+      "entries": [],
+      "refusal": "foreign:xz"
+    },
+    {
+      "file": "archive.zst",
+      "format": null,
+      "entries": [],
+      "refusal": "foreign:zstd"
+    },
+    {
+      "file": "dupes.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "Report.txt",
+          "path": "Report.txt",
+          "kind": "file",
+          "size": "2",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "report.txt",
+          "path": "report.txt",
+          "kind": "file",
+          "size": "2",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "Report.txt",
+          "path": "Report.txt",
+          "kind": "file",
+          "size": "2",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "folder",
+          "path": "folder",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "folder/a.txt",
+          "path": "folder/a.txt",
+          "kind": "file",
+          "size": "2",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "Folder",
+          "path": "Folder",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "Folder/b.txt",
+          "path": "Folder/b.txt",
+          "kind": "file",
+          "size": "2",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "docs",
+          "path": "docs",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "empty.zip",
+      "format": "zip",
+      "entries": [],
+      "refusal": null
+    },
+    {
+      "file": "links.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "target.txt",
+          "path": "target.txt",
+          "kind": "file",
+          "size": "8",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "link",
+          "path": "link",
+          "kind": "symlink",
+          "size": "10",
+          "cipher": "none",
+          "skip": "link"
+        },
+        {
+          "display_path": "fifo",
+          "path": "fifo",
+          "kind": "device",
+          "size": "0",
+          "cipher": "none",
+          "skip": "device"
+        },
+        {
+          "display_path": "folder-by-mode",
+          "path": "folder-by-mode",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "dos-folder",
+          "path": "dos-folder",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "macos.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "a.txt",
+          "path": "a.txt",
+          "kind": "file",
+          "size": "6",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "__MACOSX/",
+          "path": null,
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": "mac_resource"
+        },
+        {
+          "display_path": "__MACOSX/._a.txt",
+          "path": null,
+          "kind": "file",
+          "size": "15",
+          "cipher": "none",
+          "skip": "mac_resource"
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "methods.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "a.bin",
+          "path": "a.bin",
+          "kind": "file",
+          "size": "100",
+          "cipher": "none",
+          "skip": "method:bzip2"
+        },
+        {
+          "display_path": "b.bin",
+          "path": "b.bin",
+          "kind": "file",
+          "size": "50",
+          "cipher": "none",
+          "skip": "method:Deflate64"
+        },
+        {
+          "display_path": "c.bin",
+          "path": "c.bin",
+          "kind": "file",
+          "size": "7",
+          "cipher": "none",
+          "skip": "method:method 77"
+        },
+        {
+          "display_path": "d.txt",
+          "path": "d.txt",
+          "kind": "file",
+          "size": "7",
+          "cipher": "none",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "mixed.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "plain.txt",
+          "path": "plain.txt",
+          "kind": "file",
+          "size": "15",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "secret.txt",
+          "path": "secret.txt",
+          "kind": "file",
+          "size": "1000",
+          "cipher": "zipcrypto",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "nameless.gz",
+      "format": "gz",
+      "entries": [
+        {
+          "display_path": "",
+          "path": null,
+          "kind": "file",
+          "size": "8",
+          "cipher": "none",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "names.tar",
+      "format": "tar",
+      "entries": [
+        {
+          "display_path": "long",
+          "path": "long",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "long/nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn.txt",
+          "path": "long/nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn.txt",
+          "kind": "file",
+          "size": "14",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "café.txt",
+          "path": "café.txt",
+          "kind": "file",
+          "size": "8",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "日本語",
+          "path": "日本語",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "日本語/ファイル.txt",
+          "path": "日本語/ファイル.txt",
+          "kind": "file",
+          "size": "9",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "Café.txt",
+          "path": "Café.txt",
+          "kind": "file",
+          "size": "8",
+          "cipher": "none",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "names.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "café.txt",
+          "path": "café.txt",
+          "kind": "file",
+          "size": "6",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "naïve.txt",
+          "path": "naïve.txt",
+          "kind": "file",
+          "size": "8",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "résumé.txt",
+          "path": "résumé.txt",
+          "kind": "file",
+          "size": "16",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "日本語.txt",
+          "path": "日本語.txt",
+          "kind": "file",
+          "size": "13",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "kept.txt",
+          "path": "kept.txt",
+          "kind": "file",
+          "size": "19",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "Café.txt",
+          "path": "Café.txt",
+          "kind": "file",
+          "size": "4",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "CON.txt",
+          "path": "_CON.txt",
+          "kind": "file",
+          "size": "12",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "notes: draft?.txt",
+          "path": "notes_ draft_.txt",
+          "kind": "file",
+          "size": "19",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "a:b?.txt",
+          "path": "b_.txt",
+          "kind": "file",
+          "size": "15",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "trailing.",
+          "path": "trailing_",
+          "kind": "file",
+          "size": "13",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "photo�gpj.exe",
+          "path": "photogpj.exe",
+          "kind": "file",
+          "size": "14",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "bell�.txt",
+          "path": null,
+          "kind": "file",
+          "size": "8",
+          "cipher": "none",
+          "skip": "unusable_name"
+        },
+        {
+          "display_path": "bad�.txt",
+          "path": null,
+          "kind": "file",
+          "size": "14",
+          "cipher": "none",
+          "skip": "unusable_name"
+        },
+        {
+          "display_path": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "path": null,
+          "kind": "file",
+          "size": "15",
+          "cipher": "none",
+          "skip": "unusable_name"
+        },
+        {
+          "display_path": "d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.txt",
+          "path": null,
+          "kind": "file",
+          "size": "9",
+          "cipher": "none",
+          "skip": "unusable_name"
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "notes.txt",
+      "format": null,
+      "entries": [],
+      "refusal": "not_an_archive"
+    },
+    {
+      "file": "notes.txt.gz",
+      "format": "gz",
+      "entries": [
+        {
+          "display_path": "notes.txt",
+          "path": "notes.txt",
+          "kind": "file",
+          "size": "21",
+          "cipher": "none",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "plain.tar",
+      "format": "tar",
+      "entries": [
+        {
+          "display_path": "docs",
+          "path": "docs",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "docs/readme.txt",
+          "path": "docs/readme.txt",
+          "kind": "file",
+          "size": "9",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "docs/link-to-readme",
+          "path": "docs/link-to-readme",
+          "kind": "symlink",
+          "size": "0",
+          "cipher": "none",
+          "skip": "link"
+        },
+        {
+          "display_path": "docs/hard-readme",
+          "path": "docs/hard-readme",
+          "kind": "hard_link",
+          "size": "0",
+          "cipher": "none",
+          "skip": "link"
+        },
+        {
+          "display_path": "dev",
+          "path": "dev",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "dev/tty0",
+          "path": "dev/tty0",
+          "kind": "device",
+          "size": "0",
+          "cipher": "none",
+          "skip": "device"
+        },
+        {
+          "display_path": "dev/pipe",
+          "path": "dev/pipe",
+          "kind": "device",
+          "size": "0",
+          "cipher": "none",
+          "skip": "device"
+        },
+        {
+          "display_path": "photos",
+          "path": "photos",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "photos/2024",
+          "path": "photos/2024",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "photos/2024/beach.jpg",
+          "path": "photos/2024/beach.jpg",
+          "kind": "file",
+          "size": "23",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "sparse.img",
+          "path": "sparse.img",
+          "kind": "other",
+          "size": "0",
+          "cipher": "none",
+          "skip": "unsupported:Sparse file"
+        },
+        {
+          "display_path": "odd",
+          "path": "odd",
+          "kind": "other",
+          "size": "0",
+          "cipher": "none",
+          "skip": "unsupported:Unknown entry type"
+        },
+        {
+          "display_path": "../escape.txt",
+          "path": null,
+          "kind": "file",
+          "size": "1",
+          "cipher": "none",
+          "skip": "outside_folder"
+        },
+        {
+          "display_path": "/abs.txt",
+          "path": "abs.txt",
+          "kind": "file",
+          "size": "9",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "zeros.bin",
+          "path": "zeros.bin",
+          "kind": "file",
+          "size": "3000",
+          "cipher": "none",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "plain.tgz",
+      "format": "tgz",
+      "entries": [
+        {
+          "display_path": "docs",
+          "path": "docs",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "docs/readme.txt",
+          "path": "docs/readme.txt",
+          "kind": "file",
+          "size": "9",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "docs/link-to-readme",
+          "path": "docs/link-to-readme",
+          "kind": "symlink",
+          "size": "0",
+          "cipher": "none",
+          "skip": "link"
+        },
+        {
+          "display_path": "docs/hard-readme",
+          "path": "docs/hard-readme",
+          "kind": "hard_link",
+          "size": "0",
+          "cipher": "none",
+          "skip": "link"
+        },
+        {
+          "display_path": "dev",
+          "path": "dev",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "dev/tty0",
+          "path": "dev/tty0",
+          "kind": "device",
+          "size": "0",
+          "cipher": "none",
+          "skip": "device"
+        },
+        {
+          "display_path": "dev/pipe",
+          "path": "dev/pipe",
+          "kind": "device",
+          "size": "0",
+          "cipher": "none",
+          "skip": "device"
+        },
+        {
+          "display_path": "photos",
+          "path": "photos",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "photos/2024",
+          "path": "photos/2024",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "photos/2024/beach.jpg",
+          "path": "photos/2024/beach.jpg",
+          "kind": "file",
+          "size": "23",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "sparse.img",
+          "path": "sparse.img",
+          "kind": "other",
+          "size": "0",
+          "cipher": "none",
+          "skip": "unsupported:Sparse file"
+        },
+        {
+          "display_path": "odd",
+          "path": "odd",
+          "kind": "other",
+          "size": "0",
+          "cipher": "none",
+          "skip": "unsupported:Unknown entry type"
+        },
+        {
+          "display_path": "../escape.txt",
+          "path": null,
+          "kind": "file",
+          "size": "1",
+          "cipher": "none",
+          "skip": "outside_folder"
+        },
+        {
+          "display_path": "/abs.txt",
+          "path": "abs.txt",
+          "kind": "file",
+          "size": "9",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "zeros.bin",
+          "path": "zeros.bin",
+          "kind": "file",
+          "size": "3000",
+          "cipher": "none",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "plain.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "docs",
+          "path": "docs",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "docs/readme.txt",
+          "path": "docs/readme.txt",
+          "kind": "file",
+          "size": "9",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "photos",
+          "path": "photos",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "photos/2024",
+          "path": "photos/2024",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "photos/2024/beach.jpg",
+          "path": "photos/2024/beach.jpg",
+          "kind": "file",
+          "size": "23",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "notes.txt",
+          "path": "notes.txt",
+          "kind": "file",
+          "size": "7",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "empty.txt",
+          "path": "empty.txt",
+          "kind": "file",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "story.txt",
+          "path": "story.txt",
+          "kind": "file",
+          "size": "1141",
+          "cipher": "none",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "self-extracting.exe",
+      "format": null,
+      "entries": [],
+      "refusal": "self_extracting"
+    },
+    {
+      "file": "slip.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "../evil.txt",
+          "path": null,
+          "kind": "file",
+          "size": "1",
+          "cipher": "none",
+          "skip": "outside_folder"
+        },
+        {
+          "display_path": "etc",
+          "path": "etc",
+          "kind": "folder",
+          "size": "0",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "/etc/x",
+          "path": "etc/x",
+          "kind": "file",
+          "size": "1",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "C:\\x",
+          "path": "x",
+          "kind": "file",
+          "size": "1",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "..\\..\\x",
+          "path": null,
+          "kind": "file",
+          "size": "1",
+          "cipher": "none",
+          "skip": "outside_folder"
+        },
+        {
+          "display_path": "a�b",
+          "path": null,
+          "kind": "file",
+          "size": "1",
+          "cipher": "none",
+          "skip": "unusable_name"
+        },
+        {
+          "display_path": "//server/share/y.txt",
+          "path": "y.txt",
+          "kind": "file",
+          "size": "1",
+          "cipher": "none",
+          "skip": null
+        },
+        {
+          "display_path": "ok.txt",
+          "path": "ok.txt",
+          "kind": "file",
+          "size": "1",
+          "cipher": "none",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "spanned.z01",
+      "format": null,
+      "entries": [],
+      "refusal": "spanned"
+    },
+    {
+      "file": "spanned.zip",
+      "format": null,
+      "entries": [],
+      "refusal": "spanned"
+    },
+    {
+      "file": "strong.zip",
+      "format": null,
+      "entries": [],
+      "refusal": "strong_encryption"
+    },
+    {
+      "file": "truncated.gz",
+      "format": null,
+      "entries": [],
+      "refusal": "truncated"
+    },
+    {
+      "file": "truncated.tar",
+      "format": null,
+      "entries": [],
+      "refusal": "truncated"
+    },
+    {
+      "file": "truncated.zip",
+      "format": null,
+      "entries": [],
+      "refusal": "truncated"
+    },
+    {
+      "file": "two-members.gz",
+      "format": "gz",
+      "entries": [
+        {
+          "display_path": "joined.txt",
+          "path": "joined.txt",
+          "kind": "file",
+          "size": "13",
+          "cipher": "none",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "two-passwords.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "secret.txt",
+          "path": "secret.txt",
+          "kind": "file",
+          "size": "1000",
+          "cipher": "zipcrypto",
+          "skip": null
+        },
+        {
+          "display_path": "other.txt",
+          "path": "other.txt",
+          "kind": "file",
+          "size": "1000",
+          "cipher": "zipcrypto",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "zipcrypto-cp437-quick-check.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "first.txt",
+          "path": "first.txt",
+          "kind": "file",
+          "size": "140",
+          "cipher": "zipcrypto",
+          "skip": null
+        },
+        {
+          "display_path": "second.txt",
+          "path": "second.txt",
+          "kind": "file",
+          "size": "160",
+          "cipher": "zipcrypto",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "zipcrypto-cp437.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "secret.txt",
+          "path": "secret.txt",
+          "kind": "file",
+          "size": "1000",
+          "cipher": "zipcrypto",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "zipcrypto-crc-check.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "empty.txt",
+          "path": "empty.txt",
+          "kind": "file",
+          "size": "0",
+          "cipher": "zipcrypto",
+          "skip": null
+        },
+        {
+          "display_path": "secret.txt",
+          "path": "secret.txt",
+          "kind": "file",
+          "size": "1000",
+          "cipher": "zipcrypto",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    },
+    {
+      "file": "zipcrypto.zip",
+      "format": "zip",
+      "entries": [
+        {
+          "display_path": "secret.txt",
+          "path": "secret.txt",
+          "kind": "file",
+          "size": "1000",
+          "cipher": "zipcrypto",
+          "skip": null
+        }
+      ],
+      "refusal": null
+    }
+  ],
+  "words": [
+    {
+      "key": "archive_reading",
+      "args": {},
+      "text": "Reading the archive…"
+    },
+    {
+      "key": "archive_kind_zip",
+      "args": {},
+      "text": "ZIP archive"
+    },
+    {
+      "key": "archive_kind_tar",
+      "args": {},
+      "text": "TAR archive"
+    },
+    {
+      "key": "archive_kind_tgz",
+      "args": {},
+      "text": "TAR archive, gzip-compressed"
+    },
+    {
+      "key": "archive_kind_gz",
+      "args": {},
+      "text": "gzip-compressed file"
+    },
+    {
+      "key": "archive_summary",
+      "args": {
+        "files": "1",
+        "folders": "1",
+        "size": "999 B"
+      },
+      "text": "1 file, 1 folder · 999 B"
+    },
+    {
+      "key": "archive_summary",
+      "args": {
+        "files": "1,234",
+        "folders": "0",
+        "size": "3.4 MB"
+      },
+      "text": "1,234 files, 0 folders · 3.4 MB"
+    },
+    {
+      "key": "archive_empty",
+      "args": {},
+      "text": "This archive is empty."
+    },
+    {
+      "key": "archive_some_protected",
+      "args": {},
+      "text": "Some files in this archive are protected by a password."
+    },
+    {
+      "key": "archive_all_protected",
+      "args": {},
+      "text": "The files in this archive are protected by a password."
+    },
+    {
+      "key": "archive_names_not_protected",
+      "args": {},
+      "text": "The password protects the files' contents, not their names."
+    },
+    {
+      "key": "archive_zipcrypto_weak",
+      "args": {},
+      "text": "This archive uses ZipCrypto, an old protection that can be broken without the password. Files you extract are stored with Beebeeb's own encryption."
+    },
+    {
+      "key": "archive_listing_incomplete",
+      "args": {},
+      "text": "This archive is too large to list here. Extract it to see all its files."
+    },
+    {
+      "key": "entry_link",
+      "args": {},
+      "text": "Link, not extracted"
+    },
+    {
+      "key": "entry_device",
+      "args": {},
+      "text": "Special file, not extracted"
+    },
+    {
+      "key": "entry_outside",
+      "args": {},
+      "text": "Points outside the folder, not extracted"
+    },
+    {
+      "key": "entry_bad_name",
+      "args": {},
+      "text": "Name can't be used, not extracted"
+    },
+    {
+      "key": "entry_method",
+      "args": {
+        "method": "bzip2"
+      },
+      "text": "Uses bzip2 compression, which Beebeeb can't open"
+    },
+    {
+      "key": "entry_too_large",
+      "args": {},
+      "text": "Too large to extract here"
+    },
+    {
+      "key": "entry_bomb",
+      "args": {},
+      "text": "Expands far more than a normal file, not extracted"
+    },
+    {
+      "key": "entry_mac_resource",
+      "args": {},
+      "text": "macOS resource data, not extracted"
+    },
+    {
+      "key": "entry_unsupported",
+      "args": {
+        "what": "Sparse file"
+      },
+      "text": "Sparse file, not extracted"
+    },
+    {
+      "key": "entry_corrupt",
+      "args": {},
+      "text": "Damaged in the archive, not extracted"
+    },
+    {
+      "key": "entry_other_password",
+      "args": {},
+      "text": "Uses a different password, not extracted"
+    },
+    {
+      "key": "entry_renamed",
+      "args": {
+        "name": "report (2).pdf"
+      },
+      "text": "Saved as \"report (2).pdf\""
+    },
+    {
+      "key": "action_extract",
+      "args": {},
+      "text": "Extract"
+    },
+    {
+      "key": "action_extract_to",
+      "args": {},
+      "text": "Extract to…"
+    },
+    {
+      "key": "action_extract_selected",
+      "args": {
+        "n": "1"
+      },
+      "text": "Extract 1 item"
+    },
+    {
+      "key": "action_extract_selected",
+      "args": {
+        "n": "1,000"
+      },
+      "text": "Extract 1,000 items"
+    },
+    {
+      "key": "action_download",
+      "args": {},
+      "text": "Download"
+    },
+    {
+      "key": "action_open",
+      "args": {},
+      "text": "Open"
+    },
+    {
+      "key": "action_stop",
+      "args": {},
+      "text": "Stop"
+    },
+    {
+      "key": "action_open_folder",
+      "args": {},
+      "text": "Open folder"
+    },
+    {
+      "key": "action_move_to_trash",
+      "args": {},
+      "text": "Move to Trash"
+    },
+    {
+      "key": "action_cancel",
+      "args": {},
+      "text": "Cancel"
+    },
+    {
+      "key": "password_title",
+      "args": {},
+      "text": "Enter the archive's password"
+    },
+    {
+      "key": "password_body",
+      "args": {
+        "name": "photos.zip"
+      },
+      "text": "\"photos.zip\" is protected by a password. Beebeeb uses it on this device only and doesn't keep it."
+    },
+    {
+      "key": "password_wrong",
+      "args": {},
+      "text": "That password didn't work. Check it and try again."
+    },
+    {
+      "key": "extract_progress",
+      "args": {
+        "done": "0",
+        "total": "1",
+        "bytes_done": "0 B",
+        "bytes_total": "1.5 KB"
+      },
+      "text": "Extracting 0 of 1 file · 0 B of 1.5 KB"
+    },
+    {
+      "key": "extract_progress",
+      "args": {
+        "done": "1,200",
+        "total": "12,345",
+        "bytes_done": "2.1 GB",
+        "bytes_total": "68.7 GB"
+      },
+      "text": "Extracting 1,200 of 12,345 files · 2.1 GB of 68.7 GB"
+    },
+    {
+      "key": "extract_keep_open",
+      "args": {},
+      "text": "Keep Beebeeb open until extraction finishes."
+    },
+    {
+      "key": "extract_done",
+      "args": {
+        "files": "1",
+        "folder": "photos"
+      },
+      "text": "Extracted 1 file to \"photos\"."
+    },
+    {
+      "key": "extract_done",
+      "args": {
+        "files": "12",
+        "folder": "photos 2024"
+      },
+      "text": "Extracted 12 files to \"photos 2024\"."
+    },
+    {
+      "key": "extract_done_with_skips",
+      "args": {
+        "files": "10",
+        "folder": "photos",
+        "skipped": "1"
+      },
+      "text": "Extracted 10 files to \"photos\". 1 was not extracted; the list says why."
+    },
+    {
+      "key": "extract_done_with_skips",
+      "args": {
+        "files": "1",
+        "folder": "photos",
+        "skipped": "3"
+      },
+      "text": "Extracted 1 file to \"photos\". 3 were not extracted; the list says why."
+    },
+    {
+      "key": "extract_renamed",
+      "args": {
+        "n": "1"
+      },
+      "text": "1 file had the same name as another file and was renamed."
+    },
+    {
+      "key": "extract_renamed",
+      "args": {
+        "n": "4"
+      },
+      "text": "4 files had the same name as another file and were renamed."
+    },
+    {
+      "key": "extract_stopped",
+      "args": {
+        "done": "0",
+        "total": "1",
+        "folder": "photos"
+      },
+      "text": "Extraction stopped. 0 of 1 file is in \"photos\"; the rest were not extracted."
+    },
+    {
+      "key": "extract_stopped",
+      "args": {
+        "done": "5",
+        "total": "9",
+        "folder": "photos"
+      },
+      "text": "Extraction stopped. 5 of 9 files are in \"photos\"; the rest were not extracted."
+    },
+    {
+      "key": "extract_failed_storage_full",
+      "args": {
+        "done": "1",
+        "total": "1",
+        "folder": "photos"
+      },
+      "text": "Your storage is full. 1 of 1 file was extracted to \"photos\"."
+    },
+    {
+      "key": "extract_failed_storage_full",
+      "args": {
+        "done": "2",
+        "total": "10",
+        "folder": "photos"
+      },
+      "text": "Your storage is full. 2 of 10 files were extracted to \"photos\"."
+    },
+    {
+      "key": "extract_failed_network",
+      "args": {
+        "done": "0",
+        "total": "1",
+        "folder": "photos"
+      },
+      "text": "The connection was lost. 0 of 1 file was extracted to \"photos\"."
+    },
+    {
+      "key": "extract_failed_network",
+      "args": {
+        "done": "1,500",
+        "total": "2,000",
+        "folder": "photos"
+      },
+      "text": "The connection was lost. 1,500 of 2,000 files were extracted to \"photos\"."
+    },
+    {
+      "key": "extract_failed_damaged",
+      "args": {
+        "done": "1",
+        "total": "5",
+        "folder": "photos"
+      },
+      "text": "The archive is damaged after 1 of 5 files. That file is in \"photos\"."
+    },
+    {
+      "key": "extract_failed_damaged",
+      "args": {
+        "done": "4",
+        "total": "7",
+        "folder": "photos"
+      },
+      "text": "The archive is damaged after 4 of 7 files. Those files are in \"photos\"."
+    },
+    {
+      "key": "extract_failed_changed",
+      "args": {
+        "done": "1",
+        "total": "1",
+        "folder": "photos"
+      },
+      "text": "The archive changed while it was being extracted. 1 of 1 file is in \"photos\". Open it again to extract the new version."
+    },
+    {
+      "key": "extract_failed_changed",
+      "args": {
+        "done": "3",
+        "total": "8",
+        "folder": "photos"
+      },
+      "text": "The archive changed while it was being extracted. 3 of 8 files are in \"photos\". Open it again to extract the new version."
+    },
+    {
+      "key": "refuse_not_archive",
+      "args": {},
+      "text": "This file isn't an archive Beebeeb can open. Beebeeb opens ZIP, TAR, TGZ and GZ files."
+    },
+    {
+      "key": "refuse_foreign",
+      "args": {
+        "format": "RAR"
+      },
+      "text": "This is a RAR archive. Beebeeb opens ZIP, TAR, TGZ and GZ files."
+    },
+    {
+      "key": "refuse_sfx",
+      "args": {},
+      "text": "This is a self-extracting program, not a plain archive."
+    },
+    {
+      "key": "refuse_spanned",
+      "args": {},
+      "text": "This is one part of a multi-part archive. Beebeeb opens single-file archives only."
+    },
+    {
+      "key": "refuse_strong_encryption",
+      "args": {},
+      "text": "This archive uses PKWARE strong encryption, which Beebeeb can't open."
+    },
+    {
+      "key": "refuse_damaged",
+      "args": {},
+      "text": "This archive is damaged and can't be read."
+    },
+    {
+      "key": "refuse_truncated",
+      "args": {},
+      "text": "This archive ends too early. It may not have finished uploading."
+    },
+    {
+      "key": "refuse_too_many",
+      "args": {},
+      "text": "This archive has more than 100,000 items, more than Beebeeb extracts at once."
+    },
+    {
+      "key": "refuse_too_large",
+      "args": {
+        "size": "300.0 GB",
+        "limit": "274.9 GB"
+      },
+      "text": "This archive expands to 300.0 GB, more than Beebeeb extracts at once (274.9 GB)."
+    },
+    {
+      "key": "refuse_bomb",
+      "args": {},
+      "text": "This archive expands far more than normal archives do, so Beebeeb won't extract it."
+    },
+    {
+      "key": "refuse_quota",
+      "args": {
+        "needed": "5.4 GB",
+        "free": "1.1 GB"
+      },
+      "text": "Extracting needs 5.4 GB and you have 1.1 GB free."
+    },
+    {
+      "key": "refuse_device_space",
+      "args": {
+        "needed": "68.7 GB",
+        "free": "1.0 MB"
+      },
+      "text": "Extracting needs 68.7 GB free on this device, and it has 1.0 MB."
+    },
+    {
+      "key": "refuse_backups",
+      "args": {},
+      "text": "Backups are read-only. Choose a folder outside Backups to extract to."
+    },
+    {
+      "key": "refuse_read_only_folder",
+      "args": {},
+      "text": "You can't add files to this folder. Choose another folder to extract to."
+    },
+    {
+      "key": "refuse_web_entry_too_large",
+      "args": {
+        "n": "1",
+        "limit": "2.1 GB"
+      },
+      "text": "1 file is larger than 2.1 GB, more than the browser can extract. Extract the rest here, or use the Beebeeb app or bb extract for all of them."
+    },
+    {
+      "key": "refuse_web_entry_too_large",
+      "args": {
+        "n": "3",
+        "limit": "2.1 GB"
+      },
+      "text": "3 files are larger than 2.1 GB, more than the browser can extract. Extract the rest here, or use the Beebeeb app or bb extract for all of them."
+    },
+    {
+      "key": "cli_password_needed",
+      "args": {},
+      "text": "This archive needs a password. Run it in a terminal, or pass the password with --password-stdin."
+    },
+    {
+      "key": "cli_extract_to_hint",
+      "args": {},
+      "text": "Add --to <folder> to extract somewhere else."
+    }
+  ],
+  "counts": [
+    {
+      "value": "0",
+      "text": "0"
+    },
+    {
+      "value": "1",
+      "text": "1"
+    },
+    {
+      "value": "12",
+      "text": "12"
+    },
+    {
+      "value": "999",
+      "text": "999"
+    },
+    {
+      "value": "1000",
+      "text": "1,000"
+    },
+    {
+      "value": "12345",
+      "text": "12,345"
+    },
+    {
+      "value": "100000",
+      "text": "100,000"
+    },
+    {
+      "value": "1234567",
+      "text": "1,234,567"
+    },
+    {
+      "value": "18446744073709551615",
+      "text": "18,446,744,073,709,551,615"
+    }
+  ],
+  "sizes": [
+    {
+      "bytes": "0",
+      "text": "0 B"
+    },
+    {
+      "bytes": "1",
+      "text": "1 B"
+    },
+    {
+      "bytes": "999",
+      "text": "999 B"
+    },
+    {
+      "bytes": "1000",
+      "text": "1.0 KB"
+    },
+    {
+      "bytes": "1049",
+      "text": "1.0 KB"
+    },
+    {
+      "bytes": "1050",
+      "text": "1.1 KB"
+    },
+    {
+      "bytes": "1250",
+      "text": "1.2 KB"
+    },
+    {
+      "bytes": "1500000",
+      "text": "1.5 MB"
+    },
+    {
+      "bytes": "999949",
+      "text": "999.9 KB"
+    },
+    {
+      "bytes": "999950",
+      "text": "1.0 MB"
+    },
+    {
+      "bytes": "2147483648",
+      "text": "2.1 GB"
+    },
+    {
+      "bytes": "68719476736",
+      "text": "68.7 GB"
+    },
+    {
+      "bytes": "274877906944",
+      "text": "274.9 GB"
+    },
+    {
+      "bytes": "1000000000000000",
+      "text": "1000.0 TB"
+    },
+    {
+      "bytes": "9223372036854775807",
+      "text": "9223372.0 TB"
+    },
+    {
+      "bytes": "18446744073709551615",
+      "text": "9223372.0 TB"
+    }
+  ]
+}

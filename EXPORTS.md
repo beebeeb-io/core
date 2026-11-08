@@ -415,3 +415,100 @@ members left out), `v0.2.2` against this branch, pinned 1.96.0:
 | `beebeeb_uniffi` | 73 | 0 | 0 |
 | `beebeeb_wasm` | 33 | 0 | 0 |
 | `beebeeb_backup` | 0 | 0 | 0 |
+
+## Archive exports (0.3.0)
+
+List, preview and extract zip, tar, tgz and gz (spec `2026-11-07-core-archives-design.md` §5, §8, §9).
+Every rule is core's (`beebeeb_core::archives`); the bindings convert. The old reader
+(`beebeeb_core::archive`) and its three exports per binding are removed (a break; 0 callers in the
+web, desktop, CLI and mobile app sources): see "Removed" below.
+
+### WASM
+
+Counts are the `export function` / `export class` names in the generated `beebeeb_wasm.d.ts`
+(`wasm-pack build beebeeb-wasm --dev --no-opt`); this branch changes no other WASM source, so the base is
+the head minus the names below.
+
+- base: 177 names
+- head: 183 names
+- **removed: 0**
+- **added: 6**
+
+| Name | What |
+| --- | --- |
+| `new WasmArchiveSession(len, platform)` | A push session for an archive of `len` (bigint) bytes on `"native"`, `"browser"` or `"mobile_app"`. `step()` → `{kind: "need_bytes", start, end}` (answer with `supply(offset, bytes)`, then step again), `{kind: "listed"}`, `{kind: "refused", refusal, format, text}` or `{kind: "io", message}`. `releaseBefore(offset)`; `listing()` → `{format, entries, totals, protection, uses_zipcrypto, complete}`; `checkPassword(index, password)` → `need_bytes` / `accepted` / `wrong` / `damaged` (the entry's headers are damaged; reading it reports `corrupt`) / `not_needed` / `io`; `preview(input)` and `previewWithPlan(input, plan)` → the screen model; `plan(request)` → a `WasmExtractionPlan` or `{kind: "refused", refusal, text}`; `startExtraction(identity, plan, password?)` → a `WasmArchiveExtraction` (the session moves into it; later calls throw); `openEntry(index, password?)` → `need_bytes` / `{kind: "bytes", bytes}` (after its check passed) / `corrupt` / `wrong` / `skipped` / `too_large` / `io`. |
+| `WasmExtractionPlan` | Core's plan, opaque, so the run uses it unedited: `kind` (`"planned"`), `view()` → `{target, nodes, skipped, renamed, totals, notices}`. |
+| `WasmArchiveExtraction` | `step()` → `need_bytes`, `need_password`, `create_folder`, `file_begin`, `file_data` (`bytes`: a `Uint8Array`, not yet verified), `file_end` (verified: upload it), `file_skipped` (drop what was staged; a protected file whose password passed its check byte but failed its CRC is skipped once, asked for again with `need_password` and begun again under the same `node`), `progress` (with its `text`), `waiting` or `finished` (outcome, reason, counts, skipped, renamed, `text`). Reports: `supply`, `releaseBefore`, `folderCreated(node, id)`, `folderNameTaken(node)`, `uploadFinished(node, ok)`, `identitySeen({file_id, object_version_id})`, `runFailed(reason)`, `supplyPassword(password)` (taken only right after `need_password`; any other time it is dropped), `cancel()`; `preview(input)` while it runs and after. |
+| `archiveText(key, args)` | Core's words: `{key, text, args}`; an unknown key throws. |
+| `archiveCountLabel(n)` | `1,234`. |
+| `archiveSizeLabel(bytes)` | `3.4 MB` (core's compact formatter, one decimal). |
+
+Every 64-bit number crosses as a `bigint` and an absent field is `null`. A password becomes core's
+zeroizing `ArchivePassword` as it enters. An unknown platform, word, destination, backup position,
+selection or fail reason throws. `beebeeb-wasm/js-tests/archives.test.cjs` runs every fixture, word,
+count and size of `test-vectors/archives_v1.json` through the module.
+
+### UniFFI
+
+Counts are the `uniffi_beebeeb_uniffi_fn_*` and `uniffi_beebeeb_uniffi_checksum_*` symbols in the
+regenerated `beebeeb_uniffiFFI.h`, base (this branch's merge base header) against head, `comm` over
+the sorted symbols.
+
+- base: 974 symbols
+- head: 982 symbols
+- **removed: 0**
+- **added: 8** (4 functions, each with its checksum)
+
+| Function | What |
+| --- | --- |
+| `archive_text(key, args: [ArchiveTextArg])` | `throws -> ArchiveText` (`key`, `text`, `args`); an unknown key is `InvalidInput` |
+| `archive_count_label(n)` / `archive_size_label(bytes)` | the count and size as the words show them |
+| `archive_list(bytes, platform)` | `throws -> ArchiveListResult` (`listed { listing }` or `refused { refusal, text }`) for an archive already in memory (the vectors, a small attachment); a large archive is listed by range reads in the archive service |
+
+Records and enums mirror core field for field: `ArchivePreviewModel` (`ArchivePreviewState`,
+`ArchivePreviewRow`, `ArchivePreviewAction`, `ArchiveActionKind`), `ArchiveListing` (`ArchiveEntry`,
+`ArchiveEntryKind`, `ArchiveCipher`, `ArchiveTime`, `ArchiveSkipReason`, `ArchiveTotals`,
+`ArchiveProtection`, `ArchiveFormat`), `ArchiveRefusal`, `ExtractProgress`, `ExtractSummary`
+(`ExtractOutcome`, `ExtractFailReason`, `ArchiveSkippedEntry`, `ArchiveRenamedEntry`) and `ArchiveText`.
+#### The archive service (`ArchiveServiceHandle`)
+
+`NativeClientHandle.archives(downloads, uploads, temp_root, platform)` → `ArchiveServiceHandle` over
+`beebeeb_client::archives::ArchiveService` (`platform`: `"mobile_app"` on the phone). It needs the
+application runtime (`unavailable` on the lightweight one) and one live service per `temp_root` (a second
+is refused until the first is dropped). The service owns `temp_root`: at start it cancels the queued
+uploads an earlier process left there and deletes their staged files; other files stay. The archive is
+read by range (`DownloadService::read_range`, v1 and v2 through core's `RangeOpener`); each file is staged
+0600 as `archive-<instance>-<run>-<node>.bbtmp`, enqueued on the upload queue only after its own check
+passed, and deleted when its upload ends, the entry is skipped, or the run stops, fails or its service is
+dropped (a dropped service stops its runs).
+
+| Method | What |
+| --- | --- |
+| `open(file: DownloadData, name, parent_id)` | `throws ArchiveError -> u64`: starts listing; the listing arrives as a `model` event |
+| `preview(archive_id, folder, selection)` | `throws -> ArchivePreviewModel` for one folder of the archive |
+| `extract(archive_id, ArchiveExtractOptions, password?)` | `throws -> u64` (the extraction); `ArchiveError.Refused { reason, text }` when the planner refuses (nothing written); uploads follow the device's upload settings |
+| `supply_password(extraction_id, password)` | answers a `model` event in `needs_password` (dropped if the run is not asking) |
+| `open_entry(archive_id, index, password?)` | `throws -> bytes` after the entry's own check passed, up to the platform's in-memory budget |
+| `cancel(extraction_id)` / `close(archive_id)` | stop a run (finished uploads stay) / close the archive and wipe its passwords |
+| `observe()` | `ArchiveEventStreamHandle.next(timeout_ms) -> ArchiveEventData?` (`model`, `read_failed`, `finished`) |
+
+New records and enums: `ArchiveExtractOptions` (`selection: [String]?`, `destination`,
+`device_free_bytes`), `ArchiveDestination` (`next_to_archive`, `folder { parent_id }`),
+`ArchiveEventData`, `ArchiveError`. A password crosses as a `SecretString` and becomes an
+`ArchivePassword` at once.
+
+### Removed: the old archive reader
+
+The extension-based `beebeeb_core::archive` (`list_tar_entries`, `decompress_gzip`, `list_archive`) is
+deleted with its exports. `git grep -c -E 'list_archive|decompress_gzip|listArchive|decompressGzip|list_tar_entries|listTarEntries|ArchiveEntryDto'`
+on each client's `origin/main` (2026-11-08): web `src` 0, desktop 0, cli 0, mobile `src` 0 and its
+hand-written native modules 0 (its 71 hits are the vendored generated binding copies, replaced when it
+pins this release).
+
+- WASM (`export function` / `export class` names in `beebeeb_wasm.d.ts`, base `52804a2` against
+  head): 182 → 179, **removed: 3** (`list_tar_entries`, `decompress_gzip`, `list_archive`), added: 0.
+- UniFFI (`fn` / `checksum` symbols in `beebeeb_uniffiFFI.h`, same base): 982 → 1000, **removed: 6**
+  (`list_tar_entries`, `decompress_gzip`, `list_archive`, each with its checksum; the
+  `ArchiveEntryDto` record goes with them), **added: 24** (the archive service: `nativeclienthandle_archives`,
+  eight `archiveservicehandle_*` methods and `archiveeventstreamhandle_next`, each with its checksum,
+  plus the two objects' `clone` / `free`).

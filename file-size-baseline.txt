@@ -9,5 +9,5 @@
 1623 beebeeb-core/src/encrypt.rs
 2414 beebeeb-core/src/kdf.rs
 1333 beebeeb-transfer/src/tests.rs
-7633 beebeeb-uniffi/src/lib.rs
-4589 beebeeb-wasm/src/lib.rs
+7591 beebeeb-uniffi/src/lib.rs
+4547 beebeeb-wasm/src/lib.rs

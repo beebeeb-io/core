@@ -18,6 +18,8 @@ pub use secrets::*;
 pub use session::*;
 pub use transport::*;
 
+#[cfg(all(feature = "store", feature = "uploads", feature = "downloads", feature = "files"))]
+pub mod archives;
 #[cfg(feature = "auth")]
 pub mod auth;
 #[cfg(feature = "backup")]
@@ -69,6 +71,8 @@ pub mod test_support;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_svc_archives;
 #[cfg(test)]
 mod tests_svc_auth;
 #[cfg(test)]

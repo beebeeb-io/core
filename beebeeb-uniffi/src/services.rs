@@ -18,6 +18,7 @@ use zeroize::Zeroizing;
 
 use crate::{AccountReplacementHandle, MasterKeyHandle};
 
+mod archives;
 mod auth;
 mod client;
 mod files;
@@ -25,6 +26,7 @@ mod settings;
 mod sharing;
 mod transfers;
 
+pub use archives::*;
 pub use auth::*;
 pub use client::*;
 pub use files::*;

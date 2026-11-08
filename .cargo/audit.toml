@@ -10,12 +10,4 @@ ignore = [
   # of elliptic-curve 0.13's arithmetic, but cargo audit still lists the crate.
   # No published opaque-ke moves off it. Removed when one does.
   "RUSTSEC-2026-0387",
-  # zip 8.6.0: four advisories, all in archive extraction (ZipArchive::extract,
-  # ZipStreamReader::extract). Core only writes archives (ZipWriter in
-  # beebeeb-core/src/zip.rs) and never extracts one; its tests read entries back
-  # with by_name. Fixed only in zip 9. Removed by the zip 9 upgrade.
-  "RUSTSEC-2026-0367",
-  "RUSTSEC-2026-0368",
-  "RUSTSEC-2026-0369",
-  "RUSTSEC-2026-0429",
 ]

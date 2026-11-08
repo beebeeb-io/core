@@ -314,6 +314,47 @@ A range session serves reads at any offset while the download runs (desktop Wind
 
 **Decision (core lane, 2026-11-05): ranges live in `beebeeb-transfer`, the whole-file download stays where it is.** The modular split (§16.2 row 10) names `beebeeb-upload::download` as the owner of the download move, but the L2 driver that exists for direct transfers is `beebeeb-transfer`, and the range session needs its `DirectIo` seam, discovery cache and pinned-route policy. So `range_session` and `RangeLessor` go in `beebeeb-transfer`, and the whole-file `beebeeb-upload::download` keeps row 10.
 
+## Archives (`archives/`)
+
+List, preview and extract zip, tar, tgz and gz (`2026-11-07-core-archives-design.md`). `ArchiveSession` is
+sans-I/O over a `ByteSource`: native sources block (`ReadSeekSource`); push drivers (web) answer
+`NeedBytes` through `SuppliedBytes`, at most `MAX_SUPPLIED_BYTES`, and every step is atomic, so a miss is
+retried, never half-applied. Detection is by magic bytes, never the extension. Zip entries are decoded by
+core's own push pipeline (raw inflate, CRC-32, WinZip AES on `aes` 0.8 and `hmac` 0.13 / `sha1` 0.11 with
+`zeroize`, ZipCrypto) because zip 9's readers borrow the archive and collapse duplicate names; zip 9 is
+the writer and the tests' reference reader. Passwords: `ArchivePassword` tries UTF-8, then CP437, and
+once an entry proved one encoding it tries that one first. An entry proves the password only when its
+own check covers data (AES; ZipCrypto with 4 or more bytes under its CRC). A protected entry that passed
+its check byte and failed its CRC, before any entry proved the password, is skipped once
+(`FileSkipped`), the person is asked again, and the entry is read again; `check_password` answers
+`Damaged` for headers it cannot judge. Names go through `archives::names` (design §6.1); the planner numbers clashes with
+`name_clash::numbered_name`; `Extraction` hands a file over (`FileEnd`) only after it verified, and binds
+the run to one archive version. The preview model and every word (`ArchiveText`, 63 keys) are core's.
+Vectors: `test-vectors/archives_v1.json` and the fixtures in `test-vectors/archives/`, written by
+`gen_archives_v1.py` (no zlib: deflate is one fixed-Huffman block) and guarded byte for byte by
+`check-archives-vectors-generated.sh`; the password fixtures come from 7-Zip and Info-ZIP. Bindings:
+`WasmArchiveSession` / `WasmArchiveExtraction` (`archives.test.cjs` runs every vector row) and the UniFFI
+records in `beebeeb-uniffi/src/archives.rs`.
+
+**The native service** (`beebeeb_client::archives::ArchiveService`, `ArchiveServiceHandle` for Swift) is
+the iOS driver. It reads through `DownloadService::read_with`: a `RangeReader` holds one `RangeOpener`
+for one recorded version (pin and commitment from `decrypt_file_metadata`), opens frame 0 first, and
+starts a new opener (frame 0 again) whenever a chunk would open twice. v1 files are read the same way,
+with v1's I9 gap (no position or version binding), the gap the whole-file read has. Demands are widened
+to whole chunks and supplied to a `SuppliedBytes` that holds the central directory and two chunks. Each
+read first asks the server for the archive's `download_version`: another version fails the run as
+`Changed`. Folders go through the Backups-checked create (a `409 name_conflict` takes the next number);
+each file is staged 0600 as `archive-<instance>-<run>-<node>.bbtmp` (128 random bits per service, so a
+name never repeats across processes) in the service's temp root and enqueued on the upload queue only on
+`FileEnd`; it is deleted when its upload ends, when the entry is skipped, and when the run stops or fails
+(the run then cancels its queued uploads and counts any that finished meanwhile). A stop is never held by
+the staging backpressure. Dropping the service stops its runs; a `Staged` record deletes its file on
+drop. One live service per temp root in a process; a new one cancels the uploads an earlier process left
+under its root (`UploadService::cancel_sources_under`) and deletes only `archive-*.bbtmp` files. The Swift
+handle refuses the lightweight runtime (its tasks would stall between calls). Listing and runs
+are tasks on the caller's runtime (the app's multi-thread runtime; never the File Provider extension).
+Tests: `beebeeb-client/src/tests_svc_archives.rs`, against an in-process file server.
+
 ## Security invariants
 
 - MasterKey and FileKey are NOT Clone — prevents accidental key copies in memory
