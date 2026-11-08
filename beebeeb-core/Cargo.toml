@@ -21,8 +21,9 @@ sha2 = "0.10"
 sha1 = "0.10"
 # HMAC-SHA1 for WinZip AES archive entries only (archives::winzip_aes): PBKDF2-HMAC-SHA1
 # turns an archive password into its keys, and HMAC-SHA1 authenticates each entry, as
-# the format fixes. These are the versions p256 and zip already lock, so the lockfile
-# gains no package; `zeroize` wipes each hash state and input buffer on drop.
+# the format fixes. The lockfile gains no package: p256 already builds hmac 0.13, and
+# sha1 0.11 was locked for the tests (zip 9's `aes-crypto`) and now builds in production
+# too. `zeroize` wipes each hash state and input buffer on drop.
 archive-hmac = { package = "hmac", version = "0.13", features = ["zeroize"] }
 archive-sha1 = { package = "sha1", version = "0.11", default-features = false, features = ["zeroize"] }
 zeroize = { version = "1", features = ["derive"] }
