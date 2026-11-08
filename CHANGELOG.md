@@ -78,6 +78,16 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   After a stop because the backup's folder was deleted (`unknown`, `backup_deleted`), `configure` a
   live folder first (`find_device_folder`; a folder restored from Trash is found again), then call
   `back_up_again`: with the deleted folder still configured, the next pass stops again.
+- `BackupConfigurationData` adds a required `device_id`: this device's canonical id, the one the app
+  already sends as `X-Beebeeb-Device-Id` (mobile: `getDeviceId()`, only an id read from secure storage
+  or durably saved). The server keys this device's photo-backup map by it; without it every device of
+  the account shared one map, and one phone's photo ids hid another's. Never pass a new id: every
+  backed-up photo would look new to the server. 1 to 128 visible ASCII characters, or `invalid_input`.
+- Make the backup service right after the upload service and before any transfer resumes: a backup
+  stopped before a crash cancels its uploads when the service starts. One backup service per upload
+  service (a second while the first lives is `unavailable`), and one per manifest store across
+  processes. The manifest store's and the asset source's callbacks run under the service's locks: they
+  must not call back into the backup service, nor wait on a thread inside `next_batch`.
 - Device link (UniFFI): `approve_device_link(id, scanned_qr, typed_code)` takes the raw text the camera
   scanned; `DeviceLinkQrData` and `DeviceLinkHandle.qr()` are removed (render `qr_payload()`). The QR
   now carries the device name: show `scanned_device_link_name(scanned_qr)` while the person confirms,
@@ -225,6 +235,13 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 
 ### API, limits, and error consumers
 
+- `photo_backup::check`, `mark`, `ids`, `identifiers` and `clear_association` take the device id and send
+  it as `X-Beebeeb-Device-Id` (`photo_backup::DEVICE_ID_HEADER`); `stats` stays account-wide.
+  `BackupConfiguration::new` takes the device id too, and `BackupError` adds `InvalidDeviceId` and
+  `AlreadyRunning`.
+- `Client::enable_system_service` and `proposed::ServiceEnable` no longer take a `parent_id`: a system
+  service folder is always at the top level (LD-0113), and the server answers 400 to a parent.
+
 - `ServerError::details` is removed. Use the bounded typed accessors for retry delay, trial cap, limit,
   and usage. New server fields require a typed accessor.
 - Archive preview now has a 256 MiB hard ceiling and a 32 MiB convenience budget. Search shards clamp
@@ -365,6 +382,19 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 - Sync: a remote restore is checked for a name clash in the item's folder, on the in-memory and the
   store-backed engine alike. Trashed items hold no name, so an item could take a trashed item's name,
   and restoring the trashed one left two items with that name in one folder.
+- The native backup decides "removed elsewhere" from its own copy, never from the server's map alone.
+  When the check asks again for a copy this device backed up, core reads that file: live, it stays
+  backed up and its map row is written again (`mark`); in the Trash or gone (404), it becomes
+  `RemovedElsewhere`; any other answer changes nothing and uploads nothing that pass. Before, a missing
+  map row (another device's id, a changed id, `clear-association`) marked a live copy removed, and a
+  colliding id from another phone could keep this phone's photo from ever being uploaded.
+- Background chunk uploads carry `X-Beebeeb-Client`, `X-Beebeeb-Client-Version` and
+  `X-Beebeeb-Client-OS`, as every foreground request does, so the server's minimum-version gate (task
+  1944) no longer answers 426 to a replacement chunk from the background uploader.
+- A name clash that arrives through sync names the device that wrote it: `report (conflict, Work
+  laptop).pdf`. The device list is read at most once per pass, and only when a clash needs a name; an
+  unknown device, an empty name or one the path rule refuses keeps `device`. A clash found in a
+  snapshot (no writer known) keeps `device` too.
 - Durable uploads remove safe orphan ciphertext, count invalid saved state as a terminal attempt, keep
   partial staging resumable, and can finish after the platform removes the plaintext export once all
   chunks and the staged hash are committed.
