@@ -105,6 +105,14 @@ jobs:
       - name: cargo test
         run: cargo test --workspace
 
+      # The legacy-bindings feature gates upload-path tests that guard the UniFFI
+      # surface against regressions introduced while feat/core-foundation is in
+      # flight (task 2385). The feature is a no-op on main today; feat/core-foundation
+      # will add test cases behind it. Running it here now ensures the flag is
+      # syntactically valid and nothing accidentally breaks when the feature gains content.
+      - name: cargo test beebeeb-uniffi --features legacy-bindings
+        run: cargo test -p beebeeb-uniffi --features legacy-bindings
+
   # The JS surface of beebeeb-wasm as a web client sees it. `cargo test` has no JS engine and never parses
   # the glue wasm-bindgen generates: core #34 merged a doc comment that made beebeeb_wasm.js a SyntaxError and
   # the whole workspace test run stayed green. run.sh builds both targets, `node --check`s the glue,
@@ -160,3 +168,69 @@ jobs:
       - name: Canon sweep (whole tree, must be 0 rows)
         if: always()
         run: bash scripts/claims-guard/canon-sweep.sh
+
+  # Compile the committed Kotlin UniFFI bindings with kotlinc + JNA.
+  # core PR #74 shipped a Kotlin binding with a duplicate `message` field for
+  # three rounds and CI never caught it because we never compiled the generated
+  # Kotlin. This job detects that class of error before it reaches Android.
+  # Two copies of the binding live in the tree (beebeeb-uniffi/bindings/ and
+  # bindings/kotlin/); both are compiled.
+  kotlin-bindings:
+    name: Kotlin bindings compile
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # SDKMAN is pre-installed on GitHub ubuntu-latest runners. Installing via
+      # SDKMAN pins an exact version number; the HTTPS download provides
+      # transport-layer integrity.
+      - name: Install Kotlin 2.0.21 via SDKMAN
+        shell: bash
+        run: |
+          source "$HOME/.sdkman/bin/sdkman-init.sh"
+          sdk install kotlin 2.0.21 </dev/null
+          echo "$HOME/.sdkman/candidates/kotlin/current/bin" >> "$GITHUB_PATH"
+
+      # JNA is the only runtime the generated Kotlin bindings reference. Maven
+      # Central publishes a companion sha256 file for every artifact; we
+      # download both and verify before using the jar.
+      - name: Download and verify JNA 5.14.0
+        run: |
+          JNA_URL="https://repo1.maven.org/maven2/net/java/dev/jna/jna/5.14.0/jna-5.14.0.jar"
+          curl -sSfL "$JNA_URL"       -o "$RUNNER_TEMP/jna.jar"
+          EXPECTED="$(curl -sSfL "${JNA_URL}.sha256")"
+          echo "$EXPECTED  $RUNNER_TEMP/jna.jar" | sha256sum --check
+
+      - name: Compile beebeeb-uniffi/bindings Kotlin
+        run: |
+          kotlinc -cp "$RUNNER_TEMP/jna.jar" \
+            beebeeb-uniffi/bindings/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt \
+            -d /dev/null
+
+      - name: Compile bindings/kotlin Kotlin
+        run: |
+          kotlinc -cp "$RUNNER_TEMP/jna.jar" \
+            bindings/kotlin/uniffi/beebeeb_uniffi/beebeeb_uniffi.kt \
+            -d /dev/null
+
+  # Typecheck the committed Swift UniFFI bindings on macOS. The modulemap
+  # references Darwin (macOS SDK), so this job requires a macOS runner.
+  # `swiftc -typecheck` exits non-zero on any type error, duplicate definition,
+  # or unresolved import — without producing a binary, keeping the job fast.
+  swift-bindings:
+    name: Swift bindings typecheck
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Typecheck beebeeb-uniffi/bindings Swift
+        run: |
+          cd beebeeb-uniffi/bindings
+          swiftc -typecheck \
+            -module-name beebeeb_uniffi \
+            -Xcc -fmodule-map-file="$(pwd)/beebeeb_uniffiFFI.modulemap" \
+            beebeeb_uniffi.swift
