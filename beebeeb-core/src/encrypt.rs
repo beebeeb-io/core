@@ -1282,15 +1282,16 @@ pub(crate) fn open_raw_with_aad(key: &FileKey, raw: &[u8], aad: &[u8]) -> Result
 ///
 /// **Chunk format (task 1908):** the chunks are opened in order as one file's
 /// stream. `file_id` is the id the file was uploaded under (bound into every
-/// v2 frame); `expected` comes from the file's encrypted metadata
-/// ([`decrypt_file_metadata`]): `V2` accepts only v2 frames, `Unrecorded`
-/// (legacy metadata) lets chunk 0 decide. A v2 file that is reordered, mixes
-/// frames of two uploads, has a chunk duplicated/dropped/appended, or ends
-/// before its last chunk is rejected.
+/// v2 frame); `expected` and `version` come from the file's encrypted metadata
+/// ([`decrypt_file_metadata`]): v2 opens only as the upload `version` names,
+/// and with no `version` only a v1 file opens (the ruling of 2026-11-07). A v2
+/// file that is reordered, mixes frames of two uploads, has a chunk
+/// duplicated/dropped/appended, or ends before its last chunk is rejected.
 pub fn decrypt_chunks_to_file(
     key: &FileKey,
     file_id: &str,
     expected: crate::chunk_stream::ExpectedChunkFormat,
+    version: Option<crate::chunk_stream::VersionCommitment>,
     chunks: Vec<(Vec<u8>, Vec<u8>)>, // Vec of (nonce, ciphertext) pairs
     output_path: &str,
 ) -> Result<u64, CoreError> {
@@ -1299,7 +1300,8 @@ pub fn decrypt_chunks_to_file(
 
     // Inner helper does the streaming decrypt into the .tmp; on ANY Err the
     // outer code removes the .tmp so no partial plaintext survives at output_path.
-    let result = decrypt_chunks_to_tmp(key, file_id, expected, chunks, &tmp_path);
+    let opener = crate::chunk_stream::StreamOpener::with_version_commitment(key, file_id, expected, version);
+    let result = decrypt_chunks_to_tmp(key, opener, chunks, &tmp_path);
 
     match result {
         Ok(total) => {
@@ -1323,8 +1325,7 @@ pub fn decrypt_chunks_to_file(
 /// every error path.
 fn decrypt_chunks_to_tmp(
     key: &FileKey,
-    file_id: &str,
-    expected: crate::chunk_stream::ExpectedChunkFormat,
+    mut opener: crate::chunk_stream::StreamOpener,
     chunks: Vec<(Vec<u8>, Vec<u8>)>,
     tmp_path: &str,
 ) -> Result<u64, CoreError> {
@@ -1332,7 +1333,6 @@ fn decrypt_chunks_to_tmp(
     use std::io::Write;
 
     let mut file = File::create(tmp_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
-    let mut opener = crate::chunk_stream::StreamOpener::new(key, file_id, expected);
     let mut total: u64 = 0;
     for (nonce, ciphertext) in chunks {
         if nonce.len() != NONCE_LEN {
@@ -1384,15 +1384,16 @@ pub fn decrypt_chunk_raw(key: &FileKey, raw: &[u8]) -> Result<Vec<u8>, CoreError
 ///
 /// **Chunk format (task 1908):** the body is opened as one file's stream.
 /// `file_id` is the id the file was uploaded under (bound into every v2 frame);
-/// `expected` comes from the file's encrypted metadata
-/// ([`decrypt_file_metadata`]): `V2` accepts only v2 frames, `Unrecorded`
-/// (legacy metadata) lets chunk 0 decide. A v2 body that is reordered, spliced
-/// (within or across uploads), has trailing frames, or ends before its last
-/// chunk is rejected.
+/// `expected` and `version` come from the file's encrypted metadata
+/// ([`decrypt_file_metadata`]): v2 opens only as the upload `version` names,
+/// and with no `version` only a v1 body opens (the ruling of 2026-11-07). A v2
+/// body that is reordered, spliced (within or across uploads), has trailing
+/// frames, or ends before its last chunk is rejected.
 pub fn decrypt_contiguous_to_file(
     key: &FileKey,
     file_id: &str,
     expected: crate::chunk_stream::ExpectedChunkFormat,
+    version: Option<crate::chunk_stream::VersionCommitment>,
     body: &[u8],
     chunk_size: u64,
     output_path: &str,
@@ -1413,7 +1414,8 @@ pub fn decrypt_contiguous_to_file(
 
     // Inner closure does the streaming decrypt; on ANY Err the outer code
     // removes the .tmp so no partial plaintext survives at output_path.
-    let result = decrypt_contiguous_to_tmp(key, file_id, expected, body, encrypted_chunk_len, &tmp_path);
+    let opener = crate::chunk_stream::StreamOpener::with_version_commitment(key, file_id, expected, version);
+    let result = decrypt_contiguous_to_tmp(key, opener, body, encrypted_chunk_len, &tmp_path);
 
     match result {
         Ok(total) => {
@@ -1436,8 +1438,7 @@ pub fn decrypt_contiguous_to_file(
 /// so the caller can guarantee `.tmp` cleanup on every error path.
 fn decrypt_contiguous_to_tmp(
     key: &FileKey,
-    file_id: &str,
-    expected: crate::chunk_stream::ExpectedChunkFormat,
+    mut opener: crate::chunk_stream::StreamOpener,
     body: &[u8],
     encrypted_chunk_len: usize,
     tmp_path: &str,
@@ -1446,7 +1447,6 @@ fn decrypt_contiguous_to_tmp(
     use std::io::Write;
 
     let mut file = File::create(tmp_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
-    let mut opener = crate::chunk_stream::StreamOpener::new(key, file_id, expected);
     let mut total: u64 = 0;
     let mut offset = 0usize;
 

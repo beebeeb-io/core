@@ -50,6 +50,28 @@ nodeTest('a missing record or half a commitment is refused', () => {
     () => new wasm.WasmChunkDecryptor(MK, FILE_ID, { chunk_format: 2, version_id: '00112233445566778899aabb' }),
     /together/,
   );
-  // A legacy record (no commitment) stays readable.
-  assert.deepEqual(read({ chunk_format: 2 }, frames), DATA);
+});
+
+// Guus's ruling of 2026-11-07, "refuse v2 without commitment": a record with no
+// version commitment opens no v2 content, through the decryptor or the
+// random-access open.
+nodeTest('a record without a commitment opens no v2 content', () => {
+  const { frames, version } = upload();
+  assert.throws(() => new wasm.WasmChunkDecryptor(MK, FILE_ID, { chunk_format: 2 }), /without a version commitment/);
+  assert.throws(() => read({ chunk_format: 0 }, frames), 'an unrecorded record without a commitment opened v2');
+
+  const fileKey = wasm.derive_file_key(MK, new TextEncoder().encode(FILE_ID));
+  const last = frames.length - 1;
+  const committed = {
+    chunk_format: 2,
+    version_id: Buffer.from(version.versionId).toString('hex'),
+    version_counter: version.versionCounter,
+  };
+  assert.deepEqual(
+    wasm.decrypt_chunk_frame(fileKey, FILE_ID, committed, last, true, frames[last]),
+    DATA.subarray(16 * last),
+  );
+  for (const bare of [{ chunk_format: 2 }, { chunk_format: 0 }]) {
+    assert.throws(() => wasm.decrypt_chunk_frame(fileKey, FILE_ID, bare, last, true, frames[last]));
+  }
 });

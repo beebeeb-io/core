@@ -5,7 +5,7 @@ use std::io::Cursor;
 use beebeeb_core::CoreError;
 use beebeeb_core::chunk_stream::{
     CHUNK_OVERHEAD, ChunkDecryptor, ChunkEncryptor, ChunkFormat, EncryptedChunk, ExpectedChunkFormat, MAX_CHUNK_SIZE,
-    WRITE_FORMAT,
+    VersionCommitment, WRITE_FORMAT,
 };
 use beebeeb_core::encrypt::{decrypt_file_metadata_with_key, encrypt_chunk_raw, encrypt_name_for};
 use beebeeb_core::kdf::{FileKey, MasterKey, derive_file_key};
@@ -32,8 +32,15 @@ fn push_all(enc: &mut ChunkEncryptor, plaintext: &[u8]) -> Vec<EncryptedChunk> {
     }
 }
 
+/// The commitment a writer seals for the upload whose frame 0 is `frame0`.
+fn first_version(frame0: &EncryptedChunk) -> VersionCommitment {
+    VersionCommitment::new(frame0.data[..12].try_into().unwrap(), 1).unwrap()
+}
+
+/// Read `frames` against the record of the upload that wrote them (committed to
+/// its frame 0, which every v2 file's record carries).
 fn open(key: FileKey, id: &str, frames: &[EncryptedChunk], pin: ExpectedChunkFormat) -> Result<Vec<u8>, CoreError> {
-    let mut dec = ChunkDecryptor::for_push_with_file_key(key, id, pin);
+    let mut dec = ChunkDecryptor::for_version_with_file_key(key, id, pin, frames.first().map(first_version));
     let mut out = Vec::new();
     for frame in frames {
         out.extend_from_slice(&dec.push_frame(&frame.data)?.data);
@@ -149,7 +156,8 @@ fn truncation_never_finishes() {
         .unwrap();
     let frames = push_all(&mut enc, &plaintext(65));
     enc.finish().unwrap();
-    let mut dec = ChunkDecryptor::for_push_with_file_key(key(), ID, ExpectedChunkFormat::V2);
+    let mut dec =
+        ChunkDecryptor::for_version_with_file_key(key(), ID, ExpectedChunkFormat::V2, Some(first_version(&frames[0])));
     for frame in &frames[..frames.len() - 1] {
         dec.push_frame(&frame.data).unwrap();
     }
@@ -181,7 +189,12 @@ fn bounds_and_legacy_constructor() {
         ChunkEncryptor::for_push_with_file_key(derive_file_key(&master, ID.as_bytes()), ID, 65, SIZE).unwrap();
     let frames = push_all(&mut explicit, &plaintext);
     explicit.finish().unwrap();
-    let mut dec = ChunkDecryptor::for_push(&master, ID, pin);
+    let mut dec = ChunkDecryptor::for_version_with_file_key(
+        derive_file_key(&master, ID.as_bytes()),
+        ID,
+        pin,
+        Some(first_version(&frames[0])),
+    );
     let mut opened = Vec::new();
     for frame in &frames {
         opened.extend_from_slice(&dec.push_frame(&frame.data).unwrap().data);

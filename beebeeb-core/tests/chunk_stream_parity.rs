@@ -87,7 +87,12 @@ fn file_encrypt_matches_direct_chunk_encryptor_loop() {
     // through the shared decryptor pinned as the metadata would record it; the
     // legacy no-AAD open works for v1 frames and must fail for v2 (task 1908).
     let file_key = derive_file_key(&master, file_id.as_bytes());
-    let mut dec = ChunkDecryptor::for_push(&master, file_id, ExpectedChunkFormat::recorded_for(WRITE_FORMAT));
+    let mut dec = ChunkDecryptor::for_version_with_file_key(
+        derive_file_key(&master, file_id.as_bytes()),
+        file_id,
+        ExpectedChunkFormat::recorded_for(WRITE_FORMAT),
+        Some(result.version_commitment(None).unwrap()),
+    );
     let mut recovered = Vec::new();
     for chunk in &result.chunks {
         let raw = std::fs::read(&chunk.output_path).unwrap();
@@ -134,7 +139,12 @@ fn file_encrypt_empty_file_parity() {
         decrypt_chunk_raw(&file_key, &raw).is_ok(),
         WRITE_FORMAT == ChunkFormat::V1Legacy
     );
-    let mut dec = ChunkDecryptor::for_push(&master, file_id, ExpectedChunkFormat::recorded_for(WRITE_FORMAT));
+    let mut dec = ChunkDecryptor::for_version_with_file_key(
+        derive_file_key(&master, file_id.as_bytes()),
+        file_id,
+        ExpectedChunkFormat::recorded_for(WRITE_FORMAT),
+        Some(result.version_commitment(None).unwrap()),
+    );
     assert!(dec.push_frame(&raw).unwrap().data.is_empty());
     assert_eq!(dec.finish().unwrap().chunk_count, 1);
 

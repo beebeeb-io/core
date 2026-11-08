@@ -287,6 +287,9 @@ const v2frame = H(V.chunk.frames[0].frame_hex);
 const versionId = H(V.chunk.version_id_hex);
 const chunkMk = H(V.chunk.master_key_hex); // master key of the v2 chunk fixture
 const chunkFileKey = H(V.chunk.file_key_hex); // its file key
+// The record a reader needs since the ruling of 2026-11-07: the vector's
+// commitment (its version id, first version).
+const chunkRecord = { chunk_format: 2, version_id: V.chunk.version_id_hex, version_counter: 1 };
 const gcmFileKey = H(V.gcm.file_key_hex); // file key of the AEAD fixture
 
 // Client metadata (task 1922, merged from main): the handle seals and opens
@@ -518,7 +521,7 @@ const CALLS = {
     s.secret('file key (in)', chunkFileKey);
     s.secret(
       'plaintext (out)',
-      wasm.decrypt_chunk_frame(chunkFileKey, fileIdStr, versionId, 0, false, 2, v2frame),
+      wasm.decrypt_chunk_frame(chunkFileKey, fileIdStr, chunkRecord, 0, false, v2frame),
     );
   },
   encrypt_name_with_chunk_format: (s) => {
@@ -605,17 +608,17 @@ const CALLS = {
   },
   'WasmChunkDecryptor.new': (s) => {
     s.secret('master key (in)', chunkMk);
-    const d = new wasm.WasmChunkDecryptor(chunkMk, fileIdStr, { chunk_format: 2 });
+    const d = new wasm.WasmChunkDecryptor(chunkMk, fileIdStr, chunkRecord);
     s.secret('plaintext (out)', attempt(() => d.pushFrame(v2frame)));
     attempt(() => d.free());
   },
   'WasmChunkDecryptor.fromFileKey': (s) => {
     s.secret('file key (in)', chunkFileKey);
-    const d = wasm.WasmChunkDecryptor.fromFileKey(chunkFileKey, fileIdStr, { chunk_format: 2 });
+    const d = wasm.WasmChunkDecryptor.fromFileKey(chunkFileKey, fileIdStr, chunkRecord);
     d.free();
   },
   'WasmChunkDecryptor.pushFrame': (s) => {
-    const d = new wasm.WasmChunkDecryptor(chunkMk, fileIdStr, { chunk_format: 2 });
+    const d = new wasm.WasmChunkDecryptor(chunkMk, fileIdStr, chunkRecord);
     s.secret('master key (in)', chunkMk);
     s.secret('plaintext (out)', attempt(() => d.pushFrame(v2frame)));
     attempt(() => d.free());

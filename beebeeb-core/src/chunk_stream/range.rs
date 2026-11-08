@@ -10,8 +10,10 @@
 //! frame opens under that format and version id only, never by detection. The v2 chunk subkey is
 //! derived once, and the plaintext comes back `Zeroizing` (I8).
 //!
-//! A version commitment from the same metadata, when present, fixes frame 0 to that one v2 upload,
-//! so an older upload of the same file cannot be served (the rule the whole-file read applies).
+//! A version commitment from the same metadata fixes frame 0 to that one v2 upload, so an older
+//! upload of the same file cannot be served (the rule the whole-file read applies). Without one, v2
+//! is refused (Guus's ruling of 2026-11-07): a v2 pin at [`RangeOpener::new`], and a v2 frame 0
+//! under an `Unrecorded` pin, which then opens v1 only.
 //!
 //! What it does NOT give v1 (legacy files; new files are v2, `WRITE_FORMAT = V2`): v1 frames carry
 //! no position, version or truncation binding, so equal-length frames of one file key can be
@@ -66,7 +68,8 @@ impl std::fmt::Debug for RangeOpener {
 impl RangeOpener {
     /// `pin` is the content pin from `decrypt_file_metadata[_with_key]` (never a server value), and
     /// `commitment` is the version commitment from the same metadata: when present, frame 0 opens
-    /// only as that v2 upload, the same rule `ChunkDecryptor::for_current_version` applies;
+    /// only as that v2 upload, the same rule `ChunkDecryptor::for_current_version` applies; a v2
+    /// pin without one is refused here, and an `Unrecorded` pin without one opens v1 only;
     /// `geometry` is the session's one geometry; `expected_size` is the size the OS holds for the
     /// file (the placeholder's `FileSize`). A geometry no real version has, or one whose
     /// `original_size` differs from `expected_size`, is refused: nothing may be released (I2).
@@ -87,6 +90,10 @@ impl RangeOpener {
             return Err(CoreError::InvalidInput(
                 "the geometry's size is not the size the file is known to have".into(),
             ));
+        }
+        // A v2 pin with no commitment can open nothing: refuse before any I/O.
+        if pin == ExpectedChunkFormat::V2 && commitment.is_none() {
+            return Err(super::uncommitted_v2());
         }
         Ok(RangeOpener {
             chunk_key: derive_chunk_key_v2(&file_key),
@@ -180,8 +187,9 @@ impl RangeOpener {
         open_raw_with_aad(&self.file_key, frame, &[]).map(Zeroizing::new)
     }
 
-    /// Frame 0 fixes the identity: under a v2 pin it opens as v2 or not at all; an
-    /// `Unrecorded` pin tries v2 first, then v1 (the one detection there is, for legacy files).
+    /// Frame 0 fixes the identity. A commitment names the one v2 upload this read may open.
+    /// Without one (the ruling of 2026-11-07) a v2 pin opens nothing (`new` already refused it)
+    /// and an `Unrecorded` pin opens v1 only: a v2 frame 0 is refused even when it authenticates.
     #[allow(clippy::type_complexity)]
     fn open_frame0(
         &self,
@@ -189,7 +197,6 @@ impl RangeOpener {
         frame: &[u8],
     ) -> Result<(Zeroizing<Vec<u8>>, ChunkFormat, Option<[u8; VERSION_ID_LEN]>), CoreError> {
         let v2 = version_id_of(frame).and_then(|vid| self.open_v2(&vid, 0, is_last, frame).ok().map(|p| (p, vid)));
-        // A commitment names the one upload this read may open: v2, with that version id.
         if let Some(committed) = self.committed_version_id {
             return match v2 {
                 Some((plain, vid)) if vid == committed => Ok((plain, ChunkFormat::V2, Some(vid))),
@@ -197,8 +204,7 @@ impl RangeOpener {
             };
         }
         match (self.pin, v2) {
-            (_, Some((plain, vid))) => Ok((plain, ChunkFormat::V2, Some(vid))),
-            (ExpectedChunkFormat::V2, None) => Err(CoreError::Decryption),
+            (ExpectedChunkFormat::V2, _) | (ExpectedChunkFormat::Unrecorded, Some(_)) => Err(super::uncommitted_v2()),
             (ExpectedChunkFormat::Unrecorded, None) => Ok((self.open_v1(frame)?, ChunkFormat::V1Legacy, None)),
         }
     }
@@ -259,8 +265,15 @@ mod tests {
         }
     }
 
-    fn opener(pin: ExpectedChunkFormat, g: Geometry) -> RangeOpener {
-        RangeOpener::new(key(), FILE, pin, None, g, g.original_size).unwrap()
+    /// The commitment a record carries for the upload whose frame 0 is `frame0`.
+    fn first_version(frame0: &[u8]) -> VersionCommitment {
+        VersionCommitment::new(frame0[..VERSION_ID_LEN].try_into().unwrap(), 1).unwrap()
+    }
+
+    /// The session for a record committed to `commit_to`'s upload (`None` for a v1 file, whose
+    /// record carries no commitment).
+    fn opener(pin: ExpectedChunkFormat, g: Geometry, commit_to: Option<&[u8]>) -> RangeOpener {
+        RangeOpener::new(key(), FILE, pin, commit_to.map(first_version), g, g.original_size).unwrap()
     }
 
     fn released_nothing(o: &RangeOpener, before: u64) {
@@ -271,7 +284,7 @@ mod tests {
     fn a_v2_file_opens_in_any_order_after_frame_0_and_finishes_whole() {
         let data = plain(3500, 1);
         let f = frames(FILE, &data, ChunkFormat::V2);
-        let mut o = opener(ExpectedChunkFormat::V2, geometry(4, 3500));
+        let mut o = opener(ExpectedChunkFormat::V2, geometry(4, 3500), Some(&f[0]));
         let mut out = vec![0u8; 3500];
         for i in [0u32, 3, 1, 2] {
             let p = o.open(i, &f[i as usize]).unwrap();
@@ -289,7 +302,7 @@ mod tests {
     #[test]
     fn frame_0_comes_first_and_no_index_opens_twice() {
         let f = frames(FILE, &plain(2500, 2), ChunkFormat::V2);
-        let mut o = opener(ExpectedChunkFormat::V2, geometry(3, 2500));
+        let mut o = opener(ExpectedChunkFormat::V2, geometry(3, 2500), Some(&f[0]));
         assert!(matches!(o.open(1, &f[1]), Err(CoreError::InvalidInput(_))));
         o.open(0, &f[0]).unwrap();
         o.open(1, &f[1]).unwrap();
@@ -300,10 +313,12 @@ mod tests {
     #[test]
     fn the_size_must_be_the_size_the_file_is_known_to_have() {
         let g = geometry(3, 2500);
-        assert!(RangeOpener::new(key(), FILE, ExpectedChunkFormat::V2, None, g, 2499).is_err());
+        let version = Some(VersionCommitment::new([1; VERSION_ID_LEN], 1).unwrap());
+        assert!(RangeOpener::new(key(), FILE, ExpectedChunkFormat::V2, version, g, 2500).is_ok());
+        assert!(RangeOpener::new(key(), FILE, ExpectedChunkFormat::V2, version, g, 2499).is_err());
         let mut bad = g;
         bad.encrypted_size += 1;
-        assert!(RangeOpener::new(key(), FILE, ExpectedChunkFormat::V2, None, bad, 2500).is_err());
+        assert!(RangeOpener::new(key(), FILE, ExpectedChunkFormat::V2, version, bad, 2500).is_err());
     }
 
     /// The version commitment: a protected read opens frame 0 only from the committed upload,
@@ -332,10 +347,33 @@ mod tests {
         }
     }
 
+    /// Guus's ruling of 2026-11-07, "refuse v2 without commitment": a v2 pin without a
+    /// commitment is refused before any I/O, and an `Unrecorded` pin without one refuses a v2
+    /// frame 0 that authenticates, releasing nothing, while it still opens a v1 file. Mutant:
+    /// `new` and `open_frame0` accept v2 without a commitment again: the first two asserts fail.
+    #[test]
+    fn a_record_without_a_commitment_opens_no_v2() {
+        let data = plain(2500, 9);
+        let v2 = frames(FILE, &data, ChunkFormat::V2);
+        let v1 = frames(FILE, &data, ChunkFormat::V1Legacy);
+        let g = geometry(3, 2500);
+        assert!(matches!(
+            RangeOpener::new(key(), FILE, ExpectedChunkFormat::V2, None, g, 2500),
+            Err(CoreError::InvalidInput(_))
+        ));
+        let mut o = opener(ExpectedChunkFormat::Unrecorded, g, None);
+        assert!(matches!(o.open(0, &v2[0]), Err(CoreError::InvalidInput(_))));
+        released_nothing(&o, 0);
+        assert_eq!(o.format(), None, "a refused frame 0 locks no format");
+        o.open(0, &v1[0]).unwrap();
+        assert_eq!(o.format(), Some(ChunkFormat::V1Legacy));
+    }
+
     #[test]
     fn a_v2_pin_refuses_a_v1_frame_0() {
         let f = frames(FILE, &plain(2500, 3), ChunkFormat::V1Legacy);
-        let mut o = opener(ExpectedChunkFormat::V2, geometry(3, 2500));
+        let v2 = frames(FILE, &plain(2500, 3), ChunkFormat::V2);
+        let mut o = opener(ExpectedChunkFormat::V2, geometry(3, 2500), Some(&v2[0]));
         assert!(o.open(0, &f[0]).is_err());
         assert_eq!(o.format(), None, "a refused frame 0 locks no format");
     }
@@ -348,7 +386,7 @@ mod tests {
         let a = frames(FILE, &data, ChunkFormat::V2);
         let b = frames(FILE, &data, ChunkFormat::V2); // another upload of the same file id
         let x = frames(OTHER_FILE, &data, ChunkFormat::V2); // another file, same key
-        let mut o = opener(ExpectedChunkFormat::V2, geometry(4, 3500));
+        let mut o = opener(ExpectedChunkFormat::V2, geometry(4, 3500), Some(&a[0]));
         o.open(0, &a[0]).unwrap();
         // a frame served at another index
         assert!(o.open(2, &a[1]).is_err());
@@ -373,13 +411,13 @@ mod tests {
         let data = plain(4000, 5); // exactly 4 full chunks
         let f = frames(FILE, &data, ChunkFormat::V2);
         // n - 1: chunk 2 would be the last, but it was sealed as not last.
-        let mut short = opener(ExpectedChunkFormat::V2, geometry(3, 3000));
+        let mut short = opener(ExpectedChunkFormat::V2, geometry(3, 3000), Some(&f[0]));
         short.open(0, &f[0]).unwrap();
         short.open(1, &f[1]).unwrap();
         assert!(short.open(2, &f[2]).is_err(), "n-2 does not open as last");
         assert!(short.finish().is_err());
         // n + 1: chunk 3 was sealed as last, the geometry says it is not.
-        let mut long = opener(ExpectedChunkFormat::V2, geometry(5, 4001));
+        let mut long = opener(ExpectedChunkFormat::V2, geometry(5, 4001), Some(&f[0]));
         for i in 0..3u32 {
             long.open(i, &f[i as usize]).unwrap();
         }
@@ -397,7 +435,7 @@ mod tests {
         let data = plain(3000, 6);
         let mut f = frames(FILE, &data, ChunkFormat::V2);
         f[1] = encrypt_chunk_raw(&key(), &data[1000..2000]).unwrap();
-        let mut o = opener(ExpectedChunkFormat::Unrecorded, geometry(3, 3000));
+        let mut o = opener(ExpectedChunkFormat::Unrecorded, geometry(3, 3000), Some(&f[0]));
         o.open(0, &f[0]).unwrap();
         assert_eq!(o.format(), Some(ChunkFormat::V2), "frame 0 decided v2 and locked it");
         assert!(o.open(1, &f[1]).is_err());
@@ -413,8 +451,9 @@ mod tests {
             (ChunkFormat::V2, ExpectedChunkFormat::V2),
         ] {
             let f = frames(FILE, &data, format);
+            let commit_to = (format == ChunkFormat::V2).then_some(f[0].as_slice());
             // The geometry says the last chunk holds 499 bytes; its frame holds 500.
-            let mut o = opener(pin, geometry(3, 2499));
+            let mut o = opener(pin, geometry(3, 2499), commit_to);
             o.open(0, &f[0]).unwrap();
             o.open(1, &f[1]).unwrap();
             assert!(
@@ -425,7 +464,7 @@ mod tests {
         }
         // v1: a valid, shorter frame under the same key where a full chunk belongs.
         let f = frames(FILE, &data, ChunkFormat::V1Legacy);
-        let mut o = opener(ExpectedChunkFormat::Unrecorded, geometry(3, 2500));
+        let mut o = opener(ExpectedChunkFormat::Unrecorded, geometry(3, 2500), None);
         o.open(0, &f[0]).unwrap();
         let short = encrypt_chunk_raw(&key(), &data[1000..1900]).unwrap();
         assert!(o.open(1, &short).is_err());
@@ -437,7 +476,7 @@ mod tests {
     fn t5_v1_frames_of_equal_length_swap_undetected() {
         let data = plain(3000, 8);
         let f = frames(FILE, &data, ChunkFormat::V1Legacy);
-        let mut o = opener(ExpectedChunkFormat::Unrecorded, geometry(3, 3000));
+        let mut o = opener(ExpectedChunkFormat::Unrecorded, geometry(3, 3000), None);
         o.open(0, &f[0]).unwrap();
         let at_1 = o.open(1, &f[2]).unwrap();
         let at_2 = o.open(2, &f[1]).unwrap();

@@ -147,7 +147,7 @@ fn decrypt_chunks_to_file_roundtrip() {
     let path = dir.join("beebeeb_test_decrypt_chunks.bin");
     let path_str = path.to_str().unwrap();
 
-    let total = decrypt_chunks_to_file(&key, "test-file-id", Unrecorded, chunks, path_str).unwrap();
+    let total = decrypt_chunks_to_file(&key, "test-file-id", Unrecorded, None, chunks, path_str).unwrap();
     assert_eq!(total, (chunk1.len() + chunk2.len()) as u64);
 
     let written = std::fs::read(&path).unwrap();
@@ -170,7 +170,7 @@ fn decrypt_chunks_to_file_empty_is_rejected() {
     let path_str = path.to_str().unwrap();
     std::fs::remove_file(&path).ok();
 
-    let err = decrypt_chunks_to_file(&key, "test-file-id", Unrecorded, vec![], path_str).unwrap_err();
+    let err = decrypt_chunks_to_file(&key, "test-file-id", Unrecorded, None, vec![], path_str).unwrap_err();
     assert!(matches!(err, CoreError::Decryption));
     assert!(!path.exists(), "no output may appear for a zero-frame file");
 }
@@ -194,7 +194,8 @@ fn decrypt_chunks_to_file_leaves_no_partial_file_on_midstream_failure() {
     std::fs::remove_file(&path).ok();
     std::fs::remove_file(&tmp).ok();
 
-    let err = decrypt_chunks_to_file(&key, "test-file-id", Unrecorded, chunks, path.to_str().unwrap()).unwrap_err();
+    let err =
+        decrypt_chunks_to_file(&key, "test-file-id", Unrecorded, None, chunks, path.to_str().unwrap()).unwrap_err();
     assert!(matches!(err, CoreError::Decryption));
     assert!(
         !path.exists(),
@@ -216,7 +217,7 @@ fn decrypt_chunks_to_file_wrong_key_fails() {
     let path = dir.join("beebeeb_test_decrypt_wrong_key.bin");
     let path_str = path.to_str().unwrap();
 
-    assert!(decrypt_chunks_to_file(&wrong_key, "test-file-id", Unrecorded, chunks, path_str).is_err());
+    assert!(decrypt_chunks_to_file(&wrong_key, "test-file-id", Unrecorded, None, chunks, path_str).is_err());
 
     std::fs::remove_file(&path).ok();
 }
@@ -253,6 +254,7 @@ fn decrypt_contiguous_roundtrip_two_uniform_chunks() {
         &key,
         "test-file-id",
         Unrecorded,
+        None,
         &body,
         chunk_size,
         path.to_str().unwrap(),
@@ -281,6 +283,7 @@ fn decrypt_contiguous_roundtrip_with_remainder() {
         &key,
         "test-file-id",
         Unrecorded,
+        None,
         &body,
         chunk_size,
         path.to_str().unwrap(),
@@ -301,13 +304,22 @@ fn decrypt_contiguous_empty_body_is_rejected() {
     let key = test_file_key();
     let path = std::env::temp_dir().join("beebeeb_test_contig_empty.bin");
     std::fs::remove_file(&path).ok();
-    let err = decrypt_contiguous_to_file(&key, "test-file-id", Unrecorded, &[], 8, path.to_str().unwrap()).unwrap_err();
+    let err =
+        decrypt_contiguous_to_file(&key, "test-file-id", Unrecorded, None, &[], 8, path.to_str().unwrap()).unwrap_err();
     assert!(matches!(err, CoreError::Decryption));
     assert!(!path.exists(), "no output may appear for an empty body");
 }
 
 /// v2 frames for `data` split into `cs`-byte chunks, via the shared encryptor.
-fn v2_body(file_id: &str, data: &[u8], cs: u64) -> (crate::kdf::MasterKey, Vec<Vec<u8>>) {
+fn v2_body(
+    file_id: &str,
+    data: &[u8],
+    cs: u64,
+) -> (
+    crate::kdf::MasterKey,
+    Vec<Vec<u8>>,
+    crate::chunk_stream::VersionCommitment,
+) {
     use crate::chunk_stream::{ChunkEncryptor, ChunkFormat};
     let mk = derive_master_key("test-password", b"test-salt-16bytes").unwrap();
     let mut enc = ChunkEncryptor::for_push_with_chunk_size(&mk, file_id, data.len() as u64, cs)
@@ -318,31 +330,59 @@ fn v2_body(file_id: &str, data: &[u8], cs: u64) -> (crate::kdf::MasterKey, Vec<V
         .chunks(cs as usize)
         .map(|c| enc.push_chunk(c).unwrap().data)
         .collect();
+    let version = enc.version_commitment(None).unwrap();
     enc.finish().unwrap();
-    (mk, frames)
+    (mk, frames, version)
 }
 
 #[test]
 fn decrypt_contiguous_v2_roundtrip_and_swap_rejected() {
     let data = b"AAAAAAAABBBBBBBBCCC";
-    let (mk, frames) = v2_body("contig-v2", data, 8);
+    let (mk, frames, version) = v2_body("contig-v2", data, 8);
     let key = derive_file_key(&mk, b"contig-v2");
     let path = std::env::temp_dir().join("beebeeb_test_contig_v2.bin");
 
-    let total = decrypt_contiguous_to_file(&key, "contig-v2", V2, &frames.concat(), 8, path.to_str().unwrap()).unwrap();
+    let total = decrypt_contiguous_to_file(
+        &key,
+        "contig-v2",
+        V2,
+        Some(version),
+        &frames.concat(),
+        8,
+        path.to_str().unwrap(),
+    )
+    .unwrap();
     assert_eq!(total, data.len() as u64);
     assert_eq!(std::fs::read(&path).unwrap(), data);
     std::fs::remove_file(&path).ok();
 
     // Equal-size chunks 0 and 1 swapped: must fail, and leave no output.
     let swapped = [frames[1].clone(), frames[0].clone(), frames[2].clone()].concat();
-    let err = decrypt_contiguous_to_file(&key, "contig-v2", V2, &swapped, 8, path.to_str().unwrap()).unwrap_err();
+    let err = decrypt_contiguous_to_file(
+        &key,
+        "contig-v2",
+        V2,
+        Some(version),
+        &swapped,
+        8,
+        path.to_str().unwrap(),
+    )
+    .unwrap_err();
     assert!(matches!(err, CoreError::Decryption));
     assert!(!path.exists());
 
     // Last chunk withheld: truncation must fail.
     let truncated = [frames[0].clone(), frames[1].clone()].concat();
-    let err = decrypt_contiguous_to_file(&key, "contig-v2", V2, &truncated, 8, path.to_str().unwrap()).unwrap_err();
+    let err = decrypt_contiguous_to_file(
+        &key,
+        "contig-v2",
+        V2,
+        Some(version),
+        &truncated,
+        8,
+        path.to_str().unwrap(),
+    )
+    .unwrap_err();
     assert!(matches!(err, CoreError::Decryption));
     assert!(!path.exists());
 }
@@ -350,7 +390,7 @@ fn decrypt_contiguous_v2_roundtrip_and_swap_rejected() {
 #[test]
 fn decrypt_chunks_to_file_v2_roundtrip_and_drop_rejected() {
     let data = b"AAAAAAAABBBBBBBBCCCCCCCC";
-    let (mk, frames) = v2_body("pairs-v2", data, 8);
+    let (mk, frames, version) = v2_body("pairs-v2", data, 8);
     let key = derive_file_key(&mk, b"pairs-v2");
     let pairs = |fs: &[Vec<u8>]| -> Vec<(Vec<u8>, Vec<u8>)> {
         fs.iter()
@@ -359,15 +399,66 @@ fn decrypt_chunks_to_file_v2_roundtrip_and_drop_rejected() {
     };
     let path = std::env::temp_dir().join("beebeeb_test_pairs_v2.bin");
 
-    let total = decrypt_chunks_to_file(&key, "pairs-v2", V2, pairs(&frames), path.to_str().unwrap()).unwrap();
+    let total = decrypt_chunks_to_file(
+        &key,
+        "pairs-v2",
+        V2,
+        Some(version),
+        pairs(&frames),
+        path.to_str().unwrap(),
+    )
+    .unwrap();
     assert_eq!(total, data.len() as u64);
     std::fs::remove_file(&path).ok();
 
     // Middle chunk dropped: must fail.
     let dropped = [frames[0].clone(), frames[2].clone()];
-    let err = decrypt_chunks_to_file(&key, "pairs-v2", V2, pairs(&dropped), path.to_str().unwrap()).unwrap_err();
+    let err = decrypt_chunks_to_file(
+        &key,
+        "pairs-v2",
+        V2,
+        Some(version),
+        pairs(&dropped),
+        path.to_str().unwrap(),
+    )
+    .unwrap_err();
     assert!(matches!(err, CoreError::Decryption));
     assert!(!path.exists());
+}
+
+/// Guus's ruling of 2026-11-07, "refuse v2 without commitment": the disk
+/// helpers open a v2 body only against the commitment of its record. A record
+/// with none (a `V2` pin, or an `Unrecorded` one over v2 frames) opens
+/// nothing and leaves no output. Mutant: the opener's no-commitment arm opens
+/// v2 again: both calls return `Ok`.
+#[test]
+fn disk_helpers_refuse_a_v2_body_whose_record_has_no_commitment() {
+    let data = b"AAAAAAAABBBBBBBBCCC";
+    let (mk, frames, _version) = v2_body("contig-v2-bare", data, 8);
+    let key = derive_file_key(&mk, b"contig-v2-bare");
+    let path = std::env::temp_dir().join("beebeeb_test_contig_v2_bare.bin");
+    std::fs::remove_file(&path).ok();
+    for pin in [V2, Unrecorded] {
+        let err = decrypt_contiguous_to_file(
+            &key,
+            "contig-v2-bare",
+            pin,
+            None,
+            &frames.concat(),
+            8,
+            path.to_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, CoreError::InvalidInput(_)), "{pin:?}: {err:?}");
+        assert!(!path.exists());
+        let pairs: Vec<(Vec<u8>, Vec<u8>)> = frames
+            .iter()
+            .map(|f| (f[..NONCE_LEN].to_vec(), f[NONCE_LEN..].to_vec()))
+            .collect();
+        let err = decrypt_chunks_to_file(&key, "contig-v2-bare", pin, None, pairs, path.to_str().unwrap()).unwrap_err();
+        assert!(matches!(err, CoreError::InvalidInput(_)), "{pin:?}: {err:?}");
+        assert!(!path.exists());
+    }
 }
 
 #[test]
@@ -375,8 +466,8 @@ fn decrypt_contiguous_zero_chunk_size_rejected() {
     let key = test_file_key();
     let body = vec![0u8; NONCE_LEN + 16];
     let path = std::env::temp_dir().join("beebeeb_test_contig_zero.bin");
-    let err =
-        decrypt_contiguous_to_file(&key, "test-file-id", Unrecorded, &body, 0, path.to_str().unwrap()).unwrap_err();
+    let err = decrypt_contiguous_to_file(&key, "test-file-id", Unrecorded, None, &body, 0, path.to_str().unwrap())
+        .unwrap_err();
     match err {
         CoreError::InvalidInput(_) => {}
         other => panic!("expected InvalidInput, got {other:?}"),
@@ -395,8 +486,16 @@ fn decrypt_contiguous_wrong_key_fails() {
     let blob = encrypt_chunk(&key, b"secrets").unwrap();
     let body = pack_chunk(&blob);
     let path = std::env::temp_dir().join("beebeeb_test_contig_wrong_key.bin");
-    let err = decrypt_contiguous_to_file(&wrong_key, "test-file-id", Unrecorded, &body, 7, path.to_str().unwrap())
-        .unwrap_err();
+    let err = decrypt_contiguous_to_file(
+        &wrong_key,
+        "test-file-id",
+        Unrecorded,
+        None,
+        &body,
+        7,
+        path.to_str().unwrap(),
+    )
+    .unwrap_err();
     assert!(matches!(err, CoreError::Decryption));
     std::fs::remove_file(&path).ok();
 }
@@ -407,8 +506,16 @@ fn decrypt_contiguous_truncated_body_rejected() {
     // Body shorter than NONCE_LEN + TAG_LEN — cannot even attempt decrypt.
     let body = vec![0u8; NONCE_LEN + 8]; // 8 bytes < 16 byte tag
     let path = std::env::temp_dir().join("beebeeb_test_contig_truncated.bin");
-    let err =
-        decrypt_contiguous_to_file(&key, "test-file-id", Unrecorded, &body, 64, path.to_str().unwrap()).unwrap_err();
+    let err = decrypt_contiguous_to_file(
+        &key,
+        "test-file-id",
+        Unrecorded,
+        None,
+        &body,
+        64,
+        path.to_str().unwrap(),
+    )
+    .unwrap_err();
     assert!(matches!(err, CoreError::Decryption));
     std::fs::remove_file(&path).ok();
 }
@@ -438,6 +545,7 @@ fn decrypt_contiguous_leaves_no_partial_file_on_midstream_failure() {
         &key,
         "test-file-id",
         Unrecorded,
+        None,
         &body,
         chunk_size,
         path.to_str().unwrap(),
@@ -468,8 +576,16 @@ fn decrypt_contiguous_atomic_no_partial_visible_at_final_path() {
     let path = std::env::temp_dir().join("beebeeb_test_contig_atomic_firstfail.bin");
     std::fs::remove_file(&path).ok();
 
-    let err = decrypt_contiguous_to_file(&wrong_key, "test-file-id", Unrecorded, &body, 8, path.to_str().unwrap())
-        .unwrap_err();
+    let err = decrypt_contiguous_to_file(
+        &wrong_key,
+        "test-file-id",
+        Unrecorded,
+        None,
+        &body,
+        8,
+        path.to_str().unwrap(),
+    )
+    .unwrap_err();
     assert!(matches!(err, CoreError::Decryption));
     assert!(
         !path.exists(),

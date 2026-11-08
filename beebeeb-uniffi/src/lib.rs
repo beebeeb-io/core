@@ -799,85 +799,7 @@ pub fn decrypt_chunk(key: Vec<u8>, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Resul
     Ok(encrypt::decrypt_chunk(&fk, &blob)?)
 }
 
-/// Decrypt a sequence of encrypted chunks and write the plaintext to a file.
-///
-/// Chunks are decrypted sequentially and written in order; peak memory is
-/// bounded by the size of the largest single chunk's plaintext, not the
-/// total file size. The output file is created (truncating any existing
-/// file) before the first chunk.
-///
-/// On `Err`, the output file may exist on disk in a partially-written
-/// state — the caller is responsible for deleting it so a downstream
-/// cache layer does not treat the partial file as complete.
-///
-/// Returns the total number of plaintext bytes written.
-///
-/// **Task 1908:** `file_id` (the id the file was uploaded under) and
-/// `expected_chunk_format` (from the file's encrypted metadata,
-/// `decrypt_file_metadata`: 0 = unrecorded, 2 = v2) are required: the chunks
-/// are opened as one file's ordered stream — v2 frames are bound to (file id,
-/// upload, index, last), v1 files still open when the metadata records no
-/// format. Reordered, spliced, duplicated, dropped or truncated v2 chunks fail.
-/// The output is atomic (core `.tmp` + rename).
-#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
-pub fn decrypt_chunks_to_file(
-    key: Vec<u8>,
-    file_id: String,
-    expected_chunk_format: u8,
-    chunks: Vec<EncryptedChunkData>,
-    output_path: String,
-) -> Result<u64, CryptoError> {
-    let key = Zeroizing::new(key);
-    let fk = file_key_from_slice(&key)?;
-    let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
-    let chunk_pairs: Vec<(Vec<u8>, Vec<u8>)> = chunks.into_iter().map(|c| (c.nonce, c.ciphertext)).collect();
-    encrypt::decrypt_chunks_to_file(&fk, &file_id, expected, chunk_pairs, &output_path).map_err(CryptoError::from)
-}
-
-/// Decrypt a contiguous encrypted body into a file.
-///
-/// `body` is the wire format produced by stacking encrypted chunks back
-/// to back: each chunk is `nonce (12 bytes) || ciphertext (chunk_size +
-/// 16 byte AES-GCM tag)`. All chunks but the last produce `chunk_size`
-/// bytes of plaintext; the final chunk is whatever remains.
-///
-/// Compared to `decrypt_chunks_to_file`, this variant lets the caller
-/// hand over the full encrypted blob without pre-slicing — Rust performs
-/// the chunk boundaries internally. Saves N small `ByteArray` allocations
-/// + per-chunk marshalling overhead across the FFI for files with many
-///   chunks (a 100 MB / 1 MB-chunk file is one allocation here vs. 200
-///   across the bridge with the pre-sliced variant).
-///
-/// Streams chunk-by-chunk — peak memory is one plaintext chunk, not the
-/// full file. Returns the total number of plaintext bytes written.
-///
-/// **Atomic output:** core writes plaintext to a sibling `.tmp` and renames it
-/// to `output_path` only on full success; on any error the `.tmp` is removed and
-/// `output_path` is never created/overwritten. Callers no longer need to clean
-/// up a partial file on `Err`, and an existence-based cache cannot serve a
-/// truncated decrypt.
-///
-/// **Task 1908:** `file_id` (the id the file was uploaded under) is required —
-/// it is bound into every v2 frame together with the upload's version id, the
-/// chunk index and the last-chunk flag — and so is `expected_chunk_format`
-/// from the file's encrypted metadata (0 = unrecorded, 2 = v2). v1 files still
-/// open when the metadata records no format. A reordered/spliced/truncated v2
-/// body fails.
-#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
-pub fn decrypt_contiguous_to_file(
-    file_key: Vec<u8>,
-    file_id: String,
-    expected_chunk_format: u8,
-    body: Vec<u8>,
-    chunk_size: u64,
-    output_path: String,
-) -> Result<u64, CryptoError> {
-    let file_key = Zeroizing::new(file_key);
-    let fk = file_key_from_slice(&file_key)?;
-    let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
-    encrypt::decrypt_contiguous_to_file(&fk, &file_id, expected, &body, chunk_size, &output_path)
-        .map_err(CryptoError::from)
-}
+pub use chunk_decryptor::{decrypt_chunks_to_file, decrypt_contiguous_to_file};
 
 // ---------------------------------------------------------------------------
 // Metadata
@@ -1904,12 +1826,14 @@ impl MasterKeyHandle {
     /// Reads each chunk file (containing `nonce || ciphertext`), decrypts,
     /// and writes plaintext to output. Atomic rename at end.
     ///
-    /// `expected_chunk_format` (task 1908) comes from the file's encrypted
-    /// metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
+    /// `metadata` is the version's `NameMetadataDto` from
+    /// `decrypt_file_metadata` (task 1908): v2 opens only as the upload its
+    /// commitment names, and a record without one opens v1 content only (the
+    /// ruling of 2026-11-07).
     pub fn decrypt_file(
         &self,
         file_id: String,
-        expected_chunk_format: u8,
+        metadata: NameMetadataDto,
         chunk_paths: Vec<String>,
         output_path: String,
         callback: Option<Box<dyn FileProgressCallback>>,
@@ -1924,12 +1848,13 @@ impl MasterKeyHandle {
             .as_ref()
             .map(|a| a as &dyn beebeeb_core::file_encrypt::FileProgressCallback);
 
-        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
+        let (expected, version) = chunk_decryptor::metadata_pin(metadata)?;
         let result = self.with_key(|mk| {
             beebeeb_core::file_encrypt::decrypt_chunks_to_file(
                 mk,
                 &file_id,
                 expected,
+                version,
                 &path_refs,
                 Path::new(&output_path),
                 core_cb,
@@ -2300,24 +2225,22 @@ impl FileKeyHandle {
     /// asked for and `is_last` is `index == chunk_count - 1`; a server that
     /// serves another chunk or lies about the count fails the tag.
     ///
-    /// `format` (1 = v1 legacy, 2 = v2) must come from authenticated data — 2
-    /// when the encrypted metadata records v2, else the `chunk_format()` of a
-    /// decryptor that opened chunk 0 — never from a server field.
-    /// `version_id` (12 bytes, v2 only; ignored for v1) is the `version_id()` of
-    /// a decryptor that opened chunk 0, or chunk 0's first 12 bytes: frames of
-    /// another upload of the same file id fail.
+    /// `metadata` is that version's `NameMetadataDto` from
+    /// `decrypt_file_metadata[_with_key]`, never a server field: with a version
+    /// commitment only that upload's v2 frames open; a record without one opens
+    /// v1 frames only, and a `chunk_format: 2` record without one is refused
+    /// (the ruling of 2026-11-07).
     pub fn decrypt_chunk_frame(
         &self,
         file_id: String,
-        version_id: Vec<u8>,
+        metadata: NameMetadataDto,
         index: u32,
         is_last: bool,
-        format: u8,
         frame: Vec<u8>,
     ) -> Result<Vec<u8>, CryptoError> {
-        let format = ChunkFormat::from_u8(format)?;
+        let record = chunk_decryptor::metadata_record(metadata)?;
         self.with_key(|fk| {
-            beebeeb_core::chunk_stream::open_chunk(fk, &file_id, &version_id, index, is_last, format, &frame)
+            beebeeb_core::chunk_stream::open_recorded_chunk(fk, &file_id, &record, index, is_last, &frame)
         })?
         .map_err(Into::into)
     }
@@ -2576,7 +2499,7 @@ impl WriteTargetHandle {
 
 /// Decrypted name metadata (task 1908): `chunk_format` is what every content
 /// reader of the file must be given (0 = unrecorded, 2 = v2).
-#[derive(uniffi::Record)]
+#[derive(Clone, uniffi::Record)]
 pub struct NameMetadataDto {
     pub name: String,
     pub mime_type: Option<String>,
@@ -4262,8 +4185,9 @@ impl beebeeb_upload::DownloadProgressCallback for DownloadCallbackBridge<'_> {
 /// fetches `GET /api/v1/files/{file_id}/download`, splits into chunks,
 /// decrypts each with AES-256-GCM, and writes to `output_path`.
 ///
-/// `expected_chunk_format` (task 1908) comes from the file's encrypted
-/// metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
+/// `metadata` (task 1908) is the version's `NameMetadataDto` from
+/// `decrypt_file_metadata`: v2 opens only as the upload its commitment names,
+/// and a record without one opens v1 content only (the ruling of 2026-11-07).
 #[cfg(feature = "legacy-bindings")]
 #[uniffi::export]
 pub fn download_and_decrypt_file(
@@ -4271,11 +4195,11 @@ pub fn download_and_decrypt_file(
     token: String,
     master_key_handle: &MasterKeyHandle,
     file_id: String,
-    expected_chunk_format: u8,
+    metadata: NameMetadataDto,
     output_path: String,
     callback: Option<Box<dyn DownloadProgressCallback>>,
 ) -> Result<DownloadResultData, UploadError> {
-    let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)
+    let (expected, version) = chunk_decryptor::metadata_pin(metadata)
         .map_err(|e| UploadError::UploadInvalidInput { detail: e.to_string() })?;
     // Extract the raw master key bytes while the lock is held, then release.
     let mk_bytes = master_key_handle
@@ -4289,8 +4213,16 @@ pub fn download_and_decrypt_file(
     let core_cb: Option<Box<dyn beebeeb_upload::DownloadProgressCallback + '_>> =
         bridge.map(|b| Box::new(b) as Box<dyn beebeeb_upload::DownloadProgressCallback>);
 
-    let result =
-        beebeeb_upload::download_and_decrypt_file(&api_url, &token, &mk, &file_id, expected, &output_path, core_cb)?;
+    let result = beebeeb_upload::download_and_decrypt_file(
+        &api_url,
+        &token,
+        &mk,
+        &file_id,
+        expected,
+        version,
+        &output_path,
+        core_cb,
+    )?;
 
     Ok(DownloadResultData {
         output_path: result.output_path,

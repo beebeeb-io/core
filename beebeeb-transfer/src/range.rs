@@ -137,6 +137,9 @@ pub enum RangeSessionError {
     IdentityMismatch,
     /// The geometry's size is not the size the caller states (task 0783). Nothing transferred.
     SizeMismatch,
+    /// The metadata pins v2 and carries no version commitment, so no frame of the file may open
+    /// (Guus's ruling of 2026-11-07, "refuse v2 without commitment"). Refused before any request.
+    MissingVersionCommitment,
     /// The sink refused before anything was transferred.
     Sink(std::io::Error),
     /// Every chunk opened, but the sink did not get every byte (or the piece cutter still holds
@@ -162,6 +165,9 @@ impl std::fmt::Display for RangeSessionError {
             RangeSessionError::Unauthentic { index } => write!(f, "chunk {index} did not authenticate"),
             RangeSessionError::IdentityMismatch => f.write_str("the placeholder holds another version's bytes"),
             RangeSessionError::SizeMismatch => f.write_str("the file's size is not the size it is known to have"),
+            RangeSessionError::MissingVersionCommitment => {
+                f.write_str("the file's metadata records v2 content without a version commitment")
+            }
             RangeSessionError::Sink(e) => write!(f, "handing bytes to the system failed ({:?})", e.kind()),
             RangeSessionError::Incomplete => f.write_str("every chunk opened, but not every byte reached the system"),
             RangeSessionError::ApiNeeded(_) => f.write_str("only the API path could go on"),
@@ -531,6 +537,10 @@ pub async fn range_session<I: DirectIo>(
     };
     if !identity_ok {
         return st.fail(RangeSessionError::IdentityMismatch);
+    }
+    // A v2 pin without a commitment opens nothing (core refuses it too): no request is made.
+    if req.pin == ExpectedChunkFormat::V2 && req.version.is_none() {
+        return st.fail(RangeSessionError::MissingVersionCommitment);
     }
     let mailbox = control.0.clone();
     let session = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);

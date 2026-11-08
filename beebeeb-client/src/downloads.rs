@@ -591,6 +591,11 @@ impl DownloadService {
         file: &DownloadFile,
         metadata: &NameMetadata,
     ) -> Result<(), DownloadServiceError> {
+        // Guus's ruling of 2026-11-07: a v2 record without a commitment opens
+        // nothing (core refuses its frame 0), so it is refused before a fetch.
+        if metadata.chunk_format == ExpectedChunkFormat::V2 && metadata.version.is_none() {
+            return Err(DownloadServiceError::MissingVersionCommitment);
+        }
         let highest = self
             .store
             .lock()

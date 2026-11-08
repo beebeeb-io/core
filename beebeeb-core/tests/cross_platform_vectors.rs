@@ -884,7 +884,9 @@ fn vector_folder_wrapped_file_key() {
 //     path must do with these bytes, through the public reader only.
 // ---------------------------------------------------------------------------
 
-use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkFormat, ExpectedChunkFormat, chunk_aad_v2, open_chunk};
+use beebeeb_core::chunk_stream::{
+    ChunkDecryptor, ChunkFormat, ExpectedChunkFormat, VersionCommitment, chunk_aad_v2, open_chunk,
+};
 
 /// A v2 vector's frames, decrypted in order by the streaming reader under the
 /// V2 pin, equal its plaintext, and the stream finishes (last frame seen). Each
@@ -905,7 +907,14 @@ fn check_chunk_v2(name: &str) {
     let frames = v["frames"].as_array().unwrap();
     assert_eq!(frames.len() as u64, v["chunk_count"].as_u64().unwrap());
 
-    let mut dec = ChunkDecryptor::for_push(&mk, file_id, ExpectedChunkFormat::V2);
+    // The record a writer seals for this upload: frame 0's nonce, counter 1.
+    let version = VersionCommitment::new(version_id, 1).unwrap();
+    let mut dec = ChunkDecryptor::for_version_with_file_key(
+        derive_file_key(&mk, file_id.as_bytes()),
+        file_id,
+        ExpectedChunkFormat::V2,
+        Some(version),
+    );
     let mut plaintext = Vec::new();
     let mut wire = Vec::new();
     for f in frames {
@@ -940,9 +949,16 @@ fn check_chunk_v2(name: &str) {
         wire.extend(frame);
     }
     dec.finish().expect("the stream ends with its last frame");
-    assert_eq!(
-        detected_format(&mk, file_id, &decode_hex(&frames[0], "frame_hex")),
-        Some(ChunkFormat::V2)
+    let frame0 = decode_hex(&frames[0], "frame_hex");
+    assert!(matches!(
+        detected_format(&mk, file_id, &frame0, Some(version)),
+        Ok(Some(ChunkFormat::V2))
+    ));
+    // Guus's ruling of 2026-11-07: without the commitment, an unrecorded pin
+    // refuses these v2 frames.
+    assert!(
+        detected_format(&mk, file_id, &frame0, None).is_err(),
+        "{name}: v2 without a commitment"
     );
     assert_eq!(plaintext, decode_hex(&v, "plaintext_hex"), "{name}: plaintext");
     assert_eq!(
@@ -952,12 +968,22 @@ fn check_chunk_v2(name: &str) {
     );
 }
 
-/// The format a fresh reader detects for these frames when the metadata records
-/// nothing (`Unrecorded`): v2, from frame 0.
-fn detected_format(mk: &MasterKey, file_id: &str, frame0: &[u8]) -> Option<ChunkFormat> {
-    let mut dec = ChunkDecryptor::for_push(mk, file_id, ExpectedChunkFormat::Unrecorded);
-    dec.push_frame(frame0).unwrap();
-    dec.format()
+/// The format a fresh reader opens these frames with when the metadata records
+/// no format (`Unrecorded`) and carries `version`: v2, from frame 0.
+fn detected_format(
+    mk: &MasterKey,
+    file_id: &str,
+    frame0: &[u8],
+    version: Option<VersionCommitment>,
+) -> Result<Option<ChunkFormat>, beebeeb_core::CoreError> {
+    let mut dec = ChunkDecryptor::for_version_with_file_key(
+        derive_file_key(mk, file_id.as_bytes()),
+        file_id,
+        ExpectedChunkFormat::Unrecorded,
+        version,
+    );
+    dec.push_frame(frame0)?;
+    Ok(dec.format())
 }
 
 #[test]
@@ -969,7 +995,14 @@ fn vector_chunk_v2_stream_decrypt() {
     let mk = MasterKey::from_bytes(bytes32(&v, "master_key_hex"));
     let frames = v["frames"].as_array().unwrap();
     assert!(frames.len() > 2, "the stream vector must have more than two frames");
-    let mut dec = ChunkDecryptor::for_push(&mk, v["file_id"].as_str().unwrap(), ExpectedChunkFormat::V2);
+    let file_id = v["file_id"].as_str().unwrap();
+    let version_id: [u8; 12] = decode_hex(&v, "version_id_hex").try_into().unwrap();
+    let mut dec = ChunkDecryptor::for_version_with_file_key(
+        derive_file_key(&mk, file_id.as_bytes()),
+        file_id,
+        ExpectedChunkFormat::V2,
+        Some(VersionCommitment::new(version_id, 1).unwrap()),
+    );
     for f in &frames[..frames.len() - 1] {
         dec.push_frame(&decode_hex(f, "frame_hex")).unwrap();
     }

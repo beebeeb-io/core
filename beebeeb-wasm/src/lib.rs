@@ -912,29 +912,7 @@ impl WasmChunkEncryptor {
     }
 }
 
-/// Random-access open of ONE file-content frame at a known position (seeking
-/// readers: video, range previews). `index` is the chunk requested and
-/// `is_last = index == chunk_count - 1`; a server that serves another chunk or
-/// lies about the count fails the tag. `format` (1 = v1, 2 = v2) must come from
-/// authenticated data (2 when the encrypted metadata records v2, else a
-/// `WasmChunkDecryptor.format` after chunk 0), never from a server field.
-/// `version_id` (12 bytes, v2 only; ignored for v1) is `WasmChunkDecryptor.versionId`
-/// after chunk 0 (or chunk 0's first 12 bytes): another upload's frames fail.
-#[wasm_bindgen]
-pub fn decrypt_chunk_frame(
-    file_key: &[u8],
-    file_id: &str,
-    version_id: &[u8],
-    index: u32,
-    is_last: bool,
-    format: u8,
-    frame: &[u8],
-) -> Result<Vec<u8>, JsError> {
-    let fk = file_key_from_slice(file_key)?;
-    let f = beebeeb_core::chunk_stream::ChunkFormat::from_u8(format).map_err(|e| JsError::new(&e.to_string()))?;
-    beebeeb_core::chunk_stream::open_chunk(&fk, file_id, version_id, index, is_last, f, frame)
-        .map_err(|e| JsError::new(&e.to_string()))
-}
+pub use chunk_decryptor::decrypt_chunk_frame;
 
 fn expected_from_u8(code: u8) -> Result<beebeeb_core::chunk_stream::ExpectedChunkFormat, JsError> {
     beebeeb_core::chunk_stream::ExpectedChunkFormat::from_u8(code).map_err(|e| JsError::new(&e.to_string()))
@@ -3490,6 +3468,11 @@ mod tests {
         );
     }
 
+    /// The first-version commitment of the upload whose frame 0 is `frame0`.
+    fn first_version(frame0: &[u8]) -> beebeeb_core::chunk_stream::VersionCommitment {
+        beebeeb_core::chunk_stream::VersionCommitment::new(frame0[..12].try_into().unwrap(), 1).unwrap()
+    }
+
     /// Deterministic, non-trivial test data.
     fn pattern(len: usize) -> Vec<u8> {
         (0..len).map(|i| (i % 251) as u8).collect()
@@ -3499,10 +3482,11 @@ mod tests {
     /// concatenated plaintext — proves the wrapper emits the standard wire
     /// format and the FileKey derivation matches.
     fn decrypt_frames(mk: &kdf::MasterKey, file_id: &str, frames: &[Vec<u8>]) -> Vec<u8> {
-        let mut dec = ChunkDecryptor::for_push(
-            mk,
+        let mut dec = ChunkDecryptor::for_version_with_file_key(
+            kdf::derive_file_key(mk, file_id.as_bytes()),
             file_id,
             beebeeb_core::chunk_stream::ExpectedChunkFormat::recorded_for(beebeeb_core::chunk_stream::WRITE_FORMAT),
+            Some(first_version(&frames[0])),
         );
         let mut out = Vec::new();
         for f in frames {
@@ -3565,70 +3549,6 @@ mod tests {
         }
         enc.finish_summary().unwrap();
         assert_eq!(decrypt_frames(&mk, file_id, &frames), data);
-    }
-
-    #[test]
-    fn wasm_decryptor_roundtrip_and_v2_format() {
-        // Task 1908: the web decryptor (both constructors, pinned v2 as the
-        // metadata records it) reads v2 back in order; the web encryptor also
-        // writes v2. Error paths throw JsError,
-        // which cannot be constructed off-wasm (see NOTE below), so only the
-        // success seams are exercised here; the rejection cases live in core.
-        use beebeeb_core::chunk_stream::{ChunkEncryptor, ChunkFormat, ExpectedChunkFormat};
-        let mk = kdf::derive_master_key("test-password", b"test-salt-16bytes").unwrap();
-        let mk_bytes = mk.to_bytes();
-        let file_id = "wasm-dec-1";
-        let data = pattern(40);
-        let enc =
-            WasmChunkEncryptor::with_chunk_size(mk_bytes.as_ref(), file_id.to_string(), data.len() as u64, 16).unwrap();
-        assert_eq!(enc.format(), 2, "web uploads use v2");
-
-        // Explicit v2 frames exercise the fixed-size test seam.
-        let mut enc = ChunkEncryptor::for_push_with_chunk_size(&mk, file_id, data.len() as u64, 16)
-            .unwrap()
-            .with_format(ChunkFormat::V2)
-            .unwrap();
-        let frames: Vec<Vec<u8>> = data.chunks(16).map(|c| enc.push_chunk(c).unwrap().data).collect();
-        enc.finish().unwrap();
-
-        // The name metadata a v2 upload writes records 2.
-        let ne = encrypt_name_with_chunk_format(mk_bytes.as_ref(), file_id, "a.txt", None, 2).unwrap();
-        let meta = encrypt::decrypt_name_metadata(&mk, file_id, &ne).unwrap();
-        assert_eq!(meta.chunk_format, ExpectedChunkFormat::V2);
-        let pin = meta.chunk_format.as_u8();
-
-        let legacy = crate::chunk_decryptor::DecryptorMetadataJs {
-            chunk_format: pin,
-            version_id: None,
-            version_counter: None,
-        };
-        let (expected, version) = crate::chunk_decryptor::metadata_pin(&legacy).unwrap();
-        let file_key = kdf::derive_file_key(&mk, file_id.as_bytes());
-        let mut dec = WasmChunkDecryptor::with_pin(file_key, file_id, expected, version);
-        assert_eq!(dec.format(), 0);
-        assert_eq!(dec.version_id(), None);
-        let mut out = Vec::new();
-        for f in &frames {
-            out.extend(dec.push_frame(f).unwrap());
-        }
-        assert_eq!(out, data);
-        assert_eq!(dec.format(), 2);
-        assert_eq!(dec.chunks_decrypted(), 3);
-        let vid = dec.version_id().unwrap();
-        assert_eq!(vid, frames[0][..12].to_vec());
-        let summary = dec.inner.finish().unwrap();
-        assert_eq!(summary.chunk_count, 3);
-
-        let fk = kdf::derive_file_key(&mk, file_id.as_bytes());
-        let mut dec = WasmChunkDecryptor::with_pin(kdf::FileKey::from_bytes(*fk.as_bytes()), file_id, expected, None);
-        for f in &frames {
-            dec.push_frame(f).unwrap();
-        }
-        dec.inner.finish().unwrap();
-
-        // Random-access open at the right position and version.
-        let last = decrypt_chunk_frame(fk.as_bytes(), file_id, &vid, 2, true, 2, &frames[2]).unwrap();
-        assert_eq!(last, data[32..]);
     }
 
     // NOTE: error-path coverage (bad key length, unknown profile, push beyond
@@ -3765,7 +3685,12 @@ mod tests {
         assert_eq!(enc.format(), 2, "a v2-pinned file must be written as v2");
         let frames: Vec<Vec<u8>> = data.chunks(16).map(|c| enc.push_chunk(c).unwrap()).collect();
         enc.finish_summary().unwrap();
-        let mut dec = ChunkDecryptor::for_push(&mk, id, pin);
+        let mut dec = ChunkDecryptor::for_version_with_file_key(
+            kdf::derive_file_key(&mk, id.as_bytes()),
+            id,
+            pin,
+            Some(first_version(&frames[0])),
+        );
         let mut out = Vec::new();
         for f in &frames {
             out.extend_from_slice(&dec.push_frame(f).unwrap().data);

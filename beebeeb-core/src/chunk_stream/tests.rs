@@ -36,7 +36,12 @@ fn encrypt_all(
 
 /// Decrypt a sequence of frames via the push decryptor and concatenate.
 fn decrypt_frames(master: &MasterKey, file_id: &str, frames: &[EncryptedChunk]) -> Vec<u8> {
-    let mut dec = ChunkDecryptor::for_push(master, file_id, exp());
+    let mut dec = ChunkDecryptor::for_version_with_file_key(
+        derive_file_key(master, file_id.as_bytes()),
+        file_id,
+        exp(),
+        Some(first_commitment(&frames[0].data)),
+    );
     let mut out = Vec::new();
     for f in frames {
         out.extend_from_slice(&dec.push_frame(&f.data).unwrap().data);
@@ -147,11 +152,14 @@ fn wrong_key_decrypt_errors_no_panic() {
 
     // Wrong master key.
     let wrong = derive_master_key("different-password", b"different-salt-16").unwrap();
-    let mut dec = ChunkDecryptor::for_push(&wrong, "secret", exp());
+    let version = Some(first_commitment(&frames[0].data));
+    let mut dec =
+        ChunkDecryptor::for_version_with_file_key(derive_file_key(&wrong, b"secret"), "secret", exp(), version);
     assert!(matches!(dec.push_frame(&frames[0].data), Err(CoreError::Decryption)));
 
     // Right master key, wrong file_id.
-    let mut dec2 = ChunkDecryptor::for_push(&m, "other-file", exp());
+    let mut dec2 =
+        ChunkDecryptor::for_version_with_file_key(derive_file_key(&m, b"other-file"), "other-file", exp(), version);
     assert!(matches!(dec2.push_frame(&frames[0].data), Err(CoreError::Decryption)));
 }
 
@@ -382,7 +390,14 @@ fn decryptor_pull_roundtrip() {
     .chunk_plan()
     .chunk_size_bytes;
 
-    let mut dec = ChunkDecryptor::from_reader(&m, "decpull", exp(), chunk_size, Cursor::new(body)).unwrap();
+    let record = crate::encrypt::NameMetadata {
+        name: String::new(),
+        mime_type: None,
+        chunk_format: exp(),
+        version: Some(first_commitment(&frames[0].data)),
+    };
+    let mut dec =
+        ChunkDecryptor::from_reader_for_current_version(&m, "decpull", &record, chunk_size, Cursor::new(body)).unwrap();
     let mut out = Vec::new();
     let mut idx = 0u32;
     while let Some(c) = dec.next_chunk().unwrap() {
@@ -513,15 +528,17 @@ fn v2_output_does_not_open_via_legacy_decrypt_chunk_raw() {
     .with_format(ChunkFormat::V2)
     .unwrap();
     let file_key = derive_file_key(&m, b"legacy-v2");
-    let mut dec = ChunkDecryptor::for_push(&m, "legacy-v2", ExpectedChunkFormat::V2);
+    let mut dec: Option<ChunkDecryptor> = None;
     let mut out = Vec::new();
     while let Some(f) = enc.next_chunk().unwrap() {
+        let dec = dec
+            .get_or_insert_with(|| self_committed_decryptor(&m, "legacy-v2", ExpectedChunkFormat::V2, Some(&f.data)));
         assert!(decrypt_chunk_raw(&file_key, &f.data).is_err());
         assert_eq!(f.data.len(), frames_len_for(&data, f.index));
         out.extend_from_slice(&dec.push_frame(&f.data).unwrap().data);
     }
     enc.finish().unwrap();
-    dec.finish().unwrap();
+    dec.expect("frames").finish().unwrap();
     assert_eq!(out, data);
 }
 

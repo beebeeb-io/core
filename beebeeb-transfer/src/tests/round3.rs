@@ -28,8 +28,7 @@ async fn a_cancelled_discovery_leader_does_not_hang_the_next_download() {
     let leader_io = ScriptedIo::new(standard_handler(fx.clone())).with_api_delay(50);
     let mut leader_sink = VecSink::default();
     let leader_events = Events::default();
-    let leader_decryptor =
-        ChunkDecryptor::for_push_with_file_key(FileKey::from_bytes(KEY), FILE_ID, ExpectedChunkFormat::Unrecorded);
+    let leader_decryptor = fx.decryptor();
     let leader = download(
         &leader_io,
         &shared,
@@ -44,8 +43,7 @@ async fn a_cancelled_discovery_leader_does_not_hang_the_next_download() {
     let io = ScriptedIo::new(standard_handler(fx.clone()));
     let mut sink = VecSink::default();
     let events = Events::default();
-    let decryptor =
-        ChunkDecryptor::for_push_with_file_key(FileKey::from_bytes(KEY), FILE_ID, ExpectedChunkFormat::Unrecorded);
+    let decryptor = fx.decryptor();
     let mut second = Box::pin(download(&io, &shared, request_for(&fx), decryptor, &mut sink, &events));
     let outcome = poll_bounded(second.as_mut(), 100).expect("the next download completes within the poll budget");
     drop(second);
@@ -80,8 +78,14 @@ async fn a_follower_polled_repeatedly_keeps_one_waiter() {
 async fn a_v2_stream_that_ends_before_its_last_chunk_is_truncated() {
     let plain: Vec<u8> = (0..3 * 1024).map(|i| (i % 239) as u8).collect();
     let fx = Arc::new(Fixture::truncated_v2(&plain, 1024, 2));
-    let make_decryptor =
-        || ChunkDecryptor::for_push_with_file_key(FileKey::from_bytes(KEY), FILE_ID, ExpectedChunkFormat::V2);
+    let make_decryptor = || {
+        ChunkDecryptor::for_version_with_file_key(
+            FileKey::from_bytes(KEY),
+            FILE_ID,
+            ExpectedChunkFormat::V2,
+            fx.version(),
+        )
+    };
 
     // Discardable: the original `Truncated` stands and the plaintext is gone.
     let io = ScriptedIo::new(standard_handler(fx.clone()));
@@ -158,8 +162,7 @@ async fn a_cancelled_download_records_the_storage_breaker() {
     let shared = DirectShared::new();
     let mut sink = MockSink::discardable();
     let events = Events::default();
-    let decryptor =
-        ChunkDecryptor::for_push_with_file_key(FileKey::from_bytes(KEY), FILE_ID, ExpectedChunkFormat::Unrecorded);
+    let decryptor = fx.decryptor();
     let future = download(&io, &shared, request_for(&fx), decryptor, &mut sink, &events);
     assert!(
         future.now_or_never().is_none(),
@@ -169,7 +172,7 @@ async fn a_cancelled_download_records_the_storage_breaker() {
     let second = ScriptedIo::new(|_: &Request, _: i64, _: i64| panic!("a held download made a request"));
     second.set_wall(io.wall_now() + 1_000);
     second.set_mono(io.mono_now() + 1_000);
-    let (held, _, _) = run_download(&second, &shared, request_for(&fx)).await;
+    let (held, _, _) = run_download(&second, &shared, request_for(&fx), &fx).await;
     assert!(
         matches!(held, Ok(DownloadOutcome::UseApi(UseApiReason::BreakerHold))),
         "the cancelled download recorded the breaker: {held:?}"
