@@ -386,6 +386,13 @@ mod publish {
 #[cfg(unix)]
 pub use publish::{PendingPublish, TrustedDirectory};
 
+// The same publisher on Windows handles (#74 round 8: 0.3.0 did not build on
+// Windows, a shipped desktop platform, because this type was Unix-only).
+#[cfg(windows)]
+mod publish_windows;
+#[cfg(windows)]
+pub use publish_windows::{PendingPublish, TrustedDirectory};
+
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use super::*;

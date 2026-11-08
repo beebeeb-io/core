@@ -74,6 +74,19 @@ rayon = "1"
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1.4", features = ["fs"] }
 
+# The Windows trusted publisher (path_safety/publish_windows.rs): open, create,
+# rename and delete relative to handles. Pinned; 0.61.2 is already in the
+# lockfile, so no new package.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = [
+    "Wdk_Foundation",
+    "Wdk_Storage_FileSystem",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+] }
+
 [features]
 default = ["webp-encode"]
 webp-encode = ["webp"]

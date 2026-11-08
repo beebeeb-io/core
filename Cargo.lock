@@ -323,6 +323,7 @@ dependencies = [
  "url",
  "uuid",
  "webp",
+ "windows-sys 0.61.2",
  "x25519-dalek",
  "zeroize",
  "zip",

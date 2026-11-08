@@ -423,12 +423,12 @@ pub async fn download_historical<I: DirectIo>(
     download(io, shared, req, decryptor, sink, observer).await
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 struct TrustedFileSink {
     file: Option<std::fs::File>,
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 impl PlaintextSink for TrustedFileSink {
     fn write(&mut self, plain: &[u8]) -> std::io::Result<()> {
         use std::io::Write as _;
@@ -452,7 +452,7 @@ impl PlaintextSink for TrustedFileSink {
 /// already-open trusted directory. The restrictive `.bbtmp-*` sibling is
 /// removed on every handoff or failure and renamed only after full stream
 /// authentication succeeds.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[allow(clippy::too_many_arguments)]
 pub async fn download_current_to_directory<I: DirectIo>(
     io: &I,

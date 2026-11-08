@@ -56,7 +56,7 @@ pub use background::{
     BackgroundUploadPlanner, CommitRequest, SignOutPlan, StageProgress, TransferFinished, TransferRequest,
     UploadSourceIdentity,
 };
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub use download::download_current_to_directory;
 pub use download::{
     AfterWriteCause, DownloadError, DownloadOutcome, DownloadRequest, DownloadStats, PlaintextSink, download,

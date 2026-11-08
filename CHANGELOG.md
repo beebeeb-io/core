@@ -228,6 +228,11 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 - `beebeeb_store::atomic_publish` is removed. Publish relative to a
   `path_safety::TrustedDirectory` handle. The `store-test-helper` binary now requires the default-off
   `test-support` feature, which product builds must not enable.
+- `TrustedDirectory`, `PendingPublish` and `beebeeb_transfer::download_current_to_directory` build on
+  Unix and Windows. On Windows the directory is a handle that refuses a junction or symbolic link in
+  its place, the temp file is created and renamed relative to it, and an uncommitted temp file is
+  deleted through its own handle. Windows keeps the directory's inherited ACL for the temp file
+  (Unix: 0600) and has no directory flush.
 - Range reads apply the same version rule as whole-file reads. `RangeOpener::new` takes the version
   commitment from the authenticated metadata after the pin, and `RangeRequest` adds `version` and
   `authenticated_chunk_size`. With a commitment, frame 0 opens only as that v2 upload, so an older
