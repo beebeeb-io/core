@@ -66,7 +66,7 @@ pub struct MemberInviteFlow {
 
 #[uniffi::export]
 impl MemberInviteFlow {
-    /// `is_folder` is required: a folder is refused here: it goes through `FolderInviteFlow`.
+    /// `is_folder` is required: a folder is refused here: it goes through `FolderShareFlow`.
     #[uniffi::constructor]
     pub fn new(
         item_id: String,

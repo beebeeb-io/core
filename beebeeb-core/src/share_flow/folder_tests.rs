@@ -4,7 +4,7 @@
 //! `buildFolderInvite`, `ensureOwnerFolderKey`, `assertNoSeenAncestor`).
 use serde_json::{Value, json};
 
-use super::folder::{FolderInvite, FolderInviteInput, FolderInviteStep};
+use super::folder::{FolderInviteInput, FolderShare, FolderStep};
 use super::folder_keys::*;
 use super::member::InviteOutcome;
 use super::*;
@@ -47,10 +47,10 @@ fn resp(status: u16, body: Value) -> HttpResponse {
     HttpResponse::new(status, body)
 }
 
-fn sent(step: FolderInviteStep) -> (Method, String, Option<Value>, Option<String>) {
+fn sent(step: FolderStep) -> (Method, String, Option<Value>, Option<String>) {
     match step {
-        FolderInviteStep::Send(s) => (s.request.method, s.request.path, s.request.body, s.mark_custody_seen),
-        FolderInviteStep::Done(o) => panic!("expected a request, got {o:?}"),
+        FolderStep::Send(s) => (s.request.method, s.request.path, s.request.body, s.mark_custody_seen),
+        other => panic!("expected a request, got {other:?}"),
     }
 }
 
@@ -75,7 +75,7 @@ fn non_utf8_key(byte: u8) -> FileKey {
 }
 
 /// Answer the descendant listing: FOLDER holds a file and a folder; that folder holds one file.
-fn answer_listing(flow: &mut FolderInvite, first: FolderInviteStep) -> (String, Value) {
+fn answer_listing(flow: &mut FolderShare, first: FolderStep) -> (String, Value) {
     let (m, p, _, _) = sent(first);
     assert_eq!(
         (m, p.as_str()),
@@ -204,7 +204,7 @@ fn vector_folder_custody_v1_opens_with_the_custody_purpose_only() {
 #[test]
 fn flag_off_no_active_invite_mints_and_seals_every_descendant() {
     let m = master();
-    let (mut flow, first) = FolderInvite::start(input(false, CustodyMemory::default()), &m).unwrap();
+    let (mut flow, first) = FolderShare::invite(input(false, CustodyMemory::default()), &m).unwrap();
     let (_, p, _, _) = sent(first);
     assert_eq!(p, "/api/v1/shares/invites/sent");
     let step = flow.on_response(resp(200, json!({ "invites": [] }))).unwrap();
@@ -241,7 +241,7 @@ fn flag_off_no_active_invite_mints_and_seals_every_descendant() {
     let opened = open_member_file_key(&bob, &owner_pub, FOLDER, &sealed).unwrap();
     assert_eq!(opened.as_bytes(), key.as_bytes());
     match flow.on_response(resp(200, json!({}))).unwrap() {
-        FolderInviteStep::Done(InviteOutcome::Shared { invite_id }) => assert_eq!(invite_id, INVITE),
+        FolderStep::Done(InviteOutcome::Shared { invite_id }) => assert_eq!(invite_id, INVITE),
         other => panic!("{other:?}"),
     }
 }
@@ -255,7 +255,7 @@ fn flag_off_reuses_the_newest_owner_copy_that_opens() {
         invite_row("aa02", "invited", "2026-11-05T00:00:00Z", Some(owner_copy_b64(&m, FOLDER, &new).unwrap())),
         invite_row("aa03", "denied", "2026-11-07T00:00:00Z", Some(owner_copy_b64(&m, FOLDER, &non_utf8_key(4)).unwrap())),
     ]});
-    let (mut flow, _) = FolderInvite::start(input(false, CustodyMemory::default()), &m).unwrap();
+    let (mut flow, _) = FolderShare::invite(input(false, CustodyMemory::default()), &m).unwrap();
     let step = flow.on_response(resp(200, invites)).unwrap();
     let (_, body) = answer_listing(&mut flow, step);
     let used = folder_key_from_id(&body, &[&old, &new]);
@@ -268,7 +268,7 @@ fn flag_off_reuses_the_newest_owner_copy_that_opens() {
 
 #[test]
 fn flag_off_active_invites_without_an_owner_copy_never_mint() {
-    let (mut flow, _) = FolderInvite::start(input(false, CustodyMemory::default()), &master()).unwrap();
+    let (mut flow, _) = FolderShare::invite(input(false, CustodyMemory::default()), &master()).unwrap();
     let invites = json!({ "invites": [invite_row("aa01", "claimed", "2026-11-01", None)] });
     assert_eq!(
         flow.on_response(resp(200, invites)).unwrap_err(),
@@ -307,7 +307,7 @@ fn flag_off_a_legacy_copy_is_reused_only_with_proof_from_the_approved_invite() {
         invite_row("bb01", "approved", "2026-11-01", Some(copy.clone())),
         invite_row("bb02", "invited", "2026-11-02", None),
     ]});
-    let (mut flow, _) = FolderInvite::start(input(false, CustodyMemory::default()), &m).unwrap();
+    let (mut flow, _) = FolderShare::invite(input(false, CustodyMemory::default()), &m).unwrap();
     let (_, p, _, _) = sent(flow.on_response(resp(200, invites.clone())).unwrap());
     assert_eq!(p, "/api/v1/shares/invites/bb01/folder-keys");
     let step = flow.on_response(resp(200, rows)).unwrap();
@@ -315,19 +315,19 @@ fn flag_off_a_legacy_copy_is_reused_only_with_proof_from_the_approved_invite() {
     assert_eq!(folder_key_from_id(&body, &[&key]).as_bytes(), key.as_bytes());
 
     // Rows that do not prove it: refused, never minted.
-    let (mut flow, _) = FolderInvite::start(input(false, CustodyMemory::default()), &m).unwrap();
+    let (mut flow, _) = FolderShare::invite(input(false, CustodyMemory::default()), &m).unwrap();
     flow.on_response(resp(200, invites.clone())).unwrap();
     let err = flow.on_response(resp(200, json!({ "keys": [] }))).unwrap_err();
     assert_eq!(err, ShareFlowError::FolderKeyUnverified);
 
     // "invite not approved" is no proof; any other failure aborts as it is.
-    let (mut flow, _) = FolderInvite::start(input(false, CustodyMemory::default()), &m).unwrap();
+    let (mut flow, _) = FolderShare::invite(input(false, CustodyMemory::default()), &m).unwrap();
     flow.on_response(resp(200, invites.clone())).unwrap();
     let err = flow
         .on_response(resp(400, json!({ "error": "Invite not approved" })))
         .unwrap_err();
     assert_eq!(err, ShareFlowError::FolderKeyUnverified);
-    let (mut flow, _) = FolderInvite::start(input(false, CustodyMemory::default()), &m).unwrap();
+    let (mut flow, _) = FolderShare::invite(input(false, CustodyMemory::default()), &m).unwrap();
     flow.on_response(resp(200, invites)).unwrap();
     assert_eq!(
         flow.on_response(resp(500, json!({}))).unwrap_err(),
@@ -335,7 +335,7 @@ fn flag_off_a_legacy_copy_is_reused_only_with_proof_from_the_approved_invite() {
     );
 
     // No approved invite: no proof is possible.
-    let (mut flow, _) = FolderInvite::start(input(false, CustodyMemory::default()), &m).unwrap();
+    let (mut flow, _) = FolderShare::invite(input(false, CustodyMemory::default()), &m).unwrap();
     let only_invited = json!({ "invites": [invite_row("bb03", "claimed", "2026-11-03", Some(copy))] });
     assert_eq!(
         flow.on_response(resp(200, only_invited)).unwrap_err(),
@@ -346,24 +346,24 @@ fn flag_off_a_legacy_copy_is_reused_only_with_proof_from_the_approved_invite() {
 #[test]
 fn flag_off_a_folder_under_a_custody_folder_refuses_the_legacy_format() {
     let memory = CustodyMemory::new([PARENT.to_uppercase()], false);
-    let (mut flow, first) = FolderInvite::start(input(false, memory.clone()), &master()).unwrap();
+    let (mut flow, first) = FolderShare::invite(input(false, memory.clone()), &master()).unwrap();
     let (_, p, _, _) = sent(first);
     assert_eq!(p, format!("/api/v1/files/{FOLDER}"));
     let err = flow.on_response(resp(200, json!({ "parent_id": PARENT }))).unwrap_err();
     assert_eq!(err, ShareFlowError::FolderKeysUnavailable);
     // A 404 parent ends the walk: legacy is allowed.
-    let (mut flow, _) = FolderInvite::start(input(false, memory.clone()), &master()).unwrap();
+    let (mut flow, _) = FolderShare::invite(input(false, memory.clone()), &master()).unwrap();
     let (_, p, _, _) = sent(flow.on_response(resp(404, json!({}))).unwrap());
     assert_eq!(p, "/api/v1/shares/invites/sent");
     // The folder itself seen, or an unreadable memory: refused before any request.
     let seen = CustodyMemory::new([FOLDER.to_owned()], false);
     assert_eq!(
-        FolderInvite::start(input(false, seen), &master()).unwrap_err(),
+        FolderShare::invite(input(false, seen), &master()).unwrap_err(),
         ShareFlowError::FolderKeysUnavailable
     );
     let unreadable = CustodyMemory::new(Vec::<String>::new(), true);
     assert_eq!(
-        FolderInvite::start(input(false, unreadable), &master()).unwrap_err(),
+        FolderShare::invite(input(false, unreadable), &master()).unwrap_err(),
         ShareFlowError::FolderKeysUnavailable
     );
 }
@@ -375,13 +375,13 @@ fn flag_on_custody_record_gives_l7_wraps_and_marks_the_folder_seen() {
     let m = master();
     let key = non_utf8_key(6);
     let custody = b64(&frame(kdf::wrap_folder_custody(&m, FOLDER.as_bytes(), &key).unwrap()));
-    let (mut flow, first) = FolderInvite::start(input(true, CustodyMemory::default()), &m).unwrap();
+    let (mut flow, first) = FolderShare::invite(input(true, CustodyMemory::default()), &m).unwrap();
     let (_, p, _, _) = sent(first);
     assert_eq!(p, format!("/api/v1/shared-folders/{FOLDER}"));
     let step = flow
         .on_response(resp(200, json!({ "owner_wrapped_folder_key": custody })))
         .unwrap();
-    let FolderInviteStep::Send(s) = &step else { panic!() };
+    let FolderStep::Send(s) = &step else { panic!() };
     assert_eq!(
         s.mark_custody_seen.as_deref(),
         Some(FOLDER),
@@ -411,7 +411,7 @@ fn flag_on_custody_record_gives_l7_wraps_and_marks_the_folder_seen() {
 #[test]
 fn flag_on_no_record_registers_a_fresh_custody_key() {
     let m = master();
-    let (mut flow, _) = FolderInvite::start(input(true, CustodyMemory::default()), &m).unwrap();
+    let (mut flow, _) = FolderShare::invite(input(true, CustodyMemory::default()), &m).unwrap();
     let (_, p, _, _) = sent(flow.on_response(resp(404, json!({}))).unwrap());
     assert_eq!(p, "/api/v1/shares/invites/sent");
     let (method, p, body, _) = sent(flow.on_response(resp(200, json!({ "invites": [] }))).unwrap());
@@ -434,7 +434,7 @@ fn flag_on_no_record_registers_a_fresh_custody_key() {
 fn flag_on_a_lost_registration_race_uses_the_winners_key() {
     let m = master();
     let theirs = non_utf8_key(7);
-    let (mut flow, _) = FolderInvite::start(input(true, CustodyMemory::default()), &m).unwrap();
+    let (mut flow, _) = FolderShare::invite(input(true, CustodyMemory::default()), &m).unwrap();
     flow.on_response(resp(404, json!({}))).unwrap();
     flow.on_response(resp(200, json!({ "invites": [] }))).unwrap();
     let (_, p, _, _) = sent(
@@ -457,13 +457,13 @@ fn flag_on_refusals_never_mint_or_write() {
     let m = master();
     // Seen with custody before, now "no record": refused (L7c).
     let seen = CustodyMemory::new([FOLDER.to_owned()], false);
-    let (mut flow, _) = FolderInvite::start(input(true, seen), &m).unwrap();
+    let (mut flow, _) = FolderShare::invite(input(true, seen), &m).unwrap();
     assert_eq!(
         flow.on_response(resp(404, json!({}))).unwrap_err(),
         ShareFlowError::FolderKeysUnavailable
     );
     // Active flag-off invites and no custody: the upgrade is needed; nothing is written.
-    let (mut flow, _) = FolderInvite::start(input(true, CustodyMemory::default()), &m).unwrap();
+    let (mut flow, _) = FolderShare::invite(input(true, CustodyMemory::default()), &m).unwrap();
     flow.on_response(resp(404, json!({}))).unwrap();
     let invites = json!({ "invites": [invite_row("cc01", "invited", "2026-11-01", None)] });
     assert_eq!(
@@ -471,7 +471,7 @@ fn flag_on_refusals_never_mint_or_write() {
         ShareFlowError::FolderNeedsUpgrade
     );
     // The server refuses fresh custody for a folder with legacy rows.
-    let (mut flow, _) = FolderInvite::start(input(true, CustodyMemory::default()), &m).unwrap();
+    let (mut flow, _) = FolderShare::invite(input(true, CustodyMemory::default()), &m).unwrap();
     flow.on_response(resp(404, json!({}))).unwrap();
     flow.on_response(resp(200, json!({ "invites": [] }))).unwrap();
     assert_eq!(
@@ -480,13 +480,13 @@ fn flag_on_refusals_never_mint_or_write() {
         ShareFlowError::FolderNeedsUpgrade
     );
     // A custody read that is no answer (500, or 501 on this leg) aborts.
-    let (mut flow, _) = FolderInvite::start(input(true, CustodyMemory::default()), &m).unwrap();
+    let (mut flow, _) = FolderShare::invite(input(true, CustodyMemory::default()), &m).unwrap();
     assert_eq!(
         flow.on_response(resp(500, json!({}))).unwrap_err(),
         ShareFlowError::Server { status: 500 }
     );
     // A custody record that does not open aborts; it is never replaced.
-    let (mut flow, _) = FolderInvite::start(input(true, CustodyMemory::default()), &m).unwrap();
+    let (mut flow, _) = FolderShare::invite(input(true, CustodyMemory::default()), &m).unwrap();
     let wrong = b64(&frame(
         kdf::wrap_folder_custody(&MasterKey::from_bytes([8; 32]), FOLDER.as_bytes(), &non_utf8_key(1)).unwrap(),
     ));
@@ -499,7 +499,7 @@ fn flag_on_refusals_never_mint_or_write() {
 
 #[test]
 fn a_full_page_without_a_cursor_is_too_large_to_share() {
-    let (mut flow, _) = FolderInvite::start(input(false, CustodyMemory::default()), &master()).unwrap();
+    let (mut flow, _) = FolderShare::invite(input(false, CustodyMemory::default()), &master()).unwrap();
     flow.on_response(resp(200, json!({ "invites": [] }))).unwrap();
     let page: Vec<Value> = (0..SHARE_PAGE_LIMIT)
         .map(|i| json!({ "id": format!("2237c000-0000-4000-8000-{i:012x}"), "is_folder": false }))

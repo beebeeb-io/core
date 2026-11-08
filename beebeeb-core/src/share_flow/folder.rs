@@ -3,7 +3,7 @@
 //!
 //! ```mermaid
 //! flowchart TD
-//!   S[FolderInvite::start] -->|shared folders on| C[GET /shared-folders/id]
+//!   S[FolderShare::start] -->|shared folders on| C[GET /shared-folders/id]
 //!   C -->|record| O[open custody, L7]
 //!   C -->|404, never seen| I1[GET /shares/invites/sent]
 //!   I1 -->|active invites| U[refuse: folder_needs_upgrade]
@@ -70,9 +70,19 @@ pub struct FolderSend {
 }
 
 #[derive(Debug)]
-pub enum FolderInviteStep {
+pub enum FolderStep {
     Send(FolderSend),
     Done(InviteOutcome),
+    /// A folder link was stored; `link` carries `#key=K_c` and never goes to a web view.
+    LinkCreated(link::CreatedFolderLink),
+}
+
+mod link;
+pub use link::{CreatedFolderLink, FolderLinkInput, LINK_ID_ATTEMPTS};
+
+enum Purpose {
+    Invite { email: String },
+    Link(Box<link::LinkPlan>),
 }
 
 struct Child {
@@ -102,6 +112,10 @@ enum Stage {
         children: Vec<Child>,
     },
     AwaitInvite,
+    AwaitLink {
+        id: String,
+        attempt: u32,
+    },
     AwaitApprove {
         invite_id: String,
     },
@@ -116,9 +130,9 @@ struct Keyed {
     custody_blob: Option<String>,
 }
 
-pub struct FolderInvite {
+pub struct FolderShare {
     folder_id: String,
-    email: String,
+    purpose: Purpose,
     master: MasterKey,
     custody: CustodyMemory,
     stage: Stage,
@@ -126,9 +140,9 @@ pub struct FolderInvite {
     active: Vec<SentInvite>,
 }
 
-impl std::fmt::Debug for FolderInvite {
+impl std::fmt::Debug for FolderShare {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FolderInvite")
+        f.debug_struct("FolderShare")
             .field("folder_id", &self.folder_id)
             .finish_non_exhaustive()
     }
@@ -138,8 +152,8 @@ fn get(path: String) -> HttpRequest {
     HttpRequest::get(path, RequestAuth::Session)
 }
 
-fn send(request: HttpRequest) -> FolderInviteStep {
-    FolderInviteStep::Send(FolderSend {
+fn send(request: HttpRequest) -> FolderStep {
+    FolderStep::Send(FolderSend {
         request,
         mark_custody_seen: None,
     })
@@ -165,24 +179,34 @@ fn random_folder_key() -> Result<FileKey, ShareFlowError> {
     Ok(FileKey::from_bytes(*bytes))
 }
 
-impl FolderInvite {
-    pub fn start(input: FolderInviteInput<'_>, master: &MasterKey) -> Result<(Self, FolderInviteStep), ShareFlowError> {
+impl FolderShare {
+    fn new(
+        folder_id: &str,
+        purpose: Purpose,
+        master: &MasterKey,
+        custody: CustodyMemory,
+    ) -> Result<Self, ShareFlowError> {
         // A folder id that is no UUID refuses (web `parseFolderId`: it counts as seen). The id is
         // used as given (key derivation and AAD read its bytes); only the memory is canonical.
-        canonical_folder_id(input.folder_id).ok_or(ShareFlowError::FolderKeysUnavailable)?;
-        let folder_id = path_id(input.folder_id)
+        canonical_folder_id(folder_id).ok_or(ShareFlowError::FolderKeysUnavailable)?;
+        let folder_id = path_id(folder_id)
             .map_err(|_| ShareFlowError::InvalidInput("folder id"))?
             .to_owned();
-        let email = check_email(input.email)?;
-        let mut flow = Self {
+        Ok(Self {
             folder_id,
-            email,
+            purpose,
             master: own_master(master),
-            custody: input.custody,
+            custody,
             stage: Stage::Done,
             keyed: None,
             active: Vec::new(),
-        };
+        })
+    }
+
+    /// A person share of a folder (web `share-dialog.tsx` folder branch).
+    pub fn invite(input: FolderInviteInput<'_>, master: &MasterKey) -> Result<(Self, FolderStep), ShareFlowError> {
+        let email = check_email(input.email)?;
+        let mut flow = Self::new(input.folder_id, Purpose::Invite { email }, master, input.custody)?;
         let step = if input.shared_folders_write {
             flow.stage = Stage::EnsureRead;
             send(get(custody_path(&flow.folder_id)))
@@ -197,7 +221,7 @@ impl FolderInvite {
         &self.custody
     }
 
-    pub fn on_response(&mut self, resp: HttpResponse) -> Result<FolderInviteStep, ShareFlowError> {
+    pub fn on_response(&mut self, resp: HttpResponse) -> Result<FolderStep, ShareFlowError> {
         let stage = std::mem::replace(&mut self.stage, Stage::Done);
         let step = self.advance(stage, resp);
         if step.is_err() {
@@ -207,7 +231,7 @@ impl FolderInvite {
         step
     }
 
-    fn advance(&mut self, stage: Stage, resp: HttpResponse) -> Result<FolderInviteStep, ShareFlowError> {
+    fn advance(&mut self, stage: Stage, resp: HttpResponse) -> Result<FolderStep, ShareFlowError> {
         match stage {
             Stage::EnsureRead => self.on_ensure_read(resp),
             Stage::EnsureSent => {
@@ -353,7 +377,7 @@ impl FolderInvite {
                         };
                         Ok(send(request))
                     }
-                    None => self.invite(children),
+                    None => self.finish(children),
                 }
             }
             Stage::AwaitInvite => {
@@ -369,13 +393,14 @@ impl FolderInvite {
                                 self.stage = Stage::AwaitApprove { invite_id };
                                 Ok(send(req))
                             }
-                            Err(_) => Ok(FolderInviteStep::Done(InviteOutcome::AwaitingApproval { invite_id })),
+                            Err(_) => Ok(FolderStep::Done(InviteOutcome::AwaitingApproval { invite_id })),
                         }
                     }
-                    _ => Ok(FolderInviteStep::Done(InviteOutcome::Invited { invite_id, status })),
+                    _ => Ok(FolderStep::Done(InviteOutcome::Invited { invite_id, status })),
                 }
             }
-            Stage::AwaitApprove { invite_id } => Ok(FolderInviteStep::Done(if resp.ok() {
+            Stage::AwaitLink { id, attempt } => self.on_link_response(resp, id, attempt),
+            Stage::AwaitApprove { invite_id } => Ok(FolderStep::Done(if resp.ok() {
                 InviteOutcome::Shared { invite_id }
             } else {
                 InviteOutcome::AwaitingApproval { invite_id }
@@ -385,7 +410,7 @@ impl FolderInvite {
     }
 
     /// Web `ensureOwnerFolderKey`, read leg: a 404 (or `not_found`) or an empty record is "none".
-    fn on_ensure_read(&mut self, resp: HttpResponse) -> Result<FolderInviteStep, ShareFlowError> {
+    fn on_ensure_read(&mut self, resp: HttpResponse) -> Result<FolderStep, ShareFlowError> {
         if resp.ok() {
             if let Some(blob) = custody_blob(&resp) {
                 return self.open_custody(blob);
@@ -401,7 +426,7 @@ impl FolderInvite {
         Ok(send(get(SENT_PATH.to_owned())))
     }
 
-    fn open_custody(&mut self, blob: String) -> Result<FolderInviteStep, ShareFlowError> {
+    fn open_custody(&mut self, blob: String) -> Result<FolderStep, ShareFlowError> {
         let bytes = b64_decode(&blob)?;
         if bytes.len() != super::WRAPPED_KEY_LEN {
             return Err(ShareFlowError::Crypto);
@@ -419,7 +444,7 @@ impl FolderInvite {
 
     /// Web `assertNoSeenAncestor` (flag off): legacy only when neither the folder nor an ancestor
     /// was ever seen with custody. A 403/404 parent read ends the walk; any other failure aborts.
-    fn ancestor_walk(&mut self, cursor: String, depth: usize) -> Result<FolderInviteStep, ShareFlowError> {
+    fn ancestor_walk(&mut self, cursor: String, depth: usize) -> Result<FolderStep, ShareFlowError> {
         if !self.custody.has_any() {
             return Ok(self.find_existing());
         }
@@ -431,7 +456,7 @@ impl FolderInvite {
         Ok(send(get(format!("/api/v1/files/{id}"))))
     }
 
-    fn find_existing(&mut self) -> FolderInviteStep {
+    fn find_existing(&mut self) -> FolderStep {
         self.stage = Stage::FindSent;
         send(get(SENT_PATH.to_owned()))
     }
@@ -443,7 +468,7 @@ impl FolderInvite {
         blobs: Vec<String>,
         mut next: usize,
         rows: Option<Vec<(Vec<u8>, Vec<u8>)>>,
-    ) -> Result<FolderInviteStep, ShareFlowError> {
+    ) -> Result<FolderStep, ShareFlowError> {
         while next < blobs.len() {
             let bytes = b64_decode(&blobs[next])?;
             let key = match open_owner_copy(&self.master, &self.folder_id, &bytes)? {
@@ -480,22 +505,22 @@ impl FolderInvite {
         Err(ShareFlowError::FolderKeyUnverified)
     }
 
-    fn start_listing(&mut self, mark: Option<String>) -> Result<FolderInviteStep, ShareFlowError> {
+    fn start_listing(&mut self, mark: Option<String>) -> Result<FolderStep, ShareFlowError> {
         let request = list_request(&self.folder_id, None)?;
         self.stage = Stage::List {
             parent: self.folder_id.clone(),
             queue: VecDeque::new(),
             children: Vec::new(),
         };
-        Ok(FolderInviteStep::Send(FolderSend {
+        Ok(FolderStep::Send(FolderSend {
             request,
             mark_custody_seen: mark,
         }))
     }
 
-    /// Web `buildFolderInvite` + `createInvite`: every child wrapped, the root's own name key for an
-    /// L7 folder, the owner copy (the custody record, else a fresh purpose-bound copy), the key id.
-    fn invite(&mut self, children: Vec<Child>) -> Result<FolderInviteStep, ShareFlowError> {
+    /// Web `buildFolderInvite` + `createInvite` (or `createFolderLinkWithKeys`): every child
+    /// wrapped, the root's own name key for an L7 folder, then the invite or the link.
+    fn finish(&mut self, children: Vec<Child>) -> Result<FolderStep, ShareFlowError> {
         let keyed = self.keyed.as_ref().ok_or(ShareFlowError::WrongState)?;
         let mut folder_keys = Vec::with_capacity(children.len() + 1);
         if keyed.format == FolderWrapFormat::L7 {
@@ -522,13 +547,18 @@ impl FolderInvite {
             )?;
             folder_keys.push(json!({ "file_id": child.id, "encrypted_file_key": wrap }));
         }
+        let email = match &self.purpose {
+            Purpose::Invite { email } => email.clone(),
+            Purpose::Link(_) => return self.link_request(folder_keys),
+        };
+        // The owner copy: the custody record, else a fresh purpose-bound copy (2255).
         let owner = match &keyed.custody_blob {
             Some(blob) => blob.clone(),
             None => owner_copy_b64(&self.master, &self.folder_id, &keyed.folder_key)?,
         };
         let mut body = json!({
             "file_id": self.folder_id,
-            "recipient_email": self.email,
+            "recipient_email": email,
             "is_folder_share": true,
             "encrypted_folder_key": "",
             "encrypted_owner_folder_key": owner,
