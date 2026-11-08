@@ -199,7 +199,7 @@ fn device_request_and_approval_hand_over_the_keys_end_to_end() {
     let init: Value = serde_json::from_str(&request.init_frame(&facts)).unwrap();
     assert_eq!(init["device_name"], "Anna-Laptop");
     let requester_pub = init["ecdh_public_key_b64"].as_str().unwrap().to_owned();
-    let waiting = json!({ "user_code": "K7QM-4WTD", "verification_uri": "https://app/cli-auth", "expires_in": 300 });
+    let waiting = json!({ "user_code": "K7QM-4WTD", "verification_uri": "https://app.beebeeb.test/cli-auth", "expires_in": 300 });
     match request.on_frame(&waiting.to_string()).unwrap() {
         DeviceRequestEvent::Waiting {
             user_code,
