@@ -293,6 +293,36 @@ impl BreachSlot {
     }
 }
 
+/// The password gate every flow that sets a password runs (sign-up's rules, DW-A49/A67): the
+/// server's minimum (`policy`, already floored by `from_server`), then, when the policy declares a
+/// breach check, the verdict of a `breach` check made for THIS password. `fail_open` is the
+/// policy's: an outage passes only when the server says so, and a check never answered is missing.
+pub fn password_gate(
+    policy: &SignupPolicy,
+    breach: Option<&crate::onboarding::BreachCheck>,
+    password: &str,
+) -> Result<(), SignupError> {
+    let eval = evaluate(policy, password);
+    if !eval.meets_minimum {
+        return Err(SignupError::PasswordTooShort {
+            missing: eval.missing_characters,
+        });
+    }
+    if policy.breach_endpoint.is_some() {
+        let check = breach.ok_or(SignupError::BreachCheckMissing)?;
+        if !check.matches_password(password) {
+            return Err(SignupError::BreachCheckMissing);
+        }
+        match check.verdict(policy.breach_fail_open) {
+            None => return Err(SignupError::BreachCheckMissing),
+            Some(BreachVerdict::Breached { .. }) => return Err(SignupError::PasswordBreached),
+            Some(BreachVerdict::CheckFailedBlocked) => return Err(SignupError::BreachCheckBlocked),
+            Some(_) => {}
+        }
+    }
+    Ok(())
+}
+
 /// The meter and its hint while typing (DW-A36/A37): core's evaluator, so every client agrees.
 pub fn evaluate(policy: &SignupPolicy, password: &str) -> PasswordEvaluation {
     evaluate_password(password, &policy.password_policy())

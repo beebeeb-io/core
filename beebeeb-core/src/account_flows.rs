@@ -47,11 +47,11 @@ use zeroize::Zeroizing;
 use crate::auth_flow::step_up::{self as auth_step_up, ConfirmToken, StepUpPurpose, StepUpStep};
 use crate::auth_flow::{self, AuthFlowError};
 use crate::kdf::MasterKey;
+use crate::onboarding::BreachCheck;
 use crate::opaque::{compute_recovery_check, derive_x25519_private, derive_x25519_public};
 use crate::opaque_protocol;
+use crate::signup_flow::SignupPolicy;
 
-/// Minimum password length, the same as sign-up (DW-A67 rules).
-pub const MIN_PASSWORD_CHARS: usize = 12;
 /// Display name bounds (DW-A64 rules).
 pub const MAX_NAME_CHARS: usize = 64;
 
@@ -235,6 +235,12 @@ pub enum AccountFlowError {
     WeakPassword,
     #[error("the new password is the same as the current one")]
     SamePassword,
+    #[error("the password appears in a known breach")]
+    PasswordBreached,
+    #[error("the breach check for this password has not been answered")]
+    BreachCheckMissing,
+    #[error("the breach check is unavailable and the server does not allow skipping it")]
+    BreachCheckBlocked,
     #[error("a name can't be empty")]
     NameEmpty,
     #[error("the name is too long")]
@@ -269,6 +275,9 @@ impl AccountFlowError {
             Self::InvalidCode => "invalid_code",
             Self::WeakPassword => "weak_password",
             Self::SamePassword => "same_password",
+            Self::PasswordBreached => "password_breached",
+            Self::BreachCheckMissing => "breach_check_missing",
+            Self::BreachCheckBlocked => "breach_check_blocked",
             Self::NameEmpty => "name_empty",
             Self::NameTooLong => "name_too_long",
             Self::InvalidEmail => "invalid_email",
@@ -497,10 +506,21 @@ pub struct AccountFlow {
     step_up: StepUp,
 }
 
-fn validate_new_password(current: &str, new: &str) -> Result<(), AccountFlowError> {
-    if new.chars().count() < MIN_PASSWORD_CHARS {
-        return Err(AccountFlowError::WeakPassword);
-    }
+/// Sign-up's gate ([`crate::signup_flow::password_gate`]) with the server's policy and the breach
+/// check made for `new`, then "not the same as the current one". No hard-coded fallback policy.
+fn validate_new_password(
+    current: &str,
+    new: &str,
+    policy: &SignupPolicy,
+    breach: Option<&BreachCheck>,
+) -> Result<(), AccountFlowError> {
+    use crate::signup_flow::SignupError as E;
+    crate::signup_flow::password_gate(policy, breach, new).map_err(|e| match e {
+        E::PasswordBreached => AccountFlowError::PasswordBreached,
+        E::BreachCheckBlocked => AccountFlowError::BreachCheckBlocked,
+        E::BreachCheckMissing => AccountFlowError::BreachCheckMissing,
+        _ => AccountFlowError::WeakPassword,
+    })?;
     if current == new {
         return Err(AccountFlowError::SamePassword);
     }
@@ -589,8 +609,18 @@ impl AccountFlow {
 
     /// Change the password: OPAQUE re-registration with a step-up per leg (DW-A67).
     /// No master-key wrap: the master key is unchanged; the binding values are re-sent.
-    pub fn change_password(current: &str, new: &str, binding: AccountBinding) -> Result<Self, AccountFlowError> {
-        validate_new_password(current, new)?;
+    ///
+    /// `policy` is the server's (`GET /api/v1/onboarding`, [`SignupPolicy::from_response`]);
+    /// `breach` is the [`BreachCheck`] made for `new` and answered, required when the policy
+    /// declares a breach check. The same gate as sign-up and phrase recovery.
+    pub fn change_password(
+        current: &str,
+        new: &str,
+        binding: AccountBinding,
+        policy: &SignupPolicy,
+        breach: Option<&BreachCheck>,
+    ) -> Result<Self, AccountFlowError> {
+        validate_new_password(current, new, policy, breach)?;
         Ok(Self::with(Kind::ChangePassword {
             current: Zeroizing::new(current.as_bytes().to_vec()),
             new: Zeroizing::new(new.as_bytes().to_vec()),
