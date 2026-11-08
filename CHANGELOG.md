@@ -321,6 +321,24 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   when the account was emptied: it stops on a `files_removed` or `backup_deleted` notice, or on a
   device or category folder that is trashed or gone, and skips the pass when the notices cannot be
   read. Before, trashing backup photos, or an emptied account, filled the account up again by itself.
+- Sync: a remote rename is checked for a name clash in the item's own folder (its op carries no
+  parent), and a move in its destination. Clashes compare core's normal forms (`TakenNames`) and the
+  item that arrives second takes `drive_conflict_name` from its own name (`a (conflict, device).txt`:
+  the writing device is not known by name on pull), never `a (2).txt`. A snapshot names clashing
+  siblings the same whatever the server's order. Only core's decryption names an item from a remote
+  op: a plaintext `name` / `new_name` in the server's payload is dropped, and a sealed name that does
+  not open, or opens to a name the portable path rule refuses, is shown as undecryptable without
+  stopping the sync. The engine's `apply_move` applies a client-added `new_name`.
+- An offline delete from the Files app sends `file_trash` (the op the server accepts), so it reaches
+  the server and moves the item to the Trash; it sent `file_delete`, which the server refuses.
+- An upload is sized from its source as it is when the first pass starts, so a file that grew while
+  queued is uploaded whole. The completion metadata is persisted before `complete` is sent, and an
+  upload with it finishes by sending the same request (the server answers `already_completed`), so a
+  crash after the server accepted it no longer fails the upload or uploads a backup photo twice.
+- `DownloadService::video_range` reads through `RangeOpener` (frame 0 first, the geometry checked),
+  the same release path as `read_range`.
+- A UniFFI chunk decryptor, chunk encryptor or key handle whose lock was poisoned by a panic answers
+  `CryptoError::InvalidInput` and drops its state, instead of panicking across FFI on every call.
 - Durable uploads remove safe orphan ciphertext, count invalid saved state as a terminal attempt, keep
   partial staging resumable, and can finish after the platform removes the plaintext export once all
   chunks and the staged hash are committed.
