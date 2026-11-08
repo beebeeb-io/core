@@ -4060,7 +4060,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_eventstreamhandle_next() != 14144.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_backup() != 39255.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_backup() != 10971.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_file_provider() != 23944.toShort()) {
@@ -17342,6 +17342,18 @@ public object FfiConverterTypeMasterKeyHandle: FfiConverter<MasterKeyHandle, Lon
 
 public interface NativeClientHandleInterface {
     
+    /**
+     * The native backup. Make it right after the upload service, before any
+     * transfer resumes: a backup stopped before a crash cancels its uploads
+     * here, before they can publish.
+     *
+     * One per upload service, and one per manifest store across processes
+     * too: a second while the first lives is refused (`unavailable`), and an
+     * extension or a second process must never open the same store. Its
+     * callbacks run while the service holds its locks: `manifest_store`'s
+     * and `source`'s must not call back into this backup service, nor wait
+     * on a thread that is inside `next_batch`. Either deadlocks.
+     */
     fun `backup`(`uploads`: UploadServiceHandle, `source`: AssetSourceCallback, `manifestStore`: BackupManifestStoreCallback, `configuration`: BackupConfigurationData): BackupServiceHandle
     
     /**
@@ -17499,6 +17511,18 @@ open class NativeClientHandle: Disposable, AutoCloseable, NativeClientHandleInte
     }
 
     
+    /**
+     * The native backup. Make it right after the upload service, before any
+     * transfer resumes: a backup stopped before a crash cancels its uploads
+     * here, before they can publish.
+     *
+     * One per upload service, and one per manifest store across processes
+     * too: a second while the first lives is refused (`unavailable`), and an
+     * extension or a second process must never open the same store. Its
+     * callbacks run while the service holds its locks: `manifest_store`'s
+     * and `source`'s must not call back into this backup service, nor wait
+     * on a thread that is inside `next_batch`. Either deadlocks.
+     */
     @Throws(ServiceException::class)override fun `backup`(`uploads`: UploadServiceHandle, `source`: AssetSourceCallback, `manifestStore`: BackupManifestStoreCallback, `configuration`: BackupConfigurationData): BackupServiceHandle {
             return FfiConverterTypeBackupServiceHandle.lift(
     callWithHandle {
@@ -25342,11 +25366,19 @@ public object FfiConverterTypeBackupBatchData: FfiConverterRustBuffer<BackupBatc
  * `legacy_last_backup_ms` (an upgraded device's last backup under the old
  * engine) are on the server's clock, in milliseconds; they set the first
  * pass's baseline (core `backup_first_pass_baseline`). Unknown is `None`.
+ * `device_id` is this device's canonical id, the one the app already sends
+ * as `X-Beebeeb-Device-Id` (mobile: `getDeviceId()`, and only an id that was
+ * read from secure storage or durably saved): the server keys this device's
+ * photo-backup map by it. Never a new one: a different id makes every
+ * backed-up photo look new to the server. 1 to 128 visible ASCII characters,
+ * or `invalid_input`.
  */
 data class BackupConfigurationData (
     var `folderId`: kotlin.String
     , 
     var `wifiOnly`: kotlin.Boolean
+    , 
+    var `deviceId`: kotlin.String
     , 
     var `setupAtMs`: kotlin.Long?
     , 
@@ -25369,6 +25401,7 @@ public object FfiConverterTypeBackupConfigurationData: FfiConverterRustBuffer<Ba
         return BackupConfigurationData(
             FfiConverterString.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterString.read(buf),
             FfiConverterOptionalLong.read(buf),
             FfiConverterOptionalLong.read(buf),
         )
@@ -25377,6 +25410,7 @@ public object FfiConverterTypeBackupConfigurationData: FfiConverterRustBuffer<Ba
     override fun allocationSize(value: BackupConfigurationData) = (
             FfiConverterString.allocationSize(value.`folderId`) +
             FfiConverterBoolean.allocationSize(value.`wifiOnly`) +
+            FfiConverterString.allocationSize(value.`deviceId`) +
             FfiConverterOptionalLong.allocationSize(value.`setupAtMs`) +
             FfiConverterOptionalLong.allocationSize(value.`legacyLastBackupMs`)
     )
@@ -25384,6 +25418,7 @@ public object FfiConverterTypeBackupConfigurationData: FfiConverterRustBuffer<Ba
     override fun write(value: BackupConfigurationData, buf: ByteBuffer) {
             FfiConverterString.write(value.`folderId`, buf)
             FfiConverterBoolean.write(value.`wifiOnly`, buf)
+            FfiConverterString.write(value.`deviceId`, buf)
             FfiConverterOptionalLong.write(value.`setupAtMs`, buf)
             FfiConverterOptionalLong.write(value.`legacyLastBackupMs`, buf)
     }
@@ -35259,6 +35294,10 @@ public object FfiConverterTypeAccountDataPurgerCallback: FfiConverterCallbackInt
 
 
 
+/**
+ * Called during `next_batch`, under its pass lock: never call back into the
+ * backup service from here, nor wait on a thread that is inside `next_batch`.
+ */
 public interface AssetSourceCallback {
     
     /**
@@ -35342,7 +35381,8 @@ public object FfiConverterTypeAssetSourceCallback: FfiConverterCallbackInterface
 
 /**
  * `None` / `false` means the store failed. `clear` removes the records and
- * the pass state.
+ * the pass state. Called while the backup service holds its locks: never
+ * call back into the backup service from here.
  */
 public interface BackupManifestStoreCallback {
     

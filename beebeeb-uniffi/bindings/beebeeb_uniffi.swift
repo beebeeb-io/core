@@ -8045,6 +8045,18 @@ public func FfiConverterTypeMasterKeyHandle_lower(_ value: MasterKeyHandle) -> U
 
 public protocol NativeClientHandleProtocol: AnyObject, Sendable {
     
+    /**
+     * The native backup. Make it right after the upload service, before any
+     * transfer resumes: a backup stopped before a crash cancels its uploads
+     * here, before they can publish.
+     *
+     * One per upload service, and one per manifest store across processes
+     * too: a second while the first lives is refused (`unavailable`), and an
+     * extension or a second process must never open the same store. Its
+     * callbacks run while the service holds its locks: `manifest_store`'s
+     * and `source`'s must not call back into this backup service, nor wait
+     * on a thread that is inside `next_batch`. Either deadlocks.
+     */
     func backup(uploads: UploadServiceHandle, source: AssetSourceCallback, manifestStore: BackupManifestStoreCallback, configuration: BackupConfigurationData) throws  -> BackupServiceHandle
     
     /**
@@ -8157,6 +8169,18 @@ public convenience init(configuration: NativeClientConfiguration, secretAccess: 
     
 
     
+    /**
+     * The native backup. Make it right after the upload service, before any
+     * transfer resumes: a backup stopped before a crash cancels its uploads
+     * here, before they can publish.
+     *
+     * One per upload service, and one per manifest store across processes
+     * too: a second while the first lives is refused (`unavailable`), and an
+     * extension or a second process must never open the same store. Its
+     * callbacks run while the service holds its locks: `manifest_store`'s
+     * and `source`'s must not call back into this backup service, nor wait
+     * on a thread that is inside `next_batch`. Either deadlocks.
+     */
 open func backup(uploads: UploadServiceHandle, source: AssetSourceCallback, manifestStore: BackupManifestStoreCallback, configuration: BackupConfigurationData)throws  -> BackupServiceHandle  {
     return try  FfiConverterTypeBackupServiceHandle_lift(try rustCallWithError(FfiConverterTypeServiceError_lift) {
     uniffi_beebeeb_uniffi_fn_method_nativeclienthandle_backup(
@@ -13172,18 +13196,26 @@ public func FfiConverterTypeBackupBatchData_lower(_ value: BackupBatchData) -> R
  * `legacy_last_backup_ms` (an upgraded device's last backup under the old
  * engine) are on the server's clock, in milliseconds; they set the first
  * pass's baseline (core `backup_first_pass_baseline`). Unknown is `None`.
+ * `device_id` is this device's canonical id, the one the app already sends
+ * as `X-Beebeeb-Device-Id` (mobile: `getDeviceId()`, and only an id that was
+ * read from secure storage or durably saved): the server keys this device's
+ * photo-backup map by it. Never a new one: a different id makes every
+ * backed-up photo look new to the server. 1 to 128 visible ASCII characters,
+ * or `invalid_input`.
  */
 public struct BackupConfigurationData: Equatable, Hashable {
     public var folderId: String
     public var wifiOnly: Bool
+    public var deviceId: String
     public var setupAtMs: Int64?
     public var legacyLastBackupMs: Int64?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(folderId: String, wifiOnly: Bool, setupAtMs: Int64?, legacyLastBackupMs: Int64?) {
+    public init(folderId: String, wifiOnly: Bool, deviceId: String, setupAtMs: Int64?, legacyLastBackupMs: Int64?) {
         self.folderId = folderId
         self.wifiOnly = wifiOnly
+        self.deviceId = deviceId
         self.setupAtMs = setupAtMs
         self.legacyLastBackupMs = legacyLastBackupMs
     }
@@ -13206,6 +13238,7 @@ public struct FfiConverterTypeBackupConfigurationData: FfiConverterRustBuffer {
             try BackupConfigurationData(
                 folderId: FfiConverterString.read(from: &buf), 
                 wifiOnly: FfiConverterBool.read(from: &buf), 
+                deviceId: FfiConverterString.read(from: &buf), 
                 setupAtMs: FfiConverterOptionInt64.read(from: &buf), 
                 legacyLastBackupMs: FfiConverterOptionInt64.read(from: &buf)
         )
@@ -13214,6 +13247,7 @@ public struct FfiConverterTypeBackupConfigurationData: FfiConverterRustBuffer {
     public static func write(_ value: BackupConfigurationData, into buf: inout [UInt8]) {
         FfiConverterString.write(value.folderId, into: &buf)
         FfiConverterBool.write(value.wifiOnly, into: &buf)
+        FfiConverterString.write(value.deviceId, into: &buf)
         FfiConverterOptionInt64.write(value.setupAtMs, into: &buf)
         FfiConverterOptionInt64.write(value.legacyLastBackupMs, into: &buf)
     }
@@ -24583,6 +24617,10 @@ public func FfiConverterCallbackInterfaceAccountDataPurgerCallback_lower(_ v: Ac
 
 
 
+/**
+ * Called during `next_batch`, under its pass lock: never call back into the
+ * backup service from here, nor wait on a thread that is inside `next_batch`.
+ */
 public protocol AssetSourceCallback: AnyObject, Sendable {
     
     /**
@@ -24751,7 +24789,8 @@ public func FfiConverterCallbackInterfaceAssetSourceCallback_lower(_ v: AssetSou
 
 /**
  * `None` / `false` means the store failed. `clear` removes the records and
- * the pass state.
+ * the pass state. Called while the backup service holds its locks: never
+ * call back into the backup service from here.
  */
 public protocol BackupManifestStoreCallback: AnyObject, Sendable {
     
@@ -30135,7 +30174,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_eventstreamhandle_next() != 14144) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_backup() != 39255) {
+    if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_backup() != 10971) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_nativeclienthandle_file_provider() != 23944) {
