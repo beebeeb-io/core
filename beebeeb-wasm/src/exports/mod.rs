@@ -18,5 +18,6 @@ pub mod media;
 pub mod metadata_wire;
 pub mod path_safety;
 pub mod retry;
+pub mod share_flow;
 pub mod share_link;
 pub mod thumbnail;

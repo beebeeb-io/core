@@ -11,7 +11,7 @@ use wasm_bindgen::prelude::*;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RequestJs {
+pub(crate) struct RequestJs {
     method: &'static str,
     path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -32,12 +32,12 @@ fn wrong_state() -> JsError {
     err(AuthFlowError::WrongState)
 }
 
-fn to_js<T: Serialize>(v: &T) -> Result<JsValue, JsError> {
+pub(crate) fn to_js<T: Serialize>(v: &T) -> Result<JsValue, JsError> {
     v.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
         .map_err(|_| JsError::new("protocol"))
 }
 
-fn request_js(req: &HttpRequest) -> RequestJs {
+pub(crate) fn request_js(req: &HttpRequest) -> RequestJs {
     RequestJs {
         method: req.method.as_str(),
         path: req.path.clone(),
@@ -65,7 +65,7 @@ fn send(req: HttpRequest) -> Result<JsValue, JsError> {
     })
 }
 
-fn resp(status: u16, body: &str, retry_after_secs: Option<u32>) -> HttpResponse {
+pub(crate) fn resp(status: u16, body: &str, retry_after_secs: Option<u32>) -> HttpResponse {
     HttpResponse::from_text(status, body, retry_after_secs.map(u64::from))
 }
 

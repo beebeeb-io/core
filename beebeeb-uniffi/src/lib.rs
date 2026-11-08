@@ -17,6 +17,7 @@ mod auth_flow;
 mod backup;
 mod passkey;
 mod request_seal;
+mod share_flow;
 #[cfg(test)]
 mod folder_link_2237c {
     use super::*;

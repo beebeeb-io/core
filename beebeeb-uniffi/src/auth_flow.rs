@@ -50,7 +50,7 @@ fn wrong_state() -> AuthFlowFfiError {
     AuthFlowError::WrongState.into()
 }
 
-fn out(req: HttpRequest) -> AuthHttpRequest {
+pub(crate) fn out(req: HttpRequest) -> AuthHttpRequest {
     AuthHttpRequest {
         method: req.method.as_str().to_owned(),
         path: req.path.clone(),
@@ -60,7 +60,7 @@ fn out(req: HttpRequest) -> AuthHttpRequest {
     }
 }
 
-fn into(resp: AuthHttpResponse) -> HttpResponse {
+pub(crate) fn into(resp: AuthHttpResponse) -> HttpResponse {
     HttpResponse::from_text(resp.status, &resp.body_json, resp.retry_after_secs)
 }
 

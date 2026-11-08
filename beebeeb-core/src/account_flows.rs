@@ -120,6 +120,7 @@ impl ApiRequest {
         let method = match request.method {
             auth_flow::Method::Get => Method::Get,
             auth_flow::Method::Post => Method::Post,
+            auth_flow::Method::Delete => Method::Delete,
         };
         Self {
             method,

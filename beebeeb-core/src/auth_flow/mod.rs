@@ -49,6 +49,8 @@ pub(crate) fn b64_decode(s: &str) -> Result<Vec<u8>, AuthFlowError> {
 pub enum Method {
     Get,
     Post,
+    /// Only the share flows use it (revoking a link or an invite).
+    Delete,
 }
 
 impl Method {
@@ -56,6 +58,7 @@ impl Method {
         match self {
             Self::Get => "GET",
             Self::Post => "POST",
+            Self::Delete => "DELETE",
         }
     }
 }
@@ -86,6 +89,16 @@ impl HttpRequest {
             method: Method::Post,
             path: path.to_owned(),
             body: Some(body),
+            auth,
+            confirm_token: None,
+        }
+    }
+
+    pub(crate) fn delete(path: String, auth: RequestAuth) -> Self {
+        Self {
+            method: Method::Delete,
+            path,
+            body: None,
             auth,
             confirm_token: None,
         }

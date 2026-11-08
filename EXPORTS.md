@@ -1,3 +1,40 @@
+# beebeeb-wasm / uniffi exports — branch `feat/v2-share-flows`
+
+Desktop v2 B05b (Guus: every crypto and account flow lives in core). Person shares of a file and double-encrypted
+file links move into core as `beebeeb_core::share_flow`, byte-identical to web (web's `share-wrap-kat` vectors and
+the `x25519_share_key_exchange` vector are pinned in `share_flow::tests`). Measured against `main` at `e3eeb8b`.
+Additive only, except `auth_flow::Method` gains `Delete` (a host that matches it exhaustively adds one arm).
+
+## WASM
+
+Counted from source (unique `js_name = …` under `beebeeb-wasm/src`): base 187, head 193.
+
+- **removed: 0**
+- **added: 6**
+
+| Name | What |
+| --- | --- |
+| `shareWrapKey(wrapKey, key)` / `shareUnwrapKey(wrapKey, wrapped)` | Web's `wrapKeyForShare` / `unwrapKeyFromShare`: `nonce(12) \|\| ct`, no AAD. |
+| `ShareMemberInvite(itemId, isFolder, email, masterKey, fileKey)` | `start()`, `onResponse(...)` → `{kind: "send"}` / `"shared"` / `"invited"` / `"awaiting_approval"`. A folder throws `folder_invite_unsupported`. |
+| `ShareCreateLink(appUrl, fileId, masterKey, fileKey, expiresInHours?, maxOpens?, passphrase?)` | `start()`, `onResponse(...)` → `{kind: "send"}` (one retry on an untyped 409) / `{kind: "created", shareId, link, display}`. |
+| `shareRebuildLink(appUrl, masterKey, ownerWrappedKey?, ownerWrappedToken?)` | Web's `buildShareLink`: the owner's link, or `undefined`. |
+| `shareOpenMemberFileKey(masterKey, ownerPublicKey, fileId, sealed)` | The recipient side of a person share. |
+
+## UniFFI
+
+- **removed: 0**
+- **added:** objects `MemberInviteFlow`, `CreateLinkFlow`; enums `InviteStepFfi`, `LinkStepFfi`; error
+  `ShareFlowFfiError::Flow { code }`; functions `share_approve_file_invite_request`, `share_open_member_file_key`,
+  `share_rebuild_link`, `share_open_link_file_key`, `share_revoke_request`. Requests reuse `AuthHttpRequest`.
+
+The committed Kotlin bindings under `bindings/` are not regenerated here.
+
+## Rust
+
+New module `beebeeb_core::share_flow` (`member`, `link`); `auth_flow::Method::Delete` and its `account_flows` arm.
+
+---
+
 # beebeeb-wasm / uniffi exports — branch `feat/v2-auth-flows`
 
 Desktop v2 B10 (`docs/superpowers/specs/2026-11-08-desktop-v2-design.md`, crypto review rule 0): the sign-in,
