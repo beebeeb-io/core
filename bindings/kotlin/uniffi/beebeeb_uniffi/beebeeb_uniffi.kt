@@ -14252,13 +14252,10 @@ sealed class UploadException: kotlin.Exception() {
     }
     
     class ServerException(
-
-        val `status`: kotlin.UShort,
-
-        val `detail`: kotlin.String,
-
-        // BREAK-TEST: simulates core PR #74 duplicate-message regression
-        val `message`: kotlin.String
+        
+        val `status`: kotlin.UShort, 
+        
+        val `detail`: kotlin.String
         ) : UploadException() {
         override val message
             get() = "status=${ `status` }, detail=${ `detail` }"
