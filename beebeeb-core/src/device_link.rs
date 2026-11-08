@@ -9,9 +9,13 @@
 //!
 //! **QR path** ([`seal_for_new_device`], [`NewDeviceLink::open`]). The new
 //! device shows a QR ([`NewDeviceLink::qr_payload`]) that commits to its
-//! one-time X25519 key. The approver hands the raw scanned text to
-//! [`DeviceLinkQr::parse`]; there is no constructor from loose bytes, so the
-//! fingerprint can only come from a scan. The approver checks the relayed key
+//! one-time X25519 key and carries its canonical device name. The approver
+//! hands the raw scanned text to [`DeviceLinkQr::parse`]; there is no
+//! constructor from loose bytes, so the fingerprint and the name can only come
+//! from a scan. The approver shows the scanned name
+//! ([`DeviceLinkQr::device_name`]), never the relay's report, and the seal
+//! refuses a relayed name that differs from it (Guus's ruling of 2026-11-07,
+//! "bind the name into the QR now"). The approver checks the relayed key
 //! against the scanned fingerprint and seals to it. **Only that check stops a
 //! key substitution.** The typed code is mixed into the seal key, but it gives
 //! no protection against a substituted key: whoever holds the substituted
@@ -82,9 +86,12 @@ pub(crate) const PAKE_CONFIRM_APPROVER_INFO: &[u8] = b"beebeeb/device-link/pake-
 pub(crate) const PAKE_KEY_INFO: &[u8] = b"beebeeb/device-link/pake-seal/v2/key";
 pub(crate) const PAKE_AAD_DOMAIN: &[u8] = b"beebeeb/device-link/pake-seal/v2";
 
-/// Text prefix of the QR payload: `beebeeb-link:v1:` followed by the unpadded
-/// base64url form of `session_id (16) ‖ fingerprint (32)`.
-pub const QR_PAYLOAD_PREFIX: &str = "beebeeb-link:v1:";
+/// Text prefix of the QR payload: `beebeeb-link:v2:` followed by the unpadded
+/// base64url form of `session_id (16) ‖ fingerprint (32) ‖ device_name`, the
+/// name as its [`canonical_device_name`] UTF-8 (1 to [`MAX_DEVICE_NAME_BYTES`]
+/// bytes). Version 2 replaced the unshipped `v1` (no name) with the ruling of
+/// 2026-11-07; a `v1` payload is refused.
+pub const QR_PAYLOAD_PREFIX: &str = "beebeeb-link:v2:";
 /// Most Unicode scalars a canonical device name keeps.
 pub const MAX_DEVICE_NAME_SCALARS: usize = 64;
 /// Most UTF-8 bytes a canonical device name keeps (the relay's own limit).
@@ -92,7 +99,12 @@ pub const MAX_DEVICE_NAME_BYTES: usize = 160;
 
 const NONCE_LEN: usize = 12;
 const CODE_ALPHABET: &[u8; 32] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
-const QR_PAYLOAD_BYTES: usize = 16 + 32;
+/// Session id and fingerprint, before the name.
+const QR_FIXED_BYTES: usize = 16 + 32;
+/// The longest payload body: the fixed part and the longest canonical name.
+const QR_MAX_PAYLOAD_BYTES: usize = QR_FIXED_BYTES + MAX_DEVICE_NAME_BYTES;
+/// Unpadded base64url length of [`QR_MAX_PAYLOAD_BYTES`].
+const QR_MAX_BODY_CHARS: usize = QR_MAX_PAYLOAD_BYTES.div_ceil(3) * 4;
 const PAKE_WIRE_VERSION: u8 = 2;
 const SPAKE2_SIDE_A: u8 = b'A';
 const SPAKE2_SIDE_B: u8 = b'B';
@@ -118,45 +130,69 @@ type HmacSha256 = Hmac<Sha256>;
 pub struct DeviceLinkQr {
     session_id: [u8; 16],
     fingerprint: [u8; 32],
+    device_name: String,
 }
 
 impl DeviceLinkQr {
     /// Parse the raw text a camera scanned from the new device's QR. Leading
-    /// and trailing ASCII white space is ignored; anything else that is not
-    /// exactly [`QR_PAYLOAD_PREFIX`] plus 48 base64url bytes is refused.
+    /// and trailing ASCII white space is ignored. Anything else that is not
+    /// exactly [`QR_PAYLOAD_PREFIX`] plus the base64url of 48 bytes and a
+    /// canonical device name is refused: another prefix (the old `v1` too), a
+    /// missing or empty name, a name that is not UTF-8, longer than
+    /// [`MAX_DEVICE_NAME_BYTES`], or not in its [`canonical_device_name`] form.
     pub fn parse(scanned: &str) -> Result<Self, CoreError> {
         let refused = || CoreError::InvalidInput("not a Beebeeb device-link QR".into());
         let body = scanned
             .trim_matches(|c: char| c.is_ascii_whitespace())
             .strip_prefix(QR_PAYLOAD_PREFIX)
             .ok_or_else(refused)?;
-        if body.len() > 64 {
+        if body.len() > QR_MAX_BODY_CHARS {
             return Err(refused());
         }
         let bytes = URL_SAFE_NO_PAD.decode(body).map_err(|_| refused())?;
-        if bytes.len() != QR_PAYLOAD_BYTES {
+        if bytes.len() <= QR_FIXED_BYTES || bytes.len() > QR_MAX_PAYLOAD_BYTES {
+            return Err(refused());
+        }
+        let device_name = std::str::from_utf8(&bytes[QR_FIXED_BYTES..]).map_err(|_| refused())?;
+        if canonical_device_name(device_name).map_err(|_| refused())? != device_name {
             return Err(refused());
         }
         let mut session_id = [0u8; 16];
         let mut fingerprint = [0u8; 32];
         session_id.copy_from_slice(&bytes[..16]);
-        fingerprint.copy_from_slice(&bytes[16..]);
+        fingerprint.copy_from_slice(&bytes[16..QR_FIXED_BYTES]);
         Ok(Self {
             session_id,
             fingerprint,
+            device_name: device_name.to_owned(),
         })
     }
 
     /// The text to render as the QR.
     pub fn payload(&self) -> String {
-        let mut bytes = [0u8; QR_PAYLOAD_BYTES];
-        bytes[..16].copy_from_slice(&self.session_id);
-        bytes[16..].copy_from_slice(&self.fingerprint);
+        let mut bytes = Vec::with_capacity(QR_FIXED_BYTES + self.device_name.len());
+        bytes.extend_from_slice(&self.session_id);
+        bytes.extend_from_slice(&self.fingerprint);
+        bytes.extend_from_slice(self.device_name.as_bytes());
         format!("{QR_PAYLOAD_PREFIX}{}", URL_SAFE_NO_PAD.encode(bytes))
     }
 
     pub fn session_id(&self) -> &[u8; 16] {
         &self.session_id
+    }
+
+    /// The new device's canonical name as it showed it in its own QR. This is
+    /// the name an approver shows, never the relay's report: the relay's name
+    /// is unauthenticated, the scanned one came from the device's screen.
+    pub fn device_name(&self) -> &str {
+        &self.device_name
+    }
+
+    /// Whether the relay reports the same name the QR carries. The comparison
+    /// is exact: the new device sends the canonical form, and the relay's own
+    /// trim never changes it, so any difference is a rewrite.
+    pub fn matches_relayed_name(&self, relayed_device_name: &str) -> bool {
+        self.device_name == relayed_device_name
     }
 
     /// Check that the relayed public key matches the fingerprint captured in
@@ -261,6 +297,7 @@ impl NewDeviceLink {
         DeviceLinkQr {
             session_id: self.session_id,
             fingerprint: fingerprint(&self.public),
+            device_name: self.device_name.clone(),
         }
     }
 
@@ -435,20 +472,28 @@ impl SealedAccountKeyMaterial {
     }
 }
 
-/// QR path: verify the scanned fingerprint and seal account material to the
-/// relayed X25519 key.
+/// QR path: verify the scanned fingerprint and name, and seal account
+/// material to the relayed X25519 key.
 ///
 /// `qr` must come from [`DeviceLinkQr::parse`] over text scanned from the new
-/// device's screen. The fingerprint check is the only protection against a
-/// substituted key: `typed_code` is mixed into the seal key, but anyone holding
-/// the substituted private key can recover it offline (see the module
-/// documentation). Without a scan, use the typed-code path.
+/// device's screen. `relayed_device_name` is the name the relay reports for
+/// this link; a name that differs from [`DeviceLinkQr::device_name`] is refused
+/// before anything is sealed. The fingerprint check is the only protection
+/// against a substituted key: `typed_code` is mixed into the seal key, but
+/// anyone holding the substituted private key can recover it offline (see the
+/// module documentation). Without a scan, use the typed-code path.
 pub fn seal_for_new_device(
     qr: &DeviceLinkQr,
     relayed_public_key: &[u8; 32],
+    relayed_device_name: &str,
     typed_code: &str,
     material: AccountKeyMaterial,
 ) -> Result<SealedAccountKeyMaterial, CoreError> {
+    if !qr.matches_relayed_name(relayed_device_name) {
+        return Err(CoreError::InvalidInput(
+            "the relayed device name is not the name in the scanned QR".into(),
+        ));
+    }
     if !qr.verify_public_key(relayed_public_key) {
         return Err(CoreError::InvalidInput(
             "device-link public key does not match QR fingerprint".into(),

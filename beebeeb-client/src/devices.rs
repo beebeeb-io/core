@@ -25,6 +25,11 @@ pub enum DeviceError {
     /// on the way. Show it as a failed attempt; the link has been denied.
     #[error("the code did not match, or the device's details were changed on the way")]
     ConfirmationFailed,
+    /// QR path: the relay reports another name than the one in the scanned
+    /// QR, so the name was changed on the way. Nothing was sealed; the link
+    /// has been denied.
+    #[error("the device's name was changed on the way")]
+    DeviceNameChanged,
     #[error("the device link is no longer pending")]
     NotPending,
     #[error("signing out the last device requires explicit confirmation")]
@@ -283,6 +288,10 @@ impl Client {
     /// QR path. `qr` must be [`DeviceLinkQr::parse`] of text scanned from the
     /// new device's screen; without a camera, use the typed-code path, because
     /// the code alone gives no protection against a substituted key here.
+    /// Show [`DeviceLinkQr::device_name`] while the person confirms, never the
+    /// relay's name. A relay name that differs from the scanned one denies the
+    /// link and returns [`DeviceError::DeviceNameChanged`] before anything is
+    /// sealed (Guus's ruling of 2026-11-07).
     pub async fn approve_device_link(&self, id: &str, qr: &DeviceLinkQr, typed_code: &str) -> Result<(), DeviceError> {
         let session_key = self.session_key()?;
         let detail = self
@@ -295,11 +304,16 @@ impl Client {
         if &session_id != qr.session_id() {
             return Err(DeviceError::MalformedAnswer);
         }
+        if !qr.matches_relayed_name(&detail.device_name) {
+            let _ = self.deny_device_link(id).await;
+            return Err(DeviceError::DeviceNameChanged);
+        }
         let public_key = decode_fixed::<32>(Some(&detail.public_key))?;
         let key_bytes = Zeroizing::new(*session_key.master_key().to_bytes());
         let sealed = beebeeb_core::device_link::seal_for_new_device(
             qr,
             &public_key,
+            &detail.device_name,
             typed_code,
             AccountKeyMaterial::from_master_key(MasterKey::from_bytes(*key_bytes)),
         )?;

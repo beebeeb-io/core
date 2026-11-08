@@ -31,7 +31,7 @@ fn unavailable() -> ServiceError {
 }
 
 /// Core parses the raw text the camera scanned; Swift and Kotlin never pass
-/// session or fingerprint bytes.
+/// session, fingerprint or name bytes.
 fn scanned_device_link_qr(scanned_qr: &str) -> Result<DeviceLinkQr, ServiceError> {
     DeviceLinkQr::parse(scanned_qr).map_err(|_| invalid())
 }
@@ -268,9 +268,20 @@ impl DeviceServiceHandle {
             .map_err(map_client_error)
     }
 
+    /// QR path: the new device's name as its scanned QR carries it. Show this
+    /// name while the person confirms, never the pending link's
+    /// `device_name` (the relay's report). Refuses text that is not a
+    /// Beebeeb device-link QR.
+    pub fn scanned_device_link_name(&self, scanned_qr: String) -> Result<String, ServiceError> {
+        Ok(scanned_device_link_qr(&scanned_qr)?.device_name().to_owned())
+    }
+
     /// QR path. `scanned_qr` is the raw text the camera read from the new
     /// device's screen. Without a camera use the typed-code path: the code
-    /// gives no protection against a substituted key on this one.
+    /// gives no protection against a substituted key on this one. A relay
+    /// name that differs from the scanned one
+    /// ([`Self::scanned_device_link_name`]) is `ServiceError::Authentication`;
+    /// nothing is sealed and the link is denied.
     pub fn approve_device_link(&self, id: String, scanned_qr: String, typed_code: String) -> Result<(), ServiceError> {
         let qr = scanned_device_link_qr(&scanned_qr)?;
         self.root
