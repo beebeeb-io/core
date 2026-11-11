@@ -1058,8 +1058,6 @@ external fun uniffi_beebeeb_uniffi_checksum_func_backup_stop_words(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_normalize_email(
 ): Short
-external fun uniffi_beebeeb_uniffi_checksum_func_safety_number(
-): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_passkey_assertion_finish_body(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_passkey_escrow_body(
@@ -3042,7 +3040,7 @@ external fun uniffi_beebeeb_uniffi_fn_clone_shareservicehandle(`handle`: Long,un
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_shareservicehandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-external fun uniffi_beebeeb_uniffi_fn_method_shareservicehandle_create_link(`ptr`: Long,`fileId`: RustBuffer.ByValue,`wrappedFileKey`: RustBuffer.ByValue,`expiresInHours`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_beebeeb_uniffi_fn_method_shareservicehandle_create_link(`ptr`: Long,`appUrl`: RustBuffer.ByValue,`fileId`: RustBuffer.ByValue,`expiresInHours`: RustBuffer.ByValue,`maxOpens`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_shareservicehandle_revoke_folder_link(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -3363,8 +3361,6 @@ external fun uniffi_beebeeb_uniffi_fn_func_backup_stop_v2(`notices`: RustBuffer.
 external fun uniffi_beebeeb_uniffi_fn_func_backup_stop_words(`reason`: RustBuffer.ByValue,`device`: RustBuffer.ByValue,`folder`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_normalize_email(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_beebeeb_uniffi_fn_func_safety_number(`emailA`: RustBuffer.ByValue,`publicKeyA`: RustBuffer.ByValue,`emailB`: RustBuffer.ByValue,`publicKeyB`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_passkey_assertion_finish_body(`startJson`: RustBuffer.ByValue,`assertionJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -3760,9 +3756,6 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_normalize_email() != 54107.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_beebeeb_uniffi_checksum_func_safety_number() != 44018.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_passkey_assertion_finish_body() != 150.toShort()) {
@@ -4890,7 +4883,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_contactservicehandle_observe() != 53748.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_shareservicehandle_create_link() != 39871.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_shareservicehandle_create_link() != 59493.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_shareservicehandle_revoke_folder_link() != 45913.toShort()) {
@@ -24660,7 +24653,13 @@ public object FfiConverterTypeSettingsServiceHandle: FfiConverter<SettingsServic
 
 public interface ShareServiceHandleInterface {
     
-    fun `createLink`(`fileId`: kotlin.String, `wrappedFileKey`: kotlin.String, `expiresInHours`: kotlin.Long?, `passphrase`: kotlin.String?): ShareData
+    /**
+     * A public link to one of the account's files, made by core's share flow: the owner can copy
+     * it again later, and it does not expire without `expires_in_hours`. `app_url` is the web
+     * origin the link opens. A foreign item id is `invalid_input`: its key comes from an owner
+     * envelope, which this service does not hold.
+     */
+    fun `createLink`(`appUrl`: kotlin.String, `fileId`: kotlin.String, `expiresInHours`: kotlin.UInt?, `maxOpens`: kotlin.UInt?, `passphrase`: SecretString?): CreatedLinkData
     
     fun `revokeFolderLink`(`id`: kotlin.String)
     
@@ -24764,13 +24763,19 @@ open class ShareServiceHandle: Disposable, AutoCloseable, ShareServiceHandleInte
     }
 
     
-    @Throws(ServiceException::class)override fun `createLink`(`fileId`: kotlin.String, `wrappedFileKey`: kotlin.String, `expiresInHours`: kotlin.Long?, `passphrase`: kotlin.String?): ShareData {
-            return FfiConverterTypeShareData.lift(
+    /**
+     * A public link to one of the account's files, made by core's share flow: the owner can copy
+     * it again later, and it does not expire without `expires_in_hours`. `app_url` is the web
+     * origin the link opens. A foreign item id is `invalid_input`: its key comes from an owner
+     * envelope, which this service does not hold.
+     */
+    @Throws(ServiceException::class)override fun `createLink`(`appUrl`: kotlin.String, `fileId`: kotlin.String, `expiresInHours`: kotlin.UInt?, `maxOpens`: kotlin.UInt?, `passphrase`: SecretString?): CreatedLinkData {
+            return FfiConverterTypeCreatedLinkData.lift(
     callWithHandle {
     uniffiRustCallWithError(ServiceException) { _status ->
     UniffiLib.uniffi_beebeeb_uniffi_fn_method_shareservicehandle_create_link(
         it,
-        FfiConverterString.lower(`fileId`),FfiConverterString.lower(`wrappedFileKey`),FfiConverterOptionalLong.lower(`expiresInHours`),FfiConverterOptionalString.lower(`passphrase`),_status)
+        FfiConverterString.lower(`appUrl`),FfiConverterString.lower(`fileId`),FfiConverterOptionalUInt.lower(`expiresInHours`),FfiConverterOptionalUInt.lower(`maxOpens`),FfiConverterOptionalTypeSecretString.lower(`passphrase`),_status)
 }
     }
     )
@@ -32321,6 +32326,53 @@ public object FfiConverterTypeConstellationSessionInitDto: FfiConverterRustBuffe
 
 
 /**
+ * A link the server stored. `link` carries the link key after `#key=`: copy it, show `display`.
+ * `display` still names the link's token, so it is a secret too: wiped, and never printed.
+ */
+data class CreatedLinkData (
+    var `shareId`: kotlin.String
+    , 
+    var `link`: SecretString
+    , 
+    var `display`: SecretString
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCreatedLinkData: FfiConverterRustBuffer<CreatedLinkData> {
+    override fun read(buf: ByteBuffer): CreatedLinkData {
+        return CreatedLinkData(
+            FfiConverterString.read(buf),
+            FfiConverterTypeSecretString.read(buf),
+            FfiConverterTypeSecretString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: CreatedLinkData) = (
+            FfiConverterString.allocationSize(value.`shareId`) +
+            FfiConverterTypeSecretString.allocationSize(value.`link`) +
+            FfiConverterTypeSecretString.allocationSize(value.`display`)
+    )
+
+    override fun write(value: CreatedLinkData, buf: ByteBuffer) {
+            FfiConverterString.write(value.`shareId`, buf)
+            FfiConverterTypeSecretString.write(value.`link`, buf)
+            FfiConverterTypeSecretString.write(value.`display`, buf)
+    }
+}
+
+
+
+/**
  * The created request. `link` carries `R_pub` after `#`; `display` is the part before `#`.
  */
 data class CreatedRequestFfi (
@@ -35181,49 +35233,6 @@ public object FfiConverterTypeShardRefDto: FfiConverterRustBuffer<ShardRefDto> {
             FfiConverterUInt.write(value.`bucket`, buf)
             FfiConverterUInt.write(value.`page`, buf)
             FfiConverterLong.write(value.`version`, buf)
-    }
-}
-
-
-
-data class ShareData (
-    var `id`: kotlin.String
-    , 
-    var `fileId`: kotlin.String?
-    , 
-    var `expiresAt`: kotlin.String?
-    
-){
-    
-
-    
-
-    
-    companion object
-}
-
-/**
- * @suppress
- */
-public object FfiConverterTypeShareData: FfiConverterRustBuffer<ShareData> {
-    override fun read(buf: ByteBuffer): ShareData {
-        return ShareData(
-            FfiConverterString.read(buf),
-            FfiConverterOptionalString.read(buf),
-            FfiConverterOptionalString.read(buf),
-        )
-    }
-
-    override fun allocationSize(value: ShareData) = (
-            FfiConverterString.allocationSize(value.`id`) +
-            FfiConverterOptionalString.allocationSize(value.`fileId`) +
-            FfiConverterOptionalString.allocationSize(value.`expiresAt`)
-    )
-
-    override fun write(value: ShareData, buf: ByteBuffer) {
-            FfiConverterString.write(value.`id`, buf)
-            FfiConverterOptionalString.write(value.`fileId`, buf)
-            FfiConverterOptionalString.write(value.`expiresAt`, buf)
     }
 }
 
@@ -41293,6 +41302,79 @@ sealed class ServiceException: kotlin.Exception() {
             get() = "reason=${ `reason` }"
     }
     
+    /**
+     * The server needs the password confirmed again before this action (its
+     * confirmation was missing, spent or expired). Ask for the password and
+     * call again.
+     */
+    class ConfirmationRequired(
+        ) : ServiceException() {
+        override val message
+            get() = ""
+    }
+    
+    /**
+     * The account has an authenticator: call again with its code or a backup
+     * code.
+     */
+    class SecondFactorRequired(
+        ) : ServiceException() {
+        override val message
+            get() = ""
+    }
+    
+    /**
+     * The authenticator or backup code was not accepted.
+     */
+    class SecondFactorRejected(
+        ) : ServiceException() {
+        override val message
+            get() = ""
+    }
+    
+    /**
+     * The account is already scheduled for deletion; nothing changed. A new
+     * request needs that deletion cancelled first.
+     */
+    class DeletionAlreadyScheduled(
+        ) : ServiceException() {
+        override val message
+            get() = ""
+    }
+    
+    /**
+     * The account still has a subscription the provider will charge; nothing
+     * changed. Cancel the subscription first.
+     */
+    class SubscriptionActive(
+        ) : ServiceException() {
+        override val message
+            get() = ""
+    }
+    
+    /**
+     * The server could not send the email the action needs (the deletion
+     * link), so nothing changed. Try again later.
+     */
+    class EmailNotSent(
+        ) : ServiceException() {
+        override val message
+            get() = ""
+    }
+    
+    /**
+     * Core's share flow or the server refused the share. `code` is the flow's stable code
+     * (`plan_required`, `trial_share_limit_reached`, `folder_needs_upgrade`, ...): show the app's
+     * words for it.
+     */
+    class ShareRefused(
+        
+        val `code`: kotlin.String
+        ) : ServiceException() {
+        override val message
+            get() = "code=${ `code` }"
+    }
+    
 
     
 
@@ -41335,6 +41417,15 @@ public object FfiConverterTypeServiceError : FfiConverterRustBuffer<ServiceExcep
             14 -> ServiceException.AnotherAccountOnDevice()
             15 -> ServiceException.Unavailable()
             16 -> ServiceException.BackupStopUnfinished(
+                FfiConverterString.read(buf),
+                )
+            17 -> ServiceException.ConfirmationRequired()
+            18 -> ServiceException.SecondFactorRequired()
+            19 -> ServiceException.SecondFactorRejected()
+            20 -> ServiceException.DeletionAlreadyScheduled()
+            21 -> ServiceException.SubscriptionActive()
+            22 -> ServiceException.EmailNotSent()
+            23 -> ServiceException.ShareRefused(
                 FfiConverterString.read(buf),
                 )
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
@@ -41412,6 +41503,35 @@ public object FfiConverterTypeServiceError : FfiConverterRustBuffer<ServiceExcep
                 4UL
                 + FfiConverterString.allocationSize(value.`reason`)
             )
+            is ServiceException.ConfirmationRequired -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is ServiceException.SecondFactorRequired -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is ServiceException.SecondFactorRejected -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is ServiceException.DeletionAlreadyScheduled -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is ServiceException.SubscriptionActive -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is ServiceException.EmailNotSent -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is ServiceException.ShareRefused -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`code`)
+            )
         }
     }
 
@@ -41486,6 +41606,35 @@ public object FfiConverterTypeServiceError : FfiConverterRustBuffer<ServiceExcep
                 FfiConverterString.write(value.`reason`, buf)
                 Unit
             }
+            is ServiceException.ConfirmationRequired -> {
+                buf.putInt(17)
+                Unit
+            }
+            is ServiceException.SecondFactorRequired -> {
+                buf.putInt(18)
+                Unit
+            }
+            is ServiceException.SecondFactorRejected -> {
+                buf.putInt(19)
+                Unit
+            }
+            is ServiceException.DeletionAlreadyScheduled -> {
+                buf.putInt(20)
+                Unit
+            }
+            is ServiceException.SubscriptionActive -> {
+                buf.putInt(21)
+                Unit
+            }
+            is ServiceException.EmailNotSent -> {
+                buf.putInt(22)
+                Unit
+            }
+            is ServiceException.ShareRefused -> {
+                buf.putInt(23)
+                FfiConverterString.write(value.`code`, buf)
+                Unit
+            }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 
@@ -41511,7 +41660,14 @@ enum class ServiceErrorKind {
     ANCHOR_EXPIRED,
     ANOTHER_ACCOUNT_ON_DEVICE,
     UNAVAILABLE,
-    BACKUP_STOP_UNFINISHED;
+    BACKUP_STOP_UNFINISHED,
+    CONFIRMATION_REQUIRED,
+    SECOND_FACTOR_REQUIRED,
+    SECOND_FACTOR_REJECTED,
+    DELETION_ALREADY_SCHEDULED,
+    SUBSCRIPTION_ACTIVE,
+    EMAIL_NOT_SENT,
+    SHARE_REFUSED;
 
     
 
@@ -46718,22 +46874,6 @@ public typealias FfiConverterTypeSecretString = FfiConverterString
     UniffiLib.uniffi_beebeeb_uniffi_fn_func_normalize_email(
     
         FfiConverterString.lower(`raw`),_status)
-}
-    )
-    }
-    
-
-        /**
-         * The 60-digit safety number two contacts compare (12 groups of 5, joined).
-         * Each email is normalised by core first; keys are the contacts' 32-byte
-         * X25519 public keys. The same on both sides whatever the argument order.
-         */
-    @Throws(CryptoException::class) fun `safetyNumber`(`emailA`: kotlin.String, `publicKeyA`: kotlin.ByteArray, `emailB`: kotlin.String, `publicKeyB`: kotlin.ByteArray): kotlin.String {
-            return FfiConverterString.lift(
-    uniffiRustCallWithError(CryptoException) { _status ->
-    UniffiLib.uniffi_beebeeb_uniffi_fn_func_safety_number(
-    
-        FfiConverterString.lower(`emailA`),FfiConverterByteArray.lower(`publicKeyA`),FfiConverterString.lower(`emailB`),FfiConverterByteArray.lower(`publicKeyB`),_status)
 }
     )
     }

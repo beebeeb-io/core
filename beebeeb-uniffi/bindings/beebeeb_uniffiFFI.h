@@ -2950,7 +2950,7 @@ void uniffi_beebeeb_uniffi_fn_free_shareservicehandle(uint64_t handle, RustCallS
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SHARESERVICEHANDLE_CREATE_LINK
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SHARESERVICEHANDLE_CREATE_LINK
-RustBuffer uniffi_beebeeb_uniffi_fn_method_shareservicehandle_create_link(uint64_t ptr, RustBuffer file_id, RustBuffer wrapped_file_key, RustBuffer expires_in_hours, RustBuffer passphrase, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_beebeeb_uniffi_fn_method_shareservicehandle_create_link(uint64_t ptr, RustBuffer app_url, RustBuffer file_id, RustBuffer expires_in_hours, RustBuffer max_opens, RustBuffer passphrase, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_METHOD_SHARESERVICEHANDLE_REVOKE_FOLDER_LINK
@@ -3760,11 +3760,6 @@ RustBuffer uniffi_beebeeb_uniffi_fn_func_backup_stop_words(RustBuffer reason, Ru
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_NORMALIZE_EMAIL
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_NORMALIZE_EMAIL
 RustBuffer uniffi_beebeeb_uniffi_fn_func_normalize_email(RustBuffer raw, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_SAFETY_NUMBER
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_SAFETY_NUMBER
-RustBuffer uniffi_beebeeb_uniffi_fn_func_safety_number(RustBuffer email_a, RustBuffer public_key_a, RustBuffer email_b, RustBuffer public_key_b, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_FN_FUNC_PASSKEY_ASSERTION_FINISH_BODY
@@ -4605,12 +4600,6 @@ uint16_t uniffi_beebeeb_uniffi_checksum_func_backup_stop_words(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_NORMALIZE_EMAIL
 #define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_NORMALIZE_EMAIL
 uint16_t uniffi_beebeeb_uniffi_checksum_func_normalize_email(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_SAFETY_NUMBER
-#define UNIFFI_FFIDEF_UNIFFI_BEEBEEB_UNIFFI_CHECKSUM_FUNC_SAFETY_NUMBER
-uint16_t uniffi_beebeeb_uniffi_checksum_func_safety_number(void
     
 );
 #endif

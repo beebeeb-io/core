@@ -11731,7 +11731,13 @@ public func FfiConverterTypeSettingsServiceHandle_lower(_ value: SettingsService
 
 public protocol ShareServiceHandleProtocol: AnyObject, Sendable {
     
-    func createLink(fileId: String, wrappedFileKey: String, expiresInHours: Int64?, passphrase: String?) throws  -> ShareData
+    /**
+     * A public link to one of the account's files, made by core's share flow: the owner can copy
+     * it again later, and it does not expire without `expires_in_hours`. `app_url` is the web
+     * origin the link opens. A foreign item id is `invalid_input`: its key comes from an owner
+     * envelope, which this service does not hold.
+     */
+    func createLink(appUrl: String, fileId: String, expiresInHours: UInt32?, maxOpens: UInt32?, passphrase: SecretString?) throws  -> CreatedLinkData
     
     func revokeFolderLink(id: String) throws 
     
@@ -11789,14 +11795,21 @@ open class ShareServiceHandle: ShareServiceHandleProtocol, @unchecked Sendable {
     
 
     
-open func createLink(fileId: String, wrappedFileKey: String, expiresInHours: Int64?, passphrase: String?)throws  -> ShareData  {
-    return try  FfiConverterTypeShareData_lift(try rustCallWithError(FfiConverterTypeServiceError_lift) {
+    /**
+     * A public link to one of the account's files, made by core's share flow: the owner can copy
+     * it again later, and it does not expire without `expires_in_hours`. `app_url` is the web
+     * origin the link opens. A foreign item id is `invalid_input`: its key comes from an owner
+     * envelope, which this service does not hold.
+     */
+open func createLink(appUrl: String, fileId: String, expiresInHours: UInt32?, maxOpens: UInt32?, passphrase: SecretString?)throws  -> CreatedLinkData  {
+    return try  FfiConverterTypeCreatedLinkData_lift(try rustCallWithError(FfiConverterTypeServiceError_lift) {
     uniffi_beebeeb_uniffi_fn_method_shareservicehandle_create_link(
             self.uniffiCloneHandle(),
+        FfiConverterString.lower(appUrl),
         FfiConverterString.lower(fileId),
-        FfiConverterString.lower(wrappedFileKey),
-        FfiConverterOptionInt64.lower(expiresInHours),
-        FfiConverterOptionString.lower(passphrase),$0
+        FfiConverterOptionUInt32.lower(expiresInHours),
+        FfiConverterOptionUInt32.lower(maxOpens),
+        FfiConverterOptionTypeSecretString.lower(passphrase),$0
     )
 })
 }
@@ -18341,6 +18354,68 @@ public func FfiConverterTypeConstellationSessionInitDto_lower(_ value: Constella
 
 
 /**
+ * A link the server stored. `link` carries the link key after `#key=`: copy it, show `display`.
+ * `display` still names the link's token, so it is a secret too: wiped, and never printed.
+ */
+public struct CreatedLinkData: Equatable, Hashable {
+    public var shareId: String
+    public var link: SecretString
+    public var display: SecretString
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(shareId: String, link: SecretString, display: SecretString) {
+        self.shareId = shareId
+        self.link = link
+        self.display = display
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension CreatedLinkData: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCreatedLinkData: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CreatedLinkData {
+        return
+            try CreatedLinkData(
+                shareId: FfiConverterString.read(from: &buf), 
+                link: FfiConverterTypeSecretString.read(from: &buf), 
+                display: FfiConverterTypeSecretString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: CreatedLinkData, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.shareId, into: &buf)
+        FfiConverterTypeSecretString.write(value.link, into: &buf)
+        FfiConverterTypeSecretString.write(value.display, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCreatedLinkData_lift(_ buf: RustBuffer) throws -> CreatedLinkData {
+    return try FfiConverterTypeCreatedLinkData.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCreatedLinkData_lower(_ value: CreatedLinkData) -> RustBuffer {
+    return FfiConverterTypeCreatedLinkData.lower(value)
+}
+
+
+/**
  * The created request. `link` carries `R_pub` after `#`; `display` is the part before `#`.
  */
 public struct CreatedRequestFfi: Equatable, Hashable {
@@ -21880,64 +21955,6 @@ public func FfiConverterTypeShardRefDto_lift(_ buf: RustBuffer) throws -> ShardR
 #endif
 public func FfiConverterTypeShardRefDto_lower(_ value: ShardRefDto) -> RustBuffer {
     return FfiConverterTypeShardRefDto.lower(value)
-}
-
-
-public struct ShareData: Equatable, Hashable {
-    public var id: String
-    public var fileId: String?
-    public var expiresAt: String?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(id: String, fileId: String?, expiresAt: String?) {
-        self.id = id
-        self.fileId = fileId
-        self.expiresAt = expiresAt
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension ShareData: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeShareData: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ShareData {
-        return
-            try ShareData(
-                id: FfiConverterString.read(from: &buf), 
-                fileId: FfiConverterOptionString.read(from: &buf), 
-                expiresAt: FfiConverterOptionString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: ShareData, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.id, into: &buf)
-        FfiConverterOptionString.write(value.fileId, into: &buf)
-        FfiConverterOptionString.write(value.expiresAt, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeShareData_lift(_ buf: RustBuffer) throws -> ShareData {
-    return try FfiConverterTypeShareData.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeShareData_lower(_ value: ShareData) -> RustBuffer {
-    return FfiConverterTypeShareData.lower(value)
 }
 
 
@@ -27864,6 +27881,43 @@ public enum ServiceError: Swift.Error, Equatable, Hashable, Foundation.Localized
      */
     case BackupStopUnfinished(reason: String
     )
+    /**
+     * The server needs the password confirmed again before this action (its
+     * confirmation was missing, spent or expired). Ask for the password and
+     * call again.
+     */
+    case ConfirmationRequired
+    /**
+     * The account has an authenticator: call again with its code or a backup
+     * code.
+     */
+    case SecondFactorRequired
+    /**
+     * The authenticator or backup code was not accepted.
+     */
+    case SecondFactorRejected
+    /**
+     * The account is already scheduled for deletion; nothing changed. A new
+     * request needs that deletion cancelled first.
+     */
+    case DeletionAlreadyScheduled
+    /**
+     * The account still has a subscription the provider will charge; nothing
+     * changed. Cancel the subscription first.
+     */
+    case SubscriptionActive
+    /**
+     * The server could not send the email the action needs (the deletion
+     * link), so nothing changed. Try again later.
+     */
+    case EmailNotSent
+    /**
+     * Core's share flow or the server refused the share. `code` is the flow's stable code
+     * (`plan_required`, `trial_share_limit_reached`, `folder_needs_upgrade`, ...): show the app's
+     * words for it.
+     */
+    case ShareRefused(code: String
+    )
 
     
 
@@ -27917,6 +27971,15 @@ public struct FfiConverterTypeServiceError: FfiConverterRustBuffer {
         case 15: return .Unavailable
         case 16: return .BackupStopUnfinished(
             reason: try FfiConverterString.read(from: &buf)
+            )
+        case 17: return .ConfirmationRequired
+        case 18: return .SecondFactorRequired
+        case 19: return .SecondFactorRejected
+        case 20: return .DeletionAlreadyScheduled
+        case 21: return .SubscriptionActive
+        case 22: return .EmailNotSent
+        case 23: return .ShareRefused(
+            code: try FfiConverterString.read(from: &buf)
             )
 
          default: throw UniffiInternalError.unexpectedEnumCase
@@ -27998,6 +28061,35 @@ public struct FfiConverterTypeServiceError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(16))
             FfiConverterString.write(reason, into: &buf)
             
+        
+        case .ConfirmationRequired:
+            writeInt(&buf, Int32(17))
+        
+        
+        case .SecondFactorRequired:
+            writeInt(&buf, Int32(18))
+        
+        
+        case .SecondFactorRejected:
+            writeInt(&buf, Int32(19))
+        
+        
+        case .DeletionAlreadyScheduled:
+            writeInt(&buf, Int32(20))
+        
+        
+        case .SubscriptionActive:
+            writeInt(&buf, Int32(21))
+        
+        
+        case .EmailNotSent:
+            writeInt(&buf, Int32(22))
+        
+        
+        case let .ShareRefused(code):
+            writeInt(&buf, Int32(23))
+            FfiConverterString.write(code, into: &buf)
+            
         }
     }
 }
@@ -28038,6 +28130,13 @@ public enum ServiceErrorKind: Equatable, Hashable {
     case anotherAccountOnDevice
     case unavailable
     case backupStopUnfinished
+    case confirmationRequired
+    case secondFactorRequired
+    case secondFactorRejected
+    case deletionAlreadyScheduled
+    case subscriptionActive
+    case emailNotSent
+    case shareRefused
 
 
 
@@ -28090,6 +28189,20 @@ public struct FfiConverterTypeServiceErrorKind: FfiConverterRustBuffer {
         case 15: return .unavailable
         
         case 16: return .backupStopUnfinished
+        
+        case 17: return .confirmationRequired
+        
+        case 18: return .secondFactorRequired
+        
+        case 19: return .secondFactorRejected
+        
+        case 20: return .deletionAlreadyScheduled
+        
+        case 21: return .subscriptionActive
+        
+        case 22: return .emailNotSent
+        
+        case 23: return .shareRefused
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -28161,6 +28274,34 @@ public struct FfiConverterTypeServiceErrorKind: FfiConverterRustBuffer {
         
         case .backupStopUnfinished:
             writeInt(&buf, Int32(16))
+        
+        
+        case .confirmationRequired:
+            writeInt(&buf, Int32(17))
+        
+        
+        case .secondFactorRequired:
+            writeInt(&buf, Int32(18))
+        
+        
+        case .secondFactorRejected:
+            writeInt(&buf, Int32(19))
+        
+        
+        case .deletionAlreadyScheduled:
+            writeInt(&buf, Int32(20))
+        
+        
+        case .subscriptionActive:
+            writeInt(&buf, Int32(21))
+        
+        
+        case .emailNotSent:
+            writeInt(&buf, Int32(22))
+        
+        
+        case .shareRefused:
+            writeInt(&buf, Int32(23))
         
         }
     }
@@ -33644,21 +33785,6 @@ public func normalizeEmail(raw: String) -> String  {
 })
 }
 /**
- * The 60-digit safety number two contacts compare (12 groups of 5, joined).
- * Each email is normalised by core first; keys are the contacts' 32-byte
- * X25519 public keys. The same on both sides whatever the argument order.
- */
-public func safetyNumber(emailA: String, publicKeyA: Data, emailB: String, publicKeyB: Data)throws  -> String  {
-    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
-    uniffi_beebeeb_uniffi_fn_func_safety_number(
-        FfiConverterString.lower(emailA),
-        FfiConverterData.lower(publicKeyA),
-        FfiConverterString.lower(emailB),
-        FfiConverterData.lower(publicKeyB),$0
-    )
-})
-}
-/**
  * `AssertionStart` JSON + `NativeAssertion` JSON → `login-finish` body.
  */
 public func passkeyAssertionFinishBody(startJson: String, assertionJson: String)throws  -> String  {
@@ -34179,9 +34305,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_normalize_email() != 54107) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_beebeeb_uniffi_checksum_func_safety_number() != 44018) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_passkey_assertion_finish_body() != 150) {
@@ -35309,7 +35432,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_contactservicehandle_observe() != 53748) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_shareservicehandle_create_link() != 39871) {
+    if (uniffi_beebeeb_uniffi_checksum_method_shareservicehandle_create_link() != 59493) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_shareservicehandle_revoke_folder_link() != 45913) {
