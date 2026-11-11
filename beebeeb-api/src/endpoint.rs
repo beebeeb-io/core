@@ -221,7 +221,7 @@ impl<Req> RawEndpoint<Req> {
     }
 }
 
-fn enforce_limit(answer: &Answer, limit: usize) -> Result<(), ApiError> {
+pub(crate) fn enforce_limit(answer: &Answer, limit: usize) -> Result<(), ApiError> {
     if answer.body.len() > limit {
         return Err(ApiError::ResponseTooLarge {
             limit,

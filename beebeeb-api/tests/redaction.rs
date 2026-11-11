@@ -30,24 +30,31 @@ fn authenticator_setup_hides_the_secret_its_uri_and_the_backup_codes() {
 }
 
 #[test]
-fn share_link_records_hide_passphrases_and_tokens() {
-    let link = routes::shares::CreateLink {
-        file_id: "file".into(),
-        share_type: "file".into(),
-        wrapped_file_key: "wrapped".into(),
-        expires_in_hours: None,
-        max_opens: None,
+fn share_link_requests_and_records_hide_passphrases_and_tokens() {
+    use beebeeb_core::share_flow::link::{CreateLink, LinkOptions};
+    let options = LinkOptions {
         passphrase: Some("pass-phrase-secret".to_owned().into()),
-        token: Some("link-token-secret".to_owned().into()),
-        owner_wrapped_key: None,
-        owner_wrapped_token: None,
+        ..LinkOptions::default()
     };
-    let body = serde_json::to_value(&link).unwrap();
+    let (_, request) = CreateLink::start(
+        "https://app.beebeeb.test",
+        "550e8400-e29b-41d4-a716-446655440000",
+        &beebeeb_core::kdf::MasterKey::from_bytes([1; 32]),
+        &beebeeb_core::kdf::FileKey::from_bytes([7; 32]),
+        &options,
+    )
+    .unwrap();
+    let token = request.body.as_ref().unwrap()["token"].as_str().unwrap().to_owned();
+    let builder = beebeeb_api::RequestBuilder::new(beebeeb_api::ClientIdentity::new("desktop", "1"))
+        .with_auth("session-token-secret", "user");
+    let sent = beebeeb_api::FlowRequest::new(request).build(builder).unwrap();
+    let body: serde_json::Value = serde_json::from_slice(sent.body()).unwrap();
     assert_eq!(body["passphrase"], "pass-phrase-secret", "the wire form is unchanged");
-    assert_hidden(format!("{link:?}"), &["pass-phrase-secret", "link-token-secret"]);
+    assert_hidden(
+        format!("{sent:?}"),
+        &["pass-phrase-secret", &token, "session-token-secret"],
+    );
 
-    let share: routes::shares::Share = from_json(serde_json::json!({"id": "s", "token": "share-token-secret"}));
-    assert_hidden(format!("{share:?}"), &["share-token-secret"]);
     let manifest: routes::shares::ChunkManifest = from_json(serde_json::json!({
         "chunk_count": 1, "size_bytes": 1, "chunks": [],
         "download_token": "download-token-secret", "download_token_expires_at": "2099",

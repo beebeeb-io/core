@@ -73,6 +73,7 @@ pub enum ServiceErrorKind {
     DeletionAlreadyScheduled,
     SubscriptionActive,
     EmailNotSent,
+    ShareRefused,
 }
 
 impl ServiceErrorKind {
@@ -100,6 +101,7 @@ impl ServiceErrorKind {
             Self::DeletionAlreadyScheduled => "deletion_already_scheduled",
             Self::SubscriptionActive => "subscription_active",
             Self::EmailNotSent => "email_not_sent",
+            Self::ShareRefused => "share_refused",
         }
     }
 }
@@ -173,6 +175,11 @@ pub enum ServiceError {
     /// link), so nothing changed. Try again later.
     #[error("the email could not be sent")]
     EmailNotSent,
+    /// Core's share flow or the server refused the share. `code` is the flow's stable code
+    /// (`plan_required`, `trial_share_limit_reached`, `folder_needs_upgrade`, ...): show the app's
+    /// words for it.
+    #[error("the share was refused ({code})")]
+    ShareRefused { code: String },
 }
 
 impl ServiceError {
@@ -203,6 +210,7 @@ impl ServiceError {
             ServiceErrorKind::DeletionAlreadyScheduled => Self::DeletionAlreadyScheduled,
             ServiceErrorKind::SubscriptionActive => Self::SubscriptionActive,
             ServiceErrorKind::EmailNotSent => Self::EmailNotSent,
+            ServiceErrorKind::ShareRefused => Self::ShareRefused { code: String::new() },
         }
     }
 

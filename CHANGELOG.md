@@ -127,6 +127,14 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   `supply_password`, `open_entry`, `cancel`, `close`, `observe`. Show core's preview model and words as
   they are; drive uploads as for any upload (the service enqueues each verified file); keep the app open
   while it reads (`extract_keep_open`).
+- Share links (UniFFI): `ShareServiceHandle.create_link(app_url, file_id, expires_in_hours, max_opens,
+  passphrase)` makes the link with core's share flow and returns `CreatedLinkData { share_id, link,
+  display }`: copy `link` (a `SecretString` carrying the link key after `#key=`), show `display` (a
+  `SecretString` too: the part before `#` still names the link's token). It no longer takes a
+  `wrapped_file_key` (Rust wraps the file key), a link without `expires_in_hours` does not expire (no
+  30-day default), and its owner can copy it again (`share_rebuild_link`). `ShareData` is removed. A
+  refusal is the new `ServiceError::ShareRefused { code }` (kind `share_refused`): `code` is the share
+  flow's code (`plan_required`, `trial_share_limit_reached`, ...); show the app's words for it.
 
 - Account changes (`AuthServiceHandle`'s authenticator setup, enable and remove, `change_password`,
   `change_email` and `request_account_deletion`) no longer answer `unavailable` for everything. A
@@ -146,9 +154,10 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   returns a `Zeroizing` guard, the whole-file decrypt functions take the version commitment, and
   `beebeeb-sync`'s `sync_once` stops before it plans a delete (below).
 - These flows and the native services (`beebeeb-api`, `beebeeb-client`) are two separate sets of code
-  for the same account jobs. Where they speak the same server routes (password sign-in, step-up,
-  password and email change, authenticator setup, signup, link and file-request creation) a client
-  picks one. Where they differ, they do not interoperate:
+  for the same account jobs, except shares: the native share calls run `share_flow` (below). Where they
+  speak the same server routes (password sign-in, step-up, password and email change, authenticator
+  setup, signup, file-request creation) a client picks one. Where they differ, they do not
+  interoperate:
   - the passkey copy of the account key: `passkey` reads and writes web's 60-byte blob, `passkey_seal`
     the 61-byte one, in the same server field, and neither opens the other's;
   - a new device: `auth_flow::device` uses the CLI handshake of `cli_auth`, which does not
@@ -308,16 +317,29 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   helpers that materialize one entry per chunk stop at 1,000,000; use streaming for larger valid files.
 - Retry delays cap at 300 seconds. Invalid quota add-ons clamp to valid ranges with saturating
   arithmetic. `format_compact` clamps precision to 2 and `try_format_compact` rejects higher values.
+- Shares (`beebeeb-api`, `beebeeb-client`): the hand-built create records and their endpoints are
+  removed (`invites::Create` / `create`, `invites::Approve` / `approve` / `ActionResponse`,
+  `shares::Create` / `create`, `shares::CreateLink` / `create_link`, `folder_links::Create` /
+  `create`). Core's `share_flow` builds those requests and `FlowRequest` carries one to a transport as
+  built, any answer back to the flow. `shares::Share` has no `token`: no listing or public answer
+  carries one. The client's calls take what the flow needs and return its outcome:
+  `create_share_link(app_url, file_id, &LinkOptions)` → `CreatedLink`, `create_invite(file_id, email,
+  PeerKeyExpectation)` and `create_trusted_invite(store, file_id, email, contact_id, key, observed_at)`
+  → `InviteOutcome`, `approve_invite(invite_id, file_id, recipient_public_key_b64, PeerKeyExpectation)`
+  → the key sealed for, and `create_folder_link(FolderLinkInput, record_custody_seen)` →
+  `CreatedFolderLink` (record each custody mark durably in `record_custody_seen`; it runs before the
+  request that uses the folder's key). The file key is derived for an owner id; a foreign id is
+  `ShareServiceError::KeyUnavailable`. `ShareServiceError` adds `Flow`, `KeyUnavailable` and
+  `CustodyNotRecorded`.
 - Direct `beebeeb-api` users must adopt typed onboarding/registration and recovery bodies, bearer
   recovery authorization, optional device approver keys, unknown-safe optional two-factor state, and
   the current device/login response models. `AuthError` adds fixed-label `InvalidAnswer` and
   `InvalidTransition` variants.
-- Records that carry a secret redact it in `Debug`: TOTP setup, share links and shares, chunk
-  manifests, file-request and stream tokens, signup tickets, email codes, pilot keys, push tokens, the
-  data-export URL and key-proof tickets. The ones a person types or copies are also `Zeroizing`, which
-  changes their type: `TotpSetup`'s `secret`, `qr_uri` and `backup_codes`, `CreateLink`'s
-  `passphrase` and `token`, the client's `RecoveryChanges` codes and `AuthenticatorEnrollment`'s
-  `qr_uri`. Wrap a `String` with `Zeroizing::new`.
+- Records that carry a secret redact it in `Debug`: TOTP setup, chunk manifests, file-request and
+  stream tokens, signup tickets, email codes, pilot keys, push tokens, the data-export URL and key-proof
+  tickets. The ones a person types or copies are also `Zeroizing`, which changes their type:
+  `TotpSetup`'s `secret`, `qr_uri` and `backup_codes`, the client's `RecoveryChanges` codes and
+  `AuthenticatorEnrollment`'s `qr_uri`. Wrap a `String` with `Zeroizing::new`.
 - A request's `Debug` prints a header value only when the header is in `DEBUG_VISIBLE_HEADERS`;
   `Set-Cookie`, `Cookie`, `Authorization` and every other header print `[REDACTED]`.
 - The native step-up (`request_account_deletion`, `change_password`, `change_email`) reports a password
@@ -404,6 +426,12 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 
 ### Fixed
 
+- The native share calls send the bodies the server reads, built by core's share flow: an invite names
+  its recipient as `recipient_email` (the server refused the old `recipient`) and its file key is sealed
+  for the recipient's key and approved; a link carries its token and both owner copies, so its owner can
+  copy it again, and an expiry only when one is set (no 30-day default); a folder link carries the
+  subtree's key wraps (`folder_keys`) and their `format`. A test pins every create body against the
+  server's field names.
 - Account deletion from the native services (`request_account_deletion`) proves the password with the
   step-up and asks for the confirmation link on `/api/v1/auth/account/delete-request`, the route the
   server has. Its body carries only the authenticator or backup code. The unused request descriptors

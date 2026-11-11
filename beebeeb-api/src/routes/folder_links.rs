@@ -1,30 +1,6 @@
 use crate::{Endpoint, Method, request::component};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Serialize)]
-pub struct Create {
-    pub id: String,
-    pub folder_id: String,
-    #[serde(default)]
-    pub access_level: Option<String>,
-    #[serde(default)]
-    pub label_encrypted: Option<String>,
-    #[serde(default)]
-    pub expires_in_hours: Option<i64>,
-    #[serde(default)]
-    pub max_opens: Option<i32>,
-    #[serde(default)]
-    pub passphrase: Option<String>,
-    #[serde(default)]
-    pub cap_bytes: Option<i64>,
-    pub wrapped_folder_key: String,
-    #[serde(default)]
-    pub owner_wrapped_key: Option<String>,
-    #[serde(default)]
-    pub owner_wrapped_token: Option<String>,
-    #[serde(default)]
-    pub token: Option<String>,
-}
 #[derive(Debug, Clone, Serialize)]
 pub struct Patch {
     #[serde(default)]
@@ -57,9 +33,6 @@ pub struct RevokeResponse {
     pub message: String,
 }
 
-pub fn create() -> Endpoint<Create, Link> {
-    Endpoint::new(Method::Post, "/api/v1/shares/folder-links", true)
-}
 pub fn list(folder_id: Option<&str>) -> Endpoint<(), List> {
     let path = folder_id.map_or_else(
         || "/api/v1/shares/folder-links".to_string(),

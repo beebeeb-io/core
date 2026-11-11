@@ -105,6 +105,7 @@ fn service_kind(error: ServiceError) -> ServiceErrorKind {
         ServiceError::DeletionAlreadyScheduled => ServiceErrorKind::DeletionAlreadyScheduled,
         ServiceError::SubscriptionActive => ServiceErrorKind::SubscriptionActive,
         ServiceError::EmailNotSent => ServiceErrorKind::EmailNotSent,
+        ServiceError::ShareRefused { .. } => ServiceErrorKind::ShareRefused,
     }
 }
 

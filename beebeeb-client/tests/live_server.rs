@@ -46,6 +46,8 @@ type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
 #[path = "live_server/account_deletion.rs"]
 mod account_deletion;
+#[path = "live_server/shares.rs"]
+mod shares;
 
 const SIGNUP_CODE_SUBJECT: &str = "Verify your email for Beebeeb";
 const LOGIN_CODE_SUBJECT: &str = "Your Beebeeb sign-in code";
@@ -1152,95 +1154,6 @@ async fn complete_snapshot_then_sse_event_and_catch_up() -> TestResult {
     assert!(
         engine.position().seq_id > before.seq_id,
         "snapshot cursor did not advance after the SSE-triggered mutation"
-    );
-    Ok(())
-}
-
-#[tokio::test]
-#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
-async fn new_account_has_no_share_links() -> TestResult {
-    let account = provision_account().await?;
-    assert!(account.client.my_share_links().await?.shares.is_empty());
-    Ok(())
-}
-
-#[tokio::test]
-#[ignore = "requires BB_LIVE_API_URL and BB_LIVE_MAILPIT_URL"]
-async fn share_create_public_download_and_revoke() -> TestResult {
-    let account = provision_account().await?;
-    let root = tempfile::tempdir()?;
-    let file_id = drive_upload(&account, &root, b"public-share-live", 32 * 1024 * 1024, false).await?;
-    let wrapped = STANDARD.encode([0x51u8; 60]);
-    let share = account
-        .client
-        .create_share_link(&file_id, &wrapped, Some(1), None)
-        .await
-        .map_err(|error| format!("share creation failed: {error}"))?;
-    let entry = account.client.get_file(&file_id).await?;
-    let versions = account.client.file_versions(&file_id).await?;
-    let version = versions
-        .versions
-        .iter()
-        .find(|version| version.version_number == versions.current_version)
-        .ok_or("share source omitted its current version")?;
-    let name_encrypted = entry
-        .name_encrypted
-        .as_deref()
-        .ok_or("share source omitted encrypted metadata")?;
-    let metadata = beebeeb_core::encrypt::decrypt_file_metadata(&account.master_key, &file_id, name_encrypted)?;
-    let file_key = derive_file_key(&account.master_key, file_id.as_bytes());
-    let plan = beebeeb_types::plan_chunks(entry.size_bytes, ChunkProfile::Mobile);
-    let (anonymous, _) = live_client(&account.api_url)?;
-    let anonymous = Arc::new(anonymous);
-    let downloads = DownloadService::new(
-        anonymous,
-        Arc::new(Mutex::new(Store::open_in_memory()?)),
-        root.path().join("anonymous-cache"),
-        64 * 1024 * 1024,
-        MemoryBudget::NATIVE,
-    )?;
-    let public_root = root.path().join("public");
-    std::fs::create_dir(&public_root)?;
-    let public_directory = beebeeb_core::path_safety::TrustedDirectory::open(&public_root)?;
-    let result = downloads
-        .share_view_download(
-            &share.token,
-            None,
-            &file_id,
-            &file_key,
-            &metadata,
-            version.chunk_count,
-            entry.size_bytes,
-            plan.chunk_size_bytes,
-            &public_directory,
-            "shared.bin",
-        )
-        .await
-        .map_err(|error| format!("public share download failed before revoke: {error}"))?;
-    assert_eq!(result, DownloadResult::Saved);
-    assert_eq!(std::fs::read(public_root.join("shared.bin"))?, b"public-share-live");
-    account
-        .client
-        .revoke_share_link(&share.id)
-        .await
-        .map_err(|error| format!("share revoke failed: {error}"))?;
-    assert!(
-        downloads
-            .share_view_download(
-                &share.token,
-                None,
-                &file_id,
-                &file_key,
-                &metadata,
-                version.chunk_count,
-                entry.size_bytes,
-                plan.chunk_size_bytes,
-                &public_directory,
-                "revoked.bin",
-            )
-            .await
-            .is_err(),
-        "revoked share remained publicly downloadable"
     );
     Ok(())
 }

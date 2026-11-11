@@ -1,7 +1,8 @@
 use beebeeb_api::{
-    Answer, proposed,
+    Answer, FlowRequest, proposed,
     routes::{account, auth, files, folder_links, invites, onboarding, photo_backup, settings, shares, sync, uploads},
 };
+use beebeeb_core::share_flow::{folder, link, member};
 
 fn answer(json: &str) -> Answer {
     Answer::new(200, vec![], json.as_bytes().to_vec())
@@ -131,12 +132,6 @@ fn parses_recorded_ok_action_shapes() {
 
 #[test]
 fn parses_recorded_invite_action_shapes() {
-    let approved = invites::approve("invite")
-        .parse(answer(
-            r#"{"message":"invite approved","status":"approved","permission":"view"}"#,
-        ))
-        .unwrap();
-    assert_eq!(approved.permission, "view");
     let denied = invites::deny("invite")
         .parse(answer(r#"{"message":"invite denied","status":"denied"}"#))
         .unwrap();
@@ -362,4 +357,274 @@ fn version_history_uses_the_version_settings_route() {
         .unwrap();
     assert_eq!(request.method(), Method::Put);
     assert_eq!(request.path(), "/api/v1/version-settings");
+}
+
+// ── The share bodies the server reads ─────────────────────────────────────────
+//
+// The server's field names, from its request types: `CreateInviteRequest`
+// (`routes/invites/create.rs`), `ApproveRequest` (`routes/invites/approval.rs`),
+// `CreateShareRequest` (`routes/shares/create.rs`) and `CreateFolderLinkRequest`
+// (`routes/folder_links.rs`). The server ignores a field it does not declare, so a misspelt name is
+// a value that silently never arrives.
+
+const INVITE_CREATE_FIELDS: [&str; 9] = [
+    "file_id",
+    "recipient_email",
+    "permission",
+    "capability",
+    "is_folder_share",
+    "encrypted_folder_key",
+    "encrypted_owner_folder_key",
+    "folder_keys",
+    "format",
+];
+const LINK_CREATE_FIELDS: [&str; 10] = [
+    "file_id",
+    "share_type",
+    "items",
+    "expires_in_hours",
+    "max_opens",
+    "passphrase",
+    "wrapped_file_key",
+    "owner_wrapped_key",
+    "token",
+    "owner_wrapped_token",
+];
+const FOLDER_LINK_CREATE_FIELDS: [&str; 14] = [
+    "format",
+    "id",
+    "folder_id",
+    "access_level",
+    "label_encrypted",
+    "expires_in_hours",
+    "max_opens",
+    "passphrase",
+    "cap_bytes",
+    "wrapped_folder_key",
+    "owner_wrapped_key",
+    "owner_wrapped_token",
+    "token",
+    "folder_keys",
+];
+
+const INVITE_APPROVE_FIELDS: [&str; 1] = ["encrypted_file_key"];
+
+const SHARE_FILE: &str = "550e8400-e29b-41d4-a716-446655440000";
+const SHARE_FOLDER: &str = "2237c000-0000-4000-8000-000000000001";
+
+fn share_builder() -> beebeeb_api::RequestBuilder {
+    beebeeb_api::RequestBuilder::new(beebeeb_api::ClientIdentity::new("desktop", "1"))
+        .with_auth("session-token", "32e1e894-5249-4ca1-995b-0f031d52b26f")
+}
+
+/// The JSON body of a built request.
+fn sent_body(request: &beebeeb_api::Request) -> serde_json::Value {
+    serde_json::from_slice(request.body()).expect("a share body is JSON")
+}
+
+/// Every key of `body` is a field the server's request type declares, and every field in `required`
+/// carries a value. One assertion reports every difference.
+fn assert_server_reads(route: &str, body: &serde_json::Value, declared: &[&str], required: &[&str]) {
+    let object = body.as_object().expect("a share body is a JSON object");
+    let unread: Vec<&str> = object
+        .keys()
+        .map(String::as_str)
+        .filter(|key| !declared.contains(key))
+        .collect();
+    let missing: Vec<&str> = required
+        .iter()
+        .copied()
+        .filter(|field| object.get(*field).is_none_or(serde_json::Value::is_null))
+        .collect();
+    assert!(
+        unread.is_empty() && missing.is_empty(),
+        "{route}: the server does not read {unread:?}; the body has no value for {missing:?}"
+    );
+}
+
+fn share_master() -> beebeeb_core::kdf::MasterKey {
+    beebeeb_core::kdf::MasterKey::from_bytes([1; 32])
+}
+
+fn share_file_key() -> beebeeb_core::kdf::FileKey {
+    beebeeb_core::kdf::FileKey::from_bytes([7; 32])
+}
+
+/// A request of core's share flow as `beebeeb-api` builds it for the transport.
+fn sent(request: beebeeb_core::auth_flow::HttpRequest) -> beebeeb_api::Request {
+    FlowRequest::new(request).build(share_builder()).unwrap()
+}
+
+fn flow_answer(status: u16, body: serde_json::Value) -> beebeeb_core::auth_flow::HttpResponse {
+    beebeeb_core::auth_flow::HttpResponse::new(status, body)
+}
+
+/// The invite-create body as `beebeeb-api` builds it for the transport.
+fn invite_create_request() -> beebeeb_api::Request {
+    let target = member::ShareTarget {
+        item_id: SHARE_FILE.into(),
+        is_folder: false,
+    };
+    let (_, request) = member::MemberInvite::start(
+        &target,
+        "bob@example.test",
+        &share_master(),
+        &share_file_key(),
+        member::PeerKeyExpectation::NotCompared,
+    )
+    .unwrap();
+    sent(request)
+}
+
+/// The link-create body as `beebeeb-api` builds it for the transport.
+fn link_create_request() -> beebeeb_api::Request {
+    let (_, request) = link::CreateLink::start(
+        "https://app.beebeeb.test",
+        SHARE_FILE,
+        &share_master(),
+        &share_file_key(),
+        &link::LinkOptions::default(),
+    )
+    .unwrap();
+    sent(request)
+}
+
+/// The folder-link-create body as `beebeeb-api` builds it for the transport: the flow's first
+/// requests answered for a folder with no custody record, no invite and no children.
+fn folder_link_create_request() -> beebeeb_api::Request {
+    let input = folder::FolderLinkInput {
+        folder_id: SHARE_FOLDER,
+        app_url: "https://app.beebeeb.test",
+        access_level: "view",
+        label: None,
+        expires_in_hours: None,
+        cap_bytes: None,
+        max_opens: None,
+        passphrase: None,
+        custody: beebeeb_core::share_flow::folder_keys::CustodyMemory::default(),
+    };
+    let (mut flow, _custody_read) = folder::FolderShare::link(input, &share_master()).unwrap();
+    let last = [
+        flow_answer(404, serde_json::json!({"error": "not_found"})),
+        flow_answer(200, serde_json::json!({"invites": []})),
+        flow_answer(200, serde_json::json!({"key_version": 1})),
+        flow_answer(200, serde_json::json!({"files": []})),
+    ]
+    .into_iter()
+    .map(|answer| flow.on_response(answer).unwrap())
+    .last();
+    let Some(folder::FolderStep::Send(create)) = last else {
+        panic!("the flow did not reach the create: {last:?}")
+    };
+    sent(create.request)
+}
+
+/// RFC 7748's example public key (Alice), in the standard base64 the server lists keys in.
+const RECIPIENT_PUBLIC_KEY_B64: &str = "hSDwCYkwp1R0i33ctD73Wg2/Og0mOBr066SpjqqbTmo=";
+
+/// The approval body as `beebeeb-api` builds it for the transport.
+fn invite_approve_request() -> beebeeb_api::Request {
+    let approval = member::approve_request(
+        "7a1d1c2e-0000-4000-8000-000000000001",
+        SHARE_FILE,
+        RECIPIENT_PUBLIC_KEY_B64,
+        &share_master(),
+        &share_file_key(),
+        member::PeerKeyExpectation::NotCompared,
+    )
+    .unwrap();
+    sent(approval.request)
+}
+
+#[test]
+fn invite_create_body_uses_the_server_field_names() {
+    let request = invite_create_request();
+    assert_eq!(request.path(), "/api/v1/shares/invites");
+    assert_server_reads(
+        "invite create",
+        &sent_body(&request),
+        &INVITE_CREATE_FIELDS,
+        &["file_id", "recipient_email"],
+    );
+}
+
+#[test]
+fn link_create_body_carries_the_owner_copies_the_server_stores() {
+    let request = link_create_request();
+    assert_eq!(request.path(), "/api/v1/shares");
+    // The token and both owner copies travel together (the server refuses a partial set): with them
+    // the owner can copy the link again later.
+    assert_server_reads(
+        "link create",
+        &sent_body(&request),
+        &LINK_CREATE_FIELDS,
+        &[
+            "file_id",
+            "wrapped_file_key",
+            "token",
+            "owner_wrapped_key",
+            "owner_wrapped_token",
+        ],
+    );
+}
+
+#[test]
+fn folder_link_create_body_carries_the_subtree_wraps_and_their_format() {
+    let request = folder_link_create_request();
+    assert_eq!(request.path(), "/api/v1/shares/folder-links");
+    // `folder_keys` are the wraps the public listing hands a guest; `format` says how they are sealed.
+    assert_server_reads(
+        "folder link create",
+        &sent_body(&request),
+        &FOLDER_LINK_CREATE_FIELDS,
+        &[
+            "id",
+            "folder_id",
+            "wrapped_folder_key",
+            "token",
+            "owner_wrapped_key",
+            "owner_wrapped_token",
+            "folder_keys",
+            "format",
+        ],
+    );
+}
+
+#[test]
+fn invite_approval_body_uses_the_server_field_names() {
+    let request = invite_approve_request();
+    assert_eq!(
+        request.path(),
+        "/api/v1/shares/invites/7a1d1c2e-0000-4000-8000-000000000001/approve"
+    );
+    assert_server_reads(
+        "invite approval",
+        &sent_body(&request),
+        &INVITE_APPROVE_FIELDS,
+        &["encrypted_file_key"],
+    );
+}
+
+/// The owner's listing and the public answer carry no token (the server keeps only its hash); the
+/// owner's link comes back from the owner copies and the stored `wrapped_file_key`.
+#[test]
+fn parses_recorded_share_listing_and_public_share_shapes() {
+    let listed = shares::mine()
+        .parse(answer(
+            r#"{"shares":[{"id":"8d2f0000-0000-4000-8000-000000000001","file_id":"550e8400-e29b-41d4-a716-446655440000","share_type":"file","item_count":0,"expires_at":null,"max_opens":null,"open_count":0,"download_count":0,"last_opened_at":null,"has_passphrase":false,"revoked":false,"created_at":"2026-11-11T12:00:00+00:00","owner_wrapped_key":"b3duZXIta2V5","owner_wrapped_token":"b3duZXItdG9rZW4=","file":{"name_encrypted":"sealed","size_bytes":42}}]}"#,
+        ))
+        .unwrap();
+    let share = &listed.shares[0];
+    assert_eq!(share.id, "8d2f0000-0000-4000-8000-000000000001");
+    assert_eq!(share.file_id.as_deref(), Some(SHARE_FILE));
+    assert_eq!(share.extra["owner_wrapped_key"], "b3duZXIta2V5");
+    assert_eq!(share.extra["owner_wrapped_token"], "b3duZXItdG9rZW4=");
+
+    let public = shares::public_get("public-token")
+        .parse(answer(
+            r#"{"id":"8d2f0000-0000-4000-8000-000000000001","share_type":"file","name_encrypted":"sealed","size_bytes":42,"expires_at":null,"max_opens":null,"open_count":1,"download_count":0,"created_at":"2026-11-11T12:00:00+00:00","double_encrypted":true,"wrapped_file_key":"d3JhcHBlZA=="}"#,
+        ))
+        .unwrap();
+    assert_eq!(public.id, "8d2f0000-0000-4000-8000-000000000001");
+    assert_eq!(public.extra["wrapped_file_key"], "d3JhcHBlZA==");
 }

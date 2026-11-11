@@ -128,7 +128,7 @@ fn no_request_type_carries_an_account_password() {
         }
     }
     assert!(
-        request_types >= 60,
+        request_types >= 55,
         "the scan saw only {request_types} Serialize types in {} files",
         files.len()
     );

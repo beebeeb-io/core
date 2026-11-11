@@ -162,6 +162,9 @@ Secrets, input and bindings:
   (`HttpRequest::confirm_token_header`, the field is crate-only); the device-approval master key crosses
   UniFFI only as a `MasterKeyHandle` (WASM: raw, its convention). Passkey add/remove take the password,
   never a token.
+- Shares have one implementation, `share_flow`: the native share calls (`beebeeb-client` `shares`) run its
+  flows and send each request as the flow built it (`beebeeb_api::FlowRequest`), never a hand-built share
+  body, and never derive a foreign item's key to share it.
 - Passkey vault (`passkey`): web's format byte for byte (`test-vectors/passkey_vault.json` from web's
   TS); native hmac-secret callers pass `hmac_secret_salt()`, PRF-input APIs `prf_eval_input()`; no
   non-PRF fallback key, and no flow returns a PRF output, wrap key or blob to its caller; the server's

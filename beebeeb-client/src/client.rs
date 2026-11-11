@@ -461,6 +461,52 @@ impl Client {
         }
     }
 
+    /// Send one request of a core share flow (`beebeeb_core::share_flow`) as the flow built it, on
+    /// the session of account `generation`, and give the flow the server's answer whatever its
+    /// status: the flow reads its own refusals. An account mismatch, or a 401 to the session's
+    /// credentials, is the client's to report as on every other request, and never reaches the flow.
+    #[cfg(feature = "shares")]
+    pub(crate) async fn execute_share_flow(
+        &self,
+        request: beebeeb_core::auth_flow::HttpRequest,
+        generation: u64,
+    ) -> Result<beebeeb_core::auth_flow::HttpResponse, ClientError> {
+        let flow = beebeeb_api::FlowRequest::new(request);
+        let (builder, session_credentials_present) = {
+            let authentication = self.authentication.lock().map_err(|_| ClientError::State)?;
+            match authentication.as_ref() {
+                Some(authentication) if authentication.generation != generation => {
+                    return Err(ClientError::StaleAccount);
+                }
+                Some(authentication) => (
+                    self.request_builder()
+                        .with_auth(authentication.token.as_str(), authentication.expected_user.clone()),
+                    true,
+                ),
+                None => (self.request_builder(), false),
+            }
+        };
+        let request = flow.build(builder)?;
+        let carried_session_authentication = session_credentials_present && request.header("Authorization").is_some();
+        let answer = self.transport.send(request, flow.max_response_bytes()).await?;
+        if generation != self.generation() {
+            return Err(ClientError::StaleAccount);
+        }
+        if !(200..=299).contains(&answer.status) {
+            let error =
+                beebeeb_core::api_error::ServerError::parse_body(answer.status, &String::from_utf8_lossy(&answer.body));
+            if error.is_code("account_mismatch") {
+                self.events.emit(EngineEvent::AccountMismatch);
+                return Err(ClientError::Api(ApiError::Server(error)));
+            }
+            if error.status == 401 && carried_session_authentication {
+                self.events.emit(EngineEvent::SessionExpired);
+                return Err(ClientError::Api(ApiError::Server(error)));
+            }
+        }
+        flow.answer(answer).map_err(ClientError::Api)
+    }
+
     #[cfg(all(feature = "store", any(feature = "downloads", feature = "thumbnails")))]
     pub(crate) async fn execute_raw<Req>(&self, endpoint: &RawEndpoint<Req>, body: &Req) -> Result<Vec<u8>, ClientError>
     where

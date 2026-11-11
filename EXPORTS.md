@@ -498,6 +498,37 @@ reports 1 changed.
 | `beebeeb_wasm` | 18 | 0 | 0 |
 | `beebeeb_backup` | 0 | 0 | 0 |
 
+## Native share calls on the share flow (0.3.0)
+
+The native share calls no longer build share bodies: core's `share_flow` builds every request, which
+`beebeeb_api::FlowRequest` sends as built. 0 callers on web, mobile, desktop and cli `main` used the
+changed exports.
+
+### UniFFI
+
+| Export | Before | Now |
+| --- | --- | --- |
+| `ShareServiceHandle.create_link` | `(file_id, wrapped_file_key, expires_in_hours: Option<i64>, passphrase: Option<String>) -> ShareData` | `(app_url, file_id, expires_in_hours: Option<u32>, max_opens: Option<u32>, passphrase: Option<SecretString>) -> CreatedLinkData`: Rust wraps the file key and seals the owner copies; no expiry unless one is given |
+| `CreatedLinkData` | none | `{share_id, link: SecretString, display: SecretString}`: `link` carries the link key after `#key=`; `display`, the part before `#`, still names the link's token |
+| `ShareData` | `{id, file_id, expires_at}` | removed |
+| `ServiceError::ShareRefused { code }`, `ServiceErrorKind::ShareRefused` | none | a share the flow or the server refused; `code` is the share flow's code |
+
+### Rust
+
+| Item | Before | Now |
+| --- | --- | --- |
+| `beebeeb_api::FlowRequest` | none | `new(HttpRequest)`, `build(RequestBuilder)` (a step-up's confirm token goes in through the builder's `with_confirmation`), `max_response_bytes()`, `answer(Answer) -> HttpResponse` (any status) |
+| `beebeeb_api::routes::invites` | `Create`, `create`, `Approve`, `approve`, `ActionResponse` | removed: `share_flow::member` builds the invite and the approval |
+| `beebeeb_api::routes::shares` | `Create`, `create`, `CreateLink`, `create_link`; `Share.token` | removed: `share_flow::link` builds the link; no answer that `Share` reads carries a token |
+| `beebeeb_api::routes::folder_links` | `Create`, `create` | removed: `share_flow::folder` builds the folder link |
+| `Client::create_share_link` | `(file_id, wrapped_file_key, expires_in_hours, passphrase) -> shares::Share` | `(app_url, file_id, &LinkOptions) -> CreatedLink` |
+| `Client::create_invite` | `(invites::Create) -> invites::Invite` | `(file_id, email, PeerKeyExpectation) -> InviteOutcome` |
+| `Client::create_trusted_invite` | `(store, invites::Create, contact_id, presented_public_key, observed_at) -> invites::Invite` | `(store, file_id, email, contact_id, presented_public_key, observed_at) -> InviteOutcome`: sealed only for `presented_public_key` |
+| `Client::approve_invite` | `(id, encrypted_file_key) -> ()` | `(invite_id, file_id, recipient_public_key_b64, PeerKeyExpectation) -> [u8; 32]`, the key sealed for |
+| `Client::create_folder_link` | `(folder_links::Create) -> folder_links::Link` | `(FolderLinkInput, record_custody_seen) -> CreatedFolderLink` |
+| `ShareServiceError` | `Client`, `Store`, `ContactKeyChanged` | adds `Flow(ShareFlowError)`, `KeyUnavailable` (a foreign item id) and `CustodyNotRecorded` |
+| `beebeeb_client::shares::share_flow` | none | re-export of `beebeeb_core::share_flow` |
+
 ## Sign-in, account, passkey and share flow exports (0.2.7 and 0.2.8)
 
 The sans-IO flows of `beebeeb_core` (`auth_flow`, `account_flows`, `signup_flow`, `recovery_flow`,
