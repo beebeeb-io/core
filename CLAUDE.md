@@ -90,12 +90,11 @@ Formats and keys:
   `folder_key_id` (`key_id`) is the one-way folder-key id: not secret, and never used as a key.
 - `ClientMetaKey`: the derived key is never exported (a `FileKey` would also fit `encrypt_chunk`);
   `current_file`/`detail` are discarded from S1, never sealed.
-- Safety numbers: the number two people compare for a share comes from `share_flow::safety`
-  (`shareSafetyNumber`, `share_safety_number`): both user ids and the exact key the share was sealed
-  to, with the own key derived from the master key; its vectors are `test-vectors/safety_number.json`.
-  `contact_keys::safety_number` (`safetyNumber`, `safety_number`) is a second, different format (emails
-  instead of user ids; vectors in `test-vectors/contact_safety_number.json`) and gives other digits for
-  the same two people: never show it where the other person may see the first, and never add a third.
+- Safety numbers: there is one format. The number two people compare for a share comes from
+  `share_flow::safety` (`shareSafetyNumber`, `share_safety_number`): both user ids and the exact key the
+  share was sealed to, with the own key derived from the master key; its vectors are
+  `test-vectors/safety_number.json`. A "compared" mark keeps `share_flow::safety::key_fingerprint`. Never
+  add a second safety number or key fingerprint: two formats give two people different digits.
   Emails go through `normalize_email` (Rust `str::trim`, then lower case), never a client's own:
   JavaScript's `trim` strips U+FEFF and keeps U+0085.
 

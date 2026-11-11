@@ -22,8 +22,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    backup, chunk_stream, cli_auth, client_meta, contact_keys, device_link, encrypt, file_request, folder_key, item_id,
-    kdf, key_proof, passkey, passkey_seal, product_keys, recovery, transfer,
+    backup, chunk_stream, cli_auth, client_meta, device_link, encrypt, file_request, folder_key, item_id, kdf,
+    key_proof, passkey, passkey_seal, product_keys, recovery, transfer,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -326,19 +326,6 @@ const LABELS: &[Label] = &[
         Slot::ProtocolContext,
         "HMAC transcript prefix",
     ),
-    // contact keys
-    label(
-        "contact_keys::KEY_FINGERPRINT_DOMAIN",
-        contact_keys::KEY_FINGERPRINT_DOMAIN,
-        Slot::Salt,
-        "SHA-256 domain prefix over a contact public key",
-    ),
-    label(
-        "contact_keys::SAFETY_NUMBER_DOMAIN",
-        contact_keys::SAFETY_NUMBER_DOMAIN,
-        Slot::Salt,
-        "SHA-512 prefix of each party's safety-number input (email, then key)",
-    ),
     // opaque (inline literals)
     label(
         "opaque x25519 identity info",
@@ -467,7 +454,7 @@ fn find(name: &str) -> &'static Label {
 
 #[test]
 fn every_label_is_distinct_and_no_id_carrying_info_is_a_prefix_of_another_info() {
-    assert_eq!(LABELS.len(), 54, "a label was added or removed: review the slot rules");
+    assert_eq!(LABELS.len(), 52, "a label was added or removed: review the slot rules");
     for (i, a) in LABELS.iter().enumerate() {
         assert!(!a.with.is_empty());
         for b in &LABELS[i + 1..] {

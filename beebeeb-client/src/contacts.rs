@@ -1,5 +1,3 @@
-pub use beebeeb_core::contact_keys::{PinCheck, check_pin, key_fingerprint, safety_number};
-
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

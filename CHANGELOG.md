@@ -119,7 +119,7 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   holders reading a historical version use the new `for_version_with_file_key_handle`.
 - `RecoveryChangesData`'s codes and password and `PasskeyPromptResult.prf_output` are `SecretString` /
   `SecretBytes`: the same `String` and `Data` / `ByteArray` in Swift and Kotlin, wiped and redacted in
-  Rust. New: `safety_number` and `normalize_email`.
+  Rust. New: `normalize_email`.
 
 - Archives: `list_archive`, `decompress_gzip`, `list_tar_entries` and `ArchiveEntryDto` are removed
   (the extension-based `beebeeb_core::archive` is deleted). List, preview and extract archives through
@@ -139,17 +139,12 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   for the same account jobs. Where they speak the same server routes (password sign-in, step-up,
   password and email change, authenticator setup, signup, link and file-request creation) a client
   picks one. Where they differ, they do not interoperate:
-  - the safety number: `share_flow::safety` (user ids; `test-vectors/safety_number.json`) and
-    `contact_keys::safety_number` (emails; `test-vectors/contact_safety_number.json`) give different
-    digits for the same two people. A share shows the first; never show both;
   - the passkey copy of the account key: `passkey` reads and writes web's 60-byte blob, `passkey_seal`
     the 61-byte one, in the same server field, and neither opens the other's;
   - a new device: `auth_flow::device` uses the CLI handshake of `cli_auth`, which does not
     authenticate the requester's key; `device_link` does, and needs the matching server routes;
   - recovery: `recovery_flow` uses the phrase routes; the native recovery uses the attempt routes with
-    their wait;
-  - a contact key's fingerprint: `share_flow::safety::key_fingerprint` is SHA-256 of the key,
-    `contact_keys::key_fingerprint` adds a domain prefix. A stored mark of one never matches the other.
+    their wait.
 - `path_safety::check_component` no longer applies the Windows rules to a `Rules::Portable` name on a
   Windows host (0.2.8); a caller that writes the name uses `check_component_to_write`, as
   `TrustedDirectory::begin_publish` now does.
@@ -217,11 +212,13 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   exact locked-action allowlist.
 - Key-proof servers may export/import the 64-byte verifier state between requests. Keep it only in an
   expiring secret store and never log it.
-- `contact_keys::safety_number` now takes both parties' emails and keys and returns a 60-digit
-  number (12 groups of 5): per party, the trimmed, lower-cased email and the key are hashed with 5200
-  SHA-512 rounds. `contact_keys::normalize_email` is the email form it uses. The vectors are
-  `test-vectors/contact_safety_number.json`, written by an independent Python generator. It is not the
-  number a share shows: that is 0.2.8's `share_flow::safety` (see "Callers moving from 0.2.7 or 0.2.8").
+- `contact_keys` keeps only `normalize_email`, the server's stored form of an account email. Its
+  email-based safety number, key fingerprint and pin check (`safety_number`, `SAFETY_NUMBER_ROUNDS`,
+  `key_fingerprint`, `check_pin`, `PinCheck`, their `beebeeb_client::contacts` re-exports, WASM
+  `safetyNumber` and UniFFI `safety_number`) were removed before this release: for the same two people
+  they gave other digits and another fingerprint than the share's. The number two people compare and
+  the fingerprint a "compared" mark keeps come from 0.2.8's `share_flow::safety` (`safety_number`,
+  `key_fingerprint`; WASM `shareSafetyNumber`, UniFFI `share_safety_number`).
 
 ### File-format, transfer, and storage integrators
 
@@ -324,8 +321,8 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   `new WasmChunkDecryptor(masterKey, fileId, metadata)` and `fromFileKey(fileKey, fileId, metadata)`,
   and so does `decrypt_chunk_frame(fileKey, fileId, metadata, index, isLast, frame)`. A
   `chunk_format: 2` record without a version commitment throws; one with neither field opens v1 only.
-- WASM `normalizeEmail`: use it; JavaScript's `trim` differs from core's. `safetyNumber` is the
-  `contact_keys` format; the number a share shows is `shareSafetyNumber`.
+- WASM `normalizeEmail`: use it; JavaScript's `trim` differs from core's. The one safety number is
+  `shareSafetyNumber`; `safetyNumber` was removed before this release.
 - Regenerate bindings for the protected metadata fields and update the shared vector fixture to version
   18, including the protected metadata and session key-proof vectors.
 - WASM archives: `list_archive`, `decompress_gzip` and `list_tar_entries` are removed. Use

@@ -149,7 +149,7 @@ Each change closes a review finding; the old form is removed, not deprecated.
 | `new WasmChunkDecryptor` | `(masterKey, fileId, expectedChunkFormat)` | `(masterKey, fileId, metadata)`: the object `decrypt_file_metadata` returned; its commitment is enforced |
 | `WasmChunkDecryptor.fromFileKey` | `(fileKey, fileId, expectedChunkFormat)` | `(fileKey, fileId, metadata)`, from `decrypt_file_metadata_with_key` |
 | `decrypt_chunk_frame` | `(fileKey, fileId, versionId, index, isLast, format, frame)` | `(fileKey, fileId, metadata, index, isLast, frame)`: the record's commitment names the one upload whose frames open; never chunk 0's bytes |
-| `safetyNumber(emailA, publicKeyA, emailB, publicKeyB)`, `normalizeEmail(raw)` | none | core's safety number and email normalisation; web never trims an email itself |
+| `normalizeEmail(raw)` | none | core's email normalisation; web never trims an email itself. The safety number a share shows is `shareSafetyNumber` |
 | `apiDescriptor` | | adds `get_device_link_pake_for_approver`, `pending_device_links`, `get_device_link`, `approve_device_link`, `deny_device_link` |
 
 ### UniFFI
@@ -171,7 +171,7 @@ Each change closes a review finding; the old form is removed, not deprecated.
 | `MasterKeyHandle.decrypt_file` | `(file_id, expected_chunk_format, chunk_paths, output_path, callback)` | `(file_id, metadata: NameMetadataDto, chunk_paths, output_path, callback)` |
 | `decrypt_chunks_to_file`, `decrypt_contiguous_to_file`, `download_and_decrypt_file` (`legacy-bindings`) | `expected_chunk_format: u8` | `metadata: NameMetadataDto` in its place |
 | `RecoveryChangesData`, `PasskeyPromptResult.prf_output` | `String` / `Vec<u8>` | `SecretString` / `SecretBytes`: still `String` and `Data` / `ByteArray` in Swift and Kotlin, wiped and redacted on the Rust side |
-| `safety_number(email_a, public_key_a, email_b, public_key_b)`, `normalize_email(raw)` | none | core's safety number and email normalisation |
+| `normalize_email(raw)` | none | core's email normalisation. The safety number a share shows is `share_safety_number` |
 
 A decryptor refuses a missing record or half a commitment (`version_id` without `version_counter`, or
 the reverse). A record with neither field is legacy metadata: it opens v1 content only. Since Guus's
