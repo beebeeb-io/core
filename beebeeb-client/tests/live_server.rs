@@ -4,7 +4,10 @@
 //! `BB_LIVE_API_URL` and `BB_LIVE_MAILPIT_URL`, then run this test target with
 //! `--ignored --test-threads=1`. The server must enable sign-up, recovery,
 //! device links, public-share chunks, services, SSE, and short-lived sessions.
-//! It must also run with `BB_REFUSE_V1_WRITES=1` and `BB_VERSION_METADATA=1`.
+//! It must also refuse v1 writes (`BB_1908_SWITCH_GATE=1` and
+//! `BB_1908_REFUSE_V1_WRITES=1`, with `BB_1908_MIN_CLIENT_VERSIONS` admitting
+//! `desktop` and `web` at this crate's version) and run with
+//! `BB_VERSION_METADATA=1`.
 
 use std::{
     collections::BTreeSet,
@@ -40,6 +43,9 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
+
+#[path = "live_server/account_deletion.rs"]
+mod account_deletion;
 
 const SIGNUP_CODE_SUBJECT: &str = "Verify your email for Beebeeb";
 const LOGIN_CODE_SUBJECT: &str = "Your Beebeeb sign-in code";
