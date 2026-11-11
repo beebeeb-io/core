@@ -652,7 +652,8 @@ public protocol AccountFlowHandleProtocol: AnyObject, Sendable {
     func deleteConfirm(linkToken: String) throws  -> AccountFlowStep
     
     /**
-     * New backup codes with the current authenticator code; the authenticator stays.
+     * New backup codes with the current authenticator code; the authenticator stays. A server with
+     * backup codes turned off answers `Failed { code: "backup_codes_disabled" }`.
      */
     func regenerateBackupCodes(code: String) throws  -> AccountFlowStep
     
@@ -820,7 +821,8 @@ open func deleteConfirm(linkToken: String)throws  -> AccountFlowStep  {
 }
     
     /**
-     * New backup codes with the current authenticator code; the authenticator stays.
+     * New backup codes with the current authenticator code; the authenticator stays. A server with
+     * backup codes turned off answers `Failed { code: "backup_codes_disabled" }`.
      */
 open func regenerateBackupCodes(code: String)throws  -> AccountFlowStep  {
     return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
@@ -34845,7 +34847,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_delete_confirm() != 27952) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_regenerate_backup_codes() != 40702) {
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_regenerate_backup_codes() != 53790) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_resume() != 5423) {

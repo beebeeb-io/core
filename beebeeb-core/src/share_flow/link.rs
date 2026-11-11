@@ -35,7 +35,8 @@ pub const MAX_EXPIRES_IN_HOURS: u32 = 24 * 365;
 pub const MAX_OPENS: u32 = i32::MAX as u32;
 
 /// The server's answers to a token that is already in use, the only 409s worth a fresh token:
-/// `POST /shares` writes its sentence in `error`; the folder-link route sends `token_taken`.
+/// `token_taken` (in `code` or `error`, as `body_code` reads it), and the sentence an older `POST /shares`
+/// writes in `error`, kept for servers that still send it.
 const TOKEN_COLLISION_CODES: [&str; 2] = ["share token already exists — regenerate and retry", "token_taken"];
 
 /// The link's limits, as web's share dialog sends them. `None` is "never" / "unlimited".

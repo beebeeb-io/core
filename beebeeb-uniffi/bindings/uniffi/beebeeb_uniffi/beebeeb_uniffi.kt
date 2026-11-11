@@ -4295,7 +4295,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_delete_confirm() != 27952.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_regenerate_backup_codes() != 40702.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_regenerate_backup_codes() != 53790.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_resume() != 5423.toShort()) {
@@ -5780,7 +5780,8 @@ public interface AccountFlowHandleInterface {
     fun `deleteConfirm`(`linkToken`: kotlin.String): AccountFlowStep
     
     /**
-     * New backup codes with the current authenticator code; the authenticator stays.
+     * New backup codes with the current authenticator code; the authenticator stays. A server with
+     * backup codes turned off answers `Failed { code: "backup_codes_disabled" }`.
      */
     fun `regenerateBackupCodes`(`code`: kotlin.String): AccountFlowStep
     
@@ -6015,7 +6016,8 @@ open class AccountFlowHandle: Disposable, AutoCloseable, AccountFlowHandleInterf
 
     
     /**
-     * New backup codes with the current authenticator code; the authenticator stays.
+     * New backup codes with the current authenticator code; the authenticator stays. A server with
+     * backup codes turned off answers `Failed { code: "backup_codes_disabled" }`.
      */
     @Throws(AccountFlowFfiException::class)override fun `regenerateBackupCodes`(`code`: kotlin.String): AccountFlowStep {
             return FfiConverterTypeAccountFlowStep.lift(

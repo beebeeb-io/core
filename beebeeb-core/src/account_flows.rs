@@ -268,6 +268,9 @@ pub enum AccountFlowError {
     LinkInvalid,
     #[error("the request needs a confirmation")]
     ConfirmationRequired,
+    /// The server has backup codes turned off: none are made, the authenticator still works.
+    #[error("backup codes are turned off on this server")]
+    BackupCodesDisabled,
 }
 
 impl AccountFlowError {
@@ -293,6 +296,7 @@ impl AccountFlowError {
             Self::SecondFactorRequired => "second_factor_required",
             Self::LinkInvalid => "link_invalid",
             Self::ConfirmationRequired => "confirmation_required",
+            Self::BackupCodesDisabled => "backup_codes_disabled",
         }
     }
 }
@@ -550,6 +554,15 @@ fn code_error(resp: &ApiResponse) -> AccountFlowError {
     }
 }
 
+/// New backup codes: the server's `409 backup_codes_disabled` (an older server never sends it), else
+/// as [`code_error`].
+fn backup_codes_error(resp: &ApiResponse) -> AccountFlowError {
+    if resp.status == 409 && resp.error_code() == Some("backup_codes_disabled") {
+        return AccountFlowError::BackupCodesDisabled;
+    }
+    code_error(resp)
+}
+
 /// A delete-link token: what follows `#t=` in the mailed link. The whole link may be
 /// pasted; the token is taken from its fragment.
 fn validate_link_token(input: &str) -> Result<Zeroizing<String>, AccountFlowError> {
@@ -761,7 +774,7 @@ impl AccountFlow {
         Ok(Self::single(
             ApiRequest::new(Method::Post, PATH_BACKUP_CODES, Some(json!({ "code": code.as_str() }))),
             |r| Ok(AccountOutcome::BackupCodes(parse_backup_codes(r)?)),
-            code_error,
+            backup_codes_error,
         ))
     }
 
