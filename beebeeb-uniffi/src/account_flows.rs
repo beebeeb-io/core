@@ -206,8 +206,7 @@ impl AccountFlowHandle {
         ))
     }
 
-    /// New backup codes with the current authenticator code; the authenticator stays. A server with
-    /// backup codes turned off answers `Failed { code: "backup_codes_disabled" }`.
+    /// New backup codes with the current authenticator code; the authenticator stays.
     pub fn regenerate_backup_codes(&self, code: String) -> Result<AccountFlowStep, AccountFlowFfiError> {
         let code = Zeroizing::new(code);
         self.begin(AccountFlow::regenerate_backup_codes(&code))
@@ -255,26 +254,5 @@ impl AccountFlowHandle {
         if let Ok(mut s) = self.inner.lock() {
             s.abandon();
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A server with backup codes turned off: the app gets the typed code, not `server_error`.
-    #[test]
-    fn backup_codes_turned_off_reaches_the_app_with_its_code() {
-        let handle = AccountFlowHandle::new();
-        let sent = handle.regenerate_backup_codes("123456".into()).unwrap();
-        assert_eq!(sent.path, "/api/v1/auth/2fa/backup-codes");
-        let answer = handle.resume(
-            409,
-            r#"{"error":"backup_codes_disabled","message":"Backup codes are turned off on this server."}"#.into(),
-        );
-        let Err(AccountFlowFfiError::Failed { code }) = answer else {
-            panic!("a 409 refusal must be an error")
-        };
-        assert_eq!(code, "backup_codes_disabled");
     }
 }

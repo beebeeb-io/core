@@ -9,12 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `AccountFlowError::BackupCodesDisabled` (code `backup_codes_disabled`): `regenerate_backup_codes`
-  against a server with backup codes turned off. It was `Server(409)` (`server_error`). UniFFI and
-  WASM hosts get the code in their existing error string.
 - Tests for two server codes that core already reads: a share-token collision sent as `token_taken`
-  (in `error` or `code`) gets one fresh token, as the older sentence still does, and a 403
-  `account_frozen` reaches the app as `ShareRefused { code: "account_frozen" }`. See LD-0155, LD-0158.
+  (in `error` or `code`, for file links and bundles) gets one fresh token, as the older sentence still
+  does, and a 403 `account_frozen` reaches the app as `ShareRefused { code: "account_frozen" }`. See
+  LD-0155.
 
 ### Documentation
 

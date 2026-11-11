@@ -559,9 +559,8 @@ release's earlier development state.
 | `proposed::RecoveryComplete.email_verification_code` | `Option<String>` | `Option<Zeroizing<String>>` |
 | `proposed::AuthenticatorChange.code` and `.secret` | `Option<String>` | `Option<Zeroizing<String>>` |
 | `routes::onboarding::EmailVerify.code` | `String` | `Zeroizing<String>` |
-| `routes::account::DeletionRequest.code` | none | `Option<Zeroizing<String>>` |
+| `routes::account::DeletionRequest.code` | `DeleteRequest.totp_code`, `Option<String>` | `Option<Zeroizing<String>>` |
 | `routes::account::TotpSetup.secret` | `String` | `Zeroizing<String>` |
-| `AccountFlowError::BackupCodesDisabled` (code `backup_codes_disabled`; UniFFI `AccountFlowFfiError::Failed { code }`, the WASM `AccountFlow` error string) | `Server(409)` (`server_error`) | `AccountFlow::regenerate_backup_codes` against a server with backup codes turned off |
 | `beebeeb_core::contact_keys::{safety_number, key_fingerprint, check_pin, PinCheck, SAFETY_NUMBER_ROUNDS}` and their `beebeeb_client::contacts` re-export (`PinCheck`, `check_pin`, `key_fingerprint`, `safety_number`) | public | removed; `contact_keys` keeps `normalize_email`. The safety number and fingerprint are `share_flow::safety`'s. The crate-private labels `KEY_FINGERPRINT_DOMAIN` and `SAFETY_NUMBER_DOMAIN` went with them |
 | `beebeeb_store::StoreError::Database` | `rusqlite::Error` of `rusqlite` 0.32 | `rusqlite::Error` of `rusqlite` 0.41 (`libsqlite3-sys` 0.39) |
 

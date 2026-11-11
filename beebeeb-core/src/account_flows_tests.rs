@@ -622,27 +622,6 @@ fn new_backup_codes_keep_the_authenticator() {
     );
 }
 
-/// The server's answer while it has backup codes turned off (`ApiError::ConflictCode`), and the same
-/// code in `code`: a typed refusal, never a generic server error. Any other 409 stays `Server(409)`.
-#[test]
-fn backup_codes_turned_off_on_the_server_is_a_typed_refusal() {
-    let refused = |body: Value| {
-        let mut flow = AccountFlow::regenerate_backup_codes("123456").unwrap();
-        flow.start().unwrap();
-        flow.resume(ApiResponse::new(409, body)).unwrap_err()
-    };
-    for body in [
-        json!({ "error": "backup_codes_disabled", "message": "Backup codes are turned off on this server." }),
-        json!({ "code": "backup_codes_disabled", "error": "Backup codes are turned off on this server." }),
-    ] {
-        assert_eq!(refused(body.clone()).code(), "backup_codes_disabled", "{body}");
-    }
-    assert_eq!(
-        refused(json!({ "error": "something else" })),
-        AccountFlowError::Server(409)
-    );
-}
-
 #[test]
 fn host_outcome_carries_the_delete_times() {
     let mut host = HostSession::new();

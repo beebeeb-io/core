@@ -80,6 +80,33 @@ fn every_item_opens_under_the_links_k_c_and_the_owner_can_rebuild_it() {
     assert_eq!(rebuilt.as_str(), created.link.as_str());
 }
 
+/// The bundle route's collision sent as the code (LD-0155), in `error` or `code`: one fresh token.
+#[test]
+fn a_bundle_token_collision_sent_as_token_taken_gets_one_fresh_token() {
+    let m = MasterKey::from_bytes([4; 32]);
+    let key = FileKey::from_bytes([0x90; 32]);
+    let items = [BundleItem {
+        file_id: IDS[0],
+        position: 0,
+        file_key: &key,
+    }];
+    for collision in [
+        json!({ "error": "token_taken", "message": "That link token is already in use — generate a new one." }),
+        json!({ "code": "token_taken", "error": "That link token is already in use — generate a new one." }),
+    ] {
+        let (mut flow, first) = CreateLink::bundle(APP, &items, &m, &LinkOptions::default()).unwrap();
+        let LinkStep::Send(retry) = flow.on_response(HttpResponse::new(409, collision.clone())).unwrap() else {
+            panic!("expected a retry for {collision}")
+        };
+        assert_ne!(first.body.unwrap()["token"], retry.body.unwrap()["token"]);
+        assert!(matches!(
+            flow.on_response(HttpResponse::new(201, json!({ "id": "5a1e" })))
+                .unwrap(),
+            LinkStep::Created(_)
+        ));
+    }
+}
+
 #[test]
 fn a_bundle_holds_one_to_256_files() {
     let m = MasterKey::from_bytes([4; 32]);
