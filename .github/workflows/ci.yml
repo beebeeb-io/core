@@ -53,9 +53,25 @@ jobs:
         if: always()
         run: bash scripts/check-test-vectors.sh
 
+      # ripgrep comes from its official release, pinned by version and SHA256 and checked before it is
+      # unpacked, not from the Ubuntu package mirrors: when those stopped resolving, this job failed with
+      # them. The musl build is static, so it runs on any x86_64 Linux runner.
       - name: Install documentation guard dependency
         if: always()
-        run: sudo apt-get update && sudo apt-get install --yes ripgrep
+        run: |
+          set -euo pipefail
+          RG_VERSION="15.2.0"
+          RG_SHA256="33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c"
+          RG_NAME="ripgrep-$RG_VERSION-x86_64-unknown-linux-musl"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --retry 5 --retry-all-errors --retry-delay 2 --max-time 60 \
+            --output "$RUNNER_TEMP/$RG_NAME.tar.gz" \
+            "https://github.com/BurntSushi/ripgrep/releases/download/$RG_VERSION/$RG_NAME.tar.gz"
+          echo "$RG_SHA256  $RUNNER_TEMP/$RG_NAME.tar.gz" | sha256sum --check
+          mkdir "$RUNNER_TEMP/ripgrep"
+          tar -xzf "$RUNNER_TEMP/$RG_NAME.tar.gz" -C "$RUNNER_TEMP/ripgrep" --strip-components=1 "$RG_NAME/rg"
+          "$RUNNER_TEMP/ripgrep/rg" --version
+          echo "$RUNNER_TEMP/ripgrep" >> "$GITHUB_PATH"
 
       - name: Legacy write and documented-symbol guards
         if: always()
