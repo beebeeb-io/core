@@ -4,12 +4,12 @@ use zeroize::Zeroizing;
 
 #[derive(Clone, Serialize)]
 pub struct TotpCode {
-    pub code: String,
+    pub code: Zeroizing<String>,
 }
 #[derive(Clone, Serialize, Default)]
 pub struct TotpSetupRequest {
     #[serde(default)]
-    pub code: Option<String>,
+    pub code: Option<Zeroizing<String>>,
     #[serde(default)]
     pub confirm_token: Option<String>,
 }
@@ -66,5 +66,5 @@ pub fn unfreeze() -> Endpoint<(), serde_json::Value> {
     Endpoint::new(Method::Post, "/api/v1/me/unfreeze", false)
 }
 pub fn request_deletion() -> Endpoint<DeletionRequest, serde_json::Value> {
-    Endpoint::new(Method::Post, "/api/v1/auth/account/delete-request", true)
+    Endpoint::new(Method::Post, "/api/v1/auth/account/delete-request", true).coded_refusals()
 }

@@ -74,7 +74,7 @@ fn other_new_records_hide_their_tokens_tickets_and_codes() {
 
     let verify = routes::onboarding::EmailVerify {
         email: "a@example.test".into(),
-        code: "email-code-secret".into(),
+        code: zeroize::Zeroizing::new("email-code-secret".into()),
     };
     assert_hidden(format!("{verify:?}"), &["email-code-secret"]);
     let start = routes::onboarding::EmailStart {

@@ -17,7 +17,9 @@ impl Client {
     pub async fn enable_authenticator(&self, code: String) -> Result<(), AuthError> {
         self.execute(
             &beebeeb_api::routes::account::enable_totp(),
-            &beebeeb_api::routes::account::TotpCode { code },
+            &beebeeb_api::routes::account::TotpCode {
+                code: Zeroizing::new(code),
+            },
         )
         .await
         .map(|_| ())
@@ -27,7 +29,9 @@ impl Client {
     pub async fn remove_authenticator(&self, code: String) -> Result<(), AuthError> {
         self.execute(
             &beebeeb_api::routes::account::disable_totp(),
-            &beebeeb_api::routes::account::TotpCode { code },
+            &beebeeb_api::routes::account::TotpCode {
+                code: Zeroizing::new(code),
+            },
         )
         .await
         .map(|_| ())
@@ -70,32 +74,44 @@ impl std::fmt::Debug for ConfirmationToken {
     }
 }
 
+fn is_unauthorized(error: &ClientError) -> bool {
+    matches!(error, ClientError::Api(beebeeb_api::ApiError::Server(server)) if server.status == 401)
+}
+
 impl Client {
+    /// The password step-up. Its routes answer 401 to a refused step-up as well as to a
+    /// dead session, so the client reports no expired session for them
+    /// (`Endpoint::is_step_up`); a refusal is `AuthError::PasswordNotConfirmed`.
     async fn confirm_action(&self, password: &Zeroizing<String>) -> Result<ConfirmationToken, AuthError> {
         let started = client_login_start(password.as_bytes()).map_err(|_| AuthError::Crypto)?;
         let state = Zeroizing::new(started.state);
-        let answer = self
+        let start_reply = self
             .execute(
                 &proposed::confirm_opaque_start(),
                 &proposed::ConfirmOpaqueStart {
                     client_message: STANDARD.encode(started.message),
                 },
             )
-            .await?;
+            .await;
+        let answer = match start_reply {
+            Err(error) if is_unauthorized(&error) => return Err(self.refused_step_up_start().await),
+            start_reply => start_reply?,
+        };
         if answer.ksf_version == 0 {
             return Err(AuthError::LegacyUpgradeNotAuthorized);
         }
         let server_message = STANDARD
             .decode(answer.server_message)
             .map_err(|_| AuthError::MalformedAnswer)?;
+        // OPAQUE's finish fails alike for a wrong password and a record made for another one.
         let finish = client_login_finish(
             &state,
             password.as_bytes(),
             &server_message,
             u32::from(answer.ksf_version),
         )
-        .map_err(|_| AuthError::Crypto)?;
-        let confirmed = self
+        .map_err(|_| AuthError::PasswordNotConfirmed)?;
+        let finish_reply = self
             .execute(
                 &proposed::confirm_opaque_finish(),
                 &proposed::ConfirmOpaqueFinish {
@@ -103,13 +119,29 @@ impl Client {
                     server_state: answer.server_state,
                 },
             )
-            .await?;
+            .await;
+        let confirmed = match finish_reply {
+            // The start was just answered on this session, so this 401 refuses the proof.
+            Err(error) if is_unauthorized(&error) => return Err(AuthError::PasswordNotConfirmed),
+            finish_reply => finish_reply?,
+        };
         if confirmed.confirmation_token.is_empty() {
             return Err(AuthError::MalformedAnswer);
         }
         Ok(ConfirmationToken {
             token: Zeroizing::new(confirmed.confirmation_token),
         })
+    }
+
+    /// What a 401 from the step-up's start means. The server answers it alike for a dead
+    /// session and for password checks locked after failed guesses, so ask for the
+    /// account: an answer means the session lives and the step-up was refused; a failure
+    /// is that request's own, a dead session reported as expired the usual way.
+    async fn refused_step_up_start(&self) -> AuthError {
+        match self.execute(&auth::me(), &()).await {
+            Ok(_) => AuthError::PasswordNotConfirmed,
+            Err(error) => error.into(),
+        }
     }
 
     pub async fn change_password(

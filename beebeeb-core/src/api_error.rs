@@ -9,6 +9,12 @@
 //! fall back to `error`, and unwrap the double-encoded variant where `error`
 //! is itself a JSON-stringified `{ error, message }` object.
 //!
+//! Two departures are explicit: the account-delete routes put their own
+//! refusals' code in `code` and the text in `error`, which
+//! [`ServerError::parse_coded_body`] reads; and a delay the server sends only
+//! as a `Retry-After` header joins through
+//! [`ServerError::with_retry_after_header`].
+//!
 //! When the body carries no usable text, the raw body is shown instead — but
 //! only its first 512 bytes and only after [`crate::direct_transfer::scrub`],
 //! because that text is attacker-controlled: it may be a page of HTML or an
@@ -24,8 +30,9 @@ use serde_json::Value;
 /// text a user should see, the HTTP status, and the typed fields clients use.
 #[derive(Clone, PartialEq)]
 pub struct ServerError {
-    /// The body's `error` field, after unwrapping a double-encoded payload.
-    /// `None` when the body was empty, not JSON, or carried no string `error`.
+    /// The body's `error` field (a coded route's `code` first:
+    /// [`Self::parse_coded_body`]), after unwrapping a double-encoded payload.
+    /// `None` when the body was empty, not JSON, or carried no string code.
     pub code: Option<String>,
     /// The body's `message`, else its `error`, else `"<status>: <excerpt>"`
     /// where the excerpt is the body cut to 512 bytes with storage URLs scrubbed.
@@ -68,19 +75,43 @@ fn display_string(value: &str) -> String {
     body_excerpt(value)
 }
 
+/// Where a body keeps its stable code.
+#[derive(Clone, Copy)]
+enum CodeField {
+    /// `error`: the server's two-field contract.
+    Error,
+    /// `code` when it is a string, else `error`: a coded route's refusals.
+    CodeThenError,
+}
+
 impl ServerError {
     /// Decode one response body. `status` is the HTTP status the body arrived
     /// with; a 200 with an error body still decodes, but
     /// [`Self::status_is_error`] stays false, so the status wins.
     pub fn parse_body(status: u16, body: &str) -> Self {
+        Self::decode(status, body, CodeField::Error)
+    }
+
+    /// Decode a body from a route whose own refusals put the stable code in `code` and
+    /// the text in `error` (`{ "error": "<human text>", "code": "<stable code>" }`: the
+    /// account-delete routes). A body without a string `code` decodes as
+    /// [`Self::parse_body`] does, so the refusals every route shares
+    /// (`confirmation_required`) keep their code.
+    pub fn parse_coded_body(status: u16, body: &str) -> Self {
+        Self::decode(status, body, CodeField::CodeThenError)
+    }
+
+    fn decode(status: u16, body: &str, code_field: CodeField) -> Self {
         let body_fits = body.len() <= MAX_SERVER_ERROR_BODY_BYTES;
         let parsed = body_fits.then(|| serde_json::from_str::<Value>(body).ok()).flatten();
         let object = parsed.as_ref().and_then(Value::as_object);
+        let text_field = |name: &str| object.and_then(|object| object.get(name)).and_then(Value::as_str);
 
-        let mut code = object
-            .and_then(|object| object.get("error"))
-            .and_then(Value::as_str)
-            .map(display_string);
+        let mut code = match code_field {
+            CodeField::Error => text_field("error"),
+            CodeField::CodeThenError => text_field("code").or_else(|| text_field("error")),
+        }
+        .map(display_string);
         let mut message = object
             .and_then(|object| object.get("message").or_else(|| object.get("error")))
             .and_then(Value::as_str)
@@ -127,6 +158,15 @@ impl ServerError {
         }
     }
 
+    /// Take the delay from a `Retry-After` header when the body named none: the body's
+    /// own `retry_after` wins. Delta-seconds only, capped as the body's is.
+    pub fn with_retry_after_header(mut self, value: &str) -> Self {
+        if self.retry_after_seconds.is_none() {
+            self.retry_after_seconds = crate::retry::parse_retry_after(value);
+        }
+        self
+    }
+
     /// True when the body's code equals `code` exactly (never a substring).
     pub fn is_code(&self, code: &str) -> bool {
         self.code.as_deref() == Some(code)
@@ -154,7 +194,8 @@ impl ServerError {
     }
 
     /// The body's `retry_after` field, as seconds. Accepts a JSON number or a
-    /// digits-only string; anything else is `None`.
+    /// digits-only string; anything else is `None`. Without one, the
+    /// `Retry-After` header's delay ([`Self::with_retry_after_header`]).
     pub fn retry_after(&self) -> Option<u64> {
         self.retry_after_seconds
     }
@@ -181,8 +222,8 @@ mod limit_tests {
 
     #[test]
     fn parsed_fields_are_scrubbed_capped_and_debug_redacted() {
-        let secret = "https://storage.example/private/object?X-Amz-Signature=SECRET";
-        let body = format!(r#"{{"error":"bad","message":"{}{}"}}"#, secret, "x".repeat(2_000));
+        let signed_url = "https://storage.example/private/object?X-Amz-Signature=SECRET";
+        let body = format!(r#"{{"error":"bad","message":"{}{}"}}"#, signed_url, "x".repeat(2_000));
         let error = ServerError::parse_body(500, &body);
         assert!(!error.message.contains("SECRET"));
         assert!(error.message.len() <= 512);
@@ -197,5 +238,66 @@ mod limit_tests {
         let error = ServerError::parse_body(500, &body);
         assert_eq!(error.code, None);
         assert!(error.message.len() <= 512 + 5);
+    }
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use super::*;
+
+    const ALREADY_SCHEDULED: &str = r#"{"code":"delete_already_scheduled","error":"This account is already scheduled for deletion. Cancel that first."}"#;
+
+    #[test]
+    fn a_coded_body_takes_its_code_from_code_and_its_text_from_error() {
+        let coded = ServerError::parse_coded_body(409, ALREADY_SCHEDULED);
+        assert_eq!(coded.code.as_deref(), Some("delete_already_scheduled"));
+        assert!(coded.is_code("delete_already_scheduled"));
+        assert_eq!(
+            coded.message,
+            "This account is already scheduled for deletion. Cancel that first."
+        );
+
+        let two_field = ServerError::parse_body(409, ALREADY_SCHEDULED);
+        assert_eq!(
+            two_field.code.as_deref(),
+            Some("This account is already scheduled for deletion. Cancel that first."),
+            "only a coded route reads `code`"
+        );
+
+        let long = format!(r#"{{"code":"{}","error":"refused"}}"#, "c".repeat(2_000));
+        let capped = ServerError::parse_coded_body(409, &long);
+        assert_eq!(
+            capped.code.map(|code| code.len()),
+            Some(512),
+            "a coded code is capped too"
+        );
+    }
+
+    #[test]
+    fn a_coded_route_keeps_the_code_of_a_body_without_one() {
+        let shared = ServerError::parse_coded_body(
+            403,
+            r#"{"error":"confirmation_required","message":"This action requires password confirmation"}"#,
+        );
+        assert_eq!(shared.code.as_deref(), Some("confirmation_required"));
+        assert_eq!(shared.message, "This action requires password confirmation");
+    }
+
+    #[test]
+    fn a_retry_after_header_stands_in_for_a_missing_body_field() {
+        let rate_limited = r#"{"code":"delete_request_rate_limited","error":"A link was sent less than a minute ago. Check your email, or try again in a minute."}"#;
+        let header = ServerError::parse_coded_body(429, rate_limited).with_retry_after_header("60");
+        assert_eq!(header.retry_after(), Some(60));
+
+        let body_wins =
+            ServerError::parse_body(429, r#"{"error":"server_busy","retry_after":17}"#).with_retry_after_header("60");
+        assert_eq!(body_wins.retry_after(), Some(17), "the body's own delay wins");
+
+        let capped = ServerError::parse_body(503, r#"{"error":"busy"}"#).with_retry_after_header(" 99999 ");
+        assert_eq!(capped.retry_after(), Some(300), "capped as the body's is");
+
+        let http_date = ServerError::parse_body(503, r#"{"error":"busy"}"#)
+            .with_retry_after_header("Wed, 11 Nov 2026 15:00:00 GMT");
+        assert_eq!(http_date.retry_after(), None, "delta-seconds only");
     }
 }

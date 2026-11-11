@@ -176,7 +176,7 @@ fn email_code_wire_uses_the_server_challenge_and_ticket_shapes() {
             &public,
             &proposed::EmailCodeSubmit {
                 challenge: "challenge-token".into(),
-                code: "12345678".into(),
+                code: zeroize::Zeroizing::new("12345678".into()),
             },
         )
         .unwrap();

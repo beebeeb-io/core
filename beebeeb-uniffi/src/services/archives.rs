@@ -99,6 +99,12 @@ fn service_kind(error: ServiceError) -> ServiceErrorKind {
         ServiceError::AnotherAccountOnDevice => ServiceErrorKind::AnotherAccountOnDevice,
         ServiceError::Unavailable => ServiceErrorKind::Unavailable,
         ServiceError::BackupStopUnfinished { .. } => ServiceErrorKind::BackupStopUnfinished,
+        ServiceError::ConfirmationRequired => ServiceErrorKind::ConfirmationRequired,
+        ServiceError::SecondFactorRequired => ServiceErrorKind::SecondFactorRequired,
+        ServiceError::SecondFactorRejected => ServiceErrorKind::SecondFactorRejected,
+        ServiceError::DeletionAlreadyScheduled => ServiceErrorKind::DeletionAlreadyScheduled,
+        ServiceError::SubscriptionActive => ServiceErrorKind::SubscriptionActive,
+        ServiceError::EmailNotSent => ServiceErrorKind::EmailNotSent,
     }
 }
 

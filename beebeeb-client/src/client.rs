@@ -451,7 +451,9 @@ impl Client {
                 self.events.emit(EngineEvent::AccountMismatch);
                 Err(ClientError::Api(ApiError::Server(error)))
             }
-            Err(ApiError::Server(error)) if error.status == 401 && carried_session_authentication => {
+            Err(ApiError::Server(error))
+                if error.status == 401 && carried_session_authentication && !endpoint.is_step_up() =>
+            {
                 self.events.emit(EngineEvent::SessionExpired);
                 Err(ClientError::Api(ApiError::Server(error)))
             }

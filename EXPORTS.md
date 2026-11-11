@@ -77,6 +77,17 @@ change, session revoke and account deletion are also service operations; no sess
 or authenticator secret has a binding getter. `RuntimeProfile::Lightweight` plus the File Provider
 factory opens a targeted store-backed engine and does not load the whole tree.
 
+The account changes a signed-in session makes (`AuthServiceHandle.setup_authenticator`,
+`enable_authenticator`, `remove_authenticator`, `change_password`, `change_email` and
+`request_account_deletion`) keep the server's answers apart. A password the step-up did not confirm is
+`ServiceError::Authentication`, and a refused step-up never reads as an expired session.
+`ConfirmationRequired` (confirm the password again), `SecondFactorRequired` (call again with the
+authenticator or a backup code), `SecondFactorRejected` (that code was not accepted),
+`DeletionAlreadyScheduled`, `SubscriptionActive` and `EmailNotSent` (the deletion link could not be
+sent; nothing changed) are their own cases, and `ServiceErrorKind` has the same six. A delay the server
+sends only as a `Retry-After` header is `RetryAfter { seconds }`, as one in the body is. A 401 on these
+operations' other requests is `SessionExpired`.
+
 Signup methods exist so the web-declared client and contract tests can drive the shared ceremony;
 native client declarations receive the typed web-only refusal and URL. Stored sessions share the
 owner, master key, API URL, generation, and device identity, but keep one token per configured app id.
@@ -172,6 +183,7 @@ Each change closes a review finding; the old form is removed, not deprecated.
 | `decrypt_chunks_to_file`, `decrypt_contiguous_to_file`, `download_and_decrypt_file` (`legacy-bindings`) | `expected_chunk_format: u8` | `metadata: NameMetadataDto` in its place |
 | `RecoveryChangesData`, `PasskeyPromptResult.prf_output` | `String` / `Vec<u8>` | `SecretString` / `SecretBytes`: still `String` and `Data` / `ByteArray` in Swift and Kotlin, wiped and redacted on the Rust side |
 | `normalize_email(raw)` | none | core's email normalisation. The safety number a share shows is `share_safety_number` |
+| `ServiceError` of the account changes (`AuthServiceHandle`: authenticator, password, email, deletion) | every failure, an expired session included, was `Unavailable` | a wrong step-up password is `Authentication`; new `ConfirmationRequired`, `SecondFactorRequired`, `SecondFactorRejected`, `DeletionAlreadyScheduled`, `SubscriptionActive`, `EmailNotSent` (and the same `ServiceErrorKind` cases); `RetryAfter` also takes a `Retry-After` header |
 
 A decryptor refuses a missing record or half a commitment (`version_id` without `version_counter`, or
 the reverse). A record with neither field is legacy metadata: it opens v1 content only. Since Guus's

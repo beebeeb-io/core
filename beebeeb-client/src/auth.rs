@@ -261,6 +261,11 @@ pub enum AuthError {
     HardwareIdentityRequired,
     #[error("sign-in cryptography failed")]
     Crypto,
+    /// The password step-up did not confirm the password: it is not the account's, or
+    /// the server refused the proof or has locked password checks after failed guesses
+    /// (it answers those alike). The session itself is still signed in.
+    #[error("the password was not confirmed")]
+    PasswordNotConfirmed,
     #[error("the sign-in answer is malformed")]
     MalformedAnswer,
     #[error("{step}: invalid {field} in the server answer")]

@@ -147,8 +147,8 @@ impl Client {
             .execute(
                 &auth::complete_two_factor(),
                 &auth::TwoFactorRequest {
-                    partial_token: challenge.partial_token.to_string(),
-                    code,
+                    partial_token: challenge.partial_token,
+                    code: Zeroizing::new(code),
                 },
             )
             .await?;
@@ -186,7 +186,10 @@ impl Client {
     ) -> Result<proposed::EmailCodeTicket, ClientError> {
         self.execute(
             &proposed::submit_email_code(),
-            &proposed::EmailCodeSubmit { challenge, code },
+            &proposed::EmailCodeSubmit {
+                challenge,
+                code: Zeroizing::new(code),
+            },
         )
         .await
     }

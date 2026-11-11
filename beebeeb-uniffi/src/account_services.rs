@@ -19,7 +19,8 @@ use zeroize::Zeroizing;
 use crate::{
     AccountReplacementHandle, AuthServiceHandle, BreachCheckHandle, CeremonyStepDto, DeviceServiceHandle,
     MasterKeyHandle, NativeClientHandle, PasswordAcceptedHandle, PasswordEvaluationDto, SecretString, ServiceError,
-    ServiceErrorKind, copy_master_key, lock_tolerant, map_client_error, take_password_accepted,
+    ServiceErrorKind, copy_master_key, lock_tolerant, map_account_change_error, map_client_error,
+    take_password_accepted,
 };
 
 fn invalid() -> ServiceError {
@@ -537,7 +538,7 @@ impl AuthServiceHandle {
             .root
             .runtime
             .block_on(self.root.client.setup_authenticator())
-            .map_err(map_client_error)?;
+            .map_err(map_account_change_error)?;
         Ok(Arc::new(AuthenticatorEnrollmentHandle {
             state: Mutex::new(Some(enrollment)),
         }))
@@ -557,14 +558,14 @@ impl AuthServiceHandle {
         self.root
             .runtime
             .block_on(self.root.client.enable_authenticator(code))
-            .map_err(map_client_error)
+            .map_err(map_account_change_error)
     }
 
     pub fn remove_authenticator(&self, code: String) -> Result<(), ServiceError> {
         self.root
             .runtime
             .block_on(self.root.client.remove_authenticator(code))
-            .map_err(map_client_error)
+            .map_err(map_account_change_error)
     }
 
     pub fn change_password(&self, current_password: String, new_password: String) -> Result<u64, ServiceError> {
@@ -576,7 +577,7 @@ impl AuthServiceHandle {
                 Zeroizing::new(new_password),
                 self.root.secret_store.as_ref(),
             ))
-            .map_err(map_client_error)?;
+            .map_err(map_account_change_error)?;
         self.root.load_installed_session(installed.owner())?;
         Ok(installed.generation())
     }
@@ -589,7 +590,7 @@ impl AuthServiceHandle {
                 Zeroizing::new(password),
                 self.root.secret_store.as_ref(),
             ))
-            .map_err(map_client_error)
+            .map_err(map_account_change_error)
     }
 
     pub fn request_account_deletion(
@@ -604,7 +605,7 @@ impl AuthServiceHandle {
                     .client
                     .request_account_deletion(Zeroizing::new(password), authenticator_code),
             )
-            .map_err(map_client_error)
+            .map_err(map_account_change_error)
     }
 
     pub fn signup(

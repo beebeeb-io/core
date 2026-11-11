@@ -128,6 +128,16 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   they are; drive uploads as for any upload (the service enqueues each verified file); keep the app open
   while it reads (`extract_keep_open`).
 
+- Account changes (`AuthServiceHandle`'s authenticator setup, enable and remove, `change_password`,
+  `change_email` and `request_account_deletion`) no longer answer `unavailable` for everything. A
+  password the step-up did not confirm is `ServiceError::Authentication`. New cases, with the same
+  `ServiceErrorKind`s: `ConfirmationRequired` (ask for the password again), `SecondFactorRequired`
+  (call again with the authenticator or a backup code), `SecondFactorRejected` (that code was not
+  accepted), `DeletionAlreadyScheduled`, `SubscriptionActive` (cancel the subscription first) and
+  `EmailNotSent` (the deletion link could not be sent; nothing changed). A request made a moment after
+  the last deletion link is `RetryAfter { seconds }` (the server's `Retry-After` header), a 401 on their
+  other requests is `SessionExpired`, and a refused step-up never is. Update exhaustive switches.
+
 ### Callers moving from 0.2.7 or 0.2.8
 
 - 0.3.0 contains 0.2.7 and 0.2.8: `auth_flow`, `account_flows`, `signup_flow`, `recovery_flow`,
@@ -303,6 +313,25 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   `qr_uri`. Wrap a `String` with `Zeroizing::new`.
 - A request's `Debug` prints a header value only when the header is in `DEBUG_VISIBLE_HEADERS`;
   `Set-Cookie`, `Cookie`, `Authorization` and every other header print `[REDACTED]`.
+- The native step-up (`request_account_deletion`, `change_password`, `change_email`) reports a password
+  it did not confirm as `AuthError::PasswordNotConfirmed`: a wrong password was `Crypto`, and a proof the
+  server refused was a 401 `ClientError` that also emitted `EngineEvent::SessionExpired`. A 401 on
+  `confirm-opaque-start` or `confirm-opaque-finish` (`Endpoint::is_step_up`) emits no expiry: the server
+  answers 401 there for a refused step-up as for a dead session. After a 401 at the start the client asks
+  for the account (`GET /api/v1/auth/me`): a live session makes the refusal `PasswordNotConfirmed`, a
+  gone one is reported expired as on any other request.
+- `ServerError::parse_coded_body` decodes the account-delete routes' refusals, whose stable code is in
+  `code` and text in `error`; `account::request_deletion` uses it, so its refusals keep their code
+  (`second_factor_required`, `delete_already_scheduled`, `delete_subscription_active`,
+  `delete_request_rate_limited`, `delete_email_failed`). `ServerError::with_retry_after_header`: every
+  `beebeeb-api` route now fills `retry_after()` from a `Retry-After` header when the body names no
+  delay (delta-seconds, capped as the body's).
+- The one-time codes in `beebeeb-api` request types are `Zeroizing<String>`, which changes their type:
+  `TotpCode.code`, `TotpSetupRequest.code`, `auth::CodeRequest.code`, `TwoFactorRequest.code` and its
+  `partial_token`, `EmailCodeSubmit.code`, `RecoveryComplete.email_verification_code`,
+  `AuthenticatorChange.code` and its `secret`, and `onboarding::EmailVerify.code`. Wrap a `String` with
+  `Zeroizing::new`. A test fails when a `Serialize` type gains a `code` or `*_code` field outside
+  `Zeroizing`.
 - `ClientMetaField` adds `DeviceSettings = 7` and `ContactKey = 8`; codes 5 and 6 remain reserved.
   Sync `Op` literals add optional `device_id` and `created_at`.
 
@@ -374,6 +403,11 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   for `/api/v1/auth/login` and `/api/v1/auth/change-password` are removed. A test fails when a request
   type of `beebeeb-api` gains a password field, or when a production source of `beebeeb-core` or
   `beebeeb-client` names one as a JSON key.
+- An account deletion the server refuses reaches the iOS and Android apps as a refusal they can name
+  (a second factor needed or wrong, a deletion already scheduled, an active subscription, a link sent a
+  moment ago, a link email that failed) instead of `unavailable`, and Rust callers get the refusal's
+  code, which the delete route keeps in `code`. A wrong password at the step-up, or one the server
+  refuses, no longer reports the session expired.
 - `zip` moves from 8.6 to 9 (the writer only; `aes-crypto` in tests only), so RUSTSEC-2026-0367,
   -0368, -0369 and -0429 are no longer ignored in `.cargo/audit.toml`.
 - Native requests declare `file-write-v2` and `version-metadata-v1` exactly where the server checks
