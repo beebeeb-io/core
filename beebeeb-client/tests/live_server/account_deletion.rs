@@ -157,7 +157,7 @@ async fn a_wrong_password_sends_no_delete_request_and_no_mail() -> TestResult {
         .request_account_deletion(Zeroizing::new(format!("{}-wrong", account.password)), None)
         .await;
     assert!(
-        matches!(refused, Err(AuthError::Crypto)),
+        matches!(refused, Err(AuthError::PasswordNotConfirmed)),
         "the step-up did not refuse a wrong password: {refused:?}"
     );
     assert_eq!(
@@ -192,10 +192,16 @@ async fn a_two_factor_account_needs_its_authenticator_code() -> TestResult {
     let without_code = client
         .request_account_deletion(Zeroizing::new(account.password.clone()), None)
         .await;
-    assert!(
-        without_code.is_err(),
-        "a two-factor account had a link sent without its code"
-    );
+    match &without_code {
+        Err(AuthError::Client(beebeeb_client::ClientError::Api(beebeeb_api::ApiError::Server(error)))) => {
+            assert_eq!(error.status, 403);
+            assert!(
+                error.is_code("second_factor_required"),
+                "the refusal's code did not reach the client: {error:?}"
+            );
+        }
+        other => panic!("a two-factor account had a link sent without its code: {other:?}"),
+    }
     client
         .request_account_deletion(
             Zeroizing::new(account.password.clone()),
