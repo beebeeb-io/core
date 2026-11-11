@@ -94,7 +94,7 @@ impl Client {
             )
             .await;
         let answer = match start_reply {
-            Err(error) if is_unauthorized(&error) => return Err(self.refused_step_up_start().await),
+            Err(error) if is_unauthorized(&error) => return Err(self.refused_step_up().await),
             start_reply => start_reply?,
         };
         if answer.ksf_version == 0 {
@@ -121,8 +121,8 @@ impl Client {
             )
             .await;
         let confirmed = match finish_reply {
-            // The start was just answered on this session, so this 401 refuses the proof.
-            Err(error) if is_unauthorized(&error) => return Err(AuthError::PasswordNotConfirmed),
+            // The session can end between start and finish: a 401 here is asked about as well.
+            Err(error) if is_unauthorized(&error) => return Err(self.refused_step_up().await),
             finish_reply => finish_reply?,
         };
         if confirmed.confirmation_token.is_empty() {
@@ -133,11 +133,12 @@ impl Client {
         })
     }
 
-    /// What a 401 from the step-up's start means. The server answers it alike for a dead
-    /// session and for password checks locked after failed guesses, so ask for the
-    /// account: an answer means the session lives and the step-up was refused; a failure
-    /// is that request's own, a dead session reported as expired the usual way.
-    async fn refused_step_up_start(&self) -> AuthError {
+    /// What a 401 from the step-up means. The server answers it alike for a dead session and
+    /// for a refused step-up (password checks locked after failed guesses at the start, a
+    /// refused proof at the finish), so ask for the account: an answer means the session
+    /// lives and the step-up was refused; a failure is that request's own, a dead session
+    /// reported as expired the usual way.
+    async fn refused_step_up(&self) -> AuthError {
         match self.execute(&auth::me(), &()).await {
             Ok(_) => AuthError::PasswordNotConfirmed,
             Err(error) => error.into(),

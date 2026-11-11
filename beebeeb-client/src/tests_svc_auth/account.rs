@@ -21,7 +21,8 @@ enum StepUpRefusal {
     /// At the start: password checks are locked after failed guesses, or the
     /// session is gone (the server answers both alike).
     Start,
-    /// At the finish: the proof is refused.
+    /// At the finish: the proof is refused, or the session ended after the start
+    /// (the server answers both alike).
     Finish,
 }
 
@@ -423,7 +424,7 @@ async fn a_refused_proof_ends_the_deletion_without_ending_the_session() {
         .await;
 
     assert!(matches!(refused, Err(AuthError::PasswordNotConfirmed)), "{refused:?}");
-    assert_eq!(server.paths(), [STEP_UP_START, STEP_UP_FINISH]);
+    assert_eq!(server.paths(), [STEP_UP_START, STEP_UP_FINISH, ACCOUNT_ME]);
     assert_eq!(session_expiries(&drained(&mut events)), 0);
 }
 
@@ -443,7 +444,7 @@ async fn a_refused_proof_ends_the_password_change_without_ending_the_session() {
         .await;
 
     assert!(matches!(refused, Err(AuthError::PasswordNotConfirmed)), "{refused:?}");
-    assert_eq!(server.paths(), [STEP_UP_START, STEP_UP_FINISH]);
+    assert_eq!(server.paths(), [STEP_UP_START, STEP_UP_FINISH, ACCOUNT_ME]);
     assert_eq!(session_expiries(&drained(&mut events)), 0);
 }
 
@@ -462,7 +463,7 @@ async fn a_refused_proof_ends_the_email_change_without_ending_the_session() {
         .await;
 
     assert!(matches!(refused, Err(AuthError::PasswordNotConfirmed)), "{refused:?}");
-    assert_eq!(server.paths(), [STEP_UP_START, STEP_UP_FINISH]);
+    assert_eq!(server.paths(), [STEP_UP_START, STEP_UP_FINISH, ACCOUNT_ME]);
     assert_eq!(session_expiries(&drained(&mut events)), 0);
 }
 
@@ -497,6 +498,25 @@ async fn a_refused_start_on_a_gone_session_reports_the_session_expired_once() {
 
     assert_eq!(server_refusal(refused).status, 401);
     assert_eq!(server.paths(), [STEP_UP_START, ACCOUNT_ME]);
+    assert_eq!(session_expiries(&drained(&mut events)), 1);
+}
+
+#[tokio::test]
+async fn a_refused_finish_on_a_gone_session_reports_the_session_expired_once() {
+    let server = Arc::new(
+        StepUpServer::with_account_password(PASSWORD)
+            .refusing_the_step_up_at(StepUpRefusal::Finish)
+            .with_the_session_gone(),
+    );
+    let client = signed_in_client(&server);
+    let mut events = client.events().subscribe();
+
+    let refused = client
+        .request_account_deletion(Zeroizing::new(PASSWORD.to_owned()), None)
+        .await;
+
+    assert_eq!(server_refusal(refused).status, 401);
+    assert_eq!(server.paths(), [STEP_UP_START, STEP_UP_FINISH, ACCOUNT_ME]);
     assert_eq!(session_expiries(&drained(&mut events)), 1);
 }
 
