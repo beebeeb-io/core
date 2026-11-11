@@ -22,6 +22,7 @@ pub(crate) use redacted_debug;
 
 mod answer;
 mod endpoint;
+mod flow_request;
 mod request;
 
 pub mod flows;
@@ -30,4 +31,5 @@ pub mod routes;
 
 pub use answer::{Answer, ApiError};
 pub use endpoint::{Endpoint, RawEndpoint};
+pub use flow_request::FlowRequest;
 pub use request::{ClientIdentity, Header, Method, Request, RequestBuilder};

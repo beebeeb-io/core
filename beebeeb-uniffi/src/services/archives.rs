@@ -99,6 +99,7 @@ fn service_kind(error: ServiceError) -> ServiceErrorKind {
         ServiceError::AnotherAccountOnDevice => ServiceErrorKind::AnotherAccountOnDevice,
         ServiceError::Unavailable => ServiceErrorKind::Unavailable,
         ServiceError::BackupStopUnfinished { .. } => ServiceErrorKind::BackupStopUnfinished,
+        ServiceError::ShareRefused { .. } => ServiceErrorKind::ShareRefused,
     }
 }
 

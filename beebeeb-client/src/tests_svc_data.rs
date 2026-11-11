@@ -12,7 +12,6 @@ use crate::{
     files::{FileRecord, FileServiceError},
     search::SearchService,
     settings::{DeviceSettings, load_local_settings, save_local_settings},
-    shares::DEFAULT_LINK_EXPIRY_HOURS,
     sync::SyncLoopError,
     test_support::ScriptedTransport,
     transport::{StreamLimits, decode_sse},
@@ -185,24 +184,6 @@ async fn version_restore_reseals_the_current_name_for_the_old_content_above_ever
         VersionCommitment::new([0x11; 12], 8).unwrap()
     );
     assert_eq!(store.lock().unwrap().highest_file_version(FILE_ID).unwrap(), Some(8));
-}
-
-#[tokio::test]
-async fn share_links_default_to_thirty_days() {
-    let transport = ScriptedTransport::json(
-        200,
-        br#"{"id":"share-1","token":"secret","expires_at":"2026-12-03T00:00:00Z"}"#.to_vec(),
-    );
-    let client = authenticated_client(transport.clone());
-
-    client
-        .create_share_link("file-1", "wrapped-key", None, None)
-        .await
-        .unwrap();
-
-    let requests = transport.requests();
-    let body: Value = serde_json::from_slice(requests[0].body()).unwrap();
-    assert_eq!(body["expires_in_hours"], DEFAULT_LINK_EXPIRY_HOURS);
 }
 
 #[test]

@@ -1,41 +1,12 @@
 use crate::{Endpoint, Method, RawEndpoint, request::component};
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroizing;
 
-#[derive(Debug, Clone, Serialize)]
-pub struct Create {
-    pub file_id: String,
-    pub share_type: String,
-    pub wrapped_file_key: String,
-    #[serde(default)]
-    pub expires_at: Option<String>,
-    #[serde(default)]
-    pub passphrase_hash: Option<String>,
-}
-
-#[derive(Clone, Serialize)]
-pub struct CreateLink {
-    pub file_id: String,
-    pub share_type: String,
-    pub wrapped_file_key: String,
-    #[serde(default)]
-    pub expires_in_hours: Option<i64>,
-    #[serde(default)]
-    pub max_opens: Option<i32>,
-    #[serde(default)]
-    pub passphrase: Option<Zeroizing<String>>,
-    #[serde(default)]
-    pub token: Option<Zeroizing<String>>,
-    #[serde(default)]
-    pub owner_wrapped_key: Option<String>,
-    #[serde(default)]
-    pub owner_wrapped_token: Option<String>,
-}
-crate::redacted_debug!(CreateLink; show: [file_id, share_type, wrapped_file_key, expires_in_hours, max_opens, owner_wrapped_key, owner_wrapped_token]; hide: [passphrase, token]);
-#[derive(Clone, Deserialize)]
+/// A share as the owner's listings (`mine`, `by_file`) and the public answers (`public_get`,
+/// `verify`) describe it. None of them carries the token: the server keeps only its hash, and the
+/// owner gets the link back from `owner_wrapped_token` (core's `share_flow::link::rebuild_link`).
+#[derive(Debug, Clone, Deserialize)]
 pub struct Share {
     pub id: String,
-    pub token: String,
     #[serde(default)]
     pub file_id: Option<String>,
     #[serde(default)]
@@ -43,7 +14,6 @@ pub struct Share {
     #[serde(flatten)]
     pub extra: super::ExtraFields,
 }
-crate::redacted_debug!(Share; show: [id, file_id, expires_at, extra]; hide: [token]);
 #[derive(Debug, Clone, Deserialize)]
 pub struct List {
     #[serde(default)]
@@ -73,12 +43,6 @@ pub struct Verify {
     pub passphrase: String,
 }
 
-pub fn create() -> Endpoint<Create, Share> {
-    Endpoint::new(Method::Post, "/api/v1/shares", true)
-}
-pub fn create_link() -> Endpoint<CreateLink, Share> {
-    Endpoint::new(Method::Post, "/api/v1/shares", true)
-}
 pub fn mine() -> Endpoint<(), List> {
     Endpoint::new(Method::Get, "/api/v1/shares/mine", false)
 }

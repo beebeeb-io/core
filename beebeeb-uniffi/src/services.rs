@@ -67,6 +67,7 @@ pub enum ServiceErrorKind {
     AnotherAccountOnDevice,
     Unavailable,
     BackupStopUnfinished,
+    ShareRefused,
 }
 
 impl ServiceErrorKind {
@@ -88,6 +89,7 @@ impl ServiceErrorKind {
             Self::AnotherAccountOnDevice => "another_account_on_device",
             Self::Unavailable => "unavailable",
             Self::BackupStopUnfinished => "backup_stop_unfinished",
+            Self::ShareRefused => "share_refused",
         }
     }
 }
@@ -137,6 +139,11 @@ pub enum ServiceError {
     /// make the service again later.
     #[error("the backup is off ({reason}) and could not finish stopping")]
     BackupStopUnfinished { reason: String },
+    /// Core's share flow or the server refused the share. `code` is the flow's stable code
+    /// (`plan_required`, `trial_share_limit_reached`, `folder_needs_upgrade`, ...): show the app's
+    /// words for it.
+    #[error("the share was refused ({code})")]
+    ShareRefused { code: String },
 }
 
 impl ServiceError {
@@ -161,6 +168,7 @@ impl ServiceError {
             ServiceErrorKind::AnotherAccountOnDevice => Self::AnotherAccountOnDevice,
             ServiceErrorKind::Unavailable => Self::Unavailable,
             ServiceErrorKind::BackupStopUnfinished => Self::BackupStopUnfinished { reason: String::new() },
+            ServiceErrorKind::ShareRefused => Self::ShareRefused { code: String::new() },
         }
     }
 
