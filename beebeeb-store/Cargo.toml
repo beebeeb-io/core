@@ -7,7 +7,8 @@ license.workspace = true
 
 [dependencies]
 beebeeb-core = { path = "../beebeeb-core", default-features = false }
-rusqlite = { version = "0.32", features = ["bundled"] }
+# The same feature set as in beebeeb-core: the bundled SQLite and the statement cache.
+rusqlite = { version = "0.41", default-features = false, features = ["bundled", "cache"] }
 serde_json.workspace = true
 thiserror.workspace = true
 uuid = "1"

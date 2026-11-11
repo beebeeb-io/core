@@ -84,6 +84,10 @@ deployed together; v1 remains readable for legacy versions.
 
 `beebeeb-core` builds for `wasm32-unknown-unknown`; `rusqlite` (fp_cache only) is gated to non-wasm (`[target.'cfg(not(target_arch = "wasm32"))'.dependencies]` + `#[cfg(not(target_arch = "wasm32"))]` on `pub mod fp_cache;`). WASM JsValue returns serialize via typed `#[derive(Serialize)]` structs, not `Map`s.
 
+## SQLite (`fp_cache`, `beebeeb-store`)
+
+Both crates use `rusqlite` 0.41 with `default-features = false, features = ["bundled", "cache"]`: the bundled SQLite (3.54.1 through `libsqlite3-sys` 0.39.1) and the statement cache. Keep the defaults off: `ffi-sqlite-wasm-rs` only adds a second SQLite for wasm32, which the target gate never builds. One build holds one `links = "sqlite3"` package, so a `rusqlite` or `libsqlite3-sys` move here is a move for every consumer that links SQLite itself (its own `rusqlite`, or sqlx's SQLite driver; CHANGELOG 0.3.0, "Callers moving from 0.2.7 or 0.2.8"). `the_bundled_sqlite_is_at_least_3_54_0` (`beebeeb-store/tests/store_contract.rs`) fails below SQLite 3.54.0 (RUSTSEC-2026-0459).
+
 ## UniFFI handles (`beebeeb-uniffi`) — mobile/desktop
 
 `ChunkEncryptorHandle` / `ChunkDecryptorHandle` wrap the primitive for Swift/Kotlin. Key derived IN CORE from a borrowed `&MasterKeyHandle` — raw key bytes never cross FFI. **Single-consumer contract:** a handle is an ordered cursor driven from ONE sequence; the `Mutex` is only UniFFI's Send+Sync backstop. `finish()` consumes the handle. Regenerating bindings: `build-ios.sh` / `build-android.sh`; grep the regenerated header for every new symbol before shipping (the 0426 12-symbol drift lesson).
