@@ -529,6 +529,39 @@ changed exports.
 | `ShareServiceError` | `Client`, `Store`, `ContactKeyChanged` | adds `Flow(ShareFlowError)`, `KeyUnavailable` (a foreign item id) and `CustodyNotRecorded` |
 | `beebeeb_client::shares::share_flow` | none | re-export of `beebeeb_core::share_flow` |
 
+### Share refusals and link limits (0.3.0)
+
+| Item | Before | Now |
+| --- | --- | --- |
+| `ShareFlowError::Forbidden { code: String }` | none | a 403 refusal: `code` is the server's code (`code`, else `error`: `sharing_paused`, `email_unverified`, `billing_read_only`, ...), or `forbidden` when the body names none (the account-frozen 403 sends a sentence). `code()` is `forbidden` |
+| `ShareFlowError::from_status` | a 401 or 403 without a share refusal code was `Unauthorized` | a 401 is `Unauthorized`, a 403 is `Forbidden { code }` |
+| `ShareFlowError::host_code` | none | the code a host shows: `Forbidden`'s `code`, else `code()` |
+| `share_flow::link::CreateLink::on_response` (file links and bundles) | a 409 without a string `code` from the share refusals got a fresh token and was sent again | only the server's token collision (`error` `share token already exists — regenerate and retry`, or `token_taken`) is sent again, once; every other 409 is the flow's error, a refusal in `error` included |
+| `share_flow::link::MAX_EXPIRES_IN_HOURS`, `MAX_OPENS` | none | `8760` (one year) and `i32::MAX`; `LinkOptions` (file links and bundles) and `FolderLinkInput` past them are `InvalidInput("expires in hours")` / `InvalidInput("max opens")` before any request |
+| UniFFI `ServiceError` of `ShareServiceHandle.create_link` | a 403 was `Authentication` | `ShareRefused { code }` with the server's code |
+| UniFFI `ShareFlowFfiError::Flow { code }`, the WASM share flows' `JsError` message | `ShareFlowError::code()` (`unauthorized` for a 403) | `ShareFlowError::host_code()` (a 403's own code) |
+
+## Account step-up, server errors, contact keys and the store (0.3.0)
+
+Rust only, and none of it was in a release: `beebeeb-api`, `beebeeb-client`, `beebeeb-store` and
+`contact_keys` are new in 0.3.0, and `ServerError`'s two methods are additions. "Before" is this
+release's earlier development state.
+
+| Item | Before | Now |
+| --- | --- | --- |
+| `beebeeb_client::auth::AuthError::PasswordNotConfirmed` | none | the step-up did not confirm the password: a wrong password, or a 401 at `confirm-opaque-start` or `confirm-opaque-finish` while `GET /auth/me` still answers (a gone session is the 401 itself, reported expired once) |
+| `ServerError::parse_coded_body(status, body)` | none | decodes a body whose code is in `code` and text in `error` (the account-delete routes); without a string `code` it decodes as `parse_body` |
+| `ServerError::with_retry_after_header(value)` | none | takes the delay from a `Retry-After` header when the body names none |
+| `beebeeb_api::Endpoint::is_step_up` | none | true for `confirm-opaque-start` and `confirm-opaque-finish`: their 401 emits no `SessionExpired` |
+| `routes::account::TotpCode.code`, `routes::account::TotpSetupRequest.code` | `String`, `Option<String>` | `Zeroizing<String>`, `Option<Zeroizing<String>>` |
+| `routes::auth::CodeRequest.code`, `routes::auth::TwoFactorRequest.code` and `.partial_token` | `String` | `Zeroizing<String>` |
+| `proposed::EmailCodeSubmit.code` | `String` | `Zeroizing<String>` |
+| `proposed::RecoveryComplete.email_verification_code` | `Option<String>` | `Option<Zeroizing<String>>` |
+| `proposed::AuthenticatorChange.code` and `.secret` | `Option<String>` | `Option<Zeroizing<String>>` |
+| `routes::onboarding::EmailVerify.code` | `String` | `Zeroizing<String>` |
+| `beebeeb_core::contact_keys::{safety_number, key_fingerprint, check_pin, PinCheck, SAFETY_NUMBER_ROUNDS}` and their `beebeeb_client::contacts` re-export (`PinCheck`, `check_pin`, `key_fingerprint`, `safety_number`) | public | removed; `contact_keys` keeps `normalize_email`. The safety number and fingerprint are `share_flow::safety`'s. The crate-private labels `KEY_FINGERPRINT_DOMAIN` and `SAFETY_NUMBER_DOMAIN` went with them |
+| `beebeeb_store::StoreError::Database` | `rusqlite::Error` of `rusqlite` 0.32 | `rusqlite::Error` of `rusqlite` 0.41 (`libsqlite3-sys` 0.39) |
+
 ## Sign-in, account, passkey and share flow exports (0.2.7 and 0.2.8)
 
 The sans-IO flows of `beebeeb_core` (`auth_flow`, `account_flows`, `signup_flow`, `recovery_flow`,

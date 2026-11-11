@@ -164,7 +164,8 @@ Secrets, input and bindings:
   never a token.
 - Shares have one implementation, `share_flow`: the native share calls (`beebeeb-client` `shares`) run its
   flows and send each request as the flow built it (`beebeeb_api::FlowRequest`), never a hand-built share
-  body, and never derive a foreign item's key to share it.
+  body, and never derive a foreign item's key to share it. A 403 is a refusal with the server's code
+  (`ShareFlowError::Forbidden`, UniFFI `ShareRefused`), never the session or a wrong password.
 - Passkey vault (`passkey`): web's format byte for byte (`test-vectors/passkey_vault.json` from web's
   TS); native hmac-secret callers pass `hmac_secret_salt()`, PRF-input APIs `prf_eval_input()`; no
   non-PRF fallback key, and no flow returns a PRF output, wrap key or blob to its caller; the server's

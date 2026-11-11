@@ -134,7 +134,10 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   `wrapped_file_key` (Rust wraps the file key), a link without `expires_in_hours` does not expire (no
   30-day default), and its owner can copy it again (`share_rebuild_link`). `ShareData` is removed. A
   refusal is the new `ServiceError::ShareRefused { code }` (kind `share_refused`): `code` is the share
-  flow's code (`plan_required`, `trial_share_limit_reached`, ...); show the app's words for it.
+  flow's code (`plan_required`, `trial_share_limit_reached`, ...), and for a 403 the server's own
+  (`sharing_paused`, `email_unverified`, `billing_read_only`, ..., or `forbidden` when it names none);
+  show the app's words for it. A 403 is never `Authentication`. `expires_in_hours` above 8760 (one
+  year) or `max_opens` above 2147483647 is `InvalidInput`.
 
 - Account changes (`AuthServiceHandle`'s authenticator setup, enable and remove, `change_password`,
   `change_email` and `request_account_deletion`) no longer answer `unavailable` for everything. A
@@ -164,6 +167,19 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
     authenticate the requester's key; `device_link` does, and needs the matching server routes;
   - recovery: `recovery_flow` uses the phrase routes; the native recovery uses the attempt routes with
     their wait.
+- `share_flow` reads a 403 apart from a 401: `ShareFlowError::from_status` makes a 403 the new
+  `ShareFlowError::Forbidden { code }`, where `code` is the server's code (`code`, else `error`:
+  `sharing_paused`, `email_unverified`, `billing_read_only`, ...) or `forbidden` when the body names
+  none; in 0.2.8 a 403 was `Unauthorized` and its code was lost. `Unauthorized` is now a 401 only.
+  `ShareFlowError::host_code()` is the code to show (`Forbidden`'s own, else `code()`); the UniFFI
+  `ShareFlowFfiError` and the WASM share flows' errors carry it. Update exhaustive matches.
+- `CreateLink` (file links and bundles) sends a link again with a fresh token only for the server's
+  token collision; in 0.2.8 any 409 without a share refusal in `code` was sent twice, a refusal the
+  server writes in `error` (`plan_required`, `trial_sharing_unavailable`, ...) included. It is now
+  `Refused` after one request.
+- `LinkOptions` and `FolderLinkInput` refuse `expires_in_hours` above
+  `share_flow::link::MAX_EXPIRES_IN_HOURS` (8760, one year) and `max_opens` above `MAX_OPENS`
+  (`i32::MAX`) as `InvalidInput` before any request.
 - `path_safety::check_component` no longer applies the Windows rules to a `Rules::Portable` name on a
   Windows host (0.2.8); a caller that writes the name uses `check_component_to_write`, as
   `TrustedDirectory::begin_publish` now does.
@@ -346,9 +362,9 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   it did not confirm as `AuthError::PasswordNotConfirmed`: a wrong password was `Crypto`, and a proof the
   server refused was a 401 `ClientError` that also emitted `EngineEvent::SessionExpired`. A 401 on
   `confirm-opaque-start` or `confirm-opaque-finish` (`Endpoint::is_step_up`) emits no expiry: the server
-  answers 401 there for a refused step-up as for a dead session. After a 401 at the start the client asks
-  for the account (`GET /api/v1/auth/me`): a live session makes the refusal `PasswordNotConfirmed`, a
-  gone one is reported expired as on any other request.
+  answers 401 there for a refused step-up as for a dead session. After a 401 at the start or the finish
+  the client asks for the account (`GET /api/v1/auth/me`): a live session makes the refusal
+  `PasswordNotConfirmed`, a gone one is reported expired once, as on any other request.
 - `ServerError::parse_coded_body` decodes the account-delete routes' refusals, whose stable code is in
   `code` and text in `error`; `account::request_deletion` uses it, so its refusals keep their code
   (`second_factor_required`, `delete_already_scheduled`, `delete_subscription_active`,
