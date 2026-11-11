@@ -193,32 +193,39 @@ async fn a_typed_refusal_reaches_the_flow_and_an_expired_session_does_not() {
 }
 
 /// The share-create gates answer 403 with their own code (`check_share_creation`'s
-/// `sharing_paused`, in the server's body): the caller gets that code, the session stays.
+/// `sharing_paused`, and a frozen account's `account_frozen` from a server that sends it,
+/// LD-0155, in the server's bodies): the caller gets that code, the session stays.
 #[tokio::test]
 async fn a_403_refusal_keeps_the_servers_code_and_is_no_session_event() {
-    let transport = ScriptedTransport::json(
-        403,
-        json!({
-            "error": "sharing_paused",
-            "message": "Sharing is paused on this account while we review it. Your files are unaffected.",
-        })
-        .to_string()
-        .into_bytes(),
-    );
-    let client = signed_in(&transport);
-    let mut events = client.events().subscribe();
+    for (code, message) in [
+        (
+            "sharing_paused",
+            "Sharing is paused on this account while we review it. Your files are unaffected.",
+        ),
+        (
+            "account_frozen",
+            "Your account is frozen. Unfreeze it in Settings → Privacy to resume.",
+        ),
+    ] {
+        let transport = ScriptedTransport::json(
+            403,
+            json!({ "error": code, "message": message }).to_string().into_bytes(),
+        );
+        let client = signed_in(&transport);
+        let mut events = client.events().subscribe();
 
-    let refused = client
-        .create_share_link(APP, FILE, &LinkOptions::default())
-        .await
-        .unwrap_err();
+        let refused = client
+            .create_share_link(APP, FILE, &LinkOptions::default())
+            .await
+            .unwrap_err();
 
-    assert!(
-        matches!(&refused, ShareServiceError::Flow(error) if error.host_code() == "sharing_paused"),
-        "{refused:?}"
-    );
-    assert!(events.try_recv().is_err(), "a 403 is not a session event");
-    assert_eq!(transport.request_count(), 1);
+        assert!(
+            matches!(&refused, ShareServiceError::Flow(error) if error.host_code() == code),
+            "{refused:?}"
+        );
+        assert!(events.try_recv().is_err(), "a 403 is not a session event");
+        assert_eq!(transport.request_count(), 1);
+    }
 }
 
 #[tokio::test]

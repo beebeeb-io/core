@@ -533,7 +533,7 @@ changed exports.
 
 | Item | Before | Now |
 | --- | --- | --- |
-| `ShareFlowError::Forbidden { code: String }` | none | a 403 refusal: `code` is the server's code (`code`, else `error`: `sharing_paused`, `email_unverified`, `billing_read_only`, ...), or `forbidden` when the body names none (the account-frozen 403 sends a sentence). `code()` is `forbidden` |
+| `ShareFlowError::Forbidden { code: String }` | none | a 403 refusal: `code` is the server's code (`code`, else `error`: `sharing_paused`, `email_unverified`, `billing_read_only`, ...), or `forbidden` when the body names none (an older server's account-frozen 403 sends only a sentence; a newer one sends `account_frozen`). `code()` is `forbidden` |
 | `ShareFlowError::from_status` | a 401 or 403 without a share refusal code was `Unauthorized` | a 401 is `Unauthorized`, a 403 is `Forbidden { code }` |
 | `ShareFlowError::host_code` | none | the code a host shows: `Forbidden`'s `code`, else `code()` |
 | `share_flow::link::CreateLink::on_response` (file links and bundles) | a 409 without a string `code` from the share refusals got a fresh token and was sent again | only the server's token collision (`error` `share token already exists — regenerate and retry`, or `token_taken`) is sent again, once; every other 409 is the flow's error, a refusal in `error` included |
@@ -559,6 +559,8 @@ release's earlier development state.
 | `proposed::RecoveryComplete.email_verification_code` | `Option<String>` | `Option<Zeroizing<String>>` |
 | `proposed::AuthenticatorChange.code` and `.secret` | `Option<String>` | `Option<Zeroizing<String>>` |
 | `routes::onboarding::EmailVerify.code` | `String` | `Zeroizing<String>` |
+| `routes::account::DeletionRequest.code` (`DeletionRequest` replaces `DeleteRequest`) | `DeleteRequest { password: String, totp_code: Option<String> }`, posted to `/api/v1/account/delete/request` | `Option<Zeroizing<String>>`, the second factor only: the password is proven by the step-up, and `request_deletion` posts to `/api/v1/auth/account/delete-request` |
+| `routes::account::TotpSetup.secret`, `.qr_uri` and `.backup_codes` | `String`, `Option<String>`, `Vec<String>` | `Zeroizing<String>`, `Option<Zeroizing<String>>`, `Zeroizing<Vec<String>>` |
 | `beebeeb_core::contact_keys::{safety_number, key_fingerprint, check_pin, PinCheck, SAFETY_NUMBER_ROUNDS}` and their `beebeeb_client::contacts` re-export (`PinCheck`, `check_pin`, `key_fingerprint`, `safety_number`) | public | removed; `contact_keys` keeps `normalize_email`. The safety number and fingerprint are `share_flow::safety`'s. The crate-private labels `KEY_FINGERPRINT_DOMAIN` and `SAFETY_NUMBER_DOMAIN` went with them |
 | `beebeeb_store::StoreError::Database` | `rusqlite::Error` of `rusqlite` 0.32 | `rusqlite::Error` of `rusqlite` 0.41 (`libsqlite3-sys` 0.39) |
 

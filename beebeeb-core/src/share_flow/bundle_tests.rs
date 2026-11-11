@@ -80,6 +80,33 @@ fn every_item_opens_under_the_links_k_c_and_the_owner_can_rebuild_it() {
     assert_eq!(rebuilt.as_str(), created.link.as_str());
 }
 
+/// A bundle's collision sent as the code (LD-0155), in `error` or `code`: one fresh token, once.
+#[test]
+fn a_bundle_token_collision_sent_as_token_taken_gets_one_fresh_token() {
+    let m = MasterKey::from_bytes([4; 32]);
+    let key = FileKey::from_bytes([0x90; 32]);
+    let items = [BundleItem {
+        file_id: IDS[0],
+        position: 0,
+        file_key: &key,
+    }];
+    for collision in [
+        json!({ "error": "token_taken", "message": "share token already exists — regenerate and retry" }),
+        json!({ "code": "token_taken", "error": "share token already exists — regenerate and retry" }),
+    ] {
+        let (mut flow, first) = CreateLink::bundle(APP, &items, &m, &LinkOptions::default()).unwrap();
+        let LinkStep::Send(retry) = flow.on_response(HttpResponse::new(409, collision.clone())).unwrap() else {
+            panic!("expected a retry for {collision}")
+        };
+        assert_ne!(first.body.unwrap()["token"], retry.body.unwrap()["token"]);
+        assert_eq!(
+            flow.on_response(HttpResponse::new(409, collision)).unwrap_err(),
+            ShareFlowError::Server { status: 409 },
+            "one retry only"
+        );
+    }
+}
+
 #[test]
 fn a_bundle_holds_one_to_256_files() {
     let m = MasterKey::from_bytes([4; 32]);

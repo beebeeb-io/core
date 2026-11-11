@@ -89,6 +89,27 @@ fn the_frozen_403_carries_no_code_and_its_text_is_never_kept() {
 }
 
 #[test]
+fn a_frozen_account_with_its_code_keeps_it() {
+    // `ApiError::AccountFrozen` once it sends `{"error": "account_frozen", "message": ...}` (LD-0155).
+    let body = json!({
+        "error": "account_frozen",
+        "message": "Your account is frozen. Unfreeze it in Settings → Privacy to resume.",
+    });
+    let err = ShareFlowError::from_status(&HttpResponse::new(403, body.clone()));
+    assert_eq!(
+        err,
+        ShareFlowError::Forbidden {
+            code: "account_frozen".to_owned()
+        }
+    );
+    let (mut flow, _) = start(&LinkOptions::default()).unwrap();
+    assert_eq!(
+        flow.on_response(HttpResponse::new(403, body)).unwrap_err().host_code(),
+        "account_frozen"
+    );
+}
+
+#[test]
 fn a_401_is_the_session_and_a_typed_refusal_wins_over_the_status() {
     let unauthorized = ShareFlowError::from_status(&HttpResponse::new(401, json!({ "error": "unauthorized" })));
     assert_eq!(unauthorized, ShareFlowError::Unauthorized);
@@ -146,10 +167,12 @@ fn an_other_409_is_not_a_token_collision() {
 #[test]
 fn the_servers_token_collision_gets_one_fresh_token() {
     for body in [
-        // `POST /shares`: `ApiError::Conflict` on the token's unique violation.
+        // An older `POST /shares`: `ApiError::Conflict` on the token's unique violation.
         json!({ "error": "share token already exists — regenerate and retry" }),
-        // The folder-link route's `ConflictCode`.
-        json!({ "error": "token_taken", "message": "That link token is already in use — generate a new one." }),
+        // `POST /shares` that sends the code (LD-0155): `ApiError::ConflictCode`, the sentence in `message`.
+        json!({ "error": "token_taken", "message": "share token already exists — regenerate and retry" }),
+        // A coded route's shape: the code in `code`, the text in `error`.
+        json!({ "code": "token_taken", "error": "share token already exists — regenerate and retry" }),
     ] {
         let (mut flow, first) = start(&LinkOptions::default()).unwrap();
         let LinkStep::Send(second) = flow.on_response(HttpResponse::new(409, body.clone())).unwrap() else {

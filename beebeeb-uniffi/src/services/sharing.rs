@@ -159,7 +159,7 @@ mod share_error_tests {
     }
 
     /// The share-create gates' 403s (`sharing_paused`, `email_unverified`, the account-frozen one
-    /// without a code), in the server's bodies: a refusal with the server's code, never the
+    /// with and without its code), in the server's bodies: a refusal with the server's code, never the
     /// wrong-password `Authentication`.
     #[test]
     fn a_403_is_a_refusal_with_the_servers_code() {
@@ -186,6 +186,13 @@ mod share_error_tests {
                 "error": "Your account is frozen. Unfreeze it in Settings → Privacy to resume.",
             })),
             ServiceError::ShareRefused { code } if code == "forbidden"
+        ));
+        assert!(matches!(
+            refused(serde_json::json!({
+                "error": "account_frozen",
+                "message": "Your account is frozen. Unfreeze it in Settings → Privacy to resume.",
+            })),
+            ServiceError::ShareRefused { code } if code == "account_frozen"
         ));
     }
 
