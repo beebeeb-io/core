@@ -7,17 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- Tests for two server codes that core already reads: a share-token collision sent as `token_taken`
-  (in `error` or `code`, for file links and bundles) gets one fresh token, as the older sentence still
-  does, and a 403 `account_frozen` reaches the app as `ShareRefused { code: "account_frozen" }`. See
-  LD-0155.
-
 ### Documentation
 
-- `EXPORTS.md` lists `routes::account::DeletionRequest.code` and `TotpSetup.secret` among the codes held
-  in `Zeroizing<String>`.
+- Share refusals: a frozen account's 403 reaches the app as `ShareRefused { code: "account_frozen" }`
+  (the share flow's `host_code()`) from a server that sends that code; an older server's sentence still
+  gives `forbidden`. A share-token collision answered with `token_taken`, in `error` or `code`, gets one
+  fresh token for file links and bundles, as the older sentence still does. Core already behaved this
+  way; tests now pin both. See LD-0155.
+- `EXPORTS.md` lists `routes::account::DeletionRequest.code` and `TotpSetup`'s `secret`, `qr_uri` and
+  `backup_codes` among the values held in `Zeroizing`.
 
 ## [0.3.0] - Unreleased
 

@@ -171,7 +171,8 @@ pub(crate) fn body_code(resp: &HttpResponse) -> Option<&str> {
         .or_else(|| resp.body.get("error").and_then(|v| v.as_str()))
 }
 
-/// A stable code, not text: the account-frozen 403 puts a sentence in `error`, which is never kept.
+/// A stable code, not text: an older server's account-frozen 403 puts a sentence in `error`, which is
+/// never kept (a newer one sends `account_frozen`).
 fn is_wire_code(code: &str) -> bool {
     !code.is_empty()
         && code.len() <= 64

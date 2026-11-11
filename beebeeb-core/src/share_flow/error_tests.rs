@@ -167,12 +167,12 @@ fn an_other_409_is_not_a_token_collision() {
 #[test]
 fn the_servers_token_collision_gets_one_fresh_token() {
     for body in [
-        // `POST /shares`: `ApiError::Conflict` on the token's unique violation.
+        // An older `POST /shares`: `ApiError::Conflict` on the token's unique violation.
         json!({ "error": "share token already exists — regenerate and retry" }),
-        // The folder-link route's `ConflictCode`, and `POST /shares` once it sends the code (LD-0155).
-        json!({ "error": "token_taken", "message": "That link token is already in use — generate a new one." }),
+        // `POST /shares` that sends the code (LD-0155): `ApiError::ConflictCode`, the sentence in `message`.
+        json!({ "error": "token_taken", "message": "share token already exists — regenerate and retry" }),
         // A coded route's shape: the code in `code`, the text in `error`.
-        json!({ "code": "token_taken", "error": "That link token is already in use — generate a new one." }),
+        json!({ "code": "token_taken", "error": "share token already exists — regenerate and retry" }),
     ] {
         let (mut flow, first) = start(&LinkOptions::default()).unwrap();
         let LinkStep::Send(second) = flow.on_response(HttpResponse::new(409, body.clone())).unwrap() else {
