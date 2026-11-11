@@ -3,58 +3,6 @@ use serde::{Deserialize, Serialize};
 use super::Empty;
 use crate::{Endpoint, Method, RawEndpoint, request::component};
 
-#[derive(Clone, Serialize)]
-pub struct LoginRequest {
-    pub email: String,
-    pub password: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hardware_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hardware_identity_secret: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub email_code_ticket: Option<String>,
-}
-
-#[derive(Clone, Deserialize)]
-pub struct LoginResponse {
-    #[serde(default)]
-    pub session_token: Option<String>,
-    #[serde(default)]
-    pub device_confirmation_secret: Option<String>,
-    #[serde(default)]
-    pub requires_2fa: Option<bool>,
-    #[serde(default)]
-    pub partial_token: Option<String>,
-    #[serde(default)]
-    pub user_id: Option<String>,
-    #[serde(default)]
-    pub key_state: Option<String>,
-    #[serde(default)]
-    pub salt: Option<String>,
-    #[serde(default)]
-    pub hardware_identity_secret: Option<String>,
-}
-impl std::fmt::Debug for LoginResponse {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LoginResponse")
-            .field("session_token", &self.session_token.as_ref().map(|_| "[REDACTED]"))
-            .field(
-                "device_confirmation_secret",
-                &self.device_confirmation_secret.as_ref().map(|_| "[REDACTED]"),
-            )
-            .field("requires_2fa", &self.requires_2fa)
-            .field("partial_token", &self.partial_token.as_ref().map(|_| "[REDACTED]"))
-            .field("user_id", &self.user_id)
-            .field("key_state", &self.key_state)
-            .field("salt", &self.salt)
-            .field(
-                "hardware_identity_secret",
-                &self.hardware_identity_secret.as_ref().map(|_| "[REDACTED]"),
-            )
-            .finish()
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct User {
     pub id: String,
@@ -178,9 +126,6 @@ impl std::fmt::Debug for TwoFactorResponse {
     }
 }
 
-pub fn login() -> Endpoint<LoginRequest, LoginResponse> {
-    Endpoint::new(Method::Post, "/api/v1/auth/login", true).public()
-}
 pub fn opaque_start() -> Endpoint<OpaqueStartRequest, OpaqueStartResponse> {
     Endpoint::new(Method::Post, "/api/v1/opaque/login-start", true).public()
 }

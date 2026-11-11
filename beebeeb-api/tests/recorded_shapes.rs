@@ -47,9 +47,9 @@ fn session_creating_answers_never_invent_a_proven_key_state() {
         .unwrap();
     assert_eq!(registration.key_state.as_deref(), Some("locked"));
 
-    let login = auth::login()
+    let login = auth::opaque_finish()
         .parse(answer(
-            r#"{"session_token":"secret","user_id":"account","salt":"0123456789abcdef","key_state":"locked"}"#,
+            r#"{"session_token":"secret","user_id":"account","key_state":"locked"}"#,
         ))
         .unwrap();
     assert_eq!(login.session_token.as_deref(), Some("secret"));
@@ -57,7 +57,7 @@ fn session_creating_answers_never_invent_a_proven_key_state() {
     assert_eq!(login.requires_2fa, None);
     assert_eq!(login.key_state.as_deref(), Some("locked"));
 
-    let login_factor = auth::login()
+    let login_factor = auth::opaque_finish()
         .parse(answer(r#"{"requires_2fa":true,"partial_token":"partial-secret"}"#))
         .unwrap();
     assert_eq!(login_factor.session_token, None);

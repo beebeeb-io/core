@@ -30,6 +30,7 @@ use crate::{
     transport::{Transport, TransportError, TransportFuture},
 };
 
+mod account;
 mod device_link;
 mod recovery;
 mod session;

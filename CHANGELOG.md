@@ -371,6 +371,12 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 
 ### Fixed
 
+- Account deletion from the native services (`request_account_deletion`) proves the password with the
+  step-up and asks for the confirmation link on `/api/v1/auth/account/delete-request`, the route the
+  server has. Its body carries only the authenticator or backup code. The unused request descriptors
+  for `/api/v1/auth/login` and `/api/v1/auth/change-password` are removed. A test fails when a request
+  type of `beebeeb-api` gains a password field, or when a production source of `beebeeb-core` or
+  `beebeeb-client` names one as a JSON key.
 - `zip` moves from 8.6 to 9 (the writer only; `aes-crypto` in tests only), so RUSTSEC-2026-0367,
   -0368, -0369 and -0429 are no longer ignored in `.cargo/audit.toml`.
 - Native requests declare `file-write-v2` and `version-metadata-v1` exactly where the server checks

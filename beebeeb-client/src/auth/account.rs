@@ -39,12 +39,15 @@ impl Client {
         password: Zeroizing<String>,
         authenticator_code: Option<String>,
     ) -> Result<(), AuthError> {
-        self.execute(
+        let confirmation = self.confirm_action(&password).await?;
+        // The step-up is the password's only use: wipe it before the next request.
+        drop(password);
+        self.execute_confirmed(
             &beebeeb_api::routes::account::request_deletion(),
-            &beebeeb_api::routes::account::DeleteRequest {
-                password: password.to_string(),
-                totp_code: authenticator_code,
+            &beebeeb_api::routes::account::DeletionRequest {
+                code: authenticator_code.map(Zeroizing::new),
             },
+            &confirmation.token,
         )
         .await
         .map(|_| ())
