@@ -5,6 +5,10 @@
 //! - no production source of `beebeeb-core` or `beebeeb-client` names a
 //!   password as a JSON key (the sans-IO flows build their bodies with `json!`).
 //!
+//! A third scan keeps the one-time codes a person types (an authenticator,
+//! backup or email code: a field named `code` or `*_code`) in `Zeroizing`, so a
+//! request type never holds one in a plain `String` that outlives the request.
+//!
 //! What they do not see: a field renamed with `#[serde(rename)]`, a derive
 //! split over several lines or behind `cfg_attr`, a hand-written `Serialize`,
 //! and a body built in another crate. None of these forms is used for a
@@ -63,8 +67,23 @@ fn field_name(line: &str) -> Option<&str> {
     (!name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_')).then_some(name)
 }
 
-/// The `Serialize` types of one source file, each with the password fields it declares.
-fn serialised_types(source: &str) -> Vec<(String, Vec<String>)> {
+fn is_password_field(name: &str, _declaration: &str) -> bool {
+    PASSWORD_FIELDS.contains(&name)
+}
+
+/// A one-time code a person types: the field `code` or a `*_code` field.
+fn is_typed_code(name: &str, _declaration: &str) -> bool {
+    name == "code" || name.ends_with("_code")
+}
+
+/// A typed code whose declared type does not wipe it.
+fn is_unwiped_code(name: &str, declaration: &str) -> bool {
+    is_typed_code(name, declaration) && !declaration.contains("Zeroizing<")
+}
+
+/// The `Serialize` types of one source file, each with the fields `flagged` picks
+/// (by field name and declaration line).
+fn serialised_types(source: &str, flagged: fn(&str, &str) -> bool) -> Vec<(String, Vec<String>)> {
     let mut found = Vec::new();
     let mut serialised = false;
     let mut open: Option<(String, Vec<String>)> = None;
@@ -73,7 +92,7 @@ fn serialised_types(source: &str) -> Vec<(String, Vec<String>)> {
             if line == "}" {
                 found.extend(open.take());
             } else if let Some(name) = field_name(line) {
-                if PASSWORD_FIELDS.contains(&name) {
+                if flagged(name, line) {
                     fields.push(name.to_owned());
                 }
             }
@@ -101,7 +120,7 @@ fn no_request_type_carries_an_account_password() {
     let mut offenders = Vec::new();
     for file in &files {
         let source = std::fs::read_to_string(file).expect("source file must be readable");
-        for (name, fields) in serialised_types(&source) {
+        for (name, fields) in serialised_types(&source, is_password_field) {
             request_types += 1;
             if !fields.is_empty() {
                 offenders.push(format!("{}: {name} {{ {} }}", file.display(), fields.join(", ")));
@@ -143,11 +162,78 @@ pub(crate) enum AlsoBad {
 }
 ";
     assert_eq!(
-        serialised_types(source),
+        serialised_types(source, is_password_field),
         vec![
             ("Bad".to_owned(), vec!["new_password".to_owned()]),
             ("AlsoBad".to_owned(), vec!["password".to_owned()]),
         ]
+    );
+}
+
+#[test]
+fn every_typed_code_in_a_request_type_is_zeroizing() {
+    let mut files = Vec::new();
+    rust_sources(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
+    let mut codes = 0;
+    let mut offenders = Vec::new();
+    for file in &files {
+        let source = std::fs::read_to_string(file).expect("source file must be readable");
+        for (_, fields) in serialised_types(&source, is_typed_code) {
+            codes += fields.len();
+        }
+        for (name, fields) in serialised_types(&source, is_unwiped_code) {
+            if !fields.is_empty() {
+                offenders.push(format!("{}: {name} {{ {} }}", file.display(), fields.join(", ")));
+            }
+        }
+    }
+    assert!(codes >= 9, "the scan saw only {codes} typed-code fields");
+    assert!(
+        offenders.is_empty(),
+        "request types holding a typed code outside Zeroizing:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn the_code_scan_reports_a_plain_code_and_passes_a_wiped_one() {
+    let source = "\
+#[derive(Clone, Serialize)]
+pub struct Plain {
+    pub email: String,
+    pub code: String,
+    pub email_verification_code: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct Wiped {
+    pub code: Zeroizing<String>,
+    #[serde(skip_serializing_if = \"Option::is_none\")]
+    pub backup_code: Option<Zeroizing<String>>,
+    pub email_code_ticket: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Answer {
+    pub code: String,
+}
+";
+    assert_eq!(
+        serialised_types(source, is_unwiped_code),
+        vec![
+            (
+                "Plain".to_owned(),
+                vec!["code".to_owned(), "email_verification_code".to_owned()]
+            ),
+            ("Wiped".to_owned(), vec![]),
+        ]
+    );
+    assert_eq!(
+        serialised_types(source, is_typed_code)
+            .iter()
+            .map(|(_, fields)| fields.len())
+            .sum::<usize>(),
+        4
     );
 }
 

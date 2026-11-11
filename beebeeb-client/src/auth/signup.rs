@@ -187,7 +187,7 @@ impl Client {
                 &onboarding::email_verify(),
                 &onboarding::EmailVerify {
                     email: signup.canonical_email.clone(),
-                    code,
+                    code: Zeroizing::new(code),
                 },
             )
             .await?;

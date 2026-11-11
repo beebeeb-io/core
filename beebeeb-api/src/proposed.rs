@@ -3,6 +3,7 @@
 
 use crate::{Endpoint, Method, request::component};
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 use crate::routes::Timestamp;
 use beebeeb_core::system_folders::Service;
@@ -189,11 +190,11 @@ pub fn revoke_account_session(id: &str) -> Endpoint<(), AccountSessionRevoked> {
 }
 
 pub fn confirm_opaque_start() -> Endpoint<ConfirmOpaqueStart, ConfirmOpaqueStartResponse> {
-    Endpoint::new(Method::Post, "/api/v1/auth/confirm-opaque-start", true)
+    Endpoint::new(Method::Post, "/api/v1/auth/confirm-opaque-start", true).step_up()
 }
 
 pub fn confirm_opaque_finish() -> Endpoint<ConfirmOpaqueFinish, Confirmation> {
-    Endpoint::new(Method::Post, "/api/v1/auth/confirm-opaque-finish", true)
+    Endpoint::new(Method::Post, "/api/v1/auth/confirm-opaque-finish", true).step_up()
 }
 
 pub fn change_password_start() -> Endpoint<ChangePasswordStart, ChangePasswordStartResponse> {
@@ -227,7 +228,7 @@ pub struct EmailCodeChallenge {
 #[derive(Clone, Serialize)]
 pub struct EmailCodeSubmit {
     pub challenge: String,
-    pub code: String,
+    pub code: Zeroizing<String>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -443,7 +444,7 @@ pub struct RecoveryComplete {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub new_email: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub email_verification_code: Option<String>,
+    pub email_verification_code: Option<Zeroizing<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authenticator: Option<AuthenticatorChange>,
 }
@@ -452,9 +453,9 @@ pub struct RecoveryComplete {
 pub struct AuthenticatorChange {
     pub action: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub secret: Option<String>,
+    pub secret: Option<Zeroizing<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub code: Option<String>,
+    pub code: Option<Zeroizing<String>>,
 }
 
 impl std::fmt::Debug for AuthenticatorChange {

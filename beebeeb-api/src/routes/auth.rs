@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 use super::Empty;
 use crate::{Endpoint, Method, RawEndpoint, request::component};
@@ -15,7 +16,7 @@ pub struct User {
 
 #[derive(Clone, Serialize)]
 pub struct CodeRequest {
-    pub code: String,
+    pub code: Zeroizing<String>,
 }
 #[derive(Debug, Clone, Deserialize)]
 pub struct PublicKey {
@@ -97,8 +98,8 @@ impl std::fmt::Debug for OpaqueFinishResponse {
 }
 #[derive(Clone, Serialize)]
 pub struct TwoFactorRequest {
-    pub partial_token: String,
-    pub code: String,
+    pub partial_token: Zeroizing<String>,
+    pub code: Zeroizing<String>,
 }
 #[derive(Clone, Deserialize)]
 pub struct TwoFactorResponse {

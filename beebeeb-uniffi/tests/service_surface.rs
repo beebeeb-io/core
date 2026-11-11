@@ -83,6 +83,40 @@ fn email_code_and_recovery_credentials_stay_in_one_shot_handles() {
     }
 }
 
+/// The source of `pub fn <name>` in `source`, up to the next `pub fn`.
+fn method_source<'a>(source: &'a str, name: &str) -> &'a str {
+    let start = source
+        .find(&format!("pub fn {name}("))
+        .unwrap_or_else(|| panic!("missing pub fn {name}"));
+    let end = source[start + 1..]
+        .find("pub fn ")
+        .map_or(source.len(), |next| start + 1 + next);
+    &source[start..end]
+}
+
+#[test]
+fn signed_in_account_changes_map_their_errors_by_the_session_rules() {
+    let account = include_str!("../src/account_services.rs");
+    for method in [
+        "setup_authenticator",
+        "enable_authenticator",
+        "remove_authenticator",
+        "change_password",
+        "change_email",
+        "request_account_deletion",
+    ] {
+        let body = method_source(account, method);
+        assert!(
+            body.contains(".map_err(map_account_change_error)"),
+            "{method} does not map its errors with map_account_change_error"
+        );
+        assert!(
+            !body.contains("map_client_error"),
+            "{method} flattens its AuthError with map_client_error"
+        );
+    }
+}
+
 #[test]
 fn apple_keychain_backend_includes_ios_after_first_unlock() {
     let secrets = include_str!("../../beebeeb-client/src/secrets.rs");

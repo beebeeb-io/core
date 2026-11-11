@@ -1,5 +1,6 @@
 use crate::{Endpoint, Method};
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct OnboardingDocument {
@@ -124,7 +125,7 @@ pub struct EmailStartResponse {
 #[derive(Clone, Serialize)]
 pub struct EmailVerify {
     pub email: String,
-    pub code: String,
+    pub code: Zeroizing<String>,
 }
 crate::redacted_debug!(EmailVerify; show: [email]; hide: [code]);
 #[derive(Clone, Deserialize)]

@@ -299,8 +299,8 @@ impl Client {
             match (changes.new_authenticator, changes.authenticator_code) {
                 (Some(secret), Some(code)) => Some(proposed::AuthenticatorChange {
                     action: "replace".into(),
-                    secret: Some(secret.to_string()),
-                    code: Some(code.to_string()),
+                    secret: Some(secret),
+                    code: Some(code),
                 }),
                 (None, None) => None,
                 _ => return Err(AuthError::MalformedAnswer),
@@ -312,7 +312,7 @@ impl Client {
                 &proposed::RecoveryComplete {
                     opaque_registration,
                     new_email,
-                    email_verification_code: changes.email_verification_code.map(|code| code.to_string()),
+                    email_verification_code: changes.email_verification_code,
                     authenticator,
                 },
                 &attempt.token,
