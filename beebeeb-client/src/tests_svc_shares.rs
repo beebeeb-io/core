@@ -139,7 +139,12 @@ async fn a_link_carries_owner_copies_its_owner_opens_and_no_expiry_unless_set() 
 
 #[tokio::test]
 async fn a_link_token_collision_is_retried_once_with_a_fresh_token() {
-    let transport = ScriptedTransport::json(409, br#"{"error":"share token already exists"}"#.to_vec());
+    let transport = ScriptedTransport::json(
+        409,
+        json!({"error": "share token already exists — regenerate and retry"})
+            .to_string()
+            .into_bytes(),
+    );
     transport.push_json(201, json!({"id": SHARE}).to_string().into_bytes());
     let client = signed_in(&transport);
 
@@ -185,6 +190,35 @@ async fn a_typed_refusal_reaches_the_flow_and_an_expired_session_does_not() {
     );
     assert_eq!(events.try_recv().unwrap(), EngineEvent::SessionExpired);
     assert_eq!(transport.request_count(), 2);
+}
+
+/// The share-create gates answer 403 with their own code (`check_share_creation`'s
+/// `sharing_paused`, in the server's body): the caller gets that code, the session stays.
+#[tokio::test]
+async fn a_403_refusal_keeps_the_servers_code_and_is_no_session_event() {
+    let transport = ScriptedTransport::json(
+        403,
+        json!({
+            "error": "sharing_paused",
+            "message": "Sharing is paused on this account while we review it. Your files are unaffected.",
+        })
+        .to_string()
+        .into_bytes(),
+    );
+    let client = signed_in(&transport);
+    let mut events = client.events().subscribe();
+
+    let refused = client
+        .create_share_link(APP, FILE, &LinkOptions::default())
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(&refused, ShareServiceError::Flow(error) if error.host_code() == "sharing_paused"),
+        "{refused:?}"
+    );
+    assert!(events.try_recv().is_err(), "a 403 is not a session event");
+    assert_eq!(transport.request_count(), 1);
 }
 
 #[tokio::test]

@@ -68,6 +68,7 @@ fn map_share_error(error: ShareServiceError) -> ServiceError {
                 seconds: retry_after_secs,
             },
             ShareFlowError::Crypto => ServiceError::Crypto,
+            ShareFlowError::Forbidden { code } => ServiceError::ShareRefused { code },
             ShareFlowError::Refused(_)
             | ShareFlowError::PeerKeyChanged
             | ShareFlowError::FolderKeysUnavailable
@@ -155,6 +156,37 @@ mod share_error_tests {
             r#"{"error":"session_expired"}"#,
         )));
         assert!(matches!(map_share_error(expired.into()), ServiceError::SessionExpired));
+    }
+
+    /// The share-create gates' 403s (`sharing_paused`, `email_unverified`, the account-frozen one
+    /// without a code), in the server's bodies: a refusal with the server's code, never the
+    /// wrong-password `Authentication`.
+    #[test]
+    fn a_403_is_a_refusal_with_the_servers_code() {
+        use beebeeb_core::auth_flow::HttpResponse;
+        let refused = |body: serde_json::Value| {
+            map_share_error(ShareFlowError::from_status(&HttpResponse::new(403, body)).into())
+        };
+        assert!(matches!(
+            refused(serde_json::json!({
+                "error": "sharing_paused",
+                "message": "Sharing is paused on this account while we review it. Your files are unaffected.",
+            })),
+            ServiceError::ShareRefused { code } if code == "sharing_paused"
+        ));
+        assert!(matches!(
+            refused(serde_json::json!({
+                "error": "email_unverified",
+                "message": "Verify your email address to upload, share, or receive files. Check your inbox or request a new link.",
+            })),
+            ServiceError::ShareRefused { code } if code == "email_unverified"
+        ));
+        assert!(matches!(
+            refused(serde_json::json!({
+                "error": "Your account is frozen. Unfreeze it in Settings → Privacy to resume.",
+            })),
+            ServiceError::ShareRefused { code } if code == "forbidden"
+        ));
     }
 
     #[test]

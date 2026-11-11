@@ -17,7 +17,8 @@ use crate::{FileKeyHandle, MasterKeyHandle};
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum ShareFlowFfiError {
-    /// `code` is `ShareFlowError::code()` (`plan_required`, `folder_keys_unavailable`, …).
+    /// `code` is `ShareFlowError::host_code()` (`plan_required`, `folder_keys_unavailable`, a 403's
+    /// own code such as `sharing_paused`, …).
     #[error("{code}")]
     Flow { code: String },
 }
@@ -25,7 +26,7 @@ pub enum ShareFlowFfiError {
 impl From<ShareFlowError> for ShareFlowFfiError {
     fn from(e: ShareFlowError) -> Self {
         Self::Flow {
-            code: e.code().to_owned(),
+            code: e.host_code().to_owned(),
         }
     }
 }

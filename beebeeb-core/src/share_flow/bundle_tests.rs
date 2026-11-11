@@ -44,8 +44,9 @@ fn every_item_opens_under_the_links_k_c_and_the_owner_can_rebuild_it() {
         (json!(10), json!("open sesame"))
     );
     let first_token = body["token"].as_str().unwrap().to_owned();
-    // An untyped 409 (token collision) is retried once with a fresh token.
-    let LinkStep::Send(retry) = flow.on_response(HttpResponse::new(409, json!({}))).unwrap() else {
+    // The server's token collision is retried once with a fresh token.
+    let collision = json!({ "error": "share token already exists — regenerate and retry" });
+    let LinkStep::Send(retry) = flow.on_response(HttpResponse::new(409, collision)).unwrap() else {
         panic!()
     };
     let body: Value = retry.body.unwrap();

@@ -15,7 +15,7 @@ use zeroize::Zeroizing;
 use super::auth_flow::{request_js, resp, to_js};
 
 fn err(e: ShareFlowError) -> JsError {
-    JsError::new(e.code())
+    JsError::new(e.host_code())
 }
 
 fn wrong_state() -> JsError {

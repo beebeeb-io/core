@@ -587,7 +587,10 @@ fn a_token_collision_retries_once_with_a_fresh_token() {
     )
     .unwrap();
     let LinkStep::Send(second) = flow
-        .on_response(HttpResponse::new(409, json!({"error": "conflict"})))
+        .on_response(HttpResponse::new(
+            409,
+            json!({"error": "share token already exists — regenerate and retry"}),
+        ))
         .unwrap()
     else {
         panic!("expected a retry")

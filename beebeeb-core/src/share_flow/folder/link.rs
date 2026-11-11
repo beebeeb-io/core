@@ -12,6 +12,7 @@ use base64::Engine;
 use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
+use super::super::link::{MAX_EXPIRES_IN_HOURS, MAX_OPENS};
 use super::super::{ShareFlowError, b64, display_form, frame, wrap_key_for_share};
 use super::{FolderShare, FolderStep, Purpose, Stage, error_code, send};
 use crate::auth_flow::{HttpRequest, HttpResponse, RequestAuth};
@@ -102,6 +103,12 @@ impl FolderShare {
     pub fn link(input: FolderLinkInput<'_>, master: &MasterKey) -> Result<(Self, FolderStep), ShareFlowError> {
         if !ACCESS_LEVELS.contains(&input.access_level) {
             return Err(ShareFlowError::InvalidInput("access level"));
+        }
+        if input.expires_in_hours.is_some_and(|h| h > MAX_EXPIRES_IN_HOURS) {
+            return Err(ShareFlowError::InvalidInput("expires in hours"));
+        }
+        if input.max_opens.is_some_and(|n| n > MAX_OPENS) {
+            return Err(ShareFlowError::InvalidInput("max opens"));
         }
         // An empty passphrase means "none"; anything typed is used exactly (NFC).
         let passphrase = match input.passphrase.as_deref().filter(|p| !p.is_empty()) {
