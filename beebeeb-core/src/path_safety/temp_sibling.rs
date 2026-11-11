@@ -44,6 +44,23 @@ impl TempSibling {
     /// Create the temp sibling of `output`; write the returned file, then
     /// [`publish`](Self::publish). The parent directory must exist.
     pub fn create(output: &Path) -> io::Result<(Self, File)> {
+        Self::create_with(output, |_| Ok(()))
+    }
+
+    /// [`create`](Self::create), telling `before_create` each candidate temp
+    /// path immediately BEFORE it is created (task 2434), so a caller can
+    /// record the path first and create second: a process killed in between
+    /// leaves a recorded name, never an unrecorded temp.
+    ///
+    /// `before_create` runs once per candidate: the plain `{output}.tmp`, then
+    /// a random name for each one that turns out to be taken. The path of its
+    /// LAST call is the file this returns; an earlier call was a taken name
+    /// that was skipped, never opened. An error from `before_create` stops
+    /// the create, with nothing made.
+    pub fn create_with(
+        output: &Path,
+        mut before_create: impl FnMut(&Path) -> io::Result<()>,
+    ) -> io::Result<(Self, File)> {
         if let Walk::Alias(conflict) = walk_last(output)? {
             return Err(conflict_error(conflict));
         }
@@ -51,6 +68,7 @@ impl TempSibling {
         // A taken name is skipped, never opened: 8 random 64-bit names cannot
         // all be taken unless something is wrong.
         for _ in 0..8 {
+            before_create(&temp)?;
             match OpenOptions::new().write(true).create_new(true).open(&temp) {
                 Ok(file) => {
                     let sibling = Self {
@@ -230,6 +248,68 @@ mod tests {
         assert_eq!(fs::read(dir.join("notes.pdf.tmp")).unwrap(), b"the user's own file");
         assert_eq!(fs::read(dir.join("notes.pdf")).unwrap(), b"new");
         assert_eq!(entries(dir), ["notes.pdf", "notes.pdf.tmp"]);
+    }
+
+    /// The path handed to the callback is exactly the file the create then
+    /// makes, and it does not exist yet when the callback runs (task 2434).
+    #[test]
+    fn create_with_hands_out_the_path_before_it_creates_it() {
+        let scratch = Scratch::new("with-plain");
+        let dir = &scratch.0;
+        let mut seen: Vec<(PathBuf, bool)> = Vec::new();
+
+        let (temp, file) = TempSibling::create_with(&dir.join("out.bin"), |path| {
+            seen.push((path.to_path_buf(), path.exists()));
+            Ok(())
+        })
+        .unwrap();
+        drop(file);
+
+        assert_eq!(seen, [(dir.join("out.bin.tmp"), false)], "one call, before the create");
+        assert_eq!(temp.temp, dir.join("out.bin.tmp"));
+        assert_eq!(entries(dir), ["out.bin.tmp"]);
+    }
+
+    /// On the random-name branch the callback sees every candidate in order:
+    /// the taken one, then the one that is created (the last call).
+    #[test]
+    fn create_with_hands_out_the_random_name_it_then_creates() {
+        let scratch = Scratch::new("with-random");
+        let dir = &scratch.0;
+        fs::write(dir.join("out.bin.tmp"), b"the user's own file").unwrap();
+        let mut seen: Vec<PathBuf> = Vec::new();
+
+        let (temp, file) = TempSibling::create_with(&dir.join("out.bin"), |path| {
+            seen.push(path.to_path_buf());
+            Ok(())
+        })
+        .unwrap();
+        drop(file);
+
+        assert_eq!(seen.len(), 2, "the taken name, then the free one: {seen:?}");
+        assert_eq!(seen[0], dir.join("out.bin.tmp"));
+        assert_eq!(seen.last(), Some(&temp.temp), "the last candidate is the created file");
+        assert_ne!(temp.temp, dir.join("out.bin.tmp"));
+        assert_eq!(fs::read(dir.join("out.bin.tmp")).unwrap(), b"the user's own file");
+        let mut expected = vec![
+            "out.bin.tmp".to_string(),
+            temp.temp.file_name().unwrap().to_string_lossy().into_owned(),
+        ];
+        expected.sort();
+        assert_eq!(entries(dir), expected);
+    }
+
+    /// A callback that fails stops the create: no temp file is made.
+    #[test]
+    fn a_failing_callback_creates_nothing() {
+        let scratch = Scratch::new("with-error");
+        let dir = &scratch.0;
+
+        let error =
+            TempSibling::create_with(&dir.join("out.bin"), |_| Err(io::Error::other("record failed"))).unwrap_err();
+
+        assert_eq!(error.to_string(), "record failed");
+        assert_eq!(entries(dir), Vec::<String>::new());
     }
 
     /// The usual temp name when it is free; the output's own name is replaced.
