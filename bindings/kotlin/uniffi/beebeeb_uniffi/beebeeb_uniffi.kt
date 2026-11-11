@@ -41746,7 +41746,8 @@ public object FfiConverterTypeSessionResumeAction: FfiConverterRustBuffer<Sessio
 sealed class ShareFlowFfiException: kotlin.Exception() {
     
     /**
-     * `code` is `ShareFlowError::code()` (`plan_required`, `folder_keys_unavailable`, …).
+     * `code` is `ShareFlowError::host_code()` (`plan_required`, `folder_keys_unavailable`, a 403's
+     * own code such as `sharing_paused`, …).
      */
     class Flow(
         

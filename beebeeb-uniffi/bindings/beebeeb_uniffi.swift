@@ -28406,7 +28406,8 @@ public enum ShareFlowFfiError: Swift.Error, Equatable, Hashable, Foundation.Loca
     
     
     /**
-     * `code` is `ShareFlowError::code()` (`plan_required`, `folder_keys_unavailable`, …).
+     * `code` is `ShareFlowError::host_code()` (`plan_required`, `folder_keys_unavailable`, a 403's
+     * own code such as `sharing_paused`, …).
      */
     case Flow(code: String
     )
