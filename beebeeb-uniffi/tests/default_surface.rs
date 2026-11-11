@@ -13,7 +13,11 @@ fn assert_no_raw_secret_getters(source: &str, function_marker: &str, raw_return_
             && compact.contains("()")
             && ["key", "token", "secret"].iter().any(|word| compact.contains(word));
         let returns_raw_bytes = raw_return_markers.iter().any(|marker| compact.contains(marker));
-        let safe_identifier = compact.contains("keyid()");
+        // The passkey PRF input and its `hmac-secret` salt are a fixed public label
+        // and a hash of it, not secrets: "passkey" and "secret" only name them.
+        let safe_identifier = compact.contains("keyid()")
+            || compact.contains("passkeyprfevalinput()")
+            || compact.contains("passkeyhmacsecretsalt()");
         assert!(
             !(looks_like_getter && returns_raw_bytes && !safe_identifier),
             "generated binding exposes a zero-argument raw secret getter: {line}"

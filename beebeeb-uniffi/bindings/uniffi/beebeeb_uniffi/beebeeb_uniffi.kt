@@ -1060,7 +1060,51 @@ external fun uniffi_beebeeb_uniffi_checksum_func_normalize_email(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_safety_number(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_passkey_assertion_finish_body(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_passkey_escrow_body(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_passkey_hmac_secret_salt(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_passkey_parse_assertion_start(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_passkey_parse_escrow(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_passkey_parse_registration_start(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_passkey_prf_eval_input(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_passkey_registration_finish_body(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_passkey_unwrap_vault_key(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_passkey_wrap_vault_key(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_mint_guest_item_id(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_share_approve_file_invite_request(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_share_open_link_file_key(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_share_open_member_file_key(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_share_rebuild_bundle_link(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_share_rebuild_link(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_share_revoke_request(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_file_request_close_request(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_file_request_rebuild_link(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_share_rebuild_folder_link(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_share_safety_number(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_recovery_unknown_word_positions(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_signup_policy_request(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_breachcheckhandle_evaluate(
 ): Short
@@ -1362,6 +1406,40 @@ external fun uniffi_beebeeb_uniffi_checksum_method_writetargethandle_version_cou
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_writetargethandle_version_id(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_abandon(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_change_email(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_change_password(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_delete_account(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_delete_cancel(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_delete_confirm(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_regenerate_backup_codes(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_resume(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_revoke_other_sessions(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_revoke_session(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_set_activity_logging(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_set_display_name(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_totp_confirm(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_totp_disable(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_totp_setup(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_verify_email(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_verify_password(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_authenticatorenrollmenthandle_cancel(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_authenticatorenrollmenthandle_qr_uri(
@@ -1431,6 +1509,38 @@ external fun uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_start_ema
 external fun uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_step(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_verify_email(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_approvalflow_approve(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_approvalflow_code_matches(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_approvalflow_deny(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_approvalflow_on_deny_response(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_approvalflow_on_lookup_response(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_approvalflow_on_response(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_approvalflow_start(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_devicerequestflow_init_frame(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_devicerequestflow_on_frame(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signinflow_on_response(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signinflow_on_verify_response(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signinflow_start(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signinflow_verify_request(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_stepupflow_attach_confirm_token(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_stepupflow_on_response(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_stepupflow_start(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_chunk_format(
 ): Short
@@ -1730,6 +1840,72 @@ external fun uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_resume(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_run_next(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_createlinkflow_on_response(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_createlinkflow_start(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_memberinviteflow_on_response(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_memberinviteflow_start(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_createrequestflow_on_response(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_createrequestflow_start(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_foldershareflow_on_response(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_foldershareflow_start(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_breach_request(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_evaluate(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_on_breach_response(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_on_finalize_response(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_on_register_response(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_on_start_response(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_set_password(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_start(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_acknowledge_phrase(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_breach_request(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_challenge_positions(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_confirm_phrase(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_evaluate(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_on_breach_response(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_on_code_sent(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_on_code_verified(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_on_register_finish(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_on_register_start(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_phrase_words(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_register_start(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_send_code(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_set_password(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_terms_request(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_verify_code(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_wipe(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_breachcheckhandle_new(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkencryptorhandle_for_push(
@@ -1770,6 +1946,16 @@ external fun uniffi_beebeeb_uniffi_checksum_constructor_searchindexhandle_new(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_signupceremonyhandle_new(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_accountflowhandle_new(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_approvalflow_new(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_devicerequestflow_new(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_signinflow_new(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_stepupflow_new(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push_with_file_key_handle(
@@ -1785,6 +1971,22 @@ external fun uniffi_beebeeb_uniffi_checksum_constructor_nativeclienthandle_new(
 external fun uniffi_beebeeb_uniffi_checksum_constructor_storehandle_open(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_constructor_searchservicehandle_new(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_createlinkflow_bundle(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_createlinkflow_new(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_memberinviteflow_new(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_createrequestflow_new(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_foldershareflow_link(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_foldershareflow_new(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_phraserecoveryhandle_new(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_constructor_signupflowhandle_new(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_fileprogresscallback_on_progress(
 ): Short
@@ -2254,6 +2456,46 @@ external fun uniffi_beebeeb_uniffi_fn_method_writetargethandle_version_counter(`
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_writetargethandle_version_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_clone_accountflowhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_accountflowhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_accountflowhandle_new(uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_abandon(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_change_email(`ptr`: Long,`newEmail`: RustBuffer.ByValue,`password`: RustBuffer.ByValue,`recoveryCheckB64`: RustBuffer.ByValue,`x25519PublicB64`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_change_password(`ptr`: Long,`current`: RustBuffer.ByValue,`newPassword`: RustBuffer.ByValue,`recoveryCheckB64`: RustBuffer.ByValue,`x25519PublicB64`: RustBuffer.ByValue,`onboardingStatus`: Short,`onboardingBody`: RustBuffer.ByValue,`breachCheck`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_delete_account(`ptr`: Long,`password`: RustBuffer.ByValue,`code`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_delete_cancel(`ptr`: Long,`linkToken`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_delete_confirm(`ptr`: Long,`linkToken`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_regenerate_backup_codes(`ptr`: Long,`code`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_resume(`ptr`: Long,`status`: Short,`bodyText`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_revoke_other_sessions(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_revoke_session(`ptr`: Long,`sessionId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_set_activity_logging(`ptr`: Long,`on`: Byte,`password`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_set_display_name(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_totp_confirm(`ptr`: Long,`code`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_totp_disable(`ptr`: Long,`code`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_totp_setup(`ptr`: Long,`password`: RustBuffer.ByValue,`currentCode`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_verify_email(`ptr`: Long,`code`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_accountflowhandle_verify_password(`ptr`: Long,`password`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_clone_authenticatorenrollmenthandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_authenticatorenrollmenthandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -2360,6 +2602,62 @@ external fun uniffi_beebeeb_uniffi_fn_clone_typeddevicereceiverhandle(`handle`: 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_typeddevicereceiverhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_beebeeb_uniffi_fn_clone_approvalflow(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_approvalflow(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_approvalflow_new(`code`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_approvalflow_approve(`ptr`: Long,`typedCode`: RustBuffer.ByValue,`password`: RustBuffer.ByValue,`masterKey`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_approvalflow_code_matches(`ptr`: Long,`typed`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun uniffi_beebeeb_uniffi_fn_method_approvalflow_deny(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_approvalflow_on_deny_response(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_approvalflow_on_lookup_response(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_approvalflow_on_response(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_approvalflow_start(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_clone_devicerequestflow(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_devicerequestflow(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_devicerequestflow_new(uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_devicerequestflow_init_frame(`ptr`: Long,`deviceName`: RustBuffer.ByValue,`client`: RustBuffer.ByValue,`clientVersion`: RustBuffer.ByValue,`os`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_devicerequestflow_on_frame(`ptr`: Long,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_clone_signinflow(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_signinflow(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_signinflow_new(`email`: RustBuffer.ByValue,`password`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_signinflow_on_response(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_signinflow_on_verify_response(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_signinflow_start(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_signinflow_verify_request(`ptr`: Long,`code`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_clone_stepupflow(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_stepupflow(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_stepupflow_new(`password`: RustBuffer.ByValue,`purpose`: RustBuffer.ByValue,`cliCode`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_stepupflow_attach_confirm_token(`ptr`: Long,`path`: RustBuffer.ByValue,`bodyJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_stepupflow_on_response(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_stepupflow_start(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_clone_chunkdecryptorhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_free_chunkdecryptorhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -2786,6 +3084,112 @@ external fun uniffi_beebeeb_uniffi_fn_method_uploadservicehandle_resume(`ptr`: L
 ): Byte
 external fun uniffi_beebeeb_uniffi_fn_method_uploadservicehandle_run_next(`ptr`: Long,`limit`: Int,`network`: RustBuffer.ByValue,`transport`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
+external fun uniffi_beebeeb_uniffi_fn_clone_createlinkflow(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_createlinkflow(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_createlinkflow_bundle(`appUrl`: RustBuffer.ByValue,`items`: RustBuffer.ByValue,`masterKey`: Long,`expiresInHours`: RustBuffer.ByValue,`maxOpens`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_constructor_createlinkflow_new(`appUrl`: RustBuffer.ByValue,`fileId`: RustBuffer.ByValue,`masterKey`: Long,`fileKey`: Long,`expiresInHours`: RustBuffer.ByValue,`maxOpens`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_createlinkflow_on_response(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_createlinkflow_start(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_clone_memberinviteflow(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_memberinviteflow(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_memberinviteflow_new(`itemId`: RustBuffer.ByValue,`isFolder`: Byte,`email`: RustBuffer.ByValue,`masterKey`: Long,`fileKey`: Long,`peerKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_memberinviteflow_on_response(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_memberinviteflow_start(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_clone_createrequestflow(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_createrequestflow(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_createrequestflow_new(`appUrl`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,`targetFolderId`: RustBuffer.ByValue,`maxFiles`: RustBuffer.ByValue,`maxTotalBytes`: RustBuffer.ByValue,`expiresInSecs`: RustBuffer.ByValue,`masterKey`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_createrequestflow_on_response(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_createrequestflow_start(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_clone_foldershareflow(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_foldershareflow(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_foldershareflow_link(`folderId`: RustBuffer.ByValue,`appUrl`: RustBuffer.ByValue,`accessLevel`: RustBuffer.ByValue,`label`: RustBuffer.ByValue,`expiresInHours`: RustBuffer.ByValue,`capBytes`: RustBuffer.ByValue,`maxOpens`: RustBuffer.ByValue,`passphrase`: RustBuffer.ByValue,`custodySeen`: RustBuffer.ByValue,`custodyUnreadable`: Byte,`masterKey`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_constructor_foldershareflow_new(`folderId`: RustBuffer.ByValue,`email`: RustBuffer.ByValue,`sharedFoldersWrite`: Byte,`custodySeen`: RustBuffer.ByValue,`custodyUnreadable`: Byte,`masterKey`: Long,`peerKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_foldershareflow_on_response(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_foldershareflow_start(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_clone_phraserecoveryhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_phraserecoveryhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_phraserecoveryhandle_new(`policyResponse`: RustBuffer.ByValue,`email`: RustBuffer.ByValue,`phrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_breach_request(`ptr`: Long,`password`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_evaluate(`ptr`: Long,`password`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_on_breach_response(`ptr`: Long,`status`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_on_finalize_response(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_on_register_response(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_on_start_response(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_set_password(`ptr`: Long,`password`: RustBuffer.ByValue,`confirmation`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_start(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_clone_signupflowhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_free_signupflowhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_constructor_signupflowhandle_new(`policyResponse`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_acknowledge_phrase(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_breach_request(`ptr`: Long,`password`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_challenge_positions(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_confirm_phrase(`ptr`: Long,`answers`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_evaluate(`ptr`: Long,`password`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_on_breach_response(`ptr`: Long,`status`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_on_code_sent(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_on_code_verified(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_on_register_finish(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_on_register_start(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_phrase_words(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_register_start(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_send_code(`ptr`: Long,`email`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_set_password(`ptr`: Long,`password`: RustBuffer.ByValue,`confirmation`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_terms_request(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_verify_code(`ptr`: Long,`code`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_wipe(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_beebeeb_uniffi_fn_init_callback_vtable_fileprogresscallback(`vtable`: UniffiVTableCallbackInterfaceFileProgressCallback,
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_init_callback_vtable_accountdatapurgercallback(`vtable`: UniffiVTableCallbackInterfaceAccountDataPurgerCallback,
@@ -2962,7 +3366,51 @@ external fun uniffi_beebeeb_uniffi_fn_func_normalize_email(`raw`: RustBuffer.ByV
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_safety_number(`emailA`: RustBuffer.ByValue,`publicKeyA`: RustBuffer.ByValue,`emailB`: RustBuffer.ByValue,`publicKeyB`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_passkey_assertion_finish_body(`startJson`: RustBuffer.ByValue,`assertionJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_passkey_escrow_body(`credentialId`: RustBuffer.ByValue,`blob`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_passkey_hmac_secret_salt(uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_passkey_parse_assertion_start(`answerJson`: RustBuffer.ByValue,`expectedRpId`: RustBuffer.ByValue,`allowLocalhost`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_passkey_parse_escrow(`answerJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_passkey_parse_registration_start(`answerJson`: RustBuffer.ByValue,`expectedRpId`: RustBuffer.ByValue,`allowLocalhost`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_passkey_prf_eval_input(uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_passkey_registration_finish_body(`startJson`: RustBuffer.ByValue,`attestationJson`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_passkey_unwrap_vault_key(`prfOutput`: RustBuffer.ByValue,`blob`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_func_passkey_wrap_vault_key(`prfOutput`: RustBuffer.ByValue,`masterKey`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_mint_guest_item_id(uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_share_approve_file_invite_request(`inviteId`: RustBuffer.ByValue,`fileId`: RustBuffer.ByValue,`recipientPublicKeyB64`: RustBuffer.ByValue,`masterKey`: Long,`fileKey`: Long,`peerKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_share_open_link_file_key(`fragmentKey`: RustBuffer.ByValue,`wrappedFileKeyB64`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_func_share_open_member_file_key(`masterKey`: Long,`ownerPublicKey`: RustBuffer.ByValue,`fileId`: RustBuffer.ByValue,`sealed`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_beebeeb_uniffi_fn_func_share_rebuild_bundle_link(`appUrl`: RustBuffer.ByValue,`masterKey`: Long,`ownerWrappedKey`: RustBuffer.ByValue,`ownerWrappedToken`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_share_rebuild_link(`appUrl`: RustBuffer.ByValue,`masterKey`: Long,`ownerWrappedKey`: RustBuffer.ByValue,`ownerWrappedToken`: RustBuffer.ByValue,`wrappedFileKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_share_revoke_request(`id`: RustBuffer.ByValue,`isInvite`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_file_request_close_request(`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_file_request_rebuild_link(`appUrl`: RustBuffer.ByValue,`masterKey`: Long,`token`: RustBuffer.ByValue,`wrappedPrivateKey`: RustBuffer.ByValue,`wrapNonce`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_share_rebuild_folder_link(`appUrl`: RustBuffer.ByValue,`masterKey`: Long,`shareId`: RustBuffer.ByValue,`ownerWrappedKey`: RustBuffer.ByValue,`ownerWrappedToken`: RustBuffer.ByValue,`wrappedFolderKey`: RustBuffer.ByValue,`passphraseProtected`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_share_safety_number(`masterKey`: Long,`ownUserId`: RustBuffer.ByValue,`peerUserId`: RustBuffer.ByValue,`peerPublicKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_recovery_unknown_word_positions(`words`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_beebeeb_uniffi_fn_func_signup_policy_request(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun ffi_beebeeb_uniffi_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -3317,7 +3765,73 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_func_safety_number() != 44018.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_passkey_assertion_finish_body() != 150.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_passkey_escrow_body() != 4647.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_passkey_hmac_secret_salt() != 13335.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_passkey_parse_assertion_start() != 50363.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_passkey_parse_escrow() != 29286.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_passkey_parse_registration_start() != 169.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_passkey_prf_eval_input() != 24902.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_passkey_registration_finish_body() != 29947.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_passkey_unwrap_vault_key() != 52409.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_passkey_wrap_vault_key() != 37439.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_mint_guest_item_id() != 8655.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_share_approve_file_invite_request() != 50394.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_share_open_link_file_key() != 59449.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_share_open_member_file_key() != 860.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_share_rebuild_bundle_link() != 31674.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_share_rebuild_link() != 23471.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_share_revoke_request() != 41439.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_file_request_close_request() != 53378.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_file_request_rebuild_link() != 38495.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_share_rebuild_folder_link() != 15535.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_share_safety_number() != 11024.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_recovery_unknown_word_positions() != 31478.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_signup_policy_request() != 60322.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_breachcheckhandle_evaluate() != 6329.toShort()) {
@@ -3770,6 +4284,57 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_writetargethandle_version_id() != 43952.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_abandon() != 37878.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_change_email() != 34743.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_change_password() != 8344.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_delete_account() != 7761.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_delete_cancel() != 12469.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_delete_confirm() != 27952.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_regenerate_backup_codes() != 40702.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_resume() != 5423.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_revoke_other_sessions() != 63505.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_revoke_session() != 24964.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_set_activity_logging() != 34110.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_set_display_name() != 7902.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_totp_confirm() != 9458.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_totp_disable() != 9305.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_totp_setup() != 42454.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_verify_email() != 7625.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_verify_password() != 25939.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_authenticatorenrollmenthandle_cancel() != 27288.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -3873,6 +4438,54 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_verify_email() != 62146.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_approvalflow_approve() != 1399.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_approvalflow_code_matches() != 11962.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_approvalflow_deny() != 3891.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_approvalflow_on_deny_response() != 28846.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_approvalflow_on_lookup_response() != 36879.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_approvalflow_on_response() != 23867.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_approvalflow_start() != 54742.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_devicerequestflow_init_frame() != 14599.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_devicerequestflow_on_frame() != 57307.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signinflow_on_response() != 41259.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signinflow_on_verify_response() != 61415.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signinflow_start() != 38423.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signinflow_verify_request() != 63052.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_stepupflow_attach_confirm_token() != 31033.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_stepupflow_on_response() != 33225.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_stepupflow_start() != 26023.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_chunk_format() != 28015.toShort()) {
@@ -4322,6 +4935,105 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_run_next() != 45328.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_createlinkflow_on_response() != 32540.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_createlinkflow_start() != 49091.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_memberinviteflow_on_response() != 1680.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_memberinviteflow_start() != 4586.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_createrequestflow_on_response() != 41813.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_createrequestflow_start() != 50394.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_foldershareflow_on_response() != 42925.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_foldershareflow_start() != 437.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_breach_request() != 8893.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_evaluate() != 2025.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_on_breach_response() != 12324.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_on_finalize_response() != 35427.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_on_register_response() != 25235.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_on_start_response() != 52808.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_set_password() != 11686.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_start() != 52423.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_acknowledge_phrase() != 5724.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_breach_request() != 18103.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_challenge_positions() != 4651.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_confirm_phrase() != 5277.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_evaluate() != 35119.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_on_breach_response() != 37021.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_on_code_sent() != 29912.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_on_code_verified() != 537.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_on_register_finish() != 10120.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_on_register_start() != 37641.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_phrase_words() != 24400.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_register_start() != 1718.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_send_code() != 27113.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_set_password() != 29111.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_terms_request() != 38757.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_verify_code() != 21090.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_wipe() != 8749.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_breachcheckhandle_new() != 51691.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -4382,6 +5094,21 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_signupceremonyhandle_new() != 22479.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_accountflowhandle_new() != 49098.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_approvalflow_new() != 16991.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_devicerequestflow_new() != 14802.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_signinflow_new() != 31500.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_stepupflow_new() != 19550.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push() != 60587.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -4404,6 +5131,30 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_searchservicehandle_new() != 65022.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_createlinkflow_bundle() != 43023.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_createlinkflow_new() != 30018.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_memberinviteflow_new() != 1079.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_createrequestflow_new() != 63198.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_foldershareflow_link() != 65331.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_foldershareflow_new() != 61341.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_phraserecoveryhandle_new() != 22165.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_signupflowhandle_new() != 7014.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_fileprogresscallback_on_progress() != 13325.toShort()) {
@@ -5004,6 +5755,565 @@ public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
 //
 
 
+/**
+ * One account flow at a time. Drive it from ONE sequence.
+ */
+public interface AccountFlowHandleInterface {
+    
+    fun `abandon`()
+    
+    fun `changeEmail`(`newEmail`: kotlin.String, `password`: kotlin.String, `recoveryCheckB64`: kotlin.String, `x25519PublicB64`: kotlin.String): AccountFlowStep
+    
+    /**
+     * `onboarding_status` / `onboarding_body` are the server's `GET /api/v1/onboarding` answer
+     * (its password policy); `breach_check` is a [`BreachCheckHandle`] made for `new_password`
+     * and answered, required when that policy declares a breach check (sign-up's gate).
+     */
+    fun `changePassword`(`current`: kotlin.String, `newPassword`: kotlin.String, `recoveryCheckB64`: kotlin.String, `x25519PublicB64`: kotlin.String, `onboardingStatus`: kotlin.UShort, `onboardingBody`: kotlin.String, `breachCheck`: BreachCheckHandle?): AccountFlowStep
+    
+    /**
+     * Delete step 2: step-up + the second factor on a 2FA account; the server mails a link.
+     */
+    fun `deleteAccount`(`password`: kotlin.String, `code`: kotlin.String?): AccountFlowStep
+    
+    /**
+     * Undo a scheduled deletion with the same link.
+     */
+    fun `deleteCancel`(`linkToken`: kotlin.String): AccountFlowStep
+    
+    /**
+     * Delete step 3: the mailed link's token (or the whole link).
+     */
+    fun `deleteConfirm`(`linkToken`: kotlin.String): AccountFlowStep
+    
+    /**
+     * New backup codes with the current authenticator code; the authenticator stays.
+     */
+    fun `regenerateBackupCodes`(`code`: kotlin.String): AccountFlowStep
+    
+    fun `resume`(`status`: kotlin.UShort, `bodyText`: kotlin.String): AccountFlowStep
+    
+    fun `revokeOtherSessions`(): AccountFlowStep
+    
+    fun `revokeSession`(`sessionId`: kotlin.String): AccountFlowStep
+    
+    /**
+     * Turning it off takes the password (a step-up inside); turning it on ignores it.
+     */
+    fun `setActivityLogging`(`on`: kotlin.Boolean, `password`: kotlin.String?): AccountFlowStep
+    
+    fun `setDisplayName`(`name`: kotlin.String): AccountFlowStep
+    
+    fun `totpConfirm`(`code`: kotlin.String): AccountFlowStep
+    
+    fun `totpDisable`(`code`: kotlin.String): AccountFlowStep
+    
+    fun `totpSetup`(`password`: kotlin.String?, `currentCode`: kotlin.String?): AccountFlowStep
+    
+    fun `verifyEmail`(`code`: kotlin.String): AccountFlowStep
+    
+    fun `verifyPassword`(`password`: kotlin.String): AccountFlowStep
+    
+    companion object
+}
+
+/**
+ * One account flow at a time. Drive it from ONE sequence.
+ */
+open class AccountFlowHandle: Disposable, AutoCloseable, AccountFlowHandleInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+    constructor() :
+        this(UniffiWithHandle, 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_accountflowhandle_new(
+    
+        _status)
+}
+    )
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_beebeeb_uniffi_fn_free_accountflowhandle(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_beebeeb_uniffi_fn_clone_accountflowhandle(handle, status)
+        }
+    }
+
+    override fun `abandon`()
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_abandon(
+        it,
+        _status)
+}
+    }
+    
+    
+
+    
+    @Throws(AccountFlowFfiException::class)override fun `changeEmail`(`newEmail`: kotlin.String, `password`: kotlin.String, `recoveryCheckB64`: kotlin.String, `x25519PublicB64`: kotlin.String): AccountFlowStep {
+            return FfiConverterTypeAccountFlowStep.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AccountFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_change_email(
+        it,
+        FfiConverterString.lower(`newEmail`),FfiConverterString.lower(`password`),FfiConverterString.lower(`recoveryCheckB64`),FfiConverterString.lower(`x25519PublicB64`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * `onboarding_status` / `onboarding_body` are the server's `GET /api/v1/onboarding` answer
+     * (its password policy); `breach_check` is a [`BreachCheckHandle`] made for `new_password`
+     * and answered, required when that policy declares a breach check (sign-up's gate).
+     */
+    @Throws(AccountFlowFfiException::class)override fun `changePassword`(`current`: kotlin.String, `newPassword`: kotlin.String, `recoveryCheckB64`: kotlin.String, `x25519PublicB64`: kotlin.String, `onboardingStatus`: kotlin.UShort, `onboardingBody`: kotlin.String, `breachCheck`: BreachCheckHandle?): AccountFlowStep {
+            return FfiConverterTypeAccountFlowStep.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AccountFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_change_password(
+        it,
+        FfiConverterString.lower(`current`),FfiConverterString.lower(`newPassword`),FfiConverterString.lower(`recoveryCheckB64`),FfiConverterString.lower(`x25519PublicB64`),FfiConverterUShort.lower(`onboardingStatus`),FfiConverterString.lower(`onboardingBody`),FfiConverterOptionalTypeBreachCheckHandle.lower(`breachCheck`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Delete step 2: step-up + the second factor on a 2FA account; the server mails a link.
+     */
+    @Throws(AccountFlowFfiException::class)override fun `deleteAccount`(`password`: kotlin.String, `code`: kotlin.String?): AccountFlowStep {
+            return FfiConverterTypeAccountFlowStep.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AccountFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_delete_account(
+        it,
+        FfiConverterString.lower(`password`),FfiConverterOptionalString.lower(`code`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Undo a scheduled deletion with the same link.
+     */
+    @Throws(AccountFlowFfiException::class)override fun `deleteCancel`(`linkToken`: kotlin.String): AccountFlowStep {
+            return FfiConverterTypeAccountFlowStep.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AccountFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_delete_cancel(
+        it,
+        FfiConverterString.lower(`linkToken`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Delete step 3: the mailed link's token (or the whole link).
+     */
+    @Throws(AccountFlowFfiException::class)override fun `deleteConfirm`(`linkToken`: kotlin.String): AccountFlowStep {
+            return FfiConverterTypeAccountFlowStep.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AccountFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_delete_confirm(
+        it,
+        FfiConverterString.lower(`linkToken`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * New backup codes with the current authenticator code; the authenticator stays.
+     */
+    @Throws(AccountFlowFfiException::class)override fun `regenerateBackupCodes`(`code`: kotlin.String): AccountFlowStep {
+            return FfiConverterTypeAccountFlowStep.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AccountFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_regenerate_backup_codes(
+        it,
+        FfiConverterString.lower(`code`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(AccountFlowFfiException::class)override fun `resume`(`status`: kotlin.UShort, `bodyText`: kotlin.String): AccountFlowStep {
+            return FfiConverterTypeAccountFlowStep.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AccountFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_resume(
+        it,
+        FfiConverterUShort.lower(`status`),FfiConverterString.lower(`bodyText`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(AccountFlowFfiException::class)override fun `revokeOtherSessions`(): AccountFlowStep {
+            return FfiConverterTypeAccountFlowStep.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AccountFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_revoke_other_sessions(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(AccountFlowFfiException::class)override fun `revokeSession`(`sessionId`: kotlin.String): AccountFlowStep {
+            return FfiConverterTypeAccountFlowStep.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AccountFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_revoke_session(
+        it,
+        FfiConverterString.lower(`sessionId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Turning it off takes the password (a step-up inside); turning it on ignores it.
+     */
+    @Throws(AccountFlowFfiException::class)override fun `setActivityLogging`(`on`: kotlin.Boolean, `password`: kotlin.String?): AccountFlowStep {
+            return FfiConverterTypeAccountFlowStep.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AccountFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_set_activity_logging(
+        it,
+        FfiConverterBoolean.lower(`on`),FfiConverterOptionalString.lower(`password`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(AccountFlowFfiException::class)override fun `setDisplayName`(`name`: kotlin.String): AccountFlowStep {
+            return FfiConverterTypeAccountFlowStep.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AccountFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_set_display_name(
+        it,
+        FfiConverterString.lower(`name`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(AccountFlowFfiException::class)override fun `totpConfirm`(`code`: kotlin.String): AccountFlowStep {
+            return FfiConverterTypeAccountFlowStep.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AccountFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_totp_confirm(
+        it,
+        FfiConverterString.lower(`code`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(AccountFlowFfiException::class)override fun `totpDisable`(`code`: kotlin.String): AccountFlowStep {
+            return FfiConverterTypeAccountFlowStep.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AccountFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_totp_disable(
+        it,
+        FfiConverterString.lower(`code`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(AccountFlowFfiException::class)override fun `totpSetup`(`password`: kotlin.String?, `currentCode`: kotlin.String?): AccountFlowStep {
+            return FfiConverterTypeAccountFlowStep.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AccountFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_totp_setup(
+        it,
+        FfiConverterOptionalString.lower(`password`),FfiConverterOptionalString.lower(`currentCode`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(AccountFlowFfiException::class)override fun `verifyEmail`(`code`: kotlin.String): AccountFlowStep {
+            return FfiConverterTypeAccountFlowStep.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AccountFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_verify_email(
+        it,
+        FfiConverterString.lower(`code`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(AccountFlowFfiException::class)override fun `verifyPassword`(`password`: kotlin.String): AccountFlowStep {
+            return FfiConverterTypeAccountFlowStep.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AccountFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_accountflowhandle_verify_password(
+        it,
+        FfiConverterString.lower(`password`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAccountFlowHandle: FfiConverter<AccountFlowHandle, Long> {
+    override fun lower(value: AccountFlowHandle): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): AccountFlowHandle {
+        return AccountFlowHandle(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): AccountFlowHandle {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: AccountFlowHandle) = 8UL
+
+    override fun write(value: AccountFlowHandle, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
 public interface AccountReplacementHandleInterface {
     
     companion object
@@ -5139,6 +6449,374 @@ public object FfiConverterTypeAccountReplacementHandle: FfiConverter<AccountRepl
     override fun allocationSize(value: AccountReplacementHandle) = 8UL
 
     override fun write(value: AccountReplacementHandle, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+public interface ApprovalFlowInterface {
+    
+    /**
+     * Approve after the app's own biometric prompt: step-up, claim, relay.
+     */
+    fun `approve`(`typedCode`: kotlin.String, `password`: kotlin.String, `masterKey`: MasterKeyHandle): AuthHttpRequest
+    
+    fun `codeMatches`(`typed`: kotlin.String): kotlin.Boolean
+    
+    /**
+     * Deny the request shown for review (DW-A09); send it, then `on_deny_response`.
+     */
+    fun `deny`(): AuthHttpRequest
+    
+    fun `onDenyResponse`(`response`: AuthHttpResponse)
+    
+    fun `onLookupResponse`(`response`: AuthHttpResponse): RequesterFactsFfi
+    
+    fun `onResponse`(`response`: AuthHttpResponse): ApproveStepFfi
+    
+    fun `start`(): AuthHttpRequest
+    
+    companion object
+}
+
+open class ApprovalFlow: Disposable, AutoCloseable, ApprovalFlowInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+    /**
+     * Look up a waiting request by the typed code (`request_not_found` for a malformed one).
+     */
+    constructor(`code`: kotlin.String) :
+        this(UniffiWithHandle, 
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_approvalflow_new(
+    
+        FfiConverterString.lower(`code`),_status)
+}
+    )
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_beebeeb_uniffi_fn_free_approvalflow(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_beebeeb_uniffi_fn_clone_approvalflow(handle, status)
+        }
+    }
+
+    
+    /**
+     * Approve after the app's own biometric prompt: step-up, claim, relay.
+     */
+    @Throws(AuthFlowFfiException::class)override fun `approve`(`typedCode`: kotlin.String, `password`: kotlin.String, `masterKey`: MasterKeyHandle): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_approvalflow_approve(
+        it,
+        FfiConverterString.lower(`typedCode`),FfiConverterString.lower(`password`),FfiConverterTypeMasterKeyHandle.lower(`masterKey`),_status)
+}
+    }
+    )
+    }
+    
+
+    override fun `codeMatches`(`typed`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_approvalflow_code_matches(
+        it,
+        FfiConverterString.lower(`typed`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Deny the request shown for review (DW-A09); send it, then `on_deny_response`.
+     */
+    @Throws(AuthFlowFfiException::class)override fun `deny`(): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_approvalflow_deny(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(AuthFlowFfiException::class)override fun `onDenyResponse`(`response`: AuthHttpResponse)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_approvalflow_on_deny_response(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    
+    
+
+    
+    @Throws(AuthFlowFfiException::class)override fun `onLookupResponse`(`response`: AuthHttpResponse): RequesterFactsFfi {
+            return FfiConverterTypeRequesterFactsFfi.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_approvalflow_on_lookup_response(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(AuthFlowFfiException::class)override fun `onResponse`(`response`: AuthHttpResponse): ApproveStepFfi {
+            return FfiConverterTypeApproveStepFfi.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_approvalflow_on_response(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(AuthFlowFfiException::class)override fun `start`(): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_approvalflow_start(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeApprovalFlow: FfiConverter<ApprovalFlow, Long> {
+    override fun lower(value: ApprovalFlow): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): ApprovalFlow {
+        return ApprovalFlow(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): ApprovalFlow {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: ApprovalFlow) = 8UL
+
+    override fun write(value: ApprovalFlow, buf: ByteBuffer) {
         buf.putLong(lower(value))
     }
 }
@@ -9629,6 +11307,569 @@ public object FfiConverterTypeContactServiceHandle: FfiConverter<ContactServiceH
 //
 
 
+public interface CreateLinkFlowInterface {
+    
+    fun `onResponse`(`response`: AuthHttpResponse): LinkStepFfi
+    
+    fun `start`(): AuthHttpRequest
+    
+    companion object
+}
+
+open class CreateLinkFlow: Disposable, AutoCloseable, CreateLinkFlowInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+    constructor(`appUrl`: kotlin.String, `fileId`: kotlin.String, `masterKey`: MasterKeyHandle, `fileKey`: FileKeyHandle, `expiresInHours`: kotlin.UInt?, `maxOpens`: kotlin.UInt?, `passphrase`: kotlin.String?) :
+        this(UniffiWithHandle, 
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_createlinkflow_new(
+    
+        FfiConverterString.lower(`appUrl`),FfiConverterString.lower(`fileId`),FfiConverterTypeMasterKeyHandle.lower(`masterKey`),FfiConverterTypeFileKeyHandle.lower(`fileKey`),FfiConverterOptionalUInt.lower(`expiresInHours`),FfiConverterOptionalUInt.lower(`maxOpens`),FfiConverterOptionalString.lower(`passphrase`),_status)
+}
+    )
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_beebeeb_uniffi_fn_free_createlinkflow(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_beebeeb_uniffi_fn_clone_createlinkflow(handle, status)
+        }
+    }
+
+    
+    @Throws(ShareFlowFfiException::class)override fun `onResponse`(`response`: AuthHttpResponse): LinkStepFfi {
+            return FfiConverterTypeLinkStepFfi.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_createlinkflow_on_response(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(ShareFlowFfiException::class)override fun `start`(): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_createlinkflow_start(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+
+
+    
+    companion object {
+        
+    /**
+     * A bundle link over `items` (web's bundle branch). Each item carries the key that opens its row.
+     */
+    @Throws(ShareFlowFfiException::class) fun `bundle`(`appUrl`: kotlin.String, `items`: List<BundleItemFfi>, `masterKey`: MasterKeyHandle, `expiresInHours`: kotlin.UInt?, `maxOpens`: kotlin.UInt?, `passphrase`: kotlin.String?): CreateLinkFlow {
+            return FfiConverterTypeCreateLinkFlow.lift(
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_createlinkflow_bundle(
+    
+        FfiConverterString.lower(`appUrl`),FfiConverterSequenceTypeBundleItemFfi.lower(`items`),FfiConverterTypeMasterKeyHandle.lower(`masterKey`),FfiConverterOptionalUInt.lower(`expiresInHours`),FfiConverterOptionalUInt.lower(`maxOpens`),FfiConverterOptionalString.lower(`passphrase`),_status)
+}
+    )
+    }
+    
+
+        
+    }
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCreateLinkFlow: FfiConverter<CreateLinkFlow, Long> {
+    override fun lower(value: CreateLinkFlow): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): CreateLinkFlow {
+        return CreateLinkFlow(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): CreateLinkFlow {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: CreateLinkFlow) = 8UL
+
+    override fun write(value: CreateLinkFlow, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+public interface CreateRequestFlowInterface {
+    
+    fun `onResponse`(`response`: AuthHttpResponse): CreatedRequestFfi
+    
+    fun `start`(): AuthHttpRequest
+    
+    companion object
+}
+
+open class CreateRequestFlow: Disposable, AutoCloseable, CreateRequestFlowInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+    constructor(`appUrl`: kotlin.String, `title`: kotlin.String, `description`: kotlin.String?, `targetFolderId`: kotlin.String?, `maxFiles`: kotlin.UInt?, `maxTotalBytes`: kotlin.ULong?, `expiresInSecs`: kotlin.ULong?, `masterKey`: MasterKeyHandle) :
+        this(UniffiWithHandle, 
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_createrequestflow_new(
+    
+        FfiConverterString.lower(`appUrl`),FfiConverterString.lower(`title`),FfiConverterOptionalString.lower(`description`),FfiConverterOptionalString.lower(`targetFolderId`),FfiConverterOptionalUInt.lower(`maxFiles`),FfiConverterOptionalULong.lower(`maxTotalBytes`),FfiConverterOptionalULong.lower(`expiresInSecs`),FfiConverterTypeMasterKeyHandle.lower(`masterKey`),_status)
+}
+    )
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_beebeeb_uniffi_fn_free_createrequestflow(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_beebeeb_uniffi_fn_clone_createrequestflow(handle, status)
+        }
+    }
+
+    
+    @Throws(ShareFlowFfiException::class)override fun `onResponse`(`response`: AuthHttpResponse): CreatedRequestFfi {
+            return FfiConverterTypeCreatedRequestFfi.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_createrequestflow_on_response(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(ShareFlowFfiException::class)override fun `start`(): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_createrequestflow_start(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCreateRequestFlow: FfiConverter<CreateRequestFlow, Long> {
+    override fun lower(value: CreateRequestFlow): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): CreateRequestFlow {
+        return CreateRequestFlow(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): CreateRequestFlow {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: CreateRequestFlow) = 8UL
+
+    override fun write(value: CreateRequestFlow, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
 public interface DeviceApprovalHandleInterface {
     
     companion object
@@ -10117,6 +12358,280 @@ public object FfiConverterTypeDeviceLinkHandle: FfiConverter<DeviceLinkHandle, L
     override fun allocationSize(value: DeviceLinkHandle) = 8UL
 
     override fun write(value: DeviceLinkHandle, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+public interface DeviceRequestFlowInterface {
+    
+    fun `initFrame`(`deviceName`: kotlin.String?, `client`: kotlin.String, `clientVersion`: kotlin.String, `os`: kotlin.String): kotlin.String
+    
+    fun `onFrame`(`text`: kotlin.String): DeviceRequestEventFfi
+    
+    companion object
+}
+
+open class DeviceRequestFlow: Disposable, AutoCloseable, DeviceRequestFlowInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+    constructor() :
+        this(UniffiWithHandle, 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_devicerequestflow_new(
+    
+        _status)
+}
+    )
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_beebeeb_uniffi_fn_free_devicerequestflow(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_beebeeb_uniffi_fn_clone_devicerequestflow(handle, status)
+        }
+    }
+
+    override fun `initFrame`(`deviceName`: kotlin.String?, `client`: kotlin.String, `clientVersion`: kotlin.String, `os`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_devicerequestflow_init_frame(
+        it,
+        FfiConverterOptionalString.lower(`deviceName`),FfiConverterString.lower(`client`),FfiConverterString.lower(`clientVersion`),FfiConverterString.lower(`os`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(AuthFlowFfiException::class)override fun `onFrame`(`text`: kotlin.String): DeviceRequestEventFfi {
+            return FfiConverterTypeDeviceRequestEventFfi.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_devicerequestflow_on_frame(
+        it,
+        FfiConverterString.lower(`text`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDeviceRequestFlow: FfiConverter<DeviceRequestFlow, Long> {
+    override fun lower(value: DeviceRequestFlow): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): DeviceRequestFlow {
+        return DeviceRequestFlow(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): DeviceRequestFlow {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: DeviceRequestFlow) = 8UL
+
+    override fun write(value: DeviceRequestFlow, buf: ByteBuffer) {
         buf.putLong(lower(value))
     }
 }
@@ -16072,6 +18587,299 @@ public object FfiConverterTypeFileServiceHandle: FfiConverter<FileServiceHandle,
 //
 
 
+public interface FolderShareFlowInterface {
+    
+    fun `onResponse`(`response`: AuthHttpResponse): FolderStepFfi
+    
+    fun `start`(): FolderStepFfi
+    
+    companion object
+}
+
+open class FolderShareFlow: Disposable, AutoCloseable, FolderShareFlowInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+    /**
+     * `shared_folders_write` is the `shared_folders_v1` flag read at send time; a host that cannot
+     * read it must not start the flow. `custody_seen` / `custody_unreadable` are the device's
+     * custody memory (L7d).
+     */
+    constructor(`folderId`: kotlin.String, `email`: kotlin.String, `sharedFoldersWrite`: kotlin.Boolean, `custodySeen`: List<kotlin.String>, `custodyUnreadable`: kotlin.Boolean, `masterKey`: MasterKeyHandle, `peerKey`: PeerKeyExpectationFfi) :
+        this(UniffiWithHandle, 
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_foldershareflow_new(
+    
+        FfiConverterString.lower(`folderId`),FfiConverterString.lower(`email`),FfiConverterBoolean.lower(`sharedFoldersWrite`),FfiConverterSequenceString.lower(`custodySeen`),FfiConverterBoolean.lower(`custodyUnreadable`),FfiConverterTypeMasterKeyHandle.lower(`masterKey`),FfiConverterTypePeerKeyExpectationFfi.lower(`peerKey`),_status)
+}
+    )
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_beebeeb_uniffi_fn_free_foldershareflow(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_beebeeb_uniffi_fn_clone_foldershareflow(handle, status)
+        }
+    }
+
+    
+    @Throws(ShareFlowFfiException::class)override fun `onResponse`(`response`: AuthHttpResponse): FolderStepFfi {
+            return FfiConverterTypeFolderStepFfi.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_foldershareflow_on_response(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(ShareFlowFfiException::class)override fun `start`(): FolderStepFfi {
+            return FfiConverterTypeFolderStepFfi.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_foldershareflow_start(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+
+
+    
+    companion object {
+        
+    /**
+     * A live folder link (web `createFolderLinkWithKeys`).
+     */
+    @Throws(ShareFlowFfiException::class) fun `link`(`folderId`: kotlin.String, `appUrl`: kotlin.String, `accessLevel`: kotlin.String, `label`: kotlin.String?, `expiresInHours`: kotlin.UInt?, `capBytes`: kotlin.ULong?, `maxOpens`: kotlin.UInt?, `passphrase`: kotlin.String?, `custodySeen`: List<kotlin.String>, `custodyUnreadable`: kotlin.Boolean, `masterKey`: MasterKeyHandle): FolderShareFlow {
+            return FfiConverterTypeFolderShareFlow.lift(
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_foldershareflow_link(
+    
+        FfiConverterString.lower(`folderId`),FfiConverterString.lower(`appUrl`),FfiConverterString.lower(`accessLevel`),FfiConverterOptionalString.lower(`label`),FfiConverterOptionalUInt.lower(`expiresInHours`),FfiConverterOptionalULong.lower(`capBytes`),FfiConverterOptionalUInt.lower(`maxOpens`),FfiConverterOptionalString.lower(`passphrase`),FfiConverterSequenceString.lower(`custodySeen`),FfiConverterBoolean.lower(`custodyUnreadable`),FfiConverterTypeMasterKeyHandle.lower(`masterKey`),_status)
+}
+    )
+    }
+    
+
+        
+    }
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFolderShareFlow: FfiConverter<FolderShareFlow, Long> {
+    override fun lower(value: FolderShareFlow): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): FolderShareFlow {
+        return FolderShareFlow(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): FolderShareFlow {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: FolderShareFlow) = 8UL
+
+    override fun write(value: FolderShareFlow, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
 /**
  * Opaque handle to a MasterKey. The key bytes never leave Rust except via
  * `export_for_keychain`, which is only called once to persist to the OS keychain.
@@ -17368,6 +20176,284 @@ public object FfiConverterTypeMasterKeyHandle: FfiConverter<MasterKeyHandle, Lon
 //
 
 
+public interface MemberInviteFlowInterface {
+    
+    fun `onResponse`(`response`: AuthHttpResponse): InviteStepFfi
+    
+    fun `start`(): AuthHttpRequest
+    
+    companion object
+}
+
+open class MemberInviteFlow: Disposable, AutoCloseable, MemberInviteFlowInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+    /**
+     * `is_folder` is required: a folder is refused here: it goes through `FolderShareFlow`.
+     */
+    constructor(`itemId`: kotlin.String, `isFolder`: kotlin.Boolean, `email`: kotlin.String, `masterKey`: MasterKeyHandle, `fileKey`: FileKeyHandle, `peerKey`: PeerKeyExpectationFfi) :
+        this(UniffiWithHandle, 
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_memberinviteflow_new(
+    
+        FfiConverterString.lower(`itemId`),FfiConverterBoolean.lower(`isFolder`),FfiConverterString.lower(`email`),FfiConverterTypeMasterKeyHandle.lower(`masterKey`),FfiConverterTypeFileKeyHandle.lower(`fileKey`),FfiConverterTypePeerKeyExpectationFfi.lower(`peerKey`),_status)
+}
+    )
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_beebeeb_uniffi_fn_free_memberinviteflow(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_beebeeb_uniffi_fn_clone_memberinviteflow(handle, status)
+        }
+    }
+
+    
+    @Throws(ShareFlowFfiException::class)override fun `onResponse`(`response`: AuthHttpResponse): InviteStepFfi {
+            return FfiConverterTypeInviteStepFfi.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_memberinviteflow_on_response(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(ShareFlowFfiException::class)override fun `start`(): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_memberinviteflow_start(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMemberInviteFlow: FfiConverter<MemberInviteFlow, Long> {
+    override fun lower(value: MemberInviteFlow): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): MemberInviteFlow {
+        return MemberInviteFlow(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): MemberInviteFlow {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: MemberInviteFlow) = 8UL
+
+    override fun write(value: MemberInviteFlow, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
 public interface NativeClientHandleInterface {
     
     /**
@@ -18541,6 +21627,397 @@ public object FfiConverterTypePasswordAcceptedHandle: FfiConverter<PasswordAccep
     override fun allocationSize(value: PasswordAcceptedHandle) = 8UL
 
     override fun write(value: PasswordAcceptedHandle, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+/**
+ * One recovery: the phrase is checked by the server, then a new password is registered.
+ */
+public interface PhraseRecoveryHandleInterface {
+    
+    fun `breachRequest`(`password`: kotlin.String): AuthHttpRequest?
+    
+    fun `evaluate`(`password`: kotlin.String): PasswordEvaluationDto
+    
+    fun `onBreachResponse`(`status`: kotlin.UShort?, `body`: kotlin.String): BreachVerdictDto?
+    
+    /**
+     * The last step; the handle is spent afterwards.
+     */
+    fun `onFinalizeResponse`(`response`: AuthHttpResponse): RecoveredFfi
+    
+    fun `onRegisterResponse`(`response`: AuthHttpResponse): AuthHttpRequest
+    
+    fun `onStartResponse`(`response`: AuthHttpResponse)
+    
+    /**
+     * DW-A49: the same rules as sign-up, then the re-registration request.
+     */
+    fun `setPassword`(`password`: kotlin.String, `confirmation`: kotlin.String): AuthHttpRequest
+    
+    fun `start`(): AuthHttpRequest
+    
+    companion object
+}
+
+/**
+ * One recovery: the phrase is checked by the server, then a new password is registered.
+ */
+open class PhraseRecoveryHandle: Disposable, AutoCloseable, PhraseRecoveryHandleInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+    /**
+     * DW-A47: the master key is derived from the phrase here; `start()` gives the check request.
+     */
+    constructor(`policyResponse`: AuthHttpResponse, `email`: kotlin.String, `phrase`: kotlin.String) :
+        this(UniffiWithHandle, 
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_phraserecoveryhandle_new(
+    
+        FfiConverterTypeAuthHttpResponse.lower(`policyResponse`),FfiConverterString.lower(`email`),FfiConverterString.lower(`phrase`),_status)
+}
+    )
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_beebeeb_uniffi_fn_free_phraserecoveryhandle(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_beebeeb_uniffi_fn_clone_phraserecoveryhandle(handle, status)
+        }
+    }
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `breachRequest`(`password`: kotlin.String): AuthHttpRequest? {
+            return FfiConverterOptionalTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_breach_request(
+        it,
+        FfiConverterString.lower(`password`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `evaluate`(`password`: kotlin.String): PasswordEvaluationDto {
+            return FfiConverterTypePasswordEvaluationDto.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_evaluate(
+        it,
+        FfiConverterString.lower(`password`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `onBreachResponse`(`status`: kotlin.UShort?, `body`: kotlin.String): BreachVerdictDto? {
+            return FfiConverterOptionalTypeBreachVerdictDto.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_on_breach_response(
+        it,
+        FfiConverterOptionalUShort.lower(`status`),FfiConverterString.lower(`body`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The last step; the handle is spent afterwards.
+     */
+    @Throws(SignupFlowFfiException::class)override fun `onFinalizeResponse`(`response`: AuthHttpResponse): RecoveredFfi {
+            return FfiConverterTypeRecoveredFfi.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_on_finalize_response(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `onRegisterResponse`(`response`: AuthHttpResponse): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_on_register_response(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `onStartResponse`(`response`: AuthHttpResponse)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_on_start_response(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * DW-A49: the same rules as sign-up, then the re-registration request.
+     */
+    @Throws(SignupFlowFfiException::class)override fun `setPassword`(`password`: kotlin.String, `confirmation`: kotlin.String): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_set_password(
+        it,
+        FfiConverterString.lower(`password`),FfiConverterString.lower(`confirmation`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `start`(): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_start(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePhraseRecoveryHandle: FfiConverter<PhraseRecoveryHandle, Long> {
+    override fun lower(value: PhraseRecoveryHandle): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): PhraseRecoveryHandle {
+        return PhraseRecoveryHandle(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): PhraseRecoveryHandle {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: PhraseRecoveryHandle) = 8UL
+
+    override fun write(value: PhraseRecoveryHandle, buf: ByteBuffer) {
         buf.putLong(lower(value))
     }
 }
@@ -21447,6 +24924,331 @@ public object FfiConverterTypeShareServiceHandle: FfiConverter<ShareServiceHandl
 //
 
 
+public interface SignInFlowInterface {
+    
+    fun `onResponse`(`response`: AuthHttpResponse): SignInStepFfi
+    
+    /**
+     * The session token, or `wrong_code` (the flow stays ready for the next code).
+     */
+    fun `onVerifyResponse`(`response`: AuthHttpResponse): kotlin.String
+    
+    /**
+     * The login-start request (once).
+     */
+    fun `start`(): AuthHttpRequest
+    
+    /**
+     * The verify request for a 6-digit authenticator or 8-digit backup code.
+     */
+    fun `verifyRequest`(`code`: kotlin.String): AuthHttpRequest
+    
+    companion object
+}
+
+open class SignInFlow: Disposable, AutoCloseable, SignInFlowInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+    constructor(`email`: kotlin.String, `password`: kotlin.String) :
+        this(UniffiWithHandle, 
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_signinflow_new(
+    
+        FfiConverterString.lower(`email`),FfiConverterString.lower(`password`),_status)
+}
+    )
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_beebeeb_uniffi_fn_free_signinflow(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_beebeeb_uniffi_fn_clone_signinflow(handle, status)
+        }
+    }
+
+    
+    @Throws(AuthFlowFfiException::class)override fun `onResponse`(`response`: AuthHttpResponse): SignInStepFfi {
+            return FfiConverterTypeSignInStepFfi.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signinflow_on_response(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The session token, or `wrong_code` (the flow stays ready for the next code).
+     */
+    @Throws(AuthFlowFfiException::class)override fun `onVerifyResponse`(`response`: AuthHttpResponse): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signinflow_on_verify_response(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The login-start request (once).
+     */
+    @Throws(AuthFlowFfiException::class)override fun `start`(): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signinflow_start(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The verify request for a 6-digit authenticator or 8-digit backup code.
+     */
+    @Throws(AuthFlowFfiException::class)override fun `verifyRequest`(`code`: kotlin.String): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signinflow_verify_request(
+        it,
+        FfiConverterString.lower(`code`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSignInFlow: FfiConverter<SignInFlow, Long> {
+    override fun lower(value: SignInFlow): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): SignInFlow {
+        return SignInFlow(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): SignInFlow {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: SignInFlow) = 8UL
+
+    override fun write(value: SignInFlow, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
 /**
  * The signup ceremony state machine, one per signup attempt. Single-consumer:
  * drive it from one sequence (the `Mutex` is only the `Send + Sync` backstop
@@ -22077,6 +25879,560 @@ public object FfiConverterTypeSignupCeremonyHandle: FfiConverter<SignupCeremonyH
 //
 
 
+/**
+ * One account creation, from the email to the first session.
+ */
+public interface SignupFlowHandleInterface {
+    
+    fun `acknowledgePhrase`()
+    
+    /**
+     * The breach request for this password; `None` when the policy declares no check.
+     */
+    fun `breachRequest`(`password`: kotlin.String): AuthHttpRequest?
+    
+    /**
+     * 1-based word positions to ask for.
+     */
+    fun `challengePositions`(): List<kotlin.UInt>
+    
+    fun `confirmPhrase`(`answers`: List<kotlin.String>)
+    
+    fun `evaluate`(`password`: kotlin.String): PasswordEvaluationDto
+    
+    /**
+     * `status` is `None` when the breach endpoint gave no answer at all.
+     */
+    fun `onBreachResponse`(`status`: kotlin.UShort?, `body`: kotlin.String): BreachVerdictDto?
+    
+    fun `onCodeSent`(`response`: AuthHttpResponse)
+    
+    fun `onCodeVerified`(`response`: AuthHttpResponse)
+    
+    fun `onRegisterFinish`(`response`: AuthHttpResponse): SignupCreatedFfi
+    
+    fun `onRegisterStart`(`response`: AuthHttpResponse): AuthHttpRequest
+    
+    /**
+     * The 12 words, for the one-time display. The same words on every call.
+     */
+    fun `phraseWords`(): List<kotlin.String>
+    
+    fun `registerStart`(): AuthHttpRequest
+    
+    fun `sendCode`(`email`: kotlin.String): AuthHttpRequest
+    
+    fun `setPassword`(`password`: kotlin.String, `confirmation`: kotlin.String): PasswordEvaluationDto
+    
+    /**
+     * Record the accepted terms version once signed in; `None` when the policy names none.
+     */
+    fun `termsRequest`(): AuthHttpRequest?
+    
+    fun `verifyCode`(`code`: kotlin.String): AuthHttpRequest
+    
+    /**
+     * Forget everything (the person left the flow).
+     */
+    fun `wipe`()
+    
+    companion object
+}
+
+/**
+ * One account creation, from the email to the first session.
+ */
+open class SignupFlowHandle: Disposable, AutoCloseable, SignupFlowHandleInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+    /**
+     * Start from the answer to [`signup_policy_request`].
+     */
+    constructor(`policyResponse`: AuthHttpResponse) :
+        this(UniffiWithHandle, 
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_signupflowhandle_new(
+    
+        FfiConverterTypeAuthHttpResponse.lower(`policyResponse`),_status)
+}
+    )
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_beebeeb_uniffi_fn_free_signupflowhandle(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_beebeeb_uniffi_fn_clone_signupflowhandle(handle, status)
+        }
+    }
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `acknowledgePhrase`()
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_acknowledge_phrase(
+        it,
+        _status)
+}
+    }
+    
+    
+
+    
+    /**
+     * The breach request for this password; `None` when the policy declares no check.
+     */
+    @Throws(SignupFlowFfiException::class)override fun `breachRequest`(`password`: kotlin.String): AuthHttpRequest? {
+            return FfiConverterOptionalTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_breach_request(
+        it,
+        FfiConverterString.lower(`password`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 1-based word positions to ask for.
+     */
+    @Throws(SignupFlowFfiException::class)override fun `challengePositions`(): List<kotlin.UInt> {
+            return FfiConverterSequenceUInt.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_challenge_positions(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `confirmPhrase`(`answers`: List<kotlin.String>)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_confirm_phrase(
+        it,
+        FfiConverterSequenceString.lower(`answers`),_status)
+}
+    }
+    
+    
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `evaluate`(`password`: kotlin.String): PasswordEvaluationDto {
+            return FfiConverterTypePasswordEvaluationDto.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_evaluate(
+        it,
+        FfiConverterString.lower(`password`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * `status` is `None` when the breach endpoint gave no answer at all.
+     */
+    @Throws(SignupFlowFfiException::class)override fun `onBreachResponse`(`status`: kotlin.UShort?, `body`: kotlin.String): BreachVerdictDto? {
+            return FfiConverterOptionalTypeBreachVerdictDto.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_on_breach_response(
+        it,
+        FfiConverterOptionalUShort.lower(`status`),FfiConverterString.lower(`body`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `onCodeSent`(`response`: AuthHttpResponse)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_on_code_sent(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    
+    
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `onCodeVerified`(`response`: AuthHttpResponse)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_on_code_verified(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    
+    
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `onRegisterFinish`(`response`: AuthHttpResponse): SignupCreatedFfi {
+            return FfiConverterTypeSignupCreatedFfi.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_on_register_finish(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `onRegisterStart`(`response`: AuthHttpResponse): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_on_register_start(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The 12 words, for the one-time display. The same words on every call.
+     */
+    @Throws(SignupFlowFfiException::class)override fun `phraseWords`(): List<kotlin.String> {
+            return FfiConverterSequenceString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_phrase_words(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `registerStart`(): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_register_start(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `sendCode`(`email`: kotlin.String): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_send_code(
+        it,
+        FfiConverterString.lower(`email`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `setPassword`(`password`: kotlin.String, `confirmation`: kotlin.String): PasswordEvaluationDto {
+            return FfiConverterTypePasswordEvaluationDto.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_set_password(
+        it,
+        FfiConverterString.lower(`password`),FfiConverterString.lower(`confirmation`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Record the accepted terms version once signed in; `None` when the policy names none.
+     */
+    @Throws(SignupFlowFfiException::class)override fun `termsRequest`(): AuthHttpRequest? {
+            return FfiConverterOptionalTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_terms_request(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(SignupFlowFfiException::class)override fun `verifyCode`(`code`: kotlin.String): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_verify_code(
+        it,
+        FfiConverterString.lower(`code`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Forget everything (the person left the flow).
+     */override fun `wipe`()
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_wipe(
+        it,
+        _status)
+}
+    }
+    
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSignupFlowHandle: FfiConverter<SignupFlowHandle, Long> {
+    override fun lower(value: SignupFlowHandle): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): SignupFlowHandle {
+        return SignupFlowHandle(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): SignupFlowHandle {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: SignupFlowHandle) = 8UL
+
+    override fun write(value: SignupFlowHandle, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
 public interface SignupServiceHandleInterface {
     
     fun `abandon`()
@@ -22412,6 +26768,307 @@ public object FfiConverterTypeSignupServiceHandle: FfiConverter<SignupServiceHan
     override fun allocationSize(value: SignupServiceHandle) = 8UL
 
     override fun write(value: SignupServiceHandle, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+public interface StepUpFlowInterface {
+    
+    /**
+     * Spend the token on the consuming request (POST `path` with `body_json`, with the session).
+     */
+    fun `attachConfirmToken`(`path`: kotlin.String, `bodyJson`: kotlin.String): AuthHttpRequest
+    
+    fun `onResponse`(`response`: AuthHttpResponse): StepUpStepFfi
+    
+    fun `start`(): AuthHttpRequest
+    
+    companion object
+}
+
+open class StepUpFlow: Disposable, AutoCloseable, StepUpFlowInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+    /**
+     * `purpose` empty: the generic grant; `cli_code` set: a device approval for that code. A
+     * `cli_code` with any purpose other than `cli_device_approval` is refused (`invalid_input`).
+     */
+    constructor(`password`: kotlin.String, `purpose`: kotlin.String?, `cliCode`: kotlin.String?) :
+        this(UniffiWithHandle, 
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_constructor_stepupflow_new(
+    
+        FfiConverterString.lower(`password`),FfiConverterOptionalString.lower(`purpose`),FfiConverterOptionalString.lower(`cliCode`),_status)
+}
+    )
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_beebeeb_uniffi_fn_free_stepupflow(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_beebeeb_uniffi_fn_clone_stepupflow(handle, status)
+        }
+    }
+
+    
+    /**
+     * Spend the token on the consuming request (POST `path` with `body_json`, with the session).
+     */
+    @Throws(AuthFlowFfiException::class)override fun `attachConfirmToken`(`path`: kotlin.String, `bodyJson`: kotlin.String): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_stepupflow_attach_confirm_token(
+        it,
+        FfiConverterString.lower(`path`),FfiConverterString.lower(`bodyJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(AuthFlowFfiException::class)override fun `onResponse`(`response`: AuthHttpResponse): StepUpStepFfi {
+            return FfiConverterTypeStepUpStepFfi.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_stepupflow_on_response(
+        it,
+        FfiConverterTypeAuthHttpResponse.lower(`response`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(AuthFlowFfiException::class)override fun `start`(): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    callWithHandle {
+    uniffiRustCallWithError(AuthFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_stepupflow_start(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeStepUpFlow: FfiConverter<StepUpFlow, Long> {
+    override fun lower(value: StepUpFlow): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): StepUpFlow {
+        return StepUpFlow(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): StepUpFlow {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: StepUpFlow) = 8UL
+
+    override fun write(value: StepUpFlow, buf: ByteBuffer) {
         buf.putLong(lower(value))
     }
 }
@@ -24491,6 +29148,147 @@ public object FfiConverterTypeWriteTargetHandle: FfiConverter<WriteTargetHandle,
 
 
 
+data class AccountFlowOutcome (
+    var `kind`: kotlin.String
+    , 
+    var `sessionToken`: kotlin.String?
+    , 
+    var `email`: kotlin.String?
+    , 
+    var `totpSecret`: kotlin.String?
+    , 
+    var `otpauthUri`: kotlin.String?
+    , 
+    var `backupCodes`: List<kotlin.String>
+    , 
+    var `revoked`: kotlin.UInt
+    , 
+    var `shredAfter`: kotlin.String?
+    , 
+    var `cancelUntil`: kotlin.String?
+    , 
+    var `linkExpiresAt`: kotlin.String?
+    , 
+    var `notRestored`: List<kotlin.String>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAccountFlowOutcome: FfiConverterRustBuffer<AccountFlowOutcome> {
+    override fun read(buf: ByteBuffer): AccountFlowOutcome {
+        return AccountFlowOutcome(
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterSequenceString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: AccountFlowOutcome) = (
+            FfiConverterString.allocationSize(value.`kind`) +
+            FfiConverterOptionalString.allocationSize(value.`sessionToken`) +
+            FfiConverterOptionalString.allocationSize(value.`email`) +
+            FfiConverterOptionalString.allocationSize(value.`totpSecret`) +
+            FfiConverterOptionalString.allocationSize(value.`otpauthUri`) +
+            FfiConverterSequenceString.allocationSize(value.`backupCodes`) +
+            FfiConverterUInt.allocationSize(value.`revoked`) +
+            FfiConverterOptionalString.allocationSize(value.`shredAfter`) +
+            FfiConverterOptionalString.allocationSize(value.`cancelUntil`) +
+            FfiConverterOptionalString.allocationSize(value.`linkExpiresAt`) +
+            FfiConverterSequenceString.allocationSize(value.`notRestored`)
+    )
+
+    override fun write(value: AccountFlowOutcome, buf: ByteBuffer) {
+            FfiConverterString.write(value.`kind`, buf)
+            FfiConverterOptionalString.write(value.`sessionToken`, buf)
+            FfiConverterOptionalString.write(value.`email`, buf)
+            FfiConverterOptionalString.write(value.`totpSecret`, buf)
+            FfiConverterOptionalString.write(value.`otpauthUri`, buf)
+            FfiConverterSequenceString.write(value.`backupCodes`, buf)
+            FfiConverterUInt.write(value.`revoked`, buf)
+            FfiConverterOptionalString.write(value.`shredAfter`, buf)
+            FfiConverterOptionalString.write(value.`cancelUntil`, buf)
+            FfiConverterOptionalString.write(value.`linkExpiresAt`, buf)
+            FfiConverterSequenceString.write(value.`notRestored`, buf)
+    }
+}
+
+
+
+data class AccountFlowStep (
+    var `done`: kotlin.Boolean
+    , 
+    var `method`: kotlin.String
+    , 
+    var `path`: kotlin.String
+    , 
+    var `bodyJson`: kotlin.String
+    , 
+    var `confirmToken`: kotlin.String?
+    , 
+    var `outcome`: AccountFlowOutcome?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAccountFlowStep: FfiConverterRustBuffer<AccountFlowStep> {
+    override fun read(buf: ByteBuffer): AccountFlowStep {
+        return AccountFlowStep(
+            FfiConverterBoolean.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalTypeAccountFlowOutcome.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: AccountFlowStep) = (
+            FfiConverterBoolean.allocationSize(value.`done`) +
+            FfiConverterString.allocationSize(value.`method`) +
+            FfiConverterString.allocationSize(value.`path`) +
+            FfiConverterString.allocationSize(value.`bodyJson`) +
+            FfiConverterOptionalString.allocationSize(value.`confirmToken`) +
+            FfiConverterOptionalTypeAccountFlowOutcome.allocationSize(value.`outcome`)
+    )
+
+    override fun write(value: AccountFlowStep, buf: ByteBuffer) {
+            FfiConverterBoolean.write(value.`done`, buf)
+            FfiConverterString.write(value.`method`, buf)
+            FfiConverterString.write(value.`path`, buf)
+            FfiConverterString.write(value.`bodyJson`, buf)
+            FfiConverterOptionalString.write(value.`confirmToken`, buf)
+            FfiConverterOptionalTypeAccountFlowOutcome.write(value.`outcome`, buf)
+    }
+}
+
+
+
 data class AccountSessionData (
     var `id`: kotlin.String
     , 
@@ -25305,6 +30103,105 @@ public object FfiConverterTypeAssetSnapshotData: FfiConverterRustBuffer<AssetSna
             FfiConverterBoolean.write(value.`complete`, buf)
             FfiConverterSequenceTypeAssetData.write(value.`assets`, buf)
             FfiConverterOptionalString.write(value.`nextCursor`, buf)
+    }
+}
+
+
+
+data class AuthHttpRequest (
+    var `method`: kotlin.String
+    , 
+    var `path`: kotlin.String
+    , 
+    var `bodyJson`: kotlin.String?
+    , 
+    var `needsSession`: kotlin.Boolean
+    , 
+    /**
+     * Single-use step-up token for the `X-Confirm-Token` header; only on a claim request.
+     */
+    var `confirmToken`: kotlin.String?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAuthHttpRequest: FfiConverterRustBuffer<AuthHttpRequest> {
+    override fun read(buf: ByteBuffer): AuthHttpRequest {
+        return AuthHttpRequest(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: AuthHttpRequest) = (
+            FfiConverterString.allocationSize(value.`method`) +
+            FfiConverterString.allocationSize(value.`path`) +
+            FfiConverterOptionalString.allocationSize(value.`bodyJson`) +
+            FfiConverterBoolean.allocationSize(value.`needsSession`) +
+            FfiConverterOptionalString.allocationSize(value.`confirmToken`)
+    )
+
+    override fun write(value: AuthHttpRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`method`, buf)
+            FfiConverterString.write(value.`path`, buf)
+            FfiConverterOptionalString.write(value.`bodyJson`, buf)
+            FfiConverterBoolean.write(value.`needsSession`, buf)
+            FfiConverterOptionalString.write(value.`confirmToken`, buf)
+    }
+}
+
+
+
+data class AuthHttpResponse (
+    var `status`: kotlin.UShort
+    , 
+    var `bodyJson`: kotlin.String
+    , 
+    var `retryAfterSecs`: kotlin.ULong?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAuthHttpResponse: FfiConverterRustBuffer<AuthHttpResponse> {
+    override fun read(buf: ByteBuffer): AuthHttpResponse {
+        return AuthHttpResponse(
+            FfiConverterUShort.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: AuthHttpResponse) = (
+            FfiConverterUShort.allocationSize(value.`status`) +
+            FfiConverterString.allocationSize(value.`bodyJson`) +
+            FfiConverterOptionalULong.allocationSize(value.`retryAfterSecs`)
+    )
+
+    override fun write(value: AuthHttpResponse, buf: ByteBuffer) {
+            FfiConverterUShort.write(value.`status`, buf)
+            FfiConverterString.write(value.`bodyJson`, buf)
+            FfiConverterOptionalULong.write(value.`retryAfterSecs`, buf)
     }
 }
 
@@ -26804,6 +31701,62 @@ public object FfiConverterTypeBatchNameResult: FfiConverterRustBuffer<BatchNameR
 
 
 /**
+ * One file of a bundle: its id, its position in the link's order, and the key that opens its row.
+ */
+data class BundleItemFfi (
+    var `fileId`: kotlin.String
+    , 
+    var `position`: kotlin.UInt
+    , 
+    var `fileKey`: FileKeyHandle
+    
+): Disposable{
+    
+
+    
+
+    
+    @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
+    override fun destroy() {
+        
+    Disposable.destroy(
+        this.`fileId`,
+        this.`position`,
+        this.`fileKey`
+    )
+    }
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBundleItemFfi: FfiConverterRustBuffer<BundleItemFfi> {
+    override fun read(buf: ByteBuffer): BundleItemFfi {
+        return BundleItemFfi(
+            FfiConverterString.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterTypeFileKeyHandle.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: BundleItemFfi) = (
+            FfiConverterString.allocationSize(value.`fileId`) +
+            FfiConverterUInt.allocationSize(value.`position`) +
+            FfiConverterTypeFileKeyHandle.allocationSize(value.`fileKey`)
+    )
+
+    override fun write(value: BundleItemFfi, buf: ByteBuffer) {
+            FfiConverterString.write(value.`fileId`, buf)
+            FfiConverterUInt.write(value.`position`, buf)
+            FfiConverterTypeFileKeyHandle.write(value.`fileKey`, buf)
+    }
+}
+
+
+
+/**
  * A cached file/folder entry for the iOS FileProvider extension.
  */
 data class CachedFileEntryData (
@@ -27362,6 +32315,52 @@ public object FfiConverterTypeConstellationSessionInitDto: FfiConverterRustBuffe
             FfiConverterTypeConstellationPayloadDto.write(value.`payload`, buf)
             FfiConverterString.write(value.`confirmCode`, buf)
             FfiConverterByteArray.write(value.`ephemeralPrivate`, buf)
+    }
+}
+
+
+
+/**
+ * The created request. `link` carries `R_pub` after `#`; `display` is the part before `#`.
+ */
+data class CreatedRequestFfi (
+    var `id`: kotlin.String
+    , 
+    var `link`: kotlin.String
+    , 
+    var `display`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCreatedRequestFfi: FfiConverterRustBuffer<CreatedRequestFfi> {
+    override fun read(buf: ByteBuffer): CreatedRequestFfi {
+        return CreatedRequestFfi(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: CreatedRequestFfi) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`link`) +
+            FfiConverterString.allocationSize(value.`display`)
+    )
+
+    override fun write(value: CreatedRequestFfi, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`link`, buf)
+            FfiConverterString.write(value.`display`, buf)
     }
 }
 
@@ -29583,6 +34582,69 @@ public object FfiConverterTypeRequestRowKeys: FfiConverterRustBuffer<RequestRowK
 
 
 
+data class RequesterFactsFfi (
+    var `requestedAt`: kotlin.String
+    , 
+    var `expiresAt`: kotlin.String
+    , 
+    var `ip`: kotlin.String
+    , 
+    var `country`: kotlin.String?
+    , 
+    var `deviceName`: kotlin.String?
+    , 
+    var `client`: kotlin.String?
+    , 
+    var `os`: kotlin.String?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRequesterFactsFfi: FfiConverterRustBuffer<RequesterFactsFfi> {
+    override fun read(buf: ByteBuffer): RequesterFactsFfi {
+        return RequesterFactsFfi(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RequesterFactsFfi) = (
+            FfiConverterString.allocationSize(value.`requestedAt`) +
+            FfiConverterString.allocationSize(value.`expiresAt`) +
+            FfiConverterString.allocationSize(value.`ip`) +
+            FfiConverterOptionalString.allocationSize(value.`country`) +
+            FfiConverterOptionalString.allocationSize(value.`deviceName`) +
+            FfiConverterOptionalString.allocationSize(value.`client`) +
+            FfiConverterOptionalString.allocationSize(value.`os`)
+    )
+
+    override fun write(value: RequesterFactsFfi, buf: ByteBuffer) {
+            FfiConverterString.write(value.`requestedAt`, buf)
+            FfiConverterString.write(value.`expiresAt`, buf)
+            FfiConverterString.write(value.`ip`, buf)
+            FfiConverterOptionalString.write(value.`country`, buf)
+            FfiConverterOptionalString.write(value.`deviceName`, buf)
+            FfiConverterOptionalString.write(value.`client`, buf)
+            FfiConverterOptionalString.write(value.`os`, buf)
+    }
+}
+
+
+
 /**
  * Resize RGBA pixel data for thumbnail use. Always available (no WebP
  * dependency). The longest side is scaled to `max_dimension` preserving
@@ -29811,6 +34873,91 @@ public object FfiConverterTypeResolvedRequestRow: FfiConverterRustBuffer<Resolve
             FfiConverterUByte.write(value.`chunkFormat`, buf)
             FfiConverterString.write(value.`seal`, buf)
             FfiConverterOptionalTypeRequestRenameTarget.write(value.`renameTarget`, buf)
+    }
+}
+
+
+
+data class SafetyNumberFfi (
+    /**
+     * 60 digits, no separators; show as 12 groups of 5.
+     */
+    var `digits`: kotlin.String
+    , 
+    /**
+     * SHA-256 of the peer's public key: what a local "compared" mark is keyed by.
+     */
+    var `peerFingerprint`: kotlin.ByteArray
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSafetyNumberFfi: FfiConverterRustBuffer<SafetyNumberFfi> {
+    override fun read(buf: ByteBuffer): SafetyNumberFfi {
+        return SafetyNumberFfi(
+            FfiConverterString.read(buf),
+            FfiConverterByteArray.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SafetyNumberFfi) = (
+            FfiConverterString.allocationSize(value.`digits`) +
+            FfiConverterByteArray.allocationSize(value.`peerFingerprint`)
+    )
+
+    override fun write(value: SafetyNumberFfi, buf: ByteBuffer) {
+            FfiConverterString.write(value.`digits`, buf)
+            FfiConverterByteArray.write(value.`peerFingerprint`, buf)
+    }
+}
+
+
+
+/**
+ * The approval request and the exact recipient key the file key was sealed to.
+ */
+data class SealedApprovalFfi (
+    var `request`: AuthHttpRequest
+    , 
+    var `recipientPublicKey`: kotlin.ByteArray
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSealedApprovalFfi: FfiConverterRustBuffer<SealedApprovalFfi> {
+    override fun read(buf: ByteBuffer): SealedApprovalFfi {
+        return SealedApprovalFfi(
+            FfiConverterTypeAuthHttpRequest.read(buf),
+            FfiConverterByteArray.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SealedApprovalFfi) = (
+            FfiConverterTypeAuthHttpRequest.allocationSize(value.`request`) +
+            FfiConverterByteArray.allocationSize(value.`recipientPublicKey`)
+    )
+
+    override fun write(value: SealedApprovalFfi, buf: ByteBuffer) {
+            FfiConverterTypeAuthHttpRequest.write(value.`request`, buf)
+            FfiConverterByteArray.write(value.`recipientPublicKey`, buf)
     }
 }
 
@@ -30173,6 +35320,65 @@ public object FfiConverterTypeSignupConfiguration: FfiConverterRustBuffer<Signup
             FfiConverterUInt.write(value.`verifyWordCount`, buf)
             FfiConverterBoolean.write(value.`breachRequired`, buf)
             FfiConverterBoolean.write(value.`breachFailOpen`, buf)
+    }
+}
+
+
+
+/**
+ * The account exists: store both in the credential store, then drop them.
+ */
+data class SignupCreatedFfi (
+    var `sessionToken`: kotlin.String
+    , 
+    var `userId`: kotlin.String
+    , 
+    /**
+     * The master key as a handle; `export_for_keychain` once, to persist it.
+     */
+    var `masterKey`: MasterKeyHandle
+    
+): Disposable{
+    
+
+    
+
+    
+    @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
+    override fun destroy() {
+        
+    Disposable.destroy(
+        this.`sessionToken`,
+        this.`userId`,
+        this.`masterKey`
+    )
+    }
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSignupCreatedFfi: FfiConverterRustBuffer<SignupCreatedFfi> {
+    override fun read(buf: ByteBuffer): SignupCreatedFfi {
+        return SignupCreatedFfi(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeMasterKeyHandle.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SignupCreatedFfi) = (
+            FfiConverterString.allocationSize(value.`sessionToken`) +
+            FfiConverterString.allocationSize(value.`userId`) +
+            FfiConverterTypeMasterKeyHandle.allocationSize(value.`masterKey`)
+    )
+
+    override fun write(value: SignupCreatedFfi, buf: ByteBuffer) {
+            FfiConverterString.write(value.`sessionToken`, buf)
+            FfiConverterString.write(value.`userId`, buf)
+            FfiConverterTypeMasterKeyHandle.write(value.`masterKey`, buf)
     }
 }
 
@@ -30567,6 +35773,144 @@ public object FfiConverterTypeWrappedRequestPrivate: FfiConverterRustBuffer<Wrap
             FfiConverterByteArray.write(value.`nonce`, buf)
     }
 }
+
+
+
+
+
+sealed class AccountFlowFfiException: kotlin.Exception() {
+    
+    /**
+     * `code` is the stable error code (`wrong_password`, `invalid_code`, ...).
+     */
+    class Failed(
+        
+        val `code`: kotlin.String
+        ) : AccountFlowFfiException() {
+        override val message
+            get() = "code=${ `code` }"
+    }
+    
+
+    
+
+
+    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<AccountFlowFfiException> {
+        override fun lift(error_buf: RustBuffer.ByValue): AccountFlowFfiException = FfiConverterTypeAccountFlowFfiError.lift(error_buf)
+    }
+
+    
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAccountFlowFfiError : FfiConverterRustBuffer<AccountFlowFfiException> {
+    override fun read(buf: ByteBuffer): AccountFlowFfiException {
+        
+
+        return when(buf.getInt()) {
+            1 -> AccountFlowFfiException.Failed(
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: AccountFlowFfiException): ULong {
+        return when(value) {
+            is AccountFlowFfiException.Failed -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`code`)
+            )
+        }
+    }
+
+    override fun write(value: AccountFlowFfiException, buf: ByteBuffer) {
+        when(value) {
+            is AccountFlowFfiException.Failed -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`code`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
+}
+
+
+
+sealed class ApproveStepFfi {
+    
+    data class Send(
+        val `request`: uniffi.beebeeb_uniffi.AuthHttpRequest) : ApproveStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    object Approved : ApproveStepFfi()
+    
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeApproveStepFfi : FfiConverterRustBuffer<ApproveStepFfi>{
+    override fun read(buf: ByteBuffer): ApproveStepFfi {
+        return when(buf.getInt()) {
+            1 -> ApproveStepFfi.Send(
+                FfiConverterTypeAuthHttpRequest.read(buf),
+                )
+            2 -> ApproveStepFfi.Approved
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: ApproveStepFfi) = when(value) {
+        is ApproveStepFfi.Send -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeAuthHttpRequest.allocationSize(value.`request`)
+            )
+        }
+        is ApproveStepFfi.Approved -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+    }
+
+    override fun write(value: ApproveStepFfi, buf: ByteBuffer) {
+        when(value) {
+            is ApproveStepFfi.Send -> {
+                buf.putInt(1)
+                FfiConverterTypeAuthHttpRequest.write(value.`request`, buf)
+                Unit
+            }
+            is ApproveStepFfi.Approved -> {
+                buf.putInt(2)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
 
 
 
@@ -31941,6 +37285,76 @@ public object FfiConverterTypeAuthChallengeKind: FfiConverterRustBuffer<AuthChal
 
 
 
+
+
+sealed class AuthFlowFfiException: kotlin.Exception() {
+    
+    /**
+     * `code` is `AuthFlowError::code()` (`invalid_credentials`, `rate_limited`, …).
+     */
+    class Flow(
+        
+        val `code`: kotlin.String, 
+        
+        val `retryAfterSecs`: kotlin.ULong?
+        ) : AuthFlowFfiException() {
+        override val message
+            get() = "code=${ `code` }, retryAfterSecs=${ `retryAfterSecs` }"
+    }
+    
+
+    
+
+
+    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<AuthFlowFfiException> {
+        override fun lift(error_buf: RustBuffer.ByValue): AuthFlowFfiException = FfiConverterTypeAuthFlowFfiError.lift(error_buf)
+    }
+
+    
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAuthFlowFfiError : FfiConverterRustBuffer<AuthFlowFfiException> {
+    override fun read(buf: ByteBuffer): AuthFlowFfiException {
+        
+
+        return when(buf.getInt()) {
+            1 -> AuthFlowFfiException.Flow(
+                FfiConverterString.read(buf),
+                FfiConverterOptionalULong.read(buf),
+                )
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: AuthFlowFfiException): ULong {
+        return when(value) {
+            is AuthFlowFfiException.Flow -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`code`)
+                + FfiConverterOptionalULong.allocationSize(value.`retryAfterSecs`)
+            )
+        }
+    }
+
+    override fun write(value: AuthFlowFfiException, buf: ByteBuffer) {
+        when(value) {
+            is AuthFlowFfiException.Flow -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`code`, buf)
+                FfiConverterOptionalULong.write(value.`retryAfterSecs`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
+}
+
+
+
 /**
  * `Trashed` and `Deleted` (as the platform reported) and `RemovedElsewhere`
  * (the server's check asked again for a copy this device had backed up): the
@@ -32872,6 +38286,127 @@ public object FfiConverterTypeDeviceLinkPollKind: FfiConverterRustBuffer<DeviceL
 
     override fun write(value: DeviceLinkPollKind, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+sealed class DeviceRequestEventFfi: Disposable  {
+    
+    data class Waiting(
+        val `userCode`: kotlin.String, 
+        val `verificationUri`: kotlin.String, 
+        val `expiresIn`: kotlin.ULong) : DeviceRequestEventFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * The keys arrived; the app stores both in its secure store at once.
+     */
+    data class Approved(
+        val `sessionToken`: kotlin.String, 
+        val `masterKey`: uniffi.beebeeb_uniffi.MasterKeyHandle) : DeviceRequestEventFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+    @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
+    override fun destroy() {
+        when(this) {
+            is DeviceRequestEventFfi.Waiting -> {
+                
+    Disposable.destroy(
+        this.`userCode`,
+        this.`verificationUri`,
+        this.`expiresIn`
+    )
+                
+            }
+            is DeviceRequestEventFfi.Approved -> {
+                
+    Disposable.destroy(
+        this.`sessionToken`,
+        this.`masterKey`
+    )
+                
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDeviceRequestEventFfi : FfiConverterRustBuffer<DeviceRequestEventFfi>{
+    override fun read(buf: ByteBuffer): DeviceRequestEventFfi {
+        return when(buf.getInt()) {
+            1 -> DeviceRequestEventFfi.Waiting(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterULong.read(buf),
+                )
+            2 -> DeviceRequestEventFfi.Approved(
+                FfiConverterString.read(buf),
+                FfiConverterTypeMasterKeyHandle.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: DeviceRequestEventFfi) = when(value) {
+        is DeviceRequestEventFfi.Waiting -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`userCode`)
+                + FfiConverterString.allocationSize(value.`verificationUri`)
+                + FfiConverterULong.allocationSize(value.`expiresIn`)
+            )
+        }
+        is DeviceRequestEventFfi.Approved -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`sessionToken`)
+                + FfiConverterTypeMasterKeyHandle.allocationSize(value.`masterKey`)
+            )
+        }
+    }
+
+    override fun write(value: DeviceRequestEventFfi, buf: ByteBuffer) {
+        when(value) {
+            is DeviceRequestEventFfi.Waiting -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`userCode`, buf)
+                FfiConverterString.write(value.`verificationUri`, buf)
+                FfiConverterULong.write(value.`expiresIn`, buf)
+                Unit
+            }
+            is DeviceRequestEventFfi.Approved -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`sessionToken`, buf)
+                FfiConverterTypeMasterKeyHandle.write(value.`masterKey`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 }
 
@@ -34428,6 +39963,505 @@ public object FfiConverterTypeExtractOutcome : FfiConverterRustBuffer<ExtractOut
 
 
 
+/**
+ * A `Send` with `mark_custody_seen`: persist the id in the device's custody memory BEFORE sending.
+ */
+sealed class FolderStepFfi {
+    
+    data class Send(
+        val `request`: uniffi.beebeeb_uniffi.AuthHttpRequest, 
+        val `markCustodySeen`: kotlin.String?) : FolderStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    data class Shared(
+        val `inviteId`: kotlin.String, 
+        val `recipientPublicKey`: kotlin.ByteArray) : FolderStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    data class Invited(
+        val `inviteId`: kotlin.String, 
+        val `status`: kotlin.String) : FolderStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    data class AwaitingApproval(
+        val `inviteId`: kotlin.String, 
+        val `recipientPublicKey`: kotlin.ByteArray?) : FolderStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * Code `peer_key_changed`: the server's key is not the compared one; nothing was sealed.
+     */
+    data class PeerKeyChanged(
+        val `inviteId`: kotlin.String, 
+        val `recipientPublicKey`: kotlin.ByteArray) : FolderStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * `link` carries `#key=`; `display` is the part before `#`.
+     */
+    data class LinkCreated(
+        val `shareId`: kotlin.String, 
+        val `link`: kotlin.String, 
+        val `display`: kotlin.String, 
+        val `accessLevel`: kotlin.String, 
+        val `passphraseProtected`: kotlin.Boolean, 
+        val `keyVersion`: kotlin.ULong) : FolderStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFolderStepFfi : FfiConverterRustBuffer<FolderStepFfi>{
+    override fun read(buf: ByteBuffer): FolderStepFfi {
+        return when(buf.getInt()) {
+            1 -> FolderStepFfi.Send(
+                FfiConverterTypeAuthHttpRequest.read(buf),
+                FfiConverterOptionalString.read(buf),
+                )
+            2 -> FolderStepFfi.Shared(
+                FfiConverterString.read(buf),
+                FfiConverterByteArray.read(buf),
+                )
+            3 -> FolderStepFfi.Invited(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            4 -> FolderStepFfi.AwaitingApproval(
+                FfiConverterString.read(buf),
+                FfiConverterOptionalByteArray.read(buf),
+                )
+            5 -> FolderStepFfi.PeerKeyChanged(
+                FfiConverterString.read(buf),
+                FfiConverterByteArray.read(buf),
+                )
+            6 -> FolderStepFfi.LinkCreated(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterBoolean.read(buf),
+                FfiConverterULong.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: FolderStepFfi) = when(value) {
+        is FolderStepFfi.Send -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeAuthHttpRequest.allocationSize(value.`request`)
+                + FfiConverterOptionalString.allocationSize(value.`markCustodySeen`)
+            )
+        }
+        is FolderStepFfi.Shared -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`inviteId`)
+                + FfiConverterByteArray.allocationSize(value.`recipientPublicKey`)
+            )
+        }
+        is FolderStepFfi.Invited -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`inviteId`)
+                + FfiConverterString.allocationSize(value.`status`)
+            )
+        }
+        is FolderStepFfi.AwaitingApproval -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`inviteId`)
+                + FfiConverterOptionalByteArray.allocationSize(value.`recipientPublicKey`)
+            )
+        }
+        is FolderStepFfi.PeerKeyChanged -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`inviteId`)
+                + FfiConverterByteArray.allocationSize(value.`recipientPublicKey`)
+            )
+        }
+        is FolderStepFfi.LinkCreated -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`shareId`)
+                + FfiConverterString.allocationSize(value.`link`)
+                + FfiConverterString.allocationSize(value.`display`)
+                + FfiConverterString.allocationSize(value.`accessLevel`)
+                + FfiConverterBoolean.allocationSize(value.`passphraseProtected`)
+                + FfiConverterULong.allocationSize(value.`keyVersion`)
+            )
+        }
+    }
+
+    override fun write(value: FolderStepFfi, buf: ByteBuffer) {
+        when(value) {
+            is FolderStepFfi.Send -> {
+                buf.putInt(1)
+                FfiConverterTypeAuthHttpRequest.write(value.`request`, buf)
+                FfiConverterOptionalString.write(value.`markCustodySeen`, buf)
+                Unit
+            }
+            is FolderStepFfi.Shared -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`inviteId`, buf)
+                FfiConverterByteArray.write(value.`recipientPublicKey`, buf)
+                Unit
+            }
+            is FolderStepFfi.Invited -> {
+                buf.putInt(3)
+                FfiConverterString.write(value.`inviteId`, buf)
+                FfiConverterString.write(value.`status`, buf)
+                Unit
+            }
+            is FolderStepFfi.AwaitingApproval -> {
+                buf.putInt(4)
+                FfiConverterString.write(value.`inviteId`, buf)
+                FfiConverterOptionalByteArray.write(value.`recipientPublicKey`, buf)
+                Unit
+            }
+            is FolderStepFfi.PeerKeyChanged -> {
+                buf.putInt(5)
+                FfiConverterString.write(value.`inviteId`, buf)
+                FfiConverterByteArray.write(value.`recipientPublicKey`, buf)
+                Unit
+            }
+            is FolderStepFfi.LinkCreated -> {
+                buf.putInt(6)
+                FfiConverterString.write(value.`shareId`, buf)
+                FfiConverterString.write(value.`link`, buf)
+                FfiConverterString.write(value.`display`, buf)
+                FfiConverterString.write(value.`accessLevel`, buf)
+                FfiConverterBoolean.write(value.`passphraseProtected`, buf)
+                FfiConverterULong.write(value.`keyVersion`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+sealed class InviteStepFfi {
+    
+    data class Send(
+        val `request`: uniffi.beebeeb_uniffi.AuthHttpRequest) : InviteStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * `recipient_public_key`: the exact key the file key was sealed to (safety number, mark).
+     */
+    data class Shared(
+        val `inviteId`: kotlin.String, 
+        val `recipientPublicKey`: kotlin.ByteArray) : InviteStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    data class Invited(
+        val `inviteId`: kotlin.String, 
+        val `status`: kotlin.String) : InviteStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    data class AwaitingApproval(
+        val `inviteId`: kotlin.String, 
+        val `recipientPublicKey`: kotlin.ByteArray?) : InviteStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * Code `peer_key_changed`: the server's key is not the compared one; nothing was sealed.
+     */
+    data class PeerKeyChanged(
+        val `inviteId`: kotlin.String, 
+        val `recipientPublicKey`: kotlin.ByteArray) : InviteStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeInviteStepFfi : FfiConverterRustBuffer<InviteStepFfi>{
+    override fun read(buf: ByteBuffer): InviteStepFfi {
+        return when(buf.getInt()) {
+            1 -> InviteStepFfi.Send(
+                FfiConverterTypeAuthHttpRequest.read(buf),
+                )
+            2 -> InviteStepFfi.Shared(
+                FfiConverterString.read(buf),
+                FfiConverterByteArray.read(buf),
+                )
+            3 -> InviteStepFfi.Invited(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            4 -> InviteStepFfi.AwaitingApproval(
+                FfiConverterString.read(buf),
+                FfiConverterOptionalByteArray.read(buf),
+                )
+            5 -> InviteStepFfi.PeerKeyChanged(
+                FfiConverterString.read(buf),
+                FfiConverterByteArray.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: InviteStepFfi) = when(value) {
+        is InviteStepFfi.Send -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeAuthHttpRequest.allocationSize(value.`request`)
+            )
+        }
+        is InviteStepFfi.Shared -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`inviteId`)
+                + FfiConverterByteArray.allocationSize(value.`recipientPublicKey`)
+            )
+        }
+        is InviteStepFfi.Invited -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`inviteId`)
+                + FfiConverterString.allocationSize(value.`status`)
+            )
+        }
+        is InviteStepFfi.AwaitingApproval -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`inviteId`)
+                + FfiConverterOptionalByteArray.allocationSize(value.`recipientPublicKey`)
+            )
+        }
+        is InviteStepFfi.PeerKeyChanged -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`inviteId`)
+                + FfiConverterByteArray.allocationSize(value.`recipientPublicKey`)
+            )
+        }
+    }
+
+    override fun write(value: InviteStepFfi, buf: ByteBuffer) {
+        when(value) {
+            is InviteStepFfi.Send -> {
+                buf.putInt(1)
+                FfiConverterTypeAuthHttpRequest.write(value.`request`, buf)
+                Unit
+            }
+            is InviteStepFfi.Shared -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`inviteId`, buf)
+                FfiConverterByteArray.write(value.`recipientPublicKey`, buf)
+                Unit
+            }
+            is InviteStepFfi.Invited -> {
+                buf.putInt(3)
+                FfiConverterString.write(value.`inviteId`, buf)
+                FfiConverterString.write(value.`status`, buf)
+                Unit
+            }
+            is InviteStepFfi.AwaitingApproval -> {
+                buf.putInt(4)
+                FfiConverterString.write(value.`inviteId`, buf)
+                FfiConverterOptionalByteArray.write(value.`recipientPublicKey`, buf)
+                Unit
+            }
+            is InviteStepFfi.PeerKeyChanged -> {
+                buf.putInt(5)
+                FfiConverterString.write(value.`inviteId`, buf)
+                FfiConverterByteArray.write(value.`recipientPublicKey`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+sealed class LinkStepFfi {
+    
+    data class Send(
+        val `request`: uniffi.beebeeb_uniffi.AuthHttpRequest) : LinkStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * `link` carries the key in its `#key=` part; `display` is the part before `#`.
+     */
+    data class Created(
+        val `shareId`: kotlin.String, 
+        val `link`: kotlin.String, 
+        val `display`: kotlin.String) : LinkStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLinkStepFfi : FfiConverterRustBuffer<LinkStepFfi>{
+    override fun read(buf: ByteBuffer): LinkStepFfi {
+        return when(buf.getInt()) {
+            1 -> LinkStepFfi.Send(
+                FfiConverterTypeAuthHttpRequest.read(buf),
+                )
+            2 -> LinkStepFfi.Created(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: LinkStepFfi) = when(value) {
+        is LinkStepFfi.Send -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeAuthHttpRequest.allocationSize(value.`request`)
+            )
+        }
+        is LinkStepFfi.Created -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`shareId`)
+                + FfiConverterString.allocationSize(value.`link`)
+                + FfiConverterString.allocationSize(value.`display`)
+            )
+        }
+    }
+
+    override fun write(value: LinkStepFfi, buf: ByteBuffer) {
+        when(value) {
+            is LinkStepFfi.Send -> {
+                buf.putInt(1)
+                FfiConverterTypeAuthHttpRequest.write(value.`request`, buf)
+                Unit
+            }
+            is LinkStepFfi.Created -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`shareId`, buf)
+                FfiConverterString.write(value.`link`, buf)
+                FfiConverterString.write(value.`display`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
 
 enum class NetworkSignal {
     
@@ -34875,6 +40909,187 @@ public object FfiConverterTypePasswordStrengthDto: FfiConverterRustBuffer<Passwo
 
     override fun write(value: PasswordStrengthDto, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * What the host knows about the recipient's key: REQUIRED on every member seal.
+ */
+sealed class PeerKeyExpectationFfi {
+    
+    /**
+     * The host holds a compared mark; `fingerprint` is 32 bytes (`share_key_fingerprint`).
+     */
+    data class Compared(
+        val `fingerprint`: kotlin.ByteArray) : PeerKeyExpectationFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * No compared mark for this person.
+     */
+    object NotCompared : PeerKeyExpectationFfi()
+    
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePeerKeyExpectationFfi : FfiConverterRustBuffer<PeerKeyExpectationFfi>{
+    override fun read(buf: ByteBuffer): PeerKeyExpectationFfi {
+        return when(buf.getInt()) {
+            1 -> PeerKeyExpectationFfi.Compared(
+                FfiConverterByteArray.read(buf),
+                )
+            2 -> PeerKeyExpectationFfi.NotCompared
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: PeerKeyExpectationFfi) = when(value) {
+        is PeerKeyExpectationFfi.Compared -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterByteArray.allocationSize(value.`fingerprint`)
+            )
+        }
+        is PeerKeyExpectationFfi.NotCompared -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+    }
+
+    override fun write(value: PeerKeyExpectationFfi, buf: ByteBuffer) {
+        when(value) {
+            is PeerKeyExpectationFfi.Compared -> {
+                buf.putInt(1)
+                FfiConverterByteArray.write(value.`fingerprint`, buf)
+                Unit
+            }
+            is PeerKeyExpectationFfi.NotCompared -> {
+                buf.putInt(2)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+sealed class RecoveredFfi: Disposable  {
+    
+    /**
+     * Signed in with the new password: store both, then drop them.
+     */
+    data class SignedIn(
+        val `sessionToken`: kotlin.String, 
+        val `masterKey`: uniffi.beebeeb_uniffi.MasterKeyHandle) : RecoveredFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * The password changed; a normal sign-in comes next (two-factor on, or an older server).
+     */
+    object SignInRequired : RecoveredFfi()
+    
+    
+
+    
+    @Suppress("UNNECESSARY_SAFE_CALL") // codegen is much simpler if we unconditionally emit safe calls here
+    override fun destroy() {
+        when(this) {
+            is RecoveredFfi.SignedIn -> {
+                
+    Disposable.destroy(
+        this.`sessionToken`,
+        this.`masterKey`
+    )
+                
+            }
+            is RecoveredFfi.SignInRequired -> {// Nothing to destroy
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRecoveredFfi : FfiConverterRustBuffer<RecoveredFfi>{
+    override fun read(buf: ByteBuffer): RecoveredFfi {
+        return when(buf.getInt()) {
+            1 -> RecoveredFfi.SignedIn(
+                FfiConverterString.read(buf),
+                FfiConverterTypeMasterKeyHandle.read(buf),
+                )
+            2 -> RecoveredFfi.SignInRequired
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: RecoveredFfi) = when(value) {
+        is RecoveredFfi.SignedIn -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`sessionToken`)
+                + FfiConverterTypeMasterKeyHandle.allocationSize(value.`masterKey`)
+            )
+        }
+        is RecoveredFfi.SignInRequired -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+    }
+
+    override fun write(value: RecoveredFfi, buf: ByteBuffer) {
+        when(value) {
+            is RecoveredFfi.SignedIn -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`sessionToken`, buf)
+                FfiConverterTypeMasterKeyHandle.write(value.`masterKey`, buf)
+                Unit
+            }
+            is RecoveredFfi.SignInRequired -> {
+                buf.putInt(2)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 }
 
@@ -35371,6 +41586,171 @@ public object FfiConverterTypeSessionResumeAction: FfiConverterRustBuffer<Sessio
 
 
 
+
+sealed class ShareFlowFfiException: kotlin.Exception() {
+    
+    /**
+     * `code` is `ShareFlowError::code()` (`plan_required`, `folder_keys_unavailable`, …).
+     */
+    class Flow(
+        
+        val `code`: kotlin.String
+        ) : ShareFlowFfiException() {
+        override val message
+            get() = "code=${ `code` }"
+    }
+    
+
+    
+
+
+    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<ShareFlowFfiException> {
+        override fun lift(error_buf: RustBuffer.ByValue): ShareFlowFfiException = FfiConverterTypeShareFlowFfiError.lift(error_buf)
+    }
+
+    
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeShareFlowFfiError : FfiConverterRustBuffer<ShareFlowFfiException> {
+    override fun read(buf: ByteBuffer): ShareFlowFfiException {
+        
+
+        return when(buf.getInt()) {
+            1 -> ShareFlowFfiException.Flow(
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: ShareFlowFfiException): ULong {
+        return when(value) {
+            is ShareFlowFfiException.Flow -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`code`)
+            )
+        }
+    }
+
+    override fun write(value: ShareFlowFfiException, buf: ByteBuffer) {
+        when(value) {
+            is ShareFlowFfiException.Flow -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`code`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
+}
+
+
+
+sealed class SignInStepFfi {
+    
+    data class Send(
+        val `request`: uniffi.beebeeb_uniffi.AuthHttpRequest) : SignInStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    data class SignedIn(
+        val `sessionToken`: kotlin.String) : SignInStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * Two-factor is on: call `verify_request(code)`.
+     */
+    object SecondFactor : SignInStepFfi()
+    
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSignInStepFfi : FfiConverterRustBuffer<SignInStepFfi>{
+    override fun read(buf: ByteBuffer): SignInStepFfi {
+        return when(buf.getInt()) {
+            1 -> SignInStepFfi.Send(
+                FfiConverterTypeAuthHttpRequest.read(buf),
+                )
+            2 -> SignInStepFfi.SignedIn(
+                FfiConverterString.read(buf),
+                )
+            3 -> SignInStepFfi.SecondFactor
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: SignInStepFfi) = when(value) {
+        is SignInStepFfi.Send -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeAuthHttpRequest.allocationSize(value.`request`)
+            )
+        }
+        is SignInStepFfi.SignedIn -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`sessionToken`)
+            )
+        }
+        is SignInStepFfi.SecondFactor -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+    }
+
+    override fun write(value: SignInStepFfi, buf: ByteBuffer) {
+        when(value) {
+            is SignInStepFfi.Send -> {
+                buf.putInt(1)
+                FfiConverterTypeAuthHttpRequest.write(value.`request`, buf)
+                Unit
+            }
+            is SignInStepFfi.SignedIn -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`sessionToken`, buf)
+                Unit
+            }
+            is SignInStepFfi.SecondFactor -> {
+                buf.putInt(3)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
 enum class SignOutFailureData {
     
     UPLOAD_QUEUE,
@@ -35402,6 +41782,152 @@ public object FfiConverterTypeSignOutFailureData: FfiConverterRustBuffer<SignOut
 
     override fun write(value: SignOutFailureData, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+
+sealed class SignupFlowFfiException: kotlin.Exception() {
+    
+    /**
+     * `code` is `SignupError::code()` (`wrong_code`, `password_breached`, …).
+     */
+    class Flow(
+        
+        val `code`: kotlin.String, 
+        
+        val `retryAfterSecs`: kotlin.ULong?
+        ) : SignupFlowFfiException() {
+        override val message
+            get() = "code=${ `code` }, retryAfterSecs=${ `retryAfterSecs` }"
+    }
+    
+
+    
+
+
+    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<SignupFlowFfiException> {
+        override fun lift(error_buf: RustBuffer.ByValue): SignupFlowFfiException = FfiConverterTypeSignupFlowFfiError.lift(error_buf)
+    }
+
+    
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSignupFlowFfiError : FfiConverterRustBuffer<SignupFlowFfiException> {
+    override fun read(buf: ByteBuffer): SignupFlowFfiException {
+        
+
+        return when(buf.getInt()) {
+            1 -> SignupFlowFfiException.Flow(
+                FfiConverterString.read(buf),
+                FfiConverterOptionalULong.read(buf),
+                )
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: SignupFlowFfiException): ULong {
+        return when(value) {
+            is SignupFlowFfiException.Flow -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`code`)
+                + FfiConverterOptionalULong.allocationSize(value.`retryAfterSecs`)
+            )
+        }
+    }
+
+    override fun write(value: SignupFlowFfiException, buf: ByteBuffer) {
+        when(value) {
+            is SignupFlowFfiException.Flow -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`code`, buf)
+                FfiConverterOptionalULong.write(value.`retryAfterSecs`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
+}
+
+
+
+sealed class StepUpStepFfi {
+    
+    data class Send(
+        val `request`: uniffi.beebeeb_uniffi.AuthHttpRequest) : StepUpStepFfi()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * The token is held inside; `attach_confirm_token` puts it on the consuming request.
+     */
+    object Confirmed : StepUpStepFfi()
+    
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeStepUpStepFfi : FfiConverterRustBuffer<StepUpStepFfi>{
+    override fun read(buf: ByteBuffer): StepUpStepFfi {
+        return when(buf.getInt()) {
+            1 -> StepUpStepFfi.Send(
+                FfiConverterTypeAuthHttpRequest.read(buf),
+                )
+            2 -> StepUpStepFfi.Confirmed
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: StepUpStepFfi) = when(value) {
+        is StepUpStepFfi.Send -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeAuthHttpRequest.allocationSize(value.`request`)
+            )
+        }
+        is StepUpStepFfi.Confirmed -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+    }
+
+    override fun write(value: StepUpStepFfi, buf: ByteBuffer) {
+        when(value) {
+            is StepUpStepFfi.Send -> {
+                buf.putInt(1)
+                FfiConverterTypeAuthHttpRequest.write(value.`request`, buf)
+                Unit
+            }
+            is StepUpStepFfi.Confirmed -> {
+                buf.putInt(2)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 }
 
@@ -36313,6 +42839,38 @@ public object FfiConverterOptionalUByte: FfiConverterRustBuffer<kotlin.UByte?> {
 /**
  * @suppress
  */
+public object FfiConverterOptionalUShort: FfiConverterRustBuffer<kotlin.UShort?> {
+    override fun read(buf: ByteBuffer): kotlin.UShort? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterUShort.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.UShort?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterUShort.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.UShort?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterUShort.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalUInt: FfiConverterRustBuffer<kotlin.UInt?> {
     override fun read(buf: ByteBuffer): kotlin.UInt? {
         if (buf.get().toInt() == 0) {
@@ -36633,6 +43191,38 @@ public object FfiConverterOptionalTypeWriteTargetHandle: FfiConverterRustBuffer<
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeAccountFlowOutcome: FfiConverterRustBuffer<AccountFlowOutcome?> {
+    override fun read(buf: ByteBuffer): AccountFlowOutcome? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeAccountFlowOutcome.read(buf)
+    }
+
+    override fun allocationSize(value: AccountFlowOutcome?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeAccountFlowOutcome.allocationSize(value)
+        }
+    }
+
+    override fun write(value: AccountFlowOutcome?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeAccountFlowOutcome.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeArchiveEventData: FfiConverterRustBuffer<ArchiveEventData?> {
     override fun read(buf: ByteBuffer): ArchiveEventData? {
         if (buf.get().toInt() == 0) {
@@ -36751,6 +43341,38 @@ public object FfiConverterOptionalTypeAssetSnapshotData: FfiConverterRustBuffer<
         } else {
             buf.put(1)
             FfiConverterTypeAssetSnapshotData.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeAuthHttpRequest: FfiConverterRustBuffer<AuthHttpRequest?> {
+    override fun read(buf: ByteBuffer): AuthHttpRequest? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeAuthHttpRequest.read(buf)
+    }
+
+    override fun allocationSize(value: AuthHttpRequest?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeAuthHttpRequest.allocationSize(value)
+        }
+    }
+
+    override fun write(value: AuthHttpRequest?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeAuthHttpRequest.write(value, buf)
         }
     }
 }
@@ -37263,6 +43885,38 @@ public object FfiConverterOptionalTypeArchiveTime: FfiConverterRustBuffer<Archiv
         } else {
             buf.put(1)
             FfiConverterTypeArchiveTime.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeBreachVerdictDto: FfiConverterRustBuffer<BreachVerdictDto?> {
+    override fun read(buf: ByteBuffer): BreachVerdictDto? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeBreachVerdictDto.read(buf)
+    }
+
+    override fun allocationSize(value: BreachVerdictDto?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeBreachVerdictDto.allocationSize(value)
+        }
+    }
+
+    override fun write(value: BreachVerdictDto?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeBreachVerdictDto.write(value, buf)
         }
     }
 }
@@ -38235,6 +44889,34 @@ public object FfiConverterSequenceTypeBatchNameResult: FfiConverterRustBuffer<Li
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeBatchNameResult.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeBundleItemFfi: FfiConverterRustBuffer<List<BundleItemFfi>> {
+    override fun read(buf: ByteBuffer): List<BundleItemFfi> {
+        val len = buf.getInt()
+        return List<BundleItemFfi>(len) {
+            FfiConverterTypeBundleItemFfi.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<BundleItemFfi>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeBundleItemFfi.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<BundleItemFfi>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeBundleItemFfi.write(it, buf)
         }
     }
 }
@@ -40058,6 +46740,145 @@ public typealias FfiConverterTypeSecretString = FfiConverterString
     
 
         /**
+         * `AssertionStart` JSON + `NativeAssertion` JSON → `login-finish` body.
+         */
+    @Throws(CryptoException::class) fun `passkeyAssertionFinishBody`(`startJson`: kotlin.String, `assertionJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_passkey_assertion_finish_body(
+    
+        FfiConverterString.lower(`startJson`),FfiConverterString.lower(`assertionJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The `vault-key-escrow` body for a credential id and a blob from [`passkey_wrap_vault_key`].
+         */ fun `passkeyEscrowBody`(`credentialId`: kotlin.ByteArray, `blob`: kotlin.ByteArray): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_passkey_escrow_body(
+    
+        FfiConverterByteArray.lower(`credentialId`),FfiConverterByteArray.lower(`blob`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The CTAP2 hmac-secret salt, for an API that takes raw hmac-secret salts (the PRF hash already applied).
+         */ fun `passkeyHmacSecretSalt`(): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_passkey_hmac_secret_salt(
+    
+        _status)
+}
+    )
+    }
+    
+
+        /**
+         * `login-start`'s answer → `AssertionStart` JSON (options for the platform's get call). The server's `rpId` must
+         * equal `expected_rp_id`, else `passkey_rp_mismatch`.
+         */
+    @Throws(CryptoException::class) fun `passkeyParseAssertionStart`(`answerJson`: kotlin.String, `expectedRpId`: kotlin.String, `allowLocalhost`: kotlin.Boolean): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_passkey_parse_assertion_start(
+    
+        FfiConverterString.lower(`answerJson`),FfiConverterString.lower(`expectedRpId`),FfiConverterBoolean.lower(`allowLocalhost`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The escrow blob from `GET /api/v1/auth/vault-key-escrow/{id}`'s answer.
+         */
+    @Throws(CryptoException::class) fun `passkeyParseEscrow`(`answerJson`: kotlin.String): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_passkey_parse_escrow(
+    
+        FfiConverterString.lower(`answerJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * `register-start`'s answer → `RegistrationStart` JSON (options for the platform's create call). The server's
+         * `rp.id` must equal `expected_rp_id`, else `passkey_rp_mismatch`.
+         */
+    @Throws(CryptoException::class) fun `passkeyParseRegistrationStart`(`answerJson`: kotlin.String, `expectedRpId`: kotlin.String, `allowLocalhost`: kotlin.Boolean): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_passkey_parse_registration_start(
+    
+        FfiConverterString.lower(`answerJson`),FfiConverterString.lower(`expectedRpId`),FfiConverterBoolean.lower(`allowLocalhost`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The PRF eval input to pass as `prf.eval.first` to an API that takes PRF inputs (it hashes them itself).
+         */ fun `passkeyPrfEvalInput`(): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_passkey_prf_eval_input(
+    
+        _status)
+}
+    )
+    }
+    
+
+        /**
+         * `RegistrationStart` JSON + `NativeAttestation` JSON → `register-finish` body.
+         */
+    @Throws(CryptoException::class) fun `passkeyRegistrationFinishBody`(`startJson`: kotlin.String, `attestationJson`: kotlin.String, `name`: kotlin.String?): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_passkey_registration_finish_body(
+    
+        FfiConverterString.lower(`startJson`),FfiConverterString.lower(`attestationJson`),FfiConverterOptionalString.lower(`name`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Open an escrow blob with a PRF output. The vault key comes back as a handle.
+         */
+    @Throws(CryptoException::class) fun `passkeyUnwrapVaultKey`(`prfOutput`: kotlin.ByteArray, `blob`: kotlin.ByteArray): MasterKeyHandle {
+            return FfiConverterTypeMasterKeyHandle.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_passkey_unwrap_vault_key(
+    
+        FfiConverterByteArray.lower(`prfOutput`),FfiConverterByteArray.lower(`blob`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Wrap the vault key under a PRF output: the escrow blob for `POST /api/v1/auth/vault-key-escrow`.
+         */
+    @Throws(CryptoException::class) fun `passkeyWrapVaultKey`(`prfOutput`: kotlin.ByteArray, `masterKey`: MasterKeyHandle): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CryptoException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_passkey_wrap_vault_key(
+    
+        FfiConverterByteArray.lower(`prfOutput`),FfiConverterTypeMasterKeyHandle.lower(`masterKey`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Mint a guest (F) item id with NO master key (task 2275 §15). The anonymous
          * uploader path uses this; the id is a canonical RFC 9562 UUID v8.
          */
@@ -40065,6 +46886,179 @@ public typealias FfiConverterTypeSecretString = FfiConverterString
             return FfiConverterString.lift(
     uniffiRustCallWithError(CryptoException) { _status ->
     UniffiLib.uniffi_beebeeb_uniffi_fn_func_mint_guest_item_id(
+    
+        _status)
+}
+    )
+    }
+    
+
+        /**
+         * Approve a claimed file invite later: the file key sealed for the recipient. With
+         * `Compared(fingerprint)` a different server key is refused (`peer_key_changed`), unsealed. After
+         * `peer_key_changed` and the user's "share anyway", pass the key bytes the refusal carried and
+         * `Compared(share_key_fingerprint(those bytes))`, never a re-fetched key. Returns the sealed key.
+         */
+    @Throws(ShareFlowFfiException::class) fun `shareApproveFileInviteRequest`(`inviteId`: kotlin.String, `fileId`: kotlin.String, `recipientPublicKeyB64`: kotlin.String, `masterKey`: MasterKeyHandle, `fileKey`: FileKeyHandle, `peerKey`: PeerKeyExpectationFfi): SealedApprovalFfi {
+            return FfiConverterTypeSealedApprovalFfi.lift(
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_share_approve_file_invite_request(
+    
+        FfiConverterString.lower(`inviteId`),FfiConverterString.lower(`fileId`),FfiConverterString.lower(`recipientPublicKeyB64`),FfiConverterTypeMasterKeyHandle.lower(`masterKey`),FfiConverterTypeFileKeyHandle.lower(`fileKey`),FfiConverterTypePeerKeyExpectationFfi.lower(`peerKey`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The recipient side of a link: the file key from the link's `#key=` value.
+         */
+    @Throws(ShareFlowFfiException::class) fun `shareOpenLinkFileKey`(`fragmentKey`: kotlin.String, `wrappedFileKeyB64`: kotlin.String): FileKeyHandle {
+            return FfiConverterTypeFileKeyHandle.lift(
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_share_open_link_file_key(
+    
+        FfiConverterString.lower(`fragmentKey`),FfiConverterString.lower(`wrappedFileKeyB64`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The recipient side of a person share: the file key, opened with the owner's X25519 public key.
+         */
+    @Throws(ShareFlowFfiException::class) fun `shareOpenMemberFileKey`(`masterKey`: MasterKeyHandle, `ownerPublicKey`: kotlin.ByteArray, `fileId`: kotlin.String, `sealed`: kotlin.ByteArray): FileKeyHandle {
+            return FfiConverterTypeFileKeyHandle.lift(
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_share_open_member_file_key(
+    
+        FfiConverterTypeMasterKeyHandle.lower(`masterKey`),FfiConverterByteArray.lower(`ownerPublicKey`),FfiConverterString.lower(`fileId`),FfiConverterByteArray.lower(`sealed`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * [`share_rebuild_link`] for a bundle (no single wrapped file key).
+         */
+    @Throws(ShareFlowFfiException::class) fun `shareRebuildBundleLink`(`appUrl`: kotlin.String, `masterKey`: MasterKeyHandle, `ownerWrappedKey`: kotlin.String?, `ownerWrappedToken`: kotlin.String?): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_share_rebuild_bundle_link(
+    
+        FfiConverterString.lower(`appUrl`),FfiConverterTypeMasterKeyHandle.lower(`masterKey`),FfiConverterOptionalString.lower(`ownerWrappedKey`),FfiConverterOptionalString.lower(`ownerWrappedToken`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The owner's working link from a share's owner blobs; `None` when it can't be rebuilt.
+         * `wrapped_file_key` (the link's stored `wrapped_file_key`, required) must open under the rebuilt
+         * link key. A bundle uses `share_rebuild_bundle_link`.
+         */
+    @Throws(ShareFlowFfiException::class) fun `shareRebuildLink`(`appUrl`: kotlin.String, `masterKey`: MasterKeyHandle, `ownerWrappedKey`: kotlin.String?, `ownerWrappedToken`: kotlin.String?, `wrappedFileKey`: kotlin.String): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_share_rebuild_link(
+    
+        FfiConverterString.lower(`appUrl`),FfiConverterTypeMasterKeyHandle.lower(`masterKey`),FfiConverterOptionalString.lower(`ownerWrappedKey`),FfiConverterOptionalString.lower(`ownerWrappedToken`),FfiConverterString.lower(`wrappedFileKey`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * `DELETE` a link (`/shares/{id}`) or a person share (`/shares/invites/{id}`).
+         */
+    @Throws(ShareFlowFfiException::class) fun `shareRevokeRequest`(`id`: kotlin.String, `isInvite`: kotlin.Boolean): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_share_revoke_request(
+    
+        FfiConverterString.lower(`id`),FfiConverterBoolean.lower(`isInvite`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * `POST /api/v1/file-requests/{id}/close`.
+         */
+    @Throws(ShareFlowFfiException::class) fun `fileRequestCloseRequest`(`id`: kotlin.String): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_file_request_close_request(
+    
+        FfiConverterString.lower(`id`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * A request's link again from its stored wrap; `None` when it can't be rebuilt.
+         */
+    @Throws(ShareFlowFfiException::class) fun `fileRequestRebuildLink`(`appUrl`: kotlin.String, `masterKey`: MasterKeyHandle, `token`: kotlin.String?, `wrappedPrivateKey`: kotlin.String?, `wrapNonce`: kotlin.String?): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_file_request_rebuild_link(
+    
+        FfiConverterString.lower(`appUrl`),FfiConverterTypeMasterKeyHandle.lower(`masterKey`),FfiConverterOptionalString.lower(`token`),FfiConverterOptionalString.lower(`wrappedPrivateKey`),FfiConverterOptionalString.lower(`wrapNonce`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Web `rebuildFolderLinkUrl`: the owner's folder link again; `None` when it can't be rebuilt.
+         */
+    @Throws(ShareFlowFfiException::class) fun `shareRebuildFolderLink`(`appUrl`: kotlin.String, `masterKey`: MasterKeyHandle, `shareId`: kotlin.String, `ownerWrappedKey`: kotlin.String?, `ownerWrappedToken`: kotlin.String?, `wrappedFolderKey`: kotlin.String?, `passphraseProtected`: kotlin.Boolean): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_share_rebuild_folder_link(
+    
+        FfiConverterString.lower(`appUrl`),FfiConverterTypeMasterKeyHandle.lower(`masterKey`),FfiConverterString.lower(`shareId`),FfiConverterOptionalString.lower(`ownerWrappedKey`),FfiConverterOptionalString.lower(`ownerWrappedToken`),FfiConverterOptionalString.lower(`wrappedFolderKey`),FfiConverterBoolean.lower(`passphraseProtected`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The 60-digit number two people compare out of band (Signal's numeric fingerprint, v1). The own
+         * sharing key is derived in core from the `master_key` handle (as the other share exports take it);
+         * `peer_public_key` is the key the share was sealed to (`recipient_public_key` of the outcome).
+         */
+    @Throws(ShareFlowFfiException::class) fun `shareSafetyNumber`(`masterKey`: MasterKeyHandle, `ownUserId`: kotlin.String, `peerUserId`: kotlin.String, `peerPublicKey`: kotlin.ByteArray): SafetyNumberFfi {
+            return FfiConverterTypeSafetyNumberFfi.lift(
+    uniffiRustCallWithError(ShareFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_share_safety_number(
+    
+        FfiConverterTypeMasterKeyHandle.lower(`masterKey`),FfiConverterString.lower(`ownUserId`),FfiConverterString.lower(`peerUserId`),FfiConverterByteArray.lower(`peerPublicKey`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * 0-based positions of words that are not BIP39 words (DW-A47's per-word hint).
+         */ fun `recoveryUnknownWordPositions`(`words`: List<kotlin.String>): List<kotlin.UInt> {
+            return FfiConverterSequenceUInt.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_recovery_unknown_word_positions(
+    
+        FfiConverterSequenceString.lower(`words`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The request for the server's sign-up policy (`GET /api/v1/onboarding`).
+         */ fun `signupPolicyRequest`(): AuthHttpRequest {
+            return FfiConverterTypeAuthHttpRequest.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_signup_policy_request(
     
         _status)
 }

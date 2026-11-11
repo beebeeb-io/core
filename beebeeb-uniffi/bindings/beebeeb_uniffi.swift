@@ -620,6 +620,362 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 
 
 
+/**
+ * One account flow at a time. Drive it from ONE sequence.
+ */
+public protocol AccountFlowHandleProtocol: AnyObject, Sendable {
+    
+    func abandon() 
+    
+    func changeEmail(newEmail: String, password: String, recoveryCheckB64: String, x25519PublicB64: String) throws  -> AccountFlowStep
+    
+    /**
+     * `onboarding_status` / `onboarding_body` are the server's `GET /api/v1/onboarding` answer
+     * (its password policy); `breach_check` is a [`BreachCheckHandle`] made for `new_password`
+     * and answered, required when that policy declares a breach check (sign-up's gate).
+     */
+    func changePassword(current: String, newPassword: String, recoveryCheckB64: String, x25519PublicB64: String, onboardingStatus: UInt16, onboardingBody: String, breachCheck: BreachCheckHandle?) throws  -> AccountFlowStep
+    
+    /**
+     * Delete step 2: step-up + the second factor on a 2FA account; the server mails a link.
+     */
+    func deleteAccount(password: String, code: String?) throws  -> AccountFlowStep
+    
+    /**
+     * Undo a scheduled deletion with the same link.
+     */
+    func deleteCancel(linkToken: String) throws  -> AccountFlowStep
+    
+    /**
+     * Delete step 3: the mailed link's token (or the whole link).
+     */
+    func deleteConfirm(linkToken: String) throws  -> AccountFlowStep
+    
+    /**
+     * New backup codes with the current authenticator code; the authenticator stays.
+     */
+    func regenerateBackupCodes(code: String) throws  -> AccountFlowStep
+    
+    func resume(status: UInt16, bodyText: String) throws  -> AccountFlowStep
+    
+    func revokeOtherSessions() throws  -> AccountFlowStep
+    
+    func revokeSession(sessionId: String) throws  -> AccountFlowStep
+    
+    /**
+     * Turning it off takes the password (a step-up inside); turning it on ignores it.
+     */
+    func setActivityLogging(on: Bool, password: String?) throws  -> AccountFlowStep
+    
+    func setDisplayName(name: String) throws  -> AccountFlowStep
+    
+    func totpConfirm(code: String) throws  -> AccountFlowStep
+    
+    func totpDisable(code: String) throws  -> AccountFlowStep
+    
+    func totpSetup(password: String?, currentCode: String?) throws  -> AccountFlowStep
+    
+    func verifyEmail(code: String) throws  -> AccountFlowStep
+    
+    func verifyPassword(password: String) throws  -> AccountFlowStep
+    
+}
+/**
+ * One account flow at a time. Drive it from ONE sequence.
+ */
+open class AccountFlowHandle: AccountFlowHandleProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_accountflowhandle(self.handle, $0) }
+    }
+public convenience init() {
+    let handle =
+        try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_constructor_accountflowhandle_new($0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_accountflowhandle(handle, $0) }
+    }
+
+    
+
+    
+open func abandon()  {try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_abandon(
+            self.uniffiCloneHandle(),$0
+    )
+}
+}
+    
+open func changeEmail(newEmail: String, password: String, recoveryCheckB64: String, x25519PublicB64: String)throws  -> AccountFlowStep  {
+    return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_change_email(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(newEmail),
+        FfiConverterString.lower(password),
+        FfiConverterString.lower(recoveryCheckB64),
+        FfiConverterString.lower(x25519PublicB64),$0
+    )
+})
+}
+    
+    /**
+     * `onboarding_status` / `onboarding_body` are the server's `GET /api/v1/onboarding` answer
+     * (its password policy); `breach_check` is a [`BreachCheckHandle`] made for `new_password`
+     * and answered, required when that policy declares a breach check (sign-up's gate).
+     */
+open func changePassword(current: String, newPassword: String, recoveryCheckB64: String, x25519PublicB64: String, onboardingStatus: UInt16, onboardingBody: String, breachCheck: BreachCheckHandle?)throws  -> AccountFlowStep  {
+    return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_change_password(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(current),
+        FfiConverterString.lower(newPassword),
+        FfiConverterString.lower(recoveryCheckB64),
+        FfiConverterString.lower(x25519PublicB64),
+        FfiConverterUInt16.lower(onboardingStatus),
+        FfiConverterString.lower(onboardingBody),
+        FfiConverterOptionTypeBreachCheckHandle.lower(breachCheck),$0
+    )
+})
+}
+    
+    /**
+     * Delete step 2: step-up + the second factor on a 2FA account; the server mails a link.
+     */
+open func deleteAccount(password: String, code: String?)throws  -> AccountFlowStep  {
+    return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_delete_account(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(password),
+        FfiConverterOptionString.lower(code),$0
+    )
+})
+}
+    
+    /**
+     * Undo a scheduled deletion with the same link.
+     */
+open func deleteCancel(linkToken: String)throws  -> AccountFlowStep  {
+    return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_delete_cancel(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(linkToken),$0
+    )
+})
+}
+    
+    /**
+     * Delete step 3: the mailed link's token (or the whole link).
+     */
+open func deleteConfirm(linkToken: String)throws  -> AccountFlowStep  {
+    return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_delete_confirm(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(linkToken),$0
+    )
+})
+}
+    
+    /**
+     * New backup codes with the current authenticator code; the authenticator stays.
+     */
+open func regenerateBackupCodes(code: String)throws  -> AccountFlowStep  {
+    return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_regenerate_backup_codes(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(code),$0
+    )
+})
+}
+    
+open func resume(status: UInt16, bodyText: String)throws  -> AccountFlowStep  {
+    return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_resume(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt16.lower(status),
+        FfiConverterString.lower(bodyText),$0
+    )
+})
+}
+    
+open func revokeOtherSessions()throws  -> AccountFlowStep  {
+    return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_revoke_other_sessions(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+open func revokeSession(sessionId: String)throws  -> AccountFlowStep  {
+    return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_revoke_session(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(sessionId),$0
+    )
+})
+}
+    
+    /**
+     * Turning it off takes the password (a step-up inside); turning it on ignores it.
+     */
+open func setActivityLogging(on: Bool, password: String?)throws  -> AccountFlowStep  {
+    return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_set_activity_logging(
+            self.uniffiCloneHandle(),
+        FfiConverterBool.lower(on),
+        FfiConverterOptionString.lower(password),$0
+    )
+})
+}
+    
+open func setDisplayName(name: String)throws  -> AccountFlowStep  {
+    return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_set_display_name(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(name),$0
+    )
+})
+}
+    
+open func totpConfirm(code: String)throws  -> AccountFlowStep  {
+    return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_totp_confirm(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(code),$0
+    )
+})
+}
+    
+open func totpDisable(code: String)throws  -> AccountFlowStep  {
+    return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_totp_disable(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(code),$0
+    )
+})
+}
+    
+open func totpSetup(password: String?, currentCode: String?)throws  -> AccountFlowStep  {
+    return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_totp_setup(
+            self.uniffiCloneHandle(),
+        FfiConverterOptionString.lower(password),
+        FfiConverterOptionString.lower(currentCode),$0
+    )
+})
+}
+    
+open func verifyEmail(code: String)throws  -> AccountFlowStep  {
+    return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_verify_email(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(code),$0
+    )
+})
+}
+    
+open func verifyPassword(password: String)throws  -> AccountFlowStep  {
+    return try  FfiConverterTypeAccountFlowStep_lift(try rustCallWithError(FfiConverterTypeAccountFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_accountflowhandle_verify_password(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(password),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAccountFlowHandle: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = AccountFlowHandle
+
+    public static func lift(_ handle: UInt64) throws -> AccountFlowHandle {
+        return AccountFlowHandle(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: AccountFlowHandle) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AccountFlowHandle {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: AccountFlowHandle, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAccountFlowHandle_lift(_ handle: UInt64) throws -> AccountFlowHandle {
+    return try FfiConverterTypeAccountFlowHandle.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAccountFlowHandle_lower(_ value: AccountFlowHandle) -> UInt64 {
+    return FfiConverterTypeAccountFlowHandle.lower(value)
+}
+
+
+
+
+
+
 public protocol AccountReplacementHandleProtocol: AnyObject, Sendable {
     
 }
@@ -719,6 +1075,211 @@ public func FfiConverterTypeAccountReplacementHandle_lift(_ handle: UInt64) thro
 #endif
 public func FfiConverterTypeAccountReplacementHandle_lower(_ value: AccountReplacementHandle) -> UInt64 {
     return FfiConverterTypeAccountReplacementHandle.lower(value)
+}
+
+
+
+
+
+
+public protocol ApprovalFlowProtocol: AnyObject, Sendable {
+    
+    /**
+     * Approve after the app's own biometric prompt: step-up, claim, relay.
+     */
+    func approve(typedCode: String, password: String, masterKey: MasterKeyHandle) throws  -> AuthHttpRequest
+    
+    func codeMatches(typed: String)  -> Bool
+    
+    /**
+     * Deny the request shown for review (DW-A09); send it, then `on_deny_response`.
+     */
+    func deny() throws  -> AuthHttpRequest
+    
+    func onDenyResponse(response: AuthHttpResponse) throws 
+    
+    func onLookupResponse(response: AuthHttpResponse) throws  -> RequesterFactsFfi
+    
+    func onResponse(response: AuthHttpResponse) throws  -> ApproveStepFfi
+    
+    func start() throws  -> AuthHttpRequest
+    
+}
+open class ApprovalFlow: ApprovalFlowProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_approvalflow(self.handle, $0) }
+    }
+    /**
+     * Look up a waiting request by the typed code (`request_not_found` for a malformed one).
+     */
+public convenience init(code: String)throws  {
+    let handle =
+        try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_approvalflow_new(
+        FfiConverterString.lower(code),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_approvalflow(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * Approve after the app's own biometric prompt: step-up, claim, relay.
+     */
+open func approve(typedCode: String, password: String, masterKey: MasterKeyHandle)throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_approvalflow_approve(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(typedCode),
+        FfiConverterString.lower(password),
+        FfiConverterTypeMasterKeyHandle_lower(masterKey),$0
+    )
+})
+}
+    
+open func codeMatches(typed: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_approvalflow_code_matches(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(typed),$0
+    )
+})
+}
+    
+    /**
+     * Deny the request shown for review (DW-A09); send it, then `on_deny_response`.
+     */
+open func deny()throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_approvalflow_deny(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+open func onDenyResponse(response: AuthHttpResponse)throws   {try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_approvalflow_on_deny_response(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+}
+}
+    
+open func onLookupResponse(response: AuthHttpResponse)throws  -> RequesterFactsFfi  {
+    return try  FfiConverterTypeRequesterFactsFfi_lift(try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_approvalflow_on_lookup_response(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+})
+}
+    
+open func onResponse(response: AuthHttpResponse)throws  -> ApproveStepFfi  {
+    return try  FfiConverterTypeApproveStepFfi_lift(try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_approvalflow_on_response(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+})
+}
+    
+open func start()throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_approvalflow_start(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeApprovalFlow: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = ApprovalFlow
+
+    public static func lift(_ handle: UInt64) throws -> ApprovalFlow {
+        return ApprovalFlow(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: ApprovalFlow) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ApprovalFlow {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: ApprovalFlow, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeApprovalFlow_lift(_ handle: UInt64) throws -> ApprovalFlow {
+    return try FfiConverterTypeApprovalFlow.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeApprovalFlow_lower(_ value: ApprovalFlow) -> UInt64 {
+    return FfiConverterTypeApprovalFlow.lower(value)
 }
 
 
@@ -3244,6 +3805,305 @@ public func FfiConverterTypeContactServiceHandle_lower(_ value: ContactServiceHa
 
 
 
+public protocol CreateLinkFlowProtocol: AnyObject, Sendable {
+    
+    func onResponse(response: AuthHttpResponse) throws  -> LinkStepFfi
+    
+    func start() throws  -> AuthHttpRequest
+    
+}
+open class CreateLinkFlow: CreateLinkFlowProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_createlinkflow(self.handle, $0) }
+    }
+public convenience init(appUrl: String, fileId: String, masterKey: MasterKeyHandle, fileKey: FileKeyHandle, expiresInHours: UInt32?, maxOpens: UInt32?, passphrase: String?)throws  {
+    let handle =
+        try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_createlinkflow_new(
+        FfiConverterString.lower(appUrl),
+        FfiConverterString.lower(fileId),
+        FfiConverterTypeMasterKeyHandle_lower(masterKey),
+        FfiConverterTypeFileKeyHandle_lower(fileKey),
+        FfiConverterOptionUInt32.lower(expiresInHours),
+        FfiConverterOptionUInt32.lower(maxOpens),
+        FfiConverterOptionString.lower(passphrase),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_createlinkflow(handle, $0) }
+    }
+
+    
+    /**
+     * A bundle link over `items` (web's bundle branch). Each item carries the key that opens its row.
+     */
+public static func bundle(appUrl: String, items: [BundleItemFfi], masterKey: MasterKeyHandle, expiresInHours: UInt32?, maxOpens: UInt32?, passphrase: String?)throws  -> CreateLinkFlow  {
+    return try  FfiConverterTypeCreateLinkFlow_lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_createlinkflow_bundle(
+        FfiConverterString.lower(appUrl),
+        FfiConverterSequenceTypeBundleItemFfi.lower(items),
+        FfiConverterTypeMasterKeyHandle_lower(masterKey),
+        FfiConverterOptionUInt32.lower(expiresInHours),
+        FfiConverterOptionUInt32.lower(maxOpens),
+        FfiConverterOptionString.lower(passphrase),$0
+    )
+})
+}
+    
+
+    
+open func onResponse(response: AuthHttpResponse)throws  -> LinkStepFfi  {
+    return try  FfiConverterTypeLinkStepFfi_lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_createlinkflow_on_response(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+})
+}
+    
+open func start()throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_createlinkflow_start(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCreateLinkFlow: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = CreateLinkFlow
+
+    public static func lift(_ handle: UInt64) throws -> CreateLinkFlow {
+        return CreateLinkFlow(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: CreateLinkFlow) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CreateLinkFlow {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: CreateLinkFlow, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCreateLinkFlow_lift(_ handle: UInt64) throws -> CreateLinkFlow {
+    return try FfiConverterTypeCreateLinkFlow.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCreateLinkFlow_lower(_ value: CreateLinkFlow) -> UInt64 {
+    return FfiConverterTypeCreateLinkFlow.lower(value)
+}
+
+
+
+
+
+
+public protocol CreateRequestFlowProtocol: AnyObject, Sendable {
+    
+    func onResponse(response: AuthHttpResponse) throws  -> CreatedRequestFfi
+    
+    func start() throws  -> AuthHttpRequest
+    
+}
+open class CreateRequestFlow: CreateRequestFlowProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_createrequestflow(self.handle, $0) }
+    }
+public convenience init(appUrl: String, title: String, description: String?, targetFolderId: String?, maxFiles: UInt32?, maxTotalBytes: UInt64?, expiresInSecs: UInt64?, masterKey: MasterKeyHandle)throws  {
+    let handle =
+        try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_createrequestflow_new(
+        FfiConverterString.lower(appUrl),
+        FfiConverterString.lower(title),
+        FfiConverterOptionString.lower(description),
+        FfiConverterOptionString.lower(targetFolderId),
+        FfiConverterOptionUInt32.lower(maxFiles),
+        FfiConverterOptionUInt64.lower(maxTotalBytes),
+        FfiConverterOptionUInt64.lower(expiresInSecs),
+        FfiConverterTypeMasterKeyHandle_lower(masterKey),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_createrequestflow(handle, $0) }
+    }
+
+    
+
+    
+open func onResponse(response: AuthHttpResponse)throws  -> CreatedRequestFfi  {
+    return try  FfiConverterTypeCreatedRequestFfi_lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_createrequestflow_on_response(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+})
+}
+    
+open func start()throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_createrequestflow_start(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCreateRequestFlow: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = CreateRequestFlow
+
+    public static func lift(_ handle: UInt64) throws -> CreateRequestFlow {
+        return CreateRequestFlow(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: CreateRequestFlow) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CreateRequestFlow {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: CreateRequestFlow, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCreateRequestFlow_lift(_ handle: UInt64) throws -> CreateRequestFlow {
+    return try FfiConverterTypeCreateRequestFlow.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCreateRequestFlow_lower(_ value: CreateRequestFlow) -> UInt64 {
+    return FfiConverterTypeCreateRequestFlow.lower(value)
+}
+
+
+
+
+
+
 public protocol DeviceApprovalHandleProtocol: AnyObject, Sendable {
     
 }
@@ -3534,6 +4394,144 @@ public func FfiConverterTypeDeviceLinkHandle_lift(_ handle: UInt64) throws -> De
 #endif
 public func FfiConverterTypeDeviceLinkHandle_lower(_ value: DeviceLinkHandle) -> UInt64 {
     return FfiConverterTypeDeviceLinkHandle.lower(value)
+}
+
+
+
+
+
+
+public protocol DeviceRequestFlowProtocol: AnyObject, Sendable {
+    
+    func initFrame(deviceName: String?, client: String, clientVersion: String, os: String)  -> String
+    
+    func onFrame(text: String) throws  -> DeviceRequestEventFfi
+    
+}
+open class DeviceRequestFlow: DeviceRequestFlowProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_devicerequestflow(self.handle, $0) }
+    }
+public convenience init() {
+    let handle =
+        try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_constructor_devicerequestflow_new($0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_devicerequestflow(handle, $0) }
+    }
+
+    
+
+    
+open func initFrame(deviceName: String?, client: String, clientVersion: String, os: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_devicerequestflow_init_frame(
+            self.uniffiCloneHandle(),
+        FfiConverterOptionString.lower(deviceName),
+        FfiConverterString.lower(client),
+        FfiConverterString.lower(clientVersion),
+        FfiConverterString.lower(os),$0
+    )
+})
+}
+    
+open func onFrame(text: String)throws  -> DeviceRequestEventFfi  {
+    return try  FfiConverterTypeDeviceRequestEventFfi_lift(try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_devicerequestflow_on_frame(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(text),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDeviceRequestFlow: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = DeviceRequestFlow
+
+    public static func lift(_ handle: UInt64) throws -> DeviceRequestFlow {
+        return DeviceRequestFlow(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: DeviceRequestFlow) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DeviceRequestFlow {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: DeviceRequestFlow, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDeviceRequestFlow_lift(_ handle: UInt64) throws -> DeviceRequestFlow {
+    return try FfiConverterTypeDeviceRequestFlow.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDeviceRequestFlow_lower(_ value: DeviceRequestFlow) -> UInt64 {
+    return FfiConverterTypeDeviceRequestFlow.lower(value)
 }
 
 
@@ -7003,6 +8001,173 @@ public func FfiConverterTypeFileServiceHandle_lower(_ value: FileServiceHandle) 
 
 
 
+public protocol FolderShareFlowProtocol: AnyObject, Sendable {
+    
+    func onResponse(response: AuthHttpResponse) throws  -> FolderStepFfi
+    
+    func start() throws  -> FolderStepFfi
+    
+}
+open class FolderShareFlow: FolderShareFlowProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_foldershareflow(self.handle, $0) }
+    }
+    /**
+     * `shared_folders_write` is the `shared_folders_v1` flag read at send time; a host that cannot
+     * read it must not start the flow. `custody_seen` / `custody_unreadable` are the device's
+     * custody memory (L7d).
+     */
+public convenience init(folderId: String, email: String, sharedFoldersWrite: Bool, custodySeen: [String], custodyUnreadable: Bool, masterKey: MasterKeyHandle, peerKey: PeerKeyExpectationFfi)throws  {
+    let handle =
+        try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_foldershareflow_new(
+        FfiConverterString.lower(folderId),
+        FfiConverterString.lower(email),
+        FfiConverterBool.lower(sharedFoldersWrite),
+        FfiConverterSequenceString.lower(custodySeen),
+        FfiConverterBool.lower(custodyUnreadable),
+        FfiConverterTypeMasterKeyHandle_lower(masterKey),
+        FfiConverterTypePeerKeyExpectationFfi_lower(peerKey),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_foldershareflow(handle, $0) }
+    }
+
+    
+    /**
+     * A live folder link (web `createFolderLinkWithKeys`).
+     */
+public static func link(folderId: String, appUrl: String, accessLevel: String, label: String?, expiresInHours: UInt32?, capBytes: UInt64?, maxOpens: UInt32?, passphrase: String?, custodySeen: [String], custodyUnreadable: Bool, masterKey: MasterKeyHandle)throws  -> FolderShareFlow  {
+    return try  FfiConverterTypeFolderShareFlow_lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_foldershareflow_link(
+        FfiConverterString.lower(folderId),
+        FfiConverterString.lower(appUrl),
+        FfiConverterString.lower(accessLevel),
+        FfiConverterOptionString.lower(label),
+        FfiConverterOptionUInt32.lower(expiresInHours),
+        FfiConverterOptionUInt64.lower(capBytes),
+        FfiConverterOptionUInt32.lower(maxOpens),
+        FfiConverterOptionString.lower(passphrase),
+        FfiConverterSequenceString.lower(custodySeen),
+        FfiConverterBool.lower(custodyUnreadable),
+        FfiConverterTypeMasterKeyHandle_lower(masterKey),$0
+    )
+})
+}
+    
+
+    
+open func onResponse(response: AuthHttpResponse)throws  -> FolderStepFfi  {
+    return try  FfiConverterTypeFolderStepFfi_lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_foldershareflow_on_response(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+})
+}
+    
+open func start()throws  -> FolderStepFfi  {
+    return try  FfiConverterTypeFolderStepFfi_lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_foldershareflow_start(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFolderShareFlow: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = FolderShareFlow
+
+    public static func lift(_ handle: UInt64) throws -> FolderShareFlow {
+        return FolderShareFlow(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: FolderShareFlow) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FolderShareFlow {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: FolderShareFlow, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFolderShareFlow_lift(_ handle: UInt64) throws -> FolderShareFlow {
+    return try FfiConverterTypeFolderShareFlow.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFolderShareFlow_lower(_ value: FolderShareFlow) -> UInt64 {
+    return FfiConverterTypeFolderShareFlow.lower(value)
+}
+
+
+
+
+
+
 /**
  * Opaque handle to a MasterKey. The key bytes never leave Rust except via
  * `export_for_keychain`, which is only called once to persist to the OS keychain.
@@ -8043,6 +9208,149 @@ public func FfiConverterTypeMasterKeyHandle_lower(_ value: MasterKeyHandle) -> U
 
 
 
+public protocol MemberInviteFlowProtocol: AnyObject, Sendable {
+    
+    func onResponse(response: AuthHttpResponse) throws  -> InviteStepFfi
+    
+    func start() throws  -> AuthHttpRequest
+    
+}
+open class MemberInviteFlow: MemberInviteFlowProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_memberinviteflow(self.handle, $0) }
+    }
+    /**
+     * `is_folder` is required: a folder is refused here: it goes through `FolderShareFlow`.
+     */
+public convenience init(itemId: String, isFolder: Bool, email: String, masterKey: MasterKeyHandle, fileKey: FileKeyHandle, peerKey: PeerKeyExpectationFfi)throws  {
+    let handle =
+        try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_memberinviteflow_new(
+        FfiConverterString.lower(itemId),
+        FfiConverterBool.lower(isFolder),
+        FfiConverterString.lower(email),
+        FfiConverterTypeMasterKeyHandle_lower(masterKey),
+        FfiConverterTypeFileKeyHandle_lower(fileKey),
+        FfiConverterTypePeerKeyExpectationFfi_lower(peerKey),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_memberinviteflow(handle, $0) }
+    }
+
+    
+
+    
+open func onResponse(response: AuthHttpResponse)throws  -> InviteStepFfi  {
+    return try  FfiConverterTypeInviteStepFfi_lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_memberinviteflow_on_response(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+})
+}
+    
+open func start()throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_memberinviteflow_start(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMemberInviteFlow: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = MemberInviteFlow
+
+    public static func lift(_ handle: UInt64) throws -> MemberInviteFlow {
+        return MemberInviteFlow(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: MemberInviteFlow) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MemberInviteFlow {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: MemberInviteFlow, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMemberInviteFlow_lift(_ handle: UInt64) throws -> MemberInviteFlow {
+    return try FfiConverterTypeMemberInviteFlow.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMemberInviteFlow_lower(_ value: MemberInviteFlow) -> UInt64 {
+    return FfiConverterTypeMemberInviteFlow.lower(value)
+}
+
+
+
+
+
+
 public protocol NativeClientHandleProtocol: AnyObject, Sendable {
     
     /**
@@ -8833,6 +10141,231 @@ public func FfiConverterTypePasswordAcceptedHandle_lift(_ handle: UInt64) throws
 #endif
 public func FfiConverterTypePasswordAcceptedHandle_lower(_ value: PasswordAcceptedHandle) -> UInt64 {
     return FfiConverterTypePasswordAcceptedHandle.lower(value)
+}
+
+
+
+
+
+
+/**
+ * One recovery: the phrase is checked by the server, then a new password is registered.
+ */
+public protocol PhraseRecoveryHandleProtocol: AnyObject, Sendable {
+    
+    func breachRequest(password: String) throws  -> AuthHttpRequest?
+    
+    func evaluate(password: String) throws  -> PasswordEvaluationDto
+    
+    func onBreachResponse(status: UInt16?, body: String) throws  -> BreachVerdictDto?
+    
+    /**
+     * The last step; the handle is spent afterwards.
+     */
+    func onFinalizeResponse(response: AuthHttpResponse) throws  -> RecoveredFfi
+    
+    func onRegisterResponse(response: AuthHttpResponse) throws  -> AuthHttpRequest
+    
+    func onStartResponse(response: AuthHttpResponse) throws 
+    
+    /**
+     * DW-A49: the same rules as sign-up, then the re-registration request.
+     */
+    func setPassword(password: String, confirmation: String) throws  -> AuthHttpRequest
+    
+    func start() throws  -> AuthHttpRequest
+    
+}
+/**
+ * One recovery: the phrase is checked by the server, then a new password is registered.
+ */
+open class PhraseRecoveryHandle: PhraseRecoveryHandleProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_phraserecoveryhandle(self.handle, $0) }
+    }
+    /**
+     * DW-A47: the master key is derived from the phrase here; `start()` gives the check request.
+     */
+public convenience init(policyResponse: AuthHttpResponse, email: String, phrase: String)throws  {
+    let handle =
+        try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_phraserecoveryhandle_new(
+        FfiConverterTypeAuthHttpResponse_lower(policyResponse),
+        FfiConverterString.lower(email),
+        FfiConverterString.lower(phrase),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_phraserecoveryhandle(handle, $0) }
+    }
+
+    
+
+    
+open func breachRequest(password: String)throws  -> AuthHttpRequest?  {
+    return try  FfiConverterOptionTypeAuthHttpRequest.lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_breach_request(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(password),$0
+    )
+})
+}
+    
+open func evaluate(password: String)throws  -> PasswordEvaluationDto  {
+    return try  FfiConverterTypePasswordEvaluationDto_lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_evaluate(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(password),$0
+    )
+})
+}
+    
+open func onBreachResponse(status: UInt16?, body: String)throws  -> BreachVerdictDto?  {
+    return try  FfiConverterOptionTypeBreachVerdictDto.lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_on_breach_response(
+            self.uniffiCloneHandle(),
+        FfiConverterOptionUInt16.lower(status),
+        FfiConverterString.lower(body),$0
+    )
+})
+}
+    
+    /**
+     * The last step; the handle is spent afterwards.
+     */
+open func onFinalizeResponse(response: AuthHttpResponse)throws  -> RecoveredFfi  {
+    return try  FfiConverterTypeRecoveredFfi_lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_on_finalize_response(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+})
+}
+    
+open func onRegisterResponse(response: AuthHttpResponse)throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_on_register_response(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+})
+}
+    
+open func onStartResponse(response: AuthHttpResponse)throws   {try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_on_start_response(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+}
+}
+    
+    /**
+     * DW-A49: the same rules as sign-up, then the re-registration request.
+     */
+open func setPassword(password: String, confirmation: String)throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_set_password(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(password),
+        FfiConverterString.lower(confirmation),$0
+    )
+})
+}
+    
+open func start()throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_phraserecoveryhandle_start(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePhraseRecoveryHandle: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = PhraseRecoveryHandle
+
+    public static func lift(_ handle: UInt64) throws -> PhraseRecoveryHandle {
+        return PhraseRecoveryHandle(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: PhraseRecoveryHandle) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PhraseRecoveryHandle {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: PhraseRecoveryHandle, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePhraseRecoveryHandle_lift(_ handle: UInt64) throws -> PhraseRecoveryHandle {
+    return try FfiConverterTypePhraseRecoveryHandle.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePhraseRecoveryHandle_lower(_ value: PhraseRecoveryHandle) -> UInt64 {
+    return FfiConverterTypePhraseRecoveryHandle.lower(value)
 }
 
 
@@ -10326,6 +11859,182 @@ public func FfiConverterTypeShareServiceHandle_lower(_ value: ShareServiceHandle
 
 
 
+public protocol SignInFlowProtocol: AnyObject, Sendable {
+    
+    func onResponse(response: AuthHttpResponse) throws  -> SignInStepFfi
+    
+    /**
+     * The session token, or `wrong_code` (the flow stays ready for the next code).
+     */
+    func onVerifyResponse(response: AuthHttpResponse) throws  -> String
+    
+    /**
+     * The login-start request (once).
+     */
+    func start() throws  -> AuthHttpRequest
+    
+    /**
+     * The verify request for a 6-digit authenticator or 8-digit backup code.
+     */
+    func verifyRequest(code: String) throws  -> AuthHttpRequest
+    
+}
+open class SignInFlow: SignInFlowProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_signinflow(self.handle, $0) }
+    }
+public convenience init(email: String, password: String)throws  {
+    let handle =
+        try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_signinflow_new(
+        FfiConverterString.lower(email),
+        FfiConverterString.lower(password),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_signinflow(handle, $0) }
+    }
+
+    
+
+    
+open func onResponse(response: AuthHttpResponse)throws  -> SignInStepFfi  {
+    return try  FfiConverterTypeSignInStepFfi_lift(try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signinflow_on_response(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+})
+}
+    
+    /**
+     * The session token, or `wrong_code` (the flow stays ready for the next code).
+     */
+open func onVerifyResponse(response: AuthHttpResponse)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signinflow_on_verify_response(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+})
+}
+    
+    /**
+     * The login-start request (once).
+     */
+open func start()throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signinflow_start(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * The verify request for a 6-digit authenticator or 8-digit backup code.
+     */
+open func verifyRequest(code: String)throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signinflow_verify_request(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(code),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSignInFlow: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = SignInFlow
+
+    public static func lift(_ handle: UInt64) throws -> SignInFlow {
+        return SignInFlow(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: SignInFlow) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SignInFlow {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: SignInFlow, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSignInFlow_lift(_ handle: UInt64) throws -> SignInFlow {
+    return try FfiConverterTypeSignInFlow.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSignInFlow_lower(_ value: SignInFlow) -> UInt64 {
+    return FfiConverterTypeSignInFlow.lower(value)
+}
+
+
+
+
+
+
 /**
  * The signup ceremony state machine, one per signup attempt. Single-consumer:
  * drive it from one sequence (the `Mutex` is only the `Send + Sync` backstop
@@ -10747,6 +12456,343 @@ public func FfiConverterTypeSignupCeremonyHandle_lower(_ value: SignupCeremonyHa
 
 
 
+/**
+ * One account creation, from the email to the first session.
+ */
+public protocol SignupFlowHandleProtocol: AnyObject, Sendable {
+    
+    func acknowledgePhrase() throws 
+    
+    /**
+     * The breach request for this password; `None` when the policy declares no check.
+     */
+    func breachRequest(password: String) throws  -> AuthHttpRequest?
+    
+    /**
+     * 1-based word positions to ask for.
+     */
+    func challengePositions() throws  -> [UInt32]
+    
+    func confirmPhrase(answers: [String]) throws 
+    
+    func evaluate(password: String) throws  -> PasswordEvaluationDto
+    
+    /**
+     * `status` is `None` when the breach endpoint gave no answer at all.
+     */
+    func onBreachResponse(status: UInt16?, body: String) throws  -> BreachVerdictDto?
+    
+    func onCodeSent(response: AuthHttpResponse) throws 
+    
+    func onCodeVerified(response: AuthHttpResponse) throws 
+    
+    func onRegisterFinish(response: AuthHttpResponse) throws  -> SignupCreatedFfi
+    
+    func onRegisterStart(response: AuthHttpResponse) throws  -> AuthHttpRequest
+    
+    /**
+     * The 12 words, for the one-time display. The same words on every call.
+     */
+    func phraseWords() throws  -> [String]
+    
+    func registerStart() throws  -> AuthHttpRequest
+    
+    func sendCode(email: String) throws  -> AuthHttpRequest
+    
+    func setPassword(password: String, confirmation: String) throws  -> PasswordEvaluationDto
+    
+    /**
+     * Record the accepted terms version once signed in; `None` when the policy names none.
+     */
+    func termsRequest() throws  -> AuthHttpRequest?
+    
+    func verifyCode(code: String) throws  -> AuthHttpRequest
+    
+    /**
+     * Forget everything (the person left the flow).
+     */
+    func wipe() 
+    
+}
+/**
+ * One account creation, from the email to the first session.
+ */
+open class SignupFlowHandle: SignupFlowHandleProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_signupflowhandle(self.handle, $0) }
+    }
+    /**
+     * Start from the answer to [`signup_policy_request`].
+     */
+public convenience init(policyResponse: AuthHttpResponse)throws  {
+    let handle =
+        try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_signupflowhandle_new(
+        FfiConverterTypeAuthHttpResponse_lower(policyResponse),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_signupflowhandle(handle, $0) }
+    }
+
+    
+
+    
+open func acknowledgePhrase()throws   {try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_acknowledge_phrase(
+            self.uniffiCloneHandle(),$0
+    )
+}
+}
+    
+    /**
+     * The breach request for this password; `None` when the policy declares no check.
+     */
+open func breachRequest(password: String)throws  -> AuthHttpRequest?  {
+    return try  FfiConverterOptionTypeAuthHttpRequest.lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_breach_request(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(password),$0
+    )
+})
+}
+    
+    /**
+     * 1-based word positions to ask for.
+     */
+open func challengePositions()throws  -> [UInt32]  {
+    return try  FfiConverterSequenceUInt32.lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_challenge_positions(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+open func confirmPhrase(answers: [String])throws   {try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_confirm_phrase(
+            self.uniffiCloneHandle(),
+        FfiConverterSequenceString.lower(answers),$0
+    )
+}
+}
+    
+open func evaluate(password: String)throws  -> PasswordEvaluationDto  {
+    return try  FfiConverterTypePasswordEvaluationDto_lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_evaluate(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(password),$0
+    )
+})
+}
+    
+    /**
+     * `status` is `None` when the breach endpoint gave no answer at all.
+     */
+open func onBreachResponse(status: UInt16?, body: String)throws  -> BreachVerdictDto?  {
+    return try  FfiConverterOptionTypeBreachVerdictDto.lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_on_breach_response(
+            self.uniffiCloneHandle(),
+        FfiConverterOptionUInt16.lower(status),
+        FfiConverterString.lower(body),$0
+    )
+})
+}
+    
+open func onCodeSent(response: AuthHttpResponse)throws   {try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_on_code_sent(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+}
+}
+    
+open func onCodeVerified(response: AuthHttpResponse)throws   {try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_on_code_verified(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+}
+}
+    
+open func onRegisterFinish(response: AuthHttpResponse)throws  -> SignupCreatedFfi  {
+    return try  FfiConverterTypeSignupCreatedFfi_lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_on_register_finish(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+})
+}
+    
+open func onRegisterStart(response: AuthHttpResponse)throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_on_register_start(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+})
+}
+    
+    /**
+     * The 12 words, for the one-time display. The same words on every call.
+     */
+open func phraseWords()throws  -> [String]  {
+    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_phrase_words(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+open func registerStart()throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_register_start(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+open func sendCode(email: String)throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_send_code(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(email),$0
+    )
+})
+}
+    
+open func setPassword(password: String, confirmation: String)throws  -> PasswordEvaluationDto  {
+    return try  FfiConverterTypePasswordEvaluationDto_lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_set_password(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(password),
+        FfiConverterString.lower(confirmation),$0
+    )
+})
+}
+    
+    /**
+     * Record the accepted terms version once signed in; `None` when the policy names none.
+     */
+open func termsRequest()throws  -> AuthHttpRequest?  {
+    return try  FfiConverterOptionTypeAuthHttpRequest.lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_terms_request(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+open func verifyCode(code: String)throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_verify_code(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(code),$0
+    )
+})
+}
+    
+    /**
+     * Forget everything (the person left the flow).
+     */
+open func wipe()  {try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_wipe(
+            self.uniffiCloneHandle(),$0
+    )
+}
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSignupFlowHandle: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = SignupFlowHandle
+
+    public static func lift(_ handle: UInt64) throws -> SignupFlowHandle {
+        return SignupFlowHandle(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: SignupFlowHandle) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SignupFlowHandle {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: SignupFlowHandle, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSignupFlowHandle_lift(_ handle: UInt64) throws -> SignupFlowHandle {
+    return try FfiConverterTypeSignupFlowHandle.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSignupFlowHandle_lower(_ value: SignupFlowHandle) -> UInt64 {
+    return FfiConverterTypeSignupFlowHandle.lower(value)
+}
+
+
+
+
+
+
 public protocol SignupServiceHandleProtocol: AnyObject, Sendable {
     
     func abandon() throws 
@@ -10974,6 +13020,165 @@ public func FfiConverterTypeSignupServiceHandle_lift(_ handle: UInt64) throws ->
 #endif
 public func FfiConverterTypeSignupServiceHandle_lower(_ value: SignupServiceHandle) -> UInt64 {
     return FfiConverterTypeSignupServiceHandle.lower(value)
+}
+
+
+
+
+
+
+public protocol StepUpFlowProtocol: AnyObject, Sendable {
+    
+    /**
+     * Spend the token on the consuming request (POST `path` with `body_json`, with the session).
+     */
+    func attachConfirmToken(path: String, bodyJson: String) throws  -> AuthHttpRequest
+    
+    func onResponse(response: AuthHttpResponse) throws  -> StepUpStepFfi
+    
+    func start() throws  -> AuthHttpRequest
+    
+}
+open class StepUpFlow: StepUpFlowProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_beebeeb_uniffi_fn_clone_stepupflow(self.handle, $0) }
+    }
+    /**
+     * `purpose` empty: the generic grant; `cli_code` set: a device approval for that code. A
+     * `cli_code` with any purpose other than `cli_device_approval` is refused (`invalid_input`).
+     */
+public convenience init(password: String, purpose: String?, cliCode: String?)throws  {
+    let handle =
+        try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_constructor_stepupflow_new(
+        FfiConverterString.lower(password),
+        FfiConverterOptionString.lower(purpose),
+        FfiConverterOptionString.lower(cliCode),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_beebeeb_uniffi_fn_free_stepupflow(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * Spend the token on the consuming request (POST `path` with `body_json`, with the session).
+     */
+open func attachConfirmToken(path: String, bodyJson: String)throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_stepupflow_attach_confirm_token(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(path),
+        FfiConverterString.lower(bodyJson),$0
+    )
+})
+}
+    
+open func onResponse(response: AuthHttpResponse)throws  -> StepUpStepFfi  {
+    return try  FfiConverterTypeStepUpStepFfi_lift(try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_stepupflow_on_response(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeAuthHttpResponse_lower(response),$0
+    )
+})
+}
+    
+open func start()throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeAuthFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_stepupflow_start(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeStepUpFlow: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = StepUpFlow
+
+    public static func lift(_ handle: UInt64) throws -> StepUpFlow {
+        return StepUpFlow(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: StepUpFlow) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> StepUpFlow {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: StepUpFlow, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStepUpFlow_lift(_ handle: UInt64) throws -> StepUpFlow {
+    return try FfiConverterTypeStepUpFlow.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStepUpFlow_lower(_ value: StepUpFlow) -> UInt64 {
+    return FfiConverterTypeStepUpFlow.lower(value)
 }
 
 
@@ -12036,6 +14241,166 @@ public func FfiConverterTypeWriteTargetHandle_lower(_ value: WriteTargetHandle) 
 
 
 
+public struct AccountFlowOutcome: Equatable, Hashable {
+    public var kind: String
+    public var sessionToken: String?
+    public var email: String?
+    public var totpSecret: String?
+    public var otpauthUri: String?
+    public var backupCodes: [String]
+    public var revoked: UInt32
+    public var shredAfter: String?
+    public var cancelUntil: String?
+    public var linkExpiresAt: String?
+    public var notRestored: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(kind: String, sessionToken: String?, email: String?, totpSecret: String?, otpauthUri: String?, backupCodes: [String], revoked: UInt32, shredAfter: String?, cancelUntil: String?, linkExpiresAt: String?, notRestored: [String]) {
+        self.kind = kind
+        self.sessionToken = sessionToken
+        self.email = email
+        self.totpSecret = totpSecret
+        self.otpauthUri = otpauthUri
+        self.backupCodes = backupCodes
+        self.revoked = revoked
+        self.shredAfter = shredAfter
+        self.cancelUntil = cancelUntil
+        self.linkExpiresAt = linkExpiresAt
+        self.notRestored = notRestored
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension AccountFlowOutcome: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAccountFlowOutcome: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AccountFlowOutcome {
+        return
+            try AccountFlowOutcome(
+                kind: FfiConverterString.read(from: &buf), 
+                sessionToken: FfiConverterOptionString.read(from: &buf), 
+                email: FfiConverterOptionString.read(from: &buf), 
+                totpSecret: FfiConverterOptionString.read(from: &buf), 
+                otpauthUri: FfiConverterOptionString.read(from: &buf), 
+                backupCodes: FfiConverterSequenceString.read(from: &buf), 
+                revoked: FfiConverterUInt32.read(from: &buf), 
+                shredAfter: FfiConverterOptionString.read(from: &buf), 
+                cancelUntil: FfiConverterOptionString.read(from: &buf), 
+                linkExpiresAt: FfiConverterOptionString.read(from: &buf), 
+                notRestored: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: AccountFlowOutcome, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.kind, into: &buf)
+        FfiConverterOptionString.write(value.sessionToken, into: &buf)
+        FfiConverterOptionString.write(value.email, into: &buf)
+        FfiConverterOptionString.write(value.totpSecret, into: &buf)
+        FfiConverterOptionString.write(value.otpauthUri, into: &buf)
+        FfiConverterSequenceString.write(value.backupCodes, into: &buf)
+        FfiConverterUInt32.write(value.revoked, into: &buf)
+        FfiConverterOptionString.write(value.shredAfter, into: &buf)
+        FfiConverterOptionString.write(value.cancelUntil, into: &buf)
+        FfiConverterOptionString.write(value.linkExpiresAt, into: &buf)
+        FfiConverterSequenceString.write(value.notRestored, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAccountFlowOutcome_lift(_ buf: RustBuffer) throws -> AccountFlowOutcome {
+    return try FfiConverterTypeAccountFlowOutcome.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAccountFlowOutcome_lower(_ value: AccountFlowOutcome) -> RustBuffer {
+    return FfiConverterTypeAccountFlowOutcome.lower(value)
+}
+
+
+public struct AccountFlowStep: Equatable, Hashable {
+    public var done: Bool
+    public var method: String
+    public var path: String
+    public var bodyJson: String
+    public var confirmToken: String?
+    public var outcome: AccountFlowOutcome?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(done: Bool, method: String, path: String, bodyJson: String, confirmToken: String?, outcome: AccountFlowOutcome?) {
+        self.done = done
+        self.method = method
+        self.path = path
+        self.bodyJson = bodyJson
+        self.confirmToken = confirmToken
+        self.outcome = outcome
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension AccountFlowStep: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAccountFlowStep: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AccountFlowStep {
+        return
+            try AccountFlowStep(
+                done: FfiConverterBool.read(from: &buf), 
+                method: FfiConverterString.read(from: &buf), 
+                path: FfiConverterString.read(from: &buf), 
+                bodyJson: FfiConverterString.read(from: &buf), 
+                confirmToken: FfiConverterOptionString.read(from: &buf), 
+                outcome: FfiConverterOptionTypeAccountFlowOutcome.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: AccountFlowStep, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.done, into: &buf)
+        FfiConverterString.write(value.method, into: &buf)
+        FfiConverterString.write(value.path, into: &buf)
+        FfiConverterString.write(value.bodyJson, into: &buf)
+        FfiConverterOptionString.write(value.confirmToken, into: &buf)
+        FfiConverterOptionTypeAccountFlowOutcome.write(value.outcome, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAccountFlowStep_lift(_ buf: RustBuffer) throws -> AccountFlowStep {
+    return try FfiConverterTypeAccountFlowStep.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAccountFlowStep_lower(_ value: AccountFlowStep) -> RustBuffer {
+    return FfiConverterTypeAccountFlowStep.lower(value)
+}
+
+
 public struct AccountSessionData: Equatable, Hashable {
     public var id: String
     public var isCurrent: Bool
@@ -13082,6 +15447,136 @@ public func FfiConverterTypeAssetSnapshotData_lift(_ buf: RustBuffer) throws -> 
 #endif
 public func FfiConverterTypeAssetSnapshotData_lower(_ value: AssetSnapshotData) -> RustBuffer {
     return FfiConverterTypeAssetSnapshotData.lower(value)
+}
+
+
+public struct AuthHttpRequest: Equatable, Hashable {
+    public var method: String
+    public var path: String
+    public var bodyJson: String?
+    public var needsSession: Bool
+    /**
+     * Single-use step-up token for the `X-Confirm-Token` header; only on a claim request.
+     */
+    public var confirmToken: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(method: String, path: String, bodyJson: String?, needsSession: Bool, 
+        /**
+         * Single-use step-up token for the `X-Confirm-Token` header; only on a claim request.
+         */confirmToken: String?) {
+        self.method = method
+        self.path = path
+        self.bodyJson = bodyJson
+        self.needsSession = needsSession
+        self.confirmToken = confirmToken
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension AuthHttpRequest: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAuthHttpRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AuthHttpRequest {
+        return
+            try AuthHttpRequest(
+                method: FfiConverterString.read(from: &buf), 
+                path: FfiConverterString.read(from: &buf), 
+                bodyJson: FfiConverterOptionString.read(from: &buf), 
+                needsSession: FfiConverterBool.read(from: &buf), 
+                confirmToken: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: AuthHttpRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.method, into: &buf)
+        FfiConverterString.write(value.path, into: &buf)
+        FfiConverterOptionString.write(value.bodyJson, into: &buf)
+        FfiConverterBool.write(value.needsSession, into: &buf)
+        FfiConverterOptionString.write(value.confirmToken, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAuthHttpRequest_lift(_ buf: RustBuffer) throws -> AuthHttpRequest {
+    return try FfiConverterTypeAuthHttpRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAuthHttpRequest_lower(_ value: AuthHttpRequest) -> RustBuffer {
+    return FfiConverterTypeAuthHttpRequest.lower(value)
+}
+
+
+public struct AuthHttpResponse: Equatable, Hashable {
+    public var status: UInt16
+    public var bodyJson: String
+    public var retryAfterSecs: UInt64?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(status: UInt16, bodyJson: String, retryAfterSecs: UInt64?) {
+        self.status = status
+        self.bodyJson = bodyJson
+        self.retryAfterSecs = retryAfterSecs
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension AuthHttpResponse: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAuthHttpResponse: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AuthHttpResponse {
+        return
+            try AuthHttpResponse(
+                status: FfiConverterUInt16.read(from: &buf), 
+                bodyJson: FfiConverterString.read(from: &buf), 
+                retryAfterSecs: FfiConverterOptionUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: AuthHttpResponse, into buf: inout [UInt8]) {
+        FfiConverterUInt16.write(value.status, into: &buf)
+        FfiConverterString.write(value.bodyJson, into: &buf)
+        FfiConverterOptionUInt64.write(value.retryAfterSecs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAuthHttpResponse_lift(_ buf: RustBuffer) throws -> AuthHttpResponse {
+    return try FfiConverterTypeAuthHttpResponse.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAuthHttpResponse_lower(_ value: AuthHttpResponse) -> RustBuffer {
+    return FfiConverterTypeAuthHttpResponse.lower(value)
 }
 
 
@@ -15066,6 +17561,67 @@ public func FfiConverterTypeBatchNameResult_lower(_ value: BatchNameResult) -> R
 
 
 /**
+ * One file of a bundle: its id, its position in the link's order, and the key that opens its row.
+ */
+public struct BundleItemFfi {
+    public var fileId: String
+    public var position: UInt32
+    public var fileKey: FileKeyHandle
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(fileId: String, position: UInt32, fileKey: FileKeyHandle) {
+        self.fileId = fileId
+        self.position = position
+        self.fileKey = fileKey
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension BundleItemFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBundleItemFfi: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BundleItemFfi {
+        return
+            try BundleItemFfi(
+                fileId: FfiConverterString.read(from: &buf), 
+                position: FfiConverterUInt32.read(from: &buf), 
+                fileKey: FfiConverterTypeFileKeyHandle.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BundleItemFfi, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.fileId, into: &buf)
+        FfiConverterUInt32.write(value.position, into: &buf)
+        FfiConverterTypeFileKeyHandle.write(value.fileKey, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBundleItemFfi_lift(_ buf: RustBuffer) throws -> BundleItemFfi {
+    return try FfiConverterTypeBundleItemFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBundleItemFfi_lower(_ value: BundleItemFfi) -> RustBuffer {
+    return FfiConverterTypeBundleItemFfi.lower(value)
+}
+
+
+/**
  * A cached file/folder entry for the iOS FileProvider extension.
  */
 public struct CachedFileEntryData: Equatable, Hashable {
@@ -15781,6 +18337,67 @@ public func FfiConverterTypeConstellationSessionInitDto_lift(_ buf: RustBuffer) 
 #endif
 public func FfiConverterTypeConstellationSessionInitDto_lower(_ value: ConstellationSessionInitDto) -> RustBuffer {
     return FfiConverterTypeConstellationSessionInitDto.lower(value)
+}
+
+
+/**
+ * The created request. `link` carries `R_pub` after `#`; `display` is the part before `#`.
+ */
+public struct CreatedRequestFfi: Equatable, Hashable {
+    public var id: String
+    public var link: String
+    public var display: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, link: String, display: String) {
+        self.id = id
+        self.link = link
+        self.display = display
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension CreatedRequestFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCreatedRequestFfi: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CreatedRequestFfi {
+        return
+            try CreatedRequestFfi(
+                id: FfiConverterString.read(from: &buf), 
+                link: FfiConverterString.read(from: &buf), 
+                display: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: CreatedRequestFfi, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.link, into: &buf)
+        FfiConverterString.write(value.display, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCreatedRequestFfi_lift(_ buf: RustBuffer) throws -> CreatedRequestFfi {
+    return try FfiConverterTypeCreatedRequestFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCreatedRequestFfi_lower(_ value: CreatedRequestFfi) -> RustBuffer {
+    return FfiConverterTypeCreatedRequestFfi.lower(value)
 }
 
 
@@ -18521,6 +21138,80 @@ public func FfiConverterTypeRequestRowKeys_lower(_ value: RequestRowKeys) -> Rus
 }
 
 
+public struct RequesterFactsFfi: Equatable, Hashable {
+    public var requestedAt: String
+    public var expiresAt: String
+    public var ip: String
+    public var country: String?
+    public var deviceName: String?
+    public var client: String?
+    public var os: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(requestedAt: String, expiresAt: String, ip: String, country: String?, deviceName: String?, client: String?, os: String?) {
+        self.requestedAt = requestedAt
+        self.expiresAt = expiresAt
+        self.ip = ip
+        self.country = country
+        self.deviceName = deviceName
+        self.client = client
+        self.os = os
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension RequesterFactsFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRequesterFactsFfi: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RequesterFactsFfi {
+        return
+            try RequesterFactsFfi(
+                requestedAt: FfiConverterString.read(from: &buf), 
+                expiresAt: FfiConverterString.read(from: &buf), 
+                ip: FfiConverterString.read(from: &buf), 
+                country: FfiConverterOptionString.read(from: &buf), 
+                deviceName: FfiConverterOptionString.read(from: &buf), 
+                client: FfiConverterOptionString.read(from: &buf), 
+                os: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RequesterFactsFfi, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.requestedAt, into: &buf)
+        FfiConverterString.write(value.expiresAt, into: &buf)
+        FfiConverterString.write(value.ip, into: &buf)
+        FfiConverterOptionString.write(value.country, into: &buf)
+        FfiConverterOptionString.write(value.deviceName, into: &buf)
+        FfiConverterOptionString.write(value.client, into: &buf)
+        FfiConverterOptionString.write(value.os, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRequesterFactsFfi_lift(_ buf: RustBuffer) throws -> RequesterFactsFfi {
+    return try FfiConverterTypeRequesterFactsFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRequesterFactsFfi_lower(_ value: RequesterFactsFfi) -> RustBuffer {
+    return FfiConverterTypeRequesterFactsFfi.lower(value)
+}
+
+
 /**
  * Resize RGBA pixel data for thumbnail use. Always available (no WebP
  * dependency). The longest side is scaled to `max_dimension` preserving
@@ -18767,6 +21458,129 @@ public func FfiConverterTypeResolvedRequestRow_lift(_ buf: RustBuffer) throws ->
 #endif
 public func FfiConverterTypeResolvedRequestRow_lower(_ value: ResolvedRequestRow) -> RustBuffer {
     return FfiConverterTypeResolvedRequestRow.lower(value)
+}
+
+
+public struct SafetyNumberFfi: Equatable, Hashable {
+    /**
+     * 60 digits, no separators; show as 12 groups of 5.
+     */
+    public var digits: String
+    /**
+     * SHA-256 of the peer's public key: what a local "compared" mark is keyed by.
+     */
+    public var peerFingerprint: Data
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * 60 digits, no separators; show as 12 groups of 5.
+         */digits: String, 
+        /**
+         * SHA-256 of the peer's public key: what a local "compared" mark is keyed by.
+         */peerFingerprint: Data) {
+        self.digits = digits
+        self.peerFingerprint = peerFingerprint
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SafetyNumberFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSafetyNumberFfi: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SafetyNumberFfi {
+        return
+            try SafetyNumberFfi(
+                digits: FfiConverterString.read(from: &buf), 
+                peerFingerprint: FfiConverterData.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SafetyNumberFfi, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.digits, into: &buf)
+        FfiConverterData.write(value.peerFingerprint, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSafetyNumberFfi_lift(_ buf: RustBuffer) throws -> SafetyNumberFfi {
+    return try FfiConverterTypeSafetyNumberFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSafetyNumberFfi_lower(_ value: SafetyNumberFfi) -> RustBuffer {
+    return FfiConverterTypeSafetyNumberFfi.lower(value)
+}
+
+
+/**
+ * The approval request and the exact recipient key the file key was sealed to.
+ */
+public struct SealedApprovalFfi: Equatable, Hashable {
+    public var request: AuthHttpRequest
+    public var recipientPublicKey: Data
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(request: AuthHttpRequest, recipientPublicKey: Data) {
+        self.request = request
+        self.recipientPublicKey = recipientPublicKey
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SealedApprovalFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSealedApprovalFfi: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SealedApprovalFfi {
+        return
+            try SealedApprovalFfi(
+                request: FfiConverterTypeAuthHttpRequest.read(from: &buf), 
+                recipientPublicKey: FfiConverterData.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SealedApprovalFfi, into buf: inout [UInt8]) {
+        FfiConverterTypeAuthHttpRequest.write(value.request, into: &buf)
+        FfiConverterData.write(value.recipientPublicKey, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSealedApprovalFfi_lift(_ buf: RustBuffer) throws -> SealedApprovalFfi {
+    return try FfiConverterTypeSealedApprovalFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSealedApprovalFfi_lower(_ value: SealedApprovalFfi) -> RustBuffer {
+    return FfiConverterTypeSealedApprovalFfi.lower(value)
 }
 
 
@@ -19248,6 +22062,73 @@ public func FfiConverterTypeSignupConfiguration_lift(_ buf: RustBuffer) throws -
 #endif
 public func FfiConverterTypeSignupConfiguration_lower(_ value: SignupConfiguration) -> RustBuffer {
     return FfiConverterTypeSignupConfiguration.lower(value)
+}
+
+
+/**
+ * The account exists: store both in the credential store, then drop them.
+ */
+public struct SignupCreatedFfi {
+    public var sessionToken: String
+    public var userId: String
+    /**
+     * The master key as a handle; `export_for_keychain` once, to persist it.
+     */
+    public var masterKey: MasterKeyHandle
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(sessionToken: String, userId: String, 
+        /**
+         * The master key as a handle; `export_for_keychain` once, to persist it.
+         */masterKey: MasterKeyHandle) {
+        self.sessionToken = sessionToken
+        self.userId = userId
+        self.masterKey = masterKey
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SignupCreatedFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSignupCreatedFfi: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SignupCreatedFfi {
+        return
+            try SignupCreatedFfi(
+                sessionToken: FfiConverterString.read(from: &buf), 
+                userId: FfiConverterString.read(from: &buf), 
+                masterKey: FfiConverterTypeMasterKeyHandle.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SignupCreatedFfi, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.sessionToken, into: &buf)
+        FfiConverterString.write(value.userId, into: &buf)
+        FfiConverterTypeMasterKeyHandle.write(value.masterKey, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSignupCreatedFfi_lift(_ buf: RustBuffer) throws -> SignupCreatedFfi {
+    return try FfiConverterTypeSignupCreatedFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSignupCreatedFfi_lower(_ value: SignupCreatedFfi) -> RustBuffer {
+    return FfiConverterTypeSignupCreatedFfi.lower(value)
 }
 
 
@@ -19739,6 +22620,153 @@ public func FfiConverterTypeWrappedRequestPrivate_lift(_ buf: RustBuffer) throws
 public func FfiConverterTypeWrappedRequestPrivate_lower(_ value: WrappedRequestPrivate) -> RustBuffer {
     return FfiConverterTypeWrappedRequestPrivate.lower(value)
 }
+
+
+public enum AccountFlowFfiError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+
+    
+    
+    /**
+     * `code` is the stable error code (`wrong_password`, `invalid_code`, ...).
+     */
+    case Failed(code: String
+    )
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
+}
+
+#if compiler(>=6)
+extension AccountFlowFfiError: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAccountFlowFfiError: FfiConverterRustBuffer {
+    typealias SwiftType = AccountFlowFfiError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AccountFlowFfiError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .Failed(
+            code: try FfiConverterString.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: AccountFlowFfiError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case let .Failed(code):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(code, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAccountFlowFfiError_lift(_ buf: RustBuffer) throws -> AccountFlowFfiError {
+    return try FfiConverterTypeAccountFlowFfiError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAccountFlowFfiError_lower(_ value: AccountFlowFfiError) -> RustBuffer {
+    return FfiConverterTypeAccountFlowFfiError.lower(value)
+}
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum ApproveStepFfi: Equatable, Hashable {
+    
+    case send(request: AuthHttpRequest
+    )
+    case approved
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ApproveStepFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeApproveStepFfi: FfiConverterRustBuffer {
+    typealias SwiftType = ApproveStepFfi
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ApproveStepFfi {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .send(request: try FfiConverterTypeAuthHttpRequest.read(from: &buf)
+        )
+        
+        case 2: return .approved
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ApproveStepFfi, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .send(request):
+            writeInt(&buf, Int32(1))
+            FfiConverterTypeAuthHttpRequest.write(request, into: &buf)
+            
+        
+        case .approved:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeApproveStepFfi_lift(_ buf: RustBuffer) throws -> ApproveStepFfi {
+    return try FfiConverterTypeApproveStepFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeApproveStepFfi_lower(_ value: ApproveStepFfi) -> RustBuffer {
+    return FfiConverterTypeApproveStepFfi.lower(value)
+}
+
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
@@ -21096,6 +24124,85 @@ public func FfiConverterTypeAuthChallengeKind_lower(_ value: AuthChallengeKind) 
 }
 
 
+
+public enum AuthFlowFfiError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+
+    
+    
+    /**
+     * `code` is `AuthFlowError::code()` (`invalid_credentials`, `rate_limited`, …).
+     */
+    case Flow(code: String, retryAfterSecs: UInt64?
+    )
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
+}
+
+#if compiler(>=6)
+extension AuthFlowFfiError: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAuthFlowFfiError: FfiConverterRustBuffer {
+    typealias SwiftType = AuthFlowFfiError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AuthFlowFfiError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .Flow(
+            code: try FfiConverterString.read(from: &buf), 
+            retryAfterSecs: try FfiConverterOptionUInt64.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: AuthFlowFfiError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case let .Flow(code,retryAfterSecs):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(code, into: &buf)
+            FfiConverterOptionUInt64.write(retryAfterSecs, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAuthFlowFfiError_lift(_ buf: RustBuffer) throws -> AuthFlowFfiError {
+    return try FfiConverterTypeAuthFlowFfiError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAuthFlowFfiError_lower(_ value: AuthFlowFfiError) -> RustBuffer {
+    return FfiConverterTypeAuthFlowFfiError.lower(value)
+}
+
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
@@ -22021,6 +25128,85 @@ public func FfiConverterTypeDeviceLinkPollKind_lift(_ buf: RustBuffer) throws ->
 #endif
 public func FfiConverterTypeDeviceLinkPollKind_lower(_ value: DeviceLinkPollKind) -> RustBuffer {
     return FfiConverterTypeDeviceLinkPollKind.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum DeviceRequestEventFfi {
+    
+    case waiting(userCode: String, verificationUri: String, expiresIn: UInt64
+    )
+    /**
+     * The keys arrived; the app stores both in its secure store at once.
+     */
+    case approved(sessionToken: String, masterKey: MasterKeyHandle
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension DeviceRequestEventFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDeviceRequestEventFfi: FfiConverterRustBuffer {
+    typealias SwiftType = DeviceRequestEventFfi
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DeviceRequestEventFfi {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .waiting(userCode: try FfiConverterString.read(from: &buf), verificationUri: try FfiConverterString.read(from: &buf), expiresIn: try FfiConverterUInt64.read(from: &buf)
+        )
+        
+        case 2: return .approved(sessionToken: try FfiConverterString.read(from: &buf), masterKey: try FfiConverterTypeMasterKeyHandle.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DeviceRequestEventFfi, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .waiting(userCode,verificationUri,expiresIn):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(userCode, into: &buf)
+            FfiConverterString.write(verificationUri, into: &buf)
+            FfiConverterUInt64.write(expiresIn, into: &buf)
+            
+        
+        case let .approved(sessionToken,masterKey):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(sessionToken, into: &buf)
+            FfiConverterTypeMasterKeyHandle.write(masterKey, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDeviceRequestEventFfi_lift(_ buf: RustBuffer) throws -> DeviceRequestEventFfi {
+    return try FfiConverterTypeDeviceRequestEventFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDeviceRequestEventFfi_lower(_ value: DeviceRequestEventFfi) -> RustBuffer {
+    return FfiConverterTypeDeviceRequestEventFfi.lower(value)
 }
 
 
@@ -23496,6 +26682,329 @@ public func FfiConverterTypeExtractOutcome_lower(_ value: ExtractOutcome) -> Rus
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * A `Send` with `mark_custody_seen`: persist the id in the device's custody memory BEFORE sending.
+ */
+
+public enum FolderStepFfi: Equatable, Hashable {
+    
+    case send(request: AuthHttpRequest, markCustodySeen: String?
+    )
+    case shared(inviteId: String, recipientPublicKey: Data
+    )
+    case invited(inviteId: String, status: String
+    )
+    case awaitingApproval(inviteId: String, recipientPublicKey: Data?
+    )
+    /**
+     * Code `peer_key_changed`: the server's key is not the compared one; nothing was sealed.
+     */
+    case peerKeyChanged(inviteId: String, recipientPublicKey: Data
+    )
+    /**
+     * `link` carries `#key=`; `display` is the part before `#`.
+     */
+    case linkCreated(shareId: String, link: String, display: String, accessLevel: String, passphraseProtected: Bool, keyVersion: UInt64
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension FolderStepFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFolderStepFfi: FfiConverterRustBuffer {
+    typealias SwiftType = FolderStepFfi
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FolderStepFfi {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .send(request: try FfiConverterTypeAuthHttpRequest.read(from: &buf), markCustodySeen: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        case 2: return .shared(inviteId: try FfiConverterString.read(from: &buf), recipientPublicKey: try FfiConverterData.read(from: &buf)
+        )
+        
+        case 3: return .invited(inviteId: try FfiConverterString.read(from: &buf), status: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 4: return .awaitingApproval(inviteId: try FfiConverterString.read(from: &buf), recipientPublicKey: try FfiConverterOptionData.read(from: &buf)
+        )
+        
+        case 5: return .peerKeyChanged(inviteId: try FfiConverterString.read(from: &buf), recipientPublicKey: try FfiConverterData.read(from: &buf)
+        )
+        
+        case 6: return .linkCreated(shareId: try FfiConverterString.read(from: &buf), link: try FfiConverterString.read(from: &buf), display: try FfiConverterString.read(from: &buf), accessLevel: try FfiConverterString.read(from: &buf), passphraseProtected: try FfiConverterBool.read(from: &buf), keyVersion: try FfiConverterUInt64.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FolderStepFfi, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .send(request,markCustodySeen):
+            writeInt(&buf, Int32(1))
+            FfiConverterTypeAuthHttpRequest.write(request, into: &buf)
+            FfiConverterOptionString.write(markCustodySeen, into: &buf)
+            
+        
+        case let .shared(inviteId,recipientPublicKey):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(inviteId, into: &buf)
+            FfiConverterData.write(recipientPublicKey, into: &buf)
+            
+        
+        case let .invited(inviteId,status):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(inviteId, into: &buf)
+            FfiConverterString.write(status, into: &buf)
+            
+        
+        case let .awaitingApproval(inviteId,recipientPublicKey):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(inviteId, into: &buf)
+            FfiConverterOptionData.write(recipientPublicKey, into: &buf)
+            
+        
+        case let .peerKeyChanged(inviteId,recipientPublicKey):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(inviteId, into: &buf)
+            FfiConverterData.write(recipientPublicKey, into: &buf)
+            
+        
+        case let .linkCreated(shareId,link,display,accessLevel,passphraseProtected,keyVersion):
+            writeInt(&buf, Int32(6))
+            FfiConverterString.write(shareId, into: &buf)
+            FfiConverterString.write(link, into: &buf)
+            FfiConverterString.write(display, into: &buf)
+            FfiConverterString.write(accessLevel, into: &buf)
+            FfiConverterBool.write(passphraseProtected, into: &buf)
+            FfiConverterUInt64.write(keyVersion, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFolderStepFfi_lift(_ buf: RustBuffer) throws -> FolderStepFfi {
+    return try FfiConverterTypeFolderStepFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFolderStepFfi_lower(_ value: FolderStepFfi) -> RustBuffer {
+    return FfiConverterTypeFolderStepFfi.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum InviteStepFfi: Equatable, Hashable {
+    
+    case send(request: AuthHttpRequest
+    )
+    /**
+     * `recipient_public_key`: the exact key the file key was sealed to (safety number, mark).
+     */
+    case shared(inviteId: String, recipientPublicKey: Data
+    )
+    case invited(inviteId: String, status: String
+    )
+    case awaitingApproval(inviteId: String, recipientPublicKey: Data?
+    )
+    /**
+     * Code `peer_key_changed`: the server's key is not the compared one; nothing was sealed.
+     */
+    case peerKeyChanged(inviteId: String, recipientPublicKey: Data
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension InviteStepFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeInviteStepFfi: FfiConverterRustBuffer {
+    typealias SwiftType = InviteStepFfi
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> InviteStepFfi {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .send(request: try FfiConverterTypeAuthHttpRequest.read(from: &buf)
+        )
+        
+        case 2: return .shared(inviteId: try FfiConverterString.read(from: &buf), recipientPublicKey: try FfiConverterData.read(from: &buf)
+        )
+        
+        case 3: return .invited(inviteId: try FfiConverterString.read(from: &buf), status: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 4: return .awaitingApproval(inviteId: try FfiConverterString.read(from: &buf), recipientPublicKey: try FfiConverterOptionData.read(from: &buf)
+        )
+        
+        case 5: return .peerKeyChanged(inviteId: try FfiConverterString.read(from: &buf), recipientPublicKey: try FfiConverterData.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: InviteStepFfi, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .send(request):
+            writeInt(&buf, Int32(1))
+            FfiConverterTypeAuthHttpRequest.write(request, into: &buf)
+            
+        
+        case let .shared(inviteId,recipientPublicKey):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(inviteId, into: &buf)
+            FfiConverterData.write(recipientPublicKey, into: &buf)
+            
+        
+        case let .invited(inviteId,status):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(inviteId, into: &buf)
+            FfiConverterString.write(status, into: &buf)
+            
+        
+        case let .awaitingApproval(inviteId,recipientPublicKey):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(inviteId, into: &buf)
+            FfiConverterOptionData.write(recipientPublicKey, into: &buf)
+            
+        
+        case let .peerKeyChanged(inviteId,recipientPublicKey):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(inviteId, into: &buf)
+            FfiConverterData.write(recipientPublicKey, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeInviteStepFfi_lift(_ buf: RustBuffer) throws -> InviteStepFfi {
+    return try FfiConverterTypeInviteStepFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeInviteStepFfi_lower(_ value: InviteStepFfi) -> RustBuffer {
+    return FfiConverterTypeInviteStepFfi.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum LinkStepFfi: Equatable, Hashable {
+    
+    case send(request: AuthHttpRequest
+    )
+    /**
+     * `link` carries the key in its `#key=` part; `display` is the part before `#`.
+     */
+    case created(shareId: String, link: String, display: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension LinkStepFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLinkStepFfi: FfiConverterRustBuffer {
+    typealias SwiftType = LinkStepFfi
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LinkStepFfi {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .send(request: try FfiConverterTypeAuthHttpRequest.read(from: &buf)
+        )
+        
+        case 2: return .created(shareId: try FfiConverterString.read(from: &buf), link: try FfiConverterString.read(from: &buf), display: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: LinkStepFfi, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .send(request):
+            writeInt(&buf, Int32(1))
+            FfiConverterTypeAuthHttpRequest.write(request, into: &buf)
+            
+        
+        case let .created(shareId,link,display):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(shareId, into: &buf)
+            FfiConverterString.write(link, into: &buf)
+            FfiConverterString.write(display, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLinkStepFfi_lift(_ buf: RustBuffer) throws -> LinkStepFfi {
+    return try FfiConverterTypeLinkStepFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLinkStepFfi_lower(_ value: LinkStepFfi) -> RustBuffer {
+    return FfiConverterTypeLinkStepFfi.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum NetworkSignal: Equatable, Hashable {
     
@@ -24001,6 +27510,162 @@ public func FfiConverterTypePasswordStrengthDto_lift(_ buf: RustBuffer) throws -
 #endif
 public func FfiConverterTypePasswordStrengthDto_lower(_ value: PasswordStrengthDto) -> RustBuffer {
     return FfiConverterTypePasswordStrengthDto.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * What the host knows about the recipient's key: REQUIRED on every member seal.
+ */
+
+public enum PeerKeyExpectationFfi: Equatable, Hashable {
+    
+    /**
+     * The host holds a compared mark; `fingerprint` is 32 bytes (`share_key_fingerprint`).
+     */
+    case compared(fingerprint: Data
+    )
+    /**
+     * No compared mark for this person.
+     */
+    case notCompared
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PeerKeyExpectationFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePeerKeyExpectationFfi: FfiConverterRustBuffer {
+    typealias SwiftType = PeerKeyExpectationFfi
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PeerKeyExpectationFfi {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .compared(fingerprint: try FfiConverterData.read(from: &buf)
+        )
+        
+        case 2: return .notCompared
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PeerKeyExpectationFfi, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .compared(fingerprint):
+            writeInt(&buf, Int32(1))
+            FfiConverterData.write(fingerprint, into: &buf)
+            
+        
+        case .notCompared:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePeerKeyExpectationFfi_lift(_ buf: RustBuffer) throws -> PeerKeyExpectationFfi {
+    return try FfiConverterTypePeerKeyExpectationFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePeerKeyExpectationFfi_lower(_ value: PeerKeyExpectationFfi) -> RustBuffer {
+    return FfiConverterTypePeerKeyExpectationFfi.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum RecoveredFfi {
+    
+    /**
+     * Signed in with the new password: store both, then drop them.
+     */
+    case signedIn(sessionToken: String, masterKey: MasterKeyHandle
+    )
+    /**
+     * The password changed; a normal sign-in comes next (two-factor on, or an older server).
+     */
+    case signInRequired
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension RecoveredFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRecoveredFfi: FfiConverterRustBuffer {
+    typealias SwiftType = RecoveredFfi
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RecoveredFfi {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .signedIn(sessionToken: try FfiConverterString.read(from: &buf), masterKey: try FfiConverterTypeMasterKeyHandle.read(from: &buf)
+        )
+        
+        case 2: return .signInRequired
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RecoveredFfi, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .signedIn(sessionToken,masterKey):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(sessionToken, into: &buf)
+            FfiConverterTypeMasterKeyHandle.write(masterKey, into: &buf)
+            
+        
+        case .signInRequired:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoveredFfi_lift(_ buf: RustBuffer) throws -> RecoveredFfi {
+    return try FfiConverterTypeRecoveredFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoveredFfi_lower(_ value: RecoveredFfi) -> RustBuffer {
+    return FfiConverterTypeRecoveredFfi.lower(value)
 }
 
 
@@ -24594,6 +28259,166 @@ public func FfiConverterTypeSessionResumeAction_lower(_ value: SessionResumeActi
 }
 
 
+
+public enum ShareFlowFfiError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+
+    
+    
+    /**
+     * `code` is `ShareFlowError::code()` (`plan_required`, `folder_keys_unavailable`, …).
+     */
+    case Flow(code: String
+    )
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
+}
+
+#if compiler(>=6)
+extension ShareFlowFfiError: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeShareFlowFfiError: FfiConverterRustBuffer {
+    typealias SwiftType = ShareFlowFfiError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ShareFlowFfiError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .Flow(
+            code: try FfiConverterString.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ShareFlowFfiError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case let .Flow(code):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(code, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeShareFlowFfiError_lift(_ buf: RustBuffer) throws -> ShareFlowFfiError {
+    return try FfiConverterTypeShareFlowFfiError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeShareFlowFfiError_lower(_ value: ShareFlowFfiError) -> RustBuffer {
+    return FfiConverterTypeShareFlowFfiError.lower(value)
+}
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum SignInStepFfi: Equatable, Hashable {
+    
+    case send(request: AuthHttpRequest
+    )
+    case signedIn(sessionToken: String
+    )
+    /**
+     * Two-factor is on: call `verify_request(code)`.
+     */
+    case secondFactor
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension SignInStepFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSignInStepFfi: FfiConverterRustBuffer {
+    typealias SwiftType = SignInStepFfi
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SignInStepFfi {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .send(request: try FfiConverterTypeAuthHttpRequest.read(from: &buf)
+        )
+        
+        case 2: return .signedIn(sessionToken: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 3: return .secondFactor
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: SignInStepFfi, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .send(request):
+            writeInt(&buf, Int32(1))
+            FfiConverterTypeAuthHttpRequest.write(request, into: &buf)
+            
+        
+        case let .signedIn(sessionToken):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(sessionToken, into: &buf)
+            
+        
+        case .secondFactor:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSignInStepFfi_lift(_ buf: RustBuffer) throws -> SignInStepFfi {
+    return try FfiConverterTypeSignInStepFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSignInStepFfi_lower(_ value: SignInStepFfi) -> RustBuffer {
+    return FfiConverterTypeSignInStepFfi.lower(value)
+}
+
+
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
@@ -24693,6 +28518,158 @@ public func FfiConverterTypeSignOutFailureData_lift(_ buf: RustBuffer) throws ->
 #endif
 public func FfiConverterTypeSignOutFailureData_lower(_ value: SignOutFailureData) -> RustBuffer {
     return FfiConverterTypeSignOutFailureData.lower(value)
+}
+
+
+
+public enum SignupFlowFfiError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+
+    
+    
+    /**
+     * `code` is `SignupError::code()` (`wrong_code`, `password_breached`, …).
+     */
+    case Flow(code: String, retryAfterSecs: UInt64?
+    )
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
+}
+
+#if compiler(>=6)
+extension SignupFlowFfiError: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSignupFlowFfiError: FfiConverterRustBuffer {
+    typealias SwiftType = SignupFlowFfiError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SignupFlowFfiError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .Flow(
+            code: try FfiConverterString.read(from: &buf), 
+            retryAfterSecs: try FfiConverterOptionUInt64.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: SignupFlowFfiError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case let .Flow(code,retryAfterSecs):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(code, into: &buf)
+            FfiConverterOptionUInt64.write(retryAfterSecs, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSignupFlowFfiError_lift(_ buf: RustBuffer) throws -> SignupFlowFfiError {
+    return try FfiConverterTypeSignupFlowFfiError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSignupFlowFfiError_lower(_ value: SignupFlowFfiError) -> RustBuffer {
+    return FfiConverterTypeSignupFlowFfiError.lower(value)
+}
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum StepUpStepFfi: Equatable, Hashable {
+    
+    case send(request: AuthHttpRequest
+    )
+    /**
+     * The token is held inside; `attach_confirm_token` puts it on the consuming request.
+     */
+    case confirmed
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension StepUpStepFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeStepUpStepFfi: FfiConverterRustBuffer {
+    typealias SwiftType = StepUpStepFfi
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> StepUpStepFfi {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .send(request: try FfiConverterTypeAuthHttpRequest.read(from: &buf)
+        )
+        
+        case 2: return .confirmed
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: StepUpStepFfi, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .send(request):
+            writeInt(&buf, Int32(1))
+            FfiConverterTypeAuthHttpRequest.write(request, into: &buf)
+            
+        
+        case .confirmed:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStepUpStepFfi_lift(_ buf: RustBuffer) throws -> StepUpStepFfi {
+    return try FfiConverterTypeStepUpStepFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStepUpStepFfi_lower(_ value: StepUpStepFfi) -> RustBuffer {
+    return FfiConverterTypeStepUpStepFfi.lower(value)
 }
 
 
@@ -26377,6 +30354,30 @@ fileprivate struct FfiConverterOptionUInt8: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionUInt16: FfiConverterRustBuffer {
+    typealias SwiftType = UInt16?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt16.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt16.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
     typealias SwiftType = UInt32?
 
@@ -26617,6 +30618,30 @@ fileprivate struct FfiConverterOptionTypeWriteTargetHandle: FfiConverterRustBuff
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeAccountFlowOutcome: FfiConverterRustBuffer {
+    typealias SwiftType = AccountFlowOutcome?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeAccountFlowOutcome.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeAccountFlowOutcome.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeArchiveEventData: FfiConverterRustBuffer {
     typealias SwiftType = ArchiveEventData?
 
@@ -26705,6 +30730,30 @@ fileprivate struct FfiConverterOptionTypeAssetSnapshotData: FfiConverterRustBuff
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeAssetSnapshotData.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeAuthHttpRequest: FfiConverterRustBuffer {
+    typealias SwiftType = AuthHttpRequest?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeAuthHttpRequest.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeAuthHttpRequest.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -27089,6 +31138,30 @@ fileprivate struct FfiConverterOptionTypeArchiveTime: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeArchiveTime.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeBreachVerdictDto: FfiConverterRustBuffer {
+    typealias SwiftType = BreachVerdictDto?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeBreachVerdictDto.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeBreachVerdictDto.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -27934,6 +32007,31 @@ fileprivate struct FfiConverterSequenceTypeBatchNameResult: FfiConverterRustBuff
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeBatchNameResult.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeBundleItemFfi: FfiConverterRustBuffer {
+    typealias SwiftType = [BundleItemFfi]
+
+    public static func write(_ value: [BundleItemFfi], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeBundleItemFfi.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [BundleItemFfi] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [BundleItemFfi]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeBundleItemFfi.read(from: &buf))
         }
         return seq
     }
@@ -29561,12 +33659,278 @@ public func safetyNumber(emailA: String, publicKeyA: Data, emailB: String, publi
 })
 }
 /**
+ * `AssertionStart` JSON + `NativeAssertion` JSON → `login-finish` body.
+ */
+public func passkeyAssertionFinishBody(startJson: String, assertionJson: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_passkey_assertion_finish_body(
+        FfiConverterString.lower(startJson),
+        FfiConverterString.lower(assertionJson),$0
+    )
+})
+}
+/**
+ * The `vault-key-escrow` body for a credential id and a blob from [`passkey_wrap_vault_key`].
+ */
+public func passkeyEscrowBody(credentialId: Data, blob: Data) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_passkey_escrow_body(
+        FfiConverterData.lower(credentialId),
+        FfiConverterData.lower(blob),$0
+    )
+})
+}
+/**
+ * The CTAP2 hmac-secret salt, for an API that takes raw hmac-secret salts (the PRF hash already applied).
+ */
+public func passkeyHmacSecretSalt() -> Data  {
+    return try!  FfiConverterData.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_passkey_hmac_secret_salt($0
+    )
+})
+}
+/**
+ * `login-start`'s answer → `AssertionStart` JSON (options for the platform's get call). The server's `rpId` must
+ * equal `expected_rp_id`, else `passkey_rp_mismatch`.
+ */
+public func passkeyParseAssertionStart(answerJson: String, expectedRpId: String, allowLocalhost: Bool)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_passkey_parse_assertion_start(
+        FfiConverterString.lower(answerJson),
+        FfiConverterString.lower(expectedRpId),
+        FfiConverterBool.lower(allowLocalhost),$0
+    )
+})
+}
+/**
+ * The escrow blob from `GET /api/v1/auth/vault-key-escrow/{id}`'s answer.
+ */
+public func passkeyParseEscrow(answerJson: String)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_passkey_parse_escrow(
+        FfiConverterString.lower(answerJson),$0
+    )
+})
+}
+/**
+ * `register-start`'s answer → `RegistrationStart` JSON (options for the platform's create call). The server's
+ * `rp.id` must equal `expected_rp_id`, else `passkey_rp_mismatch`.
+ */
+public func passkeyParseRegistrationStart(answerJson: String, expectedRpId: String, allowLocalhost: Bool)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_passkey_parse_registration_start(
+        FfiConverterString.lower(answerJson),
+        FfiConverterString.lower(expectedRpId),
+        FfiConverterBool.lower(allowLocalhost),$0
+    )
+})
+}
+/**
+ * The PRF eval input to pass as `prf.eval.first` to an API that takes PRF inputs (it hashes them itself).
+ */
+public func passkeyPrfEvalInput() -> Data  {
+    return try!  FfiConverterData.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_passkey_prf_eval_input($0
+    )
+})
+}
+/**
+ * `RegistrationStart` JSON + `NativeAttestation` JSON → `register-finish` body.
+ */
+public func passkeyRegistrationFinishBody(startJson: String, attestationJson: String, name: String?)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_passkey_registration_finish_body(
+        FfiConverterString.lower(startJson),
+        FfiConverterString.lower(attestationJson),
+        FfiConverterOptionString.lower(name),$0
+    )
+})
+}
+/**
+ * Open an escrow blob with a PRF output. The vault key comes back as a handle.
+ */
+public func passkeyUnwrapVaultKey(prfOutput: Data, blob: Data)throws  -> MasterKeyHandle  {
+    return try  FfiConverterTypeMasterKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_passkey_unwrap_vault_key(
+        FfiConverterData.lower(prfOutput),
+        FfiConverterData.lower(blob),$0
+    )
+})
+}
+/**
+ * Wrap the vault key under a PRF output: the escrow blob for `POST /api/v1/auth/vault-key-escrow`.
+ */
+public func passkeyWrapVaultKey(prfOutput: Data, masterKey: MasterKeyHandle)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_passkey_wrap_vault_key(
+        FfiConverterData.lower(prfOutput),
+        FfiConverterTypeMasterKeyHandle_lower(masterKey),$0
+    )
+})
+}
+/**
  * Mint a guest (F) item id with NO master key (task 2275 §15). The anonymous
  * uploader path uses this; the id is a canonical RFC 9562 UUID v8.
  */
 public func mintGuestItemId()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_func_mint_guest_item_id($0
+    )
+})
+}
+/**
+ * Approve a claimed file invite later: the file key sealed for the recipient. With
+ * `Compared(fingerprint)` a different server key is refused (`peer_key_changed`), unsealed. After
+ * `peer_key_changed` and the user's "share anyway", pass the key bytes the refusal carried and
+ * `Compared(share_key_fingerprint(those bytes))`, never a re-fetched key. Returns the sealed key.
+ */
+public func shareApproveFileInviteRequest(inviteId: String, fileId: String, recipientPublicKeyB64: String, masterKey: MasterKeyHandle, fileKey: FileKeyHandle, peerKey: PeerKeyExpectationFfi)throws  -> SealedApprovalFfi  {
+    return try  FfiConverterTypeSealedApprovalFfi_lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_share_approve_file_invite_request(
+        FfiConverterString.lower(inviteId),
+        FfiConverterString.lower(fileId),
+        FfiConverterString.lower(recipientPublicKeyB64),
+        FfiConverterTypeMasterKeyHandle_lower(masterKey),
+        FfiConverterTypeFileKeyHandle_lower(fileKey),
+        FfiConverterTypePeerKeyExpectationFfi_lower(peerKey),$0
+    )
+})
+}
+/**
+ * The recipient side of a link: the file key from the link's `#key=` value.
+ */
+public func shareOpenLinkFileKey(fragmentKey: String, wrappedFileKeyB64: String)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_share_open_link_file_key(
+        FfiConverterString.lower(fragmentKey),
+        FfiConverterString.lower(wrappedFileKeyB64),$0
+    )
+})
+}
+/**
+ * The recipient side of a person share: the file key, opened with the owner's X25519 public key.
+ */
+public func shareOpenMemberFileKey(masterKey: MasterKeyHandle, ownerPublicKey: Data, fileId: String, sealed: Data)throws  -> FileKeyHandle  {
+    return try  FfiConverterTypeFileKeyHandle_lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_share_open_member_file_key(
+        FfiConverterTypeMasterKeyHandle_lower(masterKey),
+        FfiConverterData.lower(ownerPublicKey),
+        FfiConverterString.lower(fileId),
+        FfiConverterData.lower(sealed),$0
+    )
+})
+}
+/**
+ * [`share_rebuild_link`] for a bundle (no single wrapped file key).
+ */
+public func shareRebuildBundleLink(appUrl: String, masterKey: MasterKeyHandle, ownerWrappedKey: String?, ownerWrappedToken: String?)throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_share_rebuild_bundle_link(
+        FfiConverterString.lower(appUrl),
+        FfiConverterTypeMasterKeyHandle_lower(masterKey),
+        FfiConverterOptionString.lower(ownerWrappedKey),
+        FfiConverterOptionString.lower(ownerWrappedToken),$0
+    )
+})
+}
+/**
+ * The owner's working link from a share's owner blobs; `None` when it can't be rebuilt.
+ * `wrapped_file_key` (the link's stored `wrapped_file_key`, required) must open under the rebuilt
+ * link key. A bundle uses `share_rebuild_bundle_link`.
+ */
+public func shareRebuildLink(appUrl: String, masterKey: MasterKeyHandle, ownerWrappedKey: String?, ownerWrappedToken: String?, wrappedFileKey: String)throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_share_rebuild_link(
+        FfiConverterString.lower(appUrl),
+        FfiConverterTypeMasterKeyHandle_lower(masterKey),
+        FfiConverterOptionString.lower(ownerWrappedKey),
+        FfiConverterOptionString.lower(ownerWrappedToken),
+        FfiConverterString.lower(wrappedFileKey),$0
+    )
+})
+}
+/**
+ * `DELETE` a link (`/shares/{id}`) or a person share (`/shares/invites/{id}`).
+ */
+public func shareRevokeRequest(id: String, isInvite: Bool)throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_share_revoke_request(
+        FfiConverterString.lower(id),
+        FfiConverterBool.lower(isInvite),$0
+    )
+})
+}
+/**
+ * `POST /api/v1/file-requests/{id}/close`.
+ */
+public func fileRequestCloseRequest(id: String)throws  -> AuthHttpRequest  {
+    return try  FfiConverterTypeAuthHttpRequest_lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_file_request_close_request(
+        FfiConverterString.lower(id),$0
+    )
+})
+}
+/**
+ * A request's link again from its stored wrap; `None` when it can't be rebuilt.
+ */
+public func fileRequestRebuildLink(appUrl: String, masterKey: MasterKeyHandle, token: String?, wrappedPrivateKey: String?, wrapNonce: String?)throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_file_request_rebuild_link(
+        FfiConverterString.lower(appUrl),
+        FfiConverterTypeMasterKeyHandle_lower(masterKey),
+        FfiConverterOptionString.lower(token),
+        FfiConverterOptionString.lower(wrappedPrivateKey),
+        FfiConverterOptionString.lower(wrapNonce),$0
+    )
+})
+}
+/**
+ * Web `rebuildFolderLinkUrl`: the owner's folder link again; `None` when it can't be rebuilt.
+ */
+public func shareRebuildFolderLink(appUrl: String, masterKey: MasterKeyHandle, shareId: String, ownerWrappedKey: String?, ownerWrappedToken: String?, wrappedFolderKey: String?, passphraseProtected: Bool)throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_share_rebuild_folder_link(
+        FfiConverterString.lower(appUrl),
+        FfiConverterTypeMasterKeyHandle_lower(masterKey),
+        FfiConverterString.lower(shareId),
+        FfiConverterOptionString.lower(ownerWrappedKey),
+        FfiConverterOptionString.lower(ownerWrappedToken),
+        FfiConverterOptionString.lower(wrappedFolderKey),
+        FfiConverterBool.lower(passphraseProtected),$0
+    )
+})
+}
+/**
+ * The 60-digit number two people compare out of band (Signal's numeric fingerprint, v1). The own
+ * sharing key is derived in core from the `master_key` handle (as the other share exports take it);
+ * `peer_public_key` is the key the share was sealed to (`recipient_public_key` of the outcome).
+ */
+public func shareSafetyNumber(masterKey: MasterKeyHandle, ownUserId: String, peerUserId: String, peerPublicKey: Data)throws  -> SafetyNumberFfi  {
+    return try  FfiConverterTypeSafetyNumberFfi_lift(try rustCallWithError(FfiConverterTypeShareFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_func_share_safety_number(
+        FfiConverterTypeMasterKeyHandle_lower(masterKey),
+        FfiConverterString.lower(ownUserId),
+        FfiConverterString.lower(peerUserId),
+        FfiConverterData.lower(peerPublicKey),$0
+    )
+})
+}
+/**
+ * 0-based positions of words that are not BIP39 words (DW-A47's per-word hint).
+ */
+public func recoveryUnknownWordPositions(words: [String]) -> [UInt32]  {
+    return try!  FfiConverterSequenceUInt32.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_recovery_unknown_word_positions(
+        FfiConverterSequenceString.lower(words),$0
+    )
+})
+}
+/**
+ * The request for the server's sign-up policy (`GET /api/v1/onboarding`).
+ */
+public func signupPolicyRequest() -> AuthHttpRequest  {
+    return try!  FfiConverterTypeAuthHttpRequest_lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_signup_policy_request($0
     )
 })
 }
@@ -29820,7 +34184,73 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_safety_number() != 44018) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_func_passkey_assertion_finish_body() != 150) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_passkey_escrow_body() != 4647) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_passkey_hmac_secret_salt() != 13335) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_passkey_parse_assertion_start() != 50363) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_passkey_parse_escrow() != 29286) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_passkey_parse_registration_start() != 169) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_passkey_prf_eval_input() != 24902) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_passkey_registration_finish_body() != 29947) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_passkey_unwrap_vault_key() != 52409) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_passkey_wrap_vault_key() != 37439) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_func_mint_guest_item_id() != 8655) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_share_approve_file_invite_request() != 50394) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_share_open_link_file_key() != 59449) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_share_open_member_file_key() != 860) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_share_rebuild_bundle_link() != 31674) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_share_rebuild_link() != 23471) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_share_revoke_request() != 41439) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_file_request_close_request() != 53378) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_file_request_rebuild_link() != 38495) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_share_rebuild_folder_link() != 15535) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_share_safety_number() != 11024) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_recovery_unknown_word_positions() != 31478) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_func_signup_policy_request() != 60322) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_breachcheckhandle_evaluate() != 6329) {
@@ -30273,6 +34703,57 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_writetargethandle_version_id() != 43952) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_abandon() != 37878) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_change_email() != 34743) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_change_password() != 8344) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_delete_account() != 7761) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_delete_cancel() != 12469) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_delete_confirm() != 27952) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_regenerate_backup_codes() != 40702) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_resume() != 5423) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_revoke_other_sessions() != 63505) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_revoke_session() != 24964) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_set_activity_logging() != 34110) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_set_display_name() != 7902) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_totp_confirm() != 9458) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_totp_disable() != 9305) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_totp_setup() != 42454) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_verify_email() != 7625) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_accountflowhandle_verify_password() != 25939) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_authenticatorenrollmenthandle_cancel() != 27288) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -30376,6 +34857,54 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_signupservicehandle_verify_email() != 62146) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_approvalflow_approve() != 1399) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_approvalflow_code_matches() != 11962) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_approvalflow_deny() != 3891) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_approvalflow_on_deny_response() != 28846) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_approvalflow_on_lookup_response() != 36879) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_approvalflow_on_response() != 23867) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_approvalflow_start() != 54742) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_devicerequestflow_init_frame() != 14599) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_devicerequestflow_on_frame() != 57307) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signinflow_on_response() != 41259) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signinflow_on_verify_response() != 61415) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signinflow_start() != 38423) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signinflow_verify_request() != 63052) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_stepupflow_attach_confirm_token() != 31033) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_stepupflow_on_response() != 33225) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_stepupflow_start() != 26023) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_chunkdecryptorhandle_chunk_format() != 28015) {
@@ -30825,6 +35354,105 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_uploadservicehandle_run_next() != 45328) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_createlinkflow_on_response() != 32540) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_createlinkflow_start() != 49091) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_memberinviteflow_on_response() != 1680) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_memberinviteflow_start() != 4586) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_createrequestflow_on_response() != 41813) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_createrequestflow_start() != 50394) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_foldershareflow_on_response() != 42925) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_foldershareflow_start() != 437) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_breach_request() != 8893) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_evaluate() != 2025) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_on_breach_response() != 12324) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_on_finalize_response() != 35427) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_on_register_response() != 25235) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_on_start_response() != 52808) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_set_password() != 11686) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_start() != 52423) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_acknowledge_phrase() != 5724) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_breach_request() != 18103) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_challenge_positions() != 4651) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_confirm_phrase() != 5277) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_evaluate() != 35119) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_on_breach_response() != 37021) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_on_code_sent() != 29912) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_on_code_verified() != 537) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_on_register_finish() != 10120) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_on_register_start() != 37641) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_phrase_words() != 24400) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_register_start() != 1718) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_send_code() != 27113) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_set_password() != 29111) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_terms_request() != 38757) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_verify_code() != 21090) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_wipe() != 8749) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_constructor_breachcheckhandle_new() != 51691) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -30885,6 +35513,21 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_constructor_signupceremonyhandle_new() != 22479) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_accountflowhandle_new() != 49098) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_approvalflow_new() != 16991) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_devicerequestflow_new() != 14802) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_signinflow_new() != 31500) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_stepupflow_new() != 19550) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_constructor_chunkdecryptorhandle_for_push() != 60587) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -30907,6 +35550,30 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_searchservicehandle_new() != 65022) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_createlinkflow_bundle() != 43023) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_createlinkflow_new() != 30018) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_memberinviteflow_new() != 1079) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_createrequestflow_new() != 63198) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_foldershareflow_link() != 65331) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_foldershareflow_new() != 61341) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_phraserecoveryhandle_new() != 22165) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_constructor_signupflowhandle_new() != 7014) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_fileprogresscallback_on_progress() != 13325) {
