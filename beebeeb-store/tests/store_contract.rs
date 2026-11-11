@@ -250,3 +250,14 @@ fn the_plaintext_database_and_its_sidecars_are_owner_only() {
     beebeeb_store::Store::open(&existing).unwrap();
     assert_eq!(mode(&existing), 0o600);
 }
+
+/// SQLite before 3.54.0 is affected by RUSTSEC-2026-0459. This fails when
+/// `rusqlite` or `libsqlite3-sys` moves back to a release that bundles one.
+#[test]
+fn the_bundled_sqlite_is_at_least_3_54_0() {
+    assert!(
+        rusqlite::version_number() >= 3_054_000,
+        "bundled SQLite is {}",
+        rusqlite::version()
+    );
+}

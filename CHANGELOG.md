@@ -158,6 +158,13 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 - `path_safety::check_component` no longer applies the Windows rules to a `Rules::Portable` name on a
   Windows host (0.2.8); a caller that writes the name uses `check_component_to_write`, as
   `TrustedDirectory::begin_publish` now does.
+- Core now links `libsqlite3-sys` 0.39 (through `rusqlite` 0.41), and one build may hold only one
+  package with `links = "sqlite3"`. An app that also depends on `rusqlite`, `libsqlite3-sys` or sqlx's
+  SQLite driver must move to releases that accept `libsqlite3-sys` 0.39: `rusqlite` 0.41 does, and no
+  `sqlx-sqlite` release does yet (0.8 needs 0.30, 0.9 stays below 0.38). Dropping sqlx's `sqlite`
+  feature is not enough on its own: Cargo still resolves `sqlx-sqlite` into the lockfile through
+  sqlx's weak `uuid`, `chrono`, `json`, `migrate` and `any` features (rust-lang/cargo#10801). Turn
+  sqlx's default features off and enable the type features on the driver crate (`sqlx-postgres`).
 
 ### Rust sync and conflict integrators
 
@@ -410,6 +417,18 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   refuses, no longer reports the session expired.
 - `zip` moves from 8.6 to 9 (the writer only; `aes-crypto` in tests only), so RUSTSEC-2026-0367,
   -0368, -0369 and -0429 are no longer ignored in `.cargo/audit.toml`.
+- `rusqlite` moves from 0.32 to 0.41 in `beebeeb-core` (`fp_cache`) and `beebeeb-store`, and the SQLite
+  it bundles from 3.46.0 to 3.54.1 (`libsqlite3-sys` 0.30.1 to 0.39.1), so RUSTSEC-2026-0459 no longer
+  applies. Both crates turn rusqlite's default features off and keep `bundled` and `cache` (the
+  statement cache behind `prepare_cached`): 0.41's default `ffi-sqlite-wasm-rs` would only add a
+  second, never-built SQLite for wasm32 to every lockfile. No function or type of core changes
+  (`beebeeb_store::StoreError::Database` now carries 0.41's `rusqlite::Error`), and neither do the
+  store and File Provider schemas, pragmas or migrations, so existing databases open as they are: in a
+  one-off check on 2026-11-11 (no test pins it), store and `fp_cache` databases written by SQLite
+  3.46.0, with their changes still in the `-wal` or checkpointed, were read back whole by 3.54.1, and
+  the other way round. `the_bundled_sqlite_is_at_least_3_54_0` fails below 3.54.0. Core's lockfile
+  moves `hashlink` from 0.9 to 0.12 (adding `foldhash` 0.2) and drops `ahash` 0.8.12 and `hashbrown`
+  0.14.5.
 - Native requests declare `file-write-v2` and `version-metadata-v1` exactly where the server checks
   them: upload init, chunk, heartbeat and complete, and the direct upload grant and commit
   (`file-write-v2`), and file update and sync submit (`version-metadata-v1`). The request builder
