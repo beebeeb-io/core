@@ -52,11 +52,15 @@ impl TempSibling {
     /// record the path first and create second: a process killed in between
     /// leaves a recorded name, never an unrecorded temp.
     ///
-    /// `before_create` runs once per candidate: the plain `{output}.tmp`, then
-    /// a random name for each one that turns out to be taken. The path of its
-    /// LAST call is the file this returns; an earlier call was a taken name
-    /// that was skipped, never opened. An error from `before_create` stops
-    /// the create, with nothing made.
+    /// Each candidate is checked first (`symlink_metadata`, so a dangling
+    /// symlink counts as taken): the plain `{output}.tmp`, then a random name
+    /// for each one that is taken. A taken name is skipped WITHOUT telling
+    /// `before_create`, so every call names a path that was free when checked,
+    /// never a file of the user's or a crash's leftover. Only a creator that
+    /// races in between can still make the create fail with `AlreadyExists`;
+    /// the next random name is then offered, and the earlier path stays
+    /// recorded though it was never created by this call. An error from
+    /// `before_create` stops the create, with nothing made.
     pub fn create_with(
         output: &Path,
         mut before_create: impl FnMut(&Path) -> io::Result<()>,
@@ -68,6 +72,10 @@ impl TempSibling {
         // A taken name is skipped, never opened: 8 random 64-bit names cannot
         // all be taken unless something is wrong.
         for _ in 0..8 {
+            if exists(&temp)? {
+                temp = random_sibling(output);
+                continue;
+            }
             before_create(&temp)?;
             match OpenOptions::new().write(true).create_new(true).open(&temp) {
                 Ok(file) => {
@@ -79,7 +87,7 @@ impl TempSibling {
                     return Ok((sibling, file));
                 }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                    temp = with_suffix(output, &format!(".{:016x}.tmp", rand::rngs::OsRng.next_u64()));
+                    temp = random_sibling(output);
                 }
                 Err(error) => return Err(error),
             }
@@ -109,6 +117,19 @@ impl Drop for TempSibling {
             let _ = fs::remove_file(&self.temp);
         }
     }
+}
+
+/// Whether anything is at `path`, without following a symlink.
+fn exists(path: &Path) -> io::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+fn random_sibling(output: &Path) -> PathBuf {
+    with_suffix(output, &format!(".{:016x}.tmp", rand::rngs::OsRng.next_u64()))
 }
 
 /// `path` with `suffix` appended to its last component.
@@ -270,8 +291,8 @@ mod tests {
         assert_eq!(entries(dir), ["out.bin.tmp"]);
     }
 
-    /// On the random-name branch the callback sees every candidate in order:
-    /// the taken one, then the one that is created (the last call).
+    /// On the random-name branch the callback sees only the name that is then
+    /// created: the taken plain name is skipped without a call.
     #[test]
     fn create_with_hands_out_the_random_name_it_then_creates() {
         let scratch = Scratch::new("with-random");
@@ -286,9 +307,11 @@ mod tests {
         .unwrap();
         drop(file);
 
-        assert_eq!(seen.len(), 2, "the taken name, then the free one: {seen:?}");
-        assert_eq!(seen[0], dir.join("out.bin.tmp"));
-        assert_eq!(seen.last(), Some(&temp.temp), "the last candidate is the created file");
+        assert_eq!(
+            seen,
+            std::slice::from_ref(&temp.temp),
+            "one call, naming the created file"
+        );
         assert_ne!(temp.temp, dir.join("out.bin.tmp"));
         assert_eq!(fs::read(dir.join("out.bin.tmp")).unwrap(), b"the user's own file");
         let mut expected = vec![
@@ -297,6 +320,47 @@ mod tests {
         ];
         expected.sort();
         assert_eq!(entries(dir), expected);
+    }
+
+    /// A dangling symlink at the plain temp name counts as taken: no call for
+    /// it, and it is neither followed nor replaced.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_symlink_is_taken_and_never_offered() {
+        let scratch = Scratch::new("with-symlink");
+        let dir = &scratch.0;
+        std::os::unix::fs::symlink(dir.join("nowhere"), dir.join("out.bin.tmp")).unwrap();
+        let mut seen: Vec<PathBuf> = Vec::new();
+
+        let (temp, file) = TempSibling::create_with(&dir.join("out.bin"), |path| {
+            seen.push(path.to_path_buf());
+            Ok(())
+        })
+        .unwrap();
+        drop(file);
+
+        assert_eq!(seen, std::slice::from_ref(&temp.temp));
+        assert_ne!(temp.temp, dir.join("out.bin.tmp"));
+        assert!(!dir.join("nowhere").exists(), "the symlink target was not created");
+        assert!(fs::symlink_metadata(dir.join("out.bin.tmp")).unwrap().is_symlink());
+    }
+
+    /// A taken name is never offered to the callback, however many calls.
+    #[test]
+    fn a_taken_name_is_never_offered_to_the_callback() {
+        let scratch = Scratch::new("with-taken");
+        let dir = &scratch.0;
+        fs::write(dir.join("out.bin.tmp"), b"the user's own file").unwrap();
+        let mut offered_taken = false;
+
+        let (_temp, file) = TempSibling::create_with(&dir.join("out.bin"), |path| {
+            offered_taken |= path == dir.join("out.bin.tmp");
+            Ok(())
+        })
+        .unwrap();
+        drop(file);
+
+        assert!(!offered_taken, "the user's file was offered as a temp");
     }
 
     /// A callback that fails stops the create: no temp file is made.
