@@ -371,11 +371,9 @@ impl ApprovalFlow {
         master_key: Arc<MasterKeyHandle>,
     ) -> Result<AuthHttpRequest, AuthFlowFfiError> {
         let password = zeroize::Zeroizing::new(password);
-        let key = zeroize::Zeroizing::new(
-            master_key
-                .with_key(|k| k.to_bytes())
-                .map_err(|_| AuthFlowFfiError::from(AuthFlowError::InvalidInput("master key")))?,
-        );
+        let key = master_key
+            .with_key(|k| k.to_bytes())
+            .map_err(|_| AuthFlowFfiError::from(AuthFlowError::InvalidInput("master key")))?;
         let key: &[u8; 32] = &key;
         let mut guard = self.state.lock().map_err(|_| wrong_state())?;
         let ApprovalState::Pending(pending) = std::mem::replace(&mut *guard, ApprovalState::Done) else {

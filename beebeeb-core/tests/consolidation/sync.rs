@@ -5,16 +5,17 @@
 //! changed.
 
 use beebeeb_core::sync::conflict::{
-    ConflictOutcome, ConflictPolicy, Resolution, VersionInfo, auto_resolution_deadline, is_conflict, keep_both_name,
-    resolution_due,
+    AuthenticatedVersionId, ConflictOutcome, ConflictPolicy, Resolution, VersionInfo, auto_resolution_deadline,
+    is_conflict, keep_both_name, resolution_due,
 };
+use beebeeb_core::sync::{CompleteSnapshot, InMemorySyncStore, IncompleteSnapshot, SyncEngine, SyncPosition};
 use serde_json::Value;
 
 pub const CONCEPT: &str = "sync";
 
 fn version_of(value: &Value) -> VersionInfo {
     VersionInfo {
-        hash: value["hash"].as_str().expect("hash").to_string(),
+        authenticated_version: AuthenticatedVersionId::new(value["hash"].as_str().expect("hash")).expect("identity"),
         modified_at: value["modified_at"].as_u64().expect("modified_at"),
     }
 }
@@ -26,7 +27,7 @@ fn base_of(case: &Value) -> Option<VersionInfo> {
 #[test]
 fn sync_cases_match_core() {
     let cases = super::cases(CONCEPT);
-    assert_eq!(cases.len(), 20, "every named sync case is present");
+    assert_eq!(cases.len(), 21, "every named sync case is present");
 
     let mut conflicts = 0;
     let mut deadlines = 0;
@@ -47,7 +48,11 @@ fn sync_cases_match_core() {
                     None => {
                         // No shared base: equal hashes are nothing to resolve,
                         // different hashes are a conflict.
-                        assert_eq!(local.hash != remote.hash, want, "{id}: missing base");
+                        assert_eq!(
+                            local.authenticated_version != remote.authenticated_version,
+                            want,
+                            "{id}: missing base"
+                        );
                     }
                 }
             }
@@ -56,17 +61,33 @@ fn sync_cases_match_core() {
                 let detected_at = case["detected_at"].as_u64().expect("detected_at");
                 let now = case["now"].as_u64().expect("now");
                 let deadline = case["expect_deadline"].as_u64().expect("deadline");
-                assert_eq!(auto_resolution_deadline(detected_at), deadline, "{id}");
+                assert_eq!(auto_resolution_deadline(detected_at), Some(deadline), "{id}");
                 assert_eq!(
                     resolution_due(detected_at, now),
                     case["expect_due"].as_bool().unwrap(),
                     "{id}"
                 );
-                assert_eq!(ConflictPolicy::DEFAULT.deadline(detected_at), deadline, "{id}: policy");
+                let waiting = ConflictPolicy {
+                    auto_resolve_after_secs: 24 * 3600,
+                };
+                assert_eq!(waiting.deadline(detected_at), Some(deadline), "{id}: waiting policy");
+                // The shipped policy keeps both at once: it has no deadline.
+                assert_eq!(
+                    ConflictPolicy::DEFAULT.deadline(detected_at),
+                    None,
+                    "{id}: shipped policy"
+                );
             }
             "outcome" => {
                 outcomes += 1;
-                let policy = ConflictPolicy::DEFAULT;
+                let policy = case["wait_secs"]
+                    .as_u64()
+                    .map_or(ConflictPolicy::DEFAULT, |wait| ConflictPolicy {
+                        auto_resolve_after_secs: wait,
+                    });
+                if policy == ConflictPolicy::DEFAULT {
+                    assert_ne!(case["expect"], "needs_user", "{id}: the shipped policy never asks");
+                }
                 let outcome = policy.resolve(
                     &version_of(&case["local"]),
                     &version_of(&case["remote"]),
@@ -97,7 +118,8 @@ fn sync_cases_match_core() {
                     case["device"].as_str().expect("device"),
                     case["hhmm"].as_str().expect("hhmm"),
                     &taken,
-                );
+                )
+                .expect("valid HH.MM vector");
                 assert_eq!(got, case["expected"].as_str().expect("expected"), "{id}");
                 assert!(got.len() <= 255, "{id}: name limit");
                 assert!(!taken.contains(&got.to_lowercase()), "{id}: must not collide");
@@ -106,11 +128,15 @@ fn sync_cases_match_core() {
         }
     }
 
-    assert_eq!((conflicts, deadlines, outcomes, names), (7, 3, 3, 7));
+    assert_eq!((conflicts, deadlines, outcomes, names), (7, 3, 4, 7));
+    // The drive keeps both at once, and the shipped policy is the drive's.
+    assert_eq!(ConflictPolicy::DEFAULT, ConflictPolicy::DRIVE);
     for required in [
         "sync_both_directions_diverge",
         "sync_24h_due",
         "sync_conflict_auto_keep_both",
+        "sync_conflict_keeps_both_at_once",
+        "sync_conflict_waits_for_user",
         "sync_keep_both_counter",
         "sync_keep_both_hostile_device",
     ] {
@@ -125,4 +151,34 @@ fn sync_cases_match_core() {
         ],
         ["local", "remote", "both"]
     );
+}
+
+#[test]
+fn incomplete_snapshot_has_no_delete_authority() {
+    let mut engine = SyncEngine::with_store("device".into(), InMemorySyncStore::default()).expect("store");
+    let snapshot = IncompleteSnapshot::new(Vec::new());
+    let before = engine.tree_size();
+    engine.observe_incomplete_snapshot(snapshot).expect("merge");
+    assert_eq!(engine.tree_size(), before);
+}
+
+#[test]
+fn complete_snapshot_is_tied_to_a_known_position() {
+    let mut engine = SyncEngine::with_store("device".into(), InMemorySyncStore::default()).expect("store");
+    let snapshot = CompleteSnapshot::new(Vec::new(), SyncPosition::new(40, 7)).expect("position");
+    engine.apply_complete_snapshot(snapshot).expect("snapshot");
+    assert_eq!(engine.position(), SyncPosition::new(40, 7));
+}
+
+#[test]
+fn conflict_deadline_overflow_is_never_due() {
+    assert_eq!(auto_resolution_deadline(u64::MAX), None);
+    assert!(!resolution_due(u64::MAX, u64::MAX));
+}
+
+#[test]
+fn keep_both_rejects_unvalidated_time() {
+    let taken = std::collections::HashSet::new();
+    assert!(keep_both_name("report.txt", "phone", "../../bad", &taken).is_err());
+    assert!(keep_both_name("report.txt", "phone", "24.00", &taken).is_err());
 }

@@ -9,11 +9,9 @@
 //!    instant someone re-introduces a hand-rolled chunk loop that drifts.
 //! 2. Output written by the new primitive is a valid ordered stream for the
 //!    shared `ChunkDecryptor`, in `WRITE_FORMAT` (task 1908). The frame LAYOUT
-//!    is the same in both formats (same sizes, asserted above). While
-//!    `WRITE_FORMAT` is v1 (the read-only rollout phase) the frames also open
-//!    with the legacy no-AAD `encrypt::decrypt_chunk_raw`, exactly as before
-//!    1908; once it is v2 they deliberately must NOT (downgrade guarantee).
-//!    The assertion follows `WRITE_FORMAT`, so the gated switch flips it.
+//!    is the same in both formats (same sizes, asserted above). Production v2
+//!    frames deliberately do NOT open with legacy no-AAD
+//!    `encrypt::decrypt_chunk_raw` (downgrade guarantee).
 
 #![allow(deprecated)] // pre-L13 writers are the parity baseline
 
@@ -89,7 +87,12 @@ fn file_encrypt_matches_direct_chunk_encryptor_loop() {
     // through the shared decryptor pinned as the metadata would record it; the
     // legacy no-AAD open works for v1 frames and must fail for v2 (task 1908).
     let file_key = derive_file_key(&master, file_id.as_bytes());
-    let mut dec = ChunkDecryptor::for_push(&master, file_id, ExpectedChunkFormat::recorded_for(WRITE_FORMAT));
+    let mut dec = ChunkDecryptor::for_version_with_file_key(
+        derive_file_key(&master, file_id.as_bytes()),
+        file_id,
+        ExpectedChunkFormat::recorded_for(WRITE_FORMAT),
+        Some(result.version_commitment(None).unwrap()),
+    );
     let mut recovered = Vec::new();
     for chunk in &result.chunks {
         let raw = std::fs::read(&chunk.output_path).unwrap();
@@ -136,7 +139,12 @@ fn file_encrypt_empty_file_parity() {
         decrypt_chunk_raw(&file_key, &raw).is_ok(),
         WRITE_FORMAT == ChunkFormat::V1Legacy
     );
-    let mut dec = ChunkDecryptor::for_push(&master, file_id, ExpectedChunkFormat::recorded_for(WRITE_FORMAT));
+    let mut dec = ChunkDecryptor::for_version_with_file_key(
+        derive_file_key(&master, file_id.as_bytes()),
+        file_id,
+        ExpectedChunkFormat::recorded_for(WRITE_FORMAT),
+        Some(result.version_commitment(None).unwrap()),
+    );
     assert!(dec.push_frame(&raw).unwrap().data.is_empty());
     assert_eq!(dec.finish().unwrap().chunk_count, 1);
 

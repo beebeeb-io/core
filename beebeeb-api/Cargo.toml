@@ -1,0 +1,23 @@
+[package]
+name = "beebeeb-api"
+description = "I/O-free Beebeeb API requests, answers, and account flows"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+beebeeb-core = { path = "../beebeeb-core", default-features = false }
+beebeeb-types = { path = "../beebeeb-types" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+# `serde` lets wire records hold secrets in `Zeroizing` (crypto review, P2-5);
+# the locked zeroize already builds with it, so no new package.
+zeroize = { version = "1", features = ["serde"] }
+
+[features]
+default = []
+purchases = []
+
+[lib]
+path = "src/lib.rs"

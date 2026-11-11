@@ -13,8 +13,9 @@
 use std::fmt;
 use std::io::Write;
 
-use crate::chunk_stream::{CHUNK_OVERHEAD, ChunkDecryptor, ExpectedChunkFormat, MAX_CHUNK_SIZE};
+use crate::chunk_stream::{CHUNK_OVERHEAD, ChunkDecryptor, ExpectedChunkFormat, MAX_CHUNK_SIZE, VersionCommitment};
 use crate::kdf::FileKey;
+use beebeeb_types::limits::{MAX_CHUNK_COUNT, MAX_MATERIALIZED_CHUNK_COUNT, MemoryBudget};
 
 /// Smallest legal wire frame: `nonce(12) || tag(16)` with no plaintext.
 pub const MIN_FRAME_LEN: usize = CHUNK_OVERHEAD as usize;
@@ -35,14 +36,18 @@ pub struct DecryptSummary {
 
 /// Why a download could not be decrypted.
 ///
-/// `beebeeb-upload` maps these onto its own `UploadError` variants, so the
-/// messages a client sees are the ones it saw before the move.
+/// `beebeeb-upload` maps these onto its own `UploadError` variants, preserving
+/// the distinction between invalid data and valid data that needs the app.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DownloadFailure {
     /// The caller's own arguments are unusable (`chunk_count == 0`).
     InvalidInput(String),
     /// The payload does not have the shape its headers promised.
     InvalidResponse(String),
+    /// The frame is valid, but this constrained execution context cannot open
+    /// it. A File Provider must hand the request to the main app and retry
+    /// there; it must not report the file as corrupt or hostile.
+    TooLargeForContext { frame_size: u64, context_limit: u64 },
     /// A frame failed authentication or chunk-format validation.
     ChunkDecryption { chunk: u32, reason: String },
     /// Every frame opened but the stream never reached its last chunk.
@@ -55,6 +60,13 @@ impl fmt::Display for DownloadFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidInput(message) | Self::InvalidResponse(message) | Self::Io(message) => f.write_str(message),
+            Self::TooLargeForContext {
+                frame_size,
+                context_limit,
+            } => write!(
+                f,
+                "valid frame size {frame_size} exceeds this context's {context_limit}-byte limit; hand off to the main app"
+            ),
             Self::ChunkDecryption { chunk, reason } => {
                 write!(f, "decryption failed for chunk {chunk}: {reason}")
             }
@@ -72,9 +84,7 @@ impl std::error::Error for DownloadFailure {}
 /// Every frame has the same size except the last, which takes the remainder.
 /// Each frame must hold at least a nonce and a tag (28 bytes).
 pub fn compute_chunk_boundaries(total_len: usize, chunk_count: u32) -> Result<Vec<(usize, usize)>, DownloadFailure> {
-    if chunk_count == 0 {
-        return Err(DownloadFailure::InvalidInput("chunk_count must be > 0".into()));
-    }
+    check_materialized_chunk_count(chunk_count)?;
 
     let n = chunk_count as usize;
 
@@ -165,7 +175,24 @@ pub fn chunk_offset(total_len: usize, chunk_count: u32, chunk_index: u32) -> Res
 /// absurd frame. `chunk_count <= 1` still means "the whole body is one frame"
 /// and returns [`usize::MAX`].
 pub fn checked_frame_size(total_len: u64, chunk_count: u32, chunk_size: Option<u64>) -> Result<usize, DownloadFailure> {
+    let format_budget = MemoryBudget::new(MAX_FRAME_SIZE as u64, MemoryBudget::NATIVE.archive_output_bytes);
+    checked_frame_size_with_budget(total_len, chunk_count, chunk_size, format_budget)
+}
+
+pub fn checked_frame_size_with_budget(
+    total_len: u64,
+    chunk_count: u32,
+    chunk_size: Option<u64>,
+    budget: MemoryBudget,
+) -> Result<usize, DownloadFailure> {
+    check_chunk_count(chunk_count)?;
     if chunk_count <= 1 {
+        if total_len > MAX_FRAME_SIZE as u64 {
+            return Err(DownloadFailure::InvalidResponse(format!(
+                "single frame size {total_len} exceeds the maximum {MAX_FRAME_SIZE}"
+            )));
+        }
+        check_context_frame_size(total_len, budget)?;
         return Ok(usize::MAX);
     }
     if let Some(chunk_size) = chunk_size {
@@ -181,6 +208,7 @@ pub fn checked_frame_size(total_len: u64, chunk_count: u32, chunk_size: Option<u
                 "chunk size {chunk_size} exceeds the maximum {MAX_CHUNK_SIZE}"
             )));
         }
+        check_context_frame_size(with_overhead, budget)?;
         return usize::try_from(with_overhead).map_err(|_| {
             DownloadFailure::InvalidResponse(format!("frame size {with_overhead} does not fit this platform's usize"))
         });
@@ -193,11 +221,44 @@ pub fn checked_frame_size(total_len: u64, chunk_count: u32, chunk_size: Option<u
             "average frame size {average} exceeds the maximum {MAX_FRAME_SIZE}"
         )));
     }
+    check_context_frame_size(average, budget)?;
     usize::try_from(average).map_err(|_| {
         DownloadFailure::InvalidResponse(format!(
             "average frame size {average} does not fit this platform's usize"
         ))
     })
+}
+
+fn check_chunk_count(chunk_count: u32) -> Result<(), DownloadFailure> {
+    if chunk_count == 0 {
+        return Err(DownloadFailure::InvalidInput("chunk_count must be > 0".into()));
+    }
+    if chunk_count > MAX_CHUNK_COUNT {
+        return Err(DownloadFailure::InvalidResponse(format!(
+            "chunk count {chunk_count} exceeds the maximum {MAX_CHUNK_COUNT}"
+        )));
+    }
+    Ok(())
+}
+
+fn check_materialized_chunk_count(chunk_count: u32) -> Result<(), DownloadFailure> {
+    check_chunk_count(chunk_count)?;
+    if chunk_count > MAX_MATERIALIZED_CHUNK_COUNT {
+        return Err(DownloadFailure::InvalidResponse(format!(
+            "chunk count {chunk_count} exceeds the materialized API maximum {MAX_MATERIALIZED_CHUNK_COUNT}; use streaming"
+        )));
+    }
+    Ok(())
+}
+
+fn check_context_frame_size(frame_size: u64, budget: MemoryBudget) -> Result<(), DownloadFailure> {
+    if frame_size > budget.download_frame_bytes {
+        return Err(DownloadFailure::TooLargeForContext {
+            frame_size,
+            context_limit: budget.download_frame_bytes,
+        });
+    }
+    Ok(())
 }
 
 /// Open `frames` in order and write their plaintext to `writer`.
@@ -206,6 +267,10 @@ pub fn checked_frame_size(total_len: u64, chunk_count: u32, chunk_size: Option<u
 /// count is a response-shape error, never a silent truncation. A frame that
 /// fails authentication is `ChunkDecryption` for that index. `on_chunk` is
 /// called after each frame with `(decrypted_so_far, chunk_count)`.
+///
+/// `expected` and `version` come from the version's encrypted metadata: a v2
+/// file opens only as the upload `version` names, and with no `version` only a
+/// v1 file opens (Guus's ruling of 2026-11-07).
 ///
 /// # Partial output on error
 ///
@@ -217,18 +282,18 @@ pub fn checked_frame_size(total_len: u64, chunk_count: u32, chunk_size: Option<u
 /// as the file would hand the caller a silently truncated document. Callers
 /// write to a temporary path and delete it on error; never rename a partial
 /// file into place.
+#[allow(clippy::too_many_arguments)]
 pub fn decrypt_frames_to<W: Write, F: FnMut(u32, u32)>(
     file_key: &FileKey,
     file_id: &str,
     expected: ExpectedChunkFormat,
+    version: Option<VersionCommitment>,
     chunk_count: u32,
     frames: &[&[u8]],
     writer: &mut W,
     mut on_chunk: F,
 ) -> Result<DecryptSummary, DownloadFailure> {
-    if chunk_count == 0 {
-        return Err(DownloadFailure::InvalidInput("chunk_count must be > 0".into()));
-    }
+    check_materialized_chunk_count(chunk_count)?;
     if frames.len() != chunk_count as usize {
         return Err(DownloadFailure::InvalidResponse(format!(
             "download truncated: got {} of {chunk_count} frames",
@@ -238,8 +303,12 @@ pub fn decrypt_frames_to<W: Write, F: FnMut(u32, u32)>(
 
     // The decryptor owns its key; copy the borrowed one into a fresh
     // zeroize-on-drop FileKey (`from_bytes` wipes its by-value input).
-    let mut decryptor =
-        ChunkDecryptor::for_push_with_file_key(FileKey::from_bytes(*file_key.as_bytes()), file_id, expected);
+    let mut decryptor = ChunkDecryptor::for_version_with_file_key(
+        FileKey::from_bytes(*file_key.as_bytes()),
+        file_id,
+        expected,
+        version,
+    );
     let mut summary = DecryptSummary::default();
 
     for (index, frame) in frames.iter().enumerate() {
@@ -252,8 +321,14 @@ pub fn decrypt_frames_to<W: Write, F: FnMut(u32, u32)>(
         writer
             .write_all(&plaintext.data)
             .map_err(|e| DownloadFailure::Io(format!("write output: {e}")))?;
-        summary.plaintext_size += plaintext.data.len() as u64;
-        summary.chunks_decrypted += 1;
+        summary.plaintext_size = summary
+            .plaintext_size
+            .checked_add(plaintext.data.len() as u64)
+            .ok_or_else(|| DownloadFailure::InvalidResponse("plaintext size overflow".into()))?;
+        summary.chunks_decrypted = summary
+            .chunks_decrypted
+            .checked_add(1)
+            .ok_or_else(|| DownloadFailure::InvalidResponse("decrypted chunk count overflow".into()))?;
         on_chunk(summary.chunks_decrypted, chunk_count);
     }
 
@@ -265,10 +340,12 @@ pub fn decrypt_frames_to<W: Write, F: FnMut(u32, u32)>(
 }
 
 /// Split `payload` with [`compute_chunk_boundaries`] and decrypt every frame.
+#[allow(clippy::too_many_arguments)]
 pub fn decrypt_chunks_to<W: Write, F: FnMut(u32, u32)>(
     file_key: &FileKey,
     file_id: &str,
     expected: ExpectedChunkFormat,
+    version: Option<VersionCommitment>,
     chunk_count: u32,
     payload: &[u8],
     writer: &mut W,
@@ -276,7 +353,16 @@ pub fn decrypt_chunks_to<W: Write, F: FnMut(u32, u32)>(
 ) -> Result<DecryptSummary, DownloadFailure> {
     let boundaries = compute_chunk_boundaries(payload.len(), chunk_count)?;
     let frames: Vec<&[u8]> = boundaries.iter().map(|(start, end)| &payload[*start..*end]).collect();
-    decrypt_frames_to(file_key, file_id, expected, chunk_count, &frames, writer, on_chunk)
+    decrypt_frames_to(
+        file_key,
+        file_id,
+        expected,
+        version,
+        chunk_count,
+        &frames,
+        writer,
+        on_chunk,
+    )
 }
 
 #[cfg(test)]
@@ -309,14 +395,24 @@ mod tests {
             .chunks(40)
             .map(|chunk| encryptor.push_chunk(chunk).expect("push_chunk").data)
             .collect();
+        let version = encryptor.version_commitment(None).expect("commitment");
         encryptor.finish().expect("finish");
 
         // Three real frames; the header understates two, so both frames open
         // and are written, but the stream never presents its last-chunk seal.
         let refs: Vec<&[u8]> = frames[..2].iter().map(|frame| frame.as_slice()).collect();
         let mut out = Vec::new();
-        let error = decrypt_frames_to(&key, file_id, ExpectedChunkFormat::V2, 2, &refs, &mut out, |_, _| {})
-            .expect_err("an understated count must not look complete");
+        let error = decrypt_frames_to(
+            &key,
+            file_id,
+            ExpectedChunkFormat::V2,
+            Some(version),
+            2,
+            &refs,
+            &mut out,
+            |_, _| {},
+        )
+        .expect_err("an understated count must not look complete");
         assert!(
             matches!(error, DownloadFailure::Incomplete { chunks: 2, .. }),
             "expected Incomplete after 2 chunk(s), got {error:?}"
@@ -368,7 +464,66 @@ mod tests {
     #[test]
     fn the_single_frame_sentinel_is_unchanged() {
         assert_eq!(checked_frame_size(1024, 1, Some(4096)).unwrap(), usize::MAX);
-        assert_eq!(checked_frame_size(1024, 0, None).unwrap(), usize::MAX);
+        assert!(checked_frame_size(1024, 0, None).is_err());
+    }
+
+    #[test]
+    fn device_budget_is_stricter_than_the_wire_format_cap() {
+        let failure = checked_frame_size_with_budget(
+            8 * 1024 * 1024,
+            2,
+            Some(4 * 1024 * 1024 + 1),
+            MemoryBudget::MOBILE_EXTENSION,
+        )
+        .expect_err("ciphertext overhead exceeds the extension's one-frame budget");
+        assert!(matches!(failure, DownloadFailure::TooLargeForContext { .. }));
+    }
+
+    #[test]
+    fn main_app_budgets_accept_every_valid_profile_frame_cap() {
+        let mib = 1024 * 1024u64;
+        for (budget, plaintext_cap) in [
+            (MemoryBudget::MOBILE_APP, 32 * mib),
+            (MemoryBudget::BROWSER, 128 * mib),
+            (MemoryBudget::NATIVE, 256 * mib),
+        ] {
+            let frame = plaintext_cap + CHUNK_OVERHEAD;
+            assert_eq!(
+                checked_frame_size_with_budget(frame * 2, 2, Some(plaintext_cap), budget),
+                Ok(frame as usize),
+                "budget {budget:?} must open its profile's valid frame cap"
+            );
+        }
+    }
+
+    #[test]
+    fn extension_limit_returns_a_typed_handoff_error() {
+        let plaintext_size = 32 * 1024 * 1024u64;
+        let frame_size = plaintext_size + CHUNK_OVERHEAD;
+        let failure =
+            checked_frame_size_with_budget(frame_size * 2, 2, Some(plaintext_size), MemoryBudget::MOBILE_EXTENSION)
+                .unwrap_err();
+        assert_eq!(
+            failure,
+            DownloadFailure::TooLargeForContext {
+                frame_size,
+                context_limit: MemoryBudget::MOBILE_EXTENSION.download_frame_bytes,
+            }
+        );
+    }
+
+    #[test]
+    fn largest_entitled_legacy_chunk_count_is_streamable() {
+        assert!(std::hint::black_box(MAX_CHUNK_COUNT) > MAX_MATERIALIZED_CHUNK_COUNT);
+        assert_eq!(
+            checked_frame_size_with_budget(
+                beebeeb_types::quota::MAX_TOTAL_STORAGE as u64,
+                MAX_CHUNK_COUNT,
+                Some(1024 * 1024),
+                MemoryBudget::MOBILE_APP,
+            ),
+            Ok(1024 * 1024 + CHUNK_OVERHEAD as usize)
+        );
     }
 
     #[test]

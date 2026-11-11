@@ -113,7 +113,8 @@ fn backup_root_cases_match_core() {
                     &duplicates,
                     case["clash_label"].as_str().expect("clash_label"),
                     case["hhmm"].as_str().expect("hhmm"),
-                );
+                )
+                .expect("vector times are HH.MM");
                 let want: Vec<MergeStep> = case["expect"].as_array().expect("expect").iter().map(step).collect();
                 assert_eq!(got, want, "{id}");
             }

@@ -16,6 +16,7 @@ required-features = ["cli"]
 
 [features]
 default = []
+legacy-bindings = ["dep:beebeeb-upload"]
 # Pulls in uniffi_bindgen + uniffi_udl + weedle + cargo_metadata + clap + toml
 # (~5 MB of code in the iOS staticlib). Only enabled when regenerating Swift
 # bindings via the `uniffi-bindgen` binary; not needed by the shipping cdylib.
@@ -24,16 +25,14 @@ cli = ["uniffi/cli"]
 # desktop, server). When building the iOS xcframework, leave this disabled so
 # the webp crate's C symbols don't conflict with aws-lc-sys.
 webp-encode = ["beebeeb-core/webp-encode"]
-# CI-only gate: `cargo test -p beebeeb-uniffi --features legacy-bindings` runs
-# the upload-path tests that guard against regressions introduced while
-# feat/core-foundation is in flight (task 2385). On main this is a no-op
-# placeholder; it will gain a dependency once that branch merges.
-legacy-bindings = []
 
 [dependencies]
 beebeeb-core = { path = "../beebeeb-core", default-features = false }
+beebeeb-api = { path = "../beebeeb-api" }
+beebeeb-client = { path = "../beebeeb-client" }
+beebeeb-store = { path = "../beebeeb-store" }
 beebeeb-types = { path = "../beebeeb-types" }
-beebeeb-upload = { path = "../beebeeb-upload" }
+beebeeb-upload = { path = "../beebeeb-upload", optional = true }
 uniffi = { version = "0.31.1" }
 uuid = { version = "1" }
 # The device manifest's unknown fields cross the FFI as one JSON object string
@@ -47,7 +46,7 @@ zeroize = { version = "1", features = ["derive"] }
 uniffi = { version = "0.31.1", features = ["build"] }
 
 # Tests only: lets this crate's tests write v2 chunk frames while core's
-# WRITE_FORMAT is still v1 (task 1908 read-only rollout). Never in a shipped build.
+# Test-only format overrides. Never enabled in a shipped build.
 [dev-dependencies]
 beebeeb-core = { path = "../beebeeb-core", default-features = false, features = ["test-support"] }
 serde_json = "1"

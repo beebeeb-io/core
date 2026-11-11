@@ -45,6 +45,11 @@ impl FileWatcher {
     pub fn start(vault_path: &Path) -> Result<Self, SyncError> {
         let (tx, rx) = mpsc::channel::<FileChange>();
 
+        let root = std::fs::canonicalize(vault_path).map_err(SyncError::IoError)?;
+        let readiness_path = root.join(format!("beebeeb-watch-ready-{}", uuid::Uuid::new_v4()));
+        let readiness_path_for_callback = readiness_path.clone();
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+
         let sender = tx.clone();
         // Canonicalize the vault root so it matches the paths returned by the
         // OS file-system watcher. On macOS in particular, FSEvents resolves
@@ -53,10 +58,13 @@ impl FileWatcher {
         // path to be checked by `is_ignored` — that often contains hidden
         // components (e.g. `.tmpXXXX` from `tempfile`) and silently filters
         // every event as "hidden".
-        let root = std::fs::canonicalize(vault_path).unwrap_or_else(|_| vault_path.to_path_buf());
         let mut watcher = RecommendedWatcher::new(
             move |res: Result<Event, notify::Error>| match res {
                 Ok(event) => {
+                    if event.paths.iter().any(|path| path == &readiness_path_for_callback) {
+                        let _ = ready_tx.try_send(());
+                        return;
+                    }
                     if let Some(change) = classify_event(&event, &root) {
                         let _ = sender.send(change);
                     }
@@ -72,6 +80,17 @@ impl FileWatcher {
         watcher
             .watch(vault_path, RecursiveMode::Recursive)
             .map_err(|e| SyncError::WatcherError(e.to_string()))?;
+
+        let readiness = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&readiness_path);
+        if let Err(error) = readiness {
+            return Err(SyncError::IoError(error));
+        }
+        let ready = ready_rx.recv_timeout(Duration::from_secs(5));
+        let _ = std::fs::remove_file(&readiness_path);
+        ready.map_err(|_| SyncError::WatcherError("file watcher did not become ready".to_string()))?;
 
         debug!(path = %vault_path.display(), "file watcher started");
 
@@ -241,6 +260,19 @@ mod tests {
             }
         }
         assert!(found, "expected a change event for {expected:?}");
+    }
+
+    #[test]
+    fn watcher_is_ready_when_start_returns() {
+        let dir = TempDir::new().unwrap();
+        let watcher = FileWatcher::start(dir.path()).unwrap();
+        let file_path = dir.path().join("immediate.txt");
+        fs::write(&file_path, "hello").unwrap();
+        let expected = fs::canonicalize(&file_path).unwrap();
+        let changes = watcher.drain_pending();
+        assert!(changes.iter().any(|change| matches!(change,
+            FileChange::Created(path) | FileChange::Modified(path) if path == &expected
+        )));
     }
 
     #[test]

@@ -5,7 +5,7 @@
 //! CreateLink::start ──► POST /api/v1/shares
 //!     {file_id, expires_in_hours, max_opens, passphrase?, wrapped_file_key,
 //!      owner_wrapped_key, token, owner_wrapped_token}
-//!   on_response ◄── 409 without a typed code (a token collision) ──► the same body, fresh token (once)
+//!   on_response ◄── 409 token collision ──► the same body, fresh token (once)
 //!   on_response ◄── {id, ...} ──► Created { share_id, link: {app}/s/{token}#key={b64url(K_c)} }
 //! ```
 //!
@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
 use super::{
-    SHARE_REFUSAL_CODES, ShareFlowError, b64, b64_decode, path_id, require_ok, str_field, unwrap_key_from_share,
+    ShareFlowError, b64, b64_decode, body_code, path_id, require_ok, str_field, unwrap_key_from_share,
     wrap_key_for_share,
 };
 use crate::auth_flow::{HttpRequest, HttpResponse, RequestAuth};
@@ -29,6 +29,14 @@ use crate::share_token::generate_share_token;
 pub const SHARES_PATH: &str = "/api/v1/shares";
 /// Web refuses a passphrase shorter than this (after trimming).
 pub const MIN_PASSPHRASE_LEN: usize = 4;
+/// The longest expiry a link may ask for: one year. The apps offer at most 30 days.
+pub const MAX_EXPIRES_IN_HOURS: u32 = 24 * 365;
+/// The most opens a link may ask for: the server stores the count as a 32-bit signed integer.
+pub const MAX_OPENS: u32 = i32::MAX as u32;
+
+/// The server's answers to a token that is already in use, the only 409s worth a fresh token:
+/// `POST /shares` writes its sentence in `error`; the folder-link route sends `token_taken`.
+const TOKEN_COLLISION_CODES: [&str; 2] = ["share token already exists — regenerate and retry", "token_taken"];
 
 /// The link's limits, as web's share dialog sends them. `None` is "never" / "unlimited".
 #[derive(Default)]
@@ -109,11 +117,18 @@ impl CreateLink {
         Self::from_body(app_url, master, k_c, body)
     }
 
-    /// Checks shared by every link kind: the app URL and the passphrase (trimmed, at least
-    /// [`MIN_PASSPHRASE_LEN`] characters). Returns the trimmed passphrase.
+    /// Checks shared by every link kind: the app URL, the limits (at most [`MAX_EXPIRES_IN_HOURS`]
+    /// and [`MAX_OPENS`]) and the passphrase (trimmed, at least [`MIN_PASSPHRASE_LEN`] characters).
+    /// Returns the trimmed passphrase.
     pub(super) fn check<'a>(app_url: &str, options: &'a LinkOptions) -> Result<Option<&'a str>, ShareFlowError> {
         if !(app_url.starts_with("https://") || app_url.starts_with("http://localhost")) {
             return Err(ShareFlowError::InvalidInput("app url"));
+        }
+        if options.expires_in_hours.is_some_and(|h| h > MAX_EXPIRES_IN_HOURS) {
+            return Err(ShareFlowError::InvalidInput("expires in hours"));
+        }
+        if options.max_opens.is_some_and(|n| n > MAX_OPENS) {
+            return Err(ShareFlowError::InvalidInput("max opens"));
         }
         let passphrase = options.passphrase.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty());
         if passphrase.is_some_and(|p| p.chars().count() < MIN_PASSPHRASE_LEN) {
@@ -158,12 +173,9 @@ impl CreateLink {
         if self.done {
             return Err(ShareFlowError::WrongState);
         }
-        if resp.status == 409 && !self.retried {
-            let code = resp.body.get("code").and_then(|v| v.as_str());
-            if !code.is_some_and(|c| SHARE_REFUSAL_CODES.contains(&c)) {
-                self.retried = true;
-                return self.request_with_fresh_token().map(LinkStep::Send);
-            }
+        if resp.status == 409 && !self.retried && body_code(&resp).is_some_and(|c| TOKEN_COLLISION_CODES.contains(&c)) {
+            self.retried = true;
+            return self.request_with_fresh_token().map(LinkStep::Send);
         }
         self.done = true;
         require_ok(&resp)?;

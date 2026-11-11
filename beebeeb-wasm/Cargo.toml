@@ -2,12 +2,14 @@
 name = "beebeeb-wasm"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "WebAssembly bindings for Beebeeb cryptographic core"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
+beebeeb-api = { path = "../beebeeb-api" }
 beebeeb-core = { path = "../beebeeb-core", default-features = false }
 beebeeb-types = { path = "../beebeeb-types" }
 wasm-bindgen = "0.2"
@@ -39,6 +41,6 @@ wasm-opt = [
 ]
 
 # Tests only: lets this crate's tests write v2 chunk frames while core's
-# WRITE_FORMAT is still v1 (task 1908 read-only rollout). Never in a shipped build.
+# Test-only format overrides. Never enabled in a shipped build.
 [dev-dependencies]
 beebeeb-core = { path = "../beebeeb-core", default-features = false, features = ["test-support"] }

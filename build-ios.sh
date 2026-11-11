@@ -7,6 +7,13 @@ BINDINGS_DIR="$CRATE_DIR/bindings"
 TARGET_DIR="$SCRIPT_DIR/target"
 OUTPUT_XCFW="$SCRIPT_DIR/BeebeebCore.xcframework"
 OUTPUT_SWIFT="$SCRIPT_DIR/BeebeebCore.swift"
+LIBRARY_FEATURE_ARGS=()
+GENERATOR_FEATURES="cli"
+if [[ "${BEEBEEB_LEGACY_BINDINGS:-0}" == "1" ]]; then
+  LIBRARY_FEATURE_ARGS=(--features legacy-bindings)
+  GENERATOR_FEATURES="cli,legacy-bindings"
+  echo "WARNING: building the default surface plus legacy-bindings for an old app"
+fi
 
 echo "=== Beebeeb iOS xcframework build ==="
 echo ""
@@ -30,8 +37,8 @@ done
 # `bindings/` byte-for-byte in sync with the dylib uniffi-bindgen sees.
 echo ""
 echo "[0/3] Regenerating Swift bindings from current Rust source..."
-cargo build -p beebeeb-uniffi --release
-cargo run -p beebeeb-uniffi --features cli --bin uniffi-bindgen -- \
+cargo build -p beebeeb-uniffi --release "${LIBRARY_FEATURE_ARGS[@]}"
+cargo run -p beebeeb-uniffi --features "$GENERATOR_FEATURES" --bin uniffi-bindgen -- \
     generate \
     --library "$TARGET_DIR/release/libbeebeeb_uniffi.dylib" \
     --language swift \
@@ -44,15 +51,15 @@ cargo run -p beebeeb-uniffi --features cli --bin uniffi-bindgen -- \
 # thumbnails natively via PhotoKit/vImage using the always-available
 # resize_for_thumbnail UniFFI export instead.
 echo "[1/3] Building aarch64-apple-ios (device)..."
-cargo build -p beebeeb-uniffi --target aarch64-apple-ios --release --no-default-features
+cargo build -p beebeeb-uniffi --target aarch64-apple-ios --release --no-default-features "${LIBRARY_FEATURE_ARGS[@]}"
 
 # Build simulator arm64
 echo "[2/3] Building aarch64-apple-ios-sim (simulator arm64)..."
-cargo build -p beebeeb-uniffi --target aarch64-apple-ios-sim --release --no-default-features
+cargo build -p beebeeb-uniffi --target aarch64-apple-ios-sim --release --no-default-features "${LIBRARY_FEATURE_ARGS[@]}"
 
 # Build simulator x86_64
 echo "[3/3] Building x86_64-apple-ios (simulator x86_64)..."
-cargo build -p beebeeb-uniffi --target x86_64-apple-ios --release --no-default-features
+cargo build -p beebeeb-uniffi --target x86_64-apple-ios --release --no-default-features "${LIBRARY_FEATURE_ARGS[@]}"
 
 # Merge simulator slices into a fat binary
 DEVICE_LIB="$TARGET_DIR/aarch64-apple-ios/release/libbeebeeb_uniffi.a"

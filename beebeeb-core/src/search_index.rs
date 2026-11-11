@@ -46,13 +46,17 @@ use unicode_normalization::UnicodeNormalization;
 use crate::CoreError;
 use crate::encrypt::{decrypt_chunk_raw, encrypt_chunk_raw};
 use crate::kdf::{FileKey, MasterKey, derive_search_index_key, derive_shared_folder_index_key};
+use beebeeb_types::limits::{
+    MAX_SEARCH_INPUT_BYTES, MAX_SEARCH_MANIFEST_ENTRIES, MAX_SEARCH_SHARD_BYTES as SHARED_MAX_SHARD_BYTES,
+    MAX_SEARCH_SHARDS,
+};
 
 /// Default shard count. A power-of-two-ish spread that keeps per-shard size small
 /// for typical vaults while bounding the number of blobs to sync.
 pub const DEFAULT_NUM_SHARDS: u32 = 64;
 
 /// Hard upper bound on a single encrypted shard-page blob, in bytes.
-pub const MAX_SHARD_BYTES: usize = 128 * 1024;
+pub const MAX_SHARD_BYTES: usize = SHARED_MAX_SHARD_BYTES;
 
 /// Plaintext budget per page. Leaves generous headroom under [`MAX_SHARD_BYTES`]
 /// for JSON framing and the 28-byte AEAD overhead (12-byte nonce + 16-byte tag),
@@ -99,6 +103,18 @@ fn flush_token(cur: &mut String, out: &mut Vec<String>) {
 /// each token → de-duplicate preserving first-seen order. The `normalized` field
 /// is the accent-folded name lowercased as a whole (separators kept).
 pub fn tokenize(name: &str) -> Tokenized {
+    try_tokenize(name).unwrap_or_else(|_| Tokenized {
+        normalized: String::new(),
+        tokens: Vec::new(),
+    })
+}
+
+pub fn try_tokenize(name: &str) -> Result<Tokenized, CoreError> {
+    if name.len() > MAX_SEARCH_INPUT_BYTES {
+        return Err(CoreError::InvalidInput(format!(
+            "search input exceeds the maximum {MAX_SEARCH_INPUT_BYTES} bytes"
+        )));
+    }
     let folded: String = name.nfkd().filter(|c| !is_combining_mark(*c)).collect();
     let normalized = folded.to_lowercase();
 
@@ -130,7 +146,7 @@ pub fn tokenize(name: &str) -> Tokenized {
         .filter(|t| !t.is_empty() && seen.insert(t.clone()))
         .collect();
 
-    Tokenized { normalized, tokens }
+    Ok(Tokenized { normalized, tokens })
 }
 
 /// Deterministic bucket for a key (token or file_id): the first 8 bytes of its
@@ -164,10 +180,10 @@ pub struct SearchIndex {
 }
 
 impl SearchIndex {
-    /// Create an empty index with the given shard count (clamped to ≥ 1).
+    /// Create an empty index with the binding-wide shard count rule (1..=64).
     pub fn new(num_shards: u32) -> Self {
         Self {
-            num_shards: num_shards.max(1),
+            num_shards: num_shards.clamp(1, MAX_SEARCH_SHARDS),
             files: BTreeMap::new(),
             postings: BTreeMap::new(),
         }
@@ -211,10 +227,19 @@ impl SearchIndex {
     /// Insert or update a file (add or rename). Returns the set of buckets whose
     /// shards changed — re-encrypt only these for an incremental sync.
     pub fn upsert(&mut self, file_id: &str, name: &str) -> BTreeSet<u32> {
+        self.try_upsert(file_id, name).unwrap_or_default()
+    }
+
+    pub fn try_upsert(&mut self, file_id: &str, name: &str) -> Result<BTreeSet<u32>, CoreError> {
+        if file_id.len() > MAX_SEARCH_INPUT_BYTES {
+            return Err(CoreError::InvalidInput(format!(
+                "search file id exceeds the maximum {MAX_SEARCH_INPUT_BYTES} bytes"
+            )));
+        }
         let mut dirty = BTreeSet::new();
         dirty.insert(bucket_of(file_id, self.num_shards));
 
-        let parsed = tokenize(name);
+        let parsed = try_tokenize(name)?;
         let new_set: BTreeSet<String> = parsed.tokens.iter().cloned().collect();
         let old_set: BTreeSet<String> = self
             .files
@@ -243,7 +268,7 @@ impl SearchIndex {
                 tokens: parsed.tokens,
             },
         );
-        dirty
+        Ok(dirty)
     }
 
     /// Remove a file. Returns the set of buckets whose shards changed (empty if
@@ -271,8 +296,12 @@ impl SearchIndex {
     /// lives in is irrelevant — the index is flat over the whole vault, so a term
     /// that exists only in a deeply nested file is still found.
     pub fn query(&self, term: &str) -> BTreeSet<String> {
+        self.try_query(term).unwrap_or_default()
+    }
+
+    pub fn try_query(&self, term: &str) -> Result<BTreeSet<String>, CoreError> {
         let mut out = BTreeSet::new();
-        let parsed = tokenize(term);
+        let parsed = try_tokenize(term)?;
 
         for qt in &parsed.tokens {
             // Exact + prefix: BTreeMap range from `qt` while the key still starts with it.
@@ -292,7 +321,7 @@ impl SearchIndex {
                 }
             }
         }
-        out
+        Ok(out)
     }
 
     // ── Encrypted-shard (de)serialization ───────────────────────────────────
@@ -366,6 +395,11 @@ impl SearchIndex {
             for (page_idx, page) in paginate(b, bucket, PAGE_PLAINTEXT_BUDGET).into_iter().enumerate() {
                 let plaintext = serde_json::to_vec(&page).map_err(|e| CoreError::Encryption(e.to_string()))?;
                 let blob = encrypt_chunk_raw(&key, &plaintext)?;
+                if blob.len() > MAX_SHARD_BYTES {
+                    return Err(CoreError::Encryption(format!(
+                        "encrypted search shard exceeds the maximum {MAX_SHARD_BYTES} bytes"
+                    )));
+                }
                 out.push(EncryptedShard {
                     bucket: b,
                     page: page_idx as u32,
@@ -394,8 +428,25 @@ impl SearchIndex {
         shards: &[EncryptedShard],
         num_shards: u32,
     ) -> Result<Self, CoreError> {
-        let mut idx = Self::new(num_shards);
+        let normalized_shards = num_shards.clamp(1, MAX_SEARCH_SHARDS);
+        if shards.len() > MAX_SEARCH_MANIFEST_ENTRIES {
+            return Err(CoreError::InvalidInput(format!(
+                "search shard list exceeds the maximum {MAX_SEARCH_MANIFEST_ENTRIES} entries"
+            )));
+        }
+        let mut idx = Self::new(normalized_shards);
         for sh in shards {
+            if sh.bucket >= normalized_shards {
+                return Err(CoreError::InvalidInput(format!(
+                    "search shard bucket {} is outside 0..{normalized_shards}",
+                    sh.bucket
+                )));
+            }
+            if sh.blob.len() > MAX_SHARD_BYTES {
+                return Err(CoreError::InvalidInput(format!(
+                    "encrypted search shard exceeds the maximum {MAX_SHARD_BYTES} bytes"
+                )));
+            }
             let key = source.bucket_key(sh.bucket);
             let plaintext = decrypt_chunk_raw(&key, &sh.blob)?;
             let page: ShardPage = serde_json::from_slice(&plaintext).map_err(|_| CoreError::Decryption)?;
@@ -405,11 +456,36 @@ impl SearchIndex {
                     page.v
                 )));
             }
+            if page.bucket != sh.bucket {
+                return Err(CoreError::InvalidInput(format!(
+                    "search shard bucket mismatch: envelope {}, page {}",
+                    sh.bucket, page.bucket
+                )));
+            }
             for (tok, fids) in page.postings {
+                if tok.len() > MAX_SEARCH_INPUT_BYTES || bucket_of(&tok, normalized_shards) != sh.bucket {
+                    return Err(CoreError::InvalidInput(
+                        "search posting is in the wrong bucket or oversized".into(),
+                    ));
+                }
+                if fids.len() > MAX_SEARCH_MANIFEST_ENTRIES || fids.iter().any(|fid| fid.len() > MAX_SEARCH_INPUT_BYTES)
+                {
+                    return Err(CoreError::InvalidInput("search posting list is oversized".into()));
+                }
                 let set = idx.postings.entry(tok).or_default();
                 set.extend(fids);
             }
             for (fid, normalized, tokens) in page.files {
+                if fid.len() > MAX_SEARCH_INPUT_BYTES
+                    || normalized.len() > MAX_SEARCH_INPUT_BYTES
+                    || tokens.len() > MAX_SEARCH_MANIFEST_ENTRIES
+                    || tokens.iter().any(|token| token.len() > MAX_SEARCH_INPUT_BYTES)
+                    || bucket_of(&fid, normalized_shards) != sh.bucket
+                {
+                    return Err(CoreError::InvalidInput(
+                        "search file record is in the wrong bucket or oversized".into(),
+                    ));
+                }
                 idx.files.insert(fid, FileRecord { normalized, tokens });
             }
         }
@@ -465,13 +541,22 @@ struct ShardPage {
 }
 
 fn est_str(s: &str) -> usize {
-    s.len() + 3 // quotes + comma
+    s.len().saturating_add(3) // quotes + comma
 }
 fn est_posting(tok: &str, fids: &[String]) -> usize {
-    est_str(tok) + 4 + fids.iter().map(|f| est_str(f)).sum::<usize>()
+    est_str(tok)
+        .saturating_add(4)
+        .saturating_add(fids.iter().fold(0usize, |sum, f| sum.saturating_add(est_str(f))))
 }
 fn est_file(fid: &str, normalized: &str, tokens: &[String]) -> usize {
-    est_str(fid) + est_str(normalized) + 6 + tokens.iter().map(|t| est_str(t)).sum::<usize>()
+    est_str(fid)
+        .saturating_add(est_str(normalized))
+        .saturating_add(6)
+        .saturating_add(
+            tokens
+                .iter()
+                .fold(0usize, |sum, token| sum.saturating_add(est_str(token))),
+        )
 }
 
 /// Page-size base overhead for the JSON envelope (`{"v":1,"bucket":...,...}`).
@@ -490,11 +575,11 @@ fn paginate(bucket: u32, data: BucketData, budget: usize) -> Vec<ShardPage> {
         let mut sz = est_str(&tok) + 4;
         for f in fids {
             let add = est_str(&f);
-            if !chunk.is_empty() && sz + add > unit_cap {
+            if !chunk.is_empty() && sz.saturating_add(add) > unit_cap {
                 posting_units.push((tok.clone(), std::mem::take(&mut chunk)));
                 sz = est_str(&tok) + 4;
             }
-            sz += add;
+            sz = sz.saturating_add(add);
             chunk.push(f);
         }
         if !chunk.is_empty() {
@@ -514,7 +599,7 @@ fn paginate(bucket: u32, data: BucketData, budget: usize) -> Vec<ShardPage> {
 
     for (tok, fids) in posting_units {
         let est = est_posting(&tok, &fids);
-        if size + est > budget && has_content(&cur) {
+        if size.saturating_add(est) > budget && has_content(&cur) {
             pages.push(std::mem::replace(
                 &mut cur,
                 ShardPage {
@@ -526,12 +611,12 @@ fn paginate(bucket: u32, data: BucketData, budget: usize) -> Vec<ShardPage> {
             ));
             size = PAGE_BASE_OVERHEAD;
         }
-        size += est;
+        size = size.saturating_add(est);
         cur.postings.push((tok, fids));
     }
     for (fid, normalized, tokens) in data.files {
         let est = est_file(&fid, &normalized, &tokens);
-        if size + est > budget && has_content(&cur) {
+        if size.saturating_add(est) > budget && has_content(&cur) {
             pages.push(std::mem::replace(
                 &mut cur,
                 ShardPage {
@@ -543,7 +628,7 @@ fn paginate(bucket: u32, data: BucketData, budget: usize) -> Vec<ShardPage> {
             ));
             size = PAGE_BASE_OVERHEAD;
         }
-        size += est;
+        size = size.saturating_add(est);
         cur.files.push((fid, normalized, tokens));
     }
     if has_content(&cur) {
@@ -609,6 +694,35 @@ mod tests {
                 assert!(b1 < n, "in range for {key}/{n}");
             }
         }
+    }
+
+    #[test]
+    fn shard_count_and_search_input_are_bounded() {
+        assert_eq!(SearchIndex::new(0).num_shards(), 1);
+        assert_eq!(SearchIndex::new(u32::MAX).num_shards(), MAX_SEARCH_SHARDS);
+        let mut index = SearchIndex::new(DEFAULT_NUM_SHARDS);
+        assert!(index.try_upsert("id", &"x".repeat(MAX_SEARCH_INPUT_BYTES + 1)).is_err());
+        assert!(index.try_query(&"x".repeat(MAX_SEARCH_INPUT_BYTES + 1)).is_err());
+    }
+
+    #[test]
+    fn encrypted_page_bucket_must_match_its_envelope() {
+        let master = mk();
+        let page = ShardPage {
+            v: FORMAT_VERSION,
+            bucket: 1,
+            postings: Vec::new(),
+            files: Vec::new(),
+        };
+        let plaintext = serde_json::to_vec(&page).unwrap();
+        let key = derive_search_index_key(&master, 0);
+        let shard = EncryptedShard {
+            bucket: 0,
+            page: 0,
+            blob: encrypt_chunk_raw(&key, &plaintext).unwrap(),
+        };
+        let error = SearchIndex::from_encrypted_shards(&master, &[shard], DEFAULT_NUM_SHARDS).unwrap_err();
+        assert!(error.to_string().contains("bucket mismatch"));
     }
 
     // ── search correctness ───────────────────────────────────────────────

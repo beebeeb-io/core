@@ -7,8 +7,8 @@
 //! never a check that could not fail. A volume that makes no 8.3 names skips
 //! with the reason printed; with `CI` set it fails instead.
 //!
-//! The tests use only the v0.2.6 API, so this file runs unchanged at the parent
-//! (red: the write reaches the other file) and at the fix (green).
+//! The decrypt fixtures are v1 frames, so they open without a version
+//! commitment.
 
 use beebeeb_core::chunk_stream::ExpectedChunkFormat::Unrecorded;
 use beebeeb_core::encrypt::{decrypt_chunks_to_file, decrypt_contiguous_to_file, encrypt_chunk};
@@ -194,7 +194,7 @@ fn contiguous_to(output: &Path) -> Result<(), String> {
     let blob = encrypt_chunk(&key, WRITTEN).map_err(|e| e.to_string())?;
     let body = [blob.nonce, blob.ciphertext].concat();
     let path = output.to_str().expect("UTF-8 path");
-    decrypt_contiguous_to_file(&key, FILE_ID, Unrecorded, &body, WRITTEN.len() as u64, path)
+    decrypt_contiguous_to_file(&key, FILE_ID, Unrecorded, None, &body, WRITTEN.len() as u64, path)
         .map(drop)
         .map_err(|e| e.to_string())
 }
@@ -203,9 +203,16 @@ fn chunks_to(output: &Path) -> Result<(), String> {
     let key = file_key();
     let blob = encrypt_chunk(&key, WRITTEN).map_err(|e| e.to_string())?;
     let path = output.to_str().expect("UTF-8 path");
-    decrypt_chunks_to_file(&key, FILE_ID, Unrecorded, vec![(blob.nonce, blob.ciphertext)], path)
-        .map(drop)
-        .map_err(|e| e.to_string())
+    decrypt_chunks_to_file(
+        &key,
+        FILE_ID,
+        Unrecorded,
+        None,
+        vec![(blob.nonce, blob.ciphertext)],
+        path,
+    )
+    .map(drop)
+    .map_err(|e| e.to_string())
 }
 
 fn chunk_files_to(output: &Path) -> Result<(), String> {
@@ -215,7 +222,7 @@ fn chunk_files_to(output: &Path) -> Result<(), String> {
     let chunk = staging.path().join("0.enc");
     let blob = encrypt_chunk(&file_key, WRITTEN).map_err(|e| e.to_string())?;
     std::fs::write(&chunk, [blob.nonce, blob.ciphertext].concat()).expect("write chunk file");
-    file_encrypt::decrypt_chunks_to_file(&master, FILE_ID, Unrecorded, &[chunk.as_path()], output, None)
+    file_encrypt::decrypt_chunks_to_file(&master, FILE_ID, Unrecorded, None, &[chunk.as_path()], output, None)
         .map(drop)
         .map_err(|e| e.to_string())
 }

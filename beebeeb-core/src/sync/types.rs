@@ -2,6 +2,23 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Both server cursors known to describe the same account state.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SyncPosition {
+    pub seq_id: i64,
+    pub user_seq: i64,
+}
+
+impl SyncPosition {
+    pub fn new(seq_id: i64, user_seq: i64) -> Self {
+        Self { seq_id, user_seq }
+    }
+
+    pub fn is_known(self) -> bool {
+        self.seq_id >= 0 && self.user_seq >= 0
+    }
+}
+
 /// A single node in the file tree — folder or file.
 ///
 /// `name` is the decrypted filename (client-only). `name_encrypted` is the
@@ -10,6 +27,10 @@ use uuid::Uuid;
 pub struct TreeNode {
     pub id: Uuid,
     pub name: String,
+    /// The operation was retained, but its encrypted display name could not
+    /// be opened on this device.
+    #[serde(default)]
+    pub name_undecryptable: bool,
     pub name_encrypted: String,
     pub parent_id: Option<Uuid>,
     pub is_folder: bool,
@@ -26,9 +47,13 @@ pub struct TreeNode {
 }
 
 /// A server-assigned op streamed via SSE or fetched via `GET /sync/ops`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SyncOp {
     pub seq_id: i64,
+    /// Gap-free cursor for this account. Global `seq_id` may skip because it
+    /// interleaves operations from other accounts.
+    #[serde(default)]
+    pub user_seq: Option<i64>,
     pub op_type: String,
     pub client_op_id: Option<Uuid>,
     pub payload: serde_json::Value,
@@ -38,7 +63,7 @@ pub struct SyncOp {
 
 /// A locally-applied op awaiting server confirmation. Holds a pre-mutation
 /// snapshot for rollback if the server rejects the op.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PendingOp {
     pub client_op_id: Uuid,
     pub op_type: String,

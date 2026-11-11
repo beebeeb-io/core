@@ -1,0 +1,385 @@
+{
+  "cases": [
+    {
+      "expected": "report (2).pdf",
+      "id": "numbered_extension",
+      "item": "file",
+      "kind": "numbered",
+      "note": "the counter goes before the extension",
+      "original": "report.pdf",
+      "taken": []
+    },
+    {
+      "expected": "report (3).pdf",
+      "id": "numbered_next_free",
+      "item": "file",
+      "kind": "numbered",
+      "note": "(2) is taken, so (3)",
+      "original": "report.pdf",
+      "taken": [
+        "report (2).pdf"
+      ]
+    },
+    {
+      "expected": "notes (2)",
+      "id": "numbered_no_extension",
+      "item": "file",
+      "kind": "numbered",
+      "note": "a file without a dot",
+      "original": "notes",
+      "taken": []
+    },
+    {
+      "expected": ".env (2)",
+      "id": "numbered_leading_dot",
+      "item": "file",
+      "kind": "numbered",
+      "note": "a name whose only dot leads has no extension",
+      "original": ".env",
+      "taken": []
+    },
+    {
+      "expected": "v1.2 (2)",
+      "id": "numbered_folder_with_dot",
+      "item": "folder",
+      "kind": "numbered",
+      "note": "a folder's whole name is its stem",
+      "original": "v1.2",
+      "taken": []
+    },
+    {
+      "expected": "report (2) (2).pdf",
+      "id": "numbered_existing_suffix",
+      "item": "file",
+      "kind": "numbered",
+      "note": "an existing suffix is never parsed: the counter goes onto the name as given",
+      "original": "report (2).pdf",
+      "taken": []
+    },
+    {
+      "expected": "report (3).pdf",
+      "id": "numbered_full_width_taken",
+      "item": "file",
+      "kind": "numbered",
+      "note": "a taken full-width (2) is the same name after NFKC, so (3)",
+      "original": "report.pdf",
+      "taken": [
+        "report (\uff12).pdf"
+      ]
+    },
+    {
+      "expected": "Report (3).PDF",
+      "id": "numbered_case_taken",
+      "item": "file",
+      "kind": "numbered",
+      "note": "a taken name in other case blocks its spelling",
+      "original": "Report.PDF",
+      "taken": [
+        "REPORT (2).pdf"
+      ]
+    },
+    {
+      "expected": "Photos (4)",
+      "id": "numbered_folder_counts_up",
+      "item": "folder",
+      "kind": "numbered",
+      "note": "folders count up past every taken spelling",
+      "original": "Photos",
+      "taken": [
+        "photos (2)",
+        "PHOTOS (3)"
+      ]
+    },
+    {
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (2).pdf",
+      "id": "numbered_255_cut",
+      "item": "file",
+      "kind": "numbered",
+      "note": "the stem is cut so that the whole name is exactly 255 bytes",
+      "original": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf",
+      "taken": []
+    },
+    {
+      "expected": "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9 (2).txt",
+      "id": "numbered_255_cut_multibyte",
+      "item": "file",
+      "kind": "numbered",
+      "note": "the cut never splits a character",
+      "original": "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9.txt",
+      "taken": []
+    },
+    {
+      "device": "GLegion",
+      "expected": "report (conflict, GLegion).pdf",
+      "id": "drive_file",
+      "item": "file",
+      "kind": "drive",
+      "note": "the second copy names the device that lost",
+      "original": "report.pdf",
+      "taken": []
+    },
+    {
+      "device": "B",
+      "expected": "report (conflict, B) (2).pdf",
+      "id": "drive_taken_counts",
+      "item": "file",
+      "kind": "drive",
+      "note": "a taken conflict name gets (2) after the device",
+      "original": "report.pdf",
+      "taken": [
+        "report (conflict, B).pdf"
+      ]
+    },
+    {
+      "device": "B",
+      "expected": "report (conflict, B) (3).pdf",
+      "id": "drive_taken_other_case",
+      "item": "file",
+      "kind": "drive",
+      "note": "taken spellings are compared normalised",
+      "original": "report.pdf",
+      "taken": [
+        "REPORT (CONFLICT, B).PDF",
+        "report (conflict, b) (2).pdf"
+      ]
+    },
+    {
+      "device": "B",
+      "expected": "Photos (conflict, B)",
+      "id": "drive_folder",
+      "item": "folder",
+      "kind": "drive",
+      "note": "a folder's whole name is the stem",
+      "original": "Photos",
+      "taken": []
+    },
+    {
+      "device": "B",
+      "expected": "x\u00b2 (conflict, B)",
+      "id": "drive_folder_superscript",
+      "item": "folder",
+      "kind": "drive",
+      "note": "the name is kept as typed",
+      "original": "x\u00b2",
+      "taken": []
+    },
+    {
+      "device": "a/b",
+      "expected": "report (conflict, a_b).pdf",
+      "id": "drive_device_separator",
+      "item": "file",
+      "kind": "drive",
+      "note": "a separator in the device becomes _",
+      "original": "report.pdf",
+      "taken": []
+    },
+    {
+      "device": "a\\b",
+      "expected": "report (conflict, a_b).pdf",
+      "id": "drive_device_backslash",
+      "item": "file",
+      "kind": "drive",
+      "note": "a backslash too",
+      "original": "report.pdf",
+      "taken": []
+    },
+    {
+      "device": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "expected": "report (conflict, dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd).pdf",
+      "id": "drive_device_cut",
+      "item": "file",
+      "kind": "drive",
+      "note": "the device is cut to 64 bytes",
+      "original": "report.pdf",
+      "taken": []
+    },
+    {
+      "device": "GLegion",
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (conflict, GLegion).pdf",
+      "id": "drive_255_cut",
+      "item": "file",
+      "kind": "drive",
+      "note": "the stem is cut, never the device or the extension",
+      "original": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf",
+      "taken": []
+    },
+    {
+      "count": 3,
+      "expected": [
+        "report (2).pdf",
+        "report (3).pdf",
+        "report (4).pdf"
+      ],
+      "id": "candidates_three",
+      "item": "file",
+      "kind": "candidates",
+      "note": "(2) to (count + 1), no taken set",
+      "original": "report.pdf"
+    },
+    {
+      "count": 2,
+      "expected": [
+        "v1.2 (2)",
+        "v1.2 (3)"
+      ],
+      "id": "candidates_folder",
+      "item": "folder",
+      "kind": "candidates",
+      "note": "a folder's whole name is the stem",
+      "original": "v1.2"
+    },
+    {
+      "a": "Backups",
+      "b": "BACKUPS",
+      "id": "normalize_case",
+      "kind": "normalize",
+      "normalized_a": "backups",
+      "normalized_b": "backups",
+      "note": "case is folded",
+      "same": true
+    },
+    {
+      "a": "Backups",
+      "b": "\uff22\uff41\uff43\uff4b\uff55\uff50\uff53",
+      "id": "normalize_full_width",
+      "kind": "normalize",
+      "normalized_a": "backups",
+      "normalized_b": "backups",
+      "note": "NFKC folds full-width forms",
+      "same": true
+    },
+    {
+      "a": "\u00e9",
+      "b": "e\u0301",
+      "id": "normalize_composed",
+      "kind": "normalize",
+      "normalized_a": "\u00e9",
+      "normalized_b": "\u00e9",
+      "note": "composed and decomposed are one name",
+      "same": true
+    },
+    {
+      "a": "\ufb01le",
+      "b": "file",
+      "id": "normalize_ligature",
+      "kind": "normalize",
+      "normalized_a": "file",
+      "normalized_b": "file",
+      "note": "NFKC splits the ligature",
+      "same": true
+    },
+    {
+      "a": "Stra\u00dfe",
+      "b": "STRA\u1e9eE",
+      "id": "normalize_capital_sharp_s",
+      "kind": "normalize",
+      "normalized_a": "stra\u00dfe",
+      "normalized_b": "stra\u00dfe",
+      "note": "U+1E9E folds to the sharp s",
+      "same": true
+    },
+    {
+      "a": "Stra\u00dfe",
+      "b": "STRASSE",
+      "id": "normalize_no_full_folding",
+      "kind": "normalize",
+      "normalized_a": "stra\u00dfe",
+      "normalized_b": "strasse",
+      "note": "simple folding never maps the sharp s to ss",
+      "same": false
+    },
+    {
+      "a": "\u03a3\u0391\u03a3",
+      "b": "\u03c3\u03b1\u03c2",
+      "id": "normalize_sigma",
+      "kind": "normalize",
+      "normalized_a": "\u03c3\u03b1\u03c3",
+      "normalized_b": "\u03c3\u03b1\u03c3",
+      "note": "both sigmas fold to one",
+      "same": true
+    },
+    {
+      "a": "\u0130stanbul",
+      "b": "istanbul",
+      "id": "normalize_dotted_i",
+      "kind": "normalize",
+      "normalized_a": "\u0130stanbul",
+      "normalized_b": "istanbul",
+      "note": "the dotted capital I has no simple folding",
+      "same": false
+    },
+    {
+      "a": "a\u200db",
+      "b": "ab",
+      "id": "normalize_zwj_kept",
+      "kind": "normalize",
+      "normalized_a": "a\u200db",
+      "normalized_b": "ab",
+      "note": "a zero-width joiner is kept",
+      "same": false
+    },
+    {
+      "a": "\u00b5m",
+      "b": "\u03bcm",
+      "id": "normalize_micro",
+      "kind": "normalize",
+      "normalized_a": "\u03bcm",
+      "normalized_b": "\u03bcm",
+      "note": "micro sign and mu are one name",
+      "same": true
+    },
+    {
+      "a": "\uab70",
+      "b": "\u13a0",
+      "id": "normalize_cherokee",
+      "kind": "normalize",
+      "normalized_a": "\u13a0",
+      "normalized_b": "\u13a0",
+      "note": "Cherokee small letters fold to the capitals",
+      "same": true
+    },
+    {
+      "a": "T\u0308",
+      "b": "\u1e97",
+      "id": "normalize_compose_after_folding",
+      "kind": "normalize",
+      "normalized_a": "\u1e97",
+      "normalized_b": "\u1e97",
+      "note": "folding T + U+0308 gives t + U+0308, which the second NFKC composes",
+      "same": true
+    },
+    {
+      "a": "",
+      "b": "",
+      "id": "normalize_refused_empty",
+      "kind": "normalize",
+      "normalized_a": null,
+      "normalized_b": null,
+      "note": "an empty name is refused",
+      "same": true
+    },
+    {
+      "a": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "b": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "id": "normalize_limit",
+      "kind": "normalize",
+      "normalized_a": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "normalized_b": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "note": "1024 bytes is the longest input",
+      "same": true
+    },
+    {
+      "a": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "b": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "id": "normalize_refused_long",
+      "kind": "normalize",
+      "normalized_a": null,
+      "normalized_b": null,
+      "note": "1025 bytes is refused",
+      "same": true
+    }
+  ],
+  "note": "Name clashes: numbered names, drive conflict names and the normalised form; generated by tools/gen_name_clash_v1.py (unicodedata and CaseFolding.txt), never edited by hand.",
+  "unicode": "17.0.0",
+  "version": 1
+}

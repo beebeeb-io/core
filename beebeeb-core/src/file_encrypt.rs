@@ -12,7 +12,7 @@ use beebeeb_types::{ChunkProfile, plan_chunks};
 
 use crate::CoreError;
 use crate::chunk_stream::ChunkEncryptor;
-use crate::chunk_stream::{ExpectedChunkFormat, StreamOpener};
+use crate::chunk_stream::{ExpectedChunkFormat, StreamOpener, VersionCommitment};
 use crate::encrypt::{NONCE_LEN, TAG_LEN};
 use crate::kdf::{MasterKey, derive_file_key};
 
@@ -42,6 +42,22 @@ pub struct EncryptedFileResult {
     pub total_ciphertext_bytes: u64,
     /// Chunk size used for splitting (plaintext bytes per chunk).
     pub chunk_size_bytes: u64,
+}
+
+impl EncryptedFileResult {
+    /// The version commitment to seal into this version's metadata: chunk 0's
+    /// nonce is the v2 version id, and the counter follows `previous` (the
+    /// current version's commitment, `None` for a new file). Without it in the
+    /// metadata the written content cannot be read (Guus's ruling of
+    /// 2026-11-07, "refuse v2 without commitment").
+    pub fn version_commitment(&self, previous: Option<VersionCommitment>) -> Result<VersionCommitment, CoreError> {
+        let version_id = self
+            .chunks
+            .first()
+            .and_then(|chunk| <[u8; crate::chunk_stream::VERSION_ID_LEN]>::try_from(chunk.nonce.as_slice()).ok())
+            .ok_or_else(|| CoreError::InvalidInput("no chunk 0 to take the version id from".into()))?;
+        VersionCommitment::next(version_id, previous)
+    }
 }
 
 /// Result of decrypting chunks back to a file.
@@ -206,12 +222,15 @@ pub fn encrypt_file_to_chunks(
 /// or `.tmp` whose name reaches a DIFFERENT existing file through its 8.3 short
 /// name is refused (`InvalidInput`) and nothing is written.
 ///
-/// `expected` comes from the file's encrypted metadata
-/// ([`crate::encrypt::decrypt_file_metadata`]) — task 1908.
+/// `expected` and `version` come from the file's encrypted metadata
+/// ([`crate::encrypt::decrypt_file_metadata`]) — task 1908. v2 opens only as
+/// the upload `version` names; with no `version` only a v1 file opens (the
+/// ruling of 2026-11-07).
 pub fn decrypt_chunks_to_file(
     master_key: &MasterKey,
     file_id: &str,
     expected: ExpectedChunkFormat,
+    version: Option<VersionCommitment>,
     chunk_paths: &[&Path],
     output_path: &Path,
     callback: Option<&dyn FileProgressCallback>,
@@ -228,7 +247,7 @@ pub fn decrypt_chunks_to_file(
     // survives. (The temp was `with_extension("tmp")`, which IS the output for
     // `notes.tmp`: a failed decrypt truncated and then deleted that file.)
     let (total_bytes, chunks_processed) = crate::path_safety::write_through_tmp(output_path, |file| {
-        decrypt_chunks_to_tmp(&file_key, file_id, expected, chunk_paths, file, callback)
+        decrypt_chunks_to_tmp(&file_key, file_id, expected, version, chunk_paths, file, callback)
     })?;
     Ok(DecryptedFileResult {
         output_path: output_path.to_path_buf(),
@@ -244,6 +263,7 @@ fn decrypt_chunks_to_tmp(
     file_key: &crate::kdf::FileKey,
     file_id: &str,
     expected: ExpectedChunkFormat,
+    version: Option<VersionCommitment>,
     chunk_paths: &[&Path],
     output_file: File,
     callback: Option<&dyn FileProgressCallback>,
@@ -257,7 +277,7 @@ fn decrypt_chunks_to_tmp(
     // Task 1908: the chunk files are one file's ordered stream. v2 binds each
     // frame to (file_id, index, last), so a reordered/duplicated/missing chunk
     // file, or a list that stops before the last chunk, fails here.
-    let mut opener = StreamOpener::new(file_key, file_id, expected);
+    let mut opener = StreamOpener::with_version_commitment(file_key, file_id, expected, version);
 
     for (i, chunk_path) in chunk_paths.iter().enumerate() {
         // Read the entire chunk file
@@ -340,6 +360,7 @@ mod tests {
             &mk,
             "test-file-001",
             ExpectedChunkFormat::Unrecorded,
+            Some(result.version_commitment(None).unwrap()),
             &chunk_paths,
             &output_path,
             None,
@@ -381,6 +402,7 @@ mod tests {
             &mk,
             "empty-file",
             ExpectedChunkFormat::Unrecorded,
+            Some(result.version_commitment(None).unwrap()),
             &chunk_paths,
             &output_path,
             None,
@@ -419,6 +441,7 @@ mod tests {
             &mk,
             "small-file",
             ExpectedChunkFormat::Unrecorded,
+            Some(result.version_commitment(None).unwrap()),
             &chunk_paths,
             &output_path,
             None,
@@ -458,6 +481,7 @@ mod tests {
             &mk,
             "photo-file",
             ExpectedChunkFormat::Unrecorded,
+            Some(result.version_commitment(None).unwrap()),
             &chunk_paths,
             &output_path,
             None,
@@ -496,6 +520,7 @@ mod tests {
             &mk,
             "doc-file",
             ExpectedChunkFormat::Unrecorded,
+            Some(result.version_commitment(None).unwrap()),
             &chunk_paths,
             &output_path,
             None,
@@ -584,6 +609,7 @@ mod tests {
             &wrong_mk,
             "secret-file",
             ExpectedChunkFormat::Unrecorded,
+            Some(result.version_commitment(None).unwrap()),
             &chunk_paths,
             &output_path,
             None,
@@ -615,6 +641,7 @@ mod tests {
             &mk,
             "file-002",
             ExpectedChunkFormat::Unrecorded,
+            Some(result.version_commitment(None).unwrap()),
             &chunk_paths,
             &output_path,
             None,
@@ -763,6 +790,7 @@ mod tests {
             &mk,
             "partial-file",
             ExpectedChunkFormat::Unrecorded,
+            Some(enc.version_commitment(None).unwrap()),
             &chunk_paths,
             &output_path,
             None,
@@ -796,6 +824,7 @@ mod tests {
             &mk,
             "tmp-output",
             ExpectedChunkFormat::Unrecorded,
+            None,
             &[chunk.as_path()],
             &output_path,
             None,

@@ -11,8 +11,10 @@
 //! declares `mod exports;` and the new surface grows here.
 
 pub mod account_flows;
+pub mod archives;
 pub mod auth_flow;
 pub mod backup;
+pub mod contacts;
 pub mod format;
 pub mod media;
 pub mod metadata_wire;

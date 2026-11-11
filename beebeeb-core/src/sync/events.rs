@@ -16,6 +16,9 @@ pub enum SyncEvent {
         id: Uuid,
         old_parent: Option<Uuid>,
         new_parent: Option<Uuid>,
+        /// The item's name after the move: a client that resolved a name
+        /// clash in the destination may have given it a new one.
+        name: String,
     },
     FileRenamed {
         id: Uuid,

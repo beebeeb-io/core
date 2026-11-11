@@ -328,7 +328,7 @@ mod review_l6_l7 {
         let master = master();
         let mut context = b"beebeeb-folder-custody-v1".to_vec();
         context.extend_from_slice(FOLDER_ID.as_bytes());
-        let raw_master = Zeroizing::new(master.to_bytes());
+        let raw_master = master.to_bytes();
         let mut key = Zeroizing::new([0u8; 32]);
         Hkdf::<Sha256>::new(None, raw_master.as_ref())
             .expand(&context, key.as_mut())
@@ -493,9 +493,9 @@ fn l8_owner_rejects_own_v1_content_frame() {
 #[test]
 fn l8_owner_rejects_own_legacy_name_envelope() {
     let master = master();
-    let name = beebeeb_core::encrypt::encrypt_name(&master, FILE_ID, "test", None).unwrap();
-    let blob: beebeeb_types::EncryptedBlob = serde_json::from_str(&name).unwrap();
-    let plaintext = beebeeb_core::encrypt::decrypt_chunk(&derive_file_key(&master, FILE_ID.as_bytes()), &blob).unwrap();
+    let file_key = derive_file_key(&master, FILE_ID.as_bytes());
+    let blob = beebeeb_core::encrypt::encrypt_metadata(&file_key, r#"{"mime_type":null,"name":"test"}"#).unwrap();
+    let plaintext = beebeeb_core::encrypt::decrypt_chunk(&file_key, &blob).unwrap();
     assert_eq!(plaintext, br#"{"mime_type":null,"name":"test"}"#);
     let frame = [blob.nonce, blob.ciphertext].concat();
     assert_eq!(frame.len(), 60, "fixture must pass the old length gate");

@@ -32,10 +32,12 @@ pub mod chunk;
 pub mod crypto;
 pub mod file;
 pub mod format;
+pub mod limits;
 pub mod quota;
 
 pub use chunk::*;
 pub use crypto::*;
 pub use file::*;
 pub use format::*;
+pub use limits::*;
 pub use quota::*;

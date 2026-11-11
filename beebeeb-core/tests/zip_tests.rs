@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use beebeeb_core::CoreError;
-use beebeeb_core::chunk_stream::ExpectedChunkFormat;
+use beebeeb_core::chunk_stream::{ChunkEncryptor, ChunkFormat, ExpectedChunkFormat};
 use beebeeb_core::encrypt::encrypt_chunk_raw;
 use beebeeb_core::kdf::{MasterKey, derive_file_key};
 use beebeeb_core::zip::{ZipEntry, ZipProgress, stream_folder_zip};
@@ -34,6 +34,7 @@ fn single_file_roundtrip() {
         chunk_count: 1,
         size_bytes: plaintext.len() as u64,
         chunk_format: ExpectedChunkFormat::Unrecorded,
+        version: None,
     }];
 
     let cancel = AtomicBool::new(false);
@@ -75,6 +76,7 @@ fn multi_file_with_nested_paths() {
             chunk_count: 1,
             size_bytes: file_a_content.len() as u64,
             chunk_format: ExpectedChunkFormat::Unrecorded,
+            version: None,
         },
         ZipEntry {
             path: "docs/readme.txt".to_string(),
@@ -82,6 +84,7 @@ fn multi_file_with_nested_paths() {
             chunk_count: 1,
             size_bytes: file_b_content.len() as u64,
             chunk_format: ExpectedChunkFormat::Unrecorded,
+            version: None,
         },
         ZipEntry {
             path: "docs/deep/nested.txt".to_string(),
@@ -89,6 +92,7 @@ fn multi_file_with_nested_paths() {
             chunk_count: 1,
             size_bytes: file_c_content.len() as u64,
             chunk_format: ExpectedChunkFormat::Unrecorded,
+            version: None,
         },
     ];
 
@@ -136,6 +140,7 @@ fn cancellation_returns_cancelled() {
         chunk_count: 1,
         size_bytes: plaintext.len() as u64,
         chunk_format: ExpectedChunkFormat::Unrecorded,
+        version: None,
     }];
 
     let cancel = AtomicBool::new(true); // cancelled before start
@@ -167,6 +172,7 @@ fn cancellation_mid_chunks() {
         chunk_count: 3,
         size_bytes: (chunk_data.len() * 3) as u64,
         chunk_format: ExpectedChunkFormat::Unrecorded,
+        version: None,
     }];
 
     let cancel = AtomicBool::new(false);
@@ -201,6 +207,7 @@ fn progress_callback_fires() {
         chunk_count: 2,
         size_bytes: (chunk1.len() + chunk2.len()) as u64,
         chunk_format: ExpectedChunkFormat::Unrecorded,
+        version: None,
     }];
 
     let cancel = AtomicBool::new(false);
@@ -252,6 +259,7 @@ fn empty_file_produces_valid_zip_entry() {
         chunk_count: 1,
         size_bytes: 0,
         chunk_format: ExpectedChunkFormat::Unrecorded,
+        version: None,
     }];
 
     let cancel = AtomicBool::new(false);
@@ -270,6 +278,58 @@ fn empty_file_produces_valid_zip_entry() {
     let mut contents = Vec::new();
     file.read_to_end(&mut contents).unwrap();
     assert!(contents.is_empty(), "empty file should have empty content");
+}
+
+/// Guus's ruling of 2026-11-07, "refuse v2 without commitment": a v2 entry
+/// opens only against the commitment of its own metadata record. Mutant: the
+/// opener's no-commitment arm opens v2 again: the bare entries zip cleanly.
+#[test]
+#[allow(deprecated)] // a test fixture: the id comes from the test, not from core
+fn a_v2_entry_opens_only_against_its_commitment() {
+    let mk = test_master_key();
+    let file_id = "11111111-2222-4333-8444-555555555555";
+    let plaintext = b"version two content, three chunks";
+    let mut encryptor = ChunkEncryptor::for_push_with_chunk_size(&mk, file_id, plaintext.len() as u64, 12).unwrap();
+    assert_eq!(encryptor.format(), ChunkFormat::V2, "new content is written as v2");
+    let frames: Vec<Vec<u8>> = plaintext
+        .chunks(12)
+        .map(|chunk| encryptor.push_chunk(chunk).unwrap().data)
+        .collect();
+    let version = encryptor.version_commitment(None).unwrap();
+    encryptor.finish().unwrap();
+
+    let zip_with = |chunk_format, version| {
+        let entries = vec![ZipEntry {
+            path: "v2.txt".to_string(),
+            file_id: file_id.to_string(),
+            chunk_count: frames.len() as u32,
+            size_bytes: plaintext.len() as u64,
+            chunk_format,
+            version,
+        }];
+        let mut fetch = |_fid: &str, idx: u32| -> Result<Vec<u8>, CoreError> { Ok(frames[idx as usize].clone()) };
+        let mut buf = Vec::new();
+        stream_folder_zip(
+            &mk,
+            &entries,
+            &mut fetch,
+            Cursor::new(&mut buf),
+            &|_| {},
+            &AtomicBool::new(false),
+        )
+        .map(|()| buf)
+    };
+
+    let buf = zip_with(ExpectedChunkFormat::V2, Some(version)).expect("the committed entry zips");
+    let mut archive = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let mut contents = Vec::new();
+    archive.by_name("v2.txt").unwrap().read_to_end(&mut contents).unwrap();
+    assert_eq!(contents, plaintext);
+
+    for pin in [ExpectedChunkFormat::V2, ExpectedChunkFormat::Unrecorded] {
+        let error = zip_with(pin, None).expect_err("a v2 entry without a commitment must not zip");
+        assert!(matches!(error, CoreError::InvalidInput(_)), "{pin:?}: {error:?}");
+    }
 }
 
 /// Deterministic bytes that do not compress (xorshift64*), so a DEFLATE stream has to store them.
@@ -330,6 +390,7 @@ fn mixed_payloads_roundtrip() {
             chunk_count: parts.len() as u32,
             size_bytes: parts.iter().map(|p| p.len() as u64).sum(),
             chunk_format: ExpectedChunkFormat::Unrecorded,
+            version: None,
         });
     }
 
@@ -364,6 +425,8 @@ fn entry_for(path: &str, file_id: &str, chunk_count: u32, size_bytes: u64) -> Zi
         chunk_count,
         size_bytes,
         chunk_format: ExpectedChunkFormat::Unrecorded,
+        // 0.3.0: no commitment, so only the v1 frames `encrypt_chunks` writes open.
+        version: None,
     }
 }
 

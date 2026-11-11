@@ -1,8 +1,9 @@
 //! Move 3 — media and preview extensions (spec §16.2).
 //!
-//! Cases live in `test-vectors/consolidation/preview.json`: all 90 of core's
-//! extensions, the 48 extensions where the web client's list disagrees today,
-//! and the shape cases. The batch predicate must answer the whole corpus in
+//! Cases live in `test-vectors/consolidation/preview.json`: all 91 of core's
+//! extensions (90, plus `zip` since archives preview through core's reader),
+//! the 47 extensions where the web client's list disagrees, and the shape
+//! cases. The batch predicate must answer the whole corpus in
 //! order, exactly as the per-row predicate does.
 
 use beebeeb_core::media::{BitSet, is_previewable_by_extension, previewable_batch};
@@ -88,10 +89,11 @@ fn preview_cases_match_core() {
         }
     }
 
-    // All 90 of core's extensions, all 48 live disagreements, the three shape
-    // cases (unknown extension, uppercase extension, empty name).
-    assert_eq!(extensions, 90 + 3, "90 core extensions plus 3 shape cases");
-    assert_eq!(disagreements, 48, "the live web disagreement count");
+    // All 91 of core's extensions, all 47 disagreements (zip agrees since
+    // archives preview through core's reader), the three shape cases
+    // (unknown extension, uppercase extension, empty name).
+    assert_eq!(extensions, 91 + 3, "91 core extensions plus 3 shape cases");
+    assert_eq!(disagreements, 47, "the web disagreement count");
     for required in [
         "preview_unknown_extension",
         "preview_uppercase_extension",

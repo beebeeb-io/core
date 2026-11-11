@@ -1,116 +1,219 @@
-# beebeeb-io/core
+# beebeeb core
 
-Cryptographic core, shared types and sync engine (PUBLIC repo). This is the trust anchor: every client depends on it. License AGPL-3.0-or-later.
-Moved detail (key types, chunk format v2, adoption checklist, UniFFI/WASM handles, folder links, owner file keys, client metadata, search index,
-CLI handshake, onboarding, direct S3 transfer, L2 driver, security invariants, L16 labels): `docs/agent-notes.md`.
-Pre-distillation CLAUDE.md verbatim (chunk-format v2 review rounds, count-history baselines): `docs/runbook/core-task-history.md`.
+This public Rust workspace is the cryptographic and protocol trust anchor for Beebeeb clients. The
+workspace version is `0.3.0` and the license is AGPL-3.0-or-later.
 
 ## Commands
 
 ```sh
-cargo test -p beebeeb-core      # unit + suite binaries (chunk_stream_parity, cli_auth_vectors, cross_client_vectors, cross_platform_vectors,
-                                # direct_transfer_authority, integration, transfer_vectors, zip_tests, l16_labels, ...) + doctests
-cargo test --workspace 2>&1 | tee /tmp/bb-core-test.log        # full workspace
-cargo clippy --workspace -- -D warnings; cargo fmt -- --check
-wasm-pack build beebeeb-wasm --target web                      # then `make wasm-sync` from the workspace root (committed package in repos/web)
-./build-ios.sh / ./build-android.sh                            # UniFFI bindings; BUILDING.md
-bash scripts/claims-guard/claims-guard.sh                      # shared engine + policy.conf, vendored verbatim from the workspace; exceptions in .claims-allow
-bash scripts/claims-guard/canon-sweep.sh                       # must print `clean (0 rows)`; --self-test proves it goes red
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo build -p beebeeb-uniffi -p beebeeb-wasm
+bash scripts/check-test-vectors.sh
+bash scripts/check-no-legacy-writes.sh
+bash scripts/check-doc-symbols.sh
+bash scripts/check-core-pins-documented.sh
 ```
 
-Truth line: one `test result: ok. N passed; 0 failed` per crate/suite; assert the Ns, a suite that did not run is a RED. Crypto tests are trusted only
-after they have been seen to fail: mutate a KAT vector or label, paste WHICH assertion failed, revert. Bindings drift is an instrument problem: after
-`build-ios.sh`/`build-android.sh`, grep the regenerated header for every new symbol and count them.
+## Crates
 
-## Module map
-
-```
-beebeeb-core/   AES-256-GCM, Argon2id KDF (256MiB/4iter/2par), BIP39 recovery, HKDF per-file keys, onboarding state machine
-  src/kdf.rs, encrypt.rs, file_encrypt.rs   key derivation and the label table (label_table_tests.rs lists every HKDF info/AAD/salt label)
-  src/chunk_stream.rs        ChunkEncryptor / ChunkDecryptor: the ONE chunk encrypt/decrypt loop for every client; chunk format v1/v2 (position binding)
-  src/chunk_stream/range.rs  RangeOpener: random-access open at the requested index, one geometry, Zeroizing (range reads, LD-0105)
-  src/owned_keys.rs, item_id.rs, folder_key.rs   owner file-key wraps (L8), item id classes (F/O), folder key id
-  src/client_meta.rs, search_index.rs, search_sync.rs, cli_auth.rs, file_request.rs, share_token.rs   encrypted client metadata, search, CLI handshake, requests
-  src/direct_transfer/       pure-Rust rules of the direct S3 transfer contract (no I/O, clock or runtime); vectors in test-vectors/direct_transfer.json
-  src/direct_transfer/range/ RangePlanner, PieceCutter, RangeBudget, the in-flight split (C3); vectors in test-vectors/direct_range.json
-  src/onboarding/            password policy, breach (k-anonymity) check, signup ceremony; src/opaque*.rs, recovery.rs
-  src/passkey/               passkey vault (PRF -> wrap key -> escrow blob, web's format), ceremony wire, flows over injected HTTP + platform call
-  src/backup/                pure backup rules (LD-0113): protection, skip, device folders, manifest, root/merge, pass planner; vectors in test-vectors/consolidation/backup_*.json
-beebeeb-types/  CipherSuite, EncryptedBlob, KdfParams, ChunkMeta (shared across all repos)
-beebeeb-sync/   desktop sync engine: watcher (notify), conflicts (KeepBoth), selective sync
-beebeeb-transfer/  L2 driver above direct_transfer: one download() over any DirectIo (CLI + desktop); range_session() + RangeLessor (LD-0105)
-beebeeb-backup/    L2 backup pass (LD-0113): walk_source (never opens a file), fingerprint, run_pass over a client's BackupHost (desktop + CLI)
-beebeeb-upload/, beebeeb-wasm/ (web; js-tests/), beebeeb-uniffi/ (mobile/desktop handles)   bindings/
-test-vectors/vectors.json + direct_*.json + tools/ (independent Python generators)   drift guards: test_vectors_v2, published_v2_vectors_match_core
-```
-
-## Traps
-
-- **`MasterKey` and `FileKey` are NOT Clone;** all intermediate key buffers are `Zeroizing`; no panics in crypto paths (everything returns `Result`). The recovery phrase IS the master secret.
-- **A wire-format change is a coordinated migration, never a refactor.** A new derivation gets a new info string (`v2`); never change an existing one. Every HKDF info/AAD/salt label
-  is listed in `label_table_tests.rs` and distinct. New vectors need an independent generator (Python) and the drift guards.
-- **Chunk format:** v1 frames have no AAD; v2 binds position (STREAM). New files are written as v1 during the rollout (`WRITE_FORMAT`, task 1908); every reader reads both.
-  Every content reader REQUIRES the pin (`ExpectedChunkFormat` from `decrypt_file_metadata[_with_key]`, never a server value); `V2` only from an EXISTING file's authenticated
-  metadata, never for a NEW file. `finish()` is the integrity guard for completeness: call it and DISCARD all plaintext on any `Err`. The one exception is
-  core's `RangeSession` (in code `beebeeb_transfer::range_session`, over `RangeOpener`): it may release each frame once `RangeOpener` has authenticated it at
-  the requested index, while its sink holds one recorded version; 'whole', in-sync and agreed content still require the range session's only 'whole' result
-  (`range_session` → `RangeOutcome::Whole`; the contract's `RangeSession::finish()`), and after any failure the sink is not reused until it is
-  verifiably empty. Every other reader keeps the whole-file rule. v1 frames carry no position, version or truncation binding, the same as the whole-file
-  read. Invariants: `docs/agent-notes.md` (range reads I1–I9). Adoption checklist: `docs/agent-notes.md` → "Chunk format v2".
-- **Resume:** `resume_policy(stored, writing)` continues a session ONLY for `(V1Legacy, V1Legacy)`; otherwise abandon and restart from chunk 0 in a new session, never PUT into the old one.
-- **`MAX_CHUNK_SIZE` = 256 MiB** rejects a hostile server-dictated size (client OOM guard). Legacy decrypt paths write a sibling `.tmp` and rename on full success only.
-- **Search index:** `DEFAULT_NUM_SHARDS = 64` (WASM accepts at most 64); the shard key label is `beebeeb-search-index-shard-v1`.
-- **Design files live in the workspace `../../design/hifi/`; never copy them into this public repo** (a snapshot once published a false external-audit claim; the Claims guard fails on those strings).
+- `beebeeb-core`: cryptography, file formats, key types, and pure rules.
+- `beebeeb-types`: shared types.
+- `beebeeb-api`: I/O-free typed API and account flows.
+- `beebeeb-client`: native transport, per-app sessions, and product services.
+- `beebeeb-store`: native local store.
+- `beebeeb-transfer`: upload and download drivers, including range reads (`range_session` over core's
+  `RangeOpener` and `RangePlanner`).
+- `beebeeb-backup`: the desktop and CLI backup pass over a client's `BackupHost`, on core's pure
+  `backup` rules.
+- `beebeeb-wasm` and `beebeeb-uniffi`: web, Swift, and Kotlin bindings.
+- `beebeeb-upload` and `beebeeb-sync`: legacy compatibility crates; do not build new products on them.
 
 ## Never break
 
-The rules whose breakage costs data, a key, a credential or a user. One line each; the detail is in `docs/agent-notes.md`.
+The rules whose breakage costs data, a key, a credential or a user. The detail is in
+[docs/agent-notes.md](docs/agent-notes.md), [docs/legacy-formats.md](docs/legacy-formats.md) and
+[docs/client-rules.md](docs/client-rules.md).
 
-- `UpperRepair` rows: Core never writes under it and never migrates a row; a file is READ-ONLY if its name or ANY version reports it (SF-0002).
-- Item ids: F ids are never derived (key from an L8 owner envelope or L7 child wrap); non-canonical id text is `InvalidInput`, never treated as an owner id.
-- `folder_key_id` is not secret and must NEVER be used as a key; a new derivation gets a new info string (`v2`), never a change to this one.
-- A client told to restart MUST first `POST /api/v1/files/{id}/upload/abandon`; never PUT into the old session again, never fall back to the old session.
+Formats and keys:
+
+- New files and new file versions are written as chunk format v2 with purpose subkeys (Guus's ruling of
+  2026-11-07, which replaced the 2026-10-17 rule that a new file never is). The gate is on the clients:
+  no client pins this release until web and iOS read v2 files and subkey-sealed thumbnails and the
+  server's `BB_1908_SWITCH_GATE` is on. Readers keep only the compatibility paths in
+  [docs/legacy-formats.md](docs/legacy-formats.md).
+- A format, label, AAD, key derivation, info-string, point-encoding or binding change is a coordinated
+  cross-client migration, never a refactor. A new derivation gets a new info string (`v2`); never change
+  an existing one, never reinterpret existing bytes. Every label is listed in `label_table_tests.rs`.
+- Writers record the format they wrote; never drop a recorded 2; an unknown recorded value is an error,
+  never a fallback to detection. Never record `chunk_format: 2` on a file id with v1 history: its new
+  versions are v2 under the kept unrecorded pin (`chunk_format_for_pin`) and MUST carry the version
+  commitment. A replacement's counter is above both the served record's and the store's high-water mark.
 - v2 frames never use the raw file key (key separation); `version_id` is frame 0's random 96-bit nonce.
-- Writers record the format; never upgrade a file id with v1 history, never drop a recorded 2; unknown recorded values are errors, never fallback to detection.
-- Generic no-AAD `encrypt_chunk`/`decrypt_chunk` stays for key wrap, search shards, v1 content, never to SEAL a name/thumbnail/note under a per-file key.
-- Read the content pin with `decrypt_file_metadata[_with_key]` (never `decrypt_name_metadata`, never a server field) and pass `chunk_format` on.
-- Take the chunk format from the pin, never from a server value; prefer `version_id()` over re-reading chunk 0's first 12 bytes.
-- `V2` only from an EXISTING file's authenticated metadata; a NEW file never does (lead ruling 2026-10-17); each client tests its new-file path never passes `V2`.
-- Notes: write with `encrypt_note_for(file_key, text, pin)`, read with `decrypt_note`; never `encrypt_metadata`/`encryptFilename`/`encrypt_chunk` for a note.
-- A request row's `C` (`open_request_upload`) is decrypt-only: never seal a name, note or thumbnail under it. A rename seals via `seal_request_rename` / `sealRequestRename` (the §15 string-derived key); a request row has NO note sealer (notes are not writable on a request row).
-- UniFFI: a request-row result never carries a raw key, but raw key bytes still cross FFI in `open_request_upload` (the request content key `C`), `derive_master_key` (`MasterKeyResult.key`), `derive_file_key`, `derive_request_wrap_key`, `recover_from_phrase`, `derive_share_key`, `derive_x25519_private`, `x25519_shared_secret`, `transfer_derive_key` and `MasterKeyHandle::export_for_keychain`. For a request row these are DECRYPT-ONLY: never seal a name, note or thumbnail under `C`. Single-consumer contract: a handle is an ordered cursor driven from ONE sequence.
-- Folder keys are random (`FileKeyHandle.generate`, OS CSPRNG), never derived from the master key; `key_id` is the one-way folder-key id, never the key itself.
-- Canonical ids are UTF-8. Never fall back to the legacy file-key custody opener after authentication fails (L6).
-- Owner file-key wraps (L8) use the same textual encoding as L6 custody, never the binary UUID encoding of L7.
-- `ClientMetaKey`: the derived key is never exported (a `FileKey` would also fit `encrypt_chunk`); `current_file`/`detail` are discarded from S1, never sealed.
-- `auth_flow`: no plaintext-password step-up (`opaque_unavailable` is an error, never `/auth/confirm`); `ksf_version` only from the server; a `ConfirmToken` is only ever attached to its consuming request, never returned as a value in Rust; the approval payload is sealed with `cli_auth::encrypt_for_requester` (HKDF form only). UniFFI/WASM hand the session token and the confirm token on its consuming request to the platform transport by design (`HttpRequest::confirm_token_header`, the field is crate-only); the device-approval master key crosses UniFFI only as a `MasterKeyHandle` (WASM: raw, its convention). Passkey add/remove take the password, never a token.
-- A wire-format, info-string or point-encoding change is a coordinated cross-client migration, never a refactor.
-- `MIN_LENGTH_FLOOR = 12` is a floor applied inside `from_server` (the server may raise, never lower); no hard-coded fallback policy.
-- Breach check: the SHA-1 suffix never leaves the device. The HTTP call stays in each client, to Beebeeb's own endpoint, never the public HIBP API (task 0995).
-- `X-Beebeeb-Capabilities` goes on grant/init requests ONLY, never globally. A session's transport never changes after init, so there is no mid-session API chunk.
-- Direct transfer failures carry a code and never a URL; the planner is a handle (one sequence's cursor).
-- The presigned link is never a string past the binding: `WasmSignedUrl` and `DirectSignedUrl` print scheme and host only.
-- Never retry into a sink that returned `DirectFailedAfterWrite`; after `UseApi` or any `Err` use a FRESH sink.
-- Direct-transfer clients write `<path>.bbtmp` and rename, never stdout straight to the driver.
-- Passphrase NFC normalization never grows an unwiped secret buffer; core never seals a name its own opener refuses (`kdf::sanitize_actor_name`).
-- `kdf::open_legacy_child_key` refuses a 32-byte UTF-8 plaintext, so a name or label sealed under the same folder key can never be served as a child key.
-- Direct vectors: add rows in the generator, never in the JSON (`check-direct-vectors-generated.sh` fails on hand edits); the backup vectors likewise (`check-backup-vectors-generated.sh`).
-- Backups (LD-0113): the root is the `backups_root` row, never a name or a path; a backup is written only by its device's own pass (the app and drive rules refuse every other create, write, rename and move under the root, and every change to a device's `.device.json`; the pass never goes through them); the pass never writes, moves, deletes, stages or hydrates a source file; a record at or under a key the walk did not look into (whatever its normal form or case) is never gone and never a move source; a pass marks a record only while it still names the remote id the pass read, and re-keys one only while it does or no record names that remote file (compare-and-set); only a complete remote listing marks anything removed elsewhere, and a removed file that changes comes back as a new file, never a version of the deleted one.
-- Backups (LD-0121/0123): a rebuilt record needs `uploaded_at > modified + offset + margin` (10-minute floor with no offset), never "uploaded after the device's mtime" alone; `backup_stop`'s `last_pass_at` is on the server's clock, never the device's; a stopped backup never fills the account up again by itself.
-- Backups (LD-0121, Amendment 12d): a pass reads notices from `notices_since(last_pass_at)` with the 10-minute overlap and decides with `backup_pass_gate_v2`, never the strict v0.2.3 filter; the acknowledged ids it returns are stored in the same write as the stops, never before them, and an empty id never acknowledges anything.
-- Windows: a create, truncate, replace or delete by name never touches an entry whose own long name differs (an 8.3 short-name alias): `path_safety::short_name_alias`; `safe_child`/`safe_rel_join`/`default_output_path` refuse it, and every core writer goes through `path_safety::TempSibling` (exclusive temp; publish never replaces on Windows) (task 2404).
-- Passkey vault: web's format byte for byte (`test-vectors/passkey_vault.json` from web's TS); native hmac-secret callers pass `hmac_secret_salt()`, PRF-input APIs `prf_eval_input()`; no non-PRF fallback key, and no flow returns a PRF output, wrap key or blob to its caller; the server's RP id must equal the host's `ExpectedRp` (`localhost` only in a debug build or with the development flag), and the PRF probe never asks for less user verification than the creation.
-- Never release plaintext before `finish()` outside `RangeSession` (`beebeeb_transfer::range_session`); `RangeSession` releases only `RangeOpener`-authenticated frames of one recorded version (`docs/agent-notes.md`, I1–I9).
+- File-content readers take the format and version commitment from authenticated metadata
+  (`decrypt_file_metadata[_with_key]`, never `decrypt_name_metadata`, never a server field), pass
+  `chunk_format` on, and prefer `version_id()` over re-reading chunk 0's first 12 bytes. They finish
+  authentication before publishing plaintext: call `finish()` and discard all plaintext on any `Err`.
+  Every binding decryptor takes that decrypted record (`WasmChunkDecryptor`, `ChunkDecryptorHandle`) or
+  its fields (`for_version*`); a missing record or half a commitment is refused. A v2 version opens only
+  against its record's commitment (Guus's ruling of 2026-11-07): a `chunk_format: 2` record without one
+  opens nothing, an unrecorded one opens v1 only, and the commitment-less constructors read v1 only.
+  The one exception is `beebeeb_transfer::range_session`: it releases only frames that `RangeOpener`
+  authenticated at the requested index, for one recorded version, and only its `RangeOutcome::Whole`
+  result means whole content; after any failure its sink is not reused until it is verifiably empty.
+  Its invariants I1 to I9 are in [docs/agent-notes.md](docs/agent-notes.md).
+- Resume: `resume_policy` continues a stored session only for `(V1Legacy, V1Legacy)`. Otherwise the
+  client MUST first `POST /api/v1/files/{id}/upload/abandon` and restart from chunk 0 in a new session;
+  never PUT into the old session again, never fall back to it. The one exception is a v2 upload
+  continuing itself: `beebeeb_transfer::background` resumes its own persisted session, same `version_id`
+  and counter, from the next unstaged chunk (`resume_encryptor`) only when the restored state holds the
+  whole commitment, the source identity matches and `staged_plaintext_matches`; anything else is
+  `AbandonAndRestart`. A staged frame reaches the OS only after the state naming it was persisted
+  (`to_bytes`), so a re-staged index never has a second frame on the server.
+- Generic no-AAD `encrypt_chunk`/`decrypt_chunk` stays for key wraps, search shards and v1 content, never
+  to seal a name, thumbnail or note under a per-file key. Notes are written with
+  `encrypt_note_for(file_key, text, pin)` and read with `decrypt_note`, never with
+  `encrypt_metadata`/`encryptFilename`/`encrypt_chunk`.
+- A request row's `C` (`open_request_upload`) is decrypt-only: never seal a name, note or thumbnail under
+  it. A rename seals via `seal_request_rename` / `sealRequestRename`; a request row has no note sealer.
+- `UpperRepair` rows: core never writes under it and never migrates a row; a file is read-only if its
+  name or any version reports it (SF-0002).
+- Item ids: F ids are never derived (the key comes from an L8 owner envelope or an L7 child wrap);
+  non-canonical id text is `InvalidInput`, never treated as an owner id. Canonical ids are UTF-8.
+- Owner file-key wraps (L8) use the same textual encoding as L6 custody, never the binary UUID encoding
+  of L7.
+- Never fall back to a legacy opener after a purpose-bound one fails (the L6 custody opener, the legacy
+  child, folder-key and invite openers). `kdf::open_legacy_child_key` refuses a 32-byte UTF-8 plaintext,
+  so a name or label sealed under the same folder key is never served as a child key.
+- Folder keys are random (`FileKeyHandle.generate`, OS CSPRNG), never derived from the master key.
+  `folder_key_id` (`key_id`) is the one-way folder-key id: not secret, and never used as a key.
+- `ClientMetaKey`: the derived key is never exported (a `FileKey` would also fit `encrypt_chunk`);
+  `current_file`/`detail` are discarded from S1, never sealed.
+- Safety numbers: there is one format. The number two people compare for a share comes from
+  `share_flow::safety` (`shareSafetyNumber`, `share_safety_number`): both user ids and the exact key the
+  share was sealed to, with the own key derived from the master key; its vectors are
+  `test-vectors/safety_number.json`. A "compared" mark keeps `share_flow::safety::key_fingerprint`. Never
+  add a second safety number or key fingerprint: two formats give two people different digits.
+  Emails go through `normalize_email` (Rust `str::trim`, then lower case), never a client's own:
+  JavaScript's `trim` strips U+FEFF and keeps U+0085.
 
-## How we work
+Secrets, input and bindings:
 
-Workspace `CLAUDE.md` → "How we work" is the rule set (evidence, design before code, done, parallel agents). Here: the truth lines above; design before code means the
-spec or decision note changes before the primitive. Clients adopt core changes by bumping their pin (server `CORE_REV`, cli `rev`, web WASM via `make wasm-sync`).
+- Archives are hostile input (`archives`). Every entry name goes through `archives::names`, never a
+  hand-joined path, so a `..` path is never written; the zip central directory is authoritative (a
+  local header that disagrees with it is refused); a file is published only after its entry reads
+  `Verified` (zip: CRC-32, and for AES the authentication code; a tar entry has no checksum of its
+  own, and a tgz's gzip CRC-32 covers the whole stream, so a mismatch fails the run as `Damaged`
+  after the files before it were published); a driver stages extracted bytes under a name the sync
+  engine ignores (`<name>.bbtmp`, never the final name), renames or uploads only on `FileEnd`, and
+  deletes on `FileSkipped`, cancel or failure (the native service stages 0600
+  `archive-<instance>-<run>-<node>.bbtmp`); `PieceStep::Data` and `ExtractStep::FileData` print
+  their length, never bytes; a ZipCrypto entry proves a password only when its CRC covers 4 bytes or more
+  (an empty one passes any key its check byte lets through); a password is an `ArchivePassword`
+  (zeroized, not `Clone`, never logged, never stored); the limits in `archives::limits` are core's,
+  never raised by a client; hostile numbers use checked arithmetic. The old extension-based `archive`
+  reader is gone; never bring back a second archive parser.
+- `MasterKey` and `FileKey` are not `Clone`; intermediate key buffers are `Zeroizing`; crypto paths
+  return `Result` and never panic. Secrets are wiped on drop and never appear in errors or debug output.
+- Hostile sizes and counts use checked arithmetic and return errors; `MAX_CHUNK_SIZE` (256 MiB) rejects
+  a hostile server-dictated chunk size.
+- Windows: a create, truncate, replace or delete by name never touches an entry whose own long name
+  differs (an 8.3 short-name alias). `path_safety::short_name_alias` answers it;
+  `safe_child`/`safe_rel_join`/`default_output_path` refuse such a name; core's decrypt-to-file paths
+  and chunk writer go through `path_safety::TempSibling` (exclusive temp; publish never replaces on
+  Windows), and `TrustedDirectory` never replaces through a short name.
+- Passphrase NFC normalization never grows an unwiped secret buffer; core never seals a name its own
+  opener refuses (`kdf::sanitize_actor_name`).
+- `MIN_LENGTH_FLOOR = 12` is a floor applied inside `from_server` (the server may raise it, never lower
+  it); there is no hard-coded fallback policy.
+- Breach check: the SHA-1 suffix never leaves the device. The range request goes to Beebeeb's own
+  endpoint, never the public HIBP API, and is made outside `beebeeb-core`.
+- New product operations use opaque handles and purpose-specific APIs. The default UniFFI surface passes
+  no raw key bytes. Behind the default-off `legacy-bindings` feature, raw key bytes still cross FFI in
+  `open_request_upload` (the request content key `C`), `derive_master_key`, `derive_file_key`,
+  `derive_request_wrap_key`, `recover_from_phrase`, `derive_share_key`, `derive_x25519_private`,
+  `x25519_shared_secret`, `transfer_derive_key` and `MasterKeyHandle::export_for_keychain`: a migration
+  target, not precedent. A handle is an ordered cursor driven from one sequence.
+- Device link: the QR path takes only the scanned text (`DeviceLinkQr::parse`), never session,
+  fingerprint or name bytes from a host or the server; on that path the typed code gives no protection
+  against a substituted key. The QR (`beebeeb-link:v2:`) carries the canonical device name: the approver
+  shows the scanned name, never the relay's, and `seal_for_new_device` refuses a relayed name that differs. The typed-code path is SPAKE2 with key confirmation bound to the session, a fresh
+  salt and the canonical device name (`canonical_device_name`): the approver checks the new device's
+  tag before it seals anything and denies the link when it fails; the new device checks the approver's
+  tag before it opens. spake2 0.4 keeps unwiped copies of the code and its scalars (a recorded
+  residual, in `device_link.rs`). Device-link labels change only as a new `v3`, never in place.
+- Records that hold a secret redact it in `Debug` (`redacted_debug!` in `beebeeb-api`, `SecretString`
+  / `SecretBytes` across UniFFI); a secret a person types or copies is also `Zeroizing`. A header value
+  prints only when its name is in `DEBUG_VISIBLE_HEADERS`.
+- The local store (`beebeeb-store`) caches decrypted names, MIME types, sizes and the tree in plaintext
+  and holds no key or token; on Unix the database and its `-wal`/`-shm` are 0600. The Apple
+  data-protection class is the app's to set.
+- Native sign-in policy stays in `beebeeb-client`: password and any authenticator produce a locked
+  session, then device approval or a passkey/recovery key plus email code supplies the account key,
+  and key proof completes installation. Signup is web-only for these services (the server answers
+  `signup_web_only`); `signup_flow` is a separate sans-IO signup, and the server decides which client
+  may run it.
+- `auth_flow` (the sans-IO flows in `beebeeb-core`): no plaintext-password step-up (`opaque_unavailable`
+  is an error, never `/auth/confirm`); `ksf_version` only from the server; a `ConfirmToken` is only ever
+  attached to its consuming request, never returned as a value in Rust; the approval payload is sealed
+  with `cli_auth::encrypt_for_requester` (HKDF form only). UniFFI/WASM hand the session token and the
+  confirm token on its consuming request to the platform transport by design
+  (`HttpRequest::confirm_token_header`, the field is crate-only); the device-approval master key crosses
+  UniFFI only as a `MasterKeyHandle` (WASM: raw, its convention). Passkey add/remove take the password,
+  never a token.
+- Shares have one implementation, `share_flow`: the native share calls (`beebeeb-client` `shares`) run its
+  flows and send each request as the flow built it (`beebeeb_api::FlowRequest`), never a hand-built share
+  body, and never derive a foreign item's key to share it. A 403 is a refusal with the server's code
+  (`ShareFlowError::Forbidden`, UniFFI `ShareRefused`), never the session or a wrong password.
+- Passkey vault (`passkey`): web's format byte for byte (`test-vectors/passkey_vault.json` from web's
+  TS); native hmac-secret callers pass `hmac_secret_salt()`, PRF-input APIs `prf_eval_input()`; no
+  non-PRF fallback key, and no flow returns a PRF output, wrap key or blob to its caller; the server's
+  RP id must equal the host's `ExpectedRp` (`localhost` only in a debug build or with the development
+  flag), and the PRF probe never asks for less user verification than the creation. `passkey_seal` is
+  a different, 61-byte format: neither opens the other's blob, and bytes are never reinterpreted.
+- Session storage has shared owner/key/API/generation state and one `session.token.{app_id}` per app.
+  App sign-out removes one token; whole-device sign-out uses the service coordinator.
 
-## Graphify and shared docs
+Transfers:
 
-Knowledge graph at `graphify-out/`. Architecture question: `graphify query "<question>"` / `graphify explain <symbol>` /
-`graphify path "<A>" "<B>"`; overview: `graphify-out/GRAPH_SUMMARY.md` (at most 3k tokens); never read `GRAPH_REPORT.md` whole.
-Run `graphify update .` for your own navigation; never commit `graphify-out/` on a feature branch (the lead regenerates it on main).
-When you add/change/remove endpoints, types, build commands or dependencies, update the matching skill in the workspace `.claude/skills/`
-(crypto primitives, key types and the encryption flow are documented in this repo's `docs/agent-notes.md`).
+- `X-Beebeeb-Capabilities` goes only on the requests whose server behaviour it gates
+  (`Endpoint::capabilities`), never globally. A session's transport never changes after init, so there
+  is no mid-session API chunk.
+- Direct-transfer failures carry a code and never a URL; the planner is a handle (one sequence's
+  cursor). The presigned link is never a string past the binding: `WasmSignedUrl` and
+  `DirectSignedUrl` print scheme and host only.
+- Never retry into a sink that returned `DirectFailedAfterWrite`; after `UseApi` or any `Err` use a fresh
+  sink. Direct-transfer clients write `<path>.bbtmp` and rename, never stdout straight to the driver.
+
+Generated files, backups and this public repo:
+
+- Generated bindings and vector JSON are generated, not hand-edited. The direct, range, backup,
+  safety-number and name-clash vectors, and the case-folding table, each have a drift guard that fails
+  on a hand edit: add rows in the generator, never in the JSON.
+- Two names clash when their `name_tag::normalize_for_tag` forms are equal, never by lower case alone.
+  A clash's second name comes from `name_clash` (`numbered_name` in a prompt, `drive_conflict_name` in
+  the drive) and from the incoming name only, never from the existing item's.
+- Backups: the root is the `backups_root` row, never a name or a path; a backup is written only by its
+  device's own pass (the app and drive rules refuse every other create, write, rename and move under
+  the root, and every change to a device's `.device.json`; the pass never goes through them); the pass
+  never writes, moves, deletes, stages or hydrates a source file; a record at or under a key the walk
+  did not look into (whatever its normal form or case) is never gone and never a move source; a pass
+  marks a record only while it still names the remote id the pass read, and re-keys one only while it
+  does or no record names that remote file (compare-and-set); only a complete remote listing marks
+  anything removed elsewhere, and a removed file that changes comes back as a new file, never a
+  version of the deleted one. Details are in [docs/agent-notes.md](docs/agent-notes.md).
+- Backups, rebuild and stop: a rebuilt record needs `uploaded_at > modified + offset + margin` (a
+  10-minute floor with no offset), never "uploaded after the device's mtime" alone; `backup_stop`'s
+  `last_pass_at` is on the server's clock, never the device's; a stopped backup never fills the account
+  up again by itself.
+- Backups (LD-0121, Amendment 12d): a pass reads notices from `notices_since(last_pass_at)` with the
+  10-minute overlap and decides with `backup_pass_gate_v2`, never the strict v0.2.3 filter; the
+  acknowledged ids it returns are stored in the same write as the stops, never before them, and an empty
+  id never acknowledges anything.
+- Design files live in the workspace; never copy them into this public repo (a snapshot once published
+  a false external-audit claim, and the claims guard fails on those strings).
+
+All consumer boundaries, including the web exception and version-pin rule, are in
+[docs/client-rules.md](docs/client-rules.md). Detailed format and key notes are in
+[docs/agent-notes.md](docs/agent-notes.md).

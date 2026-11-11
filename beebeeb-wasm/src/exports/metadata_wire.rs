@@ -23,11 +23,8 @@ use wasm_bindgen::prelude::*;
 /// value sealed for one field as if it were another. The fields are kept
 /// apart by PURPOSE SUBKEY: one per-file HKDF subkey per purpose
 /// (`beebeeb/name/v1`, `beebeeb/thumb/v1`, `beebeeb/note/v1` in core's
-/// `encrypt`). Subkeys apply to a file whose metadata records a v2 pin —
-/// every name, thumbnail and note write for that file is subkey-sealed — and
-/// to every write once the gated core `WRITE_FORMAT` switch flips. Until then
-/// core's `METADATA_SEAL_WRITE` is `Legacy`, so a non-v2 file's names,
-/// thumbnails and notes are sealed under the raw file key.
+/// `encrypt`). New names, thumbnails and notes are subkey-sealed. Raw-key
+/// envelopes remain readable only as unprotected legacy metadata.
 ///
 /// Use `encryptNameForNewItem` / `encryptNameForTarget` for a name,
 /// `encryptThumbnailForNewItem` / `encryptThumbnailForTarget` for a

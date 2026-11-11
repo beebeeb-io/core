@@ -16,9 +16,16 @@ hkdf = "0.12"
 # hkdf already depends on, so the lockfile gains no new package.
 hmac = "0.12"
 sha2 = "0.10"
-# SHA-1 ONLY to address the k-anonymity breach corpus (onboarding::breach): the corpus is
-# keyed by SHA-1 prefix. Never used for integrity or authentication.
+# SHA-1 for the k-anonymity breach corpus (onboarding::breach): the corpus is keyed by
+# SHA-1 prefix. Not used for integrity or authentication.
 sha1 = "0.10"
+# HMAC-SHA1 for WinZip AES archive entries only (archives::winzip_aes): PBKDF2-HMAC-SHA1
+# turns an archive password into its keys, and HMAC-SHA1 authenticates each entry, as
+# the format fixes. The lockfile gains no package: p256 already builds hmac 0.13, and
+# sha1 0.11 was locked for the tests (zip 9's `aes-crypto`) and now builds in production
+# too. `zeroize` wipes each hash state and input buffer on drop.
+archive-hmac = { package = "hmac", version = "0.13", features = ["zeroize"] }
+archive-sha1 = { package = "sha1", version = "0.11", default-features = false, features = ["zeroize"] }
 zeroize = { version = "1", features = ["derive"] }
 # Constant-time key comparison (task 2255, L9 legacy folder-key proof).
 subtle = "2.6"
@@ -35,6 +42,15 @@ x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
 # crypto-bigint 0.7 (RUSTSEC-2026-0387); `getrandom` supplies `Generate::generate()`
 # (the OS CSPRNG) now that `SecretKey::random` takes a rand_core 0.10 RNG.
 p256 = { version = "0.14", features = ["ecdh", "getrandom"] }
+# SPAKE2 (asymmetric A/B roles: new device = A, approver = B) for the
+# camera-less device-link path. The relay sees only one-shot PAKE messages and
+# never receives a password verifier. spake2 0.4 does not wipe its copy of the
+# code or its scalars: the residual is recorded in device_link.rs.
+spake2 = "0.4"
+# The same curve25519-dalek spake2 and x25519-dalek already lock: the device
+# link refuses a small-order or non-canonical peer SPAKE2 element before the
+# exchange. No new package.
+curve25519-dalek = { version = "4.1", default-features = false, features = ["zeroize"] }
 reed-solomon-erasure = "6"
 serde.workspace = true
 serde_json.workspace = true
@@ -49,18 +65,37 @@ webp = { version = "0.3", optional = true, default-features = false }
 
 # rusqlite bundles C SQLite (used only by `fp_cache`) and cannot target wasm32.
 # Gate it to non-wasm targets so `beebeeb-wasm` builds in place. See task 0653.
+# Its default features stay off: `ffi-sqlite-wasm-rs` would only add a second,
+# never-built SQLite (for wasm32) to every lockfile; `cache` is the statement
+# cache behind `prepare_cached`.
 # rayon (task 0806: parallel `decrypt_names`) is thread-based and likewise can't
 # target wasm32 — `decrypt_names` falls back to a sequential iterator on wasm.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.41", default-features = false, features = ["bundled", "cache"] }
 rayon = "1"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.4", features = ["fs"] }
+
+# The Windows trusted publisher (path_safety/publish_windows.rs): open, create,
+# rename and delete relative to handles. Pinned; 0.61.2 is already in the
+# lockfile, so no new package.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = [
+    "Wdk_Foundation",
+    "Wdk_Storage_FileSystem",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+] }
 
 [features]
 default = ["webp-encode"]
 webp-encode = ["webp"]
 # Test-only seams, never in a shipped client build:
 # - `ChunkEncryptor::with_format`: the binding crates' TESTS write v2 frames
-#   while `WRITE_FORMAT` is still v1 (task 1908 read-only rollout);
+#   without exposing a production v1 writer after the v2 write switch;
 # - `ChunkEncryptor::with_vector_nonces`,
 #   `encrypt::encrypt_name_with_chunk_format_and_nonce` (task 1943) and
 #   `encrypt::encrypt_name_for_with_nonce` (task 1958): fixed nonces for the
@@ -72,3 +107,8 @@ test-support = []
 hex = "0.4"
 # Differential test only: the authority check must agree with the WHATWG parser reqwest connects with.
 url = "2"
+# Archive tests only: zip 9's AES and ZipCrypto writers build the encrypted
+# fixtures, and its reader is the independent one-shot reference that the
+# archive reader's output is compared with. Production never decodes
+# through zip (it only writes folder downloads).
+zip = { version = "9", default-features = false, features = ["deflate", "aes-crypto"] }

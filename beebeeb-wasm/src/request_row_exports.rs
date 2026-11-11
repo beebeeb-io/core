@@ -113,10 +113,10 @@ pub fn resolve_request_row(
     )
     .map_err(|e| JsError::new(&e.to_string()))?;
     let content = WasmRequestContentReader {
-        inner: beebeeb_core::request_content::RequestContentReader::new(
+        inner: beebeeb_core::request_content::RequestContentReader::for_metadata(
             row.content_key,
             item_id.to_string(),
-            row.name.chunk_format,
+            &row.name,
         ),
     };
     let obj = js_sys::Object::new();
@@ -142,6 +142,22 @@ pub fn resolve_request_row(
             let rt = js_sys::Object::new();
             set(&rt, "origin", JsValue::from_str(target.origin().as_str()))?;
             set(&rt, "pin", JsValue::from_f64(target.pin().as_u8() as f64))?;
+            set(
+                &rt,
+                "versionId",
+                match target.version() {
+                    Some(version) => js_sys::Uint8Array::from(version.version_id.as_slice()).into(),
+                    None => JsValue::NULL,
+                },
+            )?;
+            set(
+                &rt,
+                "versionCounter",
+                target
+                    .version()
+                    .map(|version| JsValue::from_f64(version.counter as f64))
+                    .unwrap_or(JsValue::NULL),
+            )?;
             rt.into()
         }
         None => JsValue::NULL,
@@ -177,4 +193,30 @@ pub fn seal_request_rename(
         beebeeb_core::chunk_stream::ExpectedChunkFormat::from_u8(pin).map_err(|e| JsError::new(&e.to_string()))?;
     beebeeb_core::rename::encrypt_name_for_request_rename(&master, item_id, pin, filename, mime_type.as_deref())
         .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Protected request-row rename preserving the resolver's version fields.
+#[wasm_bindgen(js_name = sealRequestRenameWithVersion)]
+pub fn seal_request_rename_with_version(
+    master_key: &[u8],
+    item_id: &str,
+    pin: u8,
+    version_id: &[u8],
+    version_counter: f64,
+    filename: &str,
+    mime_type: Option<String>,
+) -> Result<String, JsError> {
+    let master = master_key_from_slice(master_key)?;
+    let pin =
+        beebeeb_core::chunk_stream::ExpectedChunkFormat::from_u8(pin).map_err(|e| JsError::new(&e.to_string()))?;
+    let version = super::version_commitment_from_js(version_id, version_counter)?;
+    beebeeb_core::rename::encrypt_name_for_request_rename_with_version(
+        &master,
+        item_id,
+        pin,
+        Some(version),
+        filename,
+        mime_type.as_deref(),
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
 }

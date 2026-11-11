@@ -59,7 +59,7 @@ fn salted_sas_differs_from_saltless_hkdf() {
     // binding wrapped the wrong one, the bytes would silently differ across
     // clients. Assert they are not equal so the distinction is load-bearing.
     let salted = derive_sas(&FIXED_SHARED, &FIXED_SESSION_ID);
-    let saltless = beebeeb_core::hash::derive_sas_bytes(&FIXED_SHARED, b"beebeeb-sas-v1", 4);
+    let saltless = beebeeb_core::hash::derive_sas_bytes(&FIXED_SHARED, b"beebeeb-sas-v1", 4).unwrap();
     assert_ne!(
         salted.to_vec(),
         saltless,
@@ -79,10 +79,10 @@ fn full_transfer_roundtrip_both_sides_agree() {
     let sender_pub = sender.public;
     let receiver_pub = receiver.public;
 
-    let sender_shared = derive_shared_secret(sender.secret, &receiver_pub);
-    let receiver_shared = derive_shared_secret(receiver.secret, &sender_pub);
+    let sender_shared = derive_shared_secret(sender.secret, &receiver_pub).unwrap();
+    let receiver_shared = derive_shared_secret(receiver.secret, &sender_pub).unwrap();
     assert_eq!(
-        sender_shared, receiver_shared,
+        *sender_shared, *receiver_shared,
         "ECDH shared secret must match both ways"
     );
 
@@ -112,8 +112,8 @@ fn sas_agrees_both_sides_and_detects_mitm() {
     let sender_pub = sender.public;
     let receiver_pub = receiver.public;
 
-    let sender_shared = derive_shared_secret(sender.secret, &receiver_pub);
-    let receiver_shared = derive_shared_secret(receiver.secret, &sender_pub);
+    let sender_shared = derive_shared_secret(sender.secret, &receiver_pub).unwrap();
+    let receiver_shared = derive_shared_secret(receiver.secret, &sender_pub).unwrap();
 
     let sender_sas = derive_sas(&sender_shared, &session_id);
     let receiver_sas = derive_sas(&receiver_shared, &session_id);
@@ -134,7 +134,7 @@ fn sas_agrees_both_sides_and_detects_mitm() {
     let receiver2 = generate_keypair();
     let receiver2_pub = receiver2.public;
     // Receiver ECDHs against the MITM key instead of the real sender key.
-    let receiver_under_mitm = derive_shared_secret(receiver2.secret, &mitm_pub);
+    let receiver_under_mitm = derive_shared_secret(receiver2.secret, &mitm_pub).unwrap();
     let mitm_sas = derive_sas(&receiver_under_mitm, &session_id);
     // The honest sender's SAS (sender_shared) must not match the tampered one.
     // (Equality here would be a ~1-in-2^32 fluke; assert inequality.)

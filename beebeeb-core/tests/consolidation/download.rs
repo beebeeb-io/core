@@ -4,7 +4,7 @@
 //! executes them against `beebeeb_core::download`, the promoted loop that
 //! `beebeeb-upload` now delegates to.
 
-use beebeeb_core::chunk_stream::{ChunkEncryptor, ExpectedChunkFormat};
+use beebeeb_core::chunk_stream::{ChunkEncryptor, ExpectedChunkFormat, VersionCommitment};
 use beebeeb_core::download::{
     DownloadFailure, checked_frame_size, chunk_offset, compute_chunk_boundaries, decrypt_chunks_to, decrypt_frames_to,
 };
@@ -21,7 +21,7 @@ fn plaintext_of(size: usize) -> Vec<u8> {
     (0..size).map(|i| (i % 251) as u8).collect()
 }
 
-fn frames_for(plaintext: &[u8], chunk_size: u64, seed: [u8; 32]) -> Vec<Vec<u8>> {
+fn frames_for(plaintext: &[u8], chunk_size: u64, seed: [u8; 32]) -> (Vec<Vec<u8>>, VersionCommitment) {
     let mut enc =
         ChunkEncryptor::for_push_with_file_key(FileKey::from_bytes(seed), FILE_ID, plaintext.len() as u64, chunk_size)
             .expect("encryptor");
@@ -29,8 +29,9 @@ fn frames_for(plaintext: &[u8], chunk_size: u64, seed: [u8; 32]) -> Vec<Vec<u8>>
         .chunks(chunk_size as usize)
         .map(|chunk| enc.push_chunk(chunk).expect("push_chunk").data)
         .collect();
+    let version = enc.version_commitment(None).expect("commitment");
     enc.finish().expect("finish");
-    frames
+    (frames, version)
 }
 
 fn u64_of(case: &Value, key: &str) -> u64 {
@@ -103,7 +104,7 @@ fn download_cases_match_core() {
                 let size = u64_of(case, "plaintext_size") as usize;
                 let chunk_size = u64_of(case, "chunk_size");
                 let plaintext = plaintext_of(size);
-                let mut frames = frames_for(&plaintext, chunk_size, KEY);
+                let (mut frames, version) = frames_for(&plaintext, chunk_size, KEY);
                 let count = case["chunk_count"]
                     .as_u64()
                     .map(|n| n as u32)
@@ -133,6 +134,7 @@ fn download_cases_match_core() {
                         &key,
                         FILE_ID,
                         ExpectedChunkFormat::Unrecorded,
+                        Some(version),
                         count,
                         &payload,
                         &mut out,
@@ -146,6 +148,7 @@ fn download_cases_match_core() {
                         &key,
                         FILE_ID,
                         ExpectedChunkFormat::Unrecorded,
+                        Some(version),
                         count,
                         &refs,
                         &mut out,

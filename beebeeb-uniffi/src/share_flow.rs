@@ -17,7 +17,8 @@ use crate::{FileKeyHandle, MasterKeyHandle};
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum ShareFlowFfiError {
-    /// `code` is `ShareFlowError::code()` (`plan_required`, `folder_keys_unavailable`, …).
+    /// `code` is `ShareFlowError::host_code()` (`plan_required`, `folder_keys_unavailable`, a 403's
+    /// own code such as `sharing_paused`, …).
     #[error("{code}")]
     Flow { code: String },
 }
@@ -25,7 +26,7 @@ pub enum ShareFlowFfiError {
 impl From<ShareFlowError> for ShareFlowFfiError {
     fn from(e: ShareFlowError) -> Self {
         Self::Flow {
-            code: e.code().to_owned(),
+            code: e.host_code().to_owned(),
         }
     }
 }
@@ -44,7 +45,7 @@ fn key32(bytes: &[u8]) -> Result<Zeroizing<[u8; 32]>, ShareFlowFfiError> {
 /// The key inside a handle, for one core call (keys cross UniFFI only as handles).
 pub(crate) fn master(handle: &MasterKeyHandle) -> Result<MasterKey, ShareFlowFfiError> {
     handle
-        .with_key(|k| MasterKey::from_bytes(k.to_bytes()))
+        .with_key(|k| MasterKey::from_bytes(*k.to_bytes()))
         .map_err(|_| ShareFlowError::InvalidInput("master key handle").into())
 }
 

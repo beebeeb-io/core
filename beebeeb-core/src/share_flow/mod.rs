@@ -52,6 +52,8 @@ pub mod request;
 pub mod safety;
 
 #[cfg(test)]
+mod error_tests;
+#[cfg(test)]
 mod folder_tests;
 #[cfg(test)]
 mod safety_tests;
@@ -89,7 +91,14 @@ pub enum ShareFlowError {
     /// A typed server refusal, one of [`SHARE_REFUSAL_CODES`].
     Refused(&'static str),
     NotFound,
+    /// A 401: the session is not accepted. A 403 is [`Self::Forbidden`].
     Unauthorized,
+    /// A 403 refusal, never the session: `code` is the server's own (`sharing_paused`,
+    /// `email_unverified`, `billing_read_only`, ...), or `forbidden` when the body names no code.
+    /// [`Self::code`] is `forbidden`; [`Self::host_code`] is `code`.
+    Forbidden {
+        code: String,
+    },
     RateLimited {
         retry_after_secs: u64,
     },
@@ -116,6 +125,7 @@ impl ShareFlowError {
             Self::Refused(code) => code,
             Self::NotFound => "not_found",
             Self::Unauthorized => "unauthorized",
+            Self::Forbidden { .. } => "forbidden",
             Self::RateLimited { .. } => "rate_limited",
             Self::Server { .. } => "server",
             Self::Protocol(_) => "protocol",
@@ -125,18 +135,25 @@ impl ShareFlowError {
         }
     }
 
+    /// The code a host maps to copy: the server's own for [`Self::Forbidden`], else [`Self::code`].
+    pub fn host_code(&self) -> &str {
+        match self {
+            Self::Forbidden { code } => code,
+            other => other.code(),
+        }
+    }
+
     /// The error for a non-2xx answer: a typed refusal keeps its code; otherwise by status.
     pub fn from_status(resp: &HttpResponse) -> Self {
-        let code = resp
-            .body
-            .get("code")
-            .and_then(|v| v.as_str())
-            .or_else(|| resp.body.get("error").and_then(|v| v.as_str()));
+        let code = body_code(resp);
         if let Some(known) = code.and_then(|c| SHARE_REFUSAL_CODES.iter().find(|k| **k == c)) {
             return Self::Refused(known);
         }
         match resp.status {
-            401 | 403 => Self::Unauthorized,
+            401 => Self::Unauthorized,
+            403 => Self::Forbidden {
+                code: code.filter(|c| is_wire_code(c)).unwrap_or("forbidden").to_owned(),
+            },
             404 => Self::NotFound,
             429 => Self::RateLimited {
                 retry_after_secs: resp.retry_after_secs.unwrap_or(30),
@@ -146,10 +163,28 @@ impl ShareFlowError {
     }
 }
 
+/// A refusal's code: `code`, else `error` (the server's two-field contract).
+pub(crate) fn body_code(resp: &HttpResponse) -> Option<&str> {
+    resp.body
+        .get("code")
+        .and_then(|v| v.as_str())
+        .or_else(|| resp.body.get("error").and_then(|v| v.as_str()))
+}
+
+/// A stable code, not text: the account-frozen 403 puts a sentence in `error`, which is never kept.
+fn is_wire_code(code: &str) -> bool {
+    !code.is_empty()
+        && code.len() <= 64
+        && code
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'.')
+}
+
 impl fmt::Display for ShareFlowError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidInput(why) => write!(f, "invalid_input ({why})"),
+            Self::Forbidden { code } => write!(f, "forbidden ({code})"),
             Self::Protocol(why) => write!(f, "protocol ({why})"),
             Self::Server { status } => write!(f, "server ({status})"),
             other => f.write_str(other.code()),
@@ -266,7 +301,7 @@ pub fn display_form(link: &str) -> String {
 
 /// Copy a master key into a value the flow owns (wiped on drop).
 pub(crate) fn own_master(master: &MasterKey) -> MasterKey {
-    MasterKey::from_bytes(master.to_bytes())
+    MasterKey::from_bytes(*master.to_bytes())
 }
 
 pub(crate) fn own_file_key(key: &FileKey) -> FileKey {

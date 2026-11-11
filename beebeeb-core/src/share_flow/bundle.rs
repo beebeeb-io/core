@@ -5,7 +5,7 @@
 //! CreateLink::bundle ──► POST /api/v1/shares
 //!     {share_type: "bundle", items: [{file_id, position, wrapped_file_key}], expires_in_hours?,
 //!      max_opens, passphrase?, token, owner_wrapped_key, owner_wrapped_token}
-//!   409 (untyped) ──► once more with a fresh token;  2xx ──► Created { /s/{token}#key={K_c} }
+//!   409 token collision ──► once more with a fresh token;  2xx ──► Created { /s/{token}#key={K_c} }
 //! ```
 //!
 //! One random `K_c` wraps every item's key (`nonce || ct`, no AAD); `K_c` and the token are wrapped

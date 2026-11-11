@@ -32,6 +32,7 @@ pub struct RequestContentReader {
     file_key: FileKey,
     file_id: String,
     pin: ExpectedChunkFormat,
+    version: Option<crate::chunk_stream::VersionCommitment>,
 }
 
 impl RequestContentReader {
@@ -42,6 +43,22 @@ impl RequestContentReader {
             file_key,
             file_id: file_id.into(),
             pin,
+            version: None,
+        }
+    }
+
+    /// Bind the reader to the authenticated metadata record for a current or
+    /// historical request-row version.
+    pub fn for_metadata(
+        file_key: FileKey,
+        file_id: impl Into<String>,
+        metadata: &crate::encrypt::NameMetadata,
+    ) -> Self {
+        Self {
+            file_key,
+            file_id: file_id.into(),
+            pin: metadata.chunk_format,
+            version: metadata.version,
         }
     }
 
@@ -66,7 +83,7 @@ impl RequestContentReader {
     /// (`open_next` does not advance `next_index` on an error), but the output
     /// must still be rebuilt from frame 0.
     pub fn decryptor(&self) -> ChunkDecryptor {
-        ChunkDecryptor::for_push_with_file_key(self.copy_key(), &self.file_id, self.pin)
+        ChunkDecryptor::for_version_with_file_key(self.copy_key(), &self.file_id, self.pin, self.version)
     }
 
     /// Random-access open of ONE content frame at `index` — no earlier frames
@@ -75,7 +92,8 @@ impl RequestContentReader {
     /// `format` and `version_id` must come from authenticated data, exactly as
     /// [`open_chunk`] documents. When the row's pin is
     /// [`ExpectedChunkFormat::V2`], a v1 `format` is refused: the name already
-    /// authenticated v2 for this row.
+    /// authenticated v2 for this row. A reader built without a version
+    /// commitment ([`Self::new`], or a record with none) refuses every v2 frame.
     pub fn open_frame(
         &self,
         version_id: &[u8],
@@ -88,6 +106,14 @@ impl RequestContentReader {
             return Err(CoreError::InvalidInput(
                 "request content reader: the row records chunk format 2; a v1 frame cannot be its content".into(),
             ));
+        }
+        match self.version {
+            Some(committed) if format != ChunkFormat::V2 || version_id != committed.version_id => {
+                return Err(CoreError::Decryption);
+            }
+            // The ruling of 2026-11-07: v2 content opens only against a commitment.
+            None if format == ChunkFormat::V2 => return Err(crate::chunk_stream::uncommitted_v2()),
+            _ => {}
         }
         open_chunk(&self.file_key, &self.file_id, version_id, index, is_last, format, frame)
     }

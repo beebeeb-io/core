@@ -36,6 +36,45 @@ python3 -I test-vectors/tools/make_backup_root_vectors.py test-vectors/consolida
 python3 -I test-vectors/tools/make_backup_plan_vectors.py test-vectors/consolidation/backup_plan.json
 ```
 
+`check_version_metadata.py` independently derives the file/name subkeys, opens
+the protected metadata vector with Python `cryptography`, and checks the exact
+`version_id` / `version_counter` plaintext shape:
+
+```sh
+python3 test-vectors/tools/check_version_metadata.py test-vectors/vectors.json
+```
+
+`check_key_proof.py` independently derives both X25519 public keys, the shared
+secret, HKDF MAC key and complete HMAC transcript for the key-proof vector:
+
+```sh
+python3 test-vectors/tools/check_key_proof.py test-vectors/vectors.json
+```
+
+`make_safety_number_vectors.py` independently writes `test-vectors/safety_number.json`, the one safety number
+(`share_flow::safety`: per party the key and the user id, then 5200 SHA-512 rounds with the key appended, as Signal
+does; the lower user id first) and the inputs core must refuse, with `hashlib` only. `share_flow::safety`'s own tests
+run every row; `check-safety-number-vectors-generated.sh` (CI, with `--self-test`) fails when the JSON is not
+byte-for-byte what the generator writes:
+
+```sh
+python3 -I test-vectors/tools/make_safety_number_vectors.py test-vectors/safety_number.json
+bash test-vectors/tools/check-safety-number-vectors-generated.sh
+bash test-vectors/tools/check-safety-number-vectors-generated.sh --self-test
+```
+
+`gen_name_clash_v1.py` writes `test-vectors/name_clash_v1.json`: numbered names (`report (2).pdf`), drive conflict
+names (`report (conflict, <device>).pdf`) and the normalised form that decides when two names clash. It uses only
+`unicodedata` and the simple case folding (statuses C and S) of `ucd/CaseFolding-17.0.0.txt`, never Python's full
+`str.casefold`. `gen_case_fold_table.py` writes core's folding table, `beebeeb-core/src/name_tag/case_fold.rs`, from the
+same Unicode file, at the version `unicode-normalization` pins. `scripts/check-test-vectors.sh` regenerates both and
+fails on a difference.
+
+```sh
+python3 -I test-vectors/tools/gen_name_clash_v1.py test-vectors/name_clash_v1.json
+python3 -I test-vectors/tools/gen_case_fold_table.py beebeeb-core/src/name_tag/case_fold.rs
+```
+
 `make_cli_auth_vectors.py` (task 2378) independently generates the CLI-auth handshake known answers (P-256 public keys,
 the ECDH X-coordinate, the HKDF-SHA256 key) in pure Python: affine P-256 arithmetic and the standard library's HMAC, no
 Rust and no third-party crypto. They are Rust constants in `beebeeb-core/tests/cli_auth_vectors.rs`, not JSON, so the
@@ -45,4 +84,20 @@ check compares the constants by name instead of rewriting a file (CI, with `--se
 python3 -I test-vectors/tools/make_cli_auth_vectors.py                 # prints the constants
 python3 -I test-vectors/tools/make_cli_auth_vectors.py --check beebeeb-core/tests/cli_auth_vectors.rs
 python3 -I test-vectors/tools/make_cli_auth_vectors.py --self-test beebeeb-core/tests/cli_auth_vectors.rs
+```
+
+`gen_archives_v1.py` writes `test-vectors/archives_v1.json` and the fixtures in `test-vectors/archives/`: what core
+must list for each archive (shown name, path, kind, size, protection, skip reason, or the refusal) and every archive
+word, from the archives design (§5.1, §6, §9), never from the Rust. It writes the fixtures byte by byte with no zlib
+(zlib and zlib-ng write different deflate streams; its deflate data is one fixed-Huffman block), then reads each back
+with Python's own `zipfile`, `tarfile` and `gzip`. The password fixtures come from 7-Zip and Info-ZIP
+(`make_archive_password_fixtures.sh`, salted at random), so the generator writes only their rows. Bombs are built in
+the tests, never committed. `beebeeb-core/tests/archives_vectors.rs` runs every row through core;
+`check-archives-vectors-generated.sh` (CI, with `--self-test`) fails when the JSON or a generated fixture is not
+byte-for-byte what the generator writes: add a fixture in the generator, never in the JSON.
+
+```sh
+python3 -I test-vectors/tools/gen_archives_v1.py test-vectors/archives_v1.json test-vectors/archives
+bash test-vectors/tools/check-archives-vectors-generated.sh
+bash test-vectors/tools/check-archives-vectors-generated.sh --self-test
 ```

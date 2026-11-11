@@ -7,6 +7,547 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - Unreleased
+
+This is a breaking pre-1.0 release. The changes below are grouped by the people who must act.
+
+### Native application maintainers
+
+- Regenerate Swift and Kotlin bindings and update exhaustive switches. The default UniFFI surface now
+  starts at `NativeClientHandle` and its opaque service handles. Raw-key functions and constructors,
+  raw OPAQUE/recovery helpers, `upload_encrypted_file`, and `download_and_decrypt_file` are available
+  only through the default-off `legacy-bindings` feature. Existing apps may enable it temporarily;
+  new apps must not. Native WebP users must select `beebeeb-uniffi/webp-encode` explicitly.
+- Supply a stable app id to `ClientConfig::new`. Session tokens are stored per app as
+  `session.token.{app_id}` while the owner, master key, API URL, generation, and device identity are
+  shared. App sign-out removes one token; whole-device sign-out removes all app tokens and shared
+  state through `ServiceCoordinator`.
+- Whole-device sign-out (`ServiceCoordinator::sign_out_device`, `sign_out_whole_device`) now removes
+  the device on the server before account work stops, then sends a logout. A 401 on that logout
+  counts as done. `SignOutFailure::Session` now means a real server or local failure.
+- Native device registration sends the hardware identity as `client_key`, so two devices on one
+  platform get separate device entries. Apps on one device share one entry.
+- Recovery readiness comes from the server, never the device clock. `RecoveryAttempt::waits()` is
+  true only while the server reports `pending`; call `recovery_status` to see the wait end. This
+  needs a server that reports `ready`: against an older server a no-wait attempt stays waiting.
+- Adopt the locked sign-in order: password, then the configured authenticator, yields a locked
+  session. Complete one of device approval, passkey plus email code, or recovery key plus email code,
+  then finish account-key proof. Email tickets are submitted at proof finish, not during password
+  login. Signup is web-only. Account replacement requires an explicit replacement method and a
+  confirmed last-device warning.
+- Add the configured Keychain access-group entitlement to every iOS app and extension sharing a
+  session. Secrets use a non-synchronizing, this-device-only, after-first-unlock Keychain item.
+- Update transfer integration: factories no longer accept caller-supplied master keys, clocks, or
+  Wi-Fi/staging policy. Load the session into `NativeClientHandle`, persist the new upload-staging
+  setting, and pass `NetworkSignal`. `UploadError` and download failures add a context-handoff case;
+  hand work to the main app with a fresh sink.
+- Update backup, contacts, sync, and File Provider wrappers. Asset snapshots are paged; Rust records
+  backup completion; contact services fetch keys themselves; the coordinator takes the shared store;
+  sync exposes snapshot refresh and gap recovery; File Provider records can mark undecryptable names.
+- Local store schema 3 adds paused/cancelled transfers, and schema 4 keys cache entries by authenticated
+  file/version identity. Do not roll a database opened by this release back to an older binary. Old
+  staged-upload state restarts because planner state 3 includes a staged-prefix commitment.
+
+- `BackupConfigurationData` no longer has `managed_by`. Pass this device's folder under the Backups
+  root (a device or category folder); the backup service checks its place below the row whose
+  `system_role` is `backups_root` before it queues anything and refuses any other folder
+  (`invalid_input`). `ServiceError::Protected { detail }` (kind `protected`) carries core's words when
+  a change under Backups is refused; show them as they are. The field is `detail`, never `message`,
+  which would collide with Kotlin's `Exception.message`.
+
+- `RecoveryStateData` adds `Expired`: the server reports an attempt whose window to complete has passed
+  as `expired`, and the status call returns that state instead of failing. Offer to start a new
+  recovery.
+
+- The native backup passes core's pass gate before it queues anything (backup spec Amendments 12,
+  12c and 12d). Each pass reads the `files_removed` and `backup_deleted` notices from
+  `notices_since(last_pass_at)` on (the server's filtered `GET /api/v1/notifications`, LD-0141; the
+  10-minute overlap is core's) and whether its device and category folders are live, and decides with
+  `backup_pass_gate_v2` and the notice ids the last pass acknowledged. `BackupBatchData.stopped_reason` (a core wire string: show `backup_stop_words`, offer "Back
+  up again") means the backup is off and its unfinished uploads were cancelled; `check_failed` means
+  the notices could not be read and nothing was queued (show `backup_check_failed_words`). A stopped
+  backup stays off until `BackupServiceHandle.back_up_again()`. `BackupManifestStoreCallback` adds
+  `load_pass_state` and `save_pass_state` (`BackupPassStateData`: `last_pass_at_ms`, `stopped_reason`
+  and `acknowledged`, the notice ids the last pass acted on; removed by `clear`). Store the record in
+  ONE write, every field together (Amendment 12d rule 4): a store that loses `acknowledged` makes a
+  backup turned back on stop again on a notice it already showed. "Back up again" keeps
+  `acknowledged` and `last_pass_at_ms`; a failed check changes neither. And
+  `BackupConfigurationData` adds `setup_at_ms` and `legacy_last_backup_ms` (server clock) for the first
+  pass's baseline. `BackupCopyStateData::Gone` is split into `Deleted` (removed on the server, never
+  uploaded again by the pass) and `UploadFailed` (retried at most three times).
+- `AssetData` and `BackupManifestRecordData` add `modified_ms` and `size_bytes` (default `None`), and
+  `BackupCopyStateData` adds `RemovedElsewhere`. Report when each asset last changed on the device and
+  its size, and store both with each record: a backup copy that was removed (trashed or deleted here,
+  on the web or on another device) is uploaded again only once its asset changes (backup spec §4.2
+  rule 11); with neither known it never comes back by itself. "Back up again" forgets every record.
+  After a stop because the backup's folder was deleted (`unknown`, `backup_deleted`), `configure` a
+  live folder first (`find_device_folder`; a folder restored from Trash is found again), then call
+  `back_up_again`: with the deleted folder still configured, the next pass stops again.
+- `BackupConfigurationData` adds a required `device_id`: this device's canonical id, the one the app
+  already sends as `X-Beebeeb-Device-Id` (mobile: `getDeviceId()`, only an id read from secure storage
+  or durably saved). The server keys this device's photo-backup map by it; without it every device of
+  the account shared one map, and one phone's photo ids hid another's. Never pass a new id: every
+  backed-up photo would look new to the server. 1 to 128 visible ASCII characters, or `invalid_input`.
+- Make the backup service right after the upload service and before any transfer resumes: a backup
+  stopped before a crash cancels its uploads when the service starts. If that cancel fails (the store
+  fails), no service is made and the error is `ServiceError::BackupStopUnfinished { reason }`: show
+  `backup_stop_words` for `reason` all the same, and make the service again later. One backup service
+  per upload service (a second while the first lives is `unavailable`), and one per manifest store
+  across processes. The backup handle and any service coordinator made with it keep it alive: close
+  both (Kotlin `close()`, Swift: drop the last reference) before making a new backup service, or keep
+  the service and call `configure`. The manifest store's and the asset source's callbacks run under the service's locks: they
+  must not call back into the backup service, nor wait on a thread inside `next_batch`.
+- Device link (UniFFI): `approve_device_link(id, scanned_qr, typed_code)` takes the raw text the camera
+  scanned; `DeviceLinkQrData` and `DeviceLinkHandle.qr()` are removed (render `qr_payload()`). The QR
+  now carries the device name: show `scanned_device_link_name(scanned_qr)` while the person confirms,
+  never the pending link's `device_name`. A relay name that differs from the scanned one is
+  `ServiceError::Authentication`, and the link is denied (Guus's ruling of 2026-11-07).
+- Content readers (UniFFI): `FileKeyHandle.decrypt_chunk_frame(file_id, metadata, index, is_last,
+  frame)` and `MasterKeyHandle.decrypt_file(file_id, metadata, …)` take the `NameMetadataDto` instead of
+  a format code (and a version id). A `chunk_format: 2` record without a version commitment is refused;
+  one with neither field opens v1 content only (Guus's ruling of 2026-11-07, "refuse v2 without
+  commitment"). The
+  typed-code path now starts at the approver: `begin_typed_device_approval` → relay its message → the
+  new device's `answer_typed_path(approver_message)` → relay its answer →
+  `approve_typed_device_link`, which checks the new device's confirmation before it seals and returns
+  `ServiceError::Authentication` (and denies the link) for a wrong code or a changed device name.
+  `TypedDeviceLinkHandle`, `TypedDeviceLinkStartData` and `begin_typed_path` are removed;
+  `TypedDeviceApprovalStartData` adds `device_name`. Show that name while the person types the code.
+- Content decryptors (UniFFI) take the decrypted metadata: `ChunkDecryptorHandle.from_file`,
+  `for_push`, `for_push_with_file_key_handle` and the legacy `for_push_with_file_key` take a
+  `NameMetadataDto` in place of `expected_chunk_format`, and enforce its version commitment. Key-handle
+  holders reading a historical version use the new `for_version_with_file_key_handle`.
+- `RecoveryChangesData`'s codes and password and `PasskeyPromptResult.prf_output` are `SecretString` /
+  `SecretBytes`: the same `String` and `Data` / `ByteArray` in Swift and Kotlin, wiped and redacted in
+  Rust. New: `normalize_email`.
+
+- Archives: `list_archive`, `decompress_gzip`, `list_tar_entries` and `ArchiveEntryDto` are removed
+  (the extension-based `beebeeb_core::archive` is deleted). List, preview and extract archives through
+  `NativeClientHandle.archives(...)` → `ArchiveServiceHandle`: `open`, `preview`, `extract`,
+  `supply_password`, `open_entry`, `cancel`, `close`, `observe`. Show core's preview model and words as
+  they are; drive uploads as for any upload (the service enqueues each verified file); keep the app open
+  while it reads (`extract_keep_open`).
+- Share links (UniFFI): `ShareServiceHandle.create_link(app_url, file_id, expires_in_hours, max_opens,
+  passphrase)` makes the link with core's share flow and returns `CreatedLinkData { share_id, link,
+  display }`: copy `link` (a `SecretString` carrying the link key after `#key=`), show `display` (a
+  `SecretString` too: the part before `#` still names the link's token). It no longer takes a
+  `wrapped_file_key` (Rust wraps the file key), a link without `expires_in_hours` does not expire (no
+  30-day default), and its owner can copy it again (`share_rebuild_link`). `ShareData` is removed. A
+  refusal is the new `ServiceError::ShareRefused { code }` (kind `share_refused`): `code` is the share
+  flow's code (`plan_required`, `trial_share_limit_reached`, ...), and for a 403 the server's own
+  (`sharing_paused`, `email_unverified`, `billing_read_only`, ..., or `forbidden` when it names none);
+  show the app's words for it. A 403 is never `Authentication`. `expires_in_hours` above 8760 (one
+  year) or `max_opens` above 2147483647 is `InvalidInput`.
+
+- Account changes (`AuthServiceHandle`'s authenticator setup, enable and remove, `change_password`,
+  `change_email` and `request_account_deletion`) no longer answer `unavailable` for everything. A
+  password the step-up did not confirm is `ServiceError::Authentication`. New cases, with the same
+  `ServiceErrorKind`s: `ConfirmationRequired` (ask for the password again), `SecondFactorRequired`
+  (call again with the authenticator or a backup code), `SecondFactorRejected` (that code was not
+  accepted), `DeletionAlreadyScheduled`, `SubscriptionActive` (cancel the subscription first) and
+  `EmailNotSent` (the deletion link could not be sent; nothing changed). A request made a moment after
+  the last deletion link is `RetryAfter { seconds }` (the server's `Retry-After` header), a 401 on their
+  other requests is `SessionExpired`, and a refused step-up never is. Update exhaustive switches.
+
+### Callers moving from 0.2.7 or 0.2.8
+
+- 0.3.0 contains 0.2.7 and 0.2.8: `auth_flow`, `account_flows`, `signup_flow`, `recovery_flow`,
+  `passkey`, `share_flow` and the Windows short-name rules, with their UniFFI and WASM bindings, which
+  the committed Swift and Kotlin files now include. What changes for their callers: `MasterKey::to_bytes`
+  returns a `Zeroizing` guard, the whole-file decrypt functions take the version commitment, and
+  `beebeeb-sync`'s `sync_once` stops before it plans a delete (below).
+- These flows and the native services (`beebeeb-api`, `beebeeb-client`) are two separate sets of code
+  for the same account jobs, except shares: the native share calls run `share_flow` (below). Where they
+  speak the same server routes (password sign-in, step-up, password and email change, authenticator
+  setup, signup, file-request creation) a client picks one. Where they differ, they do not
+  interoperate:
+  - the passkey copy of the account key: `passkey` reads and writes web's 60-byte blob, `passkey_seal`
+    the 61-byte one, in the same server field, and neither opens the other's;
+  - a new device: `auth_flow::device` uses the CLI handshake of `cli_auth`, which does not
+    authenticate the requester's key; `device_link` does, and needs the matching server routes;
+  - recovery: `recovery_flow` uses the phrase routes; the native recovery uses the attempt routes with
+    their wait.
+- `share_flow` reads a 403 apart from a 401: `ShareFlowError::from_status` makes a 403 the new
+  `ShareFlowError::Forbidden { code }`, where `code` is the server's code (`code`, else `error`:
+  `sharing_paused`, `email_unverified`, `billing_read_only`, ...) or `forbidden` when the body names
+  none; in 0.2.8 a 403 was `Unauthorized` and its code was lost. `Unauthorized` is now a 401 only.
+  `ShareFlowError::host_code()` is the code to show (`Forbidden`'s own, else `code()`); the UniFFI
+  `ShareFlowFfiError` and the WASM share flows' errors carry it. Update exhaustive matches.
+- `CreateLink` (file links and bundles) sends a link again with a fresh token only for the server's
+  token collision; in 0.2.8 any 409 without a share refusal in `code` was sent twice, a refusal the
+  server writes in `error` (`plan_required`, `trial_sharing_unavailable`, ...) included. It is now
+  `Refused` after one request.
+- `LinkOptions` and `FolderLinkInput` refuse `expires_in_hours` above
+  `share_flow::link::MAX_EXPIRES_IN_HOURS` (8760, one year) and `max_opens` above `MAX_OPENS`
+  (`i32::MAX`) as `InvalidInput` before any request.
+- `path_safety::check_component` no longer applies the Windows rules to a `Rules::Portable` name on a
+  Windows host (0.2.8); a caller that writes the name uses `check_component_to_write`, as
+  `TrustedDirectory::begin_publish` now does.
+- Core now links `libsqlite3-sys` 0.39 (through `rusqlite` 0.41), and one build may hold only one
+  package with `links = "sqlite3"`. An app that also depends on `rusqlite`, `libsqlite3-sys` or sqlx's
+  SQLite driver must move to releases that accept `libsqlite3-sys` 0.39: `rusqlite` 0.41 does, and no
+  `sqlx-sqlite` release does yet (0.8 needs 0.30, 0.9 stays below 0.38). Dropping sqlx's `sqlite`
+  feature is not enough on its own: Cargo still resolves `sqlx-sqlite` into the lockfile through
+  sqlx's weak `uuid`, `chrono`, `json`, `migrate` and `any` features (rust-lang/cargo#10801). Turn
+  sqlx's default features off and enable the type features on the driver crate (`sqlx-postgres`).
+
+### Rust sync and conflict integrators
+
+- Replace `SyncEngine::load_snapshot` with `apply_complete_snapshot(CompleteSnapshot)` only for an
+  explicitly complete, cursor-bound answer. Use `observe_incomplete_snapshot` for partial listings;
+  it never deletes.
+- `apply_remote_op` now takes `RemoteOp` and returns `Result<Option<SyncEvent>, SyncEngineError>`.
+  `SyncOp` adds `user_seq`; persist `SyncPosition { seq_id, user_seq }`, and fetch a complete snapshot
+  after `SequenceGap`. Engine mutations return `Result` and roll back an in-memory change when saving
+  fails.
+- Implement `SyncStore::apply(&SyncStoreChanges)` as one atomic incremental transaction instead of
+  replacing all state with `save`. `TreeNode` adds `name_undecryptable`, and stored sync metadata adds
+  `change_anchor_floor`; initialize these fields in Rust literals. Old serialized state still reads.
+- Conflict input now uses `VersionInfo::authenticated_version`, never a server content hash.
+  Conflict deadlines return `Option<u64>`, and `keep_both_name` returns `Result` and requires a valid
+  `HH.MM` time.
+- `ConflictPolicy::DEFAULT` keeps both at once: a diverged file resolves to `AutoKeepBoth` when it is
+  detected, whatever the clocks say, and its `deadline` is `None`. `NeedsUser` and a deadline come only
+  from a policy with a non-zero `auto_resolve_after_secs`, so `conflict_state` reports `auto_keep_both`
+  with no `decision_deadline`. `ConflictPolicy::DRIVE` names that policy, and `DEFAULT` is it.
+- Name the drive's copy with `name_clash::drive_conflict_name`, for a name race and a sync conflict alike:
+  `report (conflict, <device>).pdf`, then ` (2)`, ` (3)`. `keep_both_name` (`({device}, HH.MM)`) is
+  unchanged and is no longer a drive name; the backup merge plan still uses it.
+- `beebeeb-sync::SyncEngine::sync_once` now fails with `RemoteListingUnavailable`. Do not ship the
+  legacy desktop prototype; build product sync on `beebeeb_core::sync`.
+- `SyncEvent::FileMoved` adds `name`, the item's name after the move (a client that resolved a name
+  clash in the destination may have given it a new one). `apply_restore`, like `apply_move`, applies a
+  client-added `new_name`.
+
+### Rust cryptography and authentication callers
+
+- Normal OPAQUE login accepts only KSF version 1. Version 0 is available only through
+  `client_login_finish_legacy_upgrade` after a trusted local migration decision; unknown versions
+  fail. Immediately re-register migrated accounts as version 1.
+- CLI-auth decryption accepts only the authenticated HKDF-derived ciphertext. Upgrade producers of the
+  old raw-secret format.
+- The passkey seal is a new 61-byte, versioned, account-and-credential-bound format whose version byte
+  is also in the associated data. Existing 60-byte web blobs require an explicit migration and reseal;
+  never reinterpret them. Recovery phrases are
+  exactly 12 words.
+- `MasterKey::to_bytes`, `combine_folder_link_key`, `OpaqueEnvelope::to_bytes`, OPAQUE finish secrets,
+  and transfer shared secrets now use `Zeroizing` guards. The transfer helper is fallible and rejects
+  low-order keys. Generic SAS derivation is fallible and rejects output above 8,160 bytes.
+- Device link, QR path: `DeviceLinkQr::parse(scanned_text)` is the only constructor (`from_parts` is
+  removed and `fingerprint()` is crate-private); the payload is `beebeeb-link:v2:` with the canonical
+  device name after the session id and fingerprint (`DeviceLinkQr::device_name`,
+  `matches_relayed_name`), and the unshipped `v1` is refused; `seal_for_new_device(qr, relayed_public,
+  relayed_device_name, typed_code, material)` refuses a relayed name that differs from the scanned one
+  before it seals; `beebeeb_client::devices::DeviceError::DeviceNameChanged`; the seal takes the new
+  format; `NewDeviceLink::generate(session_id, device_name)` canonicalises the name
+  (`canonical_device_name`), and `NewDeviceLink::open(sealed)` no longer takes the code.
+- Device link, typed-code path: SPAKE2 with key confirmation in both directions over a transcript that
+  binds the session, a fresh salt and the canonical device name (labels `…/v2`). The approver starts
+  (`TypedCodeApprover::start(code, session_id, device_name)`), the new device answers
+  (`NewDeviceLink::answer_typed_code` → `TypedCodeReceiver` and its message), the approver checks the
+  answer (`confirm` → `ConfirmedTypedApproval`, `CoreError::Decryption` on a wrong code or a changed
+  name) and only then seals; the new device checks the approver's tag in `TypedCodeReceiver::open`.
+  `PakeSealedAccountKeyMaterial::from_parts(nonce, ciphertext)` drops the session id. Small-order
+  peer elements are refused, and randomness failures are errors, not panics. `spake2` 0.4 does not
+  wipe its copies of the code and scalars; the residual is documented in `device_link`. Replace the draft `beebeeb-api::proposed`
+  request/answer types, rename `second_factor_required` to `authenticator_required`, and handle the
+  exact locked-action allowlist.
+- Key-proof servers may export/import the 64-byte verifier state between requests. Keep it only in an
+  expiring secret store and never log it.
+- `contact_keys` keeps only `normalize_email`, the server's stored form of an account email. Its
+  email-based safety number, key fingerprint and pin check (`safety_number`, `SAFETY_NUMBER_ROUNDS`,
+  `key_fingerprint`, `check_pin`, `PinCheck`, their `beebeeb_client::contacts` re-exports, WASM
+  `safetyNumber` and UniFFI `safety_number`) were removed before this release: for the same two people
+  they gave other digits and another fingerprint than the share's. The number two people compare and
+  the fingerprint a "compared" mark keeps come from 0.2.8's `share_flow::safety` (`safety_number`,
+  `key_fingerprint`; WASM `shareSafetyNumber`, UniFFI `share_safety_number`).
+
+### File-format, transfer, and storage integrators
+
+- New content is v2. Names, thumbnails, and notes use purpose subkeys. All uploaders must move only
+  after their readers support v2 and the purpose-specific metadata APIs; v1 remains readable.
+- Protected encrypted metadata adds `version_id` and `version_counter`, which must appear together.
+  `NameMetadata` adds `version`. Current-version readers must match frames to the authenticated
+  metadata commitment; use the historical-version path for history. Raw-key metadata claiming v2 is
+  rejected.
+- A v2 version opens only against its record's commitment (Guus's ruling of 2026-11-07): every reader
+  (`ChunkDecryptor`, `RangeOpener`, `RequestContentReader`) refuses a v2 frame 0 without one, with
+  `CoreError::InvalidInput`. No released core wrote v2, so only development and test files are
+  affected. `ChunkDecryptor::for_push`, `from_reader` and `for_push_with_file_key` read legacy v1 only.
+  The commitment is threaded through `download::decrypt_frames_to` / `decrypt_chunks_to`,
+  `encrypt::decrypt_chunks_to_file` / `decrypt_contiguous_to_file`, `file_encrypt::decrypt_chunks_to_file`,
+  `zip::ZipEntry::version` and the `beebeeb-upload` download functions (`version:
+  Option<VersionCommitment>`). New: `chunk_stream::open_recorded_chunk`,
+  `EncryptedFileResult::version_commitment`, `RangeSessionError::MissingVersionCommitment` (refused
+  before any request); `DownloadServiceError::MissingVersionCommitment` is now returned before any fetch.
+- Production v2 upload resume always restarts: abandon the old session, initialize again, and upload
+  from chunk zero. The one exception is `BackgroundUploadPlanner` continuing its own persisted v2
+  version (same session, version id and counter) after the source and the staged-plaintext hash
+  check; `BackgroundUploadPlanner::to_bytes` now takes `&mut self` and is the persistence point:
+  `next_transfers` hands the OS only frames staged before the last `to_bytes`. `BackgroundUploadPlanner` constructors and restore now require authenticated file
+  geometry and source identity; version-1 planner blobs are non-resumable.
+- `DownloadRequest` requires a `MemoryBudget` and optional authenticated chunk size. `DownloadOutcome`
+  and `AfterWriteCause` add handoff, `ApiMethod` adds `Put`, and background transports should override
+  `DirectIo::storage_put_file`.
+- `TransferState` adds `Paused` and `Cancelled`. `TransferFinished` adds
+  `UploadTokenExpired { index }`; mint a fresh scoped token and requeue the staged ciphertext without
+  spending a retry.
+- A replacement upload's version counter is one above both the served metadata's counter and the
+  store's remembered high-water mark, so a server serving an older record cannot make a counter repeat.
+- `Store::open` creates the database 0600 and its directories 0700 on Unix and tightens an existing
+  database and its `-wal`/`-shm`; the crate docs list what the plaintext cache holds.
+- `beebeeb_store::atomic_publish` is removed. Publish relative to a
+  `path_safety::TrustedDirectory` handle. The `store-test-helper` binary now requires the default-off
+  `test-support` feature, which product builds must not enable.
+- `TrustedDirectory`, `PendingPublish` and `beebeeb_transfer::download_current_to_directory` build on
+  Unix and Windows. On Windows the directory is a handle that refuses a junction or symbolic link in
+  its place (a OneDrive folder, a reparse point that is not a link, is accepted), the temp file is
+  created and renamed relative to it, and an uncommitted temp file is deleted through its own
+  handle. A final name that is another file's 8.3 short name never replaces that file. Where Windows
+  differs it does less: the temp and published file keep the directory's inherited ACL (Unix:
+  0600), there is no directory flush, and a commit fails (old file kept, no temp file left) when the
+  existing file is read-only or open elsewhere without `FILE_SHARE_DELETE`.
+- Range reads apply the same version rule as whole-file reads. `RangeOpener::new` takes the version
+  commitment from the authenticated metadata after the pin, and `RangeRequest` adds `version` and
+  `authenticated_chunk_size`. With a commitment, frame 0 opens only as that v2 upload, so an older
+  upload of the same file is refused; a geometry with another stride than the authenticated one
+  releases nothing.
+- `backup::plan_merge` returns `Result`: a clash whose keep-both time is not `HH.MM` refuses the whole
+  plan, because `keep_both_name` now validates the time. UniFFI `backup_plan_merge` reports it as
+  `InvalidInput`.
+
+### API, limits, and error consumers
+
+- `photo_backup::check`, `mark`, `ids`, `identifiers` and `clear_association` take the device id and send
+  it as `X-Beebeeb-Device-Id` (`photo_backup::DEVICE_ID_HEADER`); `stats` stays account-wide.
+  `BackupConfiguration::new` takes the device id too, and `BackupConfiguration::device_id` is a
+  `BackupDeviceId`, made only by its checked `BackupDeviceId::new`, so no path sends an unchecked id.
+  `BackupError` adds `InvalidDeviceId`, `AlreadyRunning` and `StopUnfinished { reason, cause }`.
+- `Client::enable_system_service` and `proposed::ServiceEnable` no longer take a `parent_id`: a system
+  service folder is always at the top level (LD-0113), and the server answers 400 to a parent.
+
+- `ServerError::details` is removed. Use the bounded typed accessors for retry delay, trial cap, limit,
+  and usage. New server fields require a typed accessor.
+- Archive preview now has a 256 MiB hard ceiling and a 32 MiB convenience budget. Search shards clamp
+  to 1 through 64 and typed search calls reject inputs over 4 KiB. A zero chunk count is invalid, and
+  helpers that materialize one entry per chunk stop at 1,000,000; use streaming for larger valid files.
+- Retry delays cap at 300 seconds. Invalid quota add-ons clamp to valid ranges with saturating
+  arithmetic. `format_compact` clamps precision to 2 and `try_format_compact` rejects higher values.
+- Shares (`beebeeb-api`, `beebeeb-client`): the hand-built create records and their endpoints are
+  removed (`invites::Create` / `create`, `invites::Approve` / `approve` / `ActionResponse`,
+  `shares::Create` / `create`, `shares::CreateLink` / `create_link`, `folder_links::Create` /
+  `create`). Core's `share_flow` builds those requests and `FlowRequest` carries one to a transport as
+  built, any answer back to the flow. `shares::Share` has no `token`: no listing or public answer
+  carries one. The client's calls take what the flow needs and return its outcome:
+  `create_share_link(app_url, file_id, &LinkOptions)` → `CreatedLink`, `create_invite(file_id, email,
+  PeerKeyExpectation)` and `create_trusted_invite(store, file_id, email, contact_id, key, observed_at)`
+  → `InviteOutcome`, `approve_invite(invite_id, file_id, recipient_public_key_b64, PeerKeyExpectation)`
+  → the key sealed for, and `create_folder_link(FolderLinkInput, record_custody_seen)` →
+  `CreatedFolderLink` (record each custody mark durably in `record_custody_seen`; it runs before the
+  request that uses the folder's key). The file key is derived for an owner id; a foreign id is
+  `ShareServiceError::KeyUnavailable`. `ShareServiceError` adds `Flow`, `KeyUnavailable` and
+  `CustodyNotRecorded`.
+- Direct `beebeeb-api` users must adopt typed onboarding/registration and recovery bodies, bearer
+  recovery authorization, optional device approver keys, unknown-safe optional two-factor state, and
+  the current device/login response models. `AuthError` adds fixed-label `InvalidAnswer` and
+  `InvalidTransition` variants.
+- Records that carry a secret redact it in `Debug`: TOTP setup, chunk manifests, file-request and
+  stream tokens, signup tickets, email codes, pilot keys, push tokens, the data-export URL and key-proof
+  tickets. The ones a person types or copies are also `Zeroizing`, which changes their type:
+  `TotpSetup`'s `secret`, `qr_uri` and `backup_codes`, the client's `RecoveryChanges` codes and
+  `AuthenticatorEnrollment`'s `qr_uri`. Wrap a `String` with `Zeroizing::new`.
+- A request's `Debug` prints a header value only when the header is in `DEBUG_VISIBLE_HEADERS`;
+  `Set-Cookie`, `Cookie`, `Authorization` and every other header print `[REDACTED]`.
+- The native step-up (`request_account_deletion`, `change_password`, `change_email`) reports a password
+  it did not confirm as `AuthError::PasswordNotConfirmed`: a wrong password was `Crypto`, and a proof the
+  server refused was a 401 `ClientError` that also emitted `EngineEvent::SessionExpired`. A 401 on
+  `confirm-opaque-start` or `confirm-opaque-finish` (`Endpoint::is_step_up`) emits no expiry: the server
+  answers 401 there for a refused step-up as for a dead session. After a 401 at the start or the finish
+  the client asks for the account (`GET /api/v1/auth/me`): a live session makes the refusal
+  `PasswordNotConfirmed`, a gone one is reported expired once, as on any other request.
+- `ServerError::parse_coded_body` decodes the account-delete routes' refusals, whose stable code is in
+  `code` and text in `error`; `account::request_deletion` uses it, so its refusals keep their code
+  (`second_factor_required`, `delete_already_scheduled`, `delete_subscription_active`,
+  `delete_request_rate_limited`, `delete_email_failed`). `ServerError::with_retry_after_header`: every
+  `beebeeb-api` route now fills `retry_after()` from a `Retry-After` header when the body names no
+  delay (delta-seconds, capped as the body's).
+- The one-time codes in `beebeeb-api` request types are `Zeroizing<String>`, which changes their type:
+  `TotpCode.code`, `TotpSetupRequest.code`, `auth::CodeRequest.code`, `TwoFactorRequest.code` and its
+  `partial_token`, `EmailCodeSubmit.code`, `RecoveryComplete.email_verification_code`,
+  `AuthenticatorChange.code` and its `secret`, and `onboarding::EmailVerify.code`. Wrap a `String` with
+  `Zeroizing::new`. A test fails when a `Serialize` type gains a `code` or `*_code` field outside
+  `Zeroizing`.
+- `ClientMetaField` adds `DeviceSettings = 7` and `ContactKey = 8`; codes 5 and 6 remain reserved.
+  Sync `Op` literals add optional `device_id` and `created_at`.
+
+### Web and cross-client fixture maintainers
+
+- WASM `formatCompact` throws above precision 2; pass 0 through 2 and handle the exception. Rust's
+  infallible formatter clamps instead.
+- WASM device link: `sealDeviceLink(masterKey, scannedQr, relayedPublic, relayedDeviceName, typedCode)`
+  takes the raw text the camera scanned, never session or fingerprint bytes, and throws
+  `device_name_changed` when the relay's name differs from the scanned one (deny the link); show
+  `scannedDeviceLinkName(scannedQr)`, never the relay's name; without a camera use the typed-code
+  path, now exported: `WasmTypedApproval` (approver) and `WasmNewDeviceLink.answerTypedCode` →
+  `WasmTypedReceiver` (new device). `new WasmNewDeviceLink(sessionId, deviceName)`; `publicFields()`
+  returns `qr_payload` and `device_name` and no fingerprint; `open(approverPublic, nonce, ciphertext)`.
+- WASM content decryptors take the object `decrypt_file_metadata[_with_key]` returned:
+  `new WasmChunkDecryptor(masterKey, fileId, metadata)` and `fromFileKey(fileKey, fileId, metadata)`,
+  and so does `decrypt_chunk_frame(fileKey, fileId, metadata, index, isLast, frame)`. A
+  `chunk_format: 2` record without a version commitment throws; one with neither field opens v1 only.
+- WASM `normalizeEmail`: use it; JavaScript's `trim` differs from core's. The one safety number is
+  `shareSafetyNumber`; `safetyNumber` was removed before this release.
+- Regenerate bindings for the protected metadata fields and update the shared vector fixture to version
+  18, including the protected metadata and session key-proof vectors.
+- WASM archives: `list_archive`, `decompress_gzip` and `list_tar_entries` are removed. Use
+  `WasmArchiveSession` (range reads through `need_bytes`, the preview model, `openEntry`) and
+  `WasmArchiveExtraction` (stage each file, upload it only on `file_end`, drop it on `file_skipped`).
+  `zip`, `tar`, `tgz` and `gz` now preview on every platform (`previewableBatchFor`), so web shows the
+  archive preview for all four. `checkPassword` can answer `damaged` (the entry's headers are damaged;
+  the password cannot be judged). A protected file whose password passed its check byte but failed its
+  CRC comes back as `file_skipped`, then `need_password` (`wrong`), then `file_begin` again for the
+  same `node`: drop what was staged on `file_skipped` and stage afresh on the next `file_begin`.
+  `supplyPassword` is taken only right after `need_password`; at any other time it is dropped.
+
+### Added
+
+- `beebeeb_core::archives`: one sans-I/O reader for zip, tar, tgz and gz (format by magic bytes, never
+  the extension), WinZip AES (AE-1, AE-2) and ZipCrypto passwords (`ArchivePassword`: zeroized, not
+  `Clone`, never logged), entry names through one rule set (zip-slip, device names, NFC, limits), the
+  extraction planner (destination, clashes through `numbered_name`, quota, device space, Backups), the
+  extraction step machine (a file is handed over only after its CRC-32 / authentication code passed),
+  the preview screen model and all 63 words. Vectors: `test-vectors/archives_v1.json` and its fixtures,
+  from the independent `gen_archives_v1.py`, under a drift guard. Bindings: `WasmArchiveSession`,
+  `WasmArchiveExtraction`, `WasmExtractionPlan`; UniFFI records, `archive_list` and the native
+  `ArchiveServiceHandle`.
+- `beebeeb_client::downloads::DownloadService::read_range` / `range_reader` / `read_with`: plaintext
+  ranges of v1 and v2 files through core's `RangeOpener` (frame 0 first, one recorded version), and
+  `beebeeb_client::archives::ArchiveService` (one live service per temp root; it needs the application
+  runtime). `UploadService::cancel_sources_matching` and `ClientRuntime::runs_tasks_alone`.
+- `beebeeb_core::name_clash`: `ItemKind`, `TakenNames`, `numbered_name` ("Keep both": `report (2).pdf`,
+  then `(3)`), `numbered_candidates` and `drive_conflict_name`. Names clash when their normalised forms
+  are equal, and a candidate is cut so that the whole name fits in 255 bytes.
+- `beebeeb_core::name_tag::normalize_for_tag`: `NFKC(simple_casefold(NFKC(name)))`, with simple case
+  folding (statuses C and S) at Unicode 17.0.0; an empty name or one over 1024 bytes is refused
+  (`NormalizeError`). Vectors: `test-vectors/name_clash_v1.json`, from an independent Python generator.
+- `beebeeb-api`, `beebeeb-client`, and `beebeeb-store`, plus the native service-handle surface for
+  authentication, devices, files, sync, transfers, thumbnails, sharing, contacts, settings, search,
+  backup, File Provider, and coordinated sign-out.
+- Native file services can restore a historical version while publishing fresh protected metadata
+  with a rollback counter above every observed version. The API client now carries per-version
+  metadata through the restore route, and Swift/Kotlin receive the resulting counter.
+- Upload services support protected replacement uploads against an explicit base version. The new
+  content commitment advances the previous protected counter, enabling the live replace/restore
+  contract without falling back to v1 writes.
+
+### Fixed
+
+- The native share calls send the bodies the server reads, built by core's share flow: an invite names
+  its recipient as `recipient_email` (the server refused the old `recipient`) and its file key is sealed
+  for the recipient's key and approved; a link carries its token and both owner copies, so its owner can
+  copy it again, and an expiry only when one is set (no 30-day default); a folder link carries the
+  subtree's key wraps (`folder_keys`) and their `format`. A test pins every create body against the
+  server's field names.
+- Account deletion from the native services (`request_account_deletion`) proves the password with the
+  step-up and asks for the confirmation link on `/api/v1/auth/account/delete-request`, the route the
+  server has. Its body carries only the authenticator or backup code. The unused request descriptors
+  for `/api/v1/auth/login` and `/api/v1/auth/change-password` are removed. A test fails when a request
+  type of `beebeeb-api` gains a password field, or when a production source of `beebeeb-core` or
+  `beebeeb-client` names one as a JSON key.
+- An account deletion the server refuses reaches the iOS and Android apps as a refusal they can name
+  (a second factor needed or wrong, a deletion already scheduled, an active subscription, a link sent a
+  moment ago, a link email that failed) instead of `unavailable`, and Rust callers get the refusal's
+  code, which the delete route keeps in `code`. A wrong password at the step-up, or one the server
+  refuses, no longer reports the session expired.
+- `zip` moves from 8.6 to 9 (the writer only; `aes-crypto` in tests only), so RUSTSEC-2026-0367,
+  -0368, -0369 and -0429 are no longer ignored in `.cargo/audit.toml`.
+- `rusqlite` moves from 0.32 to 0.41 in `beebeeb-core` (`fp_cache`) and `beebeeb-store`, and the SQLite
+  it bundles from 3.46.0 to 3.54.1 (`libsqlite3-sys` 0.30.1 to 0.39.1), so RUSTSEC-2026-0459 no longer
+  applies. Both crates turn rusqlite's default features off and keep `bundled` and `cache` (the
+  statement cache behind `prepare_cached`): 0.41's default `ffi-sqlite-wasm-rs` would only add a
+  second, never-built SQLite for wasm32 to every lockfile. No function or type of core changes
+  (`beebeeb_store::StoreError::Database` now carries 0.41's `rusqlite::Error`), and neither do the
+  store and File Provider schemas, pragmas or migrations, so existing databases open as they are: in a
+  one-off check on 2026-11-11 (no test pins it), store and `fp_cache` databases written by SQLite
+  3.46.0, with their changes still in the `-wal` or checkpointed, were read back whole by 3.54.1, and
+  the other way round. `the_bundled_sqlite_is_at_least_3_54_0` fails below 3.54.0. Core's lockfile
+  moves `hashlink` from 0.9 to 0.12 (adding `foldhash` 0.2) and drops `ahash` 0.8.12 and `hashbrown`
+  0.14.5.
+- Native requests declare `file-write-v2` and `version-metadata-v1` exactly where the server checks
+  them: upload init, chunk, heartbeat and complete, and the direct upload grant and commit
+  (`file-write-v2`), and file update and sync submit (`version-metadata-v1`). The request builder
+  attaches the header only to routes flagged `Endpoint::capabilities`, never to every request. A v2
+  file whose metadata predates version commitments remains readable until this device has observed a
+  protected counter; stripping the commitment after that point is rejected as rollback.
+- The file, upload and File Provider services ask core's Backups rules before every change: the row's
+  own role first (`check_root_mutation`), then the app rule (`check_app_mutation`) in the app and the
+  drive rule (`check_drive_mutation`) in the File Provider. A row's position is its depth below the
+  row whose `system_role` is `backups_root`, read through its parents. Refusals are
+  `FileServiceError::Protected` and `UploadServiceError::Protected`, with core's words. `BackupFolder`
+  replaces `ManagedBackupFolder` and `BackupError::NotInBackups` replaces `UnmanagedFolder`. The
+  backup pass's own uploads are not checked: it is the one writer the rules protect the tree for.
+- An expired recovery attempt is `RecoveryState::Expired`, not `AuthError::MalformedAnswer`;
+  completing it is refused with `RecoveryNotReady` before anything is sent.
+- Backup scans page, deduplicate, export and enqueue lazily with a 64-upload cap. Failed and cancelled
+  photo uploads retry at most three times, and successful completion is durable even when no backup
+  completion handler is alive during a background wake.
+- The native backup no longer uploads again a copy the person trashed or deleted, and no longer runs
+  when the account was emptied: it stops on a `files_removed` or `backup_deleted` notice, or on a
+  device or category folder that is trashed or gone, and skips the pass when the notices cannot be
+  read. Before, trashing backup photos, or an emptied account, filled the account up again by itself.
+- Sync: a remote rename is checked for a name clash in the item's own folder (its op carries no
+  parent), and a move in its destination. Clashes compare core's normal forms (`TakenNames`) and the
+  item that arrives second takes `drive_conflict_name` from its own name (`a (conflict, device).txt`:
+  the writing device is not known by name on pull), never `a (2).txt`. A snapshot names clashing
+  siblings the same whatever the server's order. Only core's decryption names an item from a remote
+  op: a plaintext `name` / `new_name` in the server's payload is dropped, and a sealed name that does
+  not open, or opens to a name the portable path rule refuses, is shown as undecryptable without
+  stopping the sync. The engine's `apply_move` applies a client-added `new_name`.
+- An offline delete from the Files app sends `file_trash` (the op the server accepts), so it reaches
+  the server and moves the item to the Trash; it sent `file_delete`, which the server refuses.
+- An upload is sized from its source as it is when the first pass starts, so a file that grew while
+  queued is uploaded whole. The completion metadata is persisted before `complete` is sent, and an
+  upload with it finishes by sending the same request (the server answers `already_completed`), so a
+  crash after the server accepted it no longer fails the upload or uploads a backup photo twice.
+- `DownloadService::video_range` reads through `RangeOpener` (frame 0 first, the geometry checked),
+  the same release path as `read_range`.
+- A UniFFI chunk decryptor, chunk encryptor or key handle whose lock was poisoned by a panic answers
+  `CryptoError::InvalidInput` and drops its state, instead of panicking across FFI on every call.
+- The native backup no longer uploads again a photo whose copy was trashed or deleted on the web or on
+  another device: the server's check counts only live copies, so a copy this device had backed up that
+  it asks for again becomes `RemovedElsewhere`, and only a new modification time or size uploads it
+  again. A removed copy is measured against the asset as it is after the removal, so an edit made
+  before it does not bring the copy back.
+- A backup stop is recorded before its uploads are cancelled, and every pass while the backup is off
+  cancels what is left and forgets every queued record, so a stop cut off part-way no longer leaves
+  photos queued forever. One cancel that fails no longer stops the others.
+- Backup passes run one at a time, and a pass writes the gate's state as it is when it writes, so a
+  stop is never written over. The gate also runs while 64 backup uploads are active, so a stop cancels
+  them. A configured backup folder the server no longer has (404 or 403) reaches the gate and stops the
+  backup with its reason, instead of failing every pass before it.
+- Sync: a remote restore is checked for a name clash in the item's folder, on the in-memory and the
+  store-backed engine alike. Trashed items hold no name, so an item could take a trashed item's name,
+  and restoring the trashed one left two items with that name in one folder.
+- The native backup decides "removed elsewhere" from its own copy, never from the server's map alone.
+  When the check asks again for a copy this device backed up, core reads that file: live, it stays
+  backed up and its map row is written again (`mark`); in the Trash or gone (404), it becomes
+  `RemovedElsewhere`; any other answer changes nothing and uploads nothing that pass. Before, a missing
+  map row (another device's id, a changed id, `clear-association`) marked a live copy removed, and a
+  colliding id from another phone could keep this phone's photo from ever being uploaded.
+- Background chunk uploads carry `X-Beebeeb-Client`, `X-Beebeeb-Client-Version` and
+  `X-Beebeeb-Client-OS`, as every foreground request does, so the server's minimum-version gate (task
+  1944) no longer answers 426 to a replacement chunk from the background uploader.
+- A name clash that arrives through sync names the device that wrote it: `report (conflict, Work
+  laptop).pdf`. The device list is read at most once per pass, and only when a clash needs a name; an
+  unknown device, an empty name or one the path rule refuses keeps `device`. A clash found in a
+  snapshot (no writer known) keeps `device` too.
+- Durable uploads remove safe orphan ciphertext, count invalid saved state as a terminal attempt, keep
+  partial staging resumable, and can finish after the platform removes the plaintext export once all
+  chunks and the staged hash are committed.
+- First-session crash markers no longer block a different account. Account-replacing native installs
+  now require a one-shot authorization issued only after the service coordinator purges the old
+  account's queues, caches, manifest, store, secrets and platform-owned data.
+
 ## [0.2.8] - 2026-11-08
 
 ### Changed (review hardening before v0.2.8; desktop v2 and mobile adapt to these)

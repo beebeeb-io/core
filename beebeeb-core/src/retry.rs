@@ -11,6 +11,8 @@
 //! production caller can feed it a random sample. A jittered wait is never
 //! longer than the ladder delay, and a server `Retry-After` is never jittered.
 
+use beebeeb_types::limits::MAX_RETRY_AFTER_SECONDS;
+
 /// How the ladder delay is shortened for a retry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Jitter {
@@ -102,7 +104,7 @@ impl RetryPolicy {
             return None;
         }
         Some(match retry_after_seconds {
-            Some(seconds) => seconds.saturating_mul(1000),
+            Some(seconds) => seconds.min(MAX_RETRY_AFTER_SECONDS).saturating_mul(1000),
             None => self.delay_ms(attempts_made),
         })
     }
@@ -116,5 +118,22 @@ pub fn parse_retry_after(value: &str) -> Option<u64> {
     if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
-    value.parse().ok()
+    value
+        .parse::<u64>()
+        .ok()
+        .map(|seconds| seconds.min(MAX_RETRY_AFTER_SECONDS))
+}
+
+#[cfg(test)]
+mod limit_tests {
+    use super::*;
+
+    #[test]
+    fn retry_after_is_capped() {
+        assert_eq!(parse_retry_after("99999999999"), Some(300));
+        assert_eq!(
+            RetryPolicy::DEFAULT.decide(1, RetryOutcome::Status(429), Some(u64::MAX)),
+            Some(300_000)
+        );
+    }
 }

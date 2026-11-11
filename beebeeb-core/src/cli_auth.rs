@@ -7,6 +7,12 @@
 //! password — the browser re-encrypts the live `{session_token, master_key, email}`
 //! to the CLI's ephemeral key.
 //!
+//! This legacy handshake does not authenticate the server-supplied requester
+//! public key: a server that substitutes the key receives the payload. Never
+//! build a new key-moving flow on it; the authenticated replacement is
+//! [`crate::device_link`]. [`crate::auth_flow::device`] still moves the account
+//! key over it, as the web client's approval page does today.
+//!
 //! ```text
 //!   1. CLI generates an ephemeral P-256 keypair, sends its public key to the server.
 //!   2. Browser (web client) fetches that CLI public key, generates its OWN ephemeral
@@ -30,14 +36,6 @@
 //! - **KDF (v1, current):** `key = HKDF-SHA256(ikm = shared_secret, salt = None,
 //!   info = "beebeeb-cli-auth-v1")[..32]`.
 //! - **AEAD:** AES-256-GCM with a caller-supplied 12-byte nonce.
-//!
-//! ## Raw-secret fallback (legacy v0.4 web app)
-//!
-//! Before the HKDF was introduced (web ≤ v0.4), the browser used the raw 32-byte
-//! shared secret **directly** as the AES key (no HKDF). [`decrypt_cli_payload`] tries
-//! the HKDF key first, then falls back to the raw secret, preserving compatibility
-//! with any old payload still in flight. The current web client only ever emits the
-//! HKDF form; the fallback exists purely to not break an old browser build.
 //!
 //! No primitive here hand-rolls ECDH, HKDF, or AES — the CLI calls these functions so
 //! the handshake is identical to the browser's.
@@ -126,11 +124,11 @@ impl CliEphemeralKey {
     /// Decrypt a browser-produced CLI-auth payload end to end.
     ///
     /// Performs the P-256 ECDH with `browser_public`, then [`decrypt_cli_payload`]
-    /// (HKDF key first, raw-secret fallback second). Returns the plaintext bytes
+    /// using the HKDF-derived key. Returns the plaintext bytes
     /// (the caller parses the `{session_token, master_key_b64, email}` JSON).
     ///
-    /// Errors on an invalid browser public key, a bad nonce length, or if neither the
-    /// HKDF nor the raw-secret key authenticates the ciphertext.
+    /// Errors on an invalid browser public key, a bad nonce length, or if the
+    /// HKDF key does not authenticate the ciphertext.
     pub fn decrypt_browser_payload(
         &self,
         browser_public: &[u8],
@@ -167,14 +165,13 @@ fn aes_gcm_decrypt(key: &[u8; 32], nonce: &[u8], ciphertext: &[u8]) -> Result<Ve
         .map_err(|_| CoreError::Decryption)
 }
 
-/// Decrypt a CLI-auth payload from the ECDH shared secret, trying the HKDF key first
-/// then the raw-secret fallback (legacy v0.4 web app).
+/// Decrypt a CLI-auth payload from the ECDH shared secret with the current
+/// HKDF-derived key.
 ///
 /// - **HKDF (current):** `key = HKDF-SHA256(shared_secret, info = "beebeeb-cli-auth-v1")`.
-/// - **Raw fallback (legacy):** `key = shared_secret` used directly as the AES-256 key.
 ///
-/// Returns the plaintext on the first key that authenticates, or [`CoreError::Decryption`]
-/// if neither does (ECDH mismatch or tampered ciphertext). Errors on a bad nonce length.
+/// Returns [`CoreError::Decryption`] on an ECDH mismatch or tampered
+/// ciphertext. Errors on a bad nonce length.
 pub fn decrypt_cli_payload(shared_secret: &[u8; 32], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CoreError> {
     if nonce.len() != 12 {
         return Err(CoreError::InvalidInput(format!(
@@ -184,8 +181,6 @@ pub fn decrypt_cli_payload(shared_secret: &[u8; 32], nonce: &[u8], ciphertext: &
     }
     let hkdf_key = derive_cli_auth_key(shared_secret);
     aes_gcm_decrypt(&hkdf_key, nonce, ciphertext)
-        // Backward-compat: v0.4 web app used the raw shared secret as the AES key.
-        .or_else(|_| aes_gcm_decrypt(shared_secret, nonce, ciphertext))
 }
 
 /// What the approving side relays: its ephemeral public key and the sealed payload.
@@ -270,14 +265,15 @@ mod tests {
     }
 
     #[test]
-    fn raw_secret_fallback_roundtrip() {
-        // Legacy v0.4 web app: raw shared secret used directly as the AES key.
+    fn raw_secret_payload_is_rejected() {
         let cli = CliEphemeralKey::generate();
         let payload = b"legacy-v0.4-payload";
         let (browser_pub, nonce, ct) = browser_encrypt(cli.public_key_bytes(), payload, false);
 
-        let pt = cli.decrypt_browser_payload(&browser_pub, &nonce, &ct).unwrap();
-        assert_eq!(pt, payload);
+        assert!(matches!(
+            cli.decrypt_browser_payload(&browser_pub, &nonce, &ct),
+            Err(CoreError::Decryption)
+        ));
     }
 
     #[test]
@@ -298,8 +294,7 @@ mod tests {
         let payload = b"secret";
         let (_browser_pub, nonce, ct) = browser_encrypt(cli.public_key_bytes(), payload, true);
 
-        // A DIFFERENT browser key → different shared secret → neither HKDF nor raw
-        // key authenticates.
+        // A DIFFERENT browser key produces a different HKDF key.
         let other = CliEphemeralKey::generate();
         let wrong_browser_pub = other.public_key_bytes().to_vec();
         let err = cli

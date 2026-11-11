@@ -1,8 +1,9 @@
 //! Windows: a remote delete never deletes another file through its 8.3 short
 //! name (task 2404). The test first shows that its fixture really aliases (an
 //! ordinary read of the short name reaches the other file); a volume that makes
-//! no 8.3 names skips with the reason printed, and fails with `CI` set. Only
-//! the v0.2.6 API is used, so the file runs unchanged at the parent (red).
+//! no 8.3 names skips with the reason printed, and fails with `CI` set.
+//! `sync_once` stops at the unavailable listing, so the test plans the delete
+//! from an empty listing and runs the delete step itself.
 
 use super::*;
 use std::fs;
@@ -62,18 +63,19 @@ fn a_remote_delete_never_deletes_another_file_through_its_short_name() {
     let rel = PathBuf::from(&alias);
     engine.state.files.insert(rel.clone(), FileState::Synced);
 
-    // `list_remote_files` is the placeholder empty snapshot, and the listing
-    // shows only the long name: the row is a completed remote delete.
-    let ops = engine.sync_once().unwrap();
+    // An empty remote listing, and the scan shows only the long name: the row
+    // is a completed remote delete.
+    let local = engine.scan_local_files().unwrap();
+    let ops = engine.compute_operations(&local, &[], &[]);
     assert!(
         ops.contains(&SyncOp::DeleteLocal(rel.clone())),
         "the fixture must reach the delete: {ops:?}"
     );
+    // The row's own file is not on disk, so the delete reports the row settled.
+    assert!(engine.delete_local_file(&rel), "the stale row must be cleared");
     assert_eq!(
         fs::read(&existing).ok().as_deref(),
         Some(&b"precious"[..]),
         "Report for 2026.pdf must survive a delete of {alias}"
     );
-    // The row's own file is not on disk, so the row is settled and dropped.
-    assert!(!engine.state.files.contains_key(&rel), "the stale row must be cleared");
 }

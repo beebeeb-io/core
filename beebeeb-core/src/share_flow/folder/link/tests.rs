@@ -290,3 +290,24 @@ fn link_input_is_checked_before_any_request() {
     );
     let _ = Method::Post;
 }
+
+#[test]
+fn link_limits_past_the_bounds_are_refused_before_any_request() {
+    let m = master();
+    let mut longest = input(None);
+    longest.expires_in_hours = Some(MAX_EXPIRES_IN_HOURS);
+    longest.max_opens = Some(MAX_OPENS);
+    assert!(FolderShare::link(longest, &m).is_ok());
+    let mut too_long = input(None);
+    too_long.expires_in_hours = Some(MAX_EXPIRES_IN_HOURS + 1);
+    assert_eq!(
+        FolderShare::link(too_long, &m).unwrap_err(),
+        ShareFlowError::InvalidInput("expires in hours")
+    );
+    let mut too_many = input(None);
+    too_many.max_opens = Some(MAX_OPENS + 1);
+    assert_eq!(
+        FolderShare::link(too_many, &m).unwrap_err(),
+        ShareFlowError::InvalidInput("max opens")
+    );
+}

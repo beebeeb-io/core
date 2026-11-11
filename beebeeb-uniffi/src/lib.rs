@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use zeroize::{Zeroize, Zeroizing};
 
-use beebeeb_core::chunk_stream::{ChunkDecryptor, ChunkEncryptor, ChunkFormat, ExpectedChunkFormat, SessionResume};
+use beebeeb_core::chunk_stream::{ChunkEncryptor, ChunkFormat, ExpectedChunkFormat, SessionResume};
 use beebeeb_core::client_meta;
 use beebeeb_core::constellation;
 use beebeeb_core::encrypt;
@@ -13,14 +13,27 @@ use beebeeb_types::{CipherSuite, EncryptedBlob};
 
 uniffi::setup_scaffolding!();
 mod account_flows;
+mod account_services;
+mod archives;
 mod auth_flow;
 mod backup;
+mod chunk_decryptor;
+mod contacts;
 mod passkey;
+mod platform_services;
 mod request_seal;
+mod secret_types;
+mod services;
 mod share_flow;
 mod share_folder;
 mod share_safety;
 mod signup_flow;
+pub use account_services::*;
+pub use chunk_decryptor::*;
+pub use contacts::*;
+pub use platform_services::*;
+pub use secret_types::*;
+pub use services::*;
 #[cfg(test)]
 mod folder_link_2237c {
     use super::*;
@@ -521,7 +534,7 @@ pub struct EncryptedData {
 }
 
 /// Master key bytes returned from `derive_master_key`.
-#[derive(uniffi::Record)]
+#[cfg_attr(feature = "legacy-bindings", derive(uniffi::Record))]
 pub struct MasterKeyResult {
     pub key: Vec<u8>,
 }
@@ -567,14 +580,14 @@ pub fn fit_for_seal(s: String) -> String {
 }
 
 /// Result of starting an OPAQUE registration or login.
-#[derive(uniffi::Record)]
+#[cfg_attr(feature = "legacy-bindings", derive(uniffi::Record))]
 pub struct OpaqueStartResult {
     pub message: Vec<u8>,
     pub state: Vec<u8>,
 }
 
 /// Result of finishing an OPAQUE client login.
-#[derive(uniffi::Record)]
+#[cfg_attr(feature = "legacy-bindings", derive(uniffi::Record))]
 pub struct OpaqueLoginFinishResult {
     pub message: Vec<u8>,
     pub session_key: Vec<u8>,
@@ -582,7 +595,7 @@ pub struct OpaqueLoginFinishResult {
 }
 
 /// Result of generating a recovery phrase.
-#[derive(uniffi::Record)]
+#[cfg_attr(feature = "legacy-bindings", derive(uniffi::Record))]
 pub struct RecoveryPhraseResult {
     pub phrase: String,
     pub master_key: Vec<u8>,
@@ -713,6 +726,19 @@ fn master_key_from_slice(key: &[u8]) -> Result<kdf::MasterKey, CryptoError> {
     Ok(mk)
 }
 
+fn version_commitment_from_parts(
+    version_id: Vec<u8>,
+    version_counter: u64,
+) -> Result<beebeeb_core::chunk_stream::VersionCommitment, CryptoError> {
+    let version_id = version_id.try_into().map_err(|_| CryptoError::InvalidInput {
+        detail: "version_id must be exactly 12 bytes".into(),
+    })?;
+    Ok(beebeeb_core::chunk_stream::VersionCommitment::new(
+        version_id,
+        version_counter,
+    )?)
+}
+
 fn encrypted_blob_to_data(blob: &EncryptedBlob) -> EncryptedData {
     let suite = match blob.cipher_suite {
         CipherSuite::V1Aes256Gcm => "V1Aes256Gcm",
@@ -730,7 +756,7 @@ fn encrypted_blob_to_data(blob: &EncryptedBlob) -> EncryptedData {
 
 /// Derive a 32-byte master key from a password and salt (>= 16 bytes) via
 /// Argon2id. Returns the key bytes.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn derive_master_key(password: String, salt: Vec<u8>) -> Result<MasterKeyResult, CryptoError> {
     let mk = kdf::derive_master_key(&password, &salt)?;
     let bytes = mk.to_bytes();
@@ -739,7 +765,7 @@ pub fn derive_master_key(password: String, salt: Vec<u8>) -> Result<MasterKeyRes
 
 /// Derive a per-file encryption key from a master key and file ID via
 /// HKDF-SHA256. Returns the 32-byte file key.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn derive_file_key(master_key: Vec<u8>, file_id: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let mk = master_key_from_slice(&master_key)?;
     let fk = kdf::derive_file_key(&mk, &file_id);
@@ -761,7 +787,7 @@ pub fn generate_share_token() -> String {
 
 /// Encrypt a plaintext chunk with AES-256-GCM. Returns the encrypted data
 /// containing cipher suite, nonce, and ciphertext.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn encrypt_chunk(key: Vec<u8>, plaintext: Vec<u8>) -> Result<EncryptedData, CryptoError> {
     let fk = file_key_from_slice(&key)?;
     let blob = encrypt::encrypt_chunk(&fk, &plaintext)?;
@@ -769,7 +795,7 @@ pub fn encrypt_chunk(key: Vec<u8>, plaintext: Vec<u8>) -> Result<EncryptedData, 
 }
 
 /// Decrypt a ciphertext chunk that was produced by `encrypt_chunk`.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn decrypt_chunk(key: Vec<u8>, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let fk = file_key_from_slice(&key)?;
     let blob = EncryptedBlob {
@@ -780,92 +806,14 @@ pub fn decrypt_chunk(key: Vec<u8>, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Resul
     Ok(encrypt::decrypt_chunk(&fk, &blob)?)
 }
 
-/// Decrypt a sequence of encrypted chunks and write the plaintext to a file.
-///
-/// Chunks are decrypted sequentially and written in order; peak memory is
-/// bounded by the size of the largest single chunk's plaintext, not the
-/// total file size. The output file is created (truncating any existing
-/// file) before the first chunk.
-///
-/// On `Err`, the output file may exist on disk in a partially-written
-/// state — the caller is responsible for deleting it so a downstream
-/// cache layer does not treat the partial file as complete.
-///
-/// Returns the total number of plaintext bytes written.
-///
-/// **Task 1908:** `file_id` (the id the file was uploaded under) and
-/// `expected_chunk_format` (from the file's encrypted metadata,
-/// `decrypt_file_metadata`: 0 = unrecorded, 2 = v2) are required: the chunks
-/// are opened as one file's ordered stream — v2 frames are bound to (file id,
-/// upload, index, last), v1 files still open when the metadata records no
-/// format. Reordered, spliced, duplicated, dropped or truncated v2 chunks fail.
-/// The output is atomic (core `.tmp` + rename).
-#[uniffi::export]
-pub fn decrypt_chunks_to_file(
-    key: Vec<u8>,
-    file_id: String,
-    expected_chunk_format: u8,
-    chunks: Vec<EncryptedChunkData>,
-    output_path: String,
-) -> Result<u64, CryptoError> {
-    let key = Zeroizing::new(key);
-    let fk = file_key_from_slice(&key)?;
-    let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
-    let chunk_pairs: Vec<(Vec<u8>, Vec<u8>)> = chunks.into_iter().map(|c| (c.nonce, c.ciphertext)).collect();
-    encrypt::decrypt_chunks_to_file(&fk, &file_id, expected, chunk_pairs, &output_path).map_err(CryptoError::from)
-}
-
-/// Decrypt a contiguous encrypted body into a file.
-///
-/// `body` is the wire format produced by stacking encrypted chunks back
-/// to back: each chunk is `nonce (12 bytes) || ciphertext (chunk_size +
-/// 16 byte AES-GCM tag)`. All chunks but the last produce `chunk_size`
-/// bytes of plaintext; the final chunk is whatever remains.
-///
-/// Compared to `decrypt_chunks_to_file`, this variant lets the caller
-/// hand over the full encrypted blob without pre-slicing — Rust performs
-/// the chunk boundaries internally. Saves N small `ByteArray` allocations
-/// + per-chunk marshalling overhead across the FFI for files with many
-/// chunks (a 100 MB / 1 MB-chunk file is one allocation here vs. 200
-/// across the bridge with the pre-sliced variant).
-///
-/// Streams chunk-by-chunk — peak memory is one plaintext chunk, not the
-/// full file. Returns the total number of plaintext bytes written.
-///
-/// **Atomic output:** core writes plaintext to a sibling `.tmp` and renames it
-/// to `output_path` only on full success; on any error the `.tmp` is removed and
-/// `output_path` is never created/overwritten. Callers no longer need to clean
-/// up a partial file on `Err`, and an existence-based cache cannot serve a
-/// truncated decrypt.
-///
-/// **Task 1908:** `file_id` (the id the file was uploaded under) is required —
-/// it is bound into every v2 frame together with the upload's version id, the
-/// chunk index and the last-chunk flag — and so is `expected_chunk_format`
-/// from the file's encrypted metadata (0 = unrecorded, 2 = v2). v1 files still
-/// open when the metadata records no format. A reordered/spliced/truncated v2
-/// body fails.
-#[uniffi::export]
-pub fn decrypt_contiguous_to_file(
-    file_key: Vec<u8>,
-    file_id: String,
-    expected_chunk_format: u8,
-    body: Vec<u8>,
-    chunk_size: u64,
-    output_path: String,
-) -> Result<u64, CryptoError> {
-    let file_key = Zeroizing::new(file_key);
-    let fk = file_key_from_slice(&file_key)?;
-    let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
-    encrypt::decrypt_contiguous_to_file(&fk, &file_id, expected, &body, chunk_size, &output_path)
-        .map_err(CryptoError::from)
-}
+pub use chunk_decryptor::{decrypt_chunks_to_file, decrypt_contiguous_to_file};
 
 // ---------------------------------------------------------------------------
 // Metadata
 // ---------------------------------------------------------------------------
 
 /// Encrypt a UTF-8 metadata string (filename, path, etc.) with AES-256-GCM.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn encrypt_metadata(key: Vec<u8>, metadata: String) -> Result<EncryptedData, CryptoError> {
     let fk = file_key_from_slice(&key)?;
     let blob = encrypt::encrypt_metadata(&fk, &metadata)?;
@@ -873,7 +821,7 @@ pub fn encrypt_metadata(key: Vec<u8>, metadata: String) -> Result<EncryptedData,
 }
 
 /// Decrypt a metadata blob back to a UTF-8 string.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn decrypt_metadata(key: Vec<u8>, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Result<String, CryptoError> {
     let fk = file_key_from_slice(&key)?;
     let blob = EncryptedBlob {
@@ -890,7 +838,7 @@ pub fn decrypt_metadata(key: Vec<u8>, nonce: Vec<u8>, ciphertext: Vec<u8>) -> Re
 
 /// Encrypt a filename + optional MIME type into the canonical JSON envelope.
 /// The result is a JSON string containing cipher_suite, nonce, and ciphertext.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 #[allow(deprecated)]
 pub fn encrypt_name(
     master_key: Vec<u8>,
@@ -904,7 +852,7 @@ pub fn encrypt_name(
 
 /// Decrypt a `name_encrypted` JSON envelope back to a plaintext filename.
 /// Handles both new format (`{"name":"...","mime_type":"..."}`) and legacy bare strings.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn decrypt_name(master_key: Vec<u8>, file_id: String, name_encrypted: String) -> Result<String, CryptoError> {
     let mk = master_key_from_slice(&master_key)?;
     encrypt::decrypt_name(&mk, &file_id, &name_encrypted).map_err(CryptoError::from)
@@ -912,7 +860,7 @@ pub fn decrypt_name(master_key: Vec<u8>, file_id: String, name_encrypted: String
 
 /// Decrypt a `name_encrypted` JSON envelope and return both the filename and
 /// the MIME type (if present in the encrypted payload).
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn decrypt_name_with_mime(
     master_key: Vec<u8>,
     file_id: String,
@@ -959,7 +907,7 @@ fn is_previewable_by_extension(filename: String) -> bool {
 
 /// Generate a new 12-word BIP39 recovery phrase and the corresponding master
 /// key. The phrase IS the master secret.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn generate_recovery_phrase() -> Result<RecoveryPhraseResult, CryptoError> {
     let (phrase, mk) = recovery::generate_recovery_phrase()?;
     let bytes = mk.to_bytes();
@@ -971,7 +919,7 @@ pub fn generate_recovery_phrase() -> Result<RecoveryPhraseResult, CryptoError> {
 
 /// Recover a master key from a 12-word BIP39 recovery phrase.
 /// Returns the 32-byte master key.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn recover_from_phrase(phrase: String) -> Result<Vec<u8>, CryptoError> {
     let mk = recovery::recover_from_phrase(&phrase)?;
     Ok(mk.to_bytes().to_vec())
@@ -983,7 +931,7 @@ pub fn recover_from_phrase(phrase: String) -> Result<Vec<u8>, CryptoError> {
 
 /// Start OPAQUE client registration. Returns the registration message and
 /// client state (both needed for the finish step).
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn opaque_registration_start(password: Vec<u8>) -> Result<OpaqueStartResult, CryptoError> {
     let result = beebeeb_core::opaque_protocol::client_registration_start(&password)?;
     Ok(OpaqueStartResult {
@@ -995,7 +943,7 @@ pub fn opaque_registration_start(password: Vec<u8>) -> Result<OpaqueStartResult,
 /// Finish OPAQUE client registration. Takes the client state from the start
 /// step, the password, and the server's response. Returns the registration
 /// upload bytes to send to the server.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn opaque_registration_finish(
     client_state: Vec<u8>,
     password: Vec<u8>,
@@ -1009,7 +957,7 @@ pub fn opaque_registration_finish(
 }
 
 /// Start OPAQUE client login. Returns the login message and client state.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn opaque_login_start(password: Vec<u8>) -> Result<OpaqueStartResult, CryptoError> {
     let result = beebeeb_core::opaque_protocol::client_login_start(&password)?;
     Ok(OpaqueStartResult {
@@ -1021,11 +969,10 @@ pub fn opaque_login_start(password: Vec<u8>) -> Result<OpaqueStartResult, Crypto
 /// Finish OPAQUE client login. Returns the finalization message, the session
 /// key, and the export key (used to derive the master key envelope).
 ///
-/// `ksf_version` selects the KSF the account's password file was registered
-/// under (0 = legacy Identity KSF, anything else = current Argon2id). Mobile
-/// reads it from the login-start response and passes it through verbatim; the
-/// KSF must match or finish fails.
-#[uniffi::export]
+/// Normal login accepts only the current KSF version (1). A server-supplied
+/// legacy or unknown version is rejected; legacy accounts require the explicit
+/// migration path in core.
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn opaque_login_finish(
     client_state: Vec<u8>,
     password: Vec<u8>,
@@ -1036,8 +983,8 @@ pub fn opaque_login_finish(
         beebeeb_core::opaque_protocol::client_login_finish(&client_state, &password, &server_response, ksf_version)?;
     Ok(OpaqueLoginFinishResult {
         message: result.message,
-        session_key: result.session_key,
-        export_key: result.export_key,
+        session_key: result.session_key.to_vec(),
+        export_key: result.export_key.to_vec(),
     })
 }
 
@@ -1046,14 +993,14 @@ pub fn opaque_login_finish(
 // ---------------------------------------------------------------------------
 
 /// Derive an X25519 secret scalar from a master key. Returns 32 bytes.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn derive_x25519_private(master_key: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let mk = master_key_from_slice(&master_key)?;
     Ok(beebeeb_core::opaque::derive_x25519_private(&mk).to_vec())
 }
 
 /// Derive an X25519 public point from a secret scalar. Returns 32 bytes.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn derive_x25519_public(private_key: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let pk: [u8; 32] = private_key.try_into().map_err(|_| CryptoError::InvalidInput {
         detail: "secret scalar must be 32 bytes".into(),
@@ -1063,7 +1010,7 @@ pub fn derive_x25519_public(private_key: Vec<u8>) -> Result<Vec<u8>, CryptoError
 
 /// Compute an X25519 shared secret from my secret scalar and their public point.
 /// Returns 32-byte shared secret.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn x25519_shared_secret(my_private: Vec<u8>, their_public: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let priv_key: [u8; 32] = my_private.try_into().map_err(|_| CryptoError::InvalidInput {
         detail: "secret scalar must be 32 bytes".into(),
@@ -1077,7 +1024,7 @@ pub fn x25519_shared_secret(my_private: Vec<u8>, their_public: Vec<u8>) -> Resul
 }
 
 /// Derive a share key from a shared secret and file ID. Returns 32-byte share key.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn derive_share_key(shared_secret: Vec<u8>, file_id: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let ss: [u8; 32] = shared_secret.try_into().map_err(|_| CryptoError::InvalidInput {
         detail: "shared_secret must be 32 bytes".into(),
@@ -1088,7 +1035,7 @@ pub fn derive_share_key(shared_secret: Vec<u8>, file_id: Vec<u8>) -> Result<Vec<
 /// Compute a recovery check value from a master key. Returns 32-byte check value.
 /// This is stored server-side so we can verify a recovery phrase produces the
 /// correct master key.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn compute_recovery_check(master_key: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let mk = master_key_from_slice(&master_key)?;
     Ok(beebeeb_core::opaque::compute_recovery_check(&mk).to_vec())
@@ -1098,7 +1045,7 @@ pub fn compute_recovery_check(master_key: Vec<u8>) -> Result<Vec<u8>, CryptoErro
 /// key, for a server to compare folder keys without learning them (HKDF-SHA256,
 /// info `beebeeb/folder-key-id/v1`). Returns 32 bytes; not secret, and never a
 /// key. Wipes the copy of the key this function owns.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn folder_key_id(folder_key: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let mut folder_key = folder_key;
     let key = <[u8; 32]>::try_from(folder_key.as_slice()).map(Zeroizing::new);
@@ -1115,14 +1062,14 @@ pub fn folder_key_id(folder_key: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
 
 /// Derive the per-request private-key-wrapping key from the owner's master key.
 /// Returns 32 bytes.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn derive_request_wrap_key(master_key: Vec<u8>, request_id: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let mk = master_key_from_slice(&master_key)?;
     Ok(beebeeb_core::file_request::derive_request_wrap_key(&mk, &request_id).to_vec())
 }
 
 /// Wrap a request's X25519 private key under the owner's master key.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn wrap_request_private(
     master_key: Vec<u8>,
     request_id: Vec<u8>,
@@ -1137,7 +1084,7 @@ pub fn wrap_request_private(
 }
 
 /// Unwrap a request's X25519 private key. Returns 32 bytes.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn unwrap_request_private(
     master_key: Vec<u8>,
     request_id: Vec<u8>,
@@ -1150,7 +1097,7 @@ pub fn unwrap_request_private(
 }
 
 /// Seal a content key to a request's public key (anonymous uploader path).
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn seal_to_request(
     r_pub: Vec<u8>,
     file_id: Vec<u8>,
@@ -1177,7 +1124,7 @@ pub fn seal_to_request(
 /// name, note or thumbnail under this key. For a request row the owner's rename
 /// goes through `seal_request_rename` / `sealRequestRename` (the §15
 /// string-derived key), never `C`.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn open_request_upload(
     r_priv: Vec<u8>,
     e_pub: Vec<u8>,
@@ -1213,10 +1160,28 @@ impl MasterKeyHandle {
     }
 
     fn with_key<T, F: FnOnce(&kdf::MasterKey) -> T>(&self, f: F) -> Result<T, CryptoError> {
-        let guard = self.inner.lock().unwrap();
+        let guard = chunk_decryptor::lock_handle(&self.inner)?;
         guard.as_ref().map(f).ok_or(CryptoError::InvalidInput {
             detail: "key handle has been cleared".into(),
         })
+    }
+
+    #[cfg(not(feature = "legacy-bindings"))]
+    pub fn from_keychain_bytes(bytes: Vec<u8>) -> Result<Arc<Self>, CryptoError> {
+        let arr: [u8; 32] = bytes.try_into().map_err(|_| CryptoError::InvalidInput {
+            detail: "keychain bytes must be exactly 32 bytes".into(),
+        })?;
+        Ok(Self::new(kdf::MasterKey::from_bytes(arr)))
+    }
+
+    #[cfg(all(test, not(feature = "legacy-bindings")))]
+    fn derive_x25519_private(&self) -> Result<Vec<u8>, CryptoError> {
+        self.with_key(|mk| beebeeb_core::opaque::derive_x25519_private(mk).to_vec())
+    }
+
+    #[cfg(all(test, not(feature = "legacy-bindings")))]
+    fn export_for_keychain(&self) -> Result<Vec<u8>, CryptoError> {
+        self.with_key(|mk| mk.to_bytes().to_vec())
     }
 }
 
@@ -1226,16 +1191,6 @@ impl MasterKeyHandle {
     #[uniffi::constructor]
     pub fn from_recovery_phrase(phrase: String) -> Result<Arc<Self>, CryptoError> {
         let mk = recovery::recover_from_phrase(&phrase)?;
-        Ok(Self::new(mk))
-    }
-
-    /// Reconstruct a MasterKeyHandle from 32 raw bytes read from the OS keychain.
-    #[uniffi::constructor]
-    pub fn from_keychain_bytes(bytes: Vec<u8>) -> Result<Arc<Self>, CryptoError> {
-        let arr: [u8; 32] = bytes.try_into().map_err(|_| CryptoError::InvalidInput {
-            detail: "keychain bytes must be exactly 32 bytes".into(),
-        })?;
-        let mk = kdf::MasterKey::from_bytes(arr);
         Ok(Self::new(mk))
     }
 
@@ -1307,7 +1262,7 @@ impl MasterKeyHandle {
     pub fn wrap_bytes(&self, bytes: Vec<u8>) -> Result<EncryptedData, CryptoError> {
         let bytes = Zeroizing::new(bytes);
         self.with_key(|mk| {
-            let raw = Zeroizing::new(mk.to_bytes());
+            let raw = mk.to_bytes();
             encrypt::encrypt_chunk(&kdf::FileKey::from_bytes(*raw), &bytes)
         })?
         .map(|blob| encrypted_blob_to_data(&blob))
@@ -1341,14 +1296,14 @@ impl MasterKeyHandle {
     /// Task 2275 L13: mint a new owner (O) item id for this master key. The id
     /// stays inside the returned handle; only `id_text` leaves for the wire.
     pub fn new_owner_item_id(&self) -> Result<Arc<NewItemIdHandle>, CryptoError> {
-        let master = self.with_key(|mk| kdf::MasterKey::from_bytes(mk.to_bytes()))?;
+        let master = self.with_key(|mk| kdf::MasterKey::from_bytes(*mk.to_bytes()))?;
         let id = beebeeb_core::item_id::NewItemId::owner(&master)?;
         Ok(Arc::new(NewItemIdHandle { master, id }))
     }
 
     /// Task 2275 L13: mint a new foreign (F) item id for this master key.
     pub fn new_foreign_item_id(&self) -> Result<Arc<NewItemIdHandle>, CryptoError> {
-        let master = self.with_key(|mk| kdf::MasterKey::from_bytes(mk.to_bytes()))?;
+        let master = self.with_key(|mk| kdf::MasterKey::from_bytes(*mk.to_bytes()))?;
         let id = beebeeb_core::item_id::NewItemId::foreign(&master)?;
         Ok(Arc::new(NewItemIdHandle { master, id }))
     }
@@ -1357,7 +1312,7 @@ impl MasterKeyHandle {
     /// an upload session. The tag is re-checked in constant time, so a tampered
     /// tag, a different id or a server-echoed id is refused.
     pub fn resume_new_item_id(&self, item_id: String, tag: Vec<u8>) -> Result<Arc<NewItemIdHandle>, CryptoError> {
-        let master = self.with_key(|mk| kdf::MasterKey::from_bytes(mk.to_bytes()))?;
+        let master = self.with_key(|mk| kdf::MasterKey::from_bytes(*mk.to_bytes()))?;
         let id = beebeeb_core::item_id::NewItemId::resume(&master, &item_id, &tag)?;
         Ok(Arc::new(NewItemIdHandle { master, id }))
     }
@@ -1585,17 +1540,6 @@ impl MasterKeyHandle {
         Ok(token.to_vec())
     }
 
-    /// Derive the X25519 secret scalar from the master key. Returns 32 bytes.
-    pub fn derive_x25519_private(&self) -> Result<Vec<u8>, CryptoError> {
-        self.with_key(|mk| beebeeb_core::opaque::derive_x25519_private(mk).to_vec())
-    }
-
-    /// Export the raw 32-byte key for writing to the OS keychain.
-    /// Only call this once at account setup; never log or transmit the result.
-    pub fn export_for_keychain(&self) -> Result<Vec<u8>, CryptoError> {
-        self.with_key(|mk| mk.to_bytes().to_vec())
-    }
-
     /// Compute the recovery-check value (stored server-side to verify the phrase).
     pub fn compute_recovery_check(&self) -> Result<Vec<u8>, CryptoError> {
         self.with_key(|mk| beebeeb_core::opaque::compute_recovery_check(mk).to_vec())
@@ -1630,6 +1574,24 @@ impl MasterKeyHandle {
         let chunk_format = ExpectedChunkFormat::from_u8(chunk_format)?;
         self.with_key(|mk| {
             encrypt::encrypt_name_with_chunk_format(mk, &file_id, &filename, mime_type.as_deref(), chunk_format)
+        })?
+        .map_err(CryptoError::from)
+    }
+
+    /// Seal protected metadata for one newly written v2 version.
+    pub fn encrypt_name_with_version(
+        &self,
+        file_id: String,
+        filename: String,
+        mime_type: Option<String>,
+        chunk_format: u8,
+        version_id: Vec<u8>,
+        version_counter: u64,
+    ) -> Result<String, CryptoError> {
+        let chunk_format = ExpectedChunkFormat::from_u8(chunk_format)?;
+        let version = version_commitment_from_parts(version_id, version_counter)?;
+        self.with_key(|mk| {
+            encrypt::encrypt_name_with_version(mk, &file_id, &filename, mime_type.as_deref(), chunk_format, version)
         })?
         .map_err(CryptoError::from)
     }
@@ -1871,12 +1833,14 @@ impl MasterKeyHandle {
     /// Reads each chunk file (containing `nonce || ciphertext`), decrypts,
     /// and writes plaintext to output. Atomic rename at end.
     ///
-    /// `expected_chunk_format` (task 1908) comes from the file's encrypted
-    /// metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
+    /// `metadata` is the version's `NameMetadataDto` from
+    /// `decrypt_file_metadata` (task 1908): v2 opens only as the upload its
+    /// commitment names, and a record without one opens v1 content only (the
+    /// ruling of 2026-11-07).
     pub fn decrypt_file(
         &self,
         file_id: String,
-        expected_chunk_format: u8,
+        metadata: NameMetadataDto,
         chunk_paths: Vec<String>,
         output_path: String,
         callback: Option<Box<dyn FileProgressCallback>>,
@@ -1891,12 +1855,13 @@ impl MasterKeyHandle {
             .as_ref()
             .map(|a| a as &dyn beebeeb_core::file_encrypt::FileProgressCallback);
 
-        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
+        let (expected, version) = chunk_decryptor::metadata_pin(metadata)?;
         let result = self.with_key(|mk| {
             beebeeb_core::file_encrypt::decrypt_chunks_to_file(
                 mk,
                 &file_id,
                 expected,
+                version,
                 &path_refs,
                 Path::new(&output_path),
                 core_cb,
@@ -1908,6 +1873,27 @@ impl MasterKeyHandle {
             total_bytes: result.total_bytes,
             chunks_processed: result.chunks_processed,
         })
+    }
+}
+
+#[cfg(feature = "legacy-bindings")]
+#[uniffi::export]
+impl MasterKeyHandle {
+    /// Compatibility import for apps that still read key bytes in platform code.
+    #[uniffi::constructor]
+    pub fn from_keychain_bytes(bytes: Vec<u8>) -> Result<Arc<Self>, CryptoError> {
+        let arr: [u8; 32] = bytes.try_into().map_err(|_| CryptoError::InvalidInput {
+            detail: "keychain bytes must be exactly 32 bytes".into(),
+        })?;
+        Ok(Self::new(kdf::MasterKey::from_bytes(arr)))
+    }
+
+    pub fn derive_x25519_private(&self) -> Result<Vec<u8>, CryptoError> {
+        self.with_key(|mk| beebeeb_core::opaque::derive_x25519_private(mk).to_vec())
+    }
+
+    pub fn export_for_keychain(&self) -> Result<Vec<u8>, CryptoError> {
+        self.with_key(|mk| mk.to_bytes().to_vec())
     }
 }
 
@@ -1927,32 +1913,21 @@ impl FileKeyHandle {
     }
 
     fn with_key<T, F: FnOnce(&kdf::FileKey) -> T>(&self, f: F) -> Result<T, CryptoError> {
-        let guard = self.inner.lock().unwrap();
+        let guard = chunk_decryptor::lock_handle(&self.inner)?;
         guard.as_ref().map(f).ok_or(CryptoError::InvalidInput {
             detail: "key handle has been cleared".into(),
         })
+    }
+
+    #[cfg(not(feature = "legacy-bindings"))]
+    pub fn from_key_bytes(key: Vec<u8>) -> Result<Arc<Self>, CryptoError> {
+        let key = Zeroizing::new(key);
+        Ok(Self::new(file_key_from_slice(&key)?))
     }
 }
 
 #[uniffi::export]
 impl FileKeyHandle {
-    /// A handle for a per-file key the app holds as raw bytes and that is NOT
-    /// derived from the account's master key: a shared file's key, a folder
-    /// link key. Exactly 32 bytes, anything else is an `InvalidInput` error.
-    /// The input is zeroized once copied into the key.
-    ///
-    /// **DECRYPT-ONLY for a request row.** An `open_request_upload` content key
-    /// is the anonymous uploader's `C`. Use this handle to READ that row's
-    /// content (`decrypt_file_metadata`, `decrypt_note`, the chunk readers);
-    /// never seal a name, note or thumbnail under it. The owner's rename of a
-    /// request row goes through `seal_request_rename` (the §15 string-derived
-    /// key), never `C`.
-    #[uniffi::constructor]
-    pub fn from_key_bytes(key: Vec<u8>) -> Result<Arc<Self>, CryptoError> {
-        let key = Zeroizing::new(key);
-        Ok(Self::new(file_key_from_slice(&key)?))
-    }
-
     /// A fresh random key, independent of the account master key.
     #[uniffi::constructor]
     pub fn generate() -> Result<Arc<Self>, CryptoError> {
@@ -1976,7 +1951,7 @@ impl FileKeyHandle {
                 .map_err(|_| CryptoError::InvalidInput {
                     detail: "passphrase stretch must be exactly 32 bytes".into(),
                 })?;
-        let key = Zeroizing::new(kdf::combine_folder_link_key(k_c, stretch));
+        let key = kdf::combine_folder_link_key(k_c, stretch);
         Ok(Self::new(kdf::FileKey::from_bytes(*key)))
     }
 
@@ -1994,7 +1969,7 @@ impl FileKeyHandle {
             detail: "link fragment key must be exactly 32 bytes".into(),
         })?;
         let stretch = kdf::derive_folder_link_passphrase_stretch(&passphrase, &token)?;
-        let key = Zeroizing::new(kdf::combine_folder_link_key(k_c, Some(&stretch)));
+        let key = kdf::combine_folder_link_key(k_c, Some(&stretch));
         Ok(Self::new(kdf::FileKey::from_bytes(*key)))
     }
 
@@ -2257,24 +2232,22 @@ impl FileKeyHandle {
     /// asked for and `is_last` is `index == chunk_count - 1`; a server that
     /// serves another chunk or lies about the count fails the tag.
     ///
-    /// `format` (1 = v1 legacy, 2 = v2) must come from authenticated data — 2
-    /// when the encrypted metadata records v2, else the `chunk_format()` of a
-    /// decryptor that opened chunk 0 — never from a server field.
-    /// `version_id` (12 bytes, v2 only; ignored for v1) is the `version_id()` of
-    /// a decryptor that opened chunk 0, or chunk 0's first 12 bytes: frames of
-    /// another upload of the same file id fail.
+    /// `metadata` is that version's `NameMetadataDto` from
+    /// `decrypt_file_metadata[_with_key]`, never a server field: with a version
+    /// commitment only that upload's v2 frames open; a record without one opens
+    /// v1 frames only, and a `chunk_format: 2` record without one is refused
+    /// (the ruling of 2026-11-07).
     pub fn decrypt_chunk_frame(
         &self,
         file_id: String,
-        version_id: Vec<u8>,
+        metadata: NameMetadataDto,
         index: u32,
         is_last: bool,
-        format: u8,
         frame: Vec<u8>,
     ) -> Result<Vec<u8>, CryptoError> {
-        let format = ChunkFormat::from_u8(format)?;
+        let record = chunk_decryptor::metadata_record(metadata)?;
         self.with_key(|fk| {
-            beebeeb_core::chunk_stream::open_chunk(fk, &file_id, &version_id, index, is_last, format, &frame)
+            beebeeb_core::chunk_stream::open_recorded_chunk(fk, &file_id, &record, index, is_last, &frame)
         })?
         .map_err(Into::into)
     }
@@ -2293,6 +2266,17 @@ impl FileKeyHandle {
         };
         self.with_key(|fk| encrypt::decrypt_metadata(fk, &blob))?
             .map_err(Into::into)
+    }
+}
+
+#[cfg(feature = "legacy-bindings")]
+#[uniffi::export]
+impl FileKeyHandle {
+    /// Compatibility import for apps that still hold a raw shared-file key.
+    #[uniffi::constructor]
+    pub fn from_key_bytes(key: Vec<u8>) -> Result<Arc<Self>, CryptoError> {
+        let key = Zeroizing::new(key);
+        Ok(Self::new(file_key_from_slice(&key)?))
     }
 }
 
@@ -2425,6 +2409,28 @@ impl NewItemIdHandle {
             .map_err(Into::into)
     }
 
+    /// Seal this new row's protected name metadata after frame 0 was emitted.
+    pub fn encrypt_name_with_version(
+        &self,
+        filename: String,
+        mime_type: Option<String>,
+        chunk_format: u8,
+        version_id: Vec<u8>,
+        version_counter: u64,
+    ) -> Result<String, CryptoError> {
+        let pin = ExpectedChunkFormat::from_u8(chunk_format)?;
+        let version = version_commitment_from_parts(version_id, version_counter)?;
+        encrypt::encrypt_name_for_new_item_version(
+            &self.master,
+            &self.id,
+            &filename,
+            mime_type.as_deref(),
+            pin,
+            version,
+        )
+        .map_err(Into::into)
+    }
+
     /// Seal this new row's note.
     pub fn encrypt_note(&self, note: String, chunk_format: u8) -> Result<String, CryptoError> {
         let pin = ExpectedChunkFormat::from_u8(chunk_format)?;
@@ -2461,9 +2467,30 @@ impl WriteTargetHandle {
         self.inner.pin().as_u8()
     }
 
+    pub fn version_id(&self) -> Option<Vec<u8>> {
+        self.inner.version().map(|version| version.version_id.to_vec())
+    }
+
+    pub fn version_counter(&self) -> Option<u64> {
+        self.inner.version().map(|version| version.counter)
+    }
+
     /// Seal a replacement name under the target's key and pin.
     pub fn encrypt_name(&self, filename: String, mime_type: Option<String>) -> Result<String, CryptoError> {
         encrypt::encrypt_name_for_target(&self.inner, &filename, mime_type.as_deref()).map_err(Into::into)
+    }
+
+    /// Seal metadata for a replacement version, validating the counter step.
+    pub fn encrypt_name_for_version(
+        &self,
+        filename: String,
+        mime_type: Option<String>,
+        version_id: Vec<u8>,
+        version_counter: u64,
+    ) -> Result<String, CryptoError> {
+        let version = version_commitment_from_parts(version_id, version_counter)?;
+        encrypt::encrypt_name_for_target_version(&self.inner, &filename, mime_type.as_deref(), version)
+            .map_err(Into::into)
     }
 
     /// Seal a replacement note under the target's key and pin.
@@ -2479,11 +2506,20 @@ impl WriteTargetHandle {
 
 /// Decrypted name metadata (task 1908): `chunk_format` is what every content
 /// reader of the file must be given (0 = unrecorded, 2 = v2).
-#[derive(uniffi::Record)]
+#[derive(Clone, uniffi::Record)]
 pub struct NameMetadataDto {
     pub name: String,
     pub mime_type: Option<String>,
     pub chunk_format: u8,
+    pub version_id: Option<Vec<u8>>,
+    pub version_counter: Option<u64>,
+}
+
+/// Authenticated identity of a newly encrypted file version.
+#[derive(uniffi::Record)]
+pub struct VersionCommitmentDto {
+    pub version_id: Vec<u8>,
+    pub version_counter: u64,
 }
 
 /// One resolved row (task 2275). `origin` is "derived", "derived_binary",
@@ -2506,10 +2542,14 @@ pub struct ResolvedItemKey {
 
 impl From<encrypt::NameMetadata> for NameMetadataDto {
     fn from(m: encrypt::NameMetadata) -> Self {
+        let version_id = m.version.map(|version| version.version_id.to_vec());
+        let version_counter = m.version.map(|version| version.counter);
         Self {
             name: m.name,
             mime_type: m.mime_type,
             chunk_format: m.chunk_format.as_u8(),
+            version_id,
+            version_counter,
         }
     }
 }
@@ -2557,7 +2597,7 @@ pub struct ChunkEncryptorHandle {
 impl ChunkEncryptorHandle {
     /// Run `f` against the live encryptor, or error if it has been finished.
     fn with_inner<T, F: FnOnce(&mut ChunkEncryptor) -> T>(&self, f: F) -> Result<T, CryptoError> {
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = chunk_decryptor::lock_handle(&self.inner)?;
         let enc = guard.as_mut().ok_or(CryptoError::InvalidInput {
             detail: "chunk encryptor handle has been finished or cleared".into(),
         })?;
@@ -2689,33 +2729,34 @@ impl ChunkEncryptorHandle {
         self.with_inner(|e| e.chunks_emitted())
     }
 
-    /// The chunk format this encryptor writes: 1 = v1, 2 = v2 (task 1908).
-    /// Still 1 during the read-only rollout phase. Record it at upload via
+    /// The chunk format this encryptor writes: 2 = v2. Record it at upload via
     /// `encrypt_name_with_chunk_format` (2 if this is 2, else 0) so readers
     /// can pin it.
     pub fn chunk_format(&self) -> Result<u8, CryptoError> {
         self.with_inner(|e| e.format().as_u8())
     }
 
+    /// Build the protected metadata values after frame 0 has been emitted.
+    pub fn version_commitment(&self, previous_counter: Option<u64>) -> Result<VersionCommitmentDto, CryptoError> {
+        let version = self.with_inner(|e| e.version_commitment_after(previous_counter))??;
+        Ok(VersionCommitmentDto {
+            version_id: version.version_id.to_vec(),
+            version_counter: version.counter,
+        })
+    }
+
     /// Replace / new version of an EXISTING file (task 1908 round 4, I-1):
     /// write in the format the file's recorded pin requires. `recorded_pin` =
     /// the `chunk_format` that `decrypt_file_metadata` returned for the file
-    /// (0 = unrecorded, 2 = v2) — never a server field. A v2 pin forces v2
-    /// frames even during the read-only phase (the server keeps the v2
-    /// metadata on replace, so v1 frames would never open); 0 keeps the default
-    /// write format. Call it right after the constructor, before the first
+    /// (0 = unrecorded, 2 = v2) — never a server field. Both supported pins
+    /// produce v2 frames; 0 keeps the legacy-history compatibility state.
+    /// Call it right after the constructor, before the first
     /// chunk (afterwards it errors and the handle stays usable as it was). Any
-    /// other code is an error.
-    ///
-    /// **New-file rule (lead ruling 2026-10-17):** pass 2 ONLY when it was
-    /// read from an EXISTING file's authenticated metadata. A brand-new file
-    /// makes NO call (the default write format applies) and records
-    /// `chunk_format()` in its name; passing 2 for a new file would create a
-    /// v2 file before the switch. Core cannot enforce this; each client keeps
-    /// a test that its new-file path never calls this with 2.
+    /// other code is an error. An unrecorded pin retains compatibility with
+    /// legacy history while the replacement itself is still written as v2.
     pub fn apply_recorded_pin(&self, recorded_pin: u8) -> Result<(), CryptoError> {
         let pin = ExpectedChunkFormat::from_u8(recorded_pin)?;
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = chunk_decryptor::lock_handle(&self.inner)?;
         let enc = guard.as_ref().ok_or(CryptoError::InvalidInput {
             detail: "chunk encryptor handle has been finished or cleared".into(),
         })?;
@@ -2749,7 +2790,7 @@ impl ChunkEncryptorHandle {
     /// Consume the encryptor (by value) and return the summary after the integrity
     /// guard (detects a source that shrank). The handle is unusable afterwards.
     pub fn finish(&self) -> Result<ChunkEncryptorSummaryDto, CryptoError> {
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = chunk_decryptor::lock_handle(&self.inner)?;
         let enc = guard.take().ok_or(CryptoError::InvalidInput {
             detail: "chunk encryptor handle has been finished or cleared".into(),
         })?;
@@ -2763,670 +2804,13 @@ impl ChunkEncryptorHandle {
     }
 }
 
-/// Stateful streaming decryptor handle. Single-consumer (see module note).
-#[derive(uniffi::Object)]
-pub struct ChunkDecryptorHandle {
-    inner: Mutex<Option<ChunkDecryptor>>,
-}
-
-impl ChunkDecryptorHandle {
-    fn with_inner<T, F: FnOnce(&mut ChunkDecryptor) -> T>(&self, f: F) -> Result<T, CryptoError> {
-        let mut guard = self.inner.lock().unwrap();
-        let dec = guard.as_mut().ok_or(CryptoError::InvalidInput {
-            detail: "chunk decryptor handle has been cleared".into(),
-        })?;
-        Ok(f(dec))
-    }
-}
-
-#[uniffi::export]
-impl ChunkDecryptorHandle {
-    /// PULL constructor: stream-decrypt an encrypted file from disk.
-    /// `chunk_size_bytes` is the PLAINTEXT chunk size used at encryption (the wire
-    /// frame is `nonce(12) + chunk_size + tag(16)`). Errors if it is 0.
-    ///
-    /// `expected_chunk_format` (task 1908) comes from the file's encrypted
-    /// metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
-    #[uniffi::constructor]
-    pub fn from_file(
-        master_key: &MasterKeyHandle,
-        file_id: String,
-        expected_chunk_format: u8,
-        chunk_size_bytes: u64,
-        input_path: String,
-    ) -> Result<Arc<Self>, CryptoError> {
-        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
-        let file = std::fs::File::open(std::path::Path::new(&input_path)).map_err(|e| CryptoError::Io {
-            detail: format!("open input: {e}"),
-        })?;
-        let buf_cap = (chunk_size_bytes as usize)
-            .saturating_add(28)
-            .clamp(8 * 1024, 8 * 1024 * 1024);
-        let reader = std::io::BufReader::with_capacity(buf_cap, file);
-        let dec = master_key
-            .with_key(|mk| ChunkDecryptor::from_reader(mk, &file_id, expected, chunk_size_bytes, reader))??;
-        Ok(Arc::new(Self {
-            inner: Mutex::new(Some(dec)),
-        }))
-    }
-
-    /// PUSH constructor: the caller feeds wire frames via
-    /// [`push_frame`](Self::push_frame). Each frame is self-describing, so no chunk
-    /// size is needed.
-    ///
-    /// `expected_chunk_format` (task 1908) comes from the file's encrypted
-    /// metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
-    #[uniffi::constructor]
-    pub fn for_push(
-        master_key: &MasterKeyHandle,
-        file_id: String,
-        expected_chunk_format: u8,
-    ) -> Result<Arc<Self>, CryptoError> {
-        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
-        let dec = master_key.with_key(|mk| ChunkDecryptor::for_push(mk, &file_id, expected))?;
-        Ok(Arc::new(Self {
-            inner: Mutex::new(Some(dec)),
-        }))
-    }
-
-    /// PUSH constructor from a [`FileKeyHandle`] — for callers that hold the
-    /// file key but not the owner's master key (share / shared-link recipients).
-    /// Preferred over [`for_push_with_file_key`](Self::for_push_with_file_key):
-    /// the raw key never reaches Swift/Kotlin. `file_id` must be the id the file
-    /// was uploaded under (bound into every v2 frame).
-    #[uniffi::constructor]
-    pub fn for_push_with_file_key_handle(
-        file_key: &FileKeyHandle,
-        file_id: String,
-        expected_chunk_format: u8,
-    ) -> Result<Arc<Self>, CryptoError> {
-        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
-        // Copy into a fresh zeroize-on-drop key owned by the decryptor
-        // (`FileKey::from_bytes` wipes its by-value input).
-        let fk = file_key.with_key(|fk| kdf::FileKey::from_bytes(*fk.as_bytes()))?;
-        let dec = ChunkDecryptor::for_push_with_file_key(fk, &file_id, expected);
-        Ok(Arc::new(Self {
-            inner: Mutex::new(Some(dec)),
-        }))
-    }
-
-    /// PUSH constructor from a raw 32-byte file key, for hosts that only have
-    /// the bytes. Prefer [`for_push_with_file_key_handle`](Self::for_push_with_file_key_handle).
-    /// The owned copy that crosses the FFI is zeroized here; the host's own
-    /// copy is the host's to wipe.
-    #[uniffi::constructor]
-    pub fn for_push_with_file_key(
-        file_key: Vec<u8>,
-        file_id: String,
-        expected_chunk_format: u8,
-    ) -> Result<Arc<Self>, CryptoError> {
-        let file_key = Zeroizing::new(file_key);
-        let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)?;
-        let fk = file_key_from_slice(&file_key)?;
-        let dec = ChunkDecryptor::for_push_with_file_key(fk, &file_id, expected);
-        Ok(Arc::new(Self {
-            inner: Mutex::new(Some(dec)),
-        }))
-    }
-
-    /// The file's chunk format (1 = v1 legacy, 2 = v2) once chunk 0 has been
-    /// opened; `None` before.
-    pub fn chunk_format(&self) -> Result<Option<u8>, CryptoError> {
-        self.with_inner(|d| d.format().map(ChunkFormat::as_u8))
-    }
-
-    /// v2: the upload's version id (chunk 0's 12-byte nonce) once chunk 0 has
-    /// authenticated — what a seeking reader passes to
-    /// `FileKeyHandle.decrypt_chunk_frame`. `None` before chunk 0 and for v1.
-    pub fn version_id(&self) -> Result<Option<Vec<u8>>, CryptoError> {
-        self.with_inner(|d| d.version_id().map(|v| v.to_vec()))
-    }
-
-    /// End-of-stream check, consuming the decryptor. MUST be called after the
-    /// last pushed frame: it fails if no frame was pushed or if a v2 file ended
-    /// before its last chunk (truncation). Treat an `Err` as a failed download
-    /// and discard the plaintext. The pull form runs the same check at EOF.
-    pub fn finish(&self) -> Result<ChunkDecryptorSummaryDto, CryptoError> {
-        let mut guard = self.inner.lock().unwrap();
-        let dec = guard.take().ok_or(CryptoError::InvalidInput {
-            detail: "chunk decryptor handle has been finished or cleared".into(),
-        })?;
-        let summary = dec.finish().map_err(CryptoError::from)?;
-        Ok(ChunkDecryptorSummaryDto {
-            chunk_count: summary.chunk_count,
-            format: summary.format.as_u8(),
-        })
-    }
-
-    /// PULL: emit the next decrypted chunk, or `None` at clean EOF.
-    pub fn next_chunk(&self) -> Result<Option<DecryptedChunkDto>, CryptoError> {
-        let chunk = self.with_inner(|d| d.next_chunk())??;
-        Ok(chunk.map(|c| DecryptedChunkDto {
-            index: c.index,
-            data: c.data,
-        }))
-    }
-
-    /// PUSH: decrypt one caller-provided wire frame (`nonce || ciphertext || tag`).
-    pub fn push_frame(&self, frame: Vec<u8>) -> Result<DecryptedChunkDto, CryptoError> {
-        let chunk = self.with_inner(|d| d.push_frame(&frame))??;
-        Ok(DecryptedChunkDto {
-            index: chunk.index,
-            data: chunk.data,
-        })
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Streaming handle smoke tests (in-process — exercises the Send+Sync stateful
 // path). Verifies the Rust handle logic + roundtrip; NOT a real on-device upload.
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod chunk_stream_handle_tests {
-    use super::*;
-
-    fn mk_handle() -> Arc<MasterKeyHandle> {
-        // Any 32 bytes is a valid master key for a roundtrip test.
-        MasterKeyHandle::from_keychain_bytes(vec![7u8; 32]).unwrap()
-    }
-
-    /// What the metadata records for a file written by the default encryptor.
-    fn default_expected() -> u8 {
-        ExpectedChunkFormat::recorded_for(beebeeb_core::chunk_stream::WRITE_FORMAT).as_u8()
-    }
-
-    #[test]
-    fn push_roundtrip_via_handles() {
-        let mk = mk_handle();
-        let file_id = "ffi-push-roundtrip".to_string();
-        let data = b"hello via the uniffi chunk-stream handle".to_vec();
-
-        let enc = ChunkEncryptorHandle::for_push(&mk, file_id.clone(), data.len() as u64, "mobile".into()).unwrap();
-        assert_eq!(enc.chunk_plan().unwrap().chunk_count, 1);
-        // Read-only rollout phase: the FFI encryptor still writes v1.
-        assert_eq!(
-            enc.chunk_format().unwrap(),
-            1,
-            "WRITE_FORMAT is v1 until the gated switch"
-        );
-        let frame = enc.push_chunk(data.clone()).unwrap();
-        assert_eq!(frame.index, 0);
-        assert_ne!(frame.data, data); // ciphertext != plaintext
-        let summary = enc.finish().unwrap();
-        assert_eq!(summary.chunk_count, 1);
-        assert_eq!(summary.total_plaintext, data.len() as u64);
-
-        let dec = ChunkDecryptorHandle::for_push(&mk, file_id, default_expected()).unwrap();
-        let out = dec.push_frame(frame.data).unwrap();
-        assert_eq!(out.index, 0);
-        assert_eq!(out.data, data);
-        assert_eq!(dec.chunk_format().unwrap(), Some(1));
-        let s = dec.finish().unwrap();
-        assert_eq!((s.chunk_count, s.format), (1, 1));
-    }
-
-    /// Task 1908: two equal-size v2 chunks (as a client writes them after the
-    /// gated v2 switch). Core-written via the dev-only `test-support` feature.
-    #[allow(deprecated)]
-    fn two_v2_frames(mk: &MasterKeyHandle, file_id: &str) -> (Vec<u8>, Vec<Vec<u8>>) {
-        // 5 MiB on the "mobile" ladder (4 MiB chunks) => 2 chunks.
-        let data: Vec<u8> = (0..5 * 1024 * 1024).map(|i| (i % 253) as u8).collect();
-        let frames = mk
-            .with_key(|m| {
-                let mut enc =
-                    ChunkEncryptor::for_push(m, file_id, data.len() as u64, beebeeb_types::ChunkProfile::Mobile)
-                        .unwrap()
-                        .with_format(ChunkFormat::V2)
-                        .unwrap();
-                let cs = enc.chunk_plan().chunk_size_bytes as usize;
-                let frames: Vec<Vec<u8>> = data.chunks(cs).map(|c| enc.push_chunk(c).unwrap().data).collect();
-                enc.finish().unwrap();
-                frames
-            })
-            .unwrap();
-        assert_eq!(frames.len(), 2);
-        (data, frames)
-    }
-
-    #[test]
-    fn handle_rejects_reorder_and_truncation() {
-        let mk = mk_handle();
-        let (_, frames) = two_v2_frames(&mk, "ffi-v2");
-
-        for expected in [0u8, 2] {
-            // Out of order: chunk 1 pushed first.
-            let dec = ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into(), expected).unwrap();
-            assert!(dec.push_frame(frames[1].clone()).is_err());
-
-            // Truncated: only chunk 0, then finish.
-            let dec = ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into(), expected).unwrap();
-            dec.push_frame(frames[0].clone()).unwrap();
-            assert!(
-                dec.finish().is_err(),
-                "finish must reject a v2 stream without its last chunk"
-            );
-        }
-        // Unknown expected-format codes are refused, not treated as "detect".
-        for bad in [1u8, 3] {
-            assert!(ChunkDecryptorHandle::for_push(&mk, "ffi-v2".into(), bad).is_err());
-        }
-    }
-
-    #[test]
-    fn handle_v2_pin_refuses_name_blob_as_frame0() {
-        // Review round 2 P1-1 through the FFI: metadata records v2, the server
-        // serves the file's own name blob as its only frame.
-        let mk = mk_handle();
-        let id = "ffi-downgrade";
-        let ne = mk
-            .encrypt_name_with_chunk_format(id.into(), "a.pdf".into(), Some("application/pdf".into()), 2)
-            .unwrap();
-        let meta = mk.decrypt_name_metadata(id.into(), ne.clone()).unwrap();
-        assert_eq!((meta.name.as_str(), meta.chunk_format), ("a.pdf", 2));
-        let blob = parse_name_blob(&ne);
-        let forged = [blob.nonce, blob.ciphertext].concat();
-        let dec = ChunkDecryptorHandle::for_push(&mk, id.into(), meta.chunk_format).unwrap();
-        assert!(dec.push_frame(forged).is_err());
-        // A name written without a format reads back as 0 (unrecorded).
-        let legacy = mk.encrypt_name(id.into(), "a.pdf".into(), None).unwrap();
-        assert_eq!(mk.decrypt_name_metadata(id.into(), legacy).unwrap().chunk_format, 0);
-        assert!(
-            mk.encrypt_name_with_chunk_format(id.into(), "a".into(), None, 1)
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn handle_file_metadata_refuses_plaintext_folder_reader_keeps_it() {
-        // Round 3 P1-B through the FFI: files refuse a plaintext name.
-        let mk = mk_handle();
-        let id = "ffi-plaintext";
-        assert!(mk.decrypt_file_metadata(id.into(), "innocent.txt".into()).is_err());
-        assert_eq!(
-            mk.decrypt_name_metadata(id.into(), "Photos".into()).unwrap().name,
-            "Photos"
-        );
-        let fk = mk.derive_file_key(id.as_bytes().to_vec()).unwrap();
-        assert!(fk.decrypt_file_metadata("innocent.txt".into()).is_err());
-        // A real envelope reads through both file readers.
-        let ne = mk.encrypt_name(id.into(), "a.pdf".into(), None).unwrap();
-        assert_eq!(mk.decrypt_file_metadata(id.into(), ne.clone()).unwrap().name, "a.pdf");
-        assert_eq!(fk.decrypt_file_metadata(ne).unwrap().chunk_format, 0);
-    }
-
-    #[test]
-    fn handle_thumbnail_roundtrip_and_resume_policy() {
-        let mk = mk_handle();
-        let fk = mk.derive_file_key(b"ffi-thumb".to_vec()).unwrap();
-        let sealed = fk.encrypt_thumbnail(b"webp bytes".to_vec()).unwrap();
-        assert_eq!(fk.decrypt_thumbnail(sealed).unwrap(), b"webp bytes");
-
-        // Round 3 P1-A through the FFI: the default (v1) encryptor may continue
-        // a v1 session; an unrecorded record restarts; unknown codes are errors.
-        let enc = ChunkEncryptorHandle::for_push(&mk, "ffi-resume".into(), 10, "mobile".into()).unwrap();
-        assert_eq!(
-            enc.resume_policy(Some(1)).unwrap(),
-            SessionResumeAction::ContinueSession
-        );
-        for stored in [None, Some(2)] {
-            assert_eq!(
-                enc.resume_policy(stored).unwrap(),
-                SessionResumeAction::RestartWithFreshSession,
-                "stored {stored:?}"
-            );
-        }
-        assert!(enc.resume_policy(Some(3)).is_err());
-    }
-
-    #[test]
-    fn handle_replace_of_a_v2_pinned_file_uses_the_recorded_pin() {
-        // Task 1908 round 4, I-1 through the FFI: pin from the file's metadata
-        // -> apply_recorded_pin -> the new version reads back under that pin.
-        let mk = mk_handle();
-        let id = "ffi-replace-v2";
-        let name = mk
-            .encrypt_name_with_chunk_format(id.into(), "a.pdf".into(), None, 2)
-            .unwrap();
-        let pin = mk.decrypt_file_metadata(id.into(), name).unwrap().chunk_format;
-        assert_eq!(pin, 2);
-        let data = b"replaced content of a v2-pinned file".to_vec();
-        let enc = ChunkEncryptorHandle::for_push(&mk, id.into(), data.len() as u64, "mobile".into()).unwrap();
-        enc.apply_recorded_pin(pin).unwrap();
-        assert_eq!(enc.chunk_format().unwrap(), 2, "a v2-pinned file must be written as v2");
-        let frame = enc.push_chunk(data.clone()).unwrap();
-        enc.finish().unwrap();
-        let dec = ChunkDecryptorHandle::for_push(&mk, id.into(), pin).unwrap();
-        assert_eq!(dec.push_frame(frame.data).unwrap().data, data);
-        dec.finish().unwrap();
-
-        // Unrecorded keeps the write format; unknown codes are errors.
-        let enc0 = ChunkEncryptorHandle::for_push(&mk, "ffi-replace-v1".into(), 4, "mobile".into()).unwrap();
-        enc0.apply_recorded_pin(0).unwrap();
-        assert_eq!(enc0.chunk_format().unwrap(), default_write_format());
-        for bad in [1u8, 3] {
-            let e = ChunkEncryptorHandle::for_push(&mk, "ffi-bad-pin".into(), 4, "mobile".into()).unwrap();
-            assert!(e.apply_recorded_pin(bad).is_err(), "pin code {bad}");
-        }
-    }
-
-    #[test]
-    fn handle_thumbnail_for_a_v2_pin_is_not_raw_key_sealed() {
-        let mk = mk_handle();
-        let fk = mk.derive_file_key(b"ffi-thumb-pin".to_vec()).unwrap();
-        let sealed = fk.encrypt_thumbnail_for(b"webp".to_vec(), 2).unwrap();
-        assert_eq!(fk.decrypt_thumbnail(sealed.clone()).unwrap(), b"webp");
-        assert!(
-            fk.decrypt_chunk(sealed[..12].to_vec(), sealed[12..].to_vec()).is_err(),
-            "a v2-pinned thumbnail must not open under the raw file key"
-        );
-        assert!(fk.encrypt_thumbnail_for(b"webp".to_vec(), 7).is_err());
-    }
-
-    #[test]
-    fn handle_note_for_a_v2_pin_is_subkey_sealed_and_not_a_name() {
-        // Task 1908 round 5 through the FFI: a note written for a v2-pinned
-        // file never sits under the raw file key and never opens as the
-        // file's metadata (the downgrade a raw-key note allowed).
-        let mk = mk_handle();
-        let id = "ffi-note-v2";
-        let name = mk
-            .encrypt_name_with_chunk_format(id.into(), "a.pdf".into(), None, 2)
-            .unwrap();
-        let pin = mk.decrypt_file_metadata(id.into(), name).unwrap().chunk_format;
-        assert_eq!(pin, 2);
-        let fk = mk.derive_file_key(id.as_bytes().to_vec()).unwrap();
-        let note = fk.encrypt_note_for("ffi note".into(), pin).unwrap();
-        assert_eq!(fk.decrypt_note(note.clone()).unwrap(), "ffi note");
-        let blob = parse_name_blob(&note);
-        assert!(
-            fk.decrypt_chunk(blob.nonce.clone(), blob.ciphertext.clone()).is_err(),
-            "a v2-pinned note must not open under the raw file key"
-        );
-        assert!(
-            fk.decrypt_file_metadata(note.clone()).is_err(),
-            "a v2 note must not open as the file's metadata"
-        );
-        assert!(mk.decrypt_file_metadata(id.into(), note).is_err());
-
-        // Unrecorded follows the write switch; unknown codes are errors.
-        let n0 = fk.encrypt_note_for("n0".into(), 0).unwrap();
-        assert_eq!(fk.decrypt_note(n0).unwrap(), "n0");
-        assert_eq!(fk.decrypt_note(fk.encrypt_note("n".into()).unwrap()).unwrap(), "n");
-        for bad in [1u8, 7] {
-            assert!(fk.encrypt_note_for("x".into(), bad).is_err(), "pin code {bad}");
-        }
-        assert!(fk.decrypt_note("a plaintext note".into()).is_err());
-    }
-
-    #[test]
-    fn handle_name_for_keeps_the_pin_under_a_file_key_handle_1958() {
-        // Task 1958 through the FFI: the rename writer of a FileKeyHandle keeps
-        // a v2 pin, seals under the name subkey, and for a derived key reads back
-        // through the master-key reader too.
-        let mk = mk_handle();
-        let id = "ffi-name-for";
-        let fk = mk.derive_file_key(id.as_bytes().to_vec()).unwrap();
-        let renamed = fk
-            .encrypt_name_for("renamed.pdf".into(), Some("application/pdf".into()), 2)
-            .unwrap();
-        let meta = fk.decrypt_file_metadata(renamed.clone()).unwrap();
-        assert_eq!((meta.name.as_str(), meta.chunk_format), ("renamed.pdf", 2));
-        assert_eq!(
-            mk.decrypt_file_metadata(id.into(), renamed.clone())
-                .unwrap()
-                .chunk_format,
-            2
-        );
-        let blob = parse_name_blob(&renamed);
-        assert!(
-            fk.decrypt_chunk(blob.nonce.clone(), blob.ciphertext.clone()).is_err(),
-            "a v2-pinned name must not open under the raw file key"
-        );
-        let r0 = fk.encrypt_name_for("r0.txt".into(), None, 0).unwrap();
-        assert_eq!(fk.decrypt_file_metadata(r0).unwrap().chunk_format, 0);
-        for bad in [1u8, 7] {
-            assert!(fk.encrypt_name_for("x".into(), None, bad).is_err(), "pin code {bad}");
-        }
-    }
-
-    /// The key of the published given-key name vectors (task 1958): 32 bytes
-    /// NOT derived from any master key.
-    const GIVEN_FILE_KEY: [u8; 32] = [
-        0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0x71,
-        0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f,
-    ];
-
-    #[test]
-    fn a_non_derived_key_reaches_the_name_writer_and_reader_1958_r4() {
-        // Task 1958 round 4 (Codex P1): a key the app holds as bytes (a
-        // file-request upload's content key, a shared file's key) becomes a
-        // FileKeyHandle, and its name round-trips with the pin: what Swift and
-        // Kotlin could not do while `derive_file_key` was the only way in.
-        let fk = FileKeyHandle::from_key_bytes(GIVEN_FILE_KEY.to_vec()).unwrap();
-        for pin in [0u8, 2] {
-            let sealed = fk
-                .encrypt_name_for("request-upload.pdf".into(), Some("application/pdf".into()), pin)
-                .unwrap();
-            let meta = fk.decrypt_file_metadata(sealed.clone()).unwrap();
-            assert_eq!(meta.name, "request-upload.pdf", "pin {pin}");
-            assert_eq!(meta.mime_type.as_deref(), Some("application/pdf"), "pin {pin}");
-            assert_eq!(meta.chunk_format, pin, "pin {pin}");
-            // The same key as core's, byte for byte: core's with-key reader opens it.
-            let core_meta =
-                encrypt::decrypt_file_metadata_with_key(&kdf::FileKey::from_bytes(GIVEN_FILE_KEY), &sealed).unwrap();
-            assert_eq!(core_meta.chunk_format.as_u8(), pin, "pin {pin}");
-        }
-        // The rest of the handle is reachable for such a key too (notes).
-        let note = fk.encrypt_note_for("a note".into(), 2).unwrap();
-        assert_eq!(fk.decrypt_note(note).unwrap(), "a note");
-    }
-
-    #[test]
-    fn file_key_handle_from_key_bytes_refuses_other_lengths_1958_r4() {
-        for len in [0usize, 16, 31, 33, 64] {
-            match FileKeyHandle::from_key_bytes(vec![0x42; len]) {
-                Err(CryptoError::InvalidInput { .. }) => {}
-                Err(other) => panic!("{len} bytes: wrong error {other:?}"),
-                Ok(_) => panic!("{len} bytes must be refused"),
-            }
-        }
-    }
-
-    /// The default write format's code (1 during the read-only phase).
-    fn default_write_format() -> u8 {
-        beebeeb_core::chunk_stream::WRITE_FORMAT.as_u8()
-    }
-
-    /// Parse a native `name_encrypted` envelope (numeric-array JSON).
-    fn parse_name_blob(json: &str) -> beebeeb_types::EncryptedBlob {
-        let (nonce, ciphertext) = beebeeb_core::metadata_wire::parse_encrypted_metadata(json).unwrap();
-        beebeeb_types::EncryptedBlob {
-            cipher_suite: CipherSuite::V1Aes256Gcm,
-            nonce,
-            ciphertext,
-        }
-    }
-
-    #[test]
-    fn handle_with_file_key_and_random_access_frame_open() {
-        let mk = mk_handle();
-        let (data, frames) = two_v2_frames(&mk, "ffi-fk");
-        let fk = mk.derive_file_key(b"ffi-fk".to_vec()).unwrap();
-        let fk_bytes = mk
-            .with_key(|m| kdf::derive_file_key(m, b"ffi-fk").as_bytes().to_vec())
-            .unwrap();
-
-        // File-key decryptors (share recipient path): raw bytes and handle.
-        for dec in [
-            ChunkDecryptorHandle::for_push_with_file_key(fk_bytes.clone(), "ffi-fk".into(), 2).unwrap(),
-            ChunkDecryptorHandle::for_push_with_file_key_handle(&fk, "ffi-fk".into(), 2).unwrap(),
-        ] {
-            let mut out = Vec::new();
-            for f in &frames {
-                out.extend(dec.push_frame(f.clone()).unwrap().data);
-            }
-            assert_eq!(dec.version_id().unwrap().unwrap(), frames[0][..12].to_vec());
-            dec.finish().unwrap();
-            assert_eq!(out, data);
-        }
-
-        // Wrong file id with the right key fails.
-        let dec = ChunkDecryptorHandle::for_push_with_file_key_handle(&fk, "other".into(), 2).unwrap();
-        assert!(dec.push_frame(frames[0].clone()).is_err());
-
-        // Random access: right position + version opens; wrong position, last
-        // flag, version or format fails.
-        let vid = frames[0][..12].to_vec();
-        assert_eq!(
-            fk.decrypt_chunk_frame("ffi-fk".into(), vid.clone(), 1, true, 2, frames[1].clone())
-                .unwrap(),
-            data[4 * 1024 * 1024..]
-        );
-        let (_, other_upload) = two_v2_frames(&mk, "ffi-fk");
-        for (v, i, last, fmt, frame) in [
-            (vid.clone(), 0, false, 2, frames[1].clone()),
-            (vid.clone(), 1, false, 2, frames[1].clone()),
-            (vid.clone(), 1, true, 1, frames[1].clone()),
-            (vid.clone(), 1, true, 9, frames[1].clone()),
-            (vid.clone(), 1, true, 2, other_upload[1].clone()),
-            (other_upload[0][..12].to_vec(), 1, true, 2, frames[1].clone()),
-            (vid[..11].to_vec(), 1, true, 2, frames[1].clone()),
-        ] {
-            assert!(fk.decrypt_chunk_frame("ffi-fk".into(), v, i, last, fmt, frame).is_err());
-        }
-    }
-
-    #[test]
-    fn contiguous_to_file_binds_file_id_and_rejects_swap() {
-        let mk = mk_handle();
-        let (data, frames) = two_v2_frames(&mk, "ffi-contig");
-        let fk_bytes = mk
-            .with_key(|m| kdf::derive_file_key(m, b"ffi-contig").as_bytes().to_vec())
-            .unwrap();
-        let dir = std::env::temp_dir().join("bb_uniffi_contig_1908");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let out = dir.join("out.bin").to_string_lossy().into_owned();
-        let cs = 4 * 1024 * 1024u64;
-
-        let n = decrypt_contiguous_to_file(
-            fk_bytes.clone(),
-            "ffi-contig".into(),
-            2,
-            frames.concat(),
-            cs,
-            out.clone(),
-        )
-        .unwrap();
-        assert_eq!(n, data.len() as u64);
-        std::fs::remove_file(&out).unwrap();
-
-        // Truncated to chunk 0: rejected, nothing written.
-        assert!(
-            decrypt_contiguous_to_file(
-                fk_bytes.clone(),
-                "ffi-contig".into(),
-                2,
-                frames[0].clone(),
-                cs,
-                out.clone()
-            )
-            .is_err()
-        );
-        assert!(!std::path::Path::new(&out).exists());
-
-        // Pre-sliced variant: wrong file id rejected; right id opens.
-        let pairs = || -> Vec<EncryptedChunkData> {
-            frames
-                .iter()
-                .map(|f| EncryptedChunkData {
-                    nonce: f[..12].to_vec(),
-                    ciphertext: f[12..].to_vec(),
-                })
-                .collect()
-        };
-        assert!(decrypt_chunks_to_file(fk_bytes.clone(), "not-the-id".into(), 2, pairs(), out.clone()).is_err());
-        assert_eq!(
-            decrypt_chunks_to_file(fk_bytes, "ffi-contig".into(), 2, pairs(), out.clone()).unwrap(),
-            data.len() as u64
-        );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn finished_handle_rejects_reuse() {
-        let mk = mk_handle();
-        let enc = ChunkEncryptorHandle::for_push(&mk, "x".into(), 4, "mobile".into()).unwrap();
-        let _ = enc.push_chunk(vec![1, 2, 3, 4]).unwrap();
-        enc.finish().unwrap();
-        assert!(enc.push_chunk(vec![0]).is_err());
-        assert!(enc.finish().is_err());
-        assert!(enc.next_chunk().is_err());
-    }
-
-    #[test]
-    fn wrong_key_decrypt_errors() {
-        let mk = mk_handle();
-        let enc = ChunkEncryptorHandle::for_push(&mk, "secret".into(), 5, "mobile".into()).unwrap();
-        let frame = enc.push_chunk(b"hello".to_vec()).unwrap();
-        let wrong = MasterKeyHandle::from_keychain_bytes(vec![9u8; 32]).unwrap();
-        let dec = ChunkDecryptorHandle::for_push(&wrong, "secret".into(), default_expected()).unwrap();
-        assert!(dec.push_frame(frame.data).is_err());
-    }
-
-    #[test]
-    fn pull_file_roundtrip_via_handles() {
-        use std::io::Write;
-        let mk = mk_handle();
-        let dir = std::env::temp_dir().join("beebeeb_uniffi_chunk_stream_pull");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let input = dir.join("in.bin");
-        // 9 MiB → mobile profile 4 MiB chunks → 3 chunks (4 + 4 + 1).
-        let content: Vec<u8> = (0..9 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
-        std::fs::write(&input, &content).unwrap();
-
-        let enc = ChunkEncryptorHandle::from_file(
-            &mk,
-            "pullfile".into(),
-            input.to_string_lossy().into_owned(),
-            "mobile".into(),
-        )
-        .unwrap();
-        let chunk_size = enc.chunk_plan().unwrap().chunk_size_bytes;
-        assert_eq!(chunk_size, 4 * 1024 * 1024);
-
-        let enc_path = dir.join("in.enc");
-        let mut out_file = std::fs::File::create(&enc_path).unwrap();
-        let mut frames = 0u32;
-        while let Some(c) = enc.next_chunk().unwrap() {
-            out_file.write_all(&c.data).unwrap();
-            frames += 1;
-        }
-        out_file.flush().unwrap();
-        drop(out_file);
-        assert_eq!(frames, 3);
-        let summary = enc.finish().unwrap();
-        assert_eq!(summary.total_plaintext, content.len() as u64);
-
-        let dec = ChunkDecryptorHandle::from_file(
-            &mk,
-            "pullfile".into(),
-            default_expected(),
-            chunk_size,
-            enc_path.to_string_lossy().into_owned(),
-        )
-        .unwrap();
-        let mut recovered = Vec::new();
-        while let Some(c) = dec.next_chunk().unwrap() {
-            recovered.extend_from_slice(&c.data);
-        }
-        assert_eq!(recovered, content);
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-}
+mod chunk_stream_handle_tests;
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -3596,7 +2980,7 @@ mod tests {
         assert_eq!(sas, TRANSFER_EXPECTED_SAS.to_vec());
 
         // SALTED (transfer) must differ from the salt-less helper for the same inputs.
-        let saltless = derive_sas_bytes(TRANSFER_FIXED_SHARED.to_vec(), b"beebeeb-sas-v1".to_vec(), 4);
+        let saltless = derive_sas_bytes(TRANSFER_FIXED_SHARED.to_vec(), b"beebeeb-sas-v1".to_vec(), 4).unwrap();
         assert_ne!(sas, saltless, "transfer SAS must be salted, not salt-less");
     }
 
@@ -3904,7 +3288,7 @@ mod tests {
 ///
 /// Returns `nonce (12 bytes) || ciphertext`. The key must be exactly 32 bytes.
 /// Used by the search index and anywhere an opaque blob needs authenticated encryption.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn encrypt_blob(key: Vec<u8>, plaintext: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let k: [u8; 32] = key.try_into().map_err(|_| CryptoError::InvalidInput {
         detail: "key must be exactly 32 bytes".into(),
@@ -3915,7 +3299,7 @@ pub fn encrypt_blob(key: Vec<u8>, plaintext: Vec<u8>) -> Result<Vec<u8>, CryptoE
 /// Decrypt a blob produced by `encrypt_blob`.
 ///
 /// Expects `nonce (12 bytes) || ciphertext`. Returns the original plaintext.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn decrypt_blob(key: Vec<u8>, ciphertext: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let k: [u8; 32] = key.try_into().map_err(|_| CryptoError::InvalidInput {
         detail: "key must be exactly 32 bytes".into(),
@@ -3968,9 +3352,13 @@ pub fn sha256(data: Vec<u8>) -> Vec<u8> {
 /// NOTE: this is the SALT-LESS (salt = None) helper. For the Constellation
 /// transfer channel use `transfer_derive_sas_bytes` below, which is SALTED with
 /// the session id — the two are NOT interchangeable.
-#[uniffi::export]
-pub fn derive_sas_bytes(shared_secret: Vec<u8>, info: Vec<u8>, length: u32) -> Vec<u8> {
-    beebeeb_core::hash::derive_sas_bytes(&shared_secret, &info, length as usize)
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
+pub fn derive_sas_bytes(shared_secret: Vec<u8>, info: Vec<u8>, length: u32) -> Result<Vec<u8>, CryptoError> {
+    Ok(beebeeb_core::hash::derive_sas_bytes(
+        &shared_secret,
+        &info,
+        length as usize,
+    )?)
 }
 
 // ---------------------------------------------------------------------------
@@ -3998,7 +3386,7 @@ pub fn derive_sas_bytes(shared_secret: Vec<u8>, info: Vec<u8>, length: u32) -> V
 ///
 /// `HKDF-SHA256(ikm = shared_secret, salt = session_id, info = "beebeeb-transfer-v1")`.
 /// SALTED with `session_id`. `shared_secret` must be 32 bytes, `session_id` 16.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn transfer_derive_key(shared_secret: Vec<u8>, session_id: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let ss: [u8; 32] = shared_secret.try_into().map_err(|_| CryptoError::InvalidInput {
         detail: "shared_secret must be 32 bytes".into(),
@@ -4014,7 +3402,7 @@ pub fn transfer_derive_key(shared_secret: Vec<u8>, session_id: Vec<u8>) -> Resul
 /// `HKDF-SHA256(ikm = shared_secret, salt = session_id, info = "beebeeb-sas-v1")`.
 /// SALTED with `session_id` — distinct from the salt-less `derive_sas_bytes`.
 /// Both devices computing the same 4 bytes (4 SAS words) is the MITM check.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn transfer_derive_sas_bytes(shared_secret: Vec<u8>, session_id: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
     let ss: [u8; 32] = shared_secret.try_into().map_err(|_| CryptoError::InvalidInput {
         detail: "shared_secret must be 32 bytes".into(),
@@ -4029,7 +3417,7 @@ pub fn transfer_derive_sas_bytes(shared_secret: Vec<u8>, session_id: Vec<u8>) ->
 ///
 /// Keeps the 256-word transfer wordlist single-sourced in core so Swift/Kotlin
 /// and web render identical words for the same SAS bytes. Input must be 4 bytes.
-#[uniffi::export]
+#[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn transfer_sas_to_words(sas_bytes: Vec<u8>) -> Result<Vec<String>, CryptoError> {
     let sas: [u8; 4] = sas_bytes.try_into().map_err(|_| CryptoError::InvalidInput {
         detail: "sas_bytes must be exactly 4 bytes".into(),
@@ -4042,6 +3430,7 @@ pub fn transfer_sas_to_words(sas_bytes: Vec<u8>) -> Result<Vec<String>, CryptoEr
 // ---------------------------------------------------------------------------
 
 /// Error from the upload protocol (UniFFI-compatible enum).
+#[cfg(feature = "legacy-bindings")]
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum UploadError {
     #[error("network error: {detail}")]
@@ -4065,10 +3454,18 @@ pub enum UploadError {
     #[error("invalid input: {detail}")]
     UploadInvalidInput { detail: String },
 
+    /// The storage data is valid, but an extension must hand this operation to
+    /// the main app instead of treating the file as corrupt.
+    #[error(
+        "valid frame size {frame_size} exceeds this context's {context_limit}-byte limit; hand off to the main app"
+    )]
+    TooLargeForContext { frame_size: u64, context_limit: u64 },
+
     #[error("max retries exhausted ({attempts} attempts): {last_error}")]
     MaxRetriesExhausted { attempts: u32, last_error: String },
 }
 
+#[cfg(feature = "legacy-bindings")]
 impl From<beebeeb_upload::UploadError> for UploadError {
     fn from(e: beebeeb_upload::UploadError) -> Self {
         match e {
@@ -4087,6 +3484,13 @@ impl From<beebeeb_upload::UploadError> for UploadError {
             beebeeb_upload::UploadError::IoError(s) => UploadError::UploadIo { detail: s },
             beebeeb_upload::UploadError::InvalidResponse(s) => UploadError::InvalidResponse { detail: s },
             beebeeb_upload::UploadError::InvalidInput(s) => UploadError::UploadInvalidInput { detail: s },
+            beebeeb_upload::UploadError::TooLargeForContext {
+                frame_size,
+                context_limit,
+            } => UploadError::TooLargeForContext {
+                frame_size,
+                context_limit,
+            },
             beebeeb_upload::UploadError::MaxRetriesExhausted { attempts, last_error } => {
                 UploadError::MaxRetriesExhausted { attempts, last_error }
             }
@@ -4095,6 +3499,7 @@ impl From<beebeeb_upload::UploadError> for UploadError {
 }
 
 /// Result of a successful file upload.
+#[cfg(feature = "legacy-bindings")]
 #[derive(uniffi::Record)]
 pub struct UploadResultData {
     pub file_id: String,
@@ -4104,6 +3509,7 @@ pub struct UploadResultData {
 }
 
 /// Callback interface for upload progress. Implemented by Swift/Kotlin.
+#[cfg(feature = "legacy-bindings")]
 #[uniffi::export(callback_interface)]
 pub trait UploadProgressCallback: Send + Sync {
     fn on_chunk_uploaded(&self, chunk_index: u32, total_chunks: u32);
@@ -4116,8 +3522,10 @@ pub trait UploadProgressCallback: Send + Sync {
 /// `Send + Sync` are inherited from the trait bound on
 /// [`UploadProgressCallback`] — no `unsafe impl` is needed because shared
 /// references to a `Sync` trait object are already `Send + Sync`.
+#[cfg(feature = "legacy-bindings")]
 struct UploadCallbackBridge<'a>(&'a dyn UploadProgressCallback);
 
+#[cfg(feature = "legacy-bindings")]
 impl beebeeb_upload::UploadProgressCallback for UploadCallbackBridge<'_> {
     fn on_chunk_uploaded(&self, chunk_index: u32, total_chunks: u32) {
         self.0.on_chunk_uploaded(chunk_index, total_chunks);
@@ -4137,6 +3545,7 @@ impl beebeeb_upload::UploadProgressCallback for UploadCallbackBridge<'_> {
 // FFI surface (UniFFI): the flat argument list IS the Swift/Kotlin ABI; a
 // params struct would have to be mirrored in both bindings for no benefit.
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "legacy-bindings")]
 #[uniffi::export]
 pub fn upload_encrypted_file(
     api_url: String,
@@ -4287,11 +3696,21 @@ pub struct ConstellationFrameDto {
     pub ring_phase: f32,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Clone, uniffi::Record)]
 pub struct ConstellationSessionInitDto {
     pub payload: ConstellationPayloadDto,
     pub confirm_code: String,
     pub ephemeral_private: Vec<u8>,
+}
+
+impl std::fmt::Debug for ConstellationSessionInitDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConstellationSessionInitDto")
+            .field("payload", &self.payload)
+            .field("confirm_code", &"[REDACTED]")
+            .field("ephemeral_private", &"[REDACTED]")
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -4682,52 +4101,11 @@ pub fn generate_recovery_pdf(
 }
 
 // ---------------------------------------------------------------------------
-// Archive parsing
-// ---------------------------------------------------------------------------
-
-/// A single entry inside an archive (TAR, GZ, TGZ).
-#[derive(uniffi::Record)]
-pub struct ArchiveEntryDto {
-    pub name: String,
-    pub size: u64,
-    pub is_directory: bool,
-}
-
-/// List entries in a TAR archive from raw bytes.
-#[uniffi::export]
-pub fn list_tar_entries(data: Vec<u8>) -> Result<Vec<ArchiveEntryDto>, CryptoError> {
-    let entries = beebeeb_core::archive::list_tar_entries(&data)?;
-    Ok(entries.into_iter().map(archive_entry_to_dto).collect())
-}
-
-/// Decompress gzip-compressed data.
-#[uniffi::export]
-pub fn decompress_gzip(data: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
-    beebeeb_core::archive::decompress_gzip(&data).map_err(CryptoError::from)
-}
-
-/// List entries in an archive, detecting format from the filename extension.
-///
-/// Supported: `.tar`, `.gz`, `.tgz`, `.tar.gz`.
-#[uniffi::export]
-pub fn list_archive(data: Vec<u8>, filename: String) -> Result<Vec<ArchiveEntryDto>, CryptoError> {
-    let entries = beebeeb_core::archive::list_archive(&data, &filename)?;
-    Ok(entries.into_iter().map(archive_entry_to_dto).collect())
-}
-
-fn archive_entry_to_dto(e: beebeeb_core::archive::ArchiveEntry) -> ArchiveEntryDto {
-    ArchiveEntryDto {
-        name: e.name,
-        size: e.size,
-        is_directory: e.is_directory,
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Download + decrypt — synchronous blocking wrapper for Swift/Kotlin
 // ---------------------------------------------------------------------------
 
 /// Result of a successful file download + decrypt.
+#[cfg(feature = "legacy-bindings")]
 #[derive(uniffi::Record)]
 pub struct DownloadResultData {
     pub output_path: String,
@@ -4736,6 +4114,7 @@ pub struct DownloadResultData {
 }
 
 /// Callback interface for download progress. Implemented by Swift/Kotlin.
+#[cfg(feature = "legacy-bindings")]
 #[uniffi::export(callback_interface)]
 pub trait DownloadProgressCallback: Send + Sync {
     fn on_chunk_decrypted(&self, chunk_index: u32, total_chunks: u32);
@@ -4748,8 +4127,10 @@ pub trait DownloadProgressCallback: Send + Sync {
 /// `Send + Sync` are inherited from the trait bound on
 /// [`DownloadProgressCallback`] — no `unsafe impl` is needed because shared
 /// references to a `Sync` trait object are already `Send + Sync`.
+#[cfg(feature = "legacy-bindings")]
 struct DownloadCallbackBridge<'a>(&'a dyn DownloadProgressCallback);
 
+#[cfg(feature = "legacy-bindings")]
 impl beebeeb_upload::DownloadProgressCallback for DownloadCallbackBridge<'_> {
     fn on_chunk_decrypted(&self, chunk_index: u32, total_chunks: u32) {
         self.0.on_chunk_decrypted(chunk_index, total_chunks);
@@ -4769,19 +4150,21 @@ impl beebeeb_upload::DownloadProgressCallback for DownloadCallbackBridge<'_> {
 /// fetches `GET /api/v1/files/{file_id}/download`, splits into chunks,
 /// decrypts each with AES-256-GCM, and writes to `output_path`.
 ///
-/// `expected_chunk_format` (task 1908) comes from the file's encrypted
-/// metadata (`decrypt_file_metadata`): 0 = unrecorded, 2 = v2.
+/// `metadata` (task 1908) is the version's `NameMetadataDto` from
+/// `decrypt_file_metadata`: v2 opens only as the upload its commitment names,
+/// and a record without one opens v1 content only (the ruling of 2026-11-07).
+#[cfg(feature = "legacy-bindings")]
 #[uniffi::export]
 pub fn download_and_decrypt_file(
     api_url: String,
     token: String,
     master_key_handle: &MasterKeyHandle,
     file_id: String,
-    expected_chunk_format: u8,
+    metadata: NameMetadataDto,
     output_path: String,
     callback: Option<Box<dyn DownloadProgressCallback>>,
 ) -> Result<DownloadResultData, UploadError> {
-    let expected = ExpectedChunkFormat::from_u8(expected_chunk_format)
+    let (expected, version) = chunk_decryptor::metadata_pin(metadata)
         .map_err(|e| UploadError::UploadInvalidInput { detail: e.to_string() })?;
     // Extract the raw master key bytes while the lock is held, then release.
     let mk_bytes = master_key_handle
@@ -4789,14 +4172,22 @@ pub fn download_and_decrypt_file(
         .map_err(|_| UploadError::UploadInvalidInput {
             detail: "master key handle has been cleared".into(),
         })?;
-    let mk = kdf::MasterKey::from_bytes(mk_bytes);
+    let mk = kdf::MasterKey::from_bytes(*mk_bytes);
 
     let bridge = callback.as_ref().map(|cb| DownloadCallbackBridge(cb.as_ref()));
     let core_cb: Option<Box<dyn beebeeb_upload::DownloadProgressCallback + '_>> =
         bridge.map(|b| Box::new(b) as Box<dyn beebeeb_upload::DownloadProgressCallback>);
 
-    let result =
-        beebeeb_upload::download_and_decrypt_file(&api_url, &token, &mk, &file_id, expected, &output_path, core_cb)?;
+    let result = beebeeb_upload::download_and_decrypt_file(
+        &api_url,
+        &token,
+        &mk,
+        &file_id,
+        expected,
+        version,
+        &output_path,
+        core_cb,
+    )?;
 
     Ok(DownloadResultData {
         output_path: result.output_path,
@@ -4956,7 +4347,7 @@ pub struct SearchIndexHandle {
 
 #[uniffi::export]
 impl SearchIndexHandle {
-    /// Empty index with the given shard count (clamped to ≥ 1).
+    /// Empty index with the shared shard-count rule (clamped to 1..=64).
     #[uniffi::constructor]
     pub fn new(num_shards: u32) -> Arc<Self> {
         Arc::new(Self {
@@ -5228,7 +4619,7 @@ pub fn breach_verdict_check_failed(verdict: BreachVerdictDto) -> bool {
 /// treated as an outage, so stop reading the response at that size.
 #[derive(uniffi::Object)]
 pub struct BreachCheckHandle {
-    check: Mutex<onb::BreachCheck>,
+    pub(crate) check: Mutex<onb::BreachCheck>,
 }
 
 #[uniffi::export]
@@ -5277,7 +4668,7 @@ impl BreachCheckHandle {
 /// Lock a mutex, recovering the data if a panic in another call poisoned it:
 /// one panicking call must not turn every later call on the handle into a
 /// panic across the FFI boundary.
-fn lock_tolerant<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+pub(crate) fn lock_tolerant<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
@@ -6828,27 +6219,7 @@ mod onboarding_binding_tests {
 }
 
 #[cfg(test)]
-mod folder_key_id_2133 {
-    use super::*;
-
-    #[test]
-    fn a_folder_key_that_is_not_32_bytes_is_invalid_input() {
-        for len in [31usize, 33] {
-            assert!(
-                matches!(folder_key_id(vec![0x80; len]), Err(CryptoError::InvalidInput { .. })),
-                "{len} bytes"
-            );
-        }
-    }
-
-    #[test]
-    fn the_32_byte_vector_matches() {
-        let key: Vec<u8> = (0x80u8..=0x9f).collect();
-        let id = folder_key_id(key).expect("a 32-byte key");
-        let hex: String = id.iter().map(|b| format!("{b:02x}")).collect();
-        assert_eq!(hex, "e07f022dd6a140210b19530af0a6b316ec4f06b3a2b086fdf0c03c761baf3b07");
-    }
-}
+mod folder_key_id_2133;
 
 #[cfg(test)]
 mod direct_transfer_binding_tests {

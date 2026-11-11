@@ -30,8 +30,8 @@ const BROWSER_PRIV_HEX: &str = "222222222222222222222222222222222222222222222222
 // This is the AES-256 key the current (v1) handshake uses.
 const EXPECTED_AES_KEY_HEX: &str = "8bd295090ce8a6412b831704b601b55d60ba3cae056f5e1337a11b5f9eceac35";
 
-// The raw 32-byte ECDH shared secret (X-coordinate). The legacy v0.4 web app used
-// THIS directly as the AES key (no HKDF). Pinned so the raw-fallback path is covered.
+// The raw 32-byte ECDH shared secret (X-coordinate), pinned to cover ECDH
+// compatibility independently of the HKDF layer.
 const EXPECTED_SHARED_HEX: &str = "ccfc261f58193c98ca4ad4a53bbac6f0ee29bc4d48438090446908622ca79af6";
 
 // Task 2378: the SEC1 public keys on the wire, pinned so a point-encoding drift fails
@@ -118,7 +118,7 @@ fn full_browser_to_cli_roundtrip_hkdf() {
 }
 
 #[test]
-fn full_browser_to_cli_roundtrip_raw_fallback() {
+fn raw_secret_ciphertext_is_rejected() {
     // Legacy v0.4 browser: raw shared secret used directly as the AES key (no HKDF).
     let shared = hex32(EXPECTED_SHARED_HEX);
     let nonce = [0xCDu8; 12];
@@ -128,9 +128,7 @@ fn full_browser_to_cli_roundtrip_raw_fallback() {
         .encrypt(GenericArray::from_slice(&nonce), plaintext.as_ref())
         .unwrap();
 
-    // The core decrypt tries HKDF first, then falls back to the raw secret.
-    let recovered = decrypt_cli_payload(&shared, &nonce, &ct).unwrap();
-    assert_eq!(recovered, plaintext);
+    assert!(decrypt_cli_payload(&shared, &nonce, &ct).is_err());
 }
 
 fn cli_key(priv_hex: &str) -> CliEphemeralKey {

@@ -1,0 +1,28 @@
+[package]
+name = "beebeeb-store"
+description = "Local SQLite store for Beebeeb native clients"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+beebeeb-core = { path = "../beebeeb-core", default-features = false }
+# The same feature set as in beebeeb-core: the bundled SQLite and the statement cache.
+rusqlite = { version = "0.41", default-features = false, features = ["bundled", "cache"] }
+serde_json.workspace = true
+thiserror.workspace = true
+uuid = "1"
+
+[dev-dependencies]
+chrono = "0.4"
+tempfile = "3"
+
+[[bin]]
+name = "store-test-helper"
+path = "src/bin/store_test_helper.rs"
+required-features = ["test-support"]
+
+[features]
+default = []
+# Enables only the subprocess helper used by integration tests.
+test-support = []

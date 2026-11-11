@@ -77,6 +77,7 @@ impl DirectIo for ReferenceIo {
                 match call.method {
                     ApiMethod::Get => reqwest::Method::GET,
                     ApiMethod::Post => reqwest::Method::POST,
+                    ApiMethod::Put => reqwest::Method::PUT,
                 },
                 self.url(&call.path),
             )

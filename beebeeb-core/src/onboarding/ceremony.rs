@@ -1126,6 +1126,6 @@ mod tests {
         let client_finish =
             opaque_protocol::client_login_finish(&login.state, GOOD_PW.as_bytes(), &server_login.message, 1).unwrap();
         let server_key = opaque_protocol::server_login_finish(&server_login.state, &client_finish.message).unwrap();
-        assert_eq!(client_finish.session_key, server_key);
+        assert_eq!(&*client_finish.session_key, &server_key);
     }
 }

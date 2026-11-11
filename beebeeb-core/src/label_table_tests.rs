@@ -22,8 +22,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    backup, chunk_stream, cli_auth, client_meta, encrypt, file_request, folder_key, item_id, kdf, passkey, recovery,
-    transfer,
+    backup, chunk_stream, cli_auth, client_meta, device_link, encrypt, file_request, folder_key, item_id, kdf,
+    key_proof, passkey, passkey_seal, product_keys, recovery, transfer,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +38,8 @@ enum Slot {
     Aad,
     /// An HKDF or Argon2id salt, or a SHA-256 domain prefix (never an HKDF `info`).
     Salt,
+    /// A protocol identity/context string outside HKDF, AEAD and hashing.
+    ProtocolContext,
 }
 
 struct Label {
@@ -153,6 +155,19 @@ const LABELS: &[Label] = &[
         Slot::Info,
         "master key",
     ),
+    // product keys
+    label(
+        "product_keys::PASS_KEY_INFO",
+        product_keys::PASS_KEY_INFO,
+        Slot::Info,
+        "master key",
+    ),
+    label(
+        "product_keys::CHAT_KEY_INFO",
+        product_keys::CHAT_KEY_INFO,
+        Slot::Info,
+        "master key",
+    ),
     // encrypt
     label(
         "encrypt::NAME_KEY_INFO",
@@ -198,6 +213,12 @@ const LABELS: &[Label] = &[
         Slot::Aad,
         "AAD under the client-meta key",
     ),
+    label(
+        "client_meta::SETTINGS_AAD_DOMAIN",
+        client_meta::SETTINGS_AAD_DOMAIN,
+        Slot::Aad,
+        "per-device, per-product settings AAD under the client-meta key",
+    ),
     // file_request
     label(
         "file_request::PRIV_WRAP_INFO",
@@ -217,6 +238,93 @@ const LABELS: &[Label] = &[
         cli_auth::CLI_AUTH_INFO,
         Slot::Info,
         "P-256 ECDH shared secret",
+    ),
+    // passkey seal
+    label(
+        "passkey_seal::PASSKEY_SEAL_KEY_INFO",
+        passkey_seal::PASSKEY_SEAL_KEY_INFO,
+        Slot::Info,
+        "passkey PRF output",
+    ),
+    label(
+        "passkey_seal::PASSKEY_SEAL_AAD_DOMAIN",
+        passkey_seal::PASSKEY_SEAL_AAD_DOMAIN,
+        Slot::Aad,
+        "AAD under the passkey-derived wrapping key",
+    ),
+    // device link
+    label(
+        "device_link::FINGERPRINT_DOMAIN",
+        device_link::FINGERPRINT_DOMAIN,
+        Slot::Salt,
+        "SHA-256 domain prefix over the new-device public key",
+    ),
+    label(
+        "device_link::QR_KEY_INFO",
+        device_link::QR_KEY_INFO,
+        Slot::Info,
+        "ephemeral X25519 shared secret",
+    ),
+    label(
+        "device_link::QR_AAD_DOMAIN",
+        device_link::QR_AAD_DOMAIN,
+        Slot::Aad,
+        "AAD under the device-link sealing key",
+    ),
+    label(
+        "device_link::PAKE_IDENTITY_DOMAIN",
+        device_link::PAKE_IDENTITY_DOMAIN,
+        Slot::ProtocolContext,
+        "SPAKE2 A/B identities; || link session id || role byte",
+    ),
+    label(
+        "device_link::PAKE_ADA_DOMAIN",
+        device_link::PAKE_ADA_DOMAIN,
+        Slot::Salt,
+        "SHA-256 domain prefix of the salted device-facts hash (ADa)",
+    ),
+    label(
+        "device_link::PAKE_TRANSCRIPT_DOMAIN",
+        device_link::PAKE_TRANSCRIPT_DOMAIN,
+        Slot::Salt,
+        "SHA-256 domain prefix of the typed-code transcript hash (the HKDF salt)",
+    ),
+    label(
+        "device_link::PAKE_CONFIRM_NEW_DEVICE_INFO",
+        device_link::PAKE_CONFIRM_NEW_DEVICE_INFO,
+        Slot::Info,
+        "SPAKE2 output, salt = transcript hash; the new device's confirmation key",
+    ),
+    label(
+        "device_link::PAKE_CONFIRM_APPROVER_INFO",
+        device_link::PAKE_CONFIRM_APPROVER_INFO,
+        Slot::Info,
+        "SPAKE2 output, salt = transcript hash; the approver's confirmation key",
+    ),
+    label(
+        "device_link::PAKE_KEY_INFO",
+        device_link::PAKE_KEY_INFO,
+        Slot::Info,
+        "SPAKE2 output, salt = transcript hash; the payload key",
+    ),
+    label(
+        "device_link::PAKE_AAD_DOMAIN",
+        device_link::PAKE_AAD_DOMAIN,
+        Slot::Aad,
+        "AAD under the typed-code payload key; || session id || direction byte",
+    ),
+    // key proof
+    label(
+        "key_proof::KEY_INFO",
+        key_proof::KEY_INFO,
+        Slot::Info,
+        "one-time X25519 shared secret",
+    ),
+    label(
+        "key_proof::TRANSCRIPT_DOMAIN",
+        key_proof::TRANSCRIPT_DOMAIN,
+        Slot::ProtocolContext,
+        "HMAC transcript prefix",
     ),
     // opaque (inline literals)
     label(
@@ -307,6 +415,24 @@ const CROSS_SLOT_PREFIX_PAIRS: &[(&str, &str, &str)] = &[
         "`beebeeb-share` is an HKDF salt over an X25519 shared secret (its info is the file id); the index label is an \
          HKDF info over a folder key: different input slots and different IKMs",
     ),
+    (
+        "device_link::QR_AAD_DOMAIN",
+        "device_link::QR_KEY_INFO",
+        "the domain is AES-GCM associated data under the device-link subkey; the longer label is only the HKDF info \
+         that derives that subkey from an ephemeral X25519 secret",
+    ),
+    (
+        "passkey_seal::PASSKEY_SEAL_AAD_DOMAIN",
+        "passkey_seal::PASSKEY_SEAL_KEY_INFO",
+        "the domain is AES-GCM associated data under the passkey wrapping key; the longer label is only the HKDF \
+         info that derives that key from passkey PRF output",
+    ),
+    (
+        "device_link::PAKE_AAD_DOMAIN",
+        "device_link::PAKE_KEY_INFO",
+        "the domain is AES-GCM associated data under the typed-code payload key; the longer label is only the HKDF \
+         info that derives that key from the SPAKE2 output",
+    ),
 ];
 
 /// `b"beebeeb…"` literals under `src/` that are not product labels.
@@ -328,7 +454,7 @@ fn find(name: &str) -> &'static Label {
 
 #[test]
 fn every_label_is_distinct_and_no_id_carrying_info_is_a_prefix_of_another_info() {
-    assert_eq!(LABELS.len(), 35, "a label was added or removed: review the slot rules");
+    assert_eq!(LABELS.len(), 52, "a label was added or removed: review the slot rules");
     for (i, a) in LABELS.iter().enumerate() {
         assert!(!a.with.is_empty());
         for b in &LABELS[i + 1..] {

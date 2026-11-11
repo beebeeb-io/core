@@ -105,14 +105,21 @@ pub struct WriteTarget {
     item_id: String,
     key: FileKey,
     pin: ExpectedChunkFormat,
+    version: Option<crate::chunk_stream::VersionCommitment>,
 }
 
 impl WriteTarget {
-    fn new(item_id: &str, key: &FileKey, pin: ExpectedChunkFormat) -> Self {
+    fn new(
+        item_id: &str,
+        key: &FileKey,
+        pin: ExpectedChunkFormat,
+        version: Option<crate::chunk_stream::VersionCommitment>,
+    ) -> Self {
         Self {
             item_id: item_id.to_string(),
             key: FileKey::from_bytes(*key.as_bytes()),
             pin,
+            version,
         }
     }
 
@@ -129,6 +136,11 @@ impl WriteTarget {
     /// The chunk-format pin the write must keep.
     pub fn pin(&self) -> ExpectedChunkFormat {
         self.pin
+    }
+
+    /// The current version commitment a rename must preserve.
+    pub fn version(&self) -> Option<crate::chunk_stream::VersionCommitment> {
+        self.version
     }
 }
 
@@ -352,7 +364,12 @@ fn authenticated_name(key: &FileKey, name_encrypted: &str) -> Option<NameMetadat
 fn write_target(item_id: &str, key: &FileKey, origin: KeyOrigin, name: &ResolvedName) -> Option<WriteTarget> {
     match origin {
         KeyOrigin::DerivedUpperRepair | KeyOrigin::RequestContent => None,
-        _ => Some(WriteTarget::new(item_id, key, name.pin())),
+        _ => Some(WriteTarget::new(
+            item_id,
+            key,
+            name.pin(),
+            name.metadata().and_then(|metadata| metadata.version),
+        )),
     }
 }
 
@@ -553,14 +570,21 @@ pub struct RenameTarget {
     key: FileKey,
     origin: KeyOrigin,
     pin: ExpectedChunkFormat,
+    version: Option<crate::chunk_stream::VersionCommitment>,
 }
 
 impl RenameTarget {
-    fn new(key: &FileKey, origin: KeyOrigin, pin: ExpectedChunkFormat) -> Self {
+    fn new(
+        key: &FileKey,
+        origin: KeyOrigin,
+        pin: ExpectedChunkFormat,
+        version: Option<crate::chunk_stream::VersionCommitment>,
+    ) -> Self {
         Self {
             key: FileKey::from_bytes(*key.as_bytes()),
             origin,
             pin,
+            version,
         }
     }
 
@@ -578,6 +602,11 @@ impl RenameTarget {
     /// The chunk-format pin the renamed name must keep.
     pub fn pin(&self) -> ExpectedChunkFormat {
         self.pin
+    }
+
+    /// The current version commitment a rename must preserve.
+    pub fn version(&self) -> Option<crate::chunk_stream::VersionCommitment> {
+        self.version
     }
 }
 
@@ -740,6 +769,7 @@ impl RequestRowKeys {
                 &derive_file_key(master, item_id.as_bytes()),
                 KeyOrigin::Derived,
                 name.chunk_format,
+                name.version,
             )),
         };
         Self {

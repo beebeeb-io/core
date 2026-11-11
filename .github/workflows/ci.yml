@@ -27,6 +27,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # action pinned; toolchain set below
         with:
@@ -36,29 +38,53 @@ jobs:
       - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
 
       - name: cargo fmt
-        run: cargo fmt -- --check
+        run: cargo fmt --all -- --check
 
-      # if: always() so a fmt failure doesn't silently skip clippy — this repo's
-      # main was red on fmt alone for ~2 months (2026-06-24 to 2026-08-14) and
-      # clippy never ran once in that window, purely because it was a later
-      # step in the same job. Both checks now always report; the job still
-      # correctly fails if either does.
+      # Report clippy even when formatting fails.
       - name: cargo clippy
         if: always()
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-      # The vectors are generated, never edited: the committed JSON must be byte-for-byte what the
-      # generator writes. Cheap (python only), so it runs with the fast checks, not after the tests.
-      # `if: always()` so a fmt or clippy failure does not silently skip it.
-      - name: contract vectors match their generator
+      - name: Install independent-vector dependency
         if: always()
-        run: bash test-vectors/tools/check-direct-vectors-generated.sh
+        run: python3 -m pip install --disable-pip-version-check cryptography==46.0.3
 
-      # The self-test must exit 0 (it rewrites a temp copy and the check REJECTS it) and non-zero
-      # otherwise, so this is a plain step: a check that cannot go red fails it.
-      - name: contract vector check can go red
+      - name: Python vector checks and generation drift
         if: always()
-        run: bash test-vectors/tools/check-direct-vectors-generated.sh --self-test
+        run: bash scripts/check-test-vectors.sh
+
+      # ripgrep comes from its official release, pinned by version and SHA256 and checked before it is
+      # unpacked, not from the Ubuntu package mirrors: when those stopped resolving, this job failed with
+      # them. The musl build is static, so it runs on any x86_64 Linux runner.
+      - name: Install documentation guard dependency
+        if: always()
+        run: |
+          set -euo pipefail
+          RG_VERSION="15.2.0"
+          RG_SHA256="33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c"
+          RG_NAME="ripgrep-$RG_VERSION-x86_64-unknown-linux-musl"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --retry 5 --retry-all-errors --retry-delay 2 --max-time 60 \
+            --output "$RUNNER_TEMP/$RG_NAME.tar.gz" \
+            "https://github.com/BurntSushi/ripgrep/releases/download/$RG_VERSION/$RG_NAME.tar.gz"
+          echo "$RG_SHA256  $RUNNER_TEMP/$RG_NAME.tar.gz" | sha256sum --check
+          mkdir "$RUNNER_TEMP/ripgrep"
+          tar -xzf "$RUNNER_TEMP/$RG_NAME.tar.gz" -C "$RUNNER_TEMP/ripgrep" --strip-components=1 "$RG_NAME/rg"
+          "$RUNNER_TEMP/ripgrep/rg" --version
+          echo "$RUNNER_TEMP/ripgrep" >> "$GITHUB_PATH"
+
+      - name: Legacy write and documented-symbol guards
+        if: always()
+        run: |
+          bash scripts/check-no-legacy-writes.sh
+          bash scripts/check-doc-symbols.sh
+          bash scripts/check-core-pins-documented.sh
+
+      - name: Public added-line guard
+        if: always()
+        env:
+          DIFF_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: bash scripts/check-public-added-lines.sh "$DIFF_BASE"
 
       # The range-read vectors (LD-0105) follow the same rule, with their own generator and gate.
       - name: range vectors match their generator
@@ -87,6 +113,15 @@ jobs:
         if: always()
         run: bash test-vectors/tools/check-backup-vectors-generated.sh --self-test
 
+      # The archive vectors: archives_v1.json and the fixtures gen_archives_v1.py writes, byte for byte.
+      - name: archive vectors match their generator
+        if: always()
+        run: bash test-vectors/tools/check-archives-vectors-generated.sh
+
+      - name: archive vector check can go red
+        if: always()
+        run: bash test-vectors/tools/check-archives-vectors-generated.sh --self-test
+
       # The CLI-auth handshake known answers (task 2378) are Rust constants, not JSON: the independent
       # pure-Python generator must agree with every one of them, and its check must be able to go red.
       - name: cli-auth vectors match their generator
@@ -112,7 +147,7 @@ jobs:
       - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
 
       - name: cargo test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       # The legacy-bindings feature gates upload-path tests that guard the UniFFI
       # surface against regressions introduced while feat/core-foundation is in
@@ -122,10 +157,55 @@ jobs:
       - name: cargo test beebeeb-uniffi --features legacy-bindings
         run: cargo test -p beebeeb-uniffi --features legacy-bindings
 
-  # The JS surface of beebeeb-wasm as a web client sees it. `cargo test` has no JS engine and never parses
-  # the glue wasm-bindgen generates: core #34 merged a doc comment that made beebeeb_wasm.js a SyntaxError and
-  # the whole workspace test run stayed green. run.sh builds both targets, `node --check`s the glue,
-  # `tsc --noEmit`s the .d.ts files and runs the node:test suite on the real module.
+  # Windows is a shipped platform (desktop). Core 0.3.0 did not compile there and no job could see it
+  # (#74 round 8): every crate and target must build on Windows, and the crates with platform file code
+  # (the trusted publish path in core, used by client and transfer) run their tests there too.
+  windows:
+    name: Windows build & tests
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # action pinned; toolchain set below
+        with:
+          toolchain: "1.96.0"
+
+      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+
+      # --keep-going: report every crate that fails on Windows, not only the first one.
+      - name: cargo check (every crate, every target)
+        run: cargo check --workspace --all-targets --locked --keep-going
+
+      # --no-fail-fast: one run lists every test that fails on Windows.
+      - name: cargo test (core, client, transfer)
+        run: cargo test --locked --no-fail-fast -p beebeeb-core -p beebeeb-client -p beebeeb-transfer
+
+  dependencies:
+    name: Dependency advisories, licenses & sources
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # action pinned; toolchain set below
+        with:
+          toolchain: "1.96.0"
+
+      - name: Install dependency policy tools
+        run: |
+          cargo install cargo-audit --locked --version 0.22.2
+          cargo install cargo-deny --locked --version 0.20.2
+
+      - name: Dependency advisories
+        run: cargo audit
+
+      - name: Dependency licenses and sources
+        run: cargo deny --config scripts/deny.toml check licenses sources
+
+  # Exercise the generated JavaScript and TypeScript surface in a real JS engine.
   wasm-js:
     name: WASM JS surface
     runs-on: ubuntu-latest
@@ -166,11 +246,7 @@ jobs:
       - name: Run claims guard
         run: bash scripts/claims-guard/claims-guard.sh
 
-      # The canon CLAIM_SWEEP (docs/canon/public-claims.md) over the WHOLE tree.
-      # The engine above scans user-facing paths only; design/hifi/ mockups
-      # sat outside them and published a false external-audit claim for
-      # months. The self-test runs first so a sweep that cannot go red never
-      # reports green.
+      # Scan the whole tree and prove the sweep can reject a forbidden claim.
       - name: Canon sweep self-test
         if: always()
         run: bash scripts/claims-guard/canon-sweep.sh --self-test

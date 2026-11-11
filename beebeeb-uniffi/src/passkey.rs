@@ -125,7 +125,7 @@ mod passkey_binding_tests {
         let blob = passkey_wrap_vault_key(vec![1u8; 32], mk).unwrap();
         assert_eq!(blob.len(), 60);
         let back = passkey_unwrap_vault_key(vec![1u8; 32], blob.clone()).unwrap();
-        assert_eq!(back.with_key(|k| k.to_bytes()).unwrap(), [7u8; 32]);
+        assert_eq!(*back.with_key(|k| k.to_bytes()).unwrap(), [7u8; 32]);
         assert!(passkey_unwrap_vault_key(vec![2u8; 32], blob).is_err());
         assert_eq!(passkey_hmac_secret_salt().len(), 32);
         let answer = r#"{"publicKey":{"challenge":"AAAA","rpId":"beebeeb.io"},"auth_state":"s","user_id":"u"}"#;

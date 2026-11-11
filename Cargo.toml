@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
+    "beebeeb-api",
+    "beebeeb-client",
     "beebeeb-core",
     "beebeeb-types",
     "beebeeb-sync",
@@ -9,10 +11,11 @@ members = [
     "beebeeb-backup",
     "beebeeb-wasm",
     "beebeeb-uniffi",
+    "beebeeb-store",
 ]
 
 [workspace.package]
-version = "0.2.8"
+version = "0.3.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/beebeeb-io/core"

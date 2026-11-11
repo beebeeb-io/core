@@ -1,6 +1,6 @@
 [package]
 name = "beebeeb-sync"
-description = "Desktop sync engine for Beebeeb — watches local files, syncs encrypted to cloud"
+description = "Legacy desktop sync prototype; not for product use"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

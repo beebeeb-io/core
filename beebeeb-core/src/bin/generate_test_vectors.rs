@@ -33,7 +33,7 @@ fn main() {
         "name": "master_key_from_password",
         "password": password,
         "salt_hex": hex(salt),
-        "expected_master_key_hex": hex(&mk.to_bytes()),
+        "expected_master_key_hex": hex(&*mk.to_bytes()),
     }));
 
     // Vector 2: File key derivation
@@ -41,7 +41,7 @@ fn main() {
     let fk = derive_file_key(&mk, file_id);
     vectors.push(json!({
         "name": "file_key_derivation",
-        "master_key_hex": hex(&mk.to_bytes()),
+        "master_key_hex": hex(&*mk.to_bytes()),
         "file_id_hex": hex(file_id),
         "expected_file_key_hex": hex(fk.as_bytes()),
     }));
@@ -67,7 +67,7 @@ fn main() {
     let x_pub = derive_x25519_public(&x_priv);
     vectors.push(json!({
         "name": "x25519_identity_keypair",
-        "master_key_hex": hex(&mk.to_bytes()),
+        "master_key_hex": hex(&*mk.to_bytes()),
         "expected_x25519_private_hex": hex(&*x_priv),
         "expected_x25519_public_hex": hex(&x_pub),
     }));
@@ -83,8 +83,8 @@ fn main() {
     let share_key = derive_share_key(&shared_ab, file_id);
     vectors.push(json!({
         "name": "x25519_share_key_exchange",
-        "alice_master_key_hex": hex(&mk.to_bytes()),
-        "bob_master_key_hex": hex(&mk_b.to_bytes()),
+        "alice_master_key_hex": hex(&*mk.to_bytes()),
+        "bob_master_key_hex": hex(&*mk_b.to_bytes()),
         "alice_x25519_public_hex": hex(&x_pub),
         "bob_x25519_public_hex": hex(&pub_b),
         "expected_shared_secret_hex": hex(&*shared_ab),
@@ -96,24 +96,24 @@ fn main() {
     let rc = compute_recovery_check(&mk);
     vectors.push(json!({
         "name": "recovery_check",
-        "master_key_hex": hex(&mk.to_bytes()),
+        "master_key_hex": hex(&*mk.to_bytes()),
         "expected_recovery_check_hex": hex(&*rc),
     }));
 
     // Vector 7: Envelope round-trip
     let mk_bytes = mk.to_bytes();
     let envelope = OpaqueEnvelope {
-        master_key: mk_bytes,
+        master_key: *mk_bytes,
         x25519_private: *x_priv,
         recovery_check: *rc,
     };
     let envelope_bytes = envelope.to_bytes();
     vectors.push(json!({
         "name": "envelope_serialization",
-        "master_key_hex": hex(&mk.to_bytes()),
+        "master_key_hex": hex(&*mk.to_bytes()),
         "x25519_private_hex": hex(&*x_priv),
         "recovery_check_hex": hex(&*rc),
-        "expected_envelope_hex": hex(&envelope_bytes),
+        "expected_envelope_hex": hex(&*envelope_bytes),
     }));
 
     // Vector 8: Recovery phrase
@@ -123,7 +123,7 @@ fn main() {
     vectors.push(json!({
         "name": "recovery_phrase_roundtrip",
         "mnemonic": phrase,
-        "expected_master_key_hex": hex(&recovered_mk.to_bytes()),
+        "expected_master_key_hex": hex(&*recovered_mk.to_bytes()),
         "note": "mnemonic is random — use this to verify recover_from_phrase(phrase) produces the expected key."
     }));
 
@@ -161,7 +161,7 @@ fn main() {
     assert_eq!(*opened, content_key);
     vectors.push(json!({
         "name": "file_request_seal_open",
-        "master_key_hex": hex(&mk.to_bytes()),
+        "master_key_hex": hex(&*mk.to_bytes()),
         "request_id_hex": hex(request_id),
         "expected_wrap_key_hex": hex(&*fr_wrap_key),
         "r_priv_hex": hex(&r_priv),
@@ -226,7 +226,7 @@ fn main() {
     vectors.extend(beebeeb_core::test_vectors_v2::v2_vectors());
 
     let output = json!({
-        "version": 6,
+        "version": 18,
         "generated_by": "beebeeb-core test vector generator",
         "vectors": vectors,
     });

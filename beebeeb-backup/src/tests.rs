@@ -6,7 +6,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use beebeeb_core::backup::SkipReason;
 
-use crate::walk::{Excludes, attrs_from_parts, attrs_of, collect_listing, is_within, walk_with, walk_with_paths};
+use crate::walk::{Excludes, attrs_from_parts, attrs_of, collect_listing, is_within, walk_with};
+// Only the macOS and Linux name tests walk with paths; elsewhere (Windows) the
+// import is unused, which CI's `-D warnings` refuses.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use crate::walk::walk_with_paths;
 use crate::{MAX_DEPTH, fingerprint, walk_source};
 
 /// `run_pass` over a recording host.

@@ -1,12 +1,11 @@
 //! Move 7 — the server error body and its branches (spec §16.2).
 //!
 //! Cases live in `test-vectors/consolidation/error_body.json`; this runner
-//! executes them against `beebeeb_core::api_error`. The typed error keeps the
-//! whole parsed body, so fields a client branches on (`is_trial_cap`,
-//! `limit_bytes`, `used_bytes`, and future ones) survive the decode.
+//! executes them against `beebeeb_core::api_error`. The typed error keeps only
+//! fields a client branches on (`is_trial_cap`, `limit_bytes`, `used_bytes`,
+//! and `retry_after`).
 
 use beebeeb_core::api_error::ServerError;
-use serde_json::Value;
 
 pub const CONCEPT: &str = "error_body";
 
@@ -64,13 +63,6 @@ fn error_body_cases_match_core() {
         for code in expected["not_code"].as_array().expect("not_code") {
             let code = code.as_str().expect("code string");
             assert!(!err.is_code(code), "{id}: not is_code({code})");
-        }
-
-        if let Some(details) = case.get("details_preserved").and_then(Value::as_array) {
-            for field in details {
-                let field = field.as_str().expect("field name");
-                assert!(err.details.contains_key(field), "{id}: details keeps `{field}`");
-            }
         }
     }
 

@@ -31,9 +31,9 @@ pub fn is_previewable(mime_type: Option<&str>) -> bool {
 /// Returns true if the file extension indicates a previewable file.
 /// Use when MIME type is unknown (encrypted).
 ///
-/// This is the `Mobile` column of the preview-platform table in this module,
-/// unchanged: `test-vectors/consolidation/preview_platforms.json` fails if the
-/// two ever drift.
+/// This is the `Mobile` column of the preview-platform table in this module:
+/// `test-vectors/consolidation/preview_platforms.json` fails if the two ever
+/// drift.
 pub fn is_previewable_by_extension(filename: &str) -> bool {
     let ext = match filename.rsplit('.').next() {
         Some(e) => e.to_lowercase(),
@@ -53,8 +53,8 @@ pub fn is_previewable_by_extension(filename: &str) -> bool {
         "txt" | "md" | "markdown" | "csv" | "log" | "rtf" |
         // Office
         "docx" | "xlsx" | "pptx" | "odt" | "ods" | "odp" |
-        // Archives
-        "tar" | "gz" | "tgz" |
+        // Archives (core's archive reader, every platform)
+        "zip" | "tar" | "gz" | "tgz" |
         // Code
         "py" | "js" | "jsx" | "ts" | "tsx" | "rs" | "go" | "rb" | "java" | "kt" | "swift" |
         "c" | "cpp" | "h" | "hpp" | "cs" | "php" | "sh" | "bash" | "zsh" |
@@ -142,7 +142,9 @@ const MOBILE: u8 = 1 << 2;
 /// - `DESKTOP`: desktop's `getFileType` table in `desktop/src/WindowsTray.tsx`
 ///   (88 extensions: image, video, audio, code, archive, plus `pdf`). No Rust
 ///   side feeds that list.
-/// - `MOBILE`: [`is_previewable_by_extension`] (90 extensions), unchanged.
+/// - `MOBILE`: [`is_previewable_by_extension`] (90 extensions).
+/// - Archives (`zip`, `tar`, `tgz`, `gz`) are previewed by core's archive
+///   reader (`archives`), so they are on all three columns.
 ///
 /// `test-vectors/consolidation/preview_platforms.json` carries one expected
 /// value per platform for every extension of the 123-entry union, and fails if
@@ -183,7 +185,7 @@ fn preview_platform_flags(ext: &str) -> u8 {
         "gif" => WEB | DESKTOP | MOBILE,
         "go" => WEB | DESKTOP | MOBILE,
         "graphql" => DESKTOP | MOBILE,
-        "gz" => DESKTOP | MOBILE,
+        "gz" => WEB | DESKTOP | MOBILE,
         "h" => WEB | DESKTOP | MOBILE,
         "heic" => WEB | DESKTOP | MOBILE,
         "heif" => WEB | DESKTOP | MOBILE,
@@ -246,8 +248,8 @@ fn preview_platform_flags(ext: &str) -> u8 {
         "svelte" => DESKTOP | MOBILE,
         "svg" => WEB | DESKTOP | MOBILE,
         "swift" => WEB | DESKTOP | MOBILE,
-        "tar" => DESKTOP | MOBILE,
-        "tgz" => MOBILE,
+        "tar" => WEB | DESKTOP | MOBILE,
+        "tgz" => WEB | DESKTOP | MOBILE,
         "tif" => WEB | DESKTOP | MOBILE,
         "tiff" => WEB | DESKTOP | MOBILE,
         "toml" => WEB | MOBILE,
@@ -269,7 +271,7 @@ fn preview_platform_flags(ext: &str) -> u8 {
         "yaml" => WEB | MOBILE,
         "yml" => MOBILE,
         "zig" => DESKTOP | MOBILE,
-        "zip" => WEB | DESKTOP,
+        "zip" => WEB | DESKTOP | MOBILE,
         "zsh" => DESKTOP | MOBILE,
         "zst" => DESKTOP,
         _ => 0,

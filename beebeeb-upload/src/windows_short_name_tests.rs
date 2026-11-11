@@ -1,8 +1,8 @@
 //! Windows: a download never writes through another file's 8.3 short name
 //! (task 2404). Each test first shows that its fixture really aliases (an
 //! ordinary read of the short name reaches the other file); a volume that makes
-//! no 8.3 names skips with the reason printed, and fails with `CI` set. Only
-//! the v0.2.6 API is used, so the file runs unchanged at the parent (red).
+//! no 8.3 names skips with the reason printed, and fails with `CI` set. The
+//! frames are v1, so they open without a version commitment.
 
 use crate::download::decrypt_downloaded_bytes;
 use beebeeb_core::chunk_stream::ExpectedChunkFormat::Unrecorded;
@@ -102,6 +102,7 @@ fn assert_refused(label: &str, existing: &str, to_output: impl Fn(&str) -> Strin
         &key,
         "short-name-test",
         Unrecorded,
+        None,
         &body,
         1,
         output.to_str().expect("UTF-8 path"),
@@ -160,6 +161,7 @@ fn a_download_never_truncates_another_file_through_its_tmp_name() {
         &key,
         "short-name-test",
         Unrecorded,
+        None,
         &body,
         1,
         output.to_str().expect("UTF-8 path"),
@@ -190,6 +192,7 @@ fn a_download_to_the_existing_files_own_name_still_replaces_it() {
         &key,
         "short-name-test",
         Unrecorded,
+        None,
         &body,
         1,
         output.to_str().expect("UTF-8 path"),

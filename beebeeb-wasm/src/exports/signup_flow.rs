@@ -190,7 +190,7 @@ impl SignupFlowJs {
             .inner
             .on_register_finish(&resp(status, body, retry_after_secs))
             .map_err(err)?;
-        let key = Zeroizing::new(created.master_key.to_bytes());
+        let key = created.master_key.to_bytes();
         signed_in(created.session_token.as_str(), Some(&created.user_id), &key)
     }
 
@@ -315,7 +315,7 @@ impl PhraseRecoveryJs {
                 session_token,
                 master_key,
             } => {
-                let key = Zeroizing::new(master_key.to_bytes());
+                let key = master_key.to_bytes();
                 signed_in(session_token.as_str(), None, &key)
             }
             Recovered::SignInRequired => to_js(&serde_json::json!({ "kind": "sign_in_required" })),

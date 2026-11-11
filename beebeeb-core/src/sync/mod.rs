@@ -9,9 +9,11 @@ pub mod conflict;
 pub mod engine;
 pub mod events;
 pub mod hash;
+pub mod store;
 pub mod types;
 
-pub use engine::SyncEngine;
+pub use engine::{CompleteSnapshot, IncompleteSnapshot, RemoteOp, SyncEngine, SyncEngineError};
 pub use events::SyncEvent;
 pub use hash::blake3_hash;
-pub use types::{PendingOp, SyncOp, TreeNode};
+pub use store::{InMemorySyncStore, StoredSyncMetadata, StoredSyncState, SyncStore, SyncStoreChanges, SyncStoreError};
+pub use types::{PendingOp, SyncOp, SyncPosition, TreeNode};

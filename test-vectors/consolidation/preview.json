@@ -255,6 +255,12 @@
       "expected": true
     },
     {
+      "id": "preview_ext_zip",
+      "kind": "extension",
+      "name": "file.zip",
+      "expected": true
+    },
+    {
       "id": "preview_ext_py",
       "kind": "extension",
       "name": "file.py",
@@ -872,13 +878,6 @@
       "expected": false
     },
     {
-      "id": "preview_web_zip",
-      "kind": "web-disagreement",
-      "name": "file.zip",
-      "web": true,
-      "expected": false
-    },
-    {
       "id": "preview_unknown_extension",
       "kind": "extension",
       "name": "archive.xyz9",
@@ -913,7 +912,7 @@
         true,
         true,
         true,
-        false,
+        true,
         false,
         false,
         false,

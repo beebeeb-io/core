@@ -1,0 +1,983 @@
+//! Persistent, event-driven handoff for operating-system background uploads.
+//!
+//! This planner performs no HTTP and needs no async runtime. It stages only
+//! ciphertext files, hands their paths to the caller, and consumes completion
+//! events. Its serialized state contains no account credential; a short-lived,
+//! upload-scoped token is supplied each time requests are dequeued.
+
+use std::collections::BTreeSet;
+use std::fmt;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use beebeeb_core::chunk_stream::{ChunkEncryptor, ChunkFormat, ExpectedChunkFormat, MAX_CHUNK_SIZE, VersionCommitment};
+use beebeeb_core::hash::sha256;
+use beebeeb_core::kdf::{FileKey, MasterKey};
+use beebeeb_core::retry::{RetryOutcome, RetryPolicy, parse_retry_after};
+use serde::{Deserialize, Serialize};
+
+const STATE_VERSION: u32 = 3;
+const MAX_STATE_BYTES: usize = 1024 * 1024;
+
+/// A server-issued destination for one already-encrypted chunk.
+#[derive(Clone, PartialEq, Eq)]
+pub struct BackgroundGrant {
+    pub index: u32,
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    /// Direct storage PUTs need a commit call after the operating system has
+    /// uploaded the body. API-route chunk PUTs leave this as `None`.
+    pub commit_path: Option<String>,
+    /// Whether the upload-scoped token is attached to this queued request.
+    /// This must be false for a presigned storage URL.
+    pub requires_upload_token: bool,
+}
+
+impl fmt::Debug for BackgroundGrant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BackgroundGrant")
+            .field("index", &self.index)
+            .field("url", &"<redacted>")
+            .field(
+                "header_names",
+                &self.headers.iter().map(|(name, _)| name).collect::<Vec<_>>(),
+            )
+            .field("commit_path", &self.commit_path)
+            .field("requires_upload_token", &self.requires_upload_token)
+            .finish()
+    }
+}
+
+/// One file-body request ready for the operating system's background queue.
+#[derive(Clone, PartialEq, Eq)]
+pub struct TransferRequest {
+    pub ticket: String,
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub body_path: PathBuf,
+}
+
+impl fmt::Debug for TransferRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TransferRequest")
+            .field("ticket", &self.ticket)
+            .field("url", &"<redacted>")
+            .field(
+                "header_names",
+                &self.headers.iter().map(|(name, _)| name).collect::<Vec<_>>(),
+            )
+            .field("body_path", &self.body_path)
+            .finish()
+    }
+}
+
+/// A direct PUT succeeded and its authenticated API commit must be made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitRequest {
+    pub ticket: String,
+    pub path: String,
+    pub body: Vec<u8>,
+}
+
+/// Why the handoff reached a terminal failed state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackgroundFailure {
+    SessionExpired,
+    Unauthorized,
+    Forbidden,
+    UpgradeRequired,
+    RetryLimit,
+    MalformedAnswer,
+}
+
+/// Result of reporting either a background PUT or its direct commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransferFinished {
+    Committed {
+        index: u32,
+    },
+    CommitRequired(CommitRequest),
+    RetryScheduled {
+        index: u32,
+        after_ms: u64,
+    },
+    /// The upload-scoped credential expired. The ciphertext remains staged
+    /// and ready; mint a fresh scoped token and dequeue it again.
+    UploadTokenExpired {
+        index: u32,
+    },
+    Failed {
+        index: u32,
+        reason: BackgroundFailure,
+    },
+    Ignored,
+}
+
+/// Result of staging ciphertext up to the disk ceiling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StageProgress {
+    pub staged: u32,
+    pub disk_limit_reached: bool,
+    pub all_chunks_staged: bool,
+}
+
+/// Tasks and files a client must remove from its background subsystem on
+/// sign-out. Calling this also forgets all queued planner state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignOutPlan {
+    pub cancel_tickets: Vec<String>,
+    pub delete_files: Vec<PathBuf>,
+}
+
+/// Caller-supplied identity for the plaintext source. A restore is permitted
+/// only when this value still matches exactly.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UploadSourceIdentity {
+    pub size_bytes: u64,
+    pub modified_unix_ms: i64,
+    /// Optional whole-file or sampled-chunk digest when the caller already has
+    /// one cheaply available.
+    pub content_hash: Option<[u8; 32]>,
+}
+
+/// Work the caller must perform before initializing a fresh upload session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackgroundRestartPlan {
+    pub file_id: String,
+    pub upload_session_id: String,
+    pub cleanup: SignOutPlan,
+}
+
+/// Result of restoring persisted background-upload state.
+#[derive(Debug)]
+pub enum BackgroundRestore {
+    Resumed(BackgroundUploadPlanner),
+    AbandonAndRestart(BackgroundRestartPlan),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum BackgroundError {
+    #[error("invalid background upload state")]
+    InvalidState,
+    #[error("the grant sequence does not match the encryptor")]
+    GrantSequence,
+    #[error("the ciphertext directory is not usable: {0}")]
+    Directory(#[source] io::Error),
+    #[error("staging ciphertext failed: {0}")]
+    Io(#[source] io::Error),
+    #[error("chunk encryption failed")]
+    Encryption,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+enum Phase {
+    Ready,
+    InFlight { ticket: String },
+    AwaitingCommit { ticket: String, retry_at_ms: Option<u64> },
+    RetryAt { at_ms: u64 },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StagedChunk {
+    index: u32,
+    len: u64,
+    file_name: String,
+    url: String,
+    headers: Vec<(String, String)>,
+    commit_path: Option<String>,
+    requires_upload_token: bool,
+    attempts: u32,
+    phase: Phase,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedState {
+    version: u32,
+    upload_id: String,
+    upload_session_id: String,
+    file_id: String,
+    directory: PathBuf,
+    disk_limit: u64,
+    disk_used: u64,
+    chunk_count: u32,
+    chunk_size_bytes: u64,
+    next_encrypt_index: u32,
+    #[serde(default)]
+    hashed_plaintext_chunks: u32,
+    #[serde(default)]
+    staged_plaintext_hash: Option<[u8; 32]>,
+    source_identity: UploadSourceIdentity,
+    format: Option<u8>,
+    version_id: Option<[u8; 12]>,
+    version_counter: Option<u64>,
+    max_attempts: u32,
+    chunks: Vec<StagedChunk>,
+    failed: Option<BackgroundFailure>,
+}
+
+/// Serializable state machine for one background upload.
+///
+/// **Persist before the OS sees a frame.** [`Self::next_transfers`] hands the
+/// platform only frames that were staged before the last [`Self::to_bytes`]
+/// snapshot. A frame staged after it is not in the persisted state, so after a
+/// crash restore deletes its file and seals that index again with a fresh
+/// nonce; had the OS already uploaded the first frame, the server would hold
+/// two valid frames for one index (crypto review, P3).
+pub struct BackgroundUploadPlanner {
+    state: PersistedState,
+    /// Runtime only, never serialized: chunks below this index were staged
+    /// before the last `to_bytes` snapshot.
+    persisted_through: u32,
+}
+
+impl fmt::Debug for BackgroundUploadPlanner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BackgroundUploadPlanner")
+            .field("upload_id", &self.state.upload_id)
+            .field("upload_session_id", &self.state.upload_session_id)
+            .field("disk_limit", &self.state.disk_limit)
+            .field("disk_used", &self.state.disk_used)
+            .field("chunk_count", &self.state.chunk_count)
+            .field("staged_chunks", &self.state.chunks.len())
+            .field("failed", &self.state.failed)
+            .finish()
+    }
+}
+
+impl BackgroundUploadPlanner {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        upload_id: impl Into<String>,
+        upload_session_id: impl Into<String>,
+        file_id: impl Into<String>,
+        directory: impl Into<PathBuf>,
+        disk_limit: u64,
+        chunk_size_bytes: u64,
+        chunk_count: u32,
+        source_identity: UploadSourceIdentity,
+    ) -> Result<Self, BackgroundError> {
+        let directory = directory.into();
+        let metadata = fs::metadata(&directory).map_err(BackgroundError::Directory)?;
+        if !metadata.is_dir()
+            || chunk_count == 0
+            || disk_limit == 0
+            || chunk_size_bytes == 0
+            || planned_chunk_count(source_identity.size_bytes, chunk_size_bytes)? != chunk_count
+        {
+            return Err(BackgroundError::InvalidState);
+        }
+        Ok(Self {
+            state: PersistedState {
+                version: STATE_VERSION,
+                upload_id: upload_id.into(),
+                upload_session_id: upload_session_id.into(),
+                file_id: file_id.into(),
+                directory,
+                disk_limit,
+                disk_used: 0,
+                chunk_count,
+                chunk_size_bytes,
+                next_encrypt_index: 0,
+                hashed_plaintext_chunks: 0,
+                staged_plaintext_hash: None,
+                source_identity,
+                format: None,
+                version_id: None,
+                version_counter: None,
+                max_attempts: RetryPolicy::DEFAULT.max_attempts,
+                chunks: Vec::new(),
+                failed: None,
+            },
+            persisted_through: 0,
+        })
+    }
+
+    /// Restore after process death. Unknown fields, oversized state, unsafe
+    /// filenames and inconsistent byte accounting are rejected.
+    pub fn from_bytes(
+        bytes: &[u8],
+        expected_directory: &Path,
+        current_source: &UploadSourceIdentity,
+    ) -> Result<BackgroundRestore, BackgroundError> {
+        Self::restore(bytes, expected_directory, Some(current_source))
+    }
+
+    /// Restore a fully staged upload after the platform removed its exported
+    /// plaintext source. An incomplete staging plan still requires the source.
+    pub fn from_bytes_after_staging(
+        bytes: &[u8],
+        expected_directory: &Path,
+    ) -> Result<BackgroundRestore, BackgroundError> {
+        Self::restore(bytes, expected_directory, None)
+    }
+
+    fn restore(
+        bytes: &[u8],
+        expected_directory: &Path,
+        current_source: Option<&UploadSourceIdentity>,
+    ) -> Result<BackgroundRestore, BackgroundError> {
+        if bytes.len() > MAX_STATE_BYTES {
+            return Err(BackgroundError::InvalidState);
+        }
+        let mut state: PersistedState = serde_json::from_slice(bytes).map_err(|_| BackgroundError::InvalidState)?;
+        if !matches!(state.version, 2 | STATE_VERSION)
+            || state.directory != expected_directory
+            || state.chunk_count == 0
+            || state.chunk_size_bytes == 0
+            || state.next_encrypt_index > state.chunk_count
+            || state.hashed_plaintext_chunks > state.next_encrypt_index
+            || state.max_attempts == 0
+            || state.chunks.len() > state.chunk_count as usize
+            || planned_chunk_count(state.source_identity.size_bytes, state.chunk_size_bytes)? != state.chunk_count
+        {
+            return Err(BackgroundError::InvalidState);
+        }
+        if state.next_encrypt_index == 0 {
+            if state.hashed_plaintext_chunks != 0 || state.staged_plaintext_hash.is_some() {
+                return Err(BackgroundError::InvalidState);
+            }
+        } else if state.hashed_plaintext_chunks != state.next_encrypt_index || state.staged_plaintext_hash.is_none() {
+            let cleanup = cleanup_plan(&state);
+            return Ok(BackgroundRestore::AbandonAndRestart(BackgroundRestartPlan {
+                file_id: state.file_id,
+                upload_session_id: state.upload_session_id,
+                cleanup,
+            }));
+        }
+        state.version = STATE_VERSION;
+        let has_commitment = state.format == Some(ChunkFormat::V2.as_u8())
+            && state.version_id.is_some()
+            && state.version_counter.is_some();
+        if (state.next_encrypt_index == 0 && has_commitment)
+            || (state.next_encrypt_index > 0 && !has_commitment)
+            || (state.next_encrypt_index == 0 && !state.chunks.is_empty())
+        {
+            return Err(BackgroundError::InvalidState);
+        }
+        let mut total = 0u64;
+        let mut previous = None;
+        for chunk in &state.chunks {
+            if chunk.index >= state.chunk_count
+                || chunk.index >= state.next_encrypt_index
+                || previous.is_some_and(|index| chunk.index <= index)
+                || !safe_ciphertext_name(&chunk.file_name)
+            {
+                return Err(BackgroundError::InvalidState);
+            }
+            previous = Some(chunk.index);
+            total = total.checked_add(chunk.len).ok_or(BackgroundError::InvalidState)?;
+            let metadata = fs::symlink_metadata(state.directory.join(&chunk.file_name))
+                .map_err(|_| BackgroundError::InvalidState)?;
+            if !metadata.file_type().is_file() || metadata.len() != chunk.len {
+                return Err(BackgroundError::InvalidState);
+            }
+        }
+        if total != state.disk_used || total > state.disk_limit {
+            return Err(BackgroundError::InvalidState);
+        }
+        if current_source.is_none() && state.next_encrypt_index != state.chunk_count {
+            return Err(BackgroundError::InvalidState);
+        }
+        let referenced: BTreeSet<&str> = state.chunks.iter().map(|chunk| chunk.file_name.as_str()).collect();
+        for entry in fs::read_dir(&state.directory).map_err(|_| BackgroundError::InvalidState)? {
+            let entry = entry.map_err(|_| BackgroundError::InvalidState)?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            if safe_ciphertext_name(name) && !referenced.contains(name) {
+                let metadata = fs::symlink_metadata(entry.path()).map_err(|_| BackgroundError::InvalidState)?;
+                if metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                    fs::remove_file(entry.path()).map_err(BackgroundError::Io)?;
+                }
+            }
+        }
+        if current_source.is_some_and(|current| &state.source_identity != current) {
+            let cleanup = cleanup_plan(&state);
+            return Ok(BackgroundRestore::AbandonAndRestart(BackgroundRestartPlan {
+                file_id: state.file_id,
+                upload_session_id: state.upload_session_id,
+                cleanup,
+            }));
+        }
+        Ok(BackgroundRestore::Resumed(Self {
+            persisted_through: state.next_encrypt_index,
+            state,
+        }))
+    }
+
+    /// Serialize the state for durable storage. This is also the persistence
+    /// point: frames staged before this call become eligible for
+    /// [`Self::next_transfers`]. Write the returned bytes durably before
+    /// asking for transfers.
+    pub fn to_bytes(&mut self) -> Result<Vec<u8>, BackgroundError> {
+        let bytes = serde_json::to_vec(&self.state).map_err(|_| BackgroundError::InvalidState)?;
+        self.persisted_through = self.state.next_encrypt_index;
+        Ok(bytes)
+    }
+
+    /// Extend the persisted hash chain through every plaintext chunk staged so
+    /// far. The chain retains one 32-byte value regardless of source size.
+    pub fn record_staged_plaintext_hash<R: Read + Seek>(&mut self, mut reader: R) -> Result<(), BackgroundError> {
+        if self.state.hashed_plaintext_chunks > self.state.next_encrypt_index {
+            return Err(BackgroundError::InvalidState);
+        }
+        let offset = u64::from(self.state.hashed_plaintext_chunks)
+            .checked_mul(self.state.chunk_size_bytes)
+            .ok_or(BackgroundError::InvalidState)?;
+        reader.seek(SeekFrom::Start(offset)).map_err(BackgroundError::Io)?;
+        let mut hash = self.state.staged_plaintext_hash.unwrap_or([0; 32]);
+        for index in self.state.hashed_plaintext_chunks..self.state.next_encrypt_index {
+            let plain_len = self.plaintext_chunk_len(index)?;
+            let plain_len = usize::try_from(plain_len).map_err(|_| BackgroundError::InvalidState)?;
+            let mut plaintext = vec![0; plain_len];
+            reader.read_exact(&mut plaintext).map_err(BackgroundError::Io)?;
+            let mut chained = Vec::with_capacity(hash.len().saturating_add(plaintext.len()));
+            chained.extend_from_slice(&hash);
+            chained.extend_from_slice(&plaintext);
+            hash.copy_from_slice(&sha256(&chained));
+            self.state.hashed_plaintext_chunks = index.checked_add(1).ok_or(BackgroundError::InvalidState)?;
+        }
+        self.state.staged_plaintext_hash = (self.state.hashed_plaintext_chunks > 0).then_some(hash);
+        Ok(())
+    }
+
+    /// Rehash the staged prefix before resuming encryption. This catches an
+    /// atomic source replacement that preserved both length and mtime.
+    pub fn staged_plaintext_matches<R: Read + Seek>(&self, mut reader: R) -> Result<bool, BackgroundError> {
+        if self.state.next_encrypt_index == 0 {
+            return Ok(true);
+        }
+        let Some(expected) = self.state.staged_plaintext_hash else {
+            return Ok(false);
+        };
+        reader.seek(SeekFrom::Start(0)).map_err(BackgroundError::Io)?;
+        let mut hash = [0; 32];
+        for index in 0..self.state.next_encrypt_index {
+            let plain_len = self.plaintext_chunk_len(index)?;
+            let plain_len = usize::try_from(plain_len).map_err(|_| BackgroundError::InvalidState)?;
+            let mut plaintext = vec![0; plain_len];
+            reader.read_exact(&mut plaintext).map_err(BackgroundError::Io)?;
+            let mut chained = Vec::with_capacity(hash.len().saturating_add(plaintext.len()));
+            chained.extend_from_slice(&hash);
+            chained.extend_from_slice(&plaintext);
+            hash.copy_from_slice(&sha256(&chained));
+        }
+        Ok(hash == expected)
+    }
+
+    pub fn staged_plaintext_hash_complete(&self) -> bool {
+        self.state.hashed_plaintext_chunks == self.state.next_encrypt_index
+            && (self.state.next_encrypt_index == 0 || self.state.staged_plaintext_hash.is_some())
+    }
+
+    fn plaintext_chunk_len(&self, index: u32) -> Result<u64, BackgroundError> {
+        if index >= self.state.chunk_count {
+            return Err(BackgroundError::InvalidState);
+        }
+        if index + 1 == self.state.chunk_count {
+            self.state
+                .source_identity
+                .size_bytes
+                .checked_sub(
+                    u64::from(index)
+                        .checked_mul(self.state.chunk_size_bytes)
+                        .ok_or(BackgroundError::InvalidState)?,
+                )
+                .ok_or(BackgroundError::InvalidState)
+        } else {
+            Ok(self.state.chunk_size_bytes)
+        }
+    }
+
+    /// Recreate the pull encryptor for the first unstaged chunk. This is the
+    /// narrowly-scoped same-version v2 continuation path; it does not change
+    /// the policy for a newly-created writer facing an unrelated old session.
+    pub fn resume_encryptor_with_file_key<R: Read + Seek + Send + 'static>(
+        &self,
+        file_key: FileKey,
+        reader: R,
+    ) -> Result<ChunkEncryptor, BackgroundError> {
+        let version_id = self.state.version_id.ok_or(BackgroundError::InvalidState)?;
+        if self.state.format != Some(ChunkFormat::V2.as_u8())
+            || self.state.version_counter.is_none()
+            || self.state.next_encrypt_index == 0
+            || self.state.next_encrypt_index > self.state.chunk_count
+        {
+            return Err(BackgroundError::InvalidState);
+        }
+        ChunkEncryptor::resume_v2_from_reader_with_file_key(
+            file_key,
+            &self.state.file_id,
+            version_id,
+            self.state.next_encrypt_index,
+            self.state.source_identity.size_bytes,
+            self.state.chunk_size_bytes,
+            reader,
+        )
+        .map_err(|_| BackgroundError::Encryption)
+    }
+
+    /// Master-key counterpart of [`Self::resume_encryptor_with_file_key`].
+    pub fn resume_encryptor<R: Read + Seek + Send + 'static>(
+        &self,
+        master_key: &MasterKey,
+        reader: R,
+    ) -> Result<ChunkEncryptor, BackgroundError> {
+        let version_id = self.state.version_id.ok_or(BackgroundError::InvalidState)?;
+        if self.state.format != Some(ChunkFormat::V2.as_u8())
+            || self.state.version_counter.is_none()
+            || self.state.next_encrypt_index == 0
+            || self.state.next_encrypt_index > self.state.chunk_count
+        {
+            return Err(BackgroundError::InvalidState);
+        }
+        ChunkEncryptor::resume_v2_from_reader_with_chunk_size(
+            master_key,
+            &self.state.file_id,
+            version_id,
+            self.state.next_encrypt_index,
+            self.state.source_identity.size_bytes,
+            self.state.chunk_size_bytes,
+            reader,
+        )
+        .map_err(|_| BackgroundError::Encryption)
+    }
+
+    /// Encrypt and stage as many sequential grants as fit. No plaintext path
+    /// or plaintext bytes are ever written to the ciphertext directory.
+    pub fn stage_available(
+        &mut self,
+        encryptor: &mut ChunkEncryptor,
+        grants: &[BackgroundGrant],
+        previous_version_counter: Option<u64>,
+    ) -> Result<StageProgress, BackgroundError> {
+        if self.state.failed.is_some() || encryptor.format() != ChunkFormat::V2 {
+            return Err(BackgroundError::InvalidState);
+        }
+        let plan = encryptor.chunk_plan();
+        if plan.chunk_count != u64::from(self.state.chunk_count)
+            || plan.chunk_size_bytes != self.state.chunk_size_bytes
+            || plan.file_size_bytes != self.state.source_identity.size_bytes
+            || encryptor.chunks_emitted() != self.state.next_encrypt_index
+        {
+            return Err(BackgroundError::InvalidState);
+        }
+        let mut staged = 0u32;
+        let mut disk_limit_reached = false;
+        for grant in grants {
+            let index = encryptor.chunks_emitted();
+            if index >= self.state.chunk_count || grant.index != index {
+                return Err(BackgroundError::GrantSequence);
+            }
+            let plain_len = if index + 1 == self.state.chunk_count {
+                plan.file_size_bytes
+                    .checked_sub(
+                        plan.chunk_size_bytes
+                            .checked_mul(u64::from(index))
+                            .ok_or(BackgroundError::InvalidState)?,
+                    )
+                    .ok_or(BackgroundError::InvalidState)?
+            } else {
+                plan.chunk_size_bytes
+            };
+            let frame_len = plain_len.checked_add(28).ok_or(BackgroundError::InvalidState)?;
+            let prospective_disk_used = self
+                .state
+                .disk_used
+                .checked_add(frame_len)
+                .ok_or(BackgroundError::InvalidState)?;
+            if prospective_disk_used > self.state.disk_limit {
+                disk_limit_reached = true;
+                break;
+            }
+            let encrypted = encryptor
+                .next_chunk()
+                .map_err(|_| BackgroundError::Encryption)?
+                .ok_or(BackgroundError::GrantSequence)?;
+            if encrypted.index != index || encrypted.data.len() as u64 != frame_len {
+                return Err(BackgroundError::Encryption);
+            }
+            let file_name = format!("chunk-{index:08}.bbcipher");
+            write_ciphertext_file(&self.state.directory, &file_name, &encrypted.data)?;
+            self.state.disk_used = prospective_disk_used;
+            self.state.chunks.push(StagedChunk {
+                index,
+                len: frame_len,
+                file_name,
+                url: grant.url.clone(),
+                headers: grant.headers.clone(),
+                commit_path: grant.commit_path.clone(),
+                requires_upload_token: grant.requires_upload_token,
+                attempts: 0,
+                phase: Phase::Ready,
+            });
+            if index == 0 {
+                let commitment = encryptor
+                    .version_commitment_after(previous_version_counter)
+                    .map_err(|_| BackgroundError::Encryption)?;
+                self.record_commitment(encryptor.format(), commitment);
+            }
+            self.state.next_encrypt_index = index.checked_add(1).ok_or(BackgroundError::InvalidState)?;
+            staged = staged.saturating_add(1);
+        }
+        Ok(StageProgress {
+            staged,
+            disk_limit_reached,
+            all_chunks_staged: encryptor.chunks_emitted() == self.state.chunk_count,
+        })
+    }
+
+    /// Consume the encryptor so its finish guard proves the source did not
+    /// shrink. This is valid only after every chunk has been staged.
+    pub fn finish_encryption(&self, encryptor: ChunkEncryptor) -> Result<(), BackgroundError> {
+        if encryptor.chunks_emitted() != self.state.chunk_count {
+            return Err(BackgroundError::InvalidState);
+        }
+        encryptor.finish().map(|_| ()).map_err(|_| BackgroundError::Encryption)
+    }
+
+    pub fn recorded_format(&self) -> Option<ExpectedChunkFormat> {
+        self.state
+            .format
+            .and_then(|value| ChunkFormat::from_u8(value).ok())
+            .map(ExpectedChunkFormat::recorded_for)
+    }
+
+    pub fn version_commitment(&self) -> Option<VersionCommitment> {
+        VersionCommitment::new(self.state.version_id?, self.state.version_counter?).ok()
+    }
+
+    pub fn all_chunks_staged(&self) -> bool {
+        self.state.next_encrypt_index == self.state.chunk_count
+    }
+
+    pub fn restart_plan(&self) -> BackgroundRestartPlan {
+        BackgroundRestartPlan {
+            file_id: self.state.file_id.clone(),
+            upload_session_id: self.state.upload_session_id.clone(),
+            cleanup: cleanup_plan(&self.state),
+        }
+    }
+
+    pub fn remaining_chunks(&self) -> usize {
+        self.state.chunks.len()
+    }
+
+    /// Dequeue ready work. The token is deliberately absent from serialized
+    /// state and is copied only into API-route requests that ask for it.
+    /// Frames staged after the last [`Self::to_bytes`] are held back until the
+    /// state that names them has been serialized.
+    pub fn next_transfers(&mut self, limit: usize, upload_scoped_token: &str, now_ms: u64) -> Vec<TransferRequest> {
+        if limit == 0 || upload_scoped_token.is_empty() || self.state.failed.is_some() {
+            return Vec::new();
+        }
+        let mut requests = Vec::new();
+        for chunk in &mut self.state.chunks {
+            if requests.len() >= limit || chunk.index >= self.persisted_through {
+                break;
+            }
+            let ready = matches!(chunk.phase, Phase::Ready)
+                || matches!(chunk.phase, Phase::RetryAt { at_ms } if at_ms <= now_ms);
+            if !ready {
+                continue;
+            }
+            chunk.attempts = chunk.attempts.saturating_add(1);
+            let ticket = format!("{}:{}:{}", self.state.upload_id, chunk.index, chunk.attempts);
+            chunk.phase = Phase::InFlight { ticket: ticket.clone() };
+            let mut headers = chunk.headers.clone();
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case(crate::V2_CAPABILITIES_HEADER));
+            headers.push((
+                crate::V2_CAPABILITIES_HEADER.into(),
+                crate::V2_WRITE_CAPABILITIES.into(),
+            ));
+            if chunk.requires_upload_token {
+                headers.push(("Authorization".into(), format!("Bearer {upload_scoped_token}")));
+            }
+            requests.push(TransferRequest {
+                ticket,
+                url: chunk.url.clone(),
+                headers,
+                body_path: self.state.directory.join(&chunk.file_name),
+            });
+        }
+        requests
+    }
+
+    /// Report a PUT, or report the direct commit using the same ticket. Late
+    /// and duplicate tickets are ignored without disturbing current work.
+    pub fn transfer_finished(
+        &mut self,
+        ticket: &str,
+        status: u16,
+        content_type: Option<&str>,
+        retry_after: Option<&str>,
+        body: &[u8],
+        now_ms: u64,
+    ) -> TransferFinished {
+        let Some(position) = self.state.chunks.iter().position(|chunk| match &chunk.phase {
+            Phase::InFlight { ticket: current } | Phase::AwaitingCommit { ticket: current, .. } => current == ticket,
+            _ => false,
+        }) else {
+            return TransferFinished::Ignored;
+        };
+        let awaiting_commit = matches!(self.state.chunks[position].phase, Phase::AwaitingCommit { .. });
+        if awaiting_commit {
+            if matches!(
+                self.state.chunks[position].phase,
+                Phase::AwaitingCommit {
+                    retry_at_ms: Some(at),
+                    ..
+                } if now_ms < at
+            ) {
+                return TransferFinished::Ignored;
+            }
+            return self.commit_finished(position, status, content_type, retry_after, body, now_ms);
+        }
+        if (200..300).contains(&status) || status == 412 {
+            if let Some(path) = self.state.chunks[position].commit_path.clone() {
+                self.state.chunks[position].phase = Phase::AwaitingCommit {
+                    ticket: ticket.to_owned(),
+                    retry_at_ms: None,
+                };
+                let size = self.state.chunks[position].len;
+                let body = serde_json::to_vec(&serde_json::json!({"size": size})).unwrap_or_default();
+                return TransferFinished::CommitRequired(CommitRequest {
+                    ticket: ticket.to_owned(),
+                    path,
+                    body,
+                });
+            }
+            return self.mark_committed(position);
+        }
+        self.failed_attempt(position, status, retry_after, now_ms)
+    }
+
+    pub fn sign_out(&mut self) -> SignOutPlan {
+        let mut cancel_tickets = Vec::new();
+        let mut delete_files = Vec::new();
+        for chunk in &self.state.chunks {
+            match &chunk.phase {
+                Phase::InFlight { ticket } | Phase::AwaitingCommit { ticket, .. } => {
+                    cancel_tickets.push(ticket.clone())
+                }
+                _ => {}
+            }
+            delete_files.push(self.state.directory.join(&chunk.file_name));
+        }
+        self.state.chunks.clear();
+        self.state.disk_used = 0;
+        SignOutPlan {
+            cancel_tickets,
+            delete_files,
+        }
+    }
+
+    fn record_commitment(&mut self, format: ChunkFormat, commitment: VersionCommitment) {
+        self.state.format = Some(format.as_u8());
+        self.state.version_id = Some(commitment.version_id);
+        self.state.version_counter = Some(commitment.counter);
+    }
+
+    fn commit_finished(
+        &mut self,
+        position: usize,
+        status: u16,
+        content_type: Option<&str>,
+        retry_after: Option<&str>,
+        body: &[u8],
+        now_ms: u64,
+    ) -> TransferFinished {
+        use beebeeb_core::direct_transfer::{ApiAnswer, Call, Outcome, UploadCommitted, classify};
+        self.state.chunks[position].attempts = self.state.chunks[position].attempts.saturating_add(1);
+        let answer = ApiAnswer::from_parts(status, content_type, body, retry_after);
+        match classify(Call::UploadCommit, &answer) {
+            Outcome::Proceed => {
+                let chunk = &self.state.chunks[position];
+                if UploadCommitted::from_answer(body, chunk.index, chunk.len).is_ok() {
+                    self.mark_committed(position)
+                } else {
+                    self.mark_failed(position, BackgroundFailure::MalformedAnswer)
+                }
+            }
+            Outcome::Terminal(terminal) if terminal.status == 401 => {
+                self.mark_failed(position, BackgroundFailure::Unauthorized)
+            }
+            Outcome::Terminal(terminal) if terminal.status == 403 => {
+                self.mark_failed(position, BackgroundFailure::Forbidden)
+            }
+            Outcome::Terminal(terminal) if terminal.status == 404 => {
+                self.mark_failed(position, BackgroundFailure::SessionExpired)
+            }
+            Outcome::Terminal(terminal) if terminal.status == 426 => {
+                self.mark_failed(position, BackgroundFailure::UpgradeRequired)
+            }
+            Outcome::Regrant => self.failed_attempt(position, status, retry_after, now_ms),
+            Outcome::Backoff(wait) => self.commit_retry(position, duration_ms(wait), now_ms),
+            Outcome::Held(wait) => {
+                self.commit_retry(position, duration_ms(wait.unwrap_or(Duration::from_secs(5))), now_ms)
+            }
+            Outcome::Retry => {
+                let attempts = self.state.chunks[position].attempts;
+                match self.retry_policy().decide(attempts, RetryOutcome::Status(status), None) {
+                    Some(after_ms) => self.commit_retry(position, after_ms, now_ms),
+                    None => self.mark_failed(position, BackgroundFailure::RetryLimit),
+                }
+            }
+            _ => self.mark_failed(position, BackgroundFailure::RetryLimit),
+        }
+    }
+
+    fn failed_attempt(
+        &mut self,
+        position: usize,
+        status: u16,
+        retry_after: Option<&str>,
+        now_ms: u64,
+    ) -> TransferFinished {
+        if status == 401 && self.state.chunks[position].requires_upload_token {
+            let index = self.state.chunks[position].index;
+            self.state.chunks[position].phase = Phase::Ready;
+            self.state.chunks[position].attempts = self.state.chunks[position].attempts.saturating_sub(1);
+            return TransferFinished::UploadTokenExpired { index };
+        }
+        let reason = match status {
+            401 => Some(BackgroundFailure::Unauthorized),
+            403 => Some(BackgroundFailure::Forbidden),
+            404 => Some(BackgroundFailure::SessionExpired),
+            426 => Some(BackgroundFailure::UpgradeRequired),
+            _ => None,
+        };
+        if let Some(reason) = reason {
+            return self.mark_failed(position, reason);
+        }
+        let attempts = self.state.chunks[position].attempts;
+        let outcome = if status == 0 {
+            RetryOutcome::Network
+        } else {
+            RetryOutcome::Status(status)
+        };
+        let after = self
+            .retry_policy()
+            .decide(attempts, outcome, retry_after.and_then(parse_retry_after));
+        match after {
+            Some(after_ms) => {
+                let index = self.state.chunks[position].index;
+                self.state.chunks[position].phase = Phase::RetryAt {
+                    at_ms: now_ms.saturating_add(after_ms),
+                };
+                TransferFinished::RetryScheduled { index, after_ms }
+            }
+            None => self.mark_failed(position, BackgroundFailure::RetryLimit),
+        }
+    }
+
+    fn commit_retry(&mut self, position: usize, after_ms: u64, now_ms: u64) -> TransferFinished {
+        if self.state.chunks[position].attempts >= self.state.max_attempts {
+            return self.mark_failed(position, BackgroundFailure::RetryLimit);
+        }
+        let index = self.state.chunks[position].index;
+        let ticket = match &self.state.chunks[position].phase {
+            Phase::AwaitingCommit { ticket, .. } => ticket.clone(),
+            _ => return self.mark_failed(position, BackgroundFailure::MalformedAnswer),
+        };
+        self.state.chunks[position].phase = Phase::AwaitingCommit {
+            ticket,
+            retry_at_ms: Some(now_ms.saturating_add(after_ms)),
+        };
+        TransferFinished::RetryScheduled { index, after_ms }
+    }
+
+    fn retry_policy(&self) -> RetryPolicy {
+        RetryPolicy {
+            max_attempts: self.state.max_attempts,
+            ..RetryPolicy::DEFAULT
+        }
+    }
+
+    fn mark_committed(&mut self, position: usize) -> TransferFinished {
+        let chunk = self.state.chunks.remove(position);
+        self.state.disk_used = self.state.disk_used.saturating_sub(chunk.len);
+        let _ = fs::remove_file(self.state.directory.join(chunk.file_name));
+        TransferFinished::Committed { index: chunk.index }
+    }
+
+    fn mark_failed(&mut self, position: usize, reason: BackgroundFailure) -> TransferFinished {
+        let index = self.state.chunks[position].index;
+        self.state.failed = Some(reason);
+        for chunk in self.state.chunks.drain(..) {
+            let _ = fs::remove_file(self.state.directory.join(chunk.file_name));
+        }
+        self.state.disk_used = 0;
+        TransferFinished::Failed { index, reason }
+    }
+}
+
+fn planned_chunk_count(file_size: u64, chunk_size_bytes: u64) -> Result<u32, BackgroundError> {
+    if chunk_size_bytes == 0 || chunk_size_bytes > MAX_CHUNK_SIZE {
+        return Err(BackgroundError::InvalidState);
+    }
+    let count = if file_size == 0 {
+        1
+    } else {
+        (file_size / chunk_size_bytes)
+            .checked_add(u64::from(file_size % chunk_size_bytes != 0))
+            .ok_or(BackgroundError::InvalidState)?
+    };
+    let count = u32::try_from(count).map_err(|_| BackgroundError::InvalidState)?;
+    let overhead = u64::from(count).checked_mul(28).ok_or(BackgroundError::InvalidState)?;
+    file_size.checked_add(overhead).ok_or(BackgroundError::InvalidState)?;
+    Ok(count)
+}
+
+fn cleanup_plan(state: &PersistedState) -> SignOutPlan {
+    let mut cancel_tickets = Vec::new();
+    let mut delete_files = Vec::new();
+    for chunk in &state.chunks {
+        match &chunk.phase {
+            Phase::InFlight { ticket } | Phase::AwaitingCommit { ticket, .. } => cancel_tickets.push(ticket.clone()),
+            _ => {}
+        }
+        delete_files.push(state.directory.join(&chunk.file_name));
+    }
+    SignOutPlan {
+        cancel_tickets,
+        delete_files,
+    }
+}
+
+fn safe_ciphertext_name(name: &str) -> bool {
+    name.starts_with("chunk-")
+        && name.ends_with(".bbcipher")
+        && !name.contains('/')
+        && !name.contains('\\')
+        && Path::new(name).components().count() == 1
+}
+
+fn duration_ms(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn write_ciphertext_file(directory: &Path, file_name: &str, bytes: &[u8]) -> Result<(), BackgroundError> {
+    let path = directory.join(file_name);
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path).map_err(BackgroundError::Io)?;
+    file.write_all(bytes).map_err(BackgroundError::Io)?;
+    file.sync_all().map_err(BackgroundError::Io)
+}
+
+#[cfg(test)]
+mod tests;

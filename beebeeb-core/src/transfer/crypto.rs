@@ -13,6 +13,7 @@ use x25519_dalek::{EphemeralSecret, PublicKey};
 use zeroize::Zeroizing;
 
 use super::wordlist::WORDLIST;
+use crate::CoreError;
 
 pub(crate) const TRANSFER_KEY_INFO: &[u8] = b"beebeeb-transfer-v1";
 pub(crate) const SAS_INFO: &[u8] = b"beebeeb-sas-v1";
@@ -31,10 +32,19 @@ pub fn generate_keypair() -> TransferKeypair {
     TransferKeypair { secret, public }
 }
 
-/// Compute the X25519 ECDH shared secret. The local secret is consumed.
-pub fn derive_shared_secret(my_secret: EphemeralSecret, their_public: &PublicKey) -> [u8; 32] {
+/// Compute the X25519 ECDH shared secret. The local secret is consumed and
+/// low-order peer points are rejected.
+pub fn derive_shared_secret(
+    my_secret: EphemeralSecret,
+    their_public: &PublicKey,
+) -> Result<Zeroizing<[u8; 32]>, CoreError> {
     let shared = my_secret.diffie_hellman(their_public);
-    *shared.as_bytes()
+    if !shared.was_contributory() {
+        return Err(CoreError::InvalidInput(
+            "X25519 shared secret is non-contributory (low-order public key)".into(),
+        ));
+    }
+    Ok(Zeroizing::new(*shared.as_bytes()))
 }
 
 /// Derive the 32-byte AES-256 transfer key:
@@ -80,10 +90,16 @@ mod tests {
         let alice_pub = alice.public;
         let bob_pub = bob.public;
 
-        let alice_shared = derive_shared_secret(alice.secret, &bob_pub);
-        let bob_shared = derive_shared_secret(bob.secret, &alice_pub);
+        let alice_shared = derive_shared_secret(alice.secret, &bob_pub).unwrap();
+        let bob_shared = derive_shared_secret(bob.secret, &alice_pub).unwrap();
 
-        assert_eq!(alice_shared, bob_shared);
+        assert_eq!(*alice_shared, *bob_shared);
+    }
+
+    #[test]
+    fn shared_secret_rejects_low_order_public_key() {
+        let local = generate_keypair();
+        assert!(derive_shared_secret(local.secret, &PublicKey::from([0u8; 32])).is_err());
     }
 
     #[test]
@@ -96,10 +112,10 @@ mod tests {
         let bob1_pub = bob1.public;
         let bob2_pub = bob2.public;
 
-        let s1 = derive_shared_secret(alice1.secret, &bob1_pub);
-        let s2 = derive_shared_secret(alice2.secret, &bob2_pub);
+        let s1 = derive_shared_secret(alice1.secret, &bob1_pub).unwrap();
+        let s2 = derive_shared_secret(alice2.secret, &bob2_pub).unwrap();
 
-        assert_ne!(s1, s2);
+        assert_ne!(*s1, *s2);
     }
 
     #[test]
