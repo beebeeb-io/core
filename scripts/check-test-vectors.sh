@@ -23,6 +23,13 @@ python3 "$vector_tmp/test-vectors/tools/make_upper_repair_vectors.py" "$vector_t
 python3 "$vector_tmp/test-vectors/tools/make_owner_file_key_vector.py" "$vector_tmp/test-vectors/vectors.json"
 cmp test-vectors/vectors.json "$vector_tmp/test-vectors/vectors.json"
 
+# SF-0003: the folder-link writer must leave a current vectors.json byte-identical, document
+# version included. It resolves the file relative to itself, so run a copy inside the temp tree.
+mkdir "$vector_tmp/scripts"
+cp scripts/gen-folder-link-vectors.py "$vector_tmp/scripts/gen-folder-link-vectors.py"
+python3 -I "$vector_tmp/scripts/gen-folder-link-vectors.py" --write >/dev/null
+cmp test-vectors/vectors.json "$vector_tmp/test-vectors/vectors.json"
+
 python3 "$vector_tmp/test-vectors/tools/make_direct_transfer_vectors.py" "$vector_tmp/test-vectors/direct_transfer.json"
 cmp test-vectors/direct_transfer.json "$vector_tmp/test-vectors/direct_transfer.json"
 
