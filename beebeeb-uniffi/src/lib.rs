@@ -4339,10 +4339,26 @@ fn dto_to_shard(d: EncryptedShardDto) -> search_index::EncryptedShard {
 /// A mutable client-side search index. Build it from a file list, mutate it
 /// incrementally (`upsert`/`remove` return the dirty bucket set), query it, and
 /// (de)serialize it to encrypted shards for sync. Crypto runs in core against the
-/// borrowed master key — raw key bytes never cross FFI.
+/// borrowed master key — raw key bytes never cross FFI. After a panic poisoned
+/// its lock every call fails with `CryptoError::InvalidInput`: rebuild it.
 #[derive(uniffi::Object)]
 pub struct SearchIndexHandle {
     inner: Mutex<search_index::SearchIndex>,
+}
+
+impl SearchIndexHandle {
+    /// Lock the index. A poisoned lock (a panic while the index was in use)
+    /// leaves the index untrusted: its decrypted names are dropped, as
+    /// `lock_handle` drops a key, and the call fails instead of panicking across FFI.
+    fn index(&self) -> Result<std::sync::MutexGuard<'_, search_index::SearchIndex>, CryptoError> {
+        self.inner.lock().map_err(|poisoned| {
+            let mut index = poisoned.into_inner();
+            *index = search_index::SearchIndex::new(index.num_shards());
+            CryptoError::InvalidInput {
+                detail: "the search index failed while in use and cannot be used again".into(),
+            }
+        })
+    }
 }
 
 #[uniffi::export]
@@ -4379,34 +4395,34 @@ impl SearchIndexHandle {
     }
 
     /// Shard count this index uses.
-    pub fn num_shards(&self) -> u32 {
-        self.inner.lock().unwrap().num_shards()
+    pub fn num_shards(&self) -> Result<u32, CryptoError> {
+        Ok(self.index()?.num_shards())
     }
 
     /// Number of indexed files.
-    pub fn file_count(&self) -> u64 {
-        self.inner.lock().unwrap().file_count() as u64
+    pub fn file_count(&self) -> Result<u64, CryptoError> {
+        Ok(self.index()?.file_count() as u64)
     }
 
     /// Insert or update a file (add or rename). Returns the buckets whose shards
     /// changed — re-encrypt only these for an incremental sync.
-    pub fn upsert(&self, file_id: String, name: String) -> Vec<u32> {
-        self.inner.lock().unwrap().upsert(&file_id, &name).into_iter().collect()
+    pub fn upsert(&self, file_id: String, name: String) -> Result<Vec<u32>, CryptoError> {
+        Ok(self.index()?.upsert(&file_id, &name).into_iter().collect())
     }
 
     /// Remove a file. Returns the dirty bucket set (empty if not indexed).
-    pub fn remove(&self, file_id: String) -> Vec<u32> {
-        self.inner.lock().unwrap().remove(&file_id).into_iter().collect()
+    pub fn remove(&self, file_id: String) -> Result<Vec<u32>, CryptoError> {
+        Ok(self.index()?.remove(&file_id).into_iter().collect())
     }
 
     /// Search; returns the matching `file_id`s.
-    pub fn query(&self, term: String) -> Vec<String> {
-        self.inner.lock().unwrap().query(&term).into_iter().collect()
+    pub fn query(&self, term: String) -> Result<Vec<String>, CryptoError> {
+        Ok(self.index()?.query(&term).into_iter().collect())
     }
 
     /// Encrypt every non-empty shard page of the index.
     pub fn encrypt_shards(&self, master_key: &MasterKeyHandle) -> Result<Vec<EncryptedShardDto>, CryptoError> {
-        let idx = self.inner.lock().unwrap();
+        let idx = self.index()?;
         let shards = master_key.with_key(|mk| idx.encrypt_shards(mk))??;
         Ok(shards.into_iter().map(shard_to_dto).collect())
     }
@@ -4419,7 +4435,7 @@ impl SearchIndexHandle {
         buckets: Vec<u32>,
     ) -> Result<Vec<EncryptedShardDto>, CryptoError> {
         let set: std::collections::BTreeSet<u32> = buckets.into_iter().collect();
-        let idx = self.inner.lock().unwrap();
+        let idx = self.index()?;
         let shards = master_key.with_key(|mk| idx.encrypt_buckets(mk, &set))??;
         Ok(shards.into_iter().map(shard_to_dto).collect())
     }
@@ -5945,77 +5961,7 @@ pub fn direct_resume_transport(
 }
 
 #[cfg(test)]
-mod search_index_binding_tests {
-    use super::*;
-
-    fn test_master_key() -> Arc<MasterKeyHandle> {
-        MasterKeyHandle::from_keychain_bytes(vec![7u8; 32]).unwrap()
-    }
-
-    #[test]
-    fn round_trip_through_binding_finds_nested_term() {
-        let mk = test_master_key();
-        let files = vec![
-            SearchFileEntry {
-                file_id: "top".into(),
-                name: "readme.txt".into(),
-            },
-            SearchFileEntry {
-                file_id: "deep".into(),
-                name: "buried_treasure_xyzzy.txt".into(),
-            },
-        ];
-        let idx = SearchIndexHandle::build(files, search_index::DEFAULT_NUM_SHARDS);
-
-        let shards = idx.encrypt_shards(&mk).unwrap();
-        assert!(!shards.is_empty());
-        let restored = SearchIndexHandle::from_encrypted_shards(&mk, shards, idx.num_shards()).unwrap();
-
-        assert_eq!(restored.query("xyzzy".into()), vec!["deep".to_string()]);
-        assert_eq!(restored.file_count(), 2);
-
-        // Incremental: dirty buckets drive a partial re-encrypt.
-        let dirty = restored.upsert("new".into(), "another_file.pdf".into());
-        assert!(!dirty.is_empty());
-        assert!(!restored.encrypt_buckets(&mk, dirty).unwrap().is_empty());
-        assert_eq!(restored.query("another".into()), vec!["new".to_string()]);
-    }
-
-    #[test]
-    fn wrong_master_key_fails_decrypt_through_binding() {
-        let mk = test_master_key();
-        let idx = SearchIndexHandle::build(
-            vec![SearchFileEntry {
-                file_id: "a".into(),
-                name: "secret.txt".into(),
-            }],
-            search_index::DEFAULT_NUM_SHARDS,
-        );
-        let shards = idx.encrypt_shards(&mk).unwrap();
-        let wrong = MasterKeyHandle::from_keychain_bytes(vec![9u8; 32]).unwrap();
-        assert!(SearchIndexHandle::from_encrypted_shards(&wrong, shards, idx.num_shards()).is_err());
-    }
-
-    #[test]
-    fn sync_plan_through_binding() {
-        let local = vec![ShardRefDto {
-            bucket: 1,
-            page: 0,
-            version: 2,
-        }];
-        let remote = vec![ShardRefDto {
-            bucket: 3,
-            page: 0,
-            version: 1,
-        }];
-        let plan = search_index_sync_plan(local, remote, true);
-        assert_eq!(plan.to_put.len(), 1);
-        assert_eq!(plan.to_put[0].bucket, 1);
-        assert_eq!(plan.to_delete.len(), 1);
-        assert_eq!(plan.to_delete[0].bucket, 3);
-        assert!(plan.to_get.is_empty());
-    }
-}
+mod search_index_binding_tests;
 
 #[cfg(test)]
 mod onboarding_binding_tests {

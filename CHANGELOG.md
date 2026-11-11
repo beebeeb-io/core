@@ -159,6 +159,12 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   the last deletion link is `RetryAfter { seconds }` (the server's `Retry-After` header), a 401 on their
   other requests is `SessionExpired`, and a refused step-up never is. Update exhaustive switches.
 
+- `SearchIndexHandle`'s `num_shards`, `file_count`, `upsert`, `remove` and `query` now throw
+  `CryptoError` (Swift `throws`, Kotlin `@Throws`): call them with `try`. After a panic poisoned the
+  index's lock, every call on it, including `encrypt_shards` and `encrypt_buckets`, answers
+  `CryptoError::InvalidInput` instead of panicking across FFI, and the index drops its decrypted names;
+  rebuild the index from its shards.
+
 ### Callers moving from 0.2.7 or 0.2.8
 
 - 0.3.0 contains 0.2.7 and 0.2.8: `auth_flow`, `account_flows`, `signup_flow`, `recovery_flow`,

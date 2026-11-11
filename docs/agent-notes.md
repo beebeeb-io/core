@@ -165,7 +165,7 @@ Client-built, E2E-encrypted file-name search; the server is zero-knowledge, ever
 - `SearchIndex`: `build`, incremental `upsert`/`remove` (return the dirty bucket set), `query` (exact + prefix + substring).
 - Sharding: `bucket = blake3(key)[..8] % num_shards` (`DEFAULT_NUM_SHARDS = 64`), pages ≤ 128 KB after encryption; `num_shards` fixed per index.
 - Encryption: per-shard key `kdf::derive_search_index_key` (HKDF label `beebeeb-search-index-shard-v1`, distinct from the file-key label); `blob = nonce||ciphertext||tag` via `encrypt_chunk_raw`.
-- Bindings: UniFFI `SearchIndexHandle` + WASM `WasmSearchIndex` (same surface); sync helper `search_sync::diff_manifest` (`searchIndexSyncPlan`). Dependency: `unicode-normalization` (NFKD). WASM constructors accept at most 64 shards (zero still normalizes to one), matching `deriveSharedFolderIndexKey` buckets 0–63.
+- Bindings: UniFFI `SearchIndexHandle` + WASM `WasmSearchIndex` (same surface, but every UniFFI method returns `Result`: a poisoned lock is `CryptoError::InvalidInput`, never a panic across FFI); sync helper `search_sync::diff_manifest` (`searchIndexSyncPlan`). Dependency: `unicode-normalization` (NFKD). WASM constructors accept at most 64 shards (zero still normalizes to one), matching `deriveSharedFolderIndexKey` buckets 0–63.
 - Wiring: WEB is wired (task 0871). Follow-ups: mobile wiring; retiring `/api/v1/index` (Guus-gated, after web + mobile both cut over); Part A recursive in-app search.
 
 ## Device link (`device_link.rs`, `beebeeb-client::devices`)
