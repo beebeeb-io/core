@@ -1,14 +1,14 @@
 'use strict';
 // Crypto review, P2-7: web reaches the one safety-number format and
 // the one email normalisation through WASM, on every row of
-// test-vectors/safety_number.json (generated independently with hashlib),
+// test-vectors/contact_safety_number.json (generated independently with hashlib),
 // including the two rows that pin str::trim against JavaScript's trim.
 const assert = require('node:assert/strict');
 const nodeTest = require('node:test');
 const path = require('node:path');
 const wasm = require(process.env.BB_WASM_PKG);
 
-const doc = require(path.join(__dirname, '../../test-vectors/safety_number.json'));
+const doc = require(path.join(__dirname, '../../test-vectors/contact_safety_number.json'));
 
 nodeTest('safetyNumber equals every vector row, in both argument orders', () => {
   assert.equal(doc.vectors.length, 8);

@@ -195,6 +195,20 @@ A signed-in device (the approver) gives a new device the account key. Two paths,
 - `beebeeb-store` is a plaintext cache: decrypted names, MIME types, sizes, the tree, unauthenticated contact-key pins and the rollback high-water marks of `file_versions`; no key and no token. On Unix `Store::open` creates the database 0600 and its directories 0700, and tightens an existing database and its `-wal`/`-shm`. Core does not set the Apple data-protection class (`F_SETPROTECTIONCLASS`): the iOS app's default class applies, and the app sets a stricter one if it wants it.
 - `product_keys` derivations have known-answer vectors computed outside Rust (Python `hmac`), so a change to the derivation fails a test.
 
+## Account flows (`auth_flow/`)
+
+Sans-IO: each flow returns an `HttpRequest` and takes the `HttpResponse`; the platform owns the transport. `sign_in` (OPAQUE login + `2fa/verify`), `step_up` (`confirm-opaque-*`, purpose + `cli_code` binding; 409 `opaque_unavailable` is an error, no plaintext fallback), `device` (requester socket frames; approver `cli-pubkey` → step-up → `cli-session` with `X-Confirm-Token` → `cli-authorize`). Payload `{session_token, master_key_b64}`, the same JSON web and `bb login` use. Tests: `auth_flow::tests` drives core's OPAQUE server half (one Argon2id registration per suite run). The approver can deny (`PendingApproval::deny` → `POST /auth/cli-deny`); the requester maps the `{"error":"denied"}` frame to `Denied`. The approval payload is serialized from a borrowed struct into one pre-sized `Zeroizing` buffer (no `serde_json::Value` copy of the token or key). `StepUpPurpose::from_parts` refuses a `cli_code` with any purpose but `cli_device_approval`.
+
+**JSON-body limit (account and auth flows).** Bodies are built and parsed as `serde_json::Value`; its strings (OPAQUE messages, TOTP codes, mailed tokens, a session token in a reply) are not wiped. What core hands a host is wiped (`HostStep`, `HostOutcome`, `Zeroizing` fields), the intermediate `Value` is not; the device-approval payload avoids `Value` entirely. `account_flows::change_password` takes the server's `SignupPolicy` and a `BreachCheck` and runs `signup_flow::password_gate`, the same gate as sign-up and phrase recovery.
+
+**Open (not in v0.2.8):** binding the device-approval requester key to the shown code (task 2432, a protocol change across server, web and cli) and a server step-up before TOTP disable and passkey removal (task 2433); core's passkey removal already sends a fresh step-up token.
+
+**Passkeys.** The parse functions take the host's `ExpectedRp`; a server RP id other than the expected one is `passkey_rp_mismatch`, and `localhost` is accepted only in a debug build or with `ExpectedRp::development`. The local PRF probe asks for the creation's `user_verification` (hmac-secret differs with and without UV). `add_passkey` / `remove_passkey` take the password and run the step-up inside; no host holds a confirm token.
+
+## Share flows (`share_flow/`) — desktop v2 B05b
+
+Sans-IO like `auth_flow`, byte-identical to web. `member`: a person share of ONE FILE (`POST /shares/invites`, then on `claimed` + `recipient_public_key` the file key sealed with X25519 → HKDF(`beebeeb-share`, info = file id) → AES-GCM, `nonce||ct`, to `/approve`; a failed approval is `AwaitingApproval`, as web). `is_folder` is a required input and a folder goes through `folder::FolderShare` (the 2133 folder-key rules), so a folder never becomes a file share. `link`: K_c random, `wrapped_file_key = wrap(K_c, fileKey)`, `owner_wrapped_key = wrap(master, K_c)`, `owner_wrapped_token = wrap(master, token)` (raw master as the AES key: the 0709 format web uses for file links, NOT the L6 `wrap_link_owner_*` purpose keys folder links use); an untyped 409 retries once with a fresh token; `rebuild_link` checks the stored `wrapped_file_key` opens under the rebuilt `K_c` (web's format, no AAD). Ported too: folder invites and folder links (`folder`, `folder/link`), file requests (`request`) and bundles (`bundle`). A folder or child id that is HKDF info, AAD or an invite match key must already be a canonical lower-case UUID (`InvalidInput`, never normalized). UniFFI: keys cross as `MasterKeyHandle` / `FileKeyHandle` both ways; WASM keeps raw bytes (its convention).
+
 ## CLI login handshake (`cli_auth.rs`)
 
 Device-authorization crypto for `bb login` — separate from OPAQUE. P-256 ECDH → HKDF-SHA256 (info `beebeeb-cli-auth-v1`) → AES-256-GCM; byte-identical to web's WebCrypto. `decrypt_cli_payload()` falls back to the raw shared secret (legacy v0.4 web). **Wire format is pinned, no protocol change** (`tests/cli_auth_vectors.rs` + `cli/tests/ecdh_compat.rs`) — changing the info string / point encoding is a coordinated cross-client migration, never a refactor.
@@ -368,6 +382,37 @@ Tests: `beebeeb-client/src/tests_svc_archives.rs`, against an in-process file se
 - Recovery phrase IS the master secret — password wraps it, doesn't replace it
 - No panics in crypto paths — everything returns Result
 
+## Path safety on Windows: short-name aliases (task 2404)
+
+Windows resolves a name against both the long names and the 8.3 short names of a directory, so a server name can reach
+an existing entry with a different long name. `path_safety::short_name_alias(base, rel)` walks `rel` below `base` and
+returns a typed `ShortNameAlias` for the first existing component whose entry's own long name differs (NTFS
+comparison: Unicode simple uppercase per UTF-16 unit; `char` has only the full mapping, so the 27 Greek letters with
+ypogegrammeni are mapped by hand; the volume's own `$UpCase` table can differ for `ı`, `ſ` and newer pairs). The long
+name comes from the file system: `canonicalize` on the opened handle, whose answer is final, except that an 8.3-shaped
+name it reports as its own is confirmed against the directory listing (some redirectors report the name as opened); a
+link (opened through) or an entry that cannot be opened goes to the listing. The decision is the pure `judge` (unit
+tested with stubbed answers). Never from the shape of the name alone. `base` is trusted: a user-chosen root may be
+written in short form. On every other host it is `Ok(None)` without disk access.
+
+- `safe_child`, `safe_rel_join` (every segment) and `default_output_path` refuse such a name (their `String` error).
+- Core's own writes, and beebeeb-upload's downloads off Unix, go through `path_safety::TempSibling` (on Unix those
+  downloads publish through `TrustedDirectory`, as the native services do on every host; its Windows form never
+  replaces through a short name either): `create` refuses an output
+  alias, then creates the temp exclusively (`{output}.tmp`, else `{output}.{16 hex}.tmp`: a taken name, such as a
+  crash's leftover, is never opened); `publish` checks the output again, renames over the output's own name, and on
+  Windows publishes a missing output without replacing (`hard_link` + remove the temp; without hard links an exclusive
+  create of the output and a rename over it). `encrypt_file_to_chunks` also checks every `{N}.enc` before the first
+  write. In `CoreError` a conflict is `InvalidInput` naming it (no new variant in a patch release). beebeeb-sync's
+  remote delete never deletes the entry an alias reaches.
+- A caller with a conflict path ("(2)", a conflict copy) calls `short_name_alias` first and takes that path on
+  `Some`. Output paths built from remote names must come from `safe_rel_join` (per segment), since a write path only
+  checks its last component.
+- Windows tests: `tests/windows/short_names.rs` (a module of `integration`), `path_safety/short_name_windows_tests.rs`,
+  `path_safety/temp_sibling_windows_tests.rs`, beebeeb-upload `windows_short_name_tests.rs`, beebeeb-sync
+  `engine_windows_tests.rs`. Each proves its fixture
+  aliases first; no 8.3 names on the volume skips, or fails with `CI` set.
+
 ## Design references
 
 Design files live in the workspace root `../../design/hifi/` — never copy them into this public repo (a snapshot once published a false external-audit claim; the Claims guard CI job now fails on those strings).
@@ -385,3 +430,32 @@ L7 (2237c): folder child key wraps authenticate `beebeeb-folder-child-v1 || shar
 - **Bindings:** WASM `wrapLinkLabel`, `unwrapLinkLabel`, `sealFolderActorName`, `openFolderActorName` and `openLegacyChildKey` (ids are UUID strings, keys are bytes as in L7); UniFFI `MasterKeyHandle::wrap_link_label` / `unwrap_link_label` and `FileKeyHandle::seal_folder_actor_name` / `open_folder_actor_name` / `open_legacy_child_key`. No raw key bytes cross the UniFFI boundary.
 - **Label table:** `src/label_table_tests.rs` lists every HKDF info / AAD / salt label in the crate with its slot, requires them distinct, refuses an id-carrying HKDF info that prefixes another HKDF info, documents the three cross-slot prefix pairs (`beebeeb/chunk/v2` / `.../key`, `beebeeb/client-meta/v1` / `.../key`, the `beebeeb-share` salt / `beebeeb-shared-folder-index-v1`), and scans `src/` so a new `b"beebeeb…"` label cannot be added without joining the table.
 - **Vectors:** version 16 carries `link_label_v1`, `folder_actor_name_v1` and `legacy_child_refusal_v1` (15 is unused: an earlier draft on the unmerged branch); the core drift guard regenerates them, and `beebeeb-wasm/js-tests/l16_labels.test.cjs` opens them through the WASM exports.
+
+## Passkey vault and flows (B15, desktop v2)
+
+`beebeeb_core::passkey`: ONE implementation for desktop (Rust), mobile (UniFFI) and web (WASM); a client performs only
+its platform's WebAuthn call.
+
+- **Format (web's, `repos/web/src/lib/passkey-vault.ts`):** PRF eval input = `beebeeb.io/vault-wrap-key/v1` zero-padded
+  to 32; wrap key = HKDF-SHA256(PRF output, salt empty, info `beebeeb.io/vault-wrap/v1`); blob = AES-256-GCM
+  `nonce(12) || ct(32) || tag(16)`, no AAD; escrowed with `POST /api/v1/auth/vault-key-escrow`
+  `{credential_id: base64url(raw id), encrypted_vault_key: base64(blob)}`.
+- **The PRF salt hash:** a browser turns the eval input into the CTAP2 hmac-secret salt
+  `SHA-256("WebAuthn PRF" || 0x00 || input)` itself. A native hmac-secret caller (webauthn.dll with
+  `WEBAUTHN_AUTHENTICATOR_HMAC_SECRET_VALUES_FLAG`) passes `hmac_secret_salt()` (hash applied); a PRF-input API passes
+  `prf_eval_input()`. Same salt at the authenticator, same 32-byte output.
+- **Wire:** `ceremony` decodes webauthn-rs options into platform-neutral `CreationOptions` / `RequestOptions` and builds
+  the finish bodies web sends; for a native caller it also builds `clientDataJSON` (origin `https://<rp id>`, or the
+  server's dev default `http://localhost:5173` for `localhost`).
+- **Flows (`flow`):** `add_passkey` (needs a fresh `X-Confirm-Token`; a platform without PRF at create gets one LOCAL
+  assertion for it, whose random challenge never reaches the server; escrow failure keeps the passkey, `escrowed:
+  false`), `sign_in` (the vault outcome is `Unlocked(MasterKey)`, `NoPrf`, `NoEscrow` or `UnwrapFailed`; the escrow is
+  read with the NEW session), `list_passkeys`, `remove_passkey` (UUID ids only). Errors are codes (`PasskeyError::code`),
+  never a server body.
+- **Vectors:** `bun scripts/passkey-vectors/from-web.ts <repos/web> > test-vectors/passkey_vault.json` (web's TS makes
+  them; core must open and re-wrap byte for byte); `BB_WRITE_PASSKEY_VECTORS=1 cargo test -p beebeeb-core
+  passkey_core_vectors` writes `test-vectors/passkey_vault_core.json`, which `bun scripts/passkey-vectors/web-opens-core.ts
+  <repos/web>` must open (and refuse its two bad rows).
+- **Server gaps (not core's):** `GET /api/v1/auth/passkeys` sends neither `last_used_at` nor whether a passkey has an
+  escrow; `PasskeyInfo` reads both as `Option` so the server can add them without a core change.
+- **`allow_localhost` (UniFFI / WASM passkey parse):** a host takes the value from its build configuration, never from the server or a user setting.

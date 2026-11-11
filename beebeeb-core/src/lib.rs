@@ -1,5 +1,7 @@
+pub mod account_flows;
 pub mod api_error;
 pub mod archives;
+pub mod auth_flow;
 pub mod backup;
 pub mod blob;
 pub mod chunk_stream;
@@ -34,18 +36,24 @@ pub mod onboarding;
 pub mod opaque;
 pub mod opaque_protocol;
 pub mod owned_keys;
+pub mod passkey;
 pub mod passkey_seal;
 pub mod path_safety;
 pub mod pdf;
 pub mod product_keys;
 pub mod recovery;
+pub mod recovery_flow;
 pub mod rename;
 pub mod request_content;
 pub mod retry;
+#[cfg(test)]
+mod review_p3_tests;
 pub mod search_index;
 pub mod search_sync;
+pub mod share_flow;
 pub mod share_link;
 pub mod share_token;
+pub mod signup_flow;
 pub mod sync;
 pub mod system_folders;
 #[cfg(any(test, feature = "test-support"))]

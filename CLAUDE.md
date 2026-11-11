@@ -90,10 +90,14 @@ Formats and keys:
   `folder_key_id` (`key_id`) is the one-way folder-key id: not secret, and never used as a key.
 - `ClientMetaKey`: the derived key is never exported (a `FileKey` would also fit `encrypt_chunk`);
   `current_file`/`detail` are discarded from S1, never sealed.
-- Contact safety numbers come only from `contact_keys::safety_number`, the one format web and the apps
-  show (`safetyNumber`, `safety_number`); its vectors are `test-vectors/safety_number.json`. Emails go
-  through `normalize_email` (Rust `str::trim`, then lower case), never a client's own: JavaScript's
-  `trim` strips U+FEFF and keeps U+0085, so it would give a different number.
+- Safety numbers: the number two people compare for a share comes from `share_flow::safety`
+  (`shareSafetyNumber`, `share_safety_number`): both user ids and the exact key the share was sealed
+  to, with the own key derived from the master key; its vectors are `test-vectors/safety_number.json`.
+  `contact_keys::safety_number` (`safetyNumber`, `safety_number`) is a second, different format (emails
+  instead of user ids; vectors in `test-vectors/contact_safety_number.json`) and gives other digits for
+  the same two people: never show it where the other person may see the first, and never add a third.
+  Emails go through `normalize_email` (Rust `str::trim`, then lower case), never a client's own:
+  JavaScript's `trim` strips U+FEFF and keeps U+0085.
 
 Secrets, input and bindings:
 
@@ -115,6 +119,11 @@ Secrets, input and bindings:
   return `Result` and never panic. Secrets are wiped on drop and never appear in errors or debug output.
 - Hostile sizes and counts use checked arithmetic and return errors; `MAX_CHUNK_SIZE` (256 MiB) rejects
   a hostile server-dictated chunk size.
+- Windows: a create, truncate, replace or delete by name never touches an entry whose own long name
+  differs (an 8.3 short-name alias). `path_safety::short_name_alias` answers it;
+  `safe_child`/`safe_rel_join`/`default_output_path` refuse such a name; core's decrypt-to-file paths
+  and chunk writer go through `path_safety::TempSibling` (exclusive temp; publish never replaces on
+  Windows), and `TrustedDirectory` never replaces through a short name.
 - Passphrase NFC normalization never grows an unwiped secret buffer; core never seals a name its own
   opener refuses (`kdf::sanitize_actor_name`).
 - `MIN_LENGTH_FLOOR = 12` is a floor applied inside `from_server` (the server may raise it, never lower
@@ -143,7 +152,23 @@ Secrets, input and bindings:
   data-protection class is the app's to set.
 - Native sign-in policy stays in `beebeeb-client`: password and any authenticator produce a locked
   session, then device approval or a passkey/recovery key plus email code supplies the account key,
-  and key proof completes installation. Signup is web-only.
+  and key proof completes installation. Signup is web-only for these services (the server answers
+  `signup_web_only`); `signup_flow` is a separate sans-IO signup, and the server decides which client
+  may run it.
+- `auth_flow` (the sans-IO flows in `beebeeb-core`): no plaintext-password step-up (`opaque_unavailable`
+  is an error, never `/auth/confirm`); `ksf_version` only from the server; a `ConfirmToken` is only ever
+  attached to its consuming request, never returned as a value in Rust; the approval payload is sealed
+  with `cli_auth::encrypt_for_requester` (HKDF form only). UniFFI/WASM hand the session token and the
+  confirm token on its consuming request to the platform transport by design
+  (`HttpRequest::confirm_token_header`, the field is crate-only); the device-approval master key crosses
+  UniFFI only as a `MasterKeyHandle` (WASM: raw, its convention). Passkey add/remove take the password,
+  never a token.
+- Passkey vault (`passkey`): web's format byte for byte (`test-vectors/passkey_vault.json` from web's
+  TS); native hmac-secret callers pass `hmac_secret_salt()`, PRF-input APIs `prf_eval_input()`; no
+  non-PRF fallback key, and no flow returns a PRF output, wrap key or blob to its caller; the server's
+  RP id must equal the host's `ExpectedRp` (`localhost` only in a debug build or with the development
+  flag), and the PRF probe never asks for less user verification than the creation. `passkey_seal` is
+  a different, 61-byte format: neither opens the other's blob, and bytes are never reinterpreted.
 - Session storage has shared owner/key/API/generation state and one `session.token.{app_id}` per app.
   App sign-out removes one token; whole-device sign-out uses the service coordinator.
 

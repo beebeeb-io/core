@@ -173,7 +173,7 @@ impl SyncEngine {
                     // state entry once the on-disk file is actually gone, so a
                     // transient fs error retries next cycle instead of resurrecting.
                     if self.delete_local_file(p) {
-                        info!(path = %p.display(), "deleted locally (removed remotely)");
+                        info!(path = %p.display(), "local copy gone (removed remotely)");
                         self.state.files.remove(p);
                     }
                 }
@@ -418,7 +418,31 @@ impl SyncEngine {
     ///
     /// Never panics: a `NotFound` is treated as success (the user may have already
     /// removed it); any other error is logged and reported as a non-removal.
+    ///
+    /// On Windows `rel` may reach a DIFFERENT file through an 8.3 short name
+    /// (task 2404). That file is never deleted: `rel`'s own file is not on disk,
+    /// which is success, as `NotFound` is. On every host a `rel` that is not a
+    /// relative path of plain names (`..`, absolute) is never deleted either:
+    /// it can never name a file below the vault, so its row is dropped.
     fn delete_local_file(&self, rel: &Path) -> bool {
+        let abs = self.config.vault_path.join(rel);
+        match beebeeb_core::path_safety::short_name_alias(&self.config.vault_path, rel) {
+            Ok(None) => {}
+            Ok(Some(conflict)) => {
+                warn!(path = %abs.display(), %conflict, "not deleting: the name reaches a different file");
+                return true;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => {
+                warn!(path = %abs.display(), error = %e, "not deleting: not a path below the vault");
+                return true;
+            }
+            Err(e) => {
+                warn!(path = %abs.display(), error = %e, "could not check the name before deleting; will retry");
+                return false;
+            }
+        }
+        // A link, or a path that resolves outside the vault through one, is
+        // refused and its row kept: the file it names may still be the user's.
         let Some(rel) = rel.to_str() else {
             warn!(path = %rel.display(), "refusing non-UTF-8 local delete path");
             return false;
@@ -696,6 +720,41 @@ mod tests {
         assert!(!ops.contains(&SyncOp::DeleteLocal(path)));
     }
 
+    /// A state path that climbs out of the vault is never deleted (task 2404:
+    /// the delete checks its path below the vault before it unlinks anything).
+    /// `sync_once` stops at the unavailable listing, so the test plans the
+    /// delete from an empty listing and runs the delete step itself.
+    #[test]
+    fn a_remote_delete_never_deletes_outside_the_vault() {
+        let dir = TempDir::new().unwrap();
+        let vault = dir.path().join("vault");
+        fs::create_dir(&vault).unwrap();
+        let outside = dir.path().join("outside.txt");
+        fs::write(&outside, "keep").unwrap();
+
+        let mut cfg = test_config(&vault);
+        cfg.sync_mode = crate::config::SyncMode::Full;
+        let mut engine = SyncEngine::new(cfg);
+        let rel = PathBuf::from("../outside.txt");
+        engine.state.files.insert(rel.clone(), FileState::Synced);
+
+        let local = engine.scan_local_files().unwrap();
+        let ops = engine.compute_operations(&local, &[], &[]);
+        assert!(
+            ops.contains(&SyncOp::DeleteLocal(rel.clone())),
+            "the fixture must reach the delete: {ops:?}"
+        );
+        assert!(
+            engine.delete_local_file(&rel),
+            "a row that can never name a vault file is dropped"
+        );
+        assert_eq!(
+            fs::read_to_string(&outside).unwrap(),
+            "keep",
+            "a file outside the vault must survive"
+        );
+    }
+
     #[test]
     fn sync_once_does_not_treat_placeholder_as_remote_delete() {
         let dir = TempDir::new().unwrap();
@@ -769,3 +828,9 @@ mod tests {
         assert!(engine.state.last_sync.is_none());
     }
 }
+
+// Windows only: a remote delete never deletes another file through its 8.3
+// short name (task 2404). A file of its own so it applies to the parent as is.
+#[cfg(all(test, windows))]
+#[path = "engine_windows_tests.rs"]
+mod windows_tests;

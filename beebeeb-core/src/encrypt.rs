@@ -1278,7 +1278,9 @@ pub(crate) fn open_raw_with_aad(key: &FileKey, raw: &[u8], aad: &[u8]) -> Result
 /// `rename`d to `output_path` only on full success. On **any** error (including
 /// a mid-stream decrypt failure) the `.tmp` file is removed, so no partial
 /// plaintext ever appears at `output_path`. (Same `.tmp` + atomic-rename +
-/// remove-on-error pattern as [`decrypt_contiguous_to_file`].)
+/// remove-on-error pattern as [`decrypt_contiguous_to_file`].) On Windows an
+/// `output_path` or `.tmp` whose name reaches a DIFFERENT existing file through
+/// its 8.3 short name is refused (`InvalidInput`) and nothing is written.
 ///
 /// **Chunk format (task 1908):** the chunks are opened in order as one file's
 /// stream. `file_id` is the id the file was uploaded under (bound into every
@@ -1295,44 +1297,25 @@ pub fn decrypt_chunks_to_file(
     chunks: Vec<(Vec<u8>, Vec<u8>)>, // Vec of (nonce, ciphertext) pairs
     output_path: &str,
 ) -> Result<u64, CoreError> {
-    // Write to a sibling .tmp, then atomically rename on success only.
-    let tmp_path = format!("{output_path}.tmp");
-
-    // Inner helper does the streaming decrypt into the .tmp; on ANY Err the
-    // outer code removes the .tmp so no partial plaintext survives at output_path.
+    // Stream into a sibling .tmp, published as output_path on success only;
+    // on ANY Err the .tmp is removed so no partial plaintext survives.
     let opener = crate::chunk_stream::StreamOpener::with_version_commitment(key, file_id, expected, version);
-    let result = decrypt_chunks_to_tmp(key, opener, chunks, &tmp_path);
-
-    match result {
-        Ok(total) => {
-            std::fs::rename(&tmp_path, output_path).map_err(|e| {
-                // Rename failed: drop the temp so it can't poison a cache.
-                std::fs::remove_file(&tmp_path).ok();
-                CoreError::Io(format!("rename output: {e}"))
-            })?;
-            Ok(total)
-        }
-        Err(e) => {
-            // Remove the partial temp on every failure path.
-            std::fs::remove_file(&tmp_path).ok();
-            Err(e)
-        }
-    }
+    crate::path_safety::write_through_tmp(output_path.as_ref(), |file| {
+        decrypt_chunks_to_tmp(key, opener, chunks, file)
+    })
 }
 
-/// Streaming decrypt of `(nonce, ciphertext)` chunks → `tmp_path`. Helper for
+/// Streaming decrypt of `(nonce, ciphertext)` chunks into the temp `file`. Helper for
 /// [`decrypt_chunks_to_file`] so the caller can guarantee `.tmp` cleanup on
 /// every error path.
 fn decrypt_chunks_to_tmp(
     key: &FileKey,
     mut opener: crate::chunk_stream::StreamOpener,
     chunks: Vec<(Vec<u8>, Vec<u8>)>,
-    tmp_path: &str,
+    mut file: std::fs::File,
 ) -> Result<u64, CoreError> {
-    use std::fs::File;
     use std::io::Write;
 
-    let mut file = File::create(tmp_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
     let mut total: u64 = 0;
     for (nonce, ciphertext) in chunks {
         if nonce.len() != NONCE_LEN {
@@ -1380,7 +1363,9 @@ pub fn decrypt_chunk_raw(key: &FileKey, raw: &[u8]) -> Result<Vec<u8>, CoreError
 /// removes the previous caller-cleanup obligation and prevents an
 /// existence-based cache from serving a truncated decrypt as if complete. (Same
 /// `.tmp` + atomic-rename pattern as
-/// [`crate::file_encrypt::decrypt_chunks_to_file`].)
+/// [`crate::file_encrypt::decrypt_chunks_to_file`].) On Windows an
+/// `output_path` or `.tmp` whose name reaches a DIFFERENT existing file through
+/// its 8.3 short name is refused (`InvalidInput`) and nothing is written.
 ///
 /// **Chunk format (task 1908):** the body is opened as one file's stream.
 /// `file_id` is the id the file was uploaded under (bound into every v2 frame);
@@ -1409,44 +1394,25 @@ pub fn decrypt_contiguous_to_file(
         .and_then(|v| v.checked_add(TAG_LEN))
         .ok_or_else(|| CoreError::InvalidInput("chunk_size overflows".into()))?;
 
-    // Write to a sibling .tmp, then atomically rename on success only.
-    let tmp_path = format!("{output_path}.tmp");
-
-    // Inner closure does the streaming decrypt; on ANY Err the outer code
-    // removes the .tmp so no partial plaintext survives at output_path.
+    // Stream into a sibling .tmp, published as output_path on success only;
+    // on ANY Err the .tmp is removed so no partial plaintext survives.
     let opener = crate::chunk_stream::StreamOpener::with_version_commitment(key, file_id, expected, version);
-    let result = decrypt_contiguous_to_tmp(key, opener, body, encrypted_chunk_len, &tmp_path);
-
-    match result {
-        Ok(total) => {
-            std::fs::rename(&tmp_path, output_path).map_err(|e| {
-                // Rename failed: drop the temp so it can't poison a cache.
-                std::fs::remove_file(&tmp_path).ok();
-                CoreError::Io(format!("rename output: {e}"))
-            })?;
-            Ok(total)
-        }
-        Err(e) => {
-            // Remove the partial temp on every failure path.
-            std::fs::remove_file(&tmp_path).ok();
-            Err(e)
-        }
-    }
+    crate::path_safety::write_through_tmp(output_path.as_ref(), |file| {
+        decrypt_contiguous_to_tmp(key, opener, body, encrypted_chunk_len, file)
+    })
 }
 
-/// Streaming decrypt body → `tmp_path`. Helper for [`decrypt_contiguous_to_file`]
+/// Streaming decrypt body into the temp `file`. Helper for [`decrypt_contiguous_to_file`]
 /// so the caller can guarantee `.tmp` cleanup on every error path.
 fn decrypt_contiguous_to_tmp(
     key: &FileKey,
     mut opener: crate::chunk_stream::StreamOpener,
     body: &[u8],
     encrypted_chunk_len: usize,
-    tmp_path: &str,
+    mut file: std::fs::File,
 ) -> Result<u64, CoreError> {
-    use std::fs::File;
     use std::io::Write;
 
-    let mut file = File::create(tmp_path).map_err(|e| CoreError::Io(format!("create file: {e}")))?;
     let mut total: u64 = 0;
     let mut offset = 0usize;
 

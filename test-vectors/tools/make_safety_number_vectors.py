@@ -1,107 +1,107 @@
 #!/usr/bin/env python3
-"""Independently generate the contact safety-number vectors (relayed-key pinning design, D1 and D2).
+"""Generate test-vectors/safety_number.json: the share safety number (B05e contract).
 
-Uses only hashlib; no Rust implementation or generated output is run. Usage:
-    python3 -I test-vectors/tools/make_safety_number_vectors.py test-vectors/safety_number.json
+An independent implementation of the contract text (workspace
+`.claude/tasks/backlog/v2-b05e-safety-number-contract-ruled.md`), not a port of the Rust:
 
-Per party (D2), with the email in the server's stored form (D1: trim, then Unicode lower case):
-    h = "beebeeb-safety-number-v1" || u32_be(len(email)) || email || public_key
-    5200 times: h = SHA-512(h || public_key)            (the iteration Signal uses)
-    the first 30 bytes of h, as six 5-byte chunks, each u40_be mod 100000, zero-padded to 5 digits
-The pair's number is the two 30-digit strings sorted and joined: 60 digits, 12 groups of 5.
+- per party, h = version 0x0000 || public_key || user_id (UTF-8); 5200 times h = SHA-512(h || public_key);
+  the first 30 bytes as 6 chunks of 5 bytes, each a big-endian u40 mod 100000 as 5 zero-padded digits;
+- both parties' 30 digits joined, the lower user id (byte order) first: 60 digits;
+- peer_fingerprint = SHA-256 of the peer's 32 key bytes.
+
+Inputs core must refuse (`refused`): user ids that are not canonical lowercase hyphenated UUIDs,
+own id == peer id, a key that is not 32 bytes, a key with bit 255 set, a small-order key.
+Rows are added HERE, never in the JSON: `check-safety-number-vectors-generated.sh` fails on a hand edit.
+
+    python3 test-vectors/tools/make_safety_number_vectors.py test-vectors/safety_number.json
 """
 import hashlib
 import json
-from pathlib import Path
 import sys
 
-DOMAIN = b"beebeeb-safety-number-v1"
-ROUNDS = 5200
+ITERATIONS = 5200
+
+ALICE_PK = "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a"  # RFC 7748 6.1
+BOB_PK = "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f"  # RFC 7748 6.1
+SEQ_PK = bytes(range(32)).hex()
+UID_A = "0b3c7a52-5d0e-4f1a-9d2e-1c6f3a8b9e01"
+UID_B = "7f9e2d14-3a6b-4c8d-8e1f-2b4a6c8d0e12"
+UID_C = "c41d8a3e-2b7f-4e60-9a15-3d8e7f0b2c44"
+# A point of order 8 on Curve25519 (its u-coordinate), and u = 0.
+ORDER8_PK = "e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800"
+ZERO_PK = "00" * 32
 
 
-# Rust's str::trim strips exactly the Unicode White_Space property (the server's
-# canonical_email uses it). Python's str.strip uses str.isspace, which also strips
-# U+001C-U+001F, and JavaScript's trim also strips U+FEFF: both differ, so the set
-# is spelled out here and pinned by the nel_and_nbsp_are_trimmed / bom_is_kept rows.
-WHITE_SPACE = "".join(
-    [chr(c) for c in range(0x09, 0x0E)]
-    + ["\u0020", "\u0085", "\u00a0", "\u1680"]
-    + [chr(c) for c in range(0x2000, 0x200B)]
-    + ["\u2028", "\u2029", "\u202f", "\u205f", "\u3000"]
-)
+def party(user_id, key):
+    h = b"\x00\x00" + key + user_id.encode("utf-8")
+    for _ in range(ITERATIONS):
+        h = hashlib.sha512(h + key).digest()
+    return "".join("%05d" % (int.from_bytes(h[i : i + 5], "big") % 100000) for i in range(0, 30, 5))
 
 
-def normalize_email(raw):
-    return raw.strip(WHITE_SPACE).lower()
+def number(own_id, own_key_hex, peer_id, peer_key_hex):
+    own_key, peer_key = bytes.fromhex(own_key_hex), bytes.fromhex(peer_key_hex)
+    mine, theirs = party(own_id, own_key), party(peer_id, peer_key)
+    digits = mine + theirs if own_id.encode() < peer_id.encode() else theirs + mine
+    return digits, hashlib.sha256(peer_key).hexdigest()
 
 
-def party(email, public_key):
-    email = normalize_email(email).encode("utf-8")
-    assert len(public_key) == 32
-    h = DOMAIN + len(email).to_bytes(4, "big") + email + public_key
-    for _ in range(ROUNDS):
-        h = hashlib.sha512(h + public_key).digest()
-    return "".join(f"{int.from_bytes(h[i:i + 5], 'big') % 100000:05d}" for i in range(0, 30, 5))
-
-
-def row(name, email_a, key_a, email_b, key_b, note):
-    a, b = party(email_a, key_a), party(email_b, key_b)
+def row(name, own_id, own_key, peer_id, peer_key):
+    digits, fp = number(own_id, own_key, peer_id, peer_key)
     return {
         "name": name,
-        "note": note,
-        "email_a": email_a,
-        "public_key_a_hex": key_a.hex(),
-        "email_b": email_b,
-        "public_key_b_hex": key_b.hex(),
-        "party_a": a,
-        "party_b": b,
-        "safety_number": "".join(sorted([a, b])),
+        "own_user_id": own_id,
+        "own_public_key": own_key,
+        "peer_user_id": peer_id,
+        "peer_public_key": peer_key,
+        "digits": digits,
+        "peer_fingerprint": fp,
+    }
+
+
+def refused(name, own_id, own_key, peer_id, peer_key):
+    return {
+        "name": name,
+        "own_user_id": own_id,
+        "own_public_key": own_key,
+        "peer_user_id": peer_id,
+        "peer_public_key": peer_key,
+        "code": "invalid_input",
     }
 
 
 def main():
-    out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).parents[1] / "safety_number.json"
-    alice_key = bytes(range(32))
-    bob_key = bytes(range(32, 64))
-    other_key = bytes(range(64, 96))
     vectors = [
-        row("ascii", "alice@example.test", alice_key, "bob@example.test", bob_key, "plain addresses"),
-        row(
-            "typed_forms_normalize",
-            "  Alice@Example.TEST\t",
-            alice_key,
-            "BOB@example.test ",
-            bob_key,
-            "surrounding spaces and case are removed first, so this equals the ascii row",
-        ),
-        row("unicode_domain", "İNFO@bücher.test", alice_key, "bob@example.test", bob_key, "Unicode lower case, no IDNA"),
-        row("other_email_same_key", "carol@example.test", alice_key, "bob@example.test", bob_key, "the email changes the number"),
-        row("other_key_same_email", "alice@example.test", other_key, "bob@example.test", bob_key, "the key changes the number"),
-        row("edge_keys", "a@b.test", bytes(32), "z@y.test", bytes([0xFF]) * 32, "all-zero and all-0xff keys"),
-        row(
-            "nel_and_nbsp_are_trimmed",
-            "\u0085alice@example.test\u00a0",
-            alice_key,
-            "\u3000bob@example.test\u2028",
-            bob_key,
-            "U+0085, U+00A0, U+3000 and U+2028 are Unicode White_Space, which str::trim strips: equals the ascii row",
-        ),
-        row(
-            "bom_is_kept",
-            "\ufeffalice@example.test",
-            alice_key,
-            "bob@example.test",
-            bob_key,
-            "U+FEFF is not White_Space: str::trim keeps it (JavaScript's trim would not), so this differs from ascii",
-        ),
+        row("Alice to Bob (RFC 7748 keys)", UID_A, ALICE_PK, UID_B, BOB_PK),
+        row("Bob to Alice: the same digits", UID_B, BOB_PK, UID_A, ALICE_PK),
+        row("Alice to a peer with key 00..1f", UID_A, ALICE_PK, UID_B, SEQ_PK),
+        row("the higher id is own: peer first", UID_C, SEQ_PK, UID_A, ALICE_PK),
+    ]
+    flipped = bytearray.fromhex(BOB_PK)
+    flipped[31] |= 0x80
+    refusals = [
+        refused("upper-case user id", UID_A.upper(), ALICE_PK, UID_B, BOB_PK),
+        refused("e-mail as user id", UID_A, ALICE_PK, "alice@example.com", BOB_PK),
+        refused("user id without hyphens", UID_A, ALICE_PK, UID_B.replace("-", ""), BOB_PK),
+        refused("own id equals peer id", UID_A, ALICE_PK, UID_A, BOB_PK),
+        refused("31-byte peer key", UID_A, ALICE_PK, UID_B, BOB_PK[:62]),
+        refused("peer key with bit 255 set", UID_A, ALICE_PK, UID_B, flipped.hex()),
+        refused("small-order peer key (u = 0)", UID_A, ALICE_PK, UID_B, ZERO_PK),
+        refused("small-order peer key (order 8)", UID_A, ALICE_PK, UID_B, ORDER8_PK),
     ]
     doc = {
-        "domain": DOMAIN.decode(),
-        "rounds": ROUNDS,
-        "note": "Contact safety numbers; generated by tools/make_safety_number_vectors.py (hashlib), never edited by hand.",
+        "_provenance": "B05e share safety number vectors for beebeeb_core::share_flow::safety. Generated by "
+        "test-vectors/tools/make_safety_number_vectors.py, an independent implementation of the contract text "
+        "(v2-b05e-safety-number-contract-ruled.md). Never edit by hand.",
+        "version": 1,
+        "iterations": ITERATIONS,
         "vectors": vectors,
+        "refused": refusals,
     }
-    out.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
+    with open(sys.argv[1], "w", encoding="utf-8", newline="") as f:
+        json.dump(doc, f, indent=1)
+        f.write("\n")
+    print("wrote %d vectors, %d refusals" % (len(vectors), len(refusals)))
 
 
 if __name__ == "__main__":

@@ -486,6 +486,173 @@ reports 1 changed.
 | `beebeeb_wasm` | 18 | 0 | 0 |
 | `beebeeb_backup` | 0 | 0 | 0 |
 
+## Sign-in, account, passkey and share flow exports (0.2.7 and 0.2.8)
+
+The sans-IO flows of `beebeeb_core` (`auth_flow`, `account_flows`, `signup_flow`, `recovery_flow`,
+`passkey`, `share_flow`) and their bindings, as released in 0.2.8, newest first. They are separate from
+the native service handles above: a flow returns an HTTP request and takes the answer, and the platform
+owns the transport. The committed Swift and Kotlin bindings include them.
+
+### Review hardening before v0.2.8: changed signatures, removed 0, added 0 exports
+
+The full list is CHANGELOG `[0.2.8]` → "Changed". Exports whose signature changed:
+
+- **WASM:** `passkeyParseRegistrationStart(answerJson, expectedRpId, allowLocalhost)`,
+  `passkeyParseAssertionStart(answerJson, expectedRpId, allowLocalhost)`,
+  `shareRebuildLink(appUrl, masterKey, ownerWrappedKey?, ownerWrappedToken?, wrappedFileKey)` (required), `shareRebuildBundleLink(appUrl, masterKey, ownerWrappedKey?, ownerWrappedToken?)`,
+  `AccountFlow.changePassword(current, newPassword, recoveryCheckB64, x25519PublicB64, onboardingStatus,
+  onboardingBody, breachCheck?)`; `new AuthStepUp(password, purpose?, cliCode?)` refuses a `cliCode` with another
+  purpose. WASM keeps raw key bytes (its convention).
+- **UniFFI:** `passkey_parse_registration_start` / `passkey_parse_assertion_start` (+ `expected_rp_id`,
+  `allow_localhost`); `AccountFlowHandle::change_password` (+ `onboarding_status`, `onboarding_body`,
+  `breach_check: Option<BreachCheckHandle>`); `StepUpFlow::new` refuses a `cli_code` with another purpose; keys as
+  handles: `SignupCreatedFfi.master_key`, `RecoveredFfi::SignedIn.master_key`, `DeviceRequestEventFfi::Approved.master_key`,
+  `ApprovalFlow::approve`, `MemberInviteFlow::new`, `share_approve_file_invite_request`, `share_open_member_file_key`,
+  `CreateLinkFlow::new` / `bundle` (`BundleItemFfi.file_key`), `share_rebuild_link` (+ required `wrapped_file_key`), `share_rebuild_bundle_link`,
+  `share_open_link_file_key`, `FolderShareFlow::new` / `link`, `CreateRequestFlow`, `share_rebuild_folder_link` and
+  the file-request rebuild take or return `MasterKeyHandle` / `FileKeyHandle`.
+
+### Share flows (0.2.8)
+
+Desktop v2 B05b (Guus: every crypto and account flow lives in core). Person shares of a file and double-encrypted
+file links move into core as `beebeeb_core::share_flow`, byte-identical to web (web's `share-wrap-kat` vectors and
+the `x25519_share_key_exchange` vector are pinned in `share_flow::tests`). Measured against `main` at `e3eeb8b`.
+Additive only, except `auth_flow::Method` gains `Delete` (a host that matches it exhaustively adds one arm).
+
+#### WASM
+
+Counted from source (unique `js_name = …` under `beebeeb-wasm/src`): base 187, head 193.
+
+- **removed: 0**
+- **added: 6**
+
+| Name | What |
+| --- | --- |
+| `shareWrapKey(wrapKey, key)` / `shareUnwrapKey(wrapKey, wrapped)` | Web's `wrapKeyForShare` / `unwrapKeyFromShare`: `nonce(12) \|\| ct`, no AAD. |
+| `ShareMemberInvite(itemId, isFolder, email, expectedPeerFingerprint, masterKey, fileKey)` (`expectedPeerFingerprint` required: 32 bytes, or empty = not compared) | `start()`, `onResponse(...)` → `{kind: "send"}` / `"shared"` / `"invited"` / `"awaiting_approval"` / `"peer_key_changed"` (B05e: the server key differs from `expectedPeerFingerprint`, nothing sealed; "share anyway" re-approves the carried key with the fingerprint of those bytes); `shared` and `peer_key_changed` carry `recipientPublicKey` (hex), the key sealed to / offered. A folder throws `invalid_input` (use `ShareFolderInvite`). |
+| `shareApproveFileInviteRequest(inviteId, fileId, recipientPublicKeyB64, masterKey, fileKey, expectedPeerFingerprint)` (B05e) | `{request, recipientPublicKey}` (hex: the exact key sealed to). `expectedPeerFingerprint` required (32 bytes, or empty = not compared). Throws `peer_key_changed` on a different key. |
+| `ShareFolderInvite(folderId, email, expectedPeerFingerprint, sharedFoldersWrite, custodySeen, custodyUnreadable, masterKey)` (B05c, B05e) | `start()` / `onResponse(...)` → `{kind: "send", request, markCustodySeen}` (persist the id BEFORE sending) / `"shared"` / `"invited"` / `"awaiting_approval"` / `"peer_key_changed"`. Throws `folder_key_unverified`, `folder_keys_unavailable`, `folder_needs_upgrade`, `folder_too_large`. |
+| `ShareFolderInvite.link(folderId, appUrl, accessLevel, label?, expiresInHours?, capBytes?, maxOpens?, passphrase?, custodySeen, custodyUnreadable, masterKey)` (B05c) | Web's `createFolderLinkWithKeys`: same steps, ends `{kind: "link_created", shareId, link, display, accessLevel, passphraseProtected, keyVersion}`. |
+| `shareSafetyNumber(masterKey, ownUserId, peerUserId, peerPublicKey)` (B05e) | `{digits, peerFingerprint}`: the 60-digit safety number (Signal numeric fingerprint v1, 5200 SHA-512 rounds per party, lower user id first) and SHA-256 of the peer key as hex. The own key is derived from the master key in core; `peerPublicKey` is the raw 32-byte key the share was sealed to (`recipientPublicKey` of the invite outcome). User ids are canonical lowercase UUIDs and must differ; keys with bit 255 set or of small order throw `invalid_input`. UniFFI: `share_safety_number(master_key, ...)` → `SafetyNumberFfi`. Vectors: `test-vectors/safety_number.json`. |
+| `ShareCreateRequest(appUrl, title, description?, targetFolderId?, maxFiles?, maxTotalBytes?, expiresInSecs?, masterKey)` (B05c) | A file request (web `pages/file-request.tsx`): `start()`, `onResponse(...)` → `{id, link, display}`; `link` is `/r/{token}#{b64url(R_pub)}`. |
+| `shareRebuildFolderLink(appUrl, masterKey, shareId, ownerWrappedKey?, ownerWrappedToken?, wrappedFolderKey?, passphraseProtected)` (B05c) | Web `rebuildFolderLinkUrl`: the owner's folder link, or `undefined`. UniFFI: `share_rebuild_folder_link`. |
+| `fileRequestRebuildLink(appUrl, masterKey, token?, wrappedPrivateKey?, wrapNonce?)` (B05c) | Web `handleCopyExisting`: the request's link again, or `undefined`. |
+| `shareCreateBundle(appUrl, fileIds, positions, fileKeys, masterKey, expiresInHours?, maxOpens?, passphrase?)` (B05c) | A `ShareCreateLink` over an ordered set of files (web's bundle branch); `fileKeys` is the 32-byte keys concatenated. |
+| `ShareCreateLink(appUrl, fileId, masterKey, fileKey, expiresInHours?, maxOpens?, passphrase?)` | `start()`, `onResponse(...)` → `{kind: "send"}` (one retry on an untyped 409) / `{kind: "created", shareId, link, display}`. |
+| `shareRebuildLink(appUrl, masterKey, ownerWrappedKey?, ownerWrappedToken?, wrappedFileKey)` (required), `shareRebuildBundleLink(appUrl, masterKey, ownerWrappedKey?, ownerWrappedToken?)` | Web's `buildShareLink`: the owner's link, or `undefined`. |
+| `shareOpenMemberFileKey(masterKey, ownerPublicKey, fileId, sealed)` | The recipient side of a person share. |
+
+#### UniFFI
+
+- **removed: 0**
+- **added:** objects `MemberInviteFlow`, `CreateLinkFlow`; enums `InviteStepFfi`, `LinkStepFfi`; error
+  `ShareFlowFfiError::Flow { code }`; functions `share_approve_file_invite_request`, `share_open_member_file_key`,
+  `share_rebuild_link`, `share_open_link_file_key`, `share_revoke_request`. Requests reuse `AuthHttpRequest`.
+- **added (B05c):** object `FolderShareFlow` (constructor `new` = a folder invite, `link` = a folder link), enum
+  `FolderStepFfi` (`Send` carries `mark_custody_seen`; `LinkCreated` carries `link` with `#key=` and `display`).
+- **changed (B05e):** `share_safety_number(master_key, own_user_id, peer_user_id, peer_public_key)`; `MemberInviteFlow::new`, `FolderShareFlow::new` and `share_approve_file_invite_request` take a required `peer_key: PeerKeyExpectationFfi` (`Compared { fingerprint }` / `NotCompared`), and the approve function returns `SealedApprovalFfi { request, recipient_public_key }`; `InviteStepFfi` / `FolderStepFfi` gain `PeerKeyChanged { invite_id, recipient_public_key }` and `recipient_public_key` on `Shared` / `AwaitingApproval`.
+- **added (B05c):** object `CreateRequestFlow`, record `CreatedRequestFfi`, functions `file_request_rebuild_link`,
+  `file_request_close_request`; `CreateLinkFlow.bundle` constructor with record `BundleItemFfi`.
+
+#### Rust
+
+New module `beebeeb_core::share_flow` (`member`, `link`; B05c: `folder` with `folder::link`, `folder_keys`, `request`, `bundle`); `auth_flow::Method::Delete`
+and (B05c) `Method::Put`, with their `account_flows` arms. `ShareFlowError::FolderInviteUnsupported` is gone (B05c):
+four folder codes replace it. B05e: `share_flow::safety` (`safety_number(master, …)`, `key_fingerprint`), `share_flow::access::set_member_access_request(id, MemberPermission)`, `ShareFlowError::PeerKeyChanged` (`peer_key_changed`), `InviteOutcome::PeerKeyChanged` and the sealed `recipient_public_key` on `Shared` / `AwaitingApproval`, a required `PeerKeyExpectation` on `MemberInvite::start` / `FolderInviteInput.peer_key` / `approve_request` (the only public member seal; `seal_file_key_for_member` is `pub(crate)`) (which now returns `SealedApproval`), and `Method::Patch` with its `account_flows` arm.
+
+### Account, signup and recovery flows (0.2.8)
+
+Desktop v2 B10b: server PR #422's routes wired into `account_flows` and `auth_flow`, and the bindings for B11's
+`signup_flow` / `recovery_flow` (crypto rule 0). Measured against `main` at `e3eeb8b`.
+
+**Not additive: 2 signatures change** (the server now asks for more). Both in Rust, UniFFI and WASM:
+- `AccountFlow::delete_account(password)` → `delete_account(password, code?)`: it now calls
+  `POST /auth/account/delete-request` (the server mails a link; nothing is scheduled), outcome `deletion_requested`.
+- `AccountFlow::set_activity_logging(on)` → `set_activity_logging(on, password?)`: turning it off steps up inside.
+
+#### WASM
+
+- **removed: 0; changed: 2** (`AccountFlow.deleteAccount`, `AccountFlow.setActivityLogging`)
+- **added:** classes `SignupFlow`, `PhraseRecovery`; functions `signupPolicyRequest`, `recoveryUnknownWordPositions`;
+  methods `AccountFlow.regenerateBackupCodes`, `deleteConfirm`, `deleteCancel`; `AuthApproval.deny`, `onDenyResponse`.
+- Outcome kinds added: `deletion_requested` (`link_expires_at`), `deletion_cancelled` (`not_restored`);
+  `deletion_scheduled` gains `cancel_until`. Error codes added: `second_factor_required`, `link_invalid`,
+  `confirmation_required`.
+
+#### UniFFI
+
+- **removed: 0; changed: 2** (`AccountFlowHandle.delete_account`, `set_activity_logging`; record
+  `AccountFlowOutcome` gains `cancel_until`, `link_expires_at`, `not_restored`)
+- **added:** objects `SignupFlowHandle`, `PhraseRecoveryHandle`; record `SignupCreatedFfi`; enum `RecoveredFfi`;
+  error `SignupFlowFfiError::Flow { code, retry_after_secs }`; functions `signup_policy_request`,
+  `recovery_unknown_word_positions`; methods `AccountFlowHandle.regenerate_backup_codes`, `delete_confirm`,
+  `delete_cancel`; `ApprovalFlow.deny`, `on_deny_response`.
+
+### Sign-in, step-up and device approval flows (0.2.8)
+
+Desktop v2 B10 (`docs/superpowers/specs/2026-11-08-desktop-v2-design.md`, crypto review rule 0): the sign-in,
+step-up and device-approval flows move into core. Additive only: nothing is renamed, retyped or removed. Measured
+against `main` at `124389a` (v0.2.7).
+
+#### WASM
+
+- **removed: 0**
+- **added: 4 classes** (`js_name` count +4)
+
+| Name | What |
+| --- | --- |
+| `AuthSignIn(email, password)` | `start()`, `onResponse(status, body, retryAfter?)` → `{kind: "send", request}` / `{kind: "signed_in", sessionToken}` / `{kind: "second_factor"}`; `verifyRequest(code)`, `onVerifyResponse(...)` → session token. |
+| `AuthStepUp(password, purpose?, cliCode?)` | `start()`, `onResponse(...)` → `{kind: "send"}` / `{kind: "confirmed"}`; `attachConfirmToken(path, body)` → the consuming request with `confirmToken`. |
+| `AuthDeviceRequest()` | `initFrame(deviceName?, client, version, os)`, `onFrame(text)` → `{kind: "waiting", userCode, verificationUri, expiresIn}` / `{kind: "approved", sessionToken, masterKey}`. |
+| `AuthApproval(code)` | `start()`, `onLookupResponse(...)` → facts, `codeMatches(typed)`, `approve(typed, password, masterKey)`, `onResponse(...)` → `{kind: "send"}` / `{kind: "approved"}`. |
+
+Errors throw `JsError(code)`: `invalid_credentials`, `wrong_code`, `rate_limited:<secs>`, `account_deleted`,
+`opaque_unavailable`, `request_not_found`, `already_handled`, `expired`, `denied`, `keys_did_not_arrive`, …
+
+#### UniFFI
+
+- **removed: 0**
+- **added:** objects `SignInFlow`, `StepUpFlow`, `DeviceRequestFlow`, `ApprovalFlow`; records `AuthHttpRequest`,
+  `AuthHttpResponse`, `RequesterFactsFfi`; enums `SignInStepFfi`, `StepUpStepFfi`, `DeviceRequestEventFfi`,
+  `ApproveStepFfi`; error `AuthFlowFfiError::Flow { code, retry_after_secs }`. Same shapes as WASM.
+
+### Passkey vault (0.2.8)
+
+B15 (desktop v2, passkeys; Guus 2026-11-08: the logic in core, only the platform call in each client). Measured
+against `124389a` (v0.2.7). Additive only: nothing is renamed, retyped or removed.
+
+#### WASM
+
+Counted from source: the unique `js_name = …` names under `beebeeb-wasm/src` (`grep -o | sort -u | wc -l`).
+
+- base (`124389a`): 156 names
+- head: 162 names
+- **removed: 0**
+- **added: 6**
+
+| Name | What |
+| --- | --- |
+| `passkeyPrfEvalInput()` | The 32-byte `prf.eval.first` web passes (`beebeeb.io/vault-wrap-key/v1`, zero-padded). |
+| `passkeyWrapVaultKey(prfOutput, masterKey)` | The escrow blob `nonce(12) || ct(32) || tag(16)`; web's `encryptVaultBlob` format. |
+| `passkeyUnwrapVaultKey(prfOutput, blob)` | The 32-byte vault key; throws on a wrong PRF output, a changed byte or a blob that is not 60 bytes. |
+| `passkeyParseRegistrationStart(answerJson)` | `register-start`'s answer as `RegistrationStart` JSON. |
+| `passkeyParseAssertionStart(answerJson)` | `login-start`'s answer as `AssertionStart` JSON. |
+| `passkeyEscrowBody(credentialId, blob)` | The `vault-key-escrow` POST body. |
+
+Web keeps its TS (`src/lib/passkey-vault.ts`) until a later web task switches; the vectors prove parity.
+
+#### UniFFI
+
+- **removed: 0**
+- **added: 10** free functions (`passkey_prf_eval_input`, `passkey_hmac_secret_salt`, `passkey_wrap_vault_key`,
+  `passkey_unwrap_vault_key` → `MasterKeyHandle` (no raw key crosses), `passkey_parse_registration_start`,
+  `passkey_registration_finish_body`, `passkey_escrow_body`, `passkey_parse_assertion_start`,
+  `passkey_assertion_finish_body`, `passkey_parse_escrow`).
+
+#### Rust
+
+New module `beebeeb_core::passkey` (`ceremony`, `flow`); no existing item changed.
+
 ## Archive exports (0.3.0)
 
 List, preview and extract zip, tar, tgz and gz (spec `2026-11-07-core-archives-design.md` §5, §8, §9).

@@ -128,6 +128,32 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   they are; drive uploads as for any upload (the service enqueues each verified file); keep the app open
   while it reads (`extract_keep_open`).
 
+### Callers moving from 0.2.7 or 0.2.8
+
+- 0.3.0 contains 0.2.7 and 0.2.8: `auth_flow`, `account_flows`, `signup_flow`, `recovery_flow`,
+  `passkey`, `share_flow` and the Windows short-name rules, with their UniFFI and WASM bindings, which
+  the committed Swift and Kotlin files now include. What changes for their callers: `MasterKey::to_bytes`
+  returns a `Zeroizing` guard, the whole-file decrypt functions take the version commitment, and
+  `beebeeb-sync`'s `sync_once` stops before it plans a delete (below).
+- These flows and the native services (`beebeeb-api`, `beebeeb-client`) are two separate sets of code
+  for the same account jobs. Where they speak the same server routes (password sign-in, step-up,
+  password and email change, authenticator setup, signup, link and file-request creation) a client
+  picks one. Where they differ, they do not interoperate:
+  - the safety number: `share_flow::safety` (user ids; `test-vectors/safety_number.json`) and
+    `contact_keys::safety_number` (emails; `test-vectors/contact_safety_number.json`) give different
+    digits for the same two people. A share shows the first; never show both;
+  - the passkey copy of the account key: `passkey` reads and writes web's 60-byte blob, `passkey_seal`
+    the 61-byte one, in the same server field, and neither opens the other's;
+  - a new device: `auth_flow::device` uses the CLI handshake of `cli_auth`, which does not
+    authenticate the requester's key; `device_link` does, and needs the matching server routes;
+  - recovery: `recovery_flow` uses the phrase routes; the native recovery uses the attempt routes with
+    their wait;
+  - a contact key's fingerprint: `share_flow::safety::key_fingerprint` is SHA-256 of the key,
+    `contact_keys::key_fingerprint` adds a domain prefix. A stored mark of one never matches the other.
+- `path_safety::check_component` no longer applies the Windows rules to a `Rules::Portable` name on a
+  Windows host (0.2.8); a caller that writes the name uses `check_component_to_write`, as
+  `TrustedDirectory::begin_publish` now does.
+
 ### Rust sync and conflict integrators
 
 - Replace `SyncEngine::load_snapshot` with `apply_complete_snapshot(CompleteSnapshot)` only for an
@@ -191,10 +217,11 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   exact locked-action allowlist.
 - Key-proof servers may export/import the 64-byte verifier state between requests. Keep it only in an
   expiring secret store and never log it.
-- `contact_keys::safety_number` now takes both parties' emails and keys and returns the 60-digit
-  number (12 groups of 5) that web and the apps show: per party, the trimmed, lower-cased email and the
-  key are hashed with 5200 SHA-512 rounds. `contact_keys::normalize_email` is the email form it uses.
-  The vectors are `test-vectors/safety_number.json`, written by an independent Python generator.
+- `contact_keys::safety_number` now takes both parties' emails and keys and returns a 60-digit
+  number (12 groups of 5): per party, the trimmed, lower-cased email and the key are hashed with 5200
+  SHA-512 rounds. `contact_keys::normalize_email` is the email form it uses. The vectors are
+  `test-vectors/contact_safety_number.json`, written by an independent Python generator. It is not the
+  number a share shows: that is 0.2.8's `share_flow::safety` (see "Callers moving from 0.2.7 or 0.2.8").
 
 ### File-format, transfer, and storage integrators
 
@@ -297,7 +324,8 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
   `new WasmChunkDecryptor(masterKey, fileId, metadata)` and `fromFileKey(fileKey, fileId, metadata)`,
   and so does `decrypt_chunk_frame(fileKey, fileId, metadata, index, isLast, frame)`. A
   `chunk_format: 2` record without a version commitment throws; one with neither field opens v1 only.
-- WASM `safetyNumber` and `normalizeEmail`: use them; JavaScript's `trim` differs from core's.
+- WASM `normalizeEmail`: use it; JavaScript's `trim` differs from core's. `safetyNumber` is the
+  `contact_keys` format; the number a share shows is `shareSafetyNumber`.
 - Regenerate bindings for the protected metadata fields and update the shared vector fixture to version
   18, including the protected metadata and session key-proof vectors.
 - WASM archives: `list_archive`, `decompress_gzip` and `list_tar_entries` are removed. Use
@@ -419,6 +447,139 @@ This is a breaking pre-1.0 release. The changes below are grouped by the people 
 - First-session crash markers no longer block a different account. Account-replacing native installs
   now require a one-shot authorization issued only after the service coordinator purges the old
   account's queues, caches, manifest, store, secrets and platform-owned data.
+
+## [0.2.8] - 2026-11-08
+
+### Changed (review hardening before v0.2.8; desktop v2 and mobile adapt to these)
+
+API changes, every one a compile error at the call site, none silent:
+
+1. `passkey::ceremony::parse_registration_start` / `parse_assertion_start` take `&ExpectedRp` (the host's own RP id);
+   any other server `rp.id` / `rpId` is `PasskeyError::RpMismatch` (`passkey_rp_mismatch`). `localhost` only in a
+   debug build or with `ExpectedRp::development`. `origin_for_rp` is removed (`ExpectedRp::origin_for`).
+2. `passkey::flow::add_passkey(http, authn, session, password, name, vault_key, rp)` and
+   `remove_passkey(http, session, password, id)` take the password and run the OPAQUE step-up inside; no confirm
+   token is passed in. `passkey::flow::sign_in` takes `&ExpectedRp`. New `PasskeyError::StepUp { code }`
+   (`passkey_step_up_failed`).
+3. `RequestOptions::local_prf_probe` asks for the creation's `user_verification` (was `discouraged`).
+4. `auth_flow::HttpRequest.confirm_token` is crate-only; transports read `HttpRequest::confirm_token_header()`;
+   bindings build the consuming request with `HttpRequest::session_post`.
+5. `auth_flow::step_up::StepUpPurpose::from_parts(purpose, cli_code)`: a `cli_code` with another purpose, or
+   `cli_device_approval` without a code, is `invalid_input` (UniFFI `StepUpFlow::new`, WASM `AuthStepUp`).
+6. `account_flows::AccountFlow::change_password(current, new, binding, &SignupPolicy, Option<&BreachCheck>)` runs
+   sign-up's gate (`signup_flow::password_gate`, new). `MIN_PASSWORD_CHARS` is removed. New error codes
+   `password_breached`, `breach_check_missing`, `breach_check_blocked`. UniFFI `AccountFlowHandle::change_password`
+   and WASM `AccountFlow.changePassword` take the onboarding answer (`status`, `body`) and an optional breach check.
+7. `account_flows::HostStep` / `HostOutcome`: `body_json`, `confirm_token`, `session_token`, `totp_secret`,
+   `otpauth_uri` are `Zeroizing<String>`, `backup_codes` is `Zeroizing<Vec<String>>` (JSON shape unchanged).
+8. `ApiResponse` (account flows, passkey flows) no longer derives `Debug` over its body: it prints the status only.
+   `AccountOutcome::EmailChanged` prints the email redacted.
+9. `share_flow::link::rebuild_link` takes the stored `wrapped_file_key` as a required `&str` and returns `None`
+   when it is empty or does not open under the rebuilt `K_c`. Bundles use the new `rebuild_bundle_link`. UniFFI
+   `share_rebuild_link` (required `wrapped_file_key: String`) / `share_rebuild_bundle_link` and WASM
+   `shareRebuildLink` (non-optional in the `.d.ts`) / `shareRebuildBundleLink` follow.
+10. Folder shares refuse a folder or child id that is not already a canonical lower-case UUID (`invalid_input`).
+11. UniFFI: keys cross as handles. Out: `SignupCreatedFfi.master_key`, `RecoveredFfi::SignedIn.master_key`,
+    `DeviceRequestEventFfi::Approved.master_key` (`Arc<MasterKeyHandle>`), `share_open_member_file_key`,
+    `share_open_link_file_key` (`Arc<FileKeyHandle>`). In: `ApprovalFlow.approve`, `MemberInviteFlow`,
+    `CreateLinkFlow::new` / `bundle` (`BundleItemFfi.file_key`), the folder-share constructors,
+    `share_rebuild_link`, `share_rebuild_folder_link` and the other share functions that took `master_key: Vec<u8>`.
+12. UniFFI and WASM `passkey_parse_registration_start / `passkey_parse_assertion_start` take `expected_rp_id` and
+    `allow_localhost`.
+13. File person shares refuse an id that is not a canonical lower-case UUID (`invalid_input`) in `MemberInvite::start`,
+    `approve_request`, `seal_file_key_for_member` and `open_member_file_key`; `rebuild_folder_link` returns `None` for one.
+14. Passkeys always ask for `userVerification: "required"` at creation, at the PRF probe and at the assertion, whatever
+    the server's options say.
+15. (B05e, delta 2) Every member seal takes a REQUIRED `PeerKeyExpectation` (`Compared([u8;32])` / `NotCompared`), no
+    `Option`: `approve_request`, `MemberInvite::start`, `FolderInviteInput.peer_key` (was `expected_peer_fingerprint`);
+    UniFFI `PeerKeyExpectationFfi` on `MemberInviteFlow::new`, `FolderShareFlow::new`, `share_approve_file_invite_request`;
+    WASM a required non-trailing `expectedPeerFingerprint` (32 bytes, or an empty array for not compared) on
+    `ShareMemberInvite` and `ShareFolderInvite`. "Share anyway" seals to the bytes `peer_key_changed` carried with
+    `Compared(fingerprint of those bytes)`, never to a re-fetched key.
+16. The seal validates the recipient key like the safety number does: bit 255 set or a small-order key is
+    `invalid_input` (was accepted or `crypto`). `seal_file_key_for_member` is now `pub(crate)`: `approve_request` is the
+    only public member seal.
+17. UniFFI `share_approve_file_invite_request` returns `SealedApprovalFfi { request, recipient_public_key }`; new WASM
+    export `shareApproveFileInviteRequest(inviteId, fileId, recipientPublicKeyB64, masterKey, fileKey,
+    expectedPeerFingerprint)` returns `{request, recipientPublicKey}`.
+
+Also: the device-approval payload is serialized into one pre-sized wiped buffer; the sign-up terms / privacy URL host
+is compared exactly and a URL containing `\` is refused; UniFFI account-flow passwords, codes and link tokens are held in `Zeroizing`.
+
+### Added
+
+- **Desktop v2 B05b: share flows ported** (#99). `share_flow`: person shares of a file, folder invites and folder links
+  (the 2133 folder-key rules: random folder keys, custody, L7 child wraps), file links, bundles and file requests, in
+  UniFFI and WASM; 13 named vectors in `test-vectors/vectors.json` (counted by name in the share-flow tests), covered by 19 tests,
+  match web byte for byte.
+- **Desktop v2 B10b: server #422's account routes** (#100). `account_flows`: the three-step delete (`delete_account(password,
+  code?)` → `POST /auth/account/delete-request` with the second factor on a 2FA account; `delete_confirm` and
+  `delete_cancel` with the mailed link's token), `regenerate_backup_codes(code)` (`POST /auth/2fa/backup-codes`; the
+  authenticator stays) and a step-up inside `set_activity_logging(false, password)`. `auth_flow::device`: the deny
+  route (`Approval::deny`, `PendingApproval::deny` → `POST /auth/cli-deny`). UniFFI and WASM exports for
+  `signup_flow` and `recovery_flow`. **Changed signatures:** `delete_account`, `set_activity_logging` (see EXPORTS.md).
+- **`auth_flow`: sign-in, step-up and sign in with another device as plain logic** (desktop v2, B10). Sans-IO state
+  machines over the existing API: the OPAQUE password sign-in and second factor (6-digit or 8-digit backup code), the
+  OPAQUE step-up that mints a single-use confirm token (purpose-bound for `cli_device_approval`; no plaintext-password
+  path), the requesting side of the device socket and the approving side (lookup, step-up, claim, relay). Errors are
+  codes; no server body is echoed. Exposed in UniFFI (`SignInFlow`, `StepUpFlow`, `DeviceRequestFlow`, `ApprovalFlow`)
+  and WASM (`AuthSignIn`, `AuthStepUp`, `AuthDeviceRequest`, `AuthApproval`).
+- `cli_auth::encrypt_for_requester`: the approving side of the device handshake (what web's `ecdhEncryptPayload` does),
+  HKDF form only. Additive: nothing is renamed, retyped or removed.
+- `account_flows`: password change, email change, TOTP set-up / confirm / disable, session revoke, display name,
+  activity logging and account deletion as sans-IO flows (desktop v2, B14), in UniFFI and WASM. Every step-up inside
+  them runs through `auth_flow::step_up` (generic purpose; the confirm token goes on exactly the next request).
+- `passkey`: the passkey vault primitive in web's format (PRF eval input `beebeeb.io/vault-wrap-key/v1` zero-padded
+  to 32, HKDF-SHA256 info `beebeeb.io/vault-wrap/v1` with an empty salt, AES-256-GCM `nonce || ct || tag`, no AAD),
+  the native hmac-secret salt (the WebAuthn PRF hash applied), the ceremony wire for the server's passkey and
+  escrow routes, and the flows (add, sign in + unlock, list, remove) over an injected HTTP and platform call.
+  UniFFI and WASM export the primitive and the per-step wire helpers, not the async flows (UniFFI hands the vault
+  key as a `MasterKeyHandle`, WASM as raw bytes, its convention); vectors generated from web's TS (`test-vectors/passkey_vault.json`) and core vectors
+  web's TS opens (`test-vectors/passkey_vault_core.json`, `scripts/passkey-vectors/`). Additive.
+
+## [0.2.7] - 2026-11-08
+
+Windows: a create by name never touches a different file that the OS resolves the name to (8.3 alias), task 2404.
+Additive: no public item is renamed, retyped or removed.
+
+### Fixed
+
+- **Windows: a create, truncate, replace or delete by name only ever touches the entry with that exact long name.**
+  Windows also resolves a name through the 8.3 short names of a directory, so a name could reach a different existing
+  file. Such a name is now a name conflict, decided from the existing entry's own long name as the file system reports
+  it (case-insensitive, as NTFS compares), never from the shape of the name.
+  - `path_safety::safe_child`, `safe_rel_join` (every existing segment) and `default_output_path` refuse it (their
+    `String` error names the conflict).
+  - `encrypt::decrypt_chunks_to_file`, `encrypt::decrypt_contiguous_to_file`, `file_encrypt::decrypt_chunks_to_file`
+    and `file_encrypt::encrypt_file_to_chunks` refuse such an output before creating anything
+    (`CoreError::InvalidInput` naming the conflict), and so do beebeeb-upload's downloads (`UploadError::InvalidInput`).
+    Their temp file is created exclusively: `{output}.tmp`, or `{output}.{16 hex}.tmp` when that name is taken (a temp
+    left by a crash, or a file of the user's own), so an existing entry is never opened, truncated or deleted. On
+    Windows, an output that did not exist is published without replacing (a hard link, or on a volume without hard
+    links an exclusive create and a rename over it): an entry created there meanwhile fails the write.
+  - An 8.3-shaped name that the file's handle reports as its own long name is confirmed against the directory listing
+    (some network redirectors and third-party drivers report the name as opened).
+  - beebeeb-sync's remote delete never deletes the file such a name reaches.
+  - Other hosts: no extra file-system calls, and no change but two: beebeeb-sync's remote delete drops a state row that
+    is not a relative path of plain names (`..`, absolute) instead of deleting `vault/<path>`, and the item below.
+- **`file_encrypt::decrypt_chunks_to_file` writes `{output_path}.tmp`, as its docs say** (it wrote
+  `output_path.with_extension("tmp")`, which is the output itself for `notes.tmp`: a failed decrypt truncated and then
+  deleted that file, and `a.pdf` and `a.doc` in one folder shared one temp file).
+
+### Added
+
+- `path_safety::short_name_alias(base, rel) -> io::Result<Option<ShortNameAlias>>` (native targets) and
+  `path_safety::ShortNameAlias { requested, existing }` (`#[non_exhaustive]`): the typed answer for a caller that has a
+  conflict path ("(2)", a conflict copy) and takes it instead of refusing.
+- `path_safety::TempSibling` (native targets): `create(output) -> io::Result<(TempSibling, File)>`, then
+  `publish(self) -> io::Result<()>`; dropped unpublished, it removes its temp. The write-then-publish step every core
+  writer and beebeeb-upload use, for a client that writes a file by name itself.
+
+### Known limits
+
+- The case-insensitive comparison uses Rust's Unicode tables; NTFS uses the volume's `$UpCase` table, written at format
+  time (it maps `ı` and `ſ` to themselves; older tables lack newer case pairs). Erring needs a long name equal to the
+  requested short name but for such letters.
 
 ## [0.2.6] - 2026-11-08
 

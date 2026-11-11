@@ -32,7 +32,7 @@
 //! commit fails, leaving the old file and no temp file, where the existing
 //! file is read-only or open elsewhere without `FILE_SHARE_DELETE`.
 
-use super::{MAX_PUBLISH_COMPONENT_BYTES, Rules, check_component};
+use super::{MAX_PUBLISH_COMPONENT_BYTES, Rules, check_component_to_write};
 use rand::{RngCore, rngs::OsRng};
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -113,7 +113,7 @@ impl TrustedDirectory {
     /// Create a no-follow sibling temp file. Dropping the pending publication
     /// deletes it through its own handle.
     pub fn begin_publish(&self, name: &str, rules: Rules) -> io::Result<(PendingPublish, File)> {
-        check_component(name, rules).map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        check_component_to_write(name, rules).map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
         if name.len() > MAX_PUBLISH_COMPONENT_BYTES {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,

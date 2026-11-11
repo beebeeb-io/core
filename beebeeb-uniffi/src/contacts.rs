@@ -1,7 +1,7 @@
 //! Contact safety numbers (relayed-key pinning design, D1/D2) for Swift and
 //! Kotlin, so the apps show the same number as web (crypto review,
 //! P2-7). The format is `beebeeb_core::contact_keys`, proved by
-//! `test-vectors/safety_number.json`.
+//! `test-vectors/contact_safety_number.json`.
 
 use beebeeb_core::contact_keys;
 
@@ -44,7 +44,7 @@ mod tests {
     #[test]
     fn the_binding_matches_every_safety_number_vector() {
         let doc: serde_json::Value =
-            serde_json::from_str(include_str!("../../test-vectors/safety_number.json")).unwrap();
+            serde_json::from_str(include_str!("../../test-vectors/contact_safety_number.json")).unwrap();
         let rows = doc["vectors"].as_array().unwrap();
         assert_eq!(rows.len(), 8);
         for row in rows {

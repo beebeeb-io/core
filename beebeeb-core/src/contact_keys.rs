@@ -42,7 +42,7 @@ pub fn key_fingerprint(public_key: &[u8]) -> [u8; 32] {
 /// the server's `canonical_email` does. JavaScript's `String.prototype.trim`
 /// differs (it strips U+FEFF and keeps U+0085), so a web client calls this
 /// function through WASM (`normalizeEmail`, `safetyNumber`) and never trims an
-/// email itself. `test-vectors/safety_number.json` holds a row for each side
+/// email itself. `test-vectors/contact_safety_number.json` holds a row for each side
 /// of the difference.
 pub fn normalize_email(raw: &str) -> String {
     raw.trim().to_lowercase()
@@ -135,7 +135,7 @@ mod tests {
     #[test]
     fn safety_number_matches_the_independent_vectors() {
         let doc: SafetyNumberVectors =
-            serde_json::from_str(include_str!("../../test-vectors/safety_number.json")).unwrap();
+            serde_json::from_str(include_str!("../../test-vectors/contact_safety_number.json")).unwrap();
         assert_eq!(doc.domain.as_bytes(), SAFETY_NUMBER_DOMAIN);
         assert_eq!(doc.rounds, SAFETY_NUMBER_ROUNDS);
         assert_eq!(doc.vectors.len(), 8);
