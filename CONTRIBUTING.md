@@ -4,8 +4,8 @@ Thank you for contributing. This workspace is security-sensitive and changes can
 
 ## Setup
 
-Install Git, Python 3, and the Rust toolchain pinned by `rust-toolchain.toml`. The independent vector
-checks also need Python's `cryptography` package.
+Install Git, Python 3, ripgrep, and the Rust toolchain pinned by `rust-toolchain.toml`. The independent
+vector checks also need Python's `cryptography` package; the documentation guards run `rg`.
 
 ```sh
 git clone https://github.com/beebeeb-io/core.git
@@ -26,6 +26,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 bash scripts/check-test-vectors.sh
 bash scripts/check-no-legacy-writes.sh
+bash scripts/check-doc-symbols.sh
 bash scripts/check-core-pins-documented.sh
 ```
 
