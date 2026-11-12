@@ -292,16 +292,19 @@ mod tests {
     }
 
     /// On the random-name branch the callback sees only the name that is then
-    /// created: the taken plain name is skipped without a call.
+    /// created, and that name does not exist yet when the callback runs: the
+    /// taken plain name is skipped without a call.
     #[test]
     fn create_with_hands_out_the_random_name_it_then_creates() {
         let scratch = Scratch::new("with-random");
         let dir = &scratch.0;
         fs::write(dir.join("out.bin.tmp"), b"the user's own file").unwrap();
         let mut seen: Vec<PathBuf> = Vec::new();
+        let mut existed_at_call: Vec<bool> = Vec::new();
 
         let (temp, file) = TempSibling::create_with(&dir.join("out.bin"), |path| {
             seen.push(path.to_path_buf());
+            existed_at_call.push(fs::symlink_metadata(path).is_ok());
             Ok(())
         })
         .unwrap();
@@ -312,6 +315,7 @@ mod tests {
             std::slice::from_ref(&temp.temp),
             "one call, naming the created file"
         );
+        assert_eq!(existed_at_call, [false], "the callback ran before the create");
         assert_ne!(temp.temp, dir.join("out.bin.tmp"));
         assert_eq!(fs::read(dir.join("out.bin.tmp")).unwrap(), b"the user's own file");
         let mut expected = vec![
