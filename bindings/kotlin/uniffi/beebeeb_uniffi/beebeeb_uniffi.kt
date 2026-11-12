@@ -4190,19 +4190,19 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_encrypt_shards() != 20407.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_file_count() != 50201.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_file_count() != 253.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_num_shards() != 22759.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_num_shards() != 6281.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_query() != 50316.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_query() != 54944.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_remove() != 43141.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_remove() != 49001.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_upsert() != 22759.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_upsert() != 7772.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_signupceremonyhandle_abandon() != 65431.toShort()) {
@@ -23400,7 +23400,8 @@ public object FfiConverterTypeRequestContentReader: FfiConverter<RequestContentR
  * A mutable client-side search index. Build it from a file list, mutate it
  * incrementally (`upsert`/`remove` return the dirty bucket set), query it, and
  * (de)serialize it to encrypted shards for sync. Crypto runs in core against the
- * borrowed master key — raw key bytes never cross FFI.
+ * borrowed master key — raw key bytes never cross FFI. After a panic poisoned
+ * its lock every call fails with `CryptoError::InvalidInput`: rebuild it.
  */
 public interface SearchIndexHandleInterface {
     
@@ -23448,7 +23449,8 @@ public interface SearchIndexHandleInterface {
  * A mutable client-side search index. Build it from a file list, mutate it
  * incrementally (`upsert`/`remove` return the dirty bucket set), query it, and
  * (de)serialize it to encrypted shards for sync. Crypto runs in core against the
- * borrowed master key — raw key bytes never cross FFI.
+ * borrowed master key — raw key bytes never cross FFI. After a panic poisoned
+ * its lock every call fails with `CryptoError::InvalidInput`: rebuild it.
  */
 open class SearchIndexHandle: Disposable, AutoCloseable, SearchIndexHandleInterface
 {
@@ -23595,10 +23597,11 @@ open class SearchIndexHandle: Disposable, AutoCloseable, SearchIndexHandleInterf
     
     /**
      * Number of indexed files.
-     */override fun `fileCount`(): kotlin.ULong {
+     */
+    @Throws(CryptoException::class)override fun `fileCount`(): kotlin.ULong {
             return FfiConverterULong.lift(
     callWithHandle {
-    uniffiRustCall() { _status ->
+    uniffiRustCallWithError(CryptoException) { _status ->
     UniffiLib.uniffi_beebeeb_uniffi_fn_method_searchindexhandle_file_count(
         it,
         _status)
@@ -23611,10 +23614,11 @@ open class SearchIndexHandle: Disposable, AutoCloseable, SearchIndexHandleInterf
     
     /**
      * Shard count this index uses.
-     */override fun `numShards`(): kotlin.UInt {
+     */
+    @Throws(CryptoException::class)override fun `numShards`(): kotlin.UInt {
             return FfiConverterUInt.lift(
     callWithHandle {
-    uniffiRustCall() { _status ->
+    uniffiRustCallWithError(CryptoException) { _status ->
     UniffiLib.uniffi_beebeeb_uniffi_fn_method_searchindexhandle_num_shards(
         it,
         _status)
@@ -23627,10 +23631,11 @@ open class SearchIndexHandle: Disposable, AutoCloseable, SearchIndexHandleInterf
     
     /**
      * Search; returns the matching `file_id`s.
-     */override fun `query`(`term`: kotlin.String): List<kotlin.String> {
+     */
+    @Throws(CryptoException::class)override fun `query`(`term`: kotlin.String): List<kotlin.String> {
             return FfiConverterSequenceString.lift(
     callWithHandle {
-    uniffiRustCall() { _status ->
+    uniffiRustCallWithError(CryptoException) { _status ->
     UniffiLib.uniffi_beebeeb_uniffi_fn_method_searchindexhandle_query(
         it,
         FfiConverterString.lower(`term`),_status)
@@ -23643,10 +23648,11 @@ open class SearchIndexHandle: Disposable, AutoCloseable, SearchIndexHandleInterf
     
     /**
      * Remove a file. Returns the dirty bucket set (empty if not indexed).
-     */override fun `remove`(`fileId`: kotlin.String): List<kotlin.UInt> {
+     */
+    @Throws(CryptoException::class)override fun `remove`(`fileId`: kotlin.String): List<kotlin.UInt> {
             return FfiConverterSequenceUInt.lift(
     callWithHandle {
-    uniffiRustCall() { _status ->
+    uniffiRustCallWithError(CryptoException) { _status ->
     UniffiLib.uniffi_beebeeb_uniffi_fn_method_searchindexhandle_remove(
         it,
         FfiConverterString.lower(`fileId`),_status)
@@ -23660,10 +23666,11 @@ open class SearchIndexHandle: Disposable, AutoCloseable, SearchIndexHandleInterf
     /**
      * Insert or update a file (add or rename). Returns the buckets whose shards
      * changed — re-encrypt only these for an incremental sync.
-     */override fun `upsert`(`fileId`: kotlin.String, `name`: kotlin.String): List<kotlin.UInt> {
+     */
+    @Throws(CryptoException::class)override fun `upsert`(`fileId`: kotlin.String, `name`: kotlin.String): List<kotlin.UInt> {
             return FfiConverterSequenceUInt.lift(
     callWithHandle {
-    uniffiRustCall() { _status ->
+    uniffiRustCallWithError(CryptoException) { _status ->
     UniffiLib.uniffi_beebeeb_uniffi_fn_method_searchindexhandle_upsert(
         it,
         FfiConverterString.lower(`fileId`),FfiConverterString.lower(`name`),_status)

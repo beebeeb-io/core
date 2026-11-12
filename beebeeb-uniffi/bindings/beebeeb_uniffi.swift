@@ -11053,7 +11053,8 @@ public func FfiConverterTypeRequestContentReader_lower(_ value: RequestContentRe
  * A mutable client-side search index. Build it from a file list, mutate it
  * incrementally (`upsert`/`remove` return the dirty bucket set), query it, and
  * (de)serialize it to encrypted shards for sync. Crypto runs in core against the
- * borrowed master key — raw key bytes never cross FFI.
+ * borrowed master key — raw key bytes never cross FFI. After a panic poisoned
+ * its lock every call fails with `CryptoError::InvalidInput`: rebuild it.
  */
 public protocol SearchIndexHandleProtocol: AnyObject, Sendable {
     
@@ -11071,35 +11072,36 @@ public protocol SearchIndexHandleProtocol: AnyObject, Sendable {
     /**
      * Number of indexed files.
      */
-    func fileCount()  -> UInt64
+    func fileCount() throws  -> UInt64
     
     /**
      * Shard count this index uses.
      */
-    func numShards()  -> UInt32
+    func numShards() throws  -> UInt32
     
     /**
      * Search; returns the matching `file_id`s.
      */
-    func query(term: String)  -> [String]
+    func query(term: String) throws  -> [String]
     
     /**
      * Remove a file. Returns the dirty bucket set (empty if not indexed).
      */
-    func remove(fileId: String)  -> [UInt32]
+    func remove(fileId: String) throws  -> [UInt32]
     
     /**
      * Insert or update a file (add or rename). Returns the buckets whose shards
      * changed — re-encrypt only these for an incremental sync.
      */
-    func upsert(fileId: String, name: String)  -> [UInt32]
+    func upsert(fileId: String, name: String) throws  -> [UInt32]
     
 }
 /**
  * A mutable client-side search index. Build it from a file list, mutate it
  * incrementally (`upsert`/`remove` return the dirty bucket set), query it, and
  * (de)serialize it to encrypted shards for sync. Crypto runs in core against the
- * borrowed master key — raw key bytes never cross FFI.
+ * borrowed master key — raw key bytes never cross FFI. After a panic poisoned
+ * its lock every call fails with `CryptoError::InvalidInput`: rebuild it.
  */
 open class SearchIndexHandle: SearchIndexHandleProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
@@ -11220,8 +11222,8 @@ open func encryptShards(masterKey: MasterKeyHandle)throws  -> [EncryptedShardDto
     /**
      * Number of indexed files.
      */
-open func fileCount() -> UInt64  {
-    return try!  FfiConverterUInt64.lift(try! rustCall() {
+open func fileCount()throws  -> UInt64  {
+    return try  FfiConverterUInt64.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_method_searchindexhandle_file_count(
             self.uniffiCloneHandle(),$0
     )
@@ -11231,8 +11233,8 @@ open func fileCount() -> UInt64  {
     /**
      * Shard count this index uses.
      */
-open func numShards() -> UInt32  {
-    return try!  FfiConverterUInt32.lift(try! rustCall() {
+open func numShards()throws  -> UInt32  {
+    return try  FfiConverterUInt32.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_method_searchindexhandle_num_shards(
             self.uniffiCloneHandle(),$0
     )
@@ -11242,8 +11244,8 @@ open func numShards() -> UInt32  {
     /**
      * Search; returns the matching `file_id`s.
      */
-open func query(term: String) -> [String]  {
-    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+open func query(term: String)throws  -> [String]  {
+    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_method_searchindexhandle_query(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(term),$0
@@ -11254,8 +11256,8 @@ open func query(term: String) -> [String]  {
     /**
      * Remove a file. Returns the dirty bucket set (empty if not indexed).
      */
-open func remove(fileId: String) -> [UInt32]  {
-    return try!  FfiConverterSequenceUInt32.lift(try! rustCall() {
+open func remove(fileId: String)throws  -> [UInt32]  {
+    return try  FfiConverterSequenceUInt32.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_method_searchindexhandle_remove(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(fileId),$0
@@ -11267,8 +11269,8 @@ open func remove(fileId: String) -> [UInt32]  {
      * Insert or update a file (add or rename). Returns the buckets whose shards
      * changed — re-encrypt only these for an incremental sync.
      */
-open func upsert(fileId: String, name: String) -> [UInt32]  {
-    return try!  FfiConverterSequenceUInt32.lift(try! rustCall() {
+open func upsert(fileId: String, name: String)throws  -> [UInt32]  {
+    return try  FfiConverterSequenceUInt32.lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
     uniffi_beebeeb_uniffi_fn_method_searchindexhandle_upsert(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(fileId),
@@ -34740,19 +34742,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_encrypt_shards() != 20407) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_file_count() != 50201) {
+    if (uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_file_count() != 253) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_num_shards() != 22759) {
+    if (uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_num_shards() != 6281) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_query() != 50316) {
+    if (uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_query() != 54944) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_remove() != 43141) {
+    if (uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_remove() != 49001) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_upsert() != 22759) {
+    if (uniffi_beebeeb_uniffi_checksum_method_searchindexhandle_upsert() != 7772) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_signupceremonyhandle_abandon() != 65431) {
