@@ -8,6 +8,10 @@ python3 -c 'import cryptography' || {
   echo "Python package 'cryptography' is required" >&2
   exit 1
 }
+python3 -c 'import argon2' || {
+  echo "Python package 'argon2-cffi' is required (the folder-link vector writer imports it)" >&2
+  exit 1
+}
 
 vector_tmp=$(mktemp -d "${TMPDIR:-/tmp}/beebeeb-vectors.XXXXXX")
 trap 'rm -rf "$vector_tmp"' EXIT
@@ -25,9 +29,10 @@ cmp test-vectors/vectors.json "$vector_tmp/test-vectors/vectors.json"
 
 # SF-0003: the folder-link writer must leave a current vectors.json byte-identical, document
 # version included. It resolves the file relative to itself, so run a copy inside the temp tree.
+# No -I: it imports third-party packages, and -I drops the user site where CI's pip installs them.
 mkdir "$vector_tmp/scripts"
 cp scripts/gen-folder-link-vectors.py "$vector_tmp/scripts/gen-folder-link-vectors.py"
-python3 -I "$vector_tmp/scripts/gen-folder-link-vectors.py" --write >/dev/null
+python3 "$vector_tmp/scripts/gen-folder-link-vectors.py" --write >/dev/null
 cmp test-vectors/vectors.json "$vector_tmp/test-vectors/vectors.json"
 
 python3 "$vector_tmp/test-vectors/tools/make_direct_transfer_vectors.py" "$vector_tmp/test-vectors/direct_transfer.json"

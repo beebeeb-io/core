@@ -10,7 +10,7 @@ vector checks also need Python's `cryptography` package; the documentation guard
 ```sh
 git clone https://github.com/beebeeb-io/core.git
 cd core
-python3 -m pip install cryptography
+python3 -m pip install cryptography argon2-cffi
 cargo test --workspace --locked
 ```
 
