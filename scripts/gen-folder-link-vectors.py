@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Independent 2237c vectors (argon2-cffi + cryptography, never core output).
 
-Print the two families, or update only those families and the version with
---write. All inputs below are public, deterministic known-answer fixtures.
+Print the two families, or update only those families with --write. The
+document version belongs to the file (other tools bump it), so --write keeps it.
+All inputs below are public, deterministic known-answer fixtures.
 """
 
 import argparse
@@ -100,7 +101,6 @@ def main():
         by_name = {v["name"]: v for v in generated}
         existing = {v["name"] for v in doc["vectors"]}
         doc["vectors"] = [by_name.get(v["name"], v) for v in doc["vectors"]] + [v for v in generated if v["name"] not in existing]
-        doc["version"] = 12
         path.write_text(json.dumps(doc, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     print(json.dumps(generated, ensure_ascii=False, indent=2, sort_keys=True))
 
