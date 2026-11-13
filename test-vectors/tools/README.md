@@ -101,3 +101,13 @@ python3 -I test-vectors/tools/gen_archives_v1.py test-vectors/archives_v1.json t
 bash test-vectors/tools/check-archives-vectors-generated.sh
 bash test-vectors/tools/check-archives-vectors-generated.sh --self-test
 ```
+
+`make_screen_lock_vectors.py` independently writes `test-vectors/screen_lock.json`, the screen-lock check
+record (Argon2id from the reference C library through argon2-cffi, HKDF and AES-GCM from `cryptography`).
+It needs the two packages the CI vector step installs, so it runs without `-I`:
+
+```sh
+python3 test-vectors/tools/make_screen_lock_vectors.py test-vectors/screen_lock.json
+python3 test-vectors/tools/make_screen_lock_vectors.py --check test-vectors/screen_lock.json
+python3 test-vectors/tools/make_screen_lock_vectors.py --self-test test-vectors/screen_lock.json
+```
