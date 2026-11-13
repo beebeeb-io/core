@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The two-level lock for native apps (contract: `docs/superpowers/specs/2026-11-13-two-level-lock-design.md`):
+  `beebeeb_api::flows::LockFlow`, `beebeeb_core::screen_lock` (the offline check record and the
+  wrong-try rule) and the `beebeeb-client` calls `start_from_store`, `lock_state`, `lock_screen`,
+  `unlock_screen_platform_verified`, `unlock_screen_with_password`, `lock_vault`,
+  `set_ask_password_at_start`, `session_ended` and `refresh_lock_from_server`. The password path is
+  behind `ClientConfig::lock_password_path` (default off) until the server side is live. No binding
+  exports it yet.
+
+### Changed
+
+- `Session::load_for_user` answers the new `SecretError::VaultClosed` while a vault is closed, and
+  `Client::set_session` the new `ClientError::VaultClosed`. A device that never locked a vault and has
+  the start setting off is unaffected. `opaque_protocol::client_login_finish_judged` tells a wrong
+  password from a finish that could not run.
+- A session the server refuses (a 401 to its credentials) now also drops the account key from the
+  process and stops work when that session was installed by a sign-in or by `start_from_store`; the
+  `SessionExpired` event is unchanged. `unlock_known_device` ends the stored session it replaces.
+- `ClientConfig` has a new public field (`lock_password_path`); `AuthError`, `ClientError`,
+  `SecretError` and `flows::LockedAction` have new variants. Update exhaustive matches.
+
 ### Documentation
 
 - Share refusals: a frozen account's 403 reaches the app as `ShareRefused { code: "account_frozen" }`

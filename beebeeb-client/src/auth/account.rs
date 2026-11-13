@@ -74,7 +74,7 @@ impl std::fmt::Debug for ConfirmationToken {
     }
 }
 
-fn is_unauthorized(error: &ClientError) -> bool {
+pub(super) fn is_unauthorized(error: &ClientError) -> bool {
     matches!(error, ClientError::Api(beebeeb_api::ApiError::Server(server)) if server.status == 401)
 }
 
@@ -188,8 +188,13 @@ impl Client {
         if Session::stored_owner(store)?.as_deref() != Some(changed.user_id.as_str()) {
             return Err(AuthError::AnotherAccountOnDevice);
         }
-        let stored =
-            Session::load_for_user(store, &changed.user_id, self.app_id())?.ok_or(AuthError::AccountOwnership)?;
+        let stored = Session::load_for_user_proven(store, &changed.user_id, self.app_id())?
+            .ok_or(AuthError::AccountOwnership)?;
+        // The change replaces the session, and the app is in the same lock state afterwards.
+        // The state is read here, not before the requests above: a screen lock that landed
+        // while they were on their way stays locked. From here to the install the app is
+        // closed, and a closed app cannot be screen-locked or opened by anything weaker.
+        let lock_before = self.with_lock_flow(|flow| flow.clone())?;
         self.set_authentication(changed.session_token.clone(), changed.user_id.clone())?;
         let _ = key_state;
         if let Err(error) = self.prove_session_key(stored.master_key()).await {
@@ -199,7 +204,29 @@ impl Client {
         let generation = self.generation().checked_add(1).ok_or(AuthError::MalformedAnswer)?;
         let refreshed = stored.refresh(changed.session_token, generation)?;
         refreshed.save(store, self.app_id())?;
-        self.set_session(&refreshed)?;
+        // The old password's check record must not outlive the change. With the password path
+        // on, the new password (the server has just accepted it) gets a record of its own.
+        let record = self
+            .lock_password_path()
+            .then(|| {
+                beebeeb_core::screen_lock::enroll(
+                    &new_password,
+                    &changed.user_id,
+                    changed.password_counter.unwrap_or(0),
+                )
+                .ok()
+            })
+            .flatten();
+        lock::replace_screen_check(store, record);
+        self.install_session(&refreshed)?;
+        if beebeeb_api::flows::key_may_be_loaded(lock_before.state()) {
+            self.with_lock_flow(|flow| {
+                // Only what this call closed is put back; a state someone else set stays.
+                if flow.state() == LockState::VaultClosed {
+                    *flow = lock_before;
+                }
+            })?;
+        }
         Ok(InstalledSession {
             owner: changed.user_id,
             generation,
@@ -217,7 +244,7 @@ impl Client {
             return Err(AuthError::MalformedAnswer);
         }
         let owner = self.authenticated_owner()?;
-        let stored = Session::load_for_user(store, &owner, self.app_id())?.ok_or(AuthError::AccountOwnership)?;
+        let stored = Session::load_for_user_proven(store, &owner, self.app_id())?.ok_or(AuthError::AccountOwnership)?;
         let confirmation = self.confirm_action(&password).await?;
         let registration = client_registration_start(password.as_bytes()).map_err(|_| AuthError::Crypto)?;
         let state = Zeroizing::new(registration.state);

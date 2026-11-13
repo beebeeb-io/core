@@ -468,3 +468,75 @@ its platform's WebAuthn call.
 - **Server gaps (not core's):** `GET /api/v1/auth/passkeys` sends neither `last_used_at` nor whether a passkey has an
   escrow; `PasskeyInfo` reads both as `Option` so the server can add them without a core change.
 - **`allow_localhost` (UniFFI / WASM passkey parse):** a host takes the value from its build configuration, never from the server or a user setting.
+
+## The two-level lock (`flows::lock`, `screen_lock`, `beebeeb-client` `auth/lock.rs` + `auth/lock_password.rs`)
+
+Contract: `docs/superpowers/specs/2026-11-13-two-level-lock-design.md`. Three pieces: the I/O-free state
+machine `beebeeb_api::flows::LockFlow` (`SignedOut`, `Open`, `ScreenLocked`, `VaultClosed`), the pure
+check record and wrong-try rule `beebeeb_core::screen_lock`, and the service on `Client`
+(`start_from_store`, `lock_state`, `lock_screen`, `unlock_screen_platform_verified`,
+`unlock_screen_with_password`, `lock_vault`, `set_ask_password_at_start`, `session_ended`,
+`refresh_lock_from_server`).
+
+- **Store entries** (through `SecretStore`, removed at both purge places in `session.rs`, kept by an
+  app-only sign-out): `lock.screen_check` (the 102-byte record), `lock.attempts` (13 bytes: version,
+  failures u32 BE, last failure ms u64 BE), `lock.ask_password_at_start` and `lock.vault_closed`
+  (`1` / `0`; absent is off; anything else, or a failed read, starts the vault closed).
+- **The record cannot say why it failed.** It holds no owner, so a record moved to another account
+  or with an edited header fails its tag exactly as a wrong password does: `CheckOutcome::NoMatch`.
+  `Unusable` is only a wrong length, version or pepper kind, or no owner. None of them ever matches.
+- **Enrolment is stretch, then seal.** `screen_lock::stretch` runs while the password is in hand (at
+  the accepted OPAQUE finish of `sign_in_on_device`); the `PendingScreenCheck` travels in
+  `TwoFactorChallenge` / `PasswordAccepted` and is sealed (`seal`) in the step that saves the installed
+  session, with the owner and the password counter `/auth/me` reports for the new session. A sign-in
+  whose stretch or counter read fails installs with no record. A password change on the device
+  deletes the old record and, with the password path on, enrols the new password.
+- **One typed password, one count.** `counted_password_check` runs one at a time (a second try while
+  one is on its way is refused and sends nothing), stores the count before any check, keeps it for a
+  judged wrong password (the OPAQUE finish opened the server's answer and it did not fit,
+  `LoginFinishError::WrongPassword`; the server refused a proof it judged; or the local record did not
+  match), deletes it on success, and restores it for everything that judged nothing: the server's
+  limit, a 401 on a live session, no record offline, an account on the legacy stretch, a finish that
+  could not run, any other error. An ended session deletes it with the record. A stored count that
+  does not parse becomes the longest wait, written once. After an accepted online proof the record is
+  made again unless the stored one already carries the counter the server named. Only a transport failure is "the server
+  cannot be reached"; an answer without a judgement (a missing route, an outage page) never falls back
+  to the record.
+- **An ended session.** A 401 to the session's credentials drops the key in the same call when the app
+  held it (`Open`, `ScreenLocked` become `VaultClosed`; generation advances; `WorkStopped`, then
+  `SessionExpired`). `Client::session_ended(store)` records it: the record and the count are deleted
+  and the closed mark is written. A host that installs sessions itself with `set_session` and never
+  runs a sign-in or the lock start through core stays `SignedOut` and keeps the old behaviour.
+- **`Session::load_for_user` is a restore path** and answers `SecretError::VaultClosed` while the mark
+  is set or cannot be read; `Client::set_session` is refused while the vault is closed. Core's own
+  post-proof paths use `load_for_user_proven`. The start setting is `start_from_store`'s rule: a start
+  that is closed for any reason writes the mark, so the restore path is closed with it until the
+  strong install clears it; after that install every process that shares the store can restore again.
+  The setting alone does not refuse this path (it could not tell a started-and-unlocked app from a
+  fresh boot): a host that turns the setting on starts with `start_from_store` and nothing else.
+- **Strong installs.** `unlock_known_device`, `install_new_device` and `install_recovered_session`
+  all clear the mark, drop or replace the check record, reset the count and open the flow, in the
+  step that saves the session. Each install checks that the session it proved is still the one in the
+  process (`proven_at`): a lock or another sign-in that landed while its requests were on their way is
+  not undone by it. A password change restores the lock state it started in.
+- **Credentials without a key** (`set_authentication`: a password accepted for a sign-in, a passkey or
+  device-link step) replace the session of an app that held the key, so they close it (`VaultClosed`);
+  the strong install that follows opens it again.
+- **Sign-out from a closed vault** ends the stored session with its own token
+  (`Session::stored_token_for_app`, the key entry is not read) and needs no proof.
+- **The replaced session.** `lock_vault` ends its session at the server, best effort, with that
+  session's own token; `unlock_known_device` ends the stored session it replaced after the new one is
+  installed.
+- **The password path is one switch,** `ClientConfig::lock_password_path`, default off. Off: no stretch
+  at sign-in, no record, no proof request, and `unlock_screen_with_password` and
+  `set_ask_password_at_start` answer `PasswordCheckUnavailable` (a setting that could be turned on but
+  never off would trap a person). The proof's wire shape is in `beebeeb_api::proposed`
+  (`password_proof_start`, `password_proof_finish`, `password_proof_codes`) and has one caller.
+- **Residuals.** On a device that has been offline since a password change elsewhere, the old password
+  still opens the screen lock (and only the screen). The counter is read just after the password was
+  accepted, not in the same answer: a change that lands in between leaves a record that looks current
+  until the server next refuses the old password online. Every Argon2id run blocks its caller for
+  about a second. Tests in `beebeeb-client` run the real cost; there is no cheaper test profile.
+- **Vectors.** `test-vectors/screen_lock.json` is written by `test-vectors/tools/make_screen_lock_vectors.py`
+  (argon2-cffi and `cryptography`, not a port of the Rust); `scripts/check-test-vectors.sh` fails on a
+  hand edit and proves its own check can go red.

@@ -10,6 +10,7 @@ use std::time::Duration;
     all(feature = "store", any(feature = "downloads", feature = "thumbnails"))
 ))]
 use beebeeb_api::RawEndpoint;
+use beebeeb_api::flows::{LockFlow, LockState, StartFacts};
 use beebeeb_api::{ApiError, ClientIdentity, Endpoint, RequestBuilder};
 use beebeeb_core::kdf::MasterKey;
 use serde::{Serialize, de::DeserializeOwned};
@@ -25,6 +26,12 @@ pub struct ClientConfig {
     pub identity: ClientIdentity,
     pub app_id: String,
     pub event_capacity: usize,
+    /// The password path of the screen lock: the offline check record, the online password
+    /// check and the "ask for my password at start" setting. Off by default, and to be turned
+    /// on only for a server that has the grant-nothing password proof and reports the password
+    /// counter. While off, no record is enrolled and no proof route is called; the screen lock
+    /// (platform verification) and the vault lock work without it.
+    pub lock_password_path: bool,
 }
 
 impl ClientConfig {
@@ -33,6 +40,7 @@ impl ClientConfig {
             identity: ClientIdentity::new(name, version),
             app_id: app_id.into(),
             event_capacity: 64,
+            lock_password_path: false,
         }
     }
 
@@ -79,6 +87,14 @@ impl std::fmt::Debug for SessionKey {
     }
 }
 
+/// The token of a session this process stopped using, with its account. Its only use is
+/// ending that session at the server.
+#[cfg(feature = "auth")]
+pub(crate) struct RetiredSession {
+    pub(crate) token: Zeroizing<String>,
+    pub(crate) owner: String,
+}
+
 enum RequestAuthentication<'a> {
     CurrentSession,
     Bearer(&'a str),
@@ -90,6 +106,12 @@ pub struct Client {
     authentication: Mutex<Option<Authentication>>,
     generation: AtomicU64,
     events: EngineEvents,
+    /// The two-level lock of this app process. Never locked together with `authentication`.
+    lock: Mutex<LockFlow>,
+    /// One password check of the lock at a time: its wrong-try count is read, written and
+    /// restored around requests, and two overlapping tries would share one count.
+    #[cfg(feature = "auth")]
+    pub(crate) password_check: tokio::sync::Mutex<()>,
 }
 
 /// What a native client declares. The request builder attaches it only to the
@@ -107,6 +129,9 @@ pub enum ClientError {
     InvalidAuthentication,
     #[error("the application identifier is invalid")]
     InvalidAppId,
+    /// The vault is closed: only the strong unlock installs a session.
+    #[error("the vault is closed until the account password is proven")]
+    VaultClosed,
     #[error(transparent)]
     Transport(#[from] TransportError),
     #[error(transparent)]
@@ -133,6 +158,13 @@ impl Client {
             transport,
             authentication: Mutex::new(None),
             generation: AtomicU64::new(0),
+            lock: Mutex::new(LockFlow::at_start(StartFacts {
+                session_stored: false,
+                ask_password_at_start: Some(false),
+                vault_closed: Some(false),
+            })),
+            #[cfg(feature = "auth")]
+            password_check: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -175,18 +207,53 @@ impl Client {
         if token.is_empty() || expected_user.is_empty() {
             return Err(ClientError::InvalidAuthentication);
         }
-        let mut authentication = self.authentication.lock().map_err(|_| ClientError::State)?;
-        let generation = self.advance_generation();
-        *authentication = Some(Authentication {
-            token: Zeroizing::new(token),
-            expected_user,
-            master_key: None,
-            generation,
-        });
+        let generation = {
+            let mut authentication = self.authentication.lock().map_err(|_| ClientError::State)?;
+            let generation = self.advance_generation();
+            *authentication = Some(Authentication {
+                token: Zeroizing::new(token),
+                expected_user,
+                master_key: None,
+                generation,
+            });
+            generation
+        };
+        // These credentials carry no key and may belong to another account: an app that held
+        // the key no longer does, so its lock state must not keep describing the old session.
+        // A strong install that follows opens it again; nothing weaker does.
+        self.with_lock_flow(LockFlow::session_ended)?;
         Ok(generation)
     }
 
+    /// The lock state of this app process. A host that installs sessions itself with
+    /// [`Self::set_session`] and never starts the lock (`start_from_store`) reads `SignedOut`
+    /// here until a sign-in or unlock runs through core. A poisoned state reads as closed.
+    pub fn lock_state(&self) -> LockState {
+        self.lock
+            .lock()
+            .map(|flow| flow.state())
+            .unwrap_or(LockState::VaultClosed)
+    }
+
+    pub(crate) fn lock_password_path(&self) -> bool {
+        self.config.lock_password_path
+    }
+
+    pub(crate) fn with_lock_flow<R>(&self, step: impl FnOnce(&mut LockFlow) -> R) -> Result<R, ClientError> {
+        let mut flow = self.lock.lock().map_err(|_| ClientError::State)?;
+        Ok(step(&mut flow))
+    }
+
+    /// Installs a restored session. Refused while the vault is closed: a closed vault is
+    /// opened only by the strong unlock (`unlock_known_device`), never by a restore.
     pub fn set_session(&self, session: &Session) -> Result<u64, ClientError> {
+        if self.lock_state() == LockState::VaultClosed {
+            return Err(ClientError::VaultClosed);
+        }
+        self.install_session(session)
+    }
+
+    pub(crate) fn install_session(&self, session: &Session) -> Result<u64, ClientError> {
         let mut authentication = self.authentication.lock().map_err(|_| ClientError::State)?;
         let generation = self.advance_generation();
         let key_bytes = Zeroizing::new(*session.master_key().to_bytes());
@@ -250,11 +317,83 @@ impl Client {
         self.authenticated_owner()
     }
 
+    /// Drops the key and the token. An app that held the key (`Open`, `ScreenLocked`) is left
+    /// with a closed vault: the stored session is still there, and only the strong unlock
+    /// loads its key again. A sign-out follows with [`Self::sign_out_authentication`].
     pub(crate) fn clear_authentication(&self) -> Result<u64, ClientError> {
         *self.authentication.lock().map_err(|_| ClientError::State)? = None;
         let generation = self.advance_generation();
+        self.with_lock_flow(LockFlow::session_ended)?;
         self.events.emit(EngineEvent::WorkStopped);
         Ok(generation)
+    }
+
+    /// [`Self::clear_authentication`] for a sign-out: the app is signed out, not closed.
+    pub(crate) fn sign_out_authentication(&self) -> Result<u64, ClientError> {
+        let generation = self.clear_authentication();
+        self.with_lock_flow(LockFlow::signed_out)?;
+        generation
+    }
+
+    /// Takes the session out of this process for a vault lock: the key is wiped here, the
+    /// generation advances (every key copy handed out is stale and wiped when its holder
+    /// drops it), work stops. Returns the new generation and the retired token with its
+    /// account, which the caller may use for one request only: ending that session at the
+    /// server ([`Self::end_retired_session`]).
+    #[cfg(feature = "auth")]
+    pub(crate) fn drop_key_for_vault_lock(&self) -> Result<(u64, Option<RetiredSession>), ClientError> {
+        let taken = self.authentication.lock().map_err(|_| ClientError::State)?.take();
+        let retired = taken.map(|mut authentication| {
+            authentication.master_key = None;
+            RetiredSession {
+                token: std::mem::take(&mut authentication.token),
+                owner: std::mem::take(&mut authentication.expected_user),
+            }
+        });
+        let generation = self.advance_generation();
+        self.events.emit(EngineEvent::WorkStopped);
+        Ok((generation, retired))
+    }
+
+    /// Ends a session this process no longer uses (a vault lock's, or the one a strong unlock
+    /// replaced) with that session's own token. It is the only request a retired token makes,
+    /// and its refusal raises no event: a session that is already gone is the goal.
+    #[cfg(feature = "auth")]
+    pub(crate) async fn end_retired_session(&self, token: &str, owner: &str) -> Result<(), ClientError> {
+        let endpoint = beebeeb_api::routes::auth::logout();
+        let builder = self.request_builder().with_auth(token, owner);
+        let request = endpoint.build(&builder, &())?;
+        let answer = self.transport.send(request, endpoint.max_response_bytes()).await?;
+        endpoint.parse(answer).map(|_| ()).map_err(ClientError::Api)
+    }
+
+    /// The server no longer accepts the session a request of `generation` was sent with. The
+    /// event is the host's signal; the arrow is core's: an app that held the key drops it and
+    /// is left with a closed vault. A host that never ran a sign-in or the lock start through
+    /// core (`SignedOut`) is left as it is. The refusal of an older session never drops a
+    /// newer one: the generation is compared under the lock that guards the session.
+    ///
+    /// This closes the vault in this process only. The store is not at hand here, so the
+    /// host records it with `Client::session_ended` (core's own lock calls do it themselves);
+    /// until then a restart starts screen-locked and closes again at the first refusal.
+    fn session_expired(&self, generation: u64) {
+        if matches!(self.lock_state(), LockState::Open | LockState::ScreenLocked) {
+            let dropped = self.authentication.lock().is_ok_and(|mut authentication| {
+                let current = authentication
+                    .as_ref()
+                    .is_some_and(|authentication| authentication.generation == generation);
+                if current {
+                    *authentication = None;
+                }
+                current
+            });
+            if dropped {
+                self.advance_generation();
+                let _ = self.with_lock_flow(LockFlow::session_ended);
+                self.events.emit(EngineEvent::WorkStopped);
+            }
+        }
+        self.events.emit(EngineEvent::SessionExpired);
     }
 
     /// Invalidate in-flight work while retaining the current credentials long
@@ -454,7 +593,7 @@ impl Client {
             Err(ApiError::Server(error))
                 if error.status == 401 && carried_session_authentication && !endpoint.is_step_up() =>
             {
-                self.events.emit(EngineEvent::SessionExpired);
+                self.session_expired(captured_generation);
                 Err(ClientError::Api(ApiError::Server(error)))
             }
             result => result.map(|parsed| (parsed, headers)).map_err(ClientError::Api),
@@ -500,7 +639,7 @@ impl Client {
                 return Err(ClientError::Api(ApiError::Server(error)));
             }
             if error.status == 401 && carried_session_authentication {
-                self.events.emit(EngineEvent::SessionExpired);
+                self.session_expired(generation);
                 return Err(ClientError::Api(ApiError::Server(error)));
             }
         }
@@ -562,7 +701,7 @@ impl Client {
                 Err(ClientError::Api(ApiError::Server(error)))
             }
             Err(ApiError::Server(error)) if error.status == 401 => {
-                self.events.emit(EngineEvent::SessionExpired);
+                self.session_expired(captured_generation);
                 Err(ClientError::Api(ApiError::Server(error)))
             }
             result => result.map_err(ClientError::Api),
@@ -607,7 +746,7 @@ impl Client {
                 Err(ClientError::Api(ApiError::Server(error)))
             }
             Err(ApiError::Server(error)) if error.status == 401 => {
-                self.events.emit(EngineEvent::SessionExpired);
+                self.session_expired(captured_generation);
                 Err(ClientError::Api(ApiError::Server(error)))
             }
             result => result.map_err(ClientError::Api),
@@ -647,7 +786,7 @@ impl Client {
                     Err(ClientError::Api(ApiError::Server(error)))
                 }
                 Err(ApiError::Server(error)) if error.status == 401 && carried_session_authentication => {
-                    self.events.emit(EngineEvent::SessionExpired);
+                    self.session_expired(captured_generation);
                     Err(ClientError::Api(ApiError::Server(error)))
                 }
                 Err(error) => Err(ClientError::Api(error)),

@@ -16,6 +16,10 @@ pub enum LockedAction {
     MutateFiles,
     ChangeSettings,
     DeleteAccount,
+    /// Open the screen lock (`flows::lock`).
+    UnlockScreen,
+    /// Close the vault from any state that holds the key.
+    LockVault,
 }
 
 pub const fn locked_account_allows(action: LockedAction) -> bool {

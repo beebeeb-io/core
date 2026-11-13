@@ -42,6 +42,21 @@ uses exactly one account-key source: device approval, passkey plus email code, o
 email code. Account-key proof runs before the session is installed. The email ticket belongs to key
 proof, not the password request. Signup is web-only; native clients surface the typed web URL.
 
+A native app locks at two levels, and core holds the one state machine (`Client::lock_state`); a client
+never tracks "locked" beside it, never reads the key entry itself and never compares passwords itself.
+`Client::start_from_store` replaces any start-up restore: the app starts `ScreenLocked` (key loaded, work
+runs) or `VaultClosed` (the key entry is not read; work is stopped), never open. The screen lock opens
+with `unlock_screen_platform_verified` (only after the operating system's own user-verification prompt
+returned success for the current user) or `unlock_screen_with_password`; a closed vault opens only
+with `sign_in_on_device` (plus `submit_two_factor`) and `unlock_known_device`. While `ScreenLocked` a
+host shows no file name, account data or thumbnail, keeps the window out of screen capture, and
+refuses every action except unlock, lock vault and sign out (`screen_locked_allows`). After
+`SessionExpired` a host calls `Client::session_ended`. Both levels are locks on the app, not
+encryption of the device: copy says "locked" and "sync is paused", never "encrypted while locked",
+and never that the password protects the files or the key. The host's `SecretStore` must be
+this-device-only and non-roaming. The password path (`ClientConfig::lock_password_path`) stays off
+until the server it talks to has the password proof and reports the password counter.
+
 The secret store keeps `session.owner`, `session.master_key`, `session.api_url`, and
 `account.generation` as shared device state. Each app has `session.token.{app_id}`, registered in
 `session.app_ids`. The hardware UUID and identity secret are device-local and must never sync. Signing

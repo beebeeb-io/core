@@ -15,6 +15,36 @@ const HARDWARE_ID: &str = "device.hardware_id";
 const HARDWARE_IDENTITY_SECRET: &str = "device.hardware_identity_secret";
 const ACCOUNT_CHANGE: &str = "session.account_change";
 
+/// The screen-lock check record (`beebeeb_core::screen_lock`, 102 bytes).
+pub(crate) const LOCK_SCREEN_CHECK: &str = "lock.screen_check";
+/// The failed-try count and the time of the last failure.
+pub(crate) const LOCK_ATTEMPTS: &str = "lock.attempts";
+/// The "ask for my password when the app starts" setting.
+pub(crate) const LOCK_ASK_AT_START: &str = "lock.ask_password_at_start";
+/// The mark of a closed vault: it survives a quit and a reboot.
+pub(crate) const LOCK_VAULT_CLOSED: &str = "lock.vault_closed";
+/// The lock entries belong to the account on the device: they are removed with the device
+/// session, at both places core removes one, and kept by an app-only sign-out.
+const LOCK_ENTRIES: [&str; 4] = [LOCK_SCREEN_CHECK, LOCK_ATTEMPTS, LOCK_ASK_AT_START, LOCK_VAULT_CLOSED];
+
+const FLAG_ON: &[u8] = b"1";
+const FLAG_OFF: &[u8] = b"0";
+
+/// A stored lock flag. `None` means it could not be read (a store failure, or bytes that are
+/// neither flag value): the caller treats the vault as closed. An absent entry is `false`.
+pub(crate) fn read_lock_flag(store: &dyn SecretStore, name: &str) -> Option<bool> {
+    match store.get(name) {
+        Ok(None) => Some(false),
+        Ok(Some(value)) if value.as_slice() == FLAG_ON => Some(true),
+        Ok(Some(value)) if value.as_slice() == FLAG_OFF => Some(false),
+        Ok(Some(_)) | Err(_) => None,
+    }
+}
+
+pub(crate) fn write_lock_flag(store: &dyn SecretStore, name: &str, on: bool) -> Result<(), SecretError> {
+    store.set(name, if on { FLAG_ON } else { FLAG_OFF })
+}
+
 pub(crate) struct HardwareIdentity {
     id: String,
     secret: Option<Zeroizing<String>>,
@@ -301,7 +331,10 @@ impl Session {
             delete_app_tokens(store, &app_ids, None)?;
             app_ids.clear();
             store.delete(APP_IDS)?;
-            for name in [API_URL, MASTER_KEY, HARDWARE_IDENTITY_SECRET] {
+            for name in [API_URL, MASTER_KEY, HARDWARE_IDENTITY_SECRET]
+                .into_iter()
+                .chain(LOCK_ENTRIES)
+            {
                 store.delete(name)?;
             }
         } else if previous_owner.as_deref() == Some(self.owner.as_str())
@@ -341,7 +374,57 @@ impl Session {
 
     /// Loads a key only after its separate owner record matches the expected
     /// account. A mismatch leaves the stored account untouched.
+    ///
+    /// This is a restore path, so it obeys the vault lock: while the closed mark is set, or
+    /// cannot be read, it answers `SecretError::VaultClosed` without reading the key entry.
+    /// Only core's strong unlock (`Client::unlock_known_device`) loads the key of a closed
+    /// vault, and it clears the mark. (`Client::start_from_store` sets the mark when it starts
+    /// closed because of the start setting, so that setting holds for this path too.)
     pub fn load_for_user(
+        store: &dyn SecretStore,
+        expected_user: &str,
+        app_id: &str,
+    ) -> Result<Option<Self>, SecretError> {
+        if read_lock_flag(store, LOCK_VAULT_CLOSED) != Some(false) {
+            return Err(SecretError::VaultClosed);
+        }
+        Self::load_for_user_proven(store, expected_user, app_id)
+    }
+
+    /// The stored token of this app with its owner, without reading the key entry: for
+    /// ending that session at the server from a closed vault.
+    pub(crate) fn stored_token_for_app(
+        store: &dyn SecretStore,
+        app_id: &str,
+    ) -> Result<Option<(Zeroizing<String>, String)>, SecretError> {
+        let Some(owner) = Self::stored_owner_for_app(store, app_id)? else {
+            return Ok(None);
+        };
+        let Some(token) = store.get(&token_name(app_id)?)? else {
+            return Ok(None);
+        };
+        Ok(Some((Zeroizing::new(stored_string(&token)?), owner)))
+    }
+
+    /// The owner of the stored session this app is registered in, without reading the key
+    /// entry. `None`: no stored session, or none for this app.
+    pub(crate) fn stored_owner_for_app(store: &dyn SecretStore, app_id: &str) -> Result<Option<String>, SecretError> {
+        if !valid_app_id(app_id) {
+            return Err(SecretError::Corrupt);
+        }
+        let Some(owner) = Self::stored_owner(store)? else {
+            return Ok(None);
+        };
+        Ok(stored_app_ids(store)?
+            .iter()
+            .any(|value| value == app_id)
+            .then_some(owner))
+    }
+
+    /// [`Self::load_for_user`] without the vault-lock check: for core's own paths that hold a
+    /// proof stronger than the lock (the strong unlock, a change made in an open app, a start
+    /// the lock rule allowed).
+    pub(crate) fn load_for_user_proven(
         store: &dyn SecretStore,
         expected_user: &str,
         app_id: &str,
@@ -466,7 +549,8 @@ fn purge_device_session(store: &dyn SecretStore, extra_app_id: Option<&str>) -> 
     };
     let mut failed = registry_error.is_some() || store.delete(OWNER).is_err();
     failed |= delete_app_tokens(store, &app_ids, extra_app_id).is_err();
-    for name in [API_URL, MASTER_KEY, APP_IDS, HARDWARE_IDENTITY_SECRET, ACCOUNT_CHANGE] {
+    let session_entries = [API_URL, MASTER_KEY, APP_IDS, HARDWARE_IDENTITY_SECRET, ACCOUNT_CHANGE];
+    for name in session_entries.into_iter().chain(LOCK_ENTRIES) {
         failed |= store.delete(name).is_err();
     }
     if failed {

@@ -18,6 +18,7 @@ use beebeeb_core::{
         client_registration_start,
     },
     passkey_seal::{PasskeySealedMasterKey, open_master_key, seal_master_key},
+    screen_lock::PendingScreenCheck,
 };
 use zeroize::Zeroizing;
 
@@ -25,6 +26,8 @@ use crate::{Client, ClientError, SecretError, SecretStore, Session, session::Har
 
 mod account;
 mod install;
+mod lock;
+mod lock_password;
 mod new_device;
 mod passkey;
 mod recovery;
@@ -32,6 +35,8 @@ mod sign_in;
 mod signup;
 
 pub use account::*;
+pub use lock::*;
+pub use lock_password::ScreenUnlock;
 pub use new_device::*;
 pub use passkey::*;
 pub use recovery::*;
@@ -128,6 +133,8 @@ pub struct TwoFactorChallenge {
     pub(crate) canonical_email: String,
     pub(crate) legacy_upgrade_required: bool,
     pub(crate) hardware_id: Option<String>,
+    /// The stretched password of this sign-in, waiting for the owner it is sealed to.
+    pub(crate) screen_check: Option<PendingScreenCheck>,
 }
 
 impl std::fmt::Debug for TwoFactorChallenge {
@@ -137,6 +144,7 @@ impl std::fmt::Debug for TwoFactorChallenge {
             .field("canonical_email", &self.canonical_email)
             .field("legacy_upgrade_required", &self.legacy_upgrade_required)
             .field("hardware_id", &self.hardware_id)
+            .field("screen_check", &self.screen_check.as_ref().map(|_| "[REDACTED]"))
             .finish()
     }
 }
@@ -152,6 +160,9 @@ pub struct PasswordAccepted {
     pub(crate) authenticator_required: bool,
     pub(crate) hardware_id: Option<String>,
     pub(crate) hardware_identity_secret: Option<Zeroizing<String>>,
+    /// The stretched password of this sign-in. It becomes the screen-lock check record in
+    /// the step that saves the installed session, never before.
+    pub(crate) screen_check: Option<PendingScreenCheck>,
 }
 
 impl PasswordAccepted {
@@ -192,6 +203,7 @@ impl std::fmt::Debug for PasswordAccepted {
                 "hardware_identity_secret",
                 &self.hardware_identity_secret.as_ref().map(|_| "[REDACTED]"),
             )
+            .field("screen_check", &self.screen_check.as_ref().map(|_| "[REDACTED]"))
             .finish()
     }
 }
@@ -299,6 +311,23 @@ pub enum AuthError {
     RecoveryEmailVerificationRequired,
     #[error("the server recovery answer does not identify the recovered account")]
     RecoveryAccountIdentityMissing,
+    /// The password path of the screen lock is not enabled for this client
+    /// (`ClientConfig::lock_password_path`): nothing was checked and nothing was counted.
+    #[error("the password check of the screen lock is not available")]
+    PasswordCheckUnavailable,
+    /// The local check could not run (Argon2id could not allocate its memory). Nothing was
+    /// counted; fall back to platform verification or the online check.
+    #[error("the local password check is unavailable")]
+    LocalCheckUnavailable,
+    /// Too many wrong tries: no password is checked before the wait is over.
+    #[error("too many wrong tries: wait before the next one")]
+    PasswordTryWait { wait_ms: u64 },
+    /// The server's own limit on password checks. Not a wrong try.
+    #[error("the server limits password checks: wait before the next one")]
+    PasswordCheckLimited { wait_ms: Option<u64> },
+    /// The server cannot be reached, and this step needs the password proven to the server.
+    #[error("the server cannot be reached to prove the password")]
+    PasswordProofOffline,
 }
 
 impl From<ClientError> for AuthError {
@@ -381,6 +410,7 @@ pub(crate) fn sign_in_state(
             canonical_email,
             legacy_upgrade_required,
             hardware_id,
+            screen_check: None,
         }));
     }
     let session_token = response.session_token.take().ok_or(AuthError::InvalidAnswer {
@@ -417,6 +447,7 @@ pub(crate) fn sign_in_state(
         authenticator_required: false,
         hardware_id,
         hardware_identity_secret: None,
+        screen_check: None,
     }))
 }
 

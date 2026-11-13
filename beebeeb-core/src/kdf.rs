@@ -79,9 +79,9 @@ const MIN_SALT_LEN: usize = 16;
 /// `derive_master_key` is a prod-callable export (web via WASM
 /// `derive_master_key`, mobile via UniFFI `deriveMasterKey`), so any weakening
 /// here weakens a real client-reachable master-key derivation.
-const MK_MEMORY_KIB: u32 = 256 * 1024; // 256 MiB
-const MK_ITERATIONS: u32 = 4;
-const MK_PARALLELISM: u32 = 2;
+pub(crate) const MK_MEMORY_KIB: u32 = 256 * 1024; // 256 MiB
+pub(crate) const MK_ITERATIONS: u32 = 4;
+pub(crate) const MK_PARALLELISM: u32 = 2;
 
 /// Derive a master key from a user password and salt using Argon2id.
 ///
@@ -112,7 +112,7 @@ pub fn derive_master_key(password: &str, salt: &[u8]) -> Result<MasterKey, CoreE
     Ok(MasterKey::from_zeroizing(output))
 }
 
-fn allocate_argon_memory(block_count: usize) -> Result<Zeroizing<Vec<argon2::Block>>, CoreError> {
+pub(crate) fn allocate_argon_memory(block_count: usize) -> Result<Zeroizing<Vec<argon2::Block>>, CoreError> {
     let mut memory = Vec::new();
     memory
         .try_reserve_exact(block_count)

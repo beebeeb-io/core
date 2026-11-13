@@ -279,6 +279,47 @@ pub fn client_login_finish(
     })
 }
 
+/// Why [`client_login_finish_judged`] produced no proof.
+#[derive(Debug)]
+pub enum LoginFinishError {
+    /// The server's answer was opened and does not fit this password: a wrong password, or
+    /// a record made for another one. The only outcome that judges the password.
+    WrongPassword,
+    /// Nothing was judged: an unsupported key-stretch version, a malformed message, or the
+    /// key stretch itself could not run (it could not allocate its memory).
+    NotJudged(CoreError),
+}
+
+/// [`client_login_finish`] for a caller that counts wrong passwords: it tells a judged wrong
+/// password apart from every failure that says nothing about the password.
+pub fn client_login_finish_judged(
+    client_state_bytes: &[u8],
+    password: &[u8],
+    credential_response_bytes: &[u8],
+    ksf_version: u32,
+) -> Result<ClientLoginFinishResult, LoginFinishError> {
+    let not_judged = |text: String| LoginFinishError::NotJudged(CoreError::Opaque(text));
+    if !(MIN_KSF_VERSION..=CURRENT_KSF_VERSION).contains(&ksf_version) {
+        return Err(not_judged(format!("unsupported OPAQUE KSF version {ksf_version}")));
+    }
+    let mut rng = OsRng;
+    let state = ClientLogin::<BeebeebCs>::deserialize(client_state_bytes)
+        .map_err(|e| not_judged(format!("invalid client login state: {e}")))?;
+    let response = CredentialResponse::deserialize(credential_response_bytes)
+        .map_err(|e| not_judged(format!("invalid credential response: {e}")))?;
+    let result = state
+        .finish(&mut rng, password, response, ClientLoginFinishParameters::default())
+        .map_err(|error| match error {
+            opaque_ke::errors::ProtocolError::InvalidLoginError => LoginFinishError::WrongPassword,
+            other => not_judged(format!("login finish failed: {other}")),
+        })?;
+    Ok(ClientLoginFinishResult {
+        message: result.message.serialize().to_vec(),
+        session_key: Zeroizing::new(result.session_key.to_vec()),
+        export_key: Zeroizing::new(result.export_key.to_vec()),
+    })
+}
+
 /// Finish one login for a known legacy v0 account so it can immediately
 /// re-register under [`CURRENT_KSF_VERSION`].
 ///
@@ -475,6 +516,47 @@ mod tests {
         let server_login2 = server_login_start(&server_setup, &password_file, &login_start2.message, username).unwrap();
         let wrong_ksf = client_login_finish(&login_start2.state, password, &server_login2.message, 1);
         assert!(wrong_ksf.is_err(), "v0 password file must NOT finish under the v1 KSF");
+    }
+
+    /// A caller that counts wrong passwords must not count a finish that judged nothing.
+    #[test]
+    fn a_judged_finish_tells_a_wrong_password_from_a_finish_that_could_not_run() {
+        let server_setup = create_server_setup();
+        let (password, username) = (b"judged-finish-password".as_slice(), b"judged@beebeeb.io".as_slice());
+        let reg = client_registration_start(password).unwrap();
+        let reg_response = server_registration_start(&server_setup, &reg.message, username).unwrap();
+        let upload = client_registration_finish(&reg.state, password, &reg_response).unwrap();
+        let password_file = server_registration_finish(&upload).unwrap();
+        let login = |typed: &[u8]| {
+            let start = client_login_start(typed).unwrap();
+            let answer = server_login_start(&server_setup, &password_file, &start.message, username).unwrap();
+            (start.state, answer)
+        };
+
+        let (state, answer) = login(password);
+        let finish = client_login_finish_judged(&state, password, &answer.message, CURRENT_KSF_VERSION).unwrap();
+        assert!(server_login_finish(&answer.state, &finish.message).is_ok());
+
+        let (state, answer) = login(b"another password");
+        assert!(matches!(
+            client_login_finish_judged(&state, b"another password", &answer.message, CURRENT_KSF_VERSION),
+            Err(LoginFinishError::WrongPassword)
+        ));
+        // Nothing below ran the key stretch: none of it says anything about the password.
+        for version in [0, CURRENT_KSF_VERSION + 1] {
+            assert!(matches!(
+                client_login_finish_judged(&state, password, &answer.message, version),
+                Err(LoginFinishError::NotJudged(_))
+            ));
+        }
+        assert!(matches!(
+            client_login_finish_judged(&state, password, b"not a credential response", CURRENT_KSF_VERSION),
+            Err(LoginFinishError::NotJudged(_))
+        ));
+        assert!(matches!(
+            client_login_finish_judged(b"not a state", password, &answer.message, CURRENT_KSF_VERSION),
+            Err(LoginFinishError::NotJudged(_))
+        ));
     }
 
     #[test]

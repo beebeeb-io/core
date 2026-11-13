@@ -19,17 +19,30 @@ impl Client {
         store: &dyn SecretStore,
     ) -> Result<SignInChallenge, AuthError> {
         let hardware = HardwareIdentity::load_or_create(store)?;
-        self.sign_in_with_options(
-            email,
-            &password,
-            legacy.as_ref(),
-            SignInOptions {
-                hardware_id: Some(hardware.id().to_owned()),
-                hardware_identity_secret: hardware.secret().map(str::to_owned),
-                request_password_proof: false,
-            },
-        )
-        .await
+        let mut challenge = self
+            .sign_in_with_options(
+                email,
+                &password,
+                legacy.as_ref(),
+                SignInOptions {
+                    hardware_id: Some(hardware.id().to_owned()),
+                    hardware_identity_secret: hardware.secret().map(str::to_owned),
+                    request_password_proof: false,
+                },
+            )
+            .await?;
+        // The server has just accepted this exact password: stretch it for the screen-lock
+        // check record while it is still in hand. It is sealed and saved with the installed
+        // session, never before. A stretch that cannot run means no record, not a failed sign-in.
+        if self.lock_password_path() {
+            let pending = beebeeb_core::screen_lock::stretch(&password).ok();
+            match &mut challenge {
+                SignInChallenge::TwoFactor(state) => state.screen_check = pending,
+                SignInChallenge::PasswordAccepted(state) => state.screen_check = pending,
+                SignInChallenge::RecoveryPasswordProven(_) => {}
+            }
+        }
+        Ok(challenge)
     }
 
     /// Proves the current password for recovery without creating a login
@@ -166,6 +179,7 @@ impl Client {
             authenticator_required: true,
             hardware_id: challenge.hardware_id,
             hardware_identity_secret: None,
+            screen_check: challenge.screen_check,
         })
     }
 

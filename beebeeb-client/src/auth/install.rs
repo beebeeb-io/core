@@ -6,9 +6,21 @@ impl Client {
     }
 
     pub async fn sign_out_this_app(&self, store: &dyn SecretStore) -> Result<(), AuthError> {
-        let network = self.execute_retired_logout().await.map(|_| ());
+        // A closed vault holds no installed session in memory: its stored session is ended
+        // with its own token, and so are credentials a sign-in left in memory on the way to
+        // an unlock. A person who cannot unlock can still leave.
+        let network = if self.lock_state() == LockState::VaultClosed {
+            let in_memory = match self.authenticated_owner() {
+                Ok(_) => self.execute_retired_logout().await.map(|_| ()).map_err(AuthError::from),
+                Err(_) => Ok(()),
+            };
+            let stored = self.end_stored_session(store).await;
+            in_memory.and(stored)
+        } else {
+            self.execute_retired_logout().await.map(|_| ()).map_err(Into::into)
+        };
         let stored = Session::sign_out_app(store, self.app_id());
-        let local = self.clear_authentication().map(|_| ());
+        let local = self.sign_out_authentication().map(|_| ());
         network?;
         stored?;
         local?;
@@ -23,8 +35,11 @@ impl Client {
         if Session::stored_owner(store)?.as_deref() != Some(accepted.owner.as_str()) {
             return Err(AuthError::AnotherAccountOnDevice);
         }
+        // The strong unlock is the one path that loads the key of a closed vault: the server
+        // accepted the password (and the authenticator code when the account has one), and
+        // the key is proven for the new session before anything is installed.
         let stored =
-            Session::load_for_user(store, &accepted.owner, self.app_id())?.ok_or(AuthError::AccountOwnership)?;
+            Session::load_for_user_proven(store, &accepted.owner, self.app_id())?.ok_or(AuthError::AccountOwnership)?;
         self.prove_key_for_sign_in(&mut accepted, stored.master_key(), None)
             .await?;
         if let Err(error) = self
@@ -34,11 +49,19 @@ impl Client {
             let _ = self.clear_authentication();
             return Err(error);
         }
-        let generation = self.generation().checked_add(1).ok_or(AuthError::MalformedAnswer)?;
+        let proven_at = self.generation();
+        let record = self.seal_screen_check(&mut accepted).await;
+        let generation = proven_at.checked_add(1).ok_or(AuthError::MalformedAnswer)?;
         let refreshed = stored.refresh(accepted.session_token.to_string(), generation)?;
-        refreshed.save(store, self.app_id())?;
-        persist_hardware_identity(store, &accepted)?;
-        self.set_session(&refreshed)?;
+        if let Err(error) = self.save_strong_install(&refreshed, &accepted, store, record, false, proven_at) {
+            let _ = self.clear_authentication();
+            return Err(error);
+        }
+        // The session this one replaces is ended at the server, so a closed-and-opened vault
+        // leaves no live session behind.
+        if stored.token() != refreshed.token() {
+            self.end_session_best_effort(stored.token(), &accepted.owner).await;
+        }
         Ok(InstalledSession {
             owner: accepted.owner,
             generation,
@@ -94,7 +117,9 @@ impl Client {
             let _ = self.clear_authentication();
             return Err(error);
         }
-        let generation = self.generation().checked_add(1).ok_or(AuthError::MalformedAnswer)?;
+        let proven_at = self.generation();
+        let record = self.seal_screen_check(&mut accepted).await;
+        let generation = proven_at.checked_add(1).ok_or(AuthError::MalformedAnswer)?;
         let session = Session::from_authenticated(
             api_url,
             accepted.session_token.to_string(),
@@ -102,17 +127,43 @@ impl Client {
             master_key,
             generation,
         )?;
+        if let Err(error) = self.save_strong_install(&session, &accepted, store, record, replace_account, proven_at) {
+            let _ = self.clear_authentication();
+            return Err(error);
+        }
+        Ok(InstalledSession {
+            owner: accepted.owner,
+            generation,
+        })
+    }
+
+    /// Saves an installed session and, in the same step, the lock's part of it: the closed
+    /// mark is cleared, the check record of the password that was just proven is stored, and
+    /// the app is open. Nothing before this point wrote any of them.
+    fn save_strong_install(
+        &self,
+        session: &Session,
+        accepted: &PasswordAccepted,
+        store: &dyn SecretStore,
+        record: Option<beebeeb_core::screen_lock::ScreenCheckRecord>,
+        replace_account: bool,
+        proven_at: u64,
+    ) -> Result<(), AuthError> {
+        // The install belongs to the session that was proven: a lock or a sign-out that
+        // landed while the proof was on its way is not undone by a late install.
+        if self.generation() != proven_at {
+            return Err(ClientError::StaleAccount.into());
+        }
         if replace_account {
             session.save_replacing(store, self.app_id())?;
         } else {
             session.save(store, self.app_id())?;
         }
-        persist_hardware_identity(store, &accepted)?;
-        self.set_session(&session)?;
-        Ok(InstalledSession {
-            owner: accepted.owner,
-            generation,
-        })
+        persist_hardware_identity(store, accepted)?;
+        self.finish_strong_install(store, record)?;
+        self.install_session(session)?;
+        self.with_lock_flow(beebeeb_api::flows::LockFlow::known_device_unlocked)?
+            .map_err(|error| lock::refused("session installation", error))
     }
 
     async fn report_installed_device(

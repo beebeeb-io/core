@@ -515,7 +515,7 @@ impl Client {
         self.remove_device(device_id).await?;
         let ended = self.end_session_after_device_removal().await;
         let generation = Session::sign_out_device(store)?;
-        self.clear_authentication()?;
+        self.sign_out_authentication()?;
         ended?;
         Ok(generation)
     }

@@ -50,4 +50,9 @@ cmp test-vectors/name_clash_v1.json "$vector_tmp/test-vectors/name_clash_v1.json
 python3 "$vector_tmp/test-vectors/tools/gen_case_fold_table.py" "$vector_tmp/case_fold.rs"
 cmp beebeeb-core/src/name_tag/case_fold.rs "$vector_tmp/case_fold.rs"
 
+# The screen-lock check record (two-level lock): an independent Argon2id / HKDF / AES-GCM
+# implementation must write the committed file byte for byte, and its check must be able to go red.
+python3 "$vector_tmp/test-vectors/tools/make_screen_lock_vectors.py" --check test-vectors/screen_lock.json
+python3 "$vector_tmp/test-vectors/tools/make_screen_lock_vectors.py" --self-test test-vectors/screen_lock.json
+
 echo "all test-vector Python tools passed; generated files are unchanged"
