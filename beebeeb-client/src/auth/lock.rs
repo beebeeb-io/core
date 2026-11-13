@@ -115,11 +115,11 @@ impl Client {
             return Err(refused("vault lock", FlowError::NotReady));
         }
         let mark_stored = write_lock_flag(store, LOCK_VAULT_CLOSED, true).is_ok();
-        let (generation, token) = self.drop_key_for_vault_lock()?;
+        let (generation, retired) = self.drop_key_for_vault_lock()?;
         self.with_lock_flow(|flow| flow.lock(LockLevel::Vault))?
             .map_err(|error| refused("vault lock", error))?;
-        if let Some(token) = token {
-            self.end_session_best_effort(&token).await;
+        if let Some((token, owner)) = retired {
+            self.end_session_best_effort(&token, &owner).await;
         }
         Ok(VaultLocked {
             generation,
@@ -166,9 +166,9 @@ impl Client {
         }
     }
 
-    pub(super) async fn end_session_best_effort(&self, token: &str) {
+    pub(super) async fn end_session_best_effort(&self, token: &str, owner: &str) {
         // The answer does not matter: a session that is already gone is the goal.
-        let _ = self.execute_bearer(&auth::logout(), &(), token).await;
+        let _ = self.end_retired_session(token, owner).await;
     }
 
     /// Seals the sign-in's stretched password for the account that was just accepted, with

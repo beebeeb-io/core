@@ -47,7 +47,7 @@ impl Client {
         // The session this one replaces is ended at the server, so a closed-and-opened vault
         // leaves no live session behind.
         if stored.token() != refreshed.token() {
-            self.end_session_best_effort(stored.token()).await;
+            self.end_session_best_effort(stored.token(), &accepted.owner).await;
         }
         Ok(InstalledSession {
             owner: accepted.owner,

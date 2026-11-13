@@ -316,18 +316,34 @@ impl Client {
 
     /// Takes the session out of this process for a vault lock: the key is wiped here, the
     /// generation advances (every key copy handed out is stale and wiped when its holder
-    /// drops it), work stops. Returns the new generation and the token, which the caller may
-    /// use for one request only: ending that session at the server.
+    /// drops it), work stops. Returns the new generation and the retired token with its
+    /// account, which the caller may use for one request only: ending that session at the
+    /// server ([`Self::end_retired_session`]).
     #[cfg(feature = "auth")]
-    pub(crate) fn drop_key_for_vault_lock(&self) -> Result<(u64, Option<Zeroizing<String>>), ClientError> {
+    pub(crate) fn drop_key_for_vault_lock(&self) -> Result<(u64, Option<(Zeroizing<String>, String)>), ClientError> {
         let taken = self.authentication.lock().map_err(|_| ClientError::State)?.take();
-        let token = taken.map(|mut authentication| {
+        let retired = taken.map(|mut authentication| {
             authentication.master_key = None;
-            std::mem::take(&mut authentication.token)
+            (
+                std::mem::take(&mut authentication.token),
+                std::mem::take(&mut authentication.expected_user),
+            )
         });
         let generation = self.advance_generation();
         self.events.emit(EngineEvent::WorkStopped);
-        Ok((generation, token))
+        Ok((generation, retired))
+    }
+
+    /// Ends a session this process no longer uses (a vault lock's, or the one a strong unlock
+    /// replaced) with that session's own token. It is the only request a retired token makes,
+    /// and its refusal raises no event: a session that is already gone is the goal.
+    #[cfg(feature = "auth")]
+    pub(crate) async fn end_retired_session(&self, token: &str, owner: &str) -> Result<(), ClientError> {
+        let endpoint = beebeeb_api::routes::auth::logout();
+        let builder = self.request_builder().with_auth(token, owner);
+        let request = endpoint.build(&builder, &())?;
+        let answer = self.transport.send(request, endpoint.max_response_bytes()).await?;
+        endpoint.parse(answer).map(|_| ()).map_err(ClientError::Api)
     }
 
     /// The server no longer accepts this session. The event is the host's signal; the arrow

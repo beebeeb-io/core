@@ -32,6 +32,8 @@ use crate::{
 
 mod account;
 mod device_link;
+mod lock;
+mod lock_password;
 mod recovery;
 mod session;
 mod sign_in;

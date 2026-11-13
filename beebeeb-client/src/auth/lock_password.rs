@@ -247,6 +247,8 @@ impl Client {
                     let _ = store.delete(LOCK_SCREEN_CHECK);
                 }
             }
+            // An ended session already deleted the count with the record.
+            Ok(Judgement::SessionEnded) => {}
             Ok(_) | Err(_) => {
                 let _ = store_attempts(store, &before);
             }
