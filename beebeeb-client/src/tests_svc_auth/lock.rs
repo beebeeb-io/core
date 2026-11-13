@@ -739,7 +739,7 @@ async fn an_app_sign_out_leaves_the_lock_signed_out() {
     assert_eq!(lock_entries_left(&store), 4);
 }
 
-async fn accepted_password(client: &Client, store: &dyn SecretStore) -> PasswordAccepted {
+pub(super) async fn accepted_password(client: &Client, store: &dyn SecretStore) -> PasswordAccepted {
     match client
         .sign_in_on_device(EMAIL, password(PASSWORD), None, store)
         .await
