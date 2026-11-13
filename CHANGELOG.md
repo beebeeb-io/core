@@ -26,10 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and backup keep running and answer `ClientError::VaultClosed` on a closed vault. New:
   `flows::{Call, CallRefused, call_may_run}`, `Client::check_call`, and four `LockedAction` variants
   (`ViewFiles`, `ShareFiles`, `ApproveDevice`, `UseKey`). A host that never starts the lock through core
-  is refused nothing.
+  is refused nothing. `UploadService::enqueue` is a person's call; a host's sync queues with the new
+  `UploadService::enqueue_work`. `change_password` answers `ClientError::VaultClosed` on a closed vault.
+  The UniFFI error map reports `VaultClosed` as `SessionExpired`.
 - A password change and the strong installs (`unlock_known_device`, `install_new_device`,
   `install_recovered_session`) install only for the session they proved: a vault lock or a sign-out
-  that lands before the install wins and the call answers `StaleAccount`.
+  that lands after their credentials were set (for a recovery: after its install began) wins and the
+  call answers `StaleAccount`.
 - After an accepted online password check the screen lock's record is always made again; a password
   counter that changed at the server deletes the record and keeps the wrong-try count.
 - `Session::load_for_user` answers the new `SecretError::VaultClosed` while a vault is closed, and

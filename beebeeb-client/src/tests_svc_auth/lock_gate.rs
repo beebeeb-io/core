@@ -121,6 +121,10 @@ async fn a_locked_screen_refuses_every_call_a_person_drives_and_sends_nothing() 
         "downloads.read_range" => downloads.read_range(&file, 0..1).await,
         "downloads.range_reader" => downloads.range_reader(&file),
         "uploads.list" => uploads.list(),
+        "uploads.enqueue" => uploads.enqueue(
+            crate::uploads::UploadRequest::new(root.path().join("picked.txt"), "picked.txt", None, None),
+            1,
+        ),
     );
     // Sharing and contacts.
     refused!(count:
@@ -154,7 +158,7 @@ async fn a_locked_screen_refuses_every_call_a_person_drives_and_sends_nothing() 
         "list_account_sessions" => client.list_account_sessions().await,
         "revoke_account_session" => client.revoke_account_session("session-1").await,
     );
-    assert_eq!(count, 49, "every call above was refused");
+    assert_eq!(count, 50, "every call above was refused");
     assert_eq!(server.requests().len(), 0, "a refused call sends nothing");
     assert_eq!(
         client.lock_state(),
@@ -221,6 +225,20 @@ async fn the_work_runs_on_a_locked_screen_and_stops_on_a_closed_vault() {
     assert!(matches!(
         uploads.next_transfers(1, NetworkKind::WiFi, 1).await,
         Err(UploadServiceError::Client(ClientError::VaultClosed))
+    ));
+    assert!(matches!(
+        uploads.enqueue_work(
+            crate::uploads::UploadRequest::new(root.path().join("synced.txt"), "synced.txt", None, None),
+            1,
+        ),
+        Err(UploadServiceError::Client(ClientError::VaultClosed))
+    ));
+    // A password change is made from an open app: a closed vault holds no key to keep.
+    assert!(matches!(
+        client
+            .change_password(password(PASSWORD), password("another password 2026"), &store)
+            .await,
+        Err(AuthError::Client(ClientError::VaultClosed))
     ));
     assert_eq!(server.requests().len(), asked);
     assert!(matches!(client.check_call(Call::Work), Err(ClientError::VaultClosed)));
@@ -374,7 +392,7 @@ fn every_public_call_asks_the_lock_or_is_listed_as_ungated() {
         for block in source.split("\nimpl ").skip(1) {
             let header = block.lines().next().unwrap_or_default();
             let owner = header.trim_end_matches(" {");
-            if !(owner == "Client" || owner.ends_with("Service")) {
+            if !(owner == "Client" || owner.ends_with("Service") || owner == "ServiceCoordinator") {
                 continue;
             }
             let block = block.split("\n}\n").next().unwrap_or_default();
@@ -402,7 +420,7 @@ fn every_public_call_asks_the_lock_or_is_listed_as_ungated() {
             "{file}: the public functions that do not ask the lock"
         );
     }
-    assert_eq!(gated, 82, "the public functions that ask the lock");
+    assert_eq!(gated, 90, "the public functions that ask the lock");
 }
 
 /// Every `pub fn` and `pub async fn` of one source file, free or in an `impl`, with its body.
@@ -484,7 +502,7 @@ fn no_public_entry_point_reaches_the_ungated_internals_without_asking_the_lock()
     assert!(files.len() >= 40, "{} source files", files.len());
     assert!(walked >= 300, "{walked} public functions");
     assert_eq!(
-        asking, 38,
+        asking, 41,
         "public entry points that reach an ungated internal and ask the lock"
     );
 }

@@ -117,6 +117,18 @@ fn sign_out(client: &Arc<Client>, store: &Arc<MemorySecretStore>) -> impl FnOnce
     move || on_another_thread(move || async move { client.sign_out_this_app(store.as_ref()).await.unwrap() })
 }
 
+/// The local half of a sign-out of the whole device, as `sign_out_whole_device` and the
+/// coordinator run it: the process first, then the purge of the store.
+fn device_sign_out(client: &Arc<Client>, store: &Arc<MemorySecretStore>) -> impl FnOnce() + Send + 'static {
+    let (client, store) = (client.clone(), store.clone());
+    move || {
+        on_another_thread(move || async move {
+            client.sign_out_device_authentication().unwrap();
+            Session::sign_out_device(store.as_ref()).unwrap();
+        })
+    }
+}
+
 /// An open app with a stored session and an old check record.
 fn open_app(server: &Arc<LockServer>) -> (Arc<Client>, Arc<MemorySecretStore>) {
     let store = Arc::new(store_with_session());
@@ -196,6 +208,36 @@ async fn a_sign_out_in_the_tail_of_a_password_change_wins() {
         "the session the change saved is removed again"
     );
     assert_eq!(Session::stored_owner_for_app(store.as_ref(), "test-app").unwrap(), None);
+}
+
+/// A sign-out of the whole device purges the store, and a change that was saving its new
+/// session leaves nothing behind: no owner, no key entry, no token, no lock entry.
+#[tokio::test]
+async fn a_device_sign_out_in_the_tail_of_a_password_change_leaves_the_store_purged() {
+    for at in [Write::Set(TOKEN_ENTRY), Write::Delete(LOCK_SCREEN_CHECK)] {
+        let server = LockServer::new();
+        let (client, store) = open_app(&server);
+        let racing = RacingStore::new(store.clone(), at, device_sign_out(&client, &store));
+
+        stale(
+            client
+                .change_password(password(PASSWORD), password(NEW_PASSWORD), &racing)
+                .await,
+        );
+        assert!(racing.landed());
+        assert_eq!(client.lock_state(), LockState::SignedOut);
+        assert!(client.held_key().is_err());
+        for name in [
+            "session.owner",
+            KEY_ENTRY,
+            TOKEN_ENTRY,
+            "session.api_url",
+            LOCK_SCREEN_CHECK,
+            LOCK_VAULT_CLOSED,
+        ] {
+            assert_eq!(entry(store.as_ref(), name), None, "{name}");
+        }
+    }
 }
 
 /// The strong unlock compares and installs in one step: a vault lock that lands in its save
