@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     backup, chunk_stream, cli_auth, client_meta, device_link, encrypt, file_request, folder_key, item_id, kdf,
-    key_proof, passkey, passkey_seal, product_keys, recovery, transfer,
+    key_proof, passkey, passkey_seal, product_keys, recovery, screen_lock, transfer,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,7 +36,8 @@ enum Slot {
     /// AES-256-GCM associated data = label || fields, under a key derived
     /// elsewhere (never an HKDF `info`).
     Aad,
-    /// An HKDF or Argon2id salt, or a SHA-256 domain prefix (never an HKDF `info`).
+    /// An HKDF or Argon2id salt, Argon2id associated data, or a SHA-256 domain prefix (never an
+    /// HKDF `info`).
     Salt,
     /// A protocol identity/context string outside HKDF, AEAD and hashing.
     ProtocolContext,
@@ -252,6 +253,25 @@ const LABELS: &[Label] = &[
         Slot::Aad,
         "AAD under the passkey-derived wrapping key",
     ),
+    // screen-lock check record
+    label(
+        "screen_lock::SCREEN_LOCK_STRETCH_LABEL",
+        screen_lock::SCREEN_LOCK_STRETCH_LABEL,
+        Slot::Salt,
+        "Argon2id associated data over the account password (the stretch's own domain)",
+    ),
+    label(
+        "screen_lock::SCREEN_LOCK_KEY_INFO",
+        screen_lock::SCREEN_LOCK_KEY_INFO,
+        Slot::Info,
+        "the screen-lock Argon2id stretch",
+    ),
+    label(
+        "screen_lock::SCREEN_LOCK_AAD_DOMAIN",
+        screen_lock::SCREEN_LOCK_AAD_DOMAIN,
+        Slot::Aad,
+        "AAD under the screen-lock check key; || owner id || record header",
+    ),
     // device link
     label(
         "device_link::FINGERPRINT_DOMAIN",
@@ -428,6 +448,18 @@ const CROSS_SLOT_PREFIX_PAIRS: &[(&str, &str, &str)] = &[
          info that derives that key from passkey PRF output",
     ),
     (
+        "screen_lock::SCREEN_LOCK_AAD_DOMAIN",
+        "screen_lock::SCREEN_LOCK_KEY_INFO",
+        "the domain is AES-GCM associated data under the screen-lock check key; the longer label is only the HKDF \
+         info that derives that key from the Argon2id stretch",
+    ),
+    (
+        "screen_lock::SCREEN_LOCK_AAD_DOMAIN",
+        "screen_lock::SCREEN_LOCK_STRETCH_LABEL",
+        "the domain is AES-GCM associated data under the screen-lock check key; the longer label is only the \
+         Argon2id associated data of the stretch that key comes from",
+    ),
+    (
         "device_link::PAKE_AAD_DOMAIN",
         "device_link::PAKE_KEY_INFO",
         "the domain is AES-GCM associated data under the typed-code payload key; the longer label is only the HKDF \
@@ -454,7 +486,7 @@ fn find(name: &str) -> &'static Label {
 
 #[test]
 fn every_label_is_distinct_and_no_id_carrying_info_is_a_prefix_of_another_info() {
-    assert_eq!(LABELS.len(), 52, "a label was added or removed: review the slot rules");
+    assert_eq!(LABELS.len(), 55, "a label was added or removed: review the slot rules");
     for (i, a) in LABELS.iter().enumerate() {
         assert!(!a.with.is_empty());
         for b in &LABELS[i + 1..] {

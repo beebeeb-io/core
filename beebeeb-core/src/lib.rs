@@ -48,6 +48,7 @@ pub mod request_content;
 pub mod retry;
 #[cfg(test)]
 mod review_p3_tests;
+pub mod screen_lock;
 pub mod search_index;
 pub mod search_sync;
 pub mod share_flow;

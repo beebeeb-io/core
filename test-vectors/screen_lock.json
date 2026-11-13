@@ -1,0 +1,36 @@
+{
+  "format": "beebeeb/screen-lock/v1",
+  "generator": "test-vectors/tools/make_screen_lock_vectors.py",
+  "argon2id": {
+    "version": 19,
+    "memory_kib": 262144,
+    "iterations": 4,
+    "lanes": 2
+  },
+  "records": [
+    {
+      "name": "ascii password, counter 0",
+      "password": "correct horse battery staple",
+      "owner": "0b3c7a52-5d0e-4f1a-9d2e-1c6f3a8b9e01",
+      "password_counter": 0,
+      "salt": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "nonce": "404142434445464748494a4b",
+      "token": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "stretch": "32f311d496cdfcd4a0dc3cd55ad3e39112b925fd34aabb5ad396da60878851ac",
+      "master_key_stretch": "a832536bcb9d8575843f5acc4bed69cbc041649833fe072e1654c975b2f3eb62",
+      "record": "01000000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f404142434445464748494a4b0ddb554cd9df511cff05aa9a344dc9f9548a9014da4ca87567bb5390d754f80129df8e8da16381bc47c4807935e456c4"
+    },
+    {
+      "name": "non-ascii password kept as typed (no normalization), a large counter",
+      "password": "pas\u0323\u0307sw\u00f6rd \u2603",
+      "owner": "7f9e2d14-3a6b-4c8d-8e1f-2b4a6c8d0e12",
+      "password_counter": 72623859790382856,
+      "salt": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "nonce": "5a5a5a5a5a5a5a5a5a5a5a5a",
+      "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "stretch": "6b02be53cf88516cdb6decc416084581372cb802ace77677e8dcaf67ca663979",
+      "master_key_stretch": "a2852fd3e2722d2a19b3549c4b1803d27b232e7203fa9c3dab9d711b6e40a239",
+      "record": "01000102030405060708a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a55a5a5a5a5a5a5a5a5a5a5a5a1fccd75ed78a54e6400db968e3a97395d5ed609e261e4f3cb75a34281c085a8efd7a7890bc1b45a3331ffc9461f19f99"
+    }
+  ]
+}
