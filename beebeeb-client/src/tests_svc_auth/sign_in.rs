@@ -134,6 +134,7 @@ async fn server_proven_session_still_proves_the_local_key_before_installing() {
         authenticator_required: false,
         hardware_id: Some(hardware_id),
         hardware_identity_secret: None,
+        screen_check: None,
     };
     let mut unlock = NewDeviceUnlock::recovery(accepted).unwrap();
     unlock
@@ -198,6 +199,7 @@ async fn known_device_mismatch_returns_typed_choice_without_purging_the_key() {
         authenticator_required: false,
         hardware_id: None,
         hardware_identity_secret: None,
+        screen_check: None,
     };
 
     assert!(matches!(
@@ -244,6 +246,7 @@ async fn passkey_fetch_uses_the_locked_password_session() {
         authenticator_required: false,
         hardware_id: None,
         hardware_identity_secret: None,
+        screen_check: None,
     };
     let prompt = TestPasskeyPrompt {
         credential_id: credential_id.into(),
@@ -360,6 +363,7 @@ async fn wrong_two_factor_code_stays_a_factor_error_not_session_expiry() {
         canonical_email: "person@example.test".into(),
         legacy_upgrade_required: false,
         hardware_id: None,
+        screen_check: None,
     };
 
     let result = client.submit_two_factor(challenge, "000000".into()).await;
@@ -417,6 +421,7 @@ fn passkey_key_cannot_be_supplied_before_the_email_step() {
         authenticator_required: false,
         hardware_id: None,
         hardware_identity_secret: None,
+        screen_check: None,
     };
     let mut unlock = NewDeviceUnlock::passkey(accepted).unwrap();
 
@@ -509,6 +514,7 @@ fn unlock_transition_errors_name_the_safe_step() {
         authenticator_required: true,
         hardware_id: None,
         hardware_identity_secret: None,
+        screen_check: None,
     };
 
     let error = NewDeviceUnlock::approval(accepted).unwrap_err();

@@ -1,0 +1,227 @@
+//! The two-level lock as a service over the secret store and the transport: the start rule,
+//! the screen lock, the vault lock, and what an ended session does. The state machine is
+//! `beebeeb_api::flows::LockFlow`; the check record and the wrong-try rule are
+//! `beebeeb_core::screen_lock`. A client binds these calls and keeps no lock state of its own.
+//!
+//! Neither level is encryption of the device: the account key stays in the OS credential
+//! store. The screen lock gates the app window; the vault lock removes the key from this
+//! app's process and stops the work.
+
+use beebeeb_api::flows::{FlowError, LockFlow, LockLevel, StartFacts};
+use beebeeb_core::screen_lock::ScreenCheckRecord;
+
+pub use beebeeb_api::flows::LockState;
+
+use super::*;
+use crate::session::{
+    LOCK_ASK_AT_START, LOCK_ATTEMPTS, LOCK_SCREEN_CHECK, LOCK_VAULT_CLOSED, read_lock_flag, write_lock_flag,
+};
+
+/// What [`Client::lock_vault`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VaultLocked {
+    generation: u64,
+    mark_stored: bool,
+}
+
+impl VaultLocked {
+    /// The account generation after the lock: every key copy handed out before it is stale.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Whether the closed mark was stored. When `false` the vault is closed in this process
+    /// only: tell the person that the lock will not survive a restart.
+    pub fn survives_restart(&self) -> bool {
+        self.mark_stored
+    }
+}
+
+pub(super) fn refused(step: &'static str, error: FlowError) -> AuthError {
+    AuthError::InvalidTransition {
+        step,
+        requirement: match error {
+            FlowError::StepNotRequired => "the app is not locked at this level",
+            FlowError::StepOutOfOrder => "the step is out of order",
+            FlowError::NotReady => "this lock state is opened only by the account password proven to the server",
+        },
+    }
+}
+
+pub(super) fn is_unauthorized(error: &ClientError) -> bool {
+    matches!(error, ClientError::Api(beebeeb_api::ApiError::Server(server)) if server.status == 401)
+}
+
+impl Client {
+    /// Starts the lock for this app process, once, before any session is installed.
+    ///
+    /// With a stored session the app starts `ScreenLocked` (the key is loaded, work may
+    /// start) only when the start setting is off and no closed mark is set. When the setting
+    /// is on, the mark is set, or either cannot be read, it starts `VaultClosed` and the key
+    /// entry is not read at all.
+    pub fn start_from_store(&self, store: &dyn SecretStore) -> Result<LockState, AuthError> {
+        if self.lock_state() != LockState::SignedOut || self.authenticated_owner().is_ok() {
+            return Err(AuthError::InvalidTransition {
+                step: "lock start",
+                requirement: "the lock starts once, before any session is installed",
+            });
+        }
+        let owner = Session::stored_owner_for_app(store, self.app_id())?;
+        let mut flow = LockFlow::at_start(StartFacts {
+            session_stored: owner.is_some(),
+            ask_password_at_start: read_lock_flag(store, LOCK_ASK_AT_START),
+            vault_closed: read_lock_flag(store, LOCK_VAULT_CLOSED),
+        });
+        if let (LockState::ScreenLocked, Some(owner)) = (flow.state(), owner.as_deref()) {
+            match Session::load_for_user_proven(store, owner, self.app_id())? {
+                Some(session) => {
+                    self.install_session(&session)?;
+                }
+                None => flow.signed_out(),
+            }
+        }
+        let state = flow.state();
+        self.with_lock_flow(|current| *current = flow)?;
+        Ok(state)
+    }
+
+    /// Locks the screen level by hand, by host policy or with the OS session. The key and
+    /// the work stay as they are.
+    pub fn lock_screen(&self) -> Result<(), AuthError> {
+        self.with_lock_flow(|flow| flow.lock(LockLevel::Screen))?
+            .map_err(|error| refused("screen lock", error))
+    }
+
+    /// Opens the screen lock on the host's statement that the operating system verified the
+    /// current user. Call it only after the OS prompt returned success: a cancelled or
+    /// unavailable prompt calls nothing. It never opens a closed vault.
+    pub fn unlock_screen_platform_verified(&self, store: &dyn SecretStore) -> Result<(), AuthError> {
+        self.with_lock_flow(LockFlow::platform_verified)?
+            .map_err(|error| refused("platform unlock", error))?;
+        // Any successful unlock resets the wrong-try count. A count that cannot be removed
+        // stays, which only makes the next wait longer.
+        let _ = store.delete(LOCK_ATTEMPTS);
+        Ok(())
+    }
+
+    /// Closes the vault. In this order: the closed mark is written; the key is dropped from
+    /// this process and the account generation advances, so every key copy handed out is
+    /// refused as stale and wiped when its holder drops it; work stops (`WorkStopped`); the
+    /// session is ended at the server, best effort. The stored session and key stay in the
+    /// secret store. If the mark cannot be written the vault is still closed in this process
+    /// and [`VaultLocked::survives_restart`] is `false`.
+    pub async fn lock_vault(&self, store: &dyn SecretStore) -> Result<VaultLocked, AuthError> {
+        if self.lock_state() == LockState::SignedOut {
+            return Err(refused("vault lock", FlowError::NotReady));
+        }
+        let mark_stored = write_lock_flag(store, LOCK_VAULT_CLOSED, true).is_ok();
+        let (generation, token) = self.drop_key_for_vault_lock()?;
+        self.with_lock_flow(|flow| flow.lock(LockLevel::Vault))?
+            .map_err(|error| refused("vault lock", error))?;
+        if let Some(token) = token {
+            self.end_session_best_effort(&token).await;
+        }
+        Ok(VaultLocked {
+            generation,
+            mark_stored,
+        })
+    }
+
+    /// Records that the server ended the session (the host heard `SessionExpired`, or core
+    /// saw the refusal itself): the key is dropped if it was still held, the check record and
+    /// the wrong-try count are deleted, and the closed mark is written, so the next start
+    /// does not load the key for a session the server no longer accepts.
+    pub fn session_ended(&self, store: &dyn SecretStore) -> Result<LockState, AuthError> {
+        if matches!(self.lock_state(), LockState::Open | LockState::ScreenLocked) {
+            self.clear_authentication()?;
+        }
+        let state = self.lock_state();
+        if state == LockState::VaultClosed {
+            let record = store.delete(LOCK_SCREEN_CHECK);
+            let attempts = store.delete(LOCK_ATTEMPTS);
+            let mark = write_lock_flag(store, LOCK_VAULT_CLOSED, true);
+            record?;
+            attempts?;
+            mark?;
+        }
+        Ok(state)
+    }
+
+    /// Asks the server about the session while the app holds the key. An ended session
+    /// closes the vault ([`Self::session_ended`]); a password counter that differs from the
+    /// check record's deletes the record, also for a person who only ever unlocks with
+    /// platform verification. Call it when the app starts with a connection and when one
+    /// comes back.
+    pub async fn refresh_lock_from_server(&self, store: &dyn SecretStore) -> Result<LockState, AuthError> {
+        if !matches!(self.lock_state(), LockState::Open | LockState::ScreenLocked) {
+            return Ok(self.lock_state());
+        }
+        match self.execute(&auth::me(), &()).await {
+            Ok(user) => {
+                reconcile_password_counter(store, user.password_counter)?;
+                Ok(self.lock_state())
+            }
+            Err(error) if is_unauthorized(&error) => self.session_ended(store),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub(super) async fn end_session_best_effort(&self, token: &str) {
+        // The answer does not matter: a session that is already gone is the goal.
+        let _ = self.execute_bearer(&auth::logout(), &(), token).await;
+    }
+
+    /// Seals the sign-in's stretched password for the account that was just accepted, with
+    /// the password counter the server reports for it. `None` (no record) when the password
+    /// path is off, the sign-in carried no stretch, or the counter could not be read.
+    pub(super) async fn seal_screen_check(&self, accepted: &mut PasswordAccepted) -> Option<ScreenCheckRecord> {
+        let pending = accepted.screen_check.take()?;
+        if !self.lock_password_path() {
+            return None;
+        }
+        let user = self.execute(&auth::me(), &()).await.ok()?;
+        if user.id != accepted.owner {
+            return None;
+        }
+        pending.seal(&accepted.owner, user.password_counter.unwrap_or(0)).ok()
+    }
+
+    /// The lock's part of a strong install, in the step that saved the session: the closed
+    /// mark is cleared (here and nowhere else), the check record of the password that was
+    /// just proven replaces any older one, and the wrong-try count is reset.
+    pub(super) fn finish_strong_install(
+        &self,
+        store: &dyn SecretStore,
+        record: Option<ScreenCheckRecord>,
+    ) -> Result<(), AuthError> {
+        store.delete(LOCK_VAULT_CLOSED)?;
+        replace_screen_check(store, record);
+        let _ = store.delete(LOCK_ATTEMPTS);
+        Ok(())
+    }
+}
+
+/// Stores `record`, or leaves no record at all: an older one may belong to a password the
+/// server no longer accepts, so it never survives a failed write.
+pub(super) fn replace_screen_check(store: &dyn SecretStore, record: Option<ScreenCheckRecord>) {
+    let stored = record.is_some_and(|record| store.set(LOCK_SCREEN_CHECK, &record.to_bytes()).is_ok());
+    if !stored {
+        let _ = store.delete(LOCK_SCREEN_CHECK);
+    }
+}
+
+/// Deletes the check record (and the wrong-try count) when the server's password counter
+/// differs from the record's, or the record is not one this version reads.
+pub(super) fn reconcile_password_counter(store: &dyn SecretStore, server: Option<u64>) -> Result<(), SecretError> {
+    let Some(server) = server else {
+        return Ok(());
+    };
+    let Some(bytes) = store.get(LOCK_SCREEN_CHECK)? else {
+        return Ok(());
+    };
+    if ScreenCheckRecord::from_bytes(&bytes).password_counter() != Some(server) {
+        store.delete(LOCK_SCREEN_CHECK)?;
+        store.delete(LOCK_ATTEMPTS)?;
+    }
+    Ok(())
+}

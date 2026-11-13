@@ -122,7 +122,7 @@ impl ServiceCoordinator {
         let report = self
             .sign_out_local(platform, account_data, now_ms, || async {
                 let stored = Session::sign_out_device(secrets).map(|_| ()).map_err(|_| ());
-                let local = self.client.clear_authentication().map(|_| ()).map_err(|_| ());
+                let local = self.client.sign_out_authentication().map(|_| ()).map_err(|_| ());
                 stored.and(local)
             })
             .await;
@@ -153,7 +153,7 @@ impl ServiceCoordinator {
             .sign_out_local(platform, account_data, now_ms, || async {
                 let ended = self.client.end_session_after_device_removal().await.map_err(|_| ());
                 let stored = Session::sign_out_device(secrets).map(|_| ()).map_err(|_| ());
-                let local = self.client.clear_authentication().map(|_| ()).map_err(|_| ());
+                let local = self.client.sign_out_authentication().map(|_| ()).map_err(|_| ());
                 removed.and(ended).and(stored).and(local)
             })
             .await)

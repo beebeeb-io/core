@@ -267,6 +267,7 @@ impl Client {
                 authenticator_required: false,
                 hardware_id: Some(hardware_id),
                 hardware_identity_secret: None,
+                screen_check: None,
             },
             master_key,
         })

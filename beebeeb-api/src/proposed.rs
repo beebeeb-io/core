@@ -197,6 +197,27 @@ pub fn confirm_opaque_finish() -> Endpoint<ConfirmOpaqueFinish, Confirmation> {
     Endpoint::new(Method::Post, "/api/v1/auth/confirm-opaque-finish", true).step_up()
 }
 
+/// The grant-nothing password proof for the current session (two-level lock): the same OPAQUE
+/// handshake as the step-up, but it mints no confirmation. Its 401 is asked about like the
+/// step-up's (`Endpoint::is_step_up`): the caller decides between an ended session and a limit.
+pub fn password_proof_start() -> Endpoint<PasswordProofStart, PasswordProofStartResponse> {
+    Endpoint::new(Method::Post, "/api/v1/auth/password-proof/start", true).step_up()
+}
+
+pub fn password_proof_finish() -> Endpoint<PasswordProofFinish, PasswordProven> {
+    Endpoint::new(Method::Post, "/api/v1/auth/password-proof/finish", true).step_up()
+}
+
+/// The refusal codes of the password proof.
+pub mod password_proof_codes {
+    /// 403: the server judged the proof, and it is not the account's password.
+    pub const NOT_PROVEN: &str = "password_not_proven";
+    /// 429: the server's own limit on password checks. Never a wrong try.
+    pub const LIMITED: &str = "password_proof_limited";
+    /// 409: the account has no password credential this proof can use.
+    pub const UNAVAILABLE: &str = "opaque_unavailable";
+}
+
 pub fn change_password_start() -> Endpoint<ChangePasswordStart, ChangePasswordStartResponse> {
     Endpoint::new(Method::Post, "/api/v1/auth/change-password-start", true)
 }
@@ -611,6 +632,33 @@ pub struct Confirmation {
 }
 
 #[derive(Clone, Serialize)]
+pub struct PasswordProofStart {
+    pub client_message: String,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct PasswordProofStartResponse {
+    pub server_message: String,
+    pub server_state: String,
+    pub ksf_version: u16,
+}
+
+#[derive(Clone, Serialize)]
+pub struct PasswordProofFinish {
+    pub client_message: String,
+    pub server_state: String,
+}
+
+/// The password is the account's password now. Nothing is granted.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PasswordProven {
+    pub proven: bool,
+    /// The account's count of password changes this password was proven at.
+    #[serde(default)]
+    pub password_counter: Option<u64>,
+}
+
+#[derive(Clone, Serialize)]
 pub struct ChangePasswordStart {
     pub client_message: String,
 }
@@ -631,6 +679,9 @@ pub struct ChangedPasswordSession {
     pub user_id: String,
     #[serde(default)]
     pub key_state: Option<String>,
+    /// The count of password changes the new password is the account's password at.
+    #[serde(default)]
+    pub password_counter: Option<u64>,
 }
 
 #[derive(Clone, Serialize)]

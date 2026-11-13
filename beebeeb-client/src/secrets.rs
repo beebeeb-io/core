@@ -10,6 +10,10 @@ pub enum SecretError {
     Corrupt,
     #[error("the stored key belongs to another account")]
     OwnerMismatch,
+    /// The vault is closed (or its lock entries cannot be read): the stored key is not
+    /// loaded before the strong unlock.
+    #[error("the vault is closed until the account password is proven")]
+    VaultClosed,
 }
 
 pub trait SecretStore: Send + Sync {

@@ -12,6 +12,10 @@ pub struct User {
     pub totp_enabled: bool,
     #[serde(default)]
     pub email_verified: bool,
+    /// The account's count of password changes, when the server reports it. A device compares
+    /// it with its screen-lock check record to learn that the record is stale.
+    #[serde(default)]
+    pub password_counter: Option<u64>,
 }
 
 #[derive(Clone, Serialize)]
