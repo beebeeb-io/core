@@ -2,7 +2,7 @@
 
 Status: contract, no code yet. Date: 2026-11-13. Source: product decision 2495 ("two levels"), with the
 ruling that the rules and the cryptography live in this repository and every client only binds them.
-Reviewed once (section 11); the open questions of section 10 are decided before the code they gate.
+Reviewed once (section 11); the questions it left open are decided (section 10).
 
 A native Beebeeb app is a sync client: background sync needs the account key. So "locked" cannot mean
 "the key is gone" by default. This contract defines two levels, says exactly what each one protects, and
@@ -12,7 +12,7 @@ never calls either one encryption of the device.
 |---|---|---|
 | What the person sees | "Beebeeb is locked on this PC. Sync continues." | "Beebeeb is locked. Sync is paused until you unlock." |
 | Account key in this app's process | stays loaded | dropped; every copy the client handed out is refused and wiped on drop |
-| Account key in the OS credential store | stays | stays (see "Open questions", Q1) |
+| Account key in the OS credential store | stays | stays (decision D1) |
 | Sync | runs | stopped, said honestly |
 | Opened with | platform user verification (Windows Hello) first, or the account password | the account password proven to the server (plus the authenticator code when the account has one), then core's known-device unlock |
 | Network needed to open | no (password: checked locally when the server cannot be reached) | yes |
@@ -51,7 +51,7 @@ stateDiagram-v2
     VaultClosed --> VaultClosed: refused or offline (nothing loaded)
 
     Open --> SignedOut: sign out
-    ScreenLocked --> SignedOut: sign out (Q5)
+    ScreenLocked --> SignedOut: sign out (no proof, last-device warning)
     VaultClosed --> SignedOut: sign out / stored key belongs to another account
 ```
 
@@ -86,8 +86,9 @@ the same store, not under the password.
   and the session token today, but nothing to test password guesses against. With this record they can
   guess the account password offline, at the cost of 3.3 per guess. A guessed password together with the
   stored session opens the actions the password guards (change password, change email, delete the
-  account), and it is the password of the person's other sign-ins. Accepting this is an owner decision
-  (Q4); the only defence is the memory-hard cost, and it is never written to a plain file.
+  account), and it is the password of the person's other sign-ins. This is accepted for 0.9.0 (decision D2); until the
+  hardware-bound pepper ships the only defence is the memory-hard cost, and the record is never written
+  to a plain file.
 - With sync running, files in the sync folder stay reachable through the file manager while the app is
   screen-locked. Copy never suggests otherwise.
 - **Copy rule:** screen-lock words never say or imply that the password decrypts, opens or protects the
@@ -189,12 +190,12 @@ clock), with the state persisted in the store so restarting the app does not res
 - **What counts as a wrong try online.** A wrong password fails on the device, in the OPAQUE finish,
   before anything is sent: the server never sees it and cannot count it. So the local count is the only
   limit on wrong passwords here, online as well as offline, and it is not optional. A 401 on either leg
-  of the step-up is never a wrong try: core asks whether the session is still alive; an ended session is
+  of the online proof is never a wrong try: core asks whether the session is still alive; an ended session is
   the `VaultClosed` arrow, a live one is the server's limit, shown as "too many tries, wait". Core must
   tell these apart (today a 401 on the second leg reads as "password not confirmed": a core change).
-- **Starts are the server's to limit.** Every online try opens a step-up at the server, and those starts
+- **Starts are the server's to limit.** Every online try opens a proof at the server, and those starts
   may count toward the account's sign-in guess limit. The local wait keeps a person at the keyboard from
-  spending that limit quickly. A per-session limit on step-up starts at the server is a test to add.
+  spending that limit quickly. A per-session limit on those starts is part of server prerequisite S2, with its own test.
 - An account still on the legacy key stretch is refused by the online check; the outcome is its own
   kind ("sign in again to finish an account upgrade"), never "wrong password".
 - This limits a person at the keyboard. It does nothing against someone who copied the record; 3.3 is
@@ -217,7 +218,7 @@ has no offline password path until case 3 happens once. Platform verification st
 ### 3.7 Order of the checks, and a password changed on another device
 
 **When the server can be reached, the password is proven online** on the current session (the OPAQUE
-step-up); the local record is then written or refreshed. **The local check alone decides only when the
+proof that grants nothing, server prerequisite S2); the local record is then written or refreshed. **The local check alone decides only when the
 server cannot be reached.** So a stale record is never what opens the screen of a connected device.
 
 After a password change elsewhere, one of two things is true, depending on the server's session policy:
@@ -234,8 +235,7 @@ still opens the screen lock** (and only the screen: the key was never under it).
 password is a wrong try, and the words say "If you changed your password on another device, connect to
 the internet to unlock."
 
-The password counter needs a small server addition (Q2). Until the server reports one, the field is 0
-and only the online-first order and the session-ended rule protect against a stale record.
+The password counter is server prerequisite S1 (section 10).
 
 ## 4. Vault lock
 
@@ -265,7 +265,7 @@ and only the online-first order and the session-ended rule protect against a sta
 - **Turning the start setting off** needs the password proven to the server (never the local check, never
   platform verification); offline it cannot be turned off. Turning it on asks for nothing.
 - **What it is not:**
-  - Not at-rest protection. The key stays in the OS credential store; see the threat table and Q1.
+  - Not at-rest protection. The key stays in the OS credential store; see the threat table and decision D1.
   - Not a guarantee about other processes: another Beebeeb app or helper that shares the store can still
     load the key. "No key" is a statement about this app's process.
   - Not a wipe of local data: files already on the disk and the local store's plaintext cache of names,
@@ -344,8 +344,8 @@ Rules a client follows:
 
 Changes in core that this contract asks for: a call that drops the key but keeps the stored session
 (`lock_vault`); ending the replaced session; telling the server's guess limit apart from a judged
-password in the step-up; carrying the record through the authenticator challenge; and the online check
-itself, which today could only use the step-up that mints a single-use confirmation (Q3).
+password in the online proof; carrying the record through the authenticator challenge; and the online check
+itself, which uses the grant-nothing proof of server prerequisite S2, not the step-up.
 
 ## 6. Bindings and reuse
 
@@ -403,8 +403,8 @@ the data on the server and in transit.
   `derive_master_key` for the same password and salt; no secret in `Debug`.
 - Attempt rule: table-driven over the schedule, a clock set back, the count persisted before the check
   (a process ended mid-check still counts), a failed write refuses the try, one typed password counts
-  once, a 401 on either step-up leg is not a wrong try, a server limit is not a wrong try; server side:
-  a per-session limit on step-up starts.
+  once, a 401 on either leg of the online proof is not a wrong try, a server limit is not a wrong try; server side:
+  a per-session limit on proof starts.
 - `flows/lock.rs`: every arrow of section 2 and every missing arrow (platform verification and the local
   check on `VaultClosed` are refused; unreadable start facts start closed).
 - Client: start with the setting on or the mark set reads the key entry 0 times; lock vault, quit, start:
@@ -414,30 +414,38 @@ the data on the server and in transit.
   identity in a password change.
 - Desktop: the frames of section 7 on a real Windows build, with a Hello prompt and with Hello absent.
 
-## 10. Open questions
+## 10. Decisions (2026-11-13)
 
-- **Q1 (cryptographic fork, owner decides). Is the vault lock meant to protect the device at rest?**
-  Decision 2495's option text describes level 2 as "drops the key … re-derive needed"; its resolution
-  names the known-device unlock, which loads the key from the store. This contract follows the
-  resolution: (a) the key stays in the store, and the vault lock is a process-and-work lock opened by the
-  server. The alternatives: (b) at vault lock, replace the stored key with a copy sealed under the
-  password (Argon2id): real protection for a locked device, bounded by password strength, offline unlock
-  possible, but the key itself becomes an offline guessing target and the native rule "the password never
-  yields the key" changes; (c) remove the key: the vault lock becomes a sign-out of this device and
-  unlocking is the new-device flow. Proposed: (a) for 0.9.0 with the honest copy above.
-- **Q2 (server, before the record ships). The password counter.** The record's header reserves it; the
-  server has to report it with the session. Without it the field is 0 and section 3.7's remainder is
-  wider (a stale record is only removed by an online password entry or an ended session).
-- **Q3 (server, before the online check ships). A proof that mints nothing.** The only online password
-  proof today is the step-up, and every success mints a short-lived confirmation for destructive account
-  actions, which a screen unlock then drops unspent. The screen lock needs a "verify the password for
-  this session" answer that grants nothing.
-- **Q4 (owner decides). Accept the offline password-guessing target of 3.1 on native devices?** It is the
-  price of an offline password fallback. The alternatives: no offline password path (platform
-  verification offline, password only online), or the hardware-bound pepper the header reserves.
-- **Q5 (owner decides). Sign-out from the screen lock without a proof.** A person who cannot unlock must
-  be able to leave, but sign-out removes the stored key. Proposed: allowed, with the existing last-device
-  key-loss warning (`sign_out_advice`).
+The five questions the design review left open were decided by the product owner on 2026-11-13. None is
+open any more.
+
+- **D1. The vault lock is not at-rest protection.** The key stays in the OS credential store; the vault
+  lock is a process-and-work lock, opened by the server-proven password and `unlock_known_device`. Copy
+  is honest about it and makes no at-rest claim. (Decision 2495's option text spoke of re-deriving the
+  key; its resolution named the known-device unlock. The resolution stands. Not chosen: a password-sealed
+  key in the store, which would make the key itself an offline guessing target, and removing the key,
+  which is a sign-out of the device.)
+- **D2. The offline password record is accepted for 0.9.0**, with the exposure of 3.1 stated as it is.
+  **Named follow-up, "hardware-bound pepper", in a 0.9.x update:** a secret held by the device's TPM is
+  mixed into the stretch, so a copied record cannot be guessed off the device. It uses the reserved
+  pepper-kind byte of the header: a new value written by new versions, with version-1 records (kind 0)
+  re-enrolled at the next server-proven password. Until it ships, section 8's "gains from this feature"
+  rows stay true and stay in the copy guidance.
+- **D3. Sign-out from the screen lock needs no proof.** A person who cannot unlock can leave. It removes
+  the stored key, so the existing last-device key-loss warning (`sign_out_advice`) is shown first.
+
+**Server prerequisites.** The server builds both; the code named here does not ship before its
+prerequisite is live:
+
+- **S1. A password counter reported with the session** (a count of password changes for the account).
+  Prerequisite for writing the check record with a real counter and for the stale-record deletion of
+  3.7. Before it is live, no record is enrolled with a counter other than 0, and a release that enables
+  the offline password path waits for it.
+- **S2. A password proof for the current session that grants nothing** ("verify the password", no
+  confirmation minted). Prerequisite for the online check of the screen lock (`unlock_screen_with_password`
+  and turning the start setting off). The step-up that mints a confirmation for destructive account
+  actions is not used for unlocking. Its refusals must tell a judged password, the server's limit and an
+  ended session apart, and it carries a per-session limit on starts (3.5).
 
 ## 11. Design review
 
@@ -452,10 +460,10 @@ Both P1 findings are folded in: a closed vault now survives a restart (the close
 stale record no longer opens a connected device (online first, the password counter, deletion when the
 session ends, section 3.7). Also folded in: the start setting is turned off only with a server-proven
 password; an ended session is a state change to `VaultClosed`; the record is named as a new exposure
-(3.1, the threat table, Q4) with a reserved pepper field; the cost is fixed by the version and the
+(3.1, the threat table, decision D2) with a reserved pepper field; the cost is fixed by the version and the
 Argon2id call is domain-separated; the wait gates the online check, a typed password counts once, the
-server's limit is not a wrong try, a failed count write refuses the try; Q3 is a gate, not a wish; "no
-key" is scoped to the process and its handed-out copies; sign-out from the screen lock is Q5; the label
+server's limit is not a wrong try, a failed count write refuses the try; the grant-nothing proof is a prerequisite, not a wish; "no
+key" is scoped to the process and its handed-out copies; sign-out from the screen lock is decision D3; the label
 table entry, the enrolment moment, both purge places, the device-only host store and ending the replaced
 session at lock time.
 
