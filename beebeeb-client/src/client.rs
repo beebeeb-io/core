@@ -87,6 +87,14 @@ impl std::fmt::Debug for SessionKey {
     }
 }
 
+/// The token of a session this process stopped using, with its account. Its only use is
+/// ending that session at the server.
+#[cfg(feature = "auth")]
+pub(crate) struct RetiredSession {
+    pub(crate) token: Zeroizing<String>,
+    pub(crate) owner: String,
+}
+
 enum RequestAuthentication<'a> {
     CurrentSession,
     Bearer(&'a str),
@@ -320,14 +328,14 @@ impl Client {
     /// account, which the caller may use for one request only: ending that session at the
     /// server ([`Self::end_retired_session`]).
     #[cfg(feature = "auth")]
-    pub(crate) fn drop_key_for_vault_lock(&self) -> Result<(u64, Option<(Zeroizing<String>, String)>), ClientError> {
+    pub(crate) fn drop_key_for_vault_lock(&self) -> Result<(u64, Option<RetiredSession>), ClientError> {
         let taken = self.authentication.lock().map_err(|_| ClientError::State)?.take();
         let retired = taken.map(|mut authentication| {
             authentication.master_key = None;
-            (
-                std::mem::take(&mut authentication.token),
-                std::mem::take(&mut authentication.expected_user),
-            )
+            RetiredSession {
+                token: std::mem::take(&mut authentication.token),
+                owner: std::mem::take(&mut authentication.expected_user),
+            }
         });
         let generation = self.advance_generation();
         self.events.emit(EngineEvent::WorkStopped);

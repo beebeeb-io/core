@@ -118,8 +118,8 @@ impl Client {
         let (generation, retired) = self.drop_key_for_vault_lock()?;
         self.with_lock_flow(|flow| flow.lock(LockLevel::Vault))?
             .map_err(|error| refused("vault lock", error))?;
-        if let Some((token, owner)) = retired {
-            self.end_session_best_effort(&token, &owner).await;
+        if let Some(retired) = retired {
+            self.end_session_best_effort(&retired.token, &retired.owner).await;
         }
         Ok(VaultLocked {
             generation,
