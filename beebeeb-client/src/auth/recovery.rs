@@ -382,7 +382,12 @@ impl Client {
         } else {
             session.save(store, self.app_id())?;
         }
-        self.set_session(&session)?;
+        // A recovery is a strong install: it opens a closed vault, and the check record of the
+        // password it replaced must not survive it.
+        self.finish_strong_install(store, None)?;
+        self.install_session(&session)?;
+        self.with_lock_flow(beebeeb_api::flows::LockFlow::known_device_unlocked)?
+            .map_err(|error| lock::refused("session installation", error))?;
         Ok(InstalledSession {
             owner: recovered.owner.clone(),
             generation,

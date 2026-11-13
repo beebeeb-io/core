@@ -101,6 +101,7 @@ async fn a_stale_record_never_opens_a_connected_device() {
     // The password was changed elsewhere and this session survived: the record still holds
     // the old password, and the server reports the counter the record was made at.
     s.seed_record(OLD_PASSWORD);
+    s.server.report_password_counter(1);
     assert_eq!(
         s.unlock(OLD_PASSWORD, NOW).await.unwrap(),
         ScreenUnlock::Wrong { wait_ms: 0 },
@@ -110,7 +111,68 @@ async fn a_stale_record_never_opens_a_connected_device() {
     assert_eq!(s.record().unwrap(), record_for(OLD_PASSWORD));
     // The new password is accepted by the server and replaces the record.
     assert_eq!(s.unlock(PASSWORD, NOW + 1).await.unwrap(), ScreenUnlock::Opened);
+    let record = ScreenCheckRecord::from_bytes(&s.record().unwrap());
+    assert_eq!(record.password_counter(), Some(1));
     assert_ne!(s.record().unwrap(), record_for(OLD_PASSWORD));
+}
+
+/// A record the server's counter says is still this password's is kept as it is; without a
+/// counter from the server nothing says so, and the record is made again.
+#[tokio::test]
+async fn an_online_unlock_keeps_a_record_at_the_servers_counter_and_renews_any_other() {
+    let s = setup();
+    s.seed_record(PASSWORD);
+    s.server.report_password_counter(0);
+    assert_eq!(s.unlock(PASSWORD, NOW).await.unwrap(), ScreenUnlock::Opened);
+    assert_eq!(
+        s.record().unwrap(),
+        record_for(PASSWORD),
+        "the same counter: kept byte for byte"
+    );
+
+    let s = setup();
+    s.seed_record(PASSWORD);
+    assert_eq!(s.unlock(PASSWORD, NOW).await.unwrap(), ScreenUnlock::Opened);
+    assert_ne!(
+        s.record().unwrap(),
+        record_for(PASSWORD),
+        "no counter named: made again"
+    );
+    assert!(ScreenCheckRecord::from_bytes(&s.record().unwrap()).is_readable());
+}
+
+/// One check at a time: the count is read, written and restored around requests, so a second
+/// try while one is on its way checks nothing and costs nothing.
+#[tokio::test]
+async fn a_second_try_while_one_is_on_its_way_checks_nothing() {
+    let s = setup();
+    s.seed_record(PASSWORD);
+    let gate = s.server.hold_requests();
+    let first = s.unlock("wrong", NOW);
+    let second = async {
+        // The first try is at the server by now.
+        tokio::task::yield_now().await;
+        let refused = s.unlock(PASSWORD, NOW).await;
+        let seen = (s.server.requests().len(), attempts(s.store.as_ref()));
+        gate.notify_one();
+        (refused, seen)
+    };
+    let (first, (second, seen_meanwhile)) = tokio::join!(first, second);
+    assert!(matches!(
+        second,
+        Err(AuthError::InvalidTransition {
+            step: "password check",
+            ..
+        })
+    ));
+    assert_eq!(
+        seen_meanwhile,
+        (0, Some((1, NOW))),
+        "one try counted, and the second sent nothing"
+    );
+    assert_eq!(first.unwrap(), ScreenUnlock::Wrong { wait_ms: 0 });
+    assert_eq!(attempts(s.store.as_ref()), Some((1, NOW)));
+    assert_eq!(s.client.lock_state(), LockState::ScreenLocked);
 }
 
 #[tokio::test]
@@ -384,6 +446,22 @@ async fn an_account_on_the_legacy_stretch_is_its_own_outcome() {
         s.unlock(PASSWORD, NOW).await.unwrap(),
         ScreenUnlock::AccountUpgradeNeeded
     );
+    // A key-stretch version this build does not know, or a message it cannot read, judged
+    // nothing about the password either.
+    for version in [7, 1] {
+        s.server.reply(
+            PROOF_START,
+            Reply::Status(
+                200,
+                serde_json::json!({ "server_message": "AA==", "server_state": "s", "ksf_version": version }),
+                Vec::new(),
+            ),
+        );
+        assert!(
+            matches!(s.unlock(PASSWORD, NOW).await, Err(AuthError::Crypto)),
+            "{version}"
+        );
+    }
     assert_eq!(attempts(s.store.as_ref()), None, "never a wrong password");
     assert_eq!(s.client.lock_state(), LockState::ScreenLocked);
 }
@@ -456,6 +534,13 @@ async fn a_clock_set_back_restarts_the_full_wait() {
         ScreenUnlock::Wait { wait_ms: HOUR }
     );
     assert_eq!(s.server.requests().len(), 0);
+    // That wait is stored once, so it does run out: half-way, then over.
+    assert_eq!(attempts(s.store.as_ref()), Some((10, NOW)));
+    assert_eq!(
+        s.unlock(PASSWORD, NOW + HOUR / 2).await.unwrap(),
+        ScreenUnlock::Wait { wait_ms: HOUR / 2 }
+    );
+    assert_eq!(s.unlock(PASSWORD, NOW + HOUR).await.unwrap(), ScreenUnlock::Opened);
 }
 
 /// The answer belongs to the session it was asked for.
@@ -474,7 +559,7 @@ async fn an_answer_that_outlives_its_session_opens_nothing() {
         s.unlock(PASSWORD, NOW).await,
         Err(AuthError::Client(ClientError::StaleAccount))
     ));
-    assert_eq!(s.client.lock_state(), LockState::ScreenLocked);
+    assert_eq!(s.client.lock_state(), LockState::VaultClosed);
 }
 
 #[tokio::test]

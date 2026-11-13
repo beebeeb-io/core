@@ -177,15 +177,19 @@ Secrets, input and bindings:
 - The two-level lock (`flows::lock`, `screen_lock`, `beebeeb-client` `auth/lock*.rs`; contract
   `docs/superpowers/specs/2026-11-13-two-level-lock-design.md`): neither level is encryption of the
   device, and no copy may say so. A weaker proof never opens the stronger level: platform verification
-  and the local check record open `ScreenLocked` only, and `VaultClosed` opens only through
-  `unlock_known_device`, also after a restart. A closed vault's key entry is never read before that
-  (`Session::load_for_user` answers `VaultClosed`; only `load_for_user_proven`, behind a proof, reads
-  it), and the closed mark is cleared in the strong install and nowhere else. The check record
+  and the local check record open `ScreenLocked` only, and `VaultClosed` opens only through a strong
+  install (`unlock_known_device`; a new-device or recovered install is one too), also after a
+  restart. A closed vault's key entry is never read before that (`Session::load_for_user` answers
+  `VaultClosed` while the mark is set; only `load_for_user_proven`, behind a proof, reads it), and the
+  closed mark is cleared in the strong install and nowhere else. Credentials without a key
+  (`set_authentication`) close an app that held one. A refused session closes the vault in the
+  process at once; the store learns it from `Client::session_ended` or core's own lock calls. The check record
   unwraps nothing and is stored only through `SecretStore`, never in a plain file; its cost is fixed
   by the record version (core's canonical Argon2id, never lowered, never a parameter); its three
   labels change only as a new `v2`. Online first: the record decides only when the server cannot be
   reached, and never for turning the start setting off. Every password try is counted before any
-  check runs; a count that cannot be written refuses the try. The lock entries are removed at both
+  check runs, one check at a time; a count that cannot be written refuses the try; only a judged
+  wrong password keeps its count (`client_login_finish_judged`, never `client_login_finish`). The lock entries are removed at both
   purge places in `session.rs`.
 
 Transfers:

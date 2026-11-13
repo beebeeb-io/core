@@ -7,11 +7,13 @@
 
 use beebeeb_api::flows::LockFlow;
 use beebeeb_api::proposed::password_proof_codes;
+use beebeeb_core::opaque_protocol::{LoginFinishError, client_login_finish_judged};
 use beebeeb_core::screen_lock::{
     self, AttemptState, CheckOutcome, LOCAL_CHECK_OFF_AT, ScreenCheckRecord, TryDecision, next_try, wait_after_ms,
 };
 
-use super::lock::{is_unauthorized, refused, replace_screen_check};
+use super::account::is_unauthorized;
+use super::lock::{refused, replace_screen_check};
 use super::*;
 use crate::TransportError;
 use crate::session::{LOCK_ASK_AT_START, LOCK_ATTEMPTS, LOCK_SCREEN_CHECK, write_lock_flag};
@@ -42,8 +44,9 @@ pub enum ScreenUnlock {
 
 /// What the server said about one typed password.
 enum OnlineProof {
+    /// `None`: the server named no password counter with its answer.
     Proven {
-        password_counter: u64,
+        password_counter: Option<u64>,
     },
     /// Judged and refused: the OPAQUE finish failed on this device, or the server refused it.
     Wrong,
@@ -90,11 +93,16 @@ fn refusal(error: ClientError) -> OnlineProof {
     }
 }
 
-fn load_attempts(store: &dyn SecretStore, now_ms: u64) -> Result<AttemptState, SecretError> {
+/// The stored count, and whether it is to be written back at once.
+fn load_attempts(store: &dyn SecretStore, now_ms: u64) -> Result<(AttemptState, bool), SecretError> {
     Ok(match store.get(LOCK_ATTEMPTS)? {
-        None => AttemptState::new(),
-        // An entry that is not a stored state never buys tries: the longest wait, from now.
-        Some(bytes) => AttemptState::from_bytes(&bytes).unwrap_or_else(|| AttemptState::unreadable(now_ms)),
+        None => (AttemptState::new(), false),
+        Some(bytes) => match AttemptState::from_bytes(&bytes) {
+            Some(state) => (state, false),
+            // An entry that is not a stored state never buys tries: the longest wait, from
+            // now, stored once so that it does run out.
+            None => (AttemptState::unreadable(now_ms), true),
+        },
     })
 }
 
@@ -216,10 +224,17 @@ impl Client {
         now_ms: u64,
         offline_allowed: bool,
     ) -> Result<Judgement, AuthError> {
+        // One check at a time: a second press while one is on its way checks nothing.
+        let Ok(_one_at_a_time) = self.password_check.try_lock() else {
+            return Err(AuthError::InvalidTransition {
+                step: "password check",
+                requirement: "the password check before it has answered",
+            });
+        };
         let owner = self.authenticated_owner()?;
-        let stored = load_attempts(store, now_ms)?;
+        let (stored, replaced) = load_attempts(store, now_ms)?;
         let before = stored.rebased(now_ms);
-        if before != stored {
+        if replaced || before != stored {
             store_attempts(store, &before)?;
         }
         let local_allowed = match next_try(&before, now_ms) {
@@ -270,8 +285,17 @@ impl Client {
     ) -> Result<Judgement, AuthError> {
         match self.prove_password_online(password).await {
             OnlineProof::Proven { password_counter } => {
-                // The server has just accepted this exact password: write or refresh the record.
-                replace_screen_check(store, screen_lock::enroll(password, owner, password_counter).ok());
+                // The server has just accepted this exact password: write or refresh the
+                // record. One the server's counter says is still this password's is kept as
+                // it is, which saves a second key stretch on every unlock.
+                let current = password_counter.is_some()
+                    && store.get(LOCK_SCREEN_CHECK).ok().flatten().is_some_and(|bytes| {
+                        ScreenCheckRecord::from_bytes(&bytes).password_counter() == password_counter
+                    });
+                if !current {
+                    let record = screen_lock::enroll(password, owner, password_counter.unwrap_or(0)).ok();
+                    replace_screen_check(store, record);
+                }
                 Ok(Judgement::Accepted)
             }
             OnlineProof::Wrong => Ok(Judgement::Wrong { failures: 0 }),
@@ -332,14 +356,17 @@ impl Client {
         let Ok(server_message) = STANDARD.decode(answer.server_message) else {
             return OnlineProof::Failed(AuthError::MalformedAnswer);
         };
-        // OPAQUE's finish fails alike for a wrong password and a record made for another one.
-        let Ok(finish) = client_login_finish(
+        // OPAQUE's finish fails alike for a wrong password and a record made for another one:
+        // that is the judgement. A finish that could not run judged nothing.
+        let finish = match client_login_finish_judged(
             &state,
             password.as_bytes(),
             &server_message,
             u32::from(answer.ksf_version),
-        ) else {
-            return OnlineProof::Wrong;
+        ) {
+            Ok(finish) => finish,
+            Err(LoginFinishError::WrongPassword) => return OnlineProof::Wrong,
+            Err(LoginFinishError::NotJudged(_)) => return OnlineProof::Failed(AuthError::Crypto),
         };
         match self
             .execute(
@@ -352,7 +379,7 @@ impl Client {
             .await
         {
             Ok(proven) if proven.proven => OnlineProof::Proven {
-                password_counter: proven.password_counter.unwrap_or(0),
+                password_counter: proven.password_counter,
             },
             Ok(_) => OnlineProof::Failed(AuthError::MalformedAnswer),
             Err(error) => refusal(error),

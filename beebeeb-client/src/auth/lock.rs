@@ -48,10 +48,6 @@ pub(super) fn refused(step: &'static str, error: FlowError) -> AuthError {
     }
 }
 
-pub(super) fn is_unauthorized(error: &ClientError) -> bool {
-    matches!(error, ClientError::Api(beebeeb_api::ApiError::Server(server)) if server.status == 401)
-}
-
 impl Client {
     /// Starts the lock for this app process, once, before any session is installed.
     ///
@@ -67,11 +63,18 @@ impl Client {
             });
         }
         let owner = Session::stored_owner_for_app(store, self.app_id())?;
-        let mut flow = LockFlow::at_start(StartFacts {
+        let facts = StartFacts {
             session_stored: owner.is_some(),
             ask_password_at_start: read_lock_flag(store, LOCK_ASK_AT_START),
             vault_closed: read_lock_flag(store, LOCK_VAULT_CLOSED),
-        });
+        };
+        let mut flow = LockFlow::at_start(facts);
+        if flow.state() == LockState::VaultClosed && facts.vault_closed != Some(true) {
+            // Closed by the start setting (or by an entry that cannot be read): mark it, so
+            // every restore path stays closed until the strong unlock, which clears the mark.
+            // A mark that cannot be written leaves this process closed all the same.
+            let _ = write_lock_flag(store, LOCK_VAULT_CLOSED, true);
+        }
         if let (LockState::ScreenLocked, Some(owner)) = (flow.state(), owner.as_deref()) {
             match Session::load_for_user_proven(store, owner, self.app_id())? {
                 Some(session) => {
@@ -161,7 +164,7 @@ impl Client {
                 reconcile_password_counter(store, user.password_counter)?;
                 Ok(self.lock_state())
             }
-            Err(error) if is_unauthorized(&error) => self.session_ended(store),
+            Err(error) if account::is_unauthorized(&error) => self.session_ended(store),
             Err(error) => Err(error.into()),
         }
     }
@@ -184,6 +187,15 @@ impl Client {
             return None;
         }
         pending.seal(&accepted.owner, user.password_counter.unwrap_or(0)).ok()
+    }
+
+    /// Ends the stored session of a closed vault at the server with its own token: no
+    /// credentials are in memory there. For a sign-out from a closed vault.
+    pub(super) async fn end_stored_session(&self, store: &dyn SecretStore) -> Result<(), AuthError> {
+        if let Some((token, owner)) = Session::stored_token_for_app(store, self.app_id())? {
+            self.end_retired_session(&token, &owner).await?;
+        }
+        Ok(())
     }
 
     /// The lock's part of a strong install, in the step that saved the session: the closed

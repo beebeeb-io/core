@@ -74,7 +74,7 @@ impl std::fmt::Debug for ConfirmationToken {
     }
 }
 
-fn is_unauthorized(error: &ClientError) -> bool {
+pub(super) fn is_unauthorized(error: &ClientError) -> bool {
     matches!(error, ClientError::Api(beebeeb_api::ApiError::Server(server)) if server.status == 401)
 }
 
@@ -154,6 +154,8 @@ impl Client {
         if new_password.is_empty() {
             return Err(AuthError::MalformedAnswer);
         }
+        // The change replaces the session: the app is in the same lock state afterwards.
+        let lock_before = self.with_lock_flow(|flow| flow.clone())?;
         let first_confirmation = self.confirm_action(&current_password).await?;
         let registration = client_registration_start(new_password.as_bytes()).map_err(|_| AuthError::Crypto)?;
         let registration_state = Zeroizing::new(registration.state);
@@ -214,6 +216,9 @@ impl Client {
             .flatten();
         lock::replace_screen_check(store, record);
         self.install_session(&refreshed)?;
+        if beebeeb_api::flows::key_may_be_loaded(lock_before.state()) {
+            self.with_lock_flow(|flow| *flow = lock_before)?;
+        }
         Ok(InstalledSession {
             owner: changed.user_id,
             generation,

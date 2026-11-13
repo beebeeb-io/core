@@ -491,11 +491,15 @@ check record and wrong-try rule `beebeeb_core::screen_lock`, and the service on 
   session, with the owner and the password counter `/auth/me` reports for the new session. A sign-in
   whose stretch or counter read fails installs with no record. A password change on the device
   deletes the old record and, with the password path on, enrols the new password.
-- **One typed password, one count.** `counted_password_check` stores the count before any check, keeps
-  it for a judged wrong password (the OPAQUE finish failed on the device, the server refused a proof it
-  judged, or the local record did not match), deletes it on success, and restores it for everything
-  that judged nothing: the server's limit, a 401 on a live session, an ended session, no record
-  offline, an account on the legacy stretch, any other error. Only a transport failure is "the server
+- **One typed password, one count.** `counted_password_check` runs one at a time (a second try while
+  one is on its way is refused and sends nothing), stores the count before any check, keeps it for a
+  judged wrong password (the OPAQUE finish opened the server's answer and it did not fit,
+  `LoginFinishError::WrongPassword`; the server refused a proof it judged; or the local record did not
+  match), deletes it on success, and restores it for everything that judged nothing: the server's
+  limit, a 401 on a live session, no record offline, an account on the legacy stretch, a finish that
+  could not run, any other error. An ended session deletes it with the record. A stored count that
+  does not parse becomes the longest wait, written once. After an accepted online proof the record is
+  made again unless the stored one already carries the counter the server named. Only a transport failure is "the server
   cannot be reached"; an answer without a judgement (a missing route, an outage page) never falls back
   to the record.
 - **An ended session.** A 401 to the session's credentials drops the key in the same call when the app
@@ -504,8 +508,20 @@ check record and wrong-try rule `beebeeb_core::screen_lock`, and the service on 
   and the closed mark is written. A host that installs sessions itself with `set_session` and never
   runs a sign-in or the lock start through core stays `SignedOut` and keeps the old behaviour.
 - **`Session::load_for_user` is a restore path** and answers `SecretError::VaultClosed` while the mark
-  is set, the start setting is on, or either cannot be read; `Client::set_session` is refused while the
-  vault is closed. Core's own post-proof paths use `load_for_user_proven`.
+  is set or cannot be read; `Client::set_session` is refused while the vault is closed. Core's own
+  post-proof paths use `load_for_user_proven`. The start setting is `start_from_store`'s rule: a start
+  that is closed for any reason writes the mark, so the restore path is closed with it until the
+  strong install clears it; after that install every process that shares the store can restore again.
+- **Strong installs.** `unlock_known_device`, `install_new_device` and `install_recovered_session`
+  all clear the mark, drop or replace the check record, reset the count and open the flow, in the
+  step that saves the session. Each install checks that the session it proved is still the one in the
+  process (`proven_at`): a lock or another sign-in that landed while its requests were on their way is
+  not undone by it. A password change restores the lock state it started in.
+- **Credentials without a key** (`set_authentication`: a password accepted for a sign-in, a passkey or
+  device-link step) replace the session of an app that held the key, so they close it (`VaultClosed`);
+  the strong install that follows opens it again.
+- **Sign-out from a closed vault** ends the stored session with its own token
+  (`Session::stored_token_for_app`, the key entry is not read) and needs no proof.
 - **The replaced session.** `lock_vault` ends its session at the server, best effort, with that
   session's own token; `unlock_known_device` ends the stored session it replaced after the new one is
   installed.

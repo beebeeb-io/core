@@ -6,7 +6,13 @@ impl Client {
     }
 
     pub async fn sign_out_this_app(&self, store: &dyn SecretStore) -> Result<(), AuthError> {
-        let network = self.execute_retired_logout().await.map(|_| ());
+        // A closed vault holds no credentials in memory: its stored session is ended with
+        // its own token. A person who cannot unlock can still leave.
+        let network = if self.lock_state() == LockState::VaultClosed {
+            self.end_stored_session(store).await
+        } else {
+            self.execute_retired_logout().await.map(|_| ()).map_err(Into::into)
+        };
         let stored = Session::sign_out_app(store, self.app_id());
         let local = self.sign_out_authentication().map(|_| ());
         network?;
@@ -37,10 +43,11 @@ impl Client {
             let _ = self.clear_authentication();
             return Err(error);
         }
-        let generation = self.generation().checked_add(1).ok_or(AuthError::MalformedAnswer)?;
-        let refreshed = stored.refresh(accepted.session_token.to_string(), generation)?;
+        let proven_at = self.generation();
         let record = self.seal_screen_check(&mut accepted).await;
-        if let Err(error) = self.save_strong_install(&refreshed, &accepted, store, record, false) {
+        let generation = proven_at.checked_add(1).ok_or(AuthError::MalformedAnswer)?;
+        let refreshed = stored.refresh(accepted.session_token.to_string(), generation)?;
+        if let Err(error) = self.save_strong_install(&refreshed, &accepted, store, record, false, proven_at) {
             let _ = self.clear_authentication();
             return Err(error);
         }
@@ -104,7 +111,9 @@ impl Client {
             let _ = self.clear_authentication();
             return Err(error);
         }
-        let generation = self.generation().checked_add(1).ok_or(AuthError::MalformedAnswer)?;
+        let proven_at = self.generation();
+        let record = self.seal_screen_check(&mut accepted).await;
+        let generation = proven_at.checked_add(1).ok_or(AuthError::MalformedAnswer)?;
         let session = Session::from_authenticated(
             api_url,
             accepted.session_token.to_string(),
@@ -112,8 +121,7 @@ impl Client {
             master_key,
             generation,
         )?;
-        let record = self.seal_screen_check(&mut accepted).await;
-        if let Err(error) = self.save_strong_install(&session, &accepted, store, record, replace_account) {
+        if let Err(error) = self.save_strong_install(&session, &accepted, store, record, replace_account, proven_at) {
             let _ = self.clear_authentication();
             return Err(error);
         }
@@ -133,7 +141,13 @@ impl Client {
         store: &dyn SecretStore,
         record: Option<beebeeb_core::screen_lock::ScreenCheckRecord>,
         replace_account: bool,
+        proven_at: u64,
     ) -> Result<(), AuthError> {
+        // The install belongs to the session that was proven: a lock or a sign-out that
+        // landed while the proof was on its way is not undone by a late install.
+        if self.generation() != proven_at {
+            return Err(ClientError::StaleAccount.into());
+        }
         if replace_account {
             session.save_replacing(store, self.app_id())?;
         } else {

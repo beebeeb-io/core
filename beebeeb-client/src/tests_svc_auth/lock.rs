@@ -96,6 +96,7 @@ struct ServerState {
     two_factor: bool,
     login_state: Option<Vec<u8>>,
     requests: Vec<beebeeb_api::Request>,
+    gate: Option<Arc<tokio::sync::Notify>>,
 }
 
 /// A server that holds [`account`]: the password proof, the sign-in, the key proof, the
@@ -156,6 +157,13 @@ impl LockServer {
         self.edit(|state| state.two_factor = true);
     }
 
+    /// Holds every request until the returned gate is notified once per request.
+    pub(super) fn hold_requests(&self) -> Arc<tokio::sync::Notify> {
+        let gate = Arc::new(tokio::sync::Notify::new());
+        self.edit(|state| state.gate = Some(gate.clone()));
+        gate
+    }
+
     /// Runs `hook` with the path of every request, before it is answered.
     pub(super) fn on_request(&self, hook: impl Fn(&str) + Send + Sync + 'static) {
         *self.hook.lock().unwrap() = Some(Box::new(hook));
@@ -203,6 +211,10 @@ impl Transport for LockServer {
         Box::pin(async move {
             if let Some(hook) = self.hook.lock().unwrap().as_ref() {
                 hook(request.path());
+            }
+            let gate = self.state.lock().unwrap().gate.clone();
+            if let Some(gate) = gate {
+                gate.notified().await;
             }
             let mut state = self.state.lock().unwrap();
             state.requests.push(request.clone());
@@ -259,13 +271,13 @@ impl Transport for LockServer {
                     let login = state.login_state.take().ok_or(TransportError::Network)?;
                     let proven = server_login_finish(&login, &client_message()?).is_ok();
                     match (request.path(), proven) {
-                        (PROOF_FINISH, true) => Self::json(
-                            200,
-                            serde_json::json!({
-                                "proven": true,
-                                "password_counter": state.password_counter.unwrap_or(0),
-                            }),
-                        ),
+                        (PROOF_FINISH, true) => {
+                            let mut proven = serde_json::json!({ "proven": true });
+                            if let Some(counter) = state.password_counter {
+                                proven["password_counter"] = counter.into();
+                            }
+                            Self::json(200, proven)
+                        }
                         (PROOF_FINISH, false) => Self::json(403, serde_json::json!({ "error": "password_not_proven" })),
                         (STEP_UP_FINISH, true) => Self::json(
                             200,
@@ -328,6 +340,7 @@ pub(super) struct FaultyStore {
     pub(super) inner: MemorySecretStore,
     fail_get: Mutex<HashSet<&'static str>>,
     fail_set: Mutex<HashSet<&'static str>>,
+    fail_delete: Mutex<HashSet<&'static str>>,
 }
 
 impl FaultyStore {
@@ -345,6 +358,10 @@ impl FaultyStore {
 
     pub(super) fn fail_writes_of(&self, name: &'static str) {
         self.fail_set.lock().unwrap().insert(name);
+    }
+
+    pub(super) fn fail_deletes_of(&self, name: &'static str) {
+        self.fail_delete.lock().unwrap().insert(name);
     }
 }
 
@@ -364,6 +381,9 @@ impl SecretStore for FaultyStore {
     }
 
     fn delete(&self, name: &str) -> Result<(), SecretError> {
+        if self.fail_delete.lock().unwrap().contains(name) {
+            return Err(SecretError::Backend);
+        }
         self.inner.delete(name)
     }
 }
@@ -480,6 +500,15 @@ fn a_closed_or_unreadable_start_reads_the_key_entry_zero_times() {
         );
         assert_eq!(store.inner.read_count_for(KEY_ENTRY), 0, "{name}");
         assert!(client.session_key().is_err(), "{name}");
+        // A start that is closed for any reason is marked closed, so that every restore
+        // path stays closed with it (a mark that cannot be read already refuses them).
+        if name != "the mark cannot be read" {
+            assert_eq!(
+                entry(&store.inner, LOCK_VAULT_CLOSED).as_deref(),
+                Some(b"1".as_slice()),
+                "{name}"
+            );
+        }
         // Neither screen proof opens it, and a restore is refused.
         assert!(client.unlock_screen_platform_verified(&store).is_err(), "{name}");
         assert!(matches!(
@@ -919,4 +948,168 @@ async fn a_changed_password_counter_deletes_the_record() {
         LockState::VaultClosed
     );
     assert_eq!(server.count(ME), asked);
+}
+
+/// The store was not at hand when the refusal arrived, and the app quit before the host
+/// recorded it: the next start is screen-locked, and its first contact closes it for good.
+#[tokio::test]
+async fn an_unrecorded_ended_session_closes_again_at_the_first_contact_after_a_restart() {
+    let server = LockServer::new();
+    let store = store_with_session();
+    let client = screen_locked(&server, &store, false);
+    server.end_the_session();
+    assert!(client.execute(&beebeeb_api::routes::auth::me(), &()).await.is_err());
+    assert_eq!(client.lock_state(), LockState::VaultClosed);
+    assert_eq!(entry(&store, LOCK_VAULT_CLOSED), None, "nothing recorded it");
+    drop(client);
+
+    let restarted = screen_locked(&server, &store, false);
+    assert_eq!(
+        restarted.refresh_lock_from_server(&store).await.unwrap(),
+        LockState::VaultClosed
+    );
+    assert!(restarted.session_key().is_err());
+    assert_eq!(entry(&store, LOCK_VAULT_CLOSED).as_deref(), Some(b"1".as_slice()));
+}
+
+/// Credentials without a key (a password accepted for a sign-in, for any account) replace
+/// the session of an app that held the key: its lock state must not go on describing it.
+#[tokio::test]
+async fn credentials_without_a_key_close_a_screen_locked_app() {
+    let server = LockServer::new();
+    let store = store_with_session();
+    let client = screen_locked(&server, &store, true);
+    store.set(LOCK_SCREEN_CHECK, &record_for(PASSWORD)).unwrap();
+    client.set_authentication("another-token", "another-account").unwrap();
+    assert_eq!(client.lock_state(), LockState::VaultClosed);
+    // Neither screen proof opens what is left, and nothing was asked or written.
+    assert!(client.unlock_screen_platform_verified(&store).is_err());
+    assert!(
+        client
+            .unlock_screen_with_password(password(PASSWORD), &store, 1)
+            .await
+            .is_err()
+    );
+    assert_eq!(server.requests().len(), 0);
+    assert_eq!(entry(&store, LOCK_SCREEN_CHECK).unwrap(), record_for(PASSWORD));
+    assert_eq!(client.lock_state(), LockState::VaultClosed);
+}
+
+#[tokio::test]
+async fn a_sign_out_from_a_closed_vault_ends_the_stored_session_with_its_own_token() {
+    let server = LockServer::new();
+    let store = store_with_session();
+    store.set(LOCK_VAULT_CLOSED, b"1").unwrap();
+    store.reset_reads();
+    let client = Client::new(config(false), server.clone()).unwrap();
+    assert_eq!(client.start_from_store(&store).unwrap(), LockState::VaultClosed);
+    // A person who cannot unlock can leave: no proof, and the key entry is not read.
+    client.sign_out_this_app(&store).await.unwrap();
+    assert_eq!(client.lock_state(), LockState::SignedOut);
+    assert_eq!(server.logged_out_tokens(), [format!("Bearer {STORED_TOKEN}")]);
+    assert_eq!(entry(&store, "session.token.test-app"), None);
+    assert_eq!(store.read_count_for(KEY_ENTRY), 0);
+}
+
+#[tokio::test]
+async fn a_strong_unlock_that_cannot_clear_the_mark_installs_nothing() {
+    let server = LockServer::new();
+    let store = FaultyStore::with_session();
+    store.inner.set(LOCK_VAULT_CLOSED, b"1").unwrap();
+    let client = Client::new(config(false), server.clone()).unwrap();
+    client.start_from_store(&store).unwrap();
+    let accepted = accepted_password(&client, &store).await;
+    store.fail_deletes_of(LOCK_VAULT_CLOSED);
+    assert!(matches!(
+        client.unlock_known_device(accepted, &store).await,
+        Err(AuthError::Secret(SecretError::Backend))
+    ));
+    // The mark is cleared in the step that installs, or the install does not happen.
+    assert_eq!(client.lock_state(), LockState::VaultClosed);
+    assert!(client.session_key().is_err());
+    assert_eq!(entry(&store.inner, LOCK_VAULT_CLOSED).as_deref(), Some(b"1".as_slice()));
+}
+
+/// A lock that lands while the strong unlock is still on its way is not undone by it.
+#[tokio::test]
+async fn a_strong_unlock_overtaken_by_another_session_installs_nothing() {
+    let server = LockServer::new();
+    let store = Arc::new(store_with_session());
+    store.set(LOCK_VAULT_CLOSED, b"1").unwrap();
+    let client = Arc::new(Client::new(config(true), server.clone()).unwrap());
+    client.start_from_store(store.as_ref()).unwrap();
+    let accepted = accepted_password(&client, store.as_ref()).await;
+    // While the unlock reads the password counter, the session in this process changes.
+    let overtaking = client.clone();
+    server.on_request(move |path| {
+        if path == ME {
+            overtaking
+                .set_authentication("another-token", "another-account")
+                .unwrap();
+        }
+    });
+    assert!(matches!(
+        client.unlock_known_device(accepted, store.as_ref()).await,
+        Err(AuthError::Client(ClientError::StaleAccount))
+    ));
+    assert_eq!(client.lock_state(), LockState::VaultClosed);
+    assert!(client.session_key().is_err());
+    assert_eq!(
+        entry(store.as_ref(), LOCK_VAULT_CLOSED).as_deref(),
+        Some(b"1".as_slice())
+    );
+    assert_eq!(
+        entry(store.as_ref(), "session.token.test-app").unwrap(),
+        STORED_TOKEN.as_bytes(),
+        "nothing was saved"
+    );
+    assert_eq!(entry(store.as_ref(), LOCK_SCREEN_CHECK), None);
+}
+
+/// A recovery is a strong install: it opens a closed vault, clears the mark, and the check
+/// record of the password it replaced does not survive it.
+#[tokio::test]
+async fn a_recovered_session_opens_a_closed_vault_and_drops_the_old_passwords_record() {
+    let transport = Arc::new(ScriptedTransport::json(
+        200,
+        serde_json::to_vec(&serde_json::json!({
+            "session_token": "recovered-token", "user_id": OWNER, "key_state": "proven",
+        }))
+        .unwrap(),
+    ));
+    let store = store_with_session();
+    store.set(LOCK_VAULT_CLOSED, b"1").unwrap();
+    store.set(LOCK_SCREEN_CHECK, &[7u8; 102]).unwrap();
+    seed_attempts(&store, 4, 9);
+    let client = Client::new(config(true), transport).unwrap();
+    assert_eq!(client.start_from_store(&store).unwrap(), LockState::VaultClosed);
+    let attempt =
+        crate::auth::RecoveryAttempt::from_parts_for_test("recovery-id", "holder-secret", None, RecoveryState::Ready);
+    let recovered = client
+        .complete_recovery(
+            &attempt,
+            EMAIL,
+            RecoveryChanges {
+                remove_authenticator: true,
+                ..RecoveryChanges::default()
+            },
+        )
+        .await
+        .unwrap();
+    client
+        .install_recovered_session(
+            &recovered,
+            MasterKey::from_bytes([1; 32]),
+            "http://localhost:8080",
+            &store,
+        )
+        .unwrap();
+    assert_eq!(client.lock_state(), LockState::Open);
+    assert!(client.session_key().unwrap().is_current(&client));
+    assert_eq!(entry(&store, LOCK_VAULT_CLOSED), None);
+    assert_eq!(entry(&store, LOCK_SCREEN_CHECK), None);
+    assert_eq!(attempts(&store), None);
+    // The app can be locked again: the lock knows this session.
+    client.lock_screen().unwrap();
+    assert_eq!(client.lock_state(), LockState::ScreenLocked);
 }

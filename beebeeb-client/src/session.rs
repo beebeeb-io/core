@@ -375,21 +375,35 @@ impl Session {
     /// Loads a key only after its separate owner record matches the expected
     /// account. A mismatch leaves the stored account untouched.
     ///
-    /// This is a start-up restore path, so it obeys the vault lock: when the closed mark is
-    /// set, the "ask for my password at start" setting is on, or either cannot be read, it
-    /// answers `SecretError::VaultClosed` without reading the key entry. Only core's strong
-    /// unlock (`Client::unlock_known_device`) loads the key of a closed vault.
+    /// This is a restore path, so it obeys the vault lock: while the closed mark is set, or
+    /// cannot be read, it answers `SecretError::VaultClosed` without reading the key entry.
+    /// Only core's strong unlock (`Client::unlock_known_device`) loads the key of a closed
+    /// vault, and it clears the mark. (`Client::start_from_store` sets the mark when it starts
+    /// closed because of the start setting, so that setting holds for this path too.)
     pub fn load_for_user(
         store: &dyn SecretStore,
         expected_user: &str,
         app_id: &str,
     ) -> Result<Option<Self>, SecretError> {
-        if read_lock_flag(store, LOCK_VAULT_CLOSED) != Some(false)
-            || read_lock_flag(store, LOCK_ASK_AT_START) != Some(false)
-        {
+        if read_lock_flag(store, LOCK_VAULT_CLOSED) != Some(false) {
             return Err(SecretError::VaultClosed);
         }
         Self::load_for_user_proven(store, expected_user, app_id)
+    }
+
+    /// The stored token of this app with its owner, without reading the key entry: for
+    /// ending that session at the server from a closed vault.
+    pub(crate) fn stored_token_for_app(
+        store: &dyn SecretStore,
+        app_id: &str,
+    ) -> Result<Option<(Zeroizing<String>, String)>, SecretError> {
+        let Some(owner) = Self::stored_owner_for_app(store, app_id)? else {
+            return Ok(None);
+        };
+        let Some(token) = store.get(&token_name(app_id)?)? else {
+            return Ok(None);
+        };
+        Ok(Some((Zeroizing::new(stored_string(&token)?), owner)))
     }
 
     /// The owner of the stored session this app is registered in, without reading the key

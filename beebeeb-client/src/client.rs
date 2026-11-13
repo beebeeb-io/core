@@ -108,6 +108,10 @@ pub struct Client {
     events: EngineEvents,
     /// The two-level lock of this app process. Never locked together with `authentication`.
     lock: Mutex<LockFlow>,
+    /// One password check of the lock at a time: its wrong-try count is read, written and
+    /// restored around requests, and two overlapping tries would share one count.
+    #[cfg(feature = "auth")]
+    pub(crate) password_check: tokio::sync::Mutex<()>,
 }
 
 /// What a native client declares. The request builder attaches it only to the
@@ -159,6 +163,8 @@ impl Client {
                 ask_password_at_start: Some(false),
                 vault_closed: Some(false),
             })),
+            #[cfg(feature = "auth")]
+            password_check: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -201,14 +207,21 @@ impl Client {
         if token.is_empty() || expected_user.is_empty() {
             return Err(ClientError::InvalidAuthentication);
         }
-        let mut authentication = self.authentication.lock().map_err(|_| ClientError::State)?;
-        let generation = self.advance_generation();
-        *authentication = Some(Authentication {
-            token: Zeroizing::new(token),
-            expected_user,
-            master_key: None,
-            generation,
-        });
+        let generation = {
+            let mut authentication = self.authentication.lock().map_err(|_| ClientError::State)?;
+            let generation = self.advance_generation();
+            *authentication = Some(Authentication {
+                token: Zeroizing::new(token),
+                expected_user,
+                master_key: None,
+                generation,
+            });
+            generation
+        };
+        // These credentials carry no key and may belong to another account: an app that held
+        // the key no longer does, so its lock state must not keep describing the old session.
+        // A strong install that follows opens it again; nothing weaker does.
+        self.with_lock_flow(LockFlow::session_ended)?;
         Ok(generation)
     }
 
@@ -354,17 +367,31 @@ impl Client {
         endpoint.parse(answer).map(|_| ()).map_err(ClientError::Api)
     }
 
-    /// The server no longer accepts this session. The event is the host's signal; the arrow
-    /// is core's: an app that held the key drops it and is left with a closed vault. A host
-    /// that never ran a sign-in or the lock start through core (`SignedOut`) is left as it is.
-    fn session_expired(&self) {
+    /// The server no longer accepts the session a request of `generation` was sent with. The
+    /// event is the host's signal; the arrow is core's: an app that held the key drops it and
+    /// is left with a closed vault. A host that never ran a sign-in or the lock start through
+    /// core (`SignedOut`) is left as it is. The refusal of an older session never drops a
+    /// newer one: the generation is compared under the lock that guards the session.
+    ///
+    /// This closes the vault in this process only. The store is not at hand here, so the
+    /// host records it with `Client::session_ended` (core's own lock calls do it themselves);
+    /// until then a restart starts screen-locked and closes again at the first refusal.
+    fn session_expired(&self, generation: u64) {
         if matches!(self.lock_state(), LockState::Open | LockState::ScreenLocked) {
-            if let Ok(mut authentication) = self.authentication.lock() {
-                *authentication = None;
+            let dropped = self.authentication.lock().is_ok_and(|mut authentication| {
+                let current = authentication
+                    .as_ref()
+                    .is_some_and(|authentication| authentication.generation == generation);
+                if current {
+                    *authentication = None;
+                }
+                current
+            });
+            if dropped {
+                self.advance_generation();
+                let _ = self.with_lock_flow(LockFlow::session_ended);
+                self.events.emit(EngineEvent::WorkStopped);
             }
-            self.advance_generation();
-            let _ = self.with_lock_flow(LockFlow::session_ended);
-            self.events.emit(EngineEvent::WorkStopped);
         }
         self.events.emit(EngineEvent::SessionExpired);
     }
@@ -566,7 +593,7 @@ impl Client {
             Err(ApiError::Server(error))
                 if error.status == 401 && carried_session_authentication && !endpoint.is_step_up() =>
             {
-                self.session_expired();
+                self.session_expired(captured_generation);
                 Err(ClientError::Api(ApiError::Server(error)))
             }
             result => result.map(|parsed| (parsed, headers)).map_err(ClientError::Api),
@@ -612,7 +639,7 @@ impl Client {
                 return Err(ClientError::Api(ApiError::Server(error)));
             }
             if error.status == 401 && carried_session_authentication {
-                self.session_expired();
+                self.session_expired(generation);
                 return Err(ClientError::Api(ApiError::Server(error)));
             }
         }
@@ -674,7 +701,7 @@ impl Client {
                 Err(ClientError::Api(ApiError::Server(error)))
             }
             Err(ApiError::Server(error)) if error.status == 401 => {
-                self.session_expired();
+                self.session_expired(captured_generation);
                 Err(ClientError::Api(ApiError::Server(error)))
             }
             result => result.map_err(ClientError::Api),
@@ -719,7 +746,7 @@ impl Client {
                 Err(ClientError::Api(ApiError::Server(error)))
             }
             Err(ApiError::Server(error)) if error.status == 401 => {
-                self.session_expired();
+                self.session_expired(captured_generation);
                 Err(ClientError::Api(ApiError::Server(error)))
             }
             result => result.map_err(ClientError::Api),
@@ -759,7 +786,7 @@ impl Client {
                     Err(ClientError::Api(ApiError::Server(error)))
                 }
                 Err(ApiError::Server(error)) if error.status == 401 && carried_session_authentication => {
-                    self.session_expired();
+                    self.session_expired(captured_generation);
                     Err(ClientError::Api(ApiError::Server(error)))
                 }
                 Err(error) => Err(ClientError::Api(error)),

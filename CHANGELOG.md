@@ -21,7 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `Session::load_for_user` answers the new `SecretError::VaultClosed` while a vault is closed, and
   `Client::set_session` the new `ClientError::VaultClosed`. A device that never locked a vault and has
-  the start setting off is unaffected.
+  the start setting off is unaffected. `opaque_protocol::client_login_finish_judged` tells a wrong
+  password from a finish that could not run.
 - A session the server refuses (a 401 to its credentials) now also drops the account key from the
   process and stops work when that session was installed by a sign-in or by `start_from_store`; the
   `SessionExpired` event is unchanged. `unlock_known_device` ends the stored session it replaces.
