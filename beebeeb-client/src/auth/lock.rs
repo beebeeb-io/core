@@ -175,13 +175,11 @@ impl Client {
     }
 
     /// Seals the sign-in's stretched password for the account that was just accepted, with
-    /// the password counter the server reports for it. `None` (no record) when the password
-    /// path is off, the sign-in carried no stretch, or the counter could not be read.
+    /// the password counter the server reports for it. `None` (no record) when the sign-in
+    /// carried no stretch (it never does while the password path is off) or the counter
+    /// could not be read.
     pub(super) async fn seal_screen_check(&self, accepted: &mut PasswordAccepted) -> Option<ScreenCheckRecord> {
         let pending = accepted.screen_check.take()?;
-        if !self.lock_password_path() {
-            return None;
-        }
         let user = self.execute(&auth::me(), &()).await.ok()?;
         if user.id != accepted.owner {
             return None;

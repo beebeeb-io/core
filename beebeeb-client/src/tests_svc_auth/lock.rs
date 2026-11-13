@@ -1147,3 +1147,22 @@ async fn a_recovered_session_opens_a_closed_vault_and_drops_the_old_passwords_re
     client.lock_screen().unwrap();
     assert_eq!(client.lock_state(), LockState::ScreenLocked);
 }
+
+/// The host may know that the session ended before any request of this process was refused.
+#[test]
+fn a_host_that_reports_an_ended_session_closes_an_open_app() {
+    let store = store_with_session();
+    let client = screen_locked(&LockServer::new(), &store, false);
+    client.unlock_screen_platform_verified(&store).unwrap();
+    let copy = client.session_key().unwrap();
+    assert_eq!(client.session_ended(&store).unwrap(), LockState::VaultClosed);
+    assert_eq!(client.lock_state(), LockState::VaultClosed);
+    assert!(client.session_key().is_err());
+    assert!(!copy.is_current(&client));
+    assert_eq!(entry(&store, LOCK_VAULT_CLOSED).as_deref(), Some(b"1".as_slice()));
+    // A signed-out app has nothing to close, and nothing is marked for it.
+    let signed_out = Client::new(config(false), LockServer::new()).unwrap();
+    let empty = MemorySecretStore::default();
+    assert_eq!(signed_out.session_ended(&empty).unwrap(), LockState::SignedOut);
+    assert_eq!(entry(&empty, LOCK_VAULT_CLOSED), None);
+}
