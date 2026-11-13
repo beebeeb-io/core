@@ -1,0 +1,385 @@
+//! Core applies the screen lock itself: while `ScreenLocked` every call a person drives is
+//! refused with `ClientError::ScreenLocked` before anything is sent, except unlock, lock the
+//! vault and sign out; the work keeps running until the vault is closed.
+
+use beebeeb_api::flows::LockState;
+
+use super::lock::*;
+use super::*;
+use crate::contacts::ContactServiceError;
+use crate::downloads::{DownloadFile, DownloadService, DownloadServiceError};
+use crate::files::{FileRecord, FileServiceError};
+use crate::shares::ShareServiceError;
+use crate::sync::SyncLoopError;
+use crate::uploads::{NetworkKind, UploadService, UploadServiceError};
+use crate::{Call, LockedAction};
+
+/// Whether an error is core's refusal of a call on a locked screen.
+trait Refusal {
+    fn is_screen_locked(&self) -> bool;
+}
+
+impl Refusal for ClientError {
+    fn is_screen_locked(&self) -> bool {
+        matches!(self, ClientError::ScreenLocked)
+    }
+}
+
+macro_rules! wraps_the_refusal {
+    ($($error:ty),+) => {$(
+        impl Refusal for $error {
+            fn is_screen_locked(&self) -> bool {
+                matches!(self, Self::Client(ClientError::ScreenLocked))
+            }
+        }
+    )+};
+}
+wraps_the_refusal!(
+    AuthError,
+    DeviceError,
+    FileServiceError,
+    ContactServiceError,
+    ShareServiceError,
+    DownloadServiceError,
+    UploadServiceError
+);
+
+/// Asserts that each call is refused as `ScreenLocked`, and counts them.
+macro_rules! refused {
+    ($count:ident: $($name:literal => $call:expr),+ $(,)?) => {$(
+        match $call {
+            Err(error) => assert!(error.is_screen_locked(), "{}: {error:?}", $name),
+            Ok(_) => panic!("{}: a locked screen let the call in", $name),
+        }
+        $count += 1;
+    )+};
+}
+
+fn services(client: &Arc<Client>, root: &std::path::Path) -> (DownloadService, UploadService) {
+    let store = Arc::new(Mutex::new(beebeeb_store::Store::open_in_memory().unwrap()));
+    (
+        DownloadService::new(
+            client.clone(),
+            store.clone(),
+            root.join("cache"),
+            1024,
+            beebeeb_types::limits::MemoryBudget::NATIVE,
+        )
+        .unwrap(),
+        UploadService::new(client.clone(), store, root.join("staging")).unwrap(),
+    )
+}
+
+fn a_file() -> DownloadFile {
+    DownloadFile {
+        file_id: "0b3c7a52-5d0e-4f1a-9d2e-1c6f3a8b9e02".into(),
+        name_encrypted: "sealed".into(),
+        size_bytes: 1,
+        chunk_size_bytes: 1,
+        chunk_count: 1,
+        object_version_id: "v".into(),
+    }
+}
+
+#[tokio::test]
+async fn a_locked_screen_refuses_every_call_a_person_drives_and_sends_nothing() {
+    let server = LockServer::new();
+    let store = store_with_session();
+    let client = Arc::new(screen_locked(&server, &store, false));
+    let root = tempfile::tempdir().unwrap();
+    let (downloads, uploads) = services(&client, root.path());
+    let session = session(OWNER, STORED_TOKEN, 1);
+    let record = FileRecord::for_test("file-1", "name");
+    let row = record.wire();
+    let file = a_file();
+    let mut local = beebeeb_store::Store::open_in_memory().unwrap();
+    let mut count = 0;
+
+    // The key does not leave core.
+    refused!(count: "session_key" => client.session_key());
+    // Files: names, listings, content, changes.
+    refused!(count:
+        "list_files" => client.list_files(None, false).await,
+        "list_file_records_page" => client.list_file_records_page(&session, None, false, None, 10).await,
+        "get_file" => client.get_file("file-1").await,
+        "get_file_record" => client.get_file_record(&session, "file-1").await,
+        "file_versions" => client.file_versions("file-1").await,
+        "storage_usage" => client.storage_usage().await,
+        "create_folder" => client.create_folder(&session, "folder", None).await,
+        "rename_entry" => client.rename_entry(&session, row, "new name").await,
+        "move_entry" => client.move_entry(&session, row, None).await,
+        "trash_file" => client.trash_file("file-1").await,
+        "trash_entry" => client.trash_entry(row).await,
+        "trash_entries" => client.trash_entries(std::slice::from_ref(row)).await,
+        "restore_file" => client.restore_file("file-1").await,
+        "restore_entry" => client.restore_entry(row).await,
+        "delete_file_forever" => client.delete_file_forever("file-1").await,
+        "delete_entry_forever" => client.delete_entry_forever(row).await,
+        "delete_entries_forever" => client.delete_entries_forever(std::slice::from_ref(row)).await,
+        "downloads.open" => downloads.open(&file, 1).await,
+        "downloads.video_range" => downloads.video_range(&file, 0..1).await,
+        "downloads.read_range" => downloads.read_range(&file, 0..1).await,
+        "downloads.range_reader" => downloads.range_reader(&file),
+        "uploads.list" => uploads.list(),
+    );
+    // Sharing and contacts.
+    refused!(count:
+        "my_share_links" => client.my_share_links().await,
+        "revoke_share_link" => client.revoke_share_link("share-1").await,
+        "incoming_invites" => client.incoming_invites().await,
+        "sent_invites" => client.sent_invites().await,
+        "deny_invite" => client.deny_invite("invite-1").await,
+        "folder_links" => client.folder_links(None).await,
+        "revoke_folder_link" => client.revoke_folder_link("link-1").await,
+        "file_requests" => client.file_requests().await,
+        "close_file_request" => client.close_file_request("request-1").await,
+        "fetch_contact_public_key" => client.fetch_contact_public_key(OWNER).await,
+        "observe_contact_key_from_server" => client.observe_contact_key_from_server(&mut local, OWNER, 1).await,
+        "accept_contact_key_from_server" => client.accept_contact_key_from_server(&mut local, OWNER, 1).await,
+    );
+    // The account, its devices and its settings.
+    refused!(count:
+        "setup_authenticator" => client.setup_authenticator().await,
+        "enable_authenticator" => client.enable_authenticator("123456".into()).await,
+        "remove_authenticator" => client.remove_authenticator("123456".into()).await,
+        "request_account_deletion" => client.request_account_deletion(password(PASSWORD), None).await,
+        "change_password" => client.change_password(password(PASSWORD), password("another password 2026"), &store).await,
+        "change_email" => client.change_email("new@example.test", password(PASSWORD), &store).await,
+        "set_version_history" => client.set_version_history(true, 30).await,
+        "pending_device_links" => client.pending_device_links().await,
+        "begin_typed_device_approval" => client.begin_typed_device_approval("link-1", "123456").await,
+        "deny_device_link" => client.deny_device_link("link-1").await,
+        "list_devices" => client.list_devices().await,
+        "remove_device" => client.remove_device("device-1").await,
+        "list_account_sessions" => client.list_account_sessions().await,
+        "revoke_account_session" => client.revoke_account_session("session-1").await,
+    );
+    assert_eq!(count, 49, "every call above was refused");
+    assert_eq!(server.requests().len(), 0, "a refused call sends nothing");
+    assert_eq!(
+        client.lock_state(),
+        LockState::ScreenLocked,
+        "a refusal changes nothing"
+    );
+    assert_eq!(
+        entry(&store, "session.token.test-app").unwrap(),
+        STORED_TOKEN.as_bytes()
+    );
+
+    // The same calls reach the server once the screen is open.
+    client.unlock_screen_platform_verified(&store).unwrap();
+    assert!(client.session_key().unwrap().is_current(&client));
+    let answer = client.list_files(None, false).await;
+    assert!(matches!(answer, Err(ClientError::Api(_))), "{answer:?}");
+    assert_eq!(server.requests().len(), 1);
+}
+
+/// The work the screen lock keeps running: it is refused only on a closed vault.
+#[tokio::test]
+async fn the_work_runs_on_a_locked_screen_and_stops_on_a_closed_vault() {
+    let server = LockServer::new();
+    let store = store_with_session();
+    let client = Arc::new(screen_locked(&server, &store, false));
+    let root = tempfile::tempdir().unwrap();
+    let (_downloads, uploads) = services(&client, root.path());
+    let session = session(OWNER, STORED_TOKEN, 1);
+    let mut engine = beebeeb_core::sync::SyncEngine::new("device-1".into());
+
+    // Screen-locked: sync asks the server, the upload queue is served.
+    let synced = client.catch_up_sync(&session, &mut engine, 100).await;
+    assert!(
+        matches!(synced, Err(SyncLoopError::Client(ClientError::Api(_)))),
+        "the request went out and the test server has no such route: {synced:?}"
+    );
+    assert_eq!(server.requests().len(), 1);
+    assert!(uploads.next_transfers(1, NetworkKind::WiFi, 1).await.unwrap().is_none());
+    assert!(client.check_call(Call::Work).is_ok());
+    // The three things a person may do there.
+    for allowed in [
+        LockedAction::UnlockScreen,
+        LockedAction::LockVault,
+        LockedAction::SignOut,
+    ] {
+        assert!(client.check_call(Call::Person(allowed)).is_ok(), "{allowed:?}");
+    }
+    assert!(matches!(
+        client.check_call(Call::Person(LockedAction::ViewFiles)),
+        Err(ClientError::ScreenLocked)
+    ));
+
+    // A closed vault: the work is refused before anything is sent.
+    client.lock_vault(&store).await.unwrap();
+    let asked = server.requests().len();
+    assert!(matches!(
+        client.catch_up_sync(&session, &mut engine, 100).await,
+        Err(SyncLoopError::Client(ClientError::VaultClosed))
+    ));
+    assert!(matches!(
+        client.refresh_sync_snapshot(&session, &mut engine).await,
+        Err(SyncLoopError::Client(ClientError::VaultClosed))
+    ));
+    assert!(matches!(
+        uploads.next_transfers(1, NetworkKind::WiFi, 1).await,
+        Err(UploadServiceError::Client(ClientError::VaultClosed))
+    ));
+    assert_eq!(server.requests().len(), asked);
+    assert!(matches!(client.check_call(Call::Work), Err(ClientError::VaultClosed)));
+}
+
+/// A host that installs its sessions itself and never starts the lock through core is
+/// refused nothing: its lock state is `SignedOut`.
+#[tokio::test]
+async fn a_host_that_never_started_the_lock_is_refused_nothing() {
+    let server = LockServer::new();
+    let client = Client::new(config(false), server.clone()).unwrap();
+    client.set_session(&session(OWNER, STORED_TOKEN, 1)).unwrap();
+    assert_eq!(client.lock_state(), LockState::SignedOut);
+    assert!(client.session_key().unwrap().is_current(&client));
+    assert!(client.check_call(Call::Work).is_ok());
+    let answer = client.list_files(None, false).await;
+    assert!(matches!(answer, Err(ClientError::Api(_))), "{answer:?}");
+    assert_eq!(server.requests().len(), 1);
+}
+
+/// The gated surface, read from the sources: in the files below, every public function of
+/// `Client` or of a service asks the lock (`person_call` or `work_call`) or is named here as
+/// one that does not. A new public function fails this test until it is put in one of the two.
+#[test]
+fn every_public_call_asks_the_lock_or_is_listed_as_ungated() {
+    // (file, source, the public functions that do not ask the lock)
+    let sources: [(&str, &str, &[&str]); 13] = [
+        ("files.rs", include_str!("../files.rs"), &[]),
+        ("settings.rs", include_str!("../settings.rs"), &[]),
+        ("contacts.rs", include_str!("../contacts.rs"), &[]),
+        ("shares.rs", include_str!("../shares.rs"), &[]),
+        ("sync.rs", include_str!("../sync.rs"), &[]),
+        ("auth/account.rs", include_str!("../auth/account.rs"), &[]),
+        (
+            "auth/passkey.rs",
+            include_str!("../auth/passkey.rs"),
+            // A step of a sign-in on a new device: it runs before the app holds a key.
+            &["open_with_passkey"],
+        ),
+        (
+            "devices.rs",
+            include_str!("../devices.rs"),
+            // The new device's side of a device link, before it holds a key; the two PAKE
+            // messages belong to both sides and carry no account data.
+            &[
+                "start_device_link_for_sign_in",
+                "start_device_link",
+                "poll_device_link",
+                "acknowledge_device_link",
+                "poll_typed_device_link",
+                "send_device_link_pake",
+                "get_device_link_pake",
+            ],
+        ),
+        (
+            "downloads.rs",
+            include_str!("../downloads.rs"),
+            // Construction, events, a cancel, the cache, and the account-free share view.
+            &[
+                "new",
+                "observe",
+                "cancel",
+                "share_view_download",
+                "clear_cache",
+                "observe_file_version",
+            ],
+        ),
+        (
+            "thumbnails.rs",
+            include_str!("../thumbnails.rs"),
+            // Construction, events, queueing for the cache, the cache, the sign-out.
+            &[
+                "new",
+                "observe",
+                "enqueue_generation",
+                "enqueue_first_sync",
+                "clear",
+                "sign_out",
+            ],
+        ),
+        (
+            "archives.rs",
+            include_str!("../archives.rs"),
+            // Construction, events, and the calls that only end or feed a run a person started.
+            &["new", "observe", "supply_password", "cancel", "close"],
+        ),
+        (
+            "uploads/queue.rs",
+            include_str!("../uploads/queue.rs"),
+            // The transfer queue is work: sync and backup feed it and it keeps running.
+            &[
+                "new",
+                "set_completion_handler",
+                "observe",
+                "enqueue",
+                "transfer_finished",
+                "pause",
+                "resume",
+                "cancel",
+                "cancel_sources_matching",
+                "pending_backup_outcomes",
+                "cancel_backup_uploads",
+                "active_backup_count",
+                "mark_backup_outcome_applied",
+                "sign_out",
+                "finalize_sign_out",
+            ],
+        ),
+        (
+            "backup.rs",
+            include_str!("../backup.rs"),
+            // The backup pass is work; everything but the pass itself is local bookkeeping.
+            &[
+                "new",
+                "with_manifest_store",
+                "configure",
+                "manifest",
+                "observe",
+                "assets_changed",
+                "stopped",
+                "back_up_again",
+                "upload_completed",
+                "sign_out",
+            ],
+        ),
+    ];
+    let mut gated = 0;
+    for (file, source, ungated) in sources {
+        let mut seen_ungated = Vec::new();
+        for block in source.split("\nimpl ").skip(1) {
+            let header = block.lines().next().unwrap_or_default();
+            let owner = header.trim_end_matches(" {");
+            if !(owner == "Client" || owner.ends_with("Service")) {
+                continue;
+            }
+            let block = block.split("\n}\n").next().unwrap_or_default();
+            for function in block.split("\n    pub ").skip(1) {
+                let Some(signature) = function
+                    .strip_prefix("async fn ")
+                    .or_else(|| function.strip_prefix("fn "))
+                else {
+                    continue;
+                };
+                let name = signature
+                    .split(|character: char| !(character.is_alphanumeric() || character == '_'))
+                    .next()
+                    .unwrap_or_default();
+                let body = function.split("\n    }\n").next().unwrap_or_default();
+                if body.contains("person_call(") || body.contains("work_call(") {
+                    gated += 1;
+                } else {
+                    seen_ungated.push(name);
+                }
+            }
+        }
+        assert_eq!(
+            seen_ungated, ungated,
+            "{file}: the public functions that do not ask the lock"
+        );
+    }
+    assert_eq!(gated, 80, "the public functions that ask the lock");
+}

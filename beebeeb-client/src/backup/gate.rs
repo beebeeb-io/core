@@ -221,7 +221,7 @@ impl Client {
     /// account's any more) is gone. Any other failure is an error: the pass
     /// cannot tell.
     async fn backup_row_live(&self, id: &str) -> Result<bool, ClientError> {
-        match self.get_file(id).await {
+        match self.get_file_inner(id).await {
             Ok(row) => Ok(!row.is_trashed),
             Err(ClientError::Api(ApiError::Server(server))) if matches!(server.status, 403 | 404) => Ok(false),
             Err(error) => Err(error),

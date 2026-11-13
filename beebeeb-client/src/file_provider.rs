@@ -219,7 +219,7 @@ impl FileProviderService {
     ) -> Result<FileProviderOutcome, FileProviderError> {
         let id = parse_id(&file.file_id)?;
         self.set_state(id, ItemWorkState::Running)?;
-        let outcome = downloads.open(file, now_ms).await;
+        let outcome = downloads.open_inner(file, now_ms).await;
         let result = match outcome {
             Ok(DownloadResult::Ready(path)) => {
                 self.set_state(id, ItemWorkState::Succeeded)?;
@@ -258,7 +258,10 @@ impl FileProviderService {
         name: &str,
         parent_id: Option<String>,
     ) -> Result<FileRecord, FileProviderError> {
-        let result = client.create_folder(session, name, parent_id).await.map_err(Into::into);
+        let result = client
+            .create_folder_inner(session, name, parent_id)
+            .await
+            .map_err(Into::into);
         match result {
             Ok(record) => {
                 let id = parse_id(&record.id)?;

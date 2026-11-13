@@ -285,17 +285,12 @@ impl Client {
     ) -> Result<Judgement, AuthError> {
         match self.prove_password_online(password).await {
             OnlineProof::Proven { password_counter } => {
-                // The server has just accepted this exact password: write or refresh the
-                // record. One the server's counter says is still this password's is kept as
-                // it is, which saves a second key stretch on every unlock.
-                let current = password_counter.is_some()
-                    && store.get(LOCK_SCREEN_CHECK).ok().flatten().is_some_and(|bytes| {
-                        ScreenCheckRecord::from_bytes(&bytes).password_counter() == password_counter
-                    });
-                if !current {
-                    let record = screen_lock::enroll(password, owner, password_counter.unwrap_or(0)).ok();
-                    replace_screen_check(store, record);
-                }
+                // The server has just accepted this exact password: the record is made again
+                // from it, every time. A stored record's counter is not authenticated, so it
+                // is never a reason to keep that record: one that looks current but was made
+                // for another password would count the right password as wrong offline.
+                let record = screen_lock::enroll(password, owner, password_counter.unwrap_or(0)).ok();
+                replace_screen_check(store, record);
                 Ok(Judgement::Accepted)
             }
             OnlineProof::Wrong => Ok(Judgement::Wrong { failures: 0 }),

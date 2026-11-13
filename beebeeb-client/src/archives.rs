@@ -316,7 +316,8 @@ impl ArchiveService {
         name: String,
         parent_id: Option<String>,
     ) -> Result<ArchiveId, ArchiveServiceError> {
-        let reader = self.inner.downloads.range_reader(file)?;
+        self.inner.client.person_call(crate::LockedAction::ViewFiles)?;
+        let reader = self.inner.downloads.range_reader_inner(file)?;
         let id = ArchiveId(self.inner.next_id.fetch_add(1, Ordering::Relaxed));
         // The source holds what the reader still needs: the central directory
         // and the chunks around it (spec §8).
@@ -346,6 +347,7 @@ impl ArchiveService {
         folder: Vec<String>,
         selection: Vec<String>,
     ) -> Result<ArchivePreviewModel, ArchiveServiceError> {
+        self.inner.client.person_call(crate::LockedAction::ViewFiles)?;
         let archive = self.inner.archive(id)?;
         let archive = lock(&archive)?;
         model(&archive, self.inner.platform, &folder, &selection)
@@ -359,6 +361,7 @@ impl ArchiveService {
         options: ExtractOptions,
         password: Option<ArchivePassword>,
     ) -> Result<ExtractionId, ArchiveServiceError> {
+        self.inner.client.person_call(crate::LockedAction::MutateFiles)?;
         let archive = self.inner.archive(id)?;
         let (file, name, archive_parent) = {
             let archive = lock(&archive)?;
@@ -376,7 +379,7 @@ impl ArchiveService {
             ExtractDestination::Folder(folder) => folder.clone(),
         };
         let destination = self.inner.destination_info(parent.as_deref()).await?;
-        let usage = self.inner.client.storage_usage().await?;
+        let usage = self.inner.client.storage_usage_inner().await?;
         let free = usage.plan_limit_bytes.saturating_sub(usage.used_bytes).max(0);
         let request = ExtractRequest {
             archive_name: name,
@@ -386,7 +389,7 @@ impl ArchiveService {
             device_free_bytes: options.device_free_bytes,
             platform: self.inner.platform,
         };
-        let reader = self.inner.downloads.range_reader(&file)?;
+        let reader = self.inner.downloads.range_reader_inner(&file)?;
         let run = ExtractionId(self.inner.next_id.fetch_add(1, Ordering::Relaxed));
         let identity = ArchiveIdentity {
             file_id: file.file_id.clone(),
@@ -456,6 +459,7 @@ impl ArchiveService {
         index: u32,
         password: Option<ArchivePassword>,
     ) -> Result<Vec<u8>, ArchiveServiceError> {
+        self.inner.client.person_call(crate::LockedAction::ViewFiles)?;
         let archive = self.inner.archive(id)?;
         let budget = self.inner.platform.budget().archive_output_bytes;
         let (mut stream, mut reader) = {
@@ -484,7 +488,7 @@ impl ArchiveService {
                 .map_err(|_| ArchiveServiceError::NoEntry)?;
             let reader = match guard.reader.take() {
                 Some(reader) => reader,
-                None => self.inner.downloads.range_reader(&guard.file)?,
+                None => self.inner.downloads.range_reader_inner(&guard.file)?,
             };
             (stream, reader)
         };
@@ -686,7 +690,7 @@ impl Inner {
     }
 
     async fn sibling_names(&self, parent: Option<&str>) -> Result<TakenNames, ArchiveServiceError> {
-        let key = self.client.session_key()?;
+        let key = self.client.held_key()?;
         let mut taken = TakenNames::new();
         let mut cursor: Option<String> = None;
         loop {
@@ -725,7 +729,7 @@ impl Inner {
                 GuardError::Refused(_) => ArchiveServiceError::Plan(PlanRefusal::Backups),
                 GuardError::Unknown => ArchiveServiceError::Destination,
             })?;
-        let key = self.client.session_key()?;
+        let key = self.client.held_key()?;
         let item = beebeeb_core::item_id::NewItemId::owner(key.master_key()).map_err(|_| ArchiveServiceError::State)?;
         let name_encrypted = beebeeb_core::encrypt::encrypt_name_for_new_item(
             key.master_key(),
@@ -750,7 +754,7 @@ impl Inner {
     /// Whether the archive still has the version that was listed. `None`:
     /// the server's answer cannot tell (no recorded version, or no answer).
     async fn same_version(&self, identity: &ArchiveIdentity) -> Option<bool> {
-        let row = self.client.get_file(&identity.file_id).await.ok()?;
+        let row = self.client.get_file_inner(&identity.file_id).await.ok()?;
         let current = row
             .extra
             .get("download_version")
@@ -776,7 +780,7 @@ async fn fetch(
         start = range.start;
         end = range.end.min(start.saturating_add(range_read_cap(file)));
     }
-    let bytes = downloads.read_with(reader, start..end).await?;
+    let bytes = downloads.read_with_inner(reader, start..end).await?;
     Ok((start, bytes))
 }
 

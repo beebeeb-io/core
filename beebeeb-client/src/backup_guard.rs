@@ -89,7 +89,7 @@ impl Client {
             if chain.len() > MAX_ANCESTORS {
                 return Err(GuardError::Unknown);
             }
-            match self.get_file(&parent).await {
+            match self.get_file_inner(&parent).await {
                 Ok(parent) => chain.push(parent),
                 // Above a folder shared with this account sits the sharer's
                 // own folder, which this account cannot read. A shared tree is
@@ -105,14 +105,14 @@ impl Client {
     /// The depth below the flagged Backups root of the row `id`, read fresh
     /// from the server.
     pub(crate) async fn backup_depth(&self, id: &str) -> Result<Option<usize>, GuardError> {
-        let row = self.get_file(id).await.map_err(GuardError::Client)?;
+        let row = self.get_file_inner(id).await.map_err(GuardError::Client)?;
         self.backup_depth_of(&row).await
     }
 
     /// Core's rule `rule` for mutation `m` of the row `id`: the row's own role
     /// first (core's root rule), then its position below the root.
     pub(crate) async fn check_backup_mutation(&self, rule: Rule, id: &str, m: Mutation) -> Result<(), GuardError> {
-        let row = self.get_file(id).await.map_err(GuardError::Client)?;
+        let row = self.get_file_inner(id).await.map_err(GuardError::Client)?;
         self.check_backup_row(rule, &row, m).await
     }
 
@@ -144,7 +144,7 @@ impl Client {
     /// The name of a file directly in a device folder. One whose name cannot
     /// be opened counts as the device's manifest, which nothing may change.
     fn backup_item_name(&self, row: &FileEntry) -> String {
-        let opened = self.session_key().ok().and_then(|key| {
+        let opened = self.held_key().ok().and_then(|key| {
             let sealed = row.name_encrypted.as_deref()?;
             decrypt_name_metadata(key.master_key(), &row.id, sealed).ok()
         });

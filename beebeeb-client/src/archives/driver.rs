@@ -212,7 +212,7 @@ impl Driver {
 
     /// Read the upload queue's states for this run's uploads again.
     fn reconcile(&mut self) {
-        let Ok(list) = self.inner.uploads.list() else {
+        let Ok(list) = self.inner.uploads.list_inner() else {
             return;
         };
         for summary in list {

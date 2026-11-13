@@ -19,8 +19,10 @@ impl Client {
         } else {
             self.execute_retired_logout().await.map(|_| ()).map_err(Into::into)
         };
-        let stored = Session::sign_out_app(store, self.app_id());
+        // The process first, then the store: an install that was on its way either lands
+        // before both (and is removed with them) or is refused and saves nothing that stays.
         let local = self.sign_out_authentication().map(|_| ());
+        let stored = Session::sign_out_app(store, self.app_id());
         network?;
         stored?;
         local?;
@@ -40,22 +42,20 @@ impl Client {
         // the key is proven for the new session before anything is installed.
         let stored =
             Session::load_for_user_proven(store, &accepted.owner, self.app_id())?.ok_or(AuthError::AccountOwnership)?;
-        self.prove_key_for_sign_in(&mut accepted, stored.master_key(), None)
+        let proven_at = self
+            .prove_key_for_sign_in(&mut accepted, stored.master_key(), None)
             .await?;
         if let Err(error) = self
             .report_installed_device(accepted.hardware_id.as_deref(), store)
             .await
         {
-            let _ = self.clear_authentication();
-            return Err(error);
+            return Err(self.abandon_sign_in(error));
         }
-        let proven_at = self.generation();
         let record = self.seal_screen_check(&mut accepted).await;
         let generation = proven_at.checked_add(1).ok_or(AuthError::MalformedAnswer)?;
         let refreshed = stored.refresh(accepted.session_token.to_string(), generation)?;
         if let Err(error) = self.save_strong_install(&refreshed, &accepted, store, record, false, proven_at) {
-            let _ = self.clear_authentication();
-            return Err(error);
+            return Err(self.abandon_sign_in(error));
         }
         // The session this one replaces is ended at the server, so a closed-and-opened vault
         // leaves no live session behind.
@@ -108,16 +108,15 @@ impl Client {
         {
             return Err(AuthError::AnotherAccountOnDevice);
         }
-        self.prove_key_for_sign_in(&mut accepted, &master_key, email_code_ticket)
+        let proven_at = self
+            .prove_key_for_sign_in(&mut accepted, &master_key, email_code_ticket)
             .await?;
         if let Err(error) = self
             .report_installed_device(accepted.hardware_id.as_deref(), store)
             .await
         {
-            let _ = self.clear_authentication();
-            return Err(error);
+            return Err(self.abandon_sign_in(error));
         }
-        let proven_at = self.generation();
         let record = self.seal_screen_check(&mut accepted).await;
         let generation = proven_at.checked_add(1).ok_or(AuthError::MalformedAnswer)?;
         let session = Session::from_authenticated(
@@ -128,8 +127,7 @@ impl Client {
             generation,
         )?;
         if let Err(error) = self.save_strong_install(&session, &accepted, store, record, replace_account, proven_at) {
-            let _ = self.clear_authentication();
-            return Err(error);
+            return Err(self.abandon_sign_in(error));
         }
         Ok(InstalledSession {
             owner: accepted.owner,
@@ -139,7 +137,8 @@ impl Client {
 
     /// Saves an installed session and, in the same step, the lock's part of it: the closed
     /// mark is cleared, the check record of the password that was just proven is stored, and
-    /// the app is open. Nothing before this point wrote any of them.
+    /// the app is open. Nothing before this point wrote any of them. `proven_at` is the
+    /// account generation of the credentials the key was proven for.
     fn save_strong_install(
         &self,
         session: &Session,
@@ -149,21 +148,19 @@ impl Client {
         replace_account: bool,
         proven_at: u64,
     ) -> Result<(), AuthError> {
-        // The install belongs to the session that was proven: a lock or a sign-out that
-        // landed while the proof was on its way is not undone by a late install.
-        if self.generation() != proven_at {
-            return Err(ClientError::StaleAccount.into());
+        self.strong_install(session, store, record, replace_account, proven_at, || {
+            persist_hardware_identity(store, accepted)
+        })
+    }
+
+    /// Gives up a sign-in whose credentials this call set. When the session changed under it
+    /// (`StaleAccount`) the credentials in the process are someone else's, or already gone,
+    /// and are left alone.
+    fn abandon_sign_in(&self, error: AuthError) -> AuthError {
+        if !matches!(error, AuthError::Client(ClientError::StaleAccount)) {
+            let _ = self.clear_authentication();
         }
-        if replace_account {
-            session.save_replacing(store, self.app_id())?;
-        } else {
-            session.save(store, self.app_id())?;
-        }
-        persist_hardware_identity(store, accepted)?;
-        self.finish_strong_install(store, record)?;
-        self.install_session(session)?;
-        self.with_lock_flow(beebeeb_api::flows::LockFlow::known_device_unlocked)?
-            .map_err(|error| lock::refused("session installation", error))
+        error
     }
 
     async fn report_installed_device(
@@ -200,13 +197,15 @@ impl Client {
         .map_err(Into::into)
     }
 
+    /// Sets the accepted credentials and proves the key for them. Returns the account
+    /// generation those credentials were set at: the install that follows is for it alone.
     async fn prove_key_for_sign_in(
         &self,
         accepted: &mut PasswordAccepted,
         master_key: &MasterKey,
         email_code_ticket: Option<proposed::EmailCodeTicket>,
-    ) -> Result<(), AuthError> {
-        self.set_authentication(accepted.session_token.to_string(), accepted.owner.clone())?;
+    ) -> Result<u64, AuthError> {
+        let proven_at = self.set_authentication(accepted.session_token.to_string(), accepted.owner.clone())?;
         let result = self
             .prove_session_key_with_ticket(
                 master_key,
@@ -217,12 +216,9 @@ impl Client {
         match result {
             Ok(hardware_identity_secret) => {
                 accepted.hardware_identity_secret = hardware_identity_secret.map(Zeroizing::new);
-                Ok(())
+                Ok(proven_at)
             }
-            Err(error) => {
-                let _ = self.clear_authentication();
-                Err(error)
-            }
+            Err(error) => Err(self.abandon_sign_in(error)),
         }
     }
 

@@ -121,8 +121,9 @@ impl ServiceCoordinator {
     ) -> Result<AccountReplacement, SignOutReport> {
         let report = self
             .sign_out_local(platform, account_data, now_ms, || async {
-                let stored = Session::sign_out_device(secrets).map(|_| ()).map_err(|_| ());
+                // The process first, then the store (see `Client::sign_out_this_app`).
                 let local = self.client.sign_out_authentication().map(|_| ()).map_err(|_| ());
+                let stored = Session::sign_out_device(secrets).map(|_| ()).map_err(|_| ());
                 stored.and(local)
             })
             .await;
@@ -142,18 +143,23 @@ impl ServiceCoordinator {
         account_data: &dyn AccountDataPurger,
         now_ms: i64,
     ) -> Result<SignOutReport, crate::devices::DeviceError> {
-        let listed = self.client.list_devices().await?;
+        let listed = self.client.list_devices_inner().await?;
         if crate::devices::last_device_warning(&listed.devices, device_id) && !confirm_last_device {
             return Err(crate::devices::DeviceError::LastDeviceConfirmationRequired);
         }
         // Removal runs before account work stops, because stopping retires the
         // credentials and only the logout may use them after that.
-        let removed = self.client.remove_device(device_id).await.map(|_| ()).map_err(|_| ());
+        let removed = self
+            .client
+            .remove_device_inner(device_id)
+            .await
+            .map(|_| ())
+            .map_err(|_| ());
         Ok(self
             .sign_out_local(platform, account_data, now_ms, || async {
                 let ended = self.client.end_session_after_device_removal().await.map_err(|_| ());
-                let stored = Session::sign_out_device(secrets).map(|_| ()).map_err(|_| ());
                 let local = self.client.sign_out_authentication().map(|_| ()).map_err(|_| ());
+                let stored = Session::sign_out_device(secrets).map(|_| ()).map_err(|_| ());
                 removed.and(ended).and(stored).and(local)
             })
             .await)

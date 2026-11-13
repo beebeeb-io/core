@@ -19,7 +19,8 @@ pub trait PasskeyPrompt: Send + Sync {
 
 impl Client {
     pub async fn create_passkey_copy(&self, prompt: &dyn PasskeyPrompt) -> Result<String, AuthError> {
-        let session_key = self.session_key()?;
+        self.person_call(crate::LockedAction::ManageFactors)?;
+        let session_key = self.held_key()?;
         let account_id = self.authenticated_owner()?;
         let output = prompt.create().await.map_err(|_| AuthError::PasskeyPrompt)?;
         let sealed = seal_master_key(

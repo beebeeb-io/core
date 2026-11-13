@@ -280,6 +280,7 @@ impl Client {
     }
 
     pub async fn pending_device_links(&self) -> Result<proposed::PendingDeviceLinks, DeviceError> {
+        self.person_call(crate::LockedAction::ApproveDevice)?;
         self.execute(&proposed::pending_device_links(), &())
             .await
             .map_err(Into::into)
@@ -293,7 +294,8 @@ impl Client {
     /// link and returns [`DeviceError::DeviceNameChanged`] before anything is
     /// sealed (Guus's ruling of 2026-11-07).
     pub async fn approve_device_link(&self, id: &str, qr: &DeviceLinkQr, typed_code: &str) -> Result<(), DeviceError> {
-        let session_key = self.session_key()?;
+        self.person_call(crate::LockedAction::ApproveDevice)?;
+        let session_key = self.held_key()?;
         let detail = self
             .execute_for_generation(&proposed::get_device_link(id), &(), session_key.generation())
             .await?;
@@ -305,7 +307,7 @@ impl Client {
             return Err(DeviceError::MalformedAnswer);
         }
         if !qr.matches_relayed_name(&detail.device_name) {
-            let _ = self.deny_device_link(id).await;
+            let _ = self.deny_device_link_inner(id).await;
             return Err(DeviceError::DeviceNameChanged);
         }
         let public_key = decode_fixed::<32>(Some(&detail.public_key))?;
@@ -340,6 +342,7 @@ impl Client {
         id: &str,
         typed_code: &str,
     ) -> Result<(PendingTypedApproval, Vec<u8>), DeviceError> {
+        self.person_call(crate::LockedAction::ApproveDevice)?;
         let detail = self.execute(&proposed::get_device_link(id), &()).await?;
         if detail.status != proposed::DeviceLinkStatus::Pending {
             return Err(DeviceError::NotPending);
@@ -369,18 +372,19 @@ impl Client {
         approval: PendingTypedApproval,
         new_device_message: &[u8],
     ) -> Result<(), DeviceError> {
+        self.person_call(crate::LockedAction::ApproveDevice)?;
         let PendingTypedApproval { id, approver } = approval;
         let confirmed = match approver.confirm(new_device_message) {
             Ok(confirmed) => confirmed,
             Err(error) => {
-                let _ = self.deny_device_link(&id).await;
+                let _ = self.deny_device_link_inner(&id).await;
                 return Err(match error {
                     CoreError::Decryption => DeviceError::ConfirmationFailed,
                     _ => DeviceError::MalformedAnswer,
                 });
             }
         };
-        let session_key = self.session_key()?;
+        let session_key = self.held_key()?;
         let key_bytes = Zeroizing::new(*session_key.master_key().to_bytes());
         let material = AccountKeyMaterial::from_master_key(MasterKey::from_bytes(*key_bytes));
         let sealed = confirmed.seal(material)?;
@@ -429,6 +433,11 @@ impl Client {
     }
 
     pub async fn deny_device_link(&self, id: &str) -> Result<(), DeviceError> {
+        self.person_call(crate::LockedAction::ApproveDevice)?;
+        self.deny_device_link_inner(id).await
+    }
+
+    pub(crate) async fn deny_device_link_inner(&self, id: &str) -> Result<(), DeviceError> {
         self.execute(&proposed::deny_device_link(id), &())
             .await
             .map(|_| ())
@@ -479,10 +488,20 @@ impl Client {
     }
 
     pub async fn list_devices(&self) -> Result<devices::Devices, DeviceError> {
+        self.person_call(crate::LockedAction::ViewStatus)?;
+        self.list_devices_inner().await
+    }
+
+    pub(crate) async fn list_devices_inner(&self) -> Result<devices::Devices, DeviceError> {
         self.execute(&devices::list(), &()).await.map_err(Into::into)
     }
 
     pub async fn remove_device(&self, id: &str) -> Result<(), DeviceError> {
+        self.person_call(crate::LockedAction::RemoveDevice)?;
+        self.remove_device_inner(id).await
+    }
+
+    pub(crate) async fn remove_device_inner(&self, id: &str) -> Result<(), DeviceError> {
         self.execute(&devices::remove(id), &())
             .await
             .map(|_| ())
@@ -490,12 +509,14 @@ impl Client {
     }
 
     pub async fn list_account_sessions(&self) -> Result<proposed::AccountSessions, DeviceError> {
+        self.person_call(crate::LockedAction::ViewStatus)?;
         self.execute(&proposed::list_account_sessions(), &())
             .await
             .map_err(Into::into)
     }
 
     pub async fn revoke_account_session(&self, id: &str) -> Result<(), DeviceError> {
+        self.person_call(crate::LockedAction::EndSession)?;
         self.execute(&proposed::revoke_account_session(id), &())
             .await
             .map(|_| ())
@@ -508,14 +529,17 @@ impl Client {
         confirm_last_device: bool,
         store: &dyn SecretStore,
     ) -> Result<u64, DeviceError> {
-        let listed = self.list_devices().await?;
+        self.person_call(crate::LockedAction::SignOut)?;
+        let listed = self.list_devices_inner().await?;
         if last_device_warning(&listed.devices, device_id) && !confirm_last_device {
             return Err(DeviceError::LastDeviceConfirmationRequired);
         }
-        self.remove_device(device_id).await?;
+        self.remove_device_inner(device_id).await?;
         let ended = self.end_session_after_device_removal().await;
+        // The process first, then the store (see `Client::sign_out_this_app`).
+        let local = self.sign_out_authentication();
         let generation = Session::sign_out_device(store)?;
-        self.sign_out_authentication()?;
+        local?;
         ended?;
         Ok(generation)
     }

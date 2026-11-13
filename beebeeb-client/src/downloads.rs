@@ -151,7 +151,16 @@ impl DownloadService {
     }
 
     pub async fn open(&self, file: &DownloadFile, now_ms: i64) -> Result<DownloadResult, DownloadServiceError> {
-        let session_key = self.client.session_key()?;
+        self.client.person_call(crate::LockedAction::ViewFiles)?;
+        self.open_inner(file, now_ms).await
+    }
+
+    pub(crate) async fn open_inner(
+        &self,
+        file: &DownloadFile,
+        now_ms: i64,
+    ) -> Result<DownloadResult, DownloadServiceError> {
+        let session_key = self.client.held_key()?;
         let metadata = self.metadata(file, &session_key)?;
         self.check_counter_before_authentication(file, &metadata)?;
         let (cache_key, version_id) = cache_identity(file, &metadata);
@@ -226,7 +235,8 @@ impl DownloadService {
         directory: &TrustedDirectory,
         output_name: &str,
     ) -> Result<DownloadResult, DownloadServiceError> {
-        let session_key = self.client.session_key()?;
+        self.client.person_call(crate::LockedAction::ViewFiles)?;
+        let session_key = self.client.held_key()?;
         let metadata = self.metadata(file, &session_key)?;
         self.save_internal(file, &metadata, &session_key, directory, output_name, None)
             .await
@@ -239,6 +249,7 @@ impl DownloadService {
     /// and releases only frames it authenticated at their index, for the one
     /// version the file's authenticated metadata commits to.
     pub async fn video_range(&self, file: &DownloadFile, range: Range<u64>) -> Result<Vec<u8>, DownloadServiceError> {
+        self.client.person_call(crate::LockedAction::ViewFiles)?;
         validate_description(file)?;
         if range.start > range.end || range.end > file.size_bytes {
             return Err(DownloadServiceError::InvalidDescription);
@@ -249,7 +260,7 @@ impl DownloadService {
         if file.chunk_size_bytes == 0 || file.chunk_count == 0 {
             return Err(DownloadServiceError::InvalidDescription);
         }
-        let mut reader = self.range_reader(file)?;
+        let mut reader = self.range_reader_inner(file)?;
         if reader.metadata.chunk_format != ExpectedChunkFormat::V2 || reader.metadata.version.is_none() {
             return Err(DownloadServiceError::InvalidDescription);
         }
@@ -265,13 +276,19 @@ impl DownloadService {
     ///
     /// v1 frames carry no position or version binding (I9): the same gap the whole-file read has.
     pub async fn read_range(&self, file: &DownloadFile, range: Range<u64>) -> Result<Vec<u8>, DownloadServiceError> {
-        let mut reader = self.range_reader(file)?;
-        self.read_with(&mut reader, range).await
+        self.client.person_call(crate::LockedAction::ViewFiles)?;
+        let mut reader = self.range_reader_inner(file)?;
+        self.read_with_inner(&mut reader, range).await
     }
 
     /// A reader of one recorded version of `file`: its pin and commitment come from the file's
     /// authenticated metadata, never a server field.
     pub fn range_reader(&self, file: &DownloadFile) -> Result<RangeReader, DownloadServiceError> {
+        self.client.person_call(crate::LockedAction::ViewFiles)?;
+        self.range_reader_inner(file)
+    }
+
+    pub(crate) fn range_reader_inner(&self, file: &DownloadFile) -> Result<RangeReader, DownloadServiceError> {
         if let Some(DownloadResult::HandOff {
             frame_size,
             context_limit,
@@ -282,7 +299,7 @@ impl DownloadService {
                 context_limit,
             });
         }
-        let session_key = self.client.session_key()?;
+        let session_key = self.client.held_key()?;
         let metadata = self.metadata(file, &session_key)?;
         self.check_counter_before_authentication(file, &metadata)?;
         let overhead = u64::from(file.chunk_count)
@@ -316,6 +333,15 @@ impl DownloadService {
         reader: &mut RangeReader,
         range: Range<u64>,
     ) -> Result<Vec<u8>, DownloadServiceError> {
+        self.client.person_call(crate::LockedAction::ViewFiles)?;
+        self.read_with_inner(reader, range).await
+    }
+
+    pub(crate) async fn read_with_inner(
+        &self,
+        reader: &mut RangeReader,
+        range: Range<u64>,
+    ) -> Result<Vec<u8>, DownloadServiceError> {
         let cap = range_read_cap(&reader.file);
         self.read_with_cap(reader, range, cap).await
     }
@@ -337,7 +363,7 @@ impl DownloadService {
         if range.end - range.start > cap {
             return Err(DownloadServiceError::InvalidDescription);
         }
-        let session_key = self.client.session_key()?;
+        let session_key = self.client.held_key()?;
         if session_key.generation() != reader.generation {
             return Err(ClientError::StaleAccount.into());
         }

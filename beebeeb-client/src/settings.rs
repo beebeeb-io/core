@@ -83,6 +83,7 @@ impl Client {
         product: &str,
         settings: &DeviceSettings,
     ) -> Result<(), SettingsError> {
+        self.person_call(crate::LockedAction::ChangeSettings)?;
         let envelope = save_local_settings(store, session, device_id, product, settings)?;
         self.execute(
             &api::set_preference(&format!("client_meta.settings.{device_id}.{product}")),
@@ -101,6 +102,7 @@ impl Client {
         device_id: &str,
         product: &str,
     ) -> Result<Option<DeviceSettings>, SettingsError> {
+        self.person_call(crate::LockedAction::ChangeSettings)?;
         let preference: api::Preference = self
             .execute(
                 &api::preference(&format!("client_meta.settings.{device_id}.{product}")),
@@ -118,6 +120,7 @@ impl Client {
     }
 
     pub async fn set_version_history(&self, enabled: bool, retention_days: u16) -> Result<(), ClientError> {
+        self.person_call(crate::LockedAction::ChangeSettings)?;
         self.execute(
             &api::set_version_setting(),
             &api::SetVersionSetting {
@@ -140,6 +143,7 @@ impl Client {
         folder_id: String,
         name_encrypted: String,
     ) -> Result<proposed::ServiceFolder, ClientError> {
+        self.person_call(crate::LockedAction::ChangeSettings)?;
         self.execute(
             &proposed::enable_service(service),
             &proposed::ServiceEnable {
@@ -151,6 +155,7 @@ impl Client {
     }
 
     pub async fn disable_system_service(&self, service: Service, move_to_trash: bool) -> Result<(), ClientError> {
+        self.person_call(crate::LockedAction::ChangeSettings)?;
         self.execute(
             &proposed::disable_service(service),
             &proposed::ServiceDisable { move_to_trash },

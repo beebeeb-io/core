@@ -131,7 +131,7 @@ pub async fn duplicate_file(
     parent_id: Option<String>,
     now_ms: i64,
 ) -> Result<DuplicateResult, FileServiceError> {
-    let path = match downloads.open(source, now_ms).await? {
+    let path = match downloads.open_inner(source, now_ms).await? {
         crate::downloads::DownloadResult::Ready(path) => path,
         crate::downloads::DownloadResult::HandOff {
             frame_size,
@@ -161,6 +161,7 @@ pub async fn duplicate_file(
 
 impl Client {
     pub async fn list_files(&self, parent_id: Option<&str>, trashed: bool) -> Result<ListResponse, ClientError> {
+        self.person_call(crate::LockedAction::ViewFiles)?;
         self.execute(&api::list(parent_id, trashed), &()).await
     }
 
@@ -172,6 +173,7 @@ impl Client {
         cursor: Option<&str>,
         limit: u16,
     ) -> Result<FileRecordPage, FileServiceError> {
+        self.person_call(crate::LockedAction::ViewFiles)?;
         if limit == 0 || limit > FILE_LIST_PAGE_CAP {
             return Err(FileServiceError::ListingTooLarge);
         }
@@ -193,14 +195,30 @@ impl Client {
     }
 
     pub async fn get_file(&self, id: &str) -> Result<FileEntry, ClientError> {
+        self.person_call(crate::LockedAction::ViewFiles)?;
+        self.get_file_inner(id).await
+    }
+
+    pub(crate) async fn get_file_inner(&self, id: &str) -> Result<FileEntry, ClientError> {
         self.execute(&api::get(id), &()).await
     }
 
     pub async fn get_file_record(&self, session: &Session, id: &str) -> Result<FileRecord, FileServiceError> {
-        open_record(session, self.get_file(id).await?)
+        self.person_call(crate::LockedAction::ViewFiles)?;
+        open_record(session, self.get_file_inner(id).await?)
     }
 
     pub async fn create_folder(
+        &self,
+        session: &Session,
+        name: &str,
+        parent_id: Option<String>,
+    ) -> Result<FileRecord, FileServiceError> {
+        self.person_call(crate::LockedAction::MutateFiles)?;
+        self.create_folder_inner(session, name, parent_id).await
+    }
+
+    pub(crate) async fn create_folder_inner(
         &self,
         session: &Session,
         name: &str,
@@ -226,6 +244,7 @@ impl Client {
         entry: &FileEntry,
         new_name: &str,
     ) -> Result<FileRecord, FileServiceError> {
+        self.person_call(crate::LockedAction::MutateFiles)?;
         self.rename_entry_under(Rule::App, session, entry, new_name).await
     }
 
@@ -259,6 +278,7 @@ impl Client {
         entry: &FileEntry,
         parent_id: Option<String>,
     ) -> Result<FileRecord, FileServiceError> {
+        self.person_call(crate::LockedAction::MutateFiles)?;
         self.move_entry_under(Rule::App, session, entry, parent_id).await
     }
 
@@ -288,21 +308,27 @@ impl Client {
     }
 
     pub async fn trash_file(&self, id: &str) -> Result<(), ClientError> {
+        self.person_call(crate::LockedAction::MutateFiles)?;
         self.execute(&api::trash(id), &()).await.map(|_| ())
     }
 
     pub async fn trash_entry(&self, entry: &FileEntry) -> Result<(), FileServiceError> {
+        self.person_call(crate::LockedAction::MutateFiles)?;
         self.trash_entry_under(Rule::App, entry).await
     }
 
     pub(crate) async fn trash_entry_under(&self, rule: Rule, entry: &FileEntry) -> Result<(), FileServiceError> {
         refuse_managed(entry)?;
         self.check_backup_mutation(rule, &entry.id, Mutation::Trash).await?;
-        self.trash_file(&entry.id).await.map_err(map_client_error)?;
+        self.execute(&api::trash(&entry.id), &())
+            .await
+            .map(|_| ())
+            .map_err(map_client_error)?;
         Ok(())
     }
 
     pub async fn trash_entries(&self, entries: &[FileEntry]) -> Result<BulkFileResult, FileServiceError> {
+        self.person_call(crate::LockedAction::MutateFiles)?;
         for entry in entries {
             refuse_managed(entry)?;
         }
@@ -323,6 +349,7 @@ impl Client {
     }
 
     pub async fn restore_file(&self, id: &str) -> Result<(), ClientError> {
+        self.person_call(crate::LockedAction::MutateFiles)?;
         self.execute(&api::restore(id), &()).await.map(|_| ())
     }
 
@@ -338,24 +365,34 @@ impl Client {
     /// the pass recorded as trashed stays recorded so; it is never uploaded
     /// twice.
     pub async fn restore_entry(&self, entry: &FileEntry) -> Result<(), FileServiceError> {
+        self.person_call(crate::LockedAction::MutateFiles)?;
         refuse_managed(entry)?;
-        self.restore_file(&entry.id).await.map_err(map_client_error)?;
+        self.execute(&api::restore(&entry.id), &())
+            .await
+            .map(|_| ())
+            .map_err(map_client_error)?;
         Ok(())
     }
 
     pub async fn delete_file_forever(&self, id: &str) -> Result<(), ClientError> {
+        self.person_call(crate::LockedAction::MutateFiles)?;
         self.execute(&api::permanent_delete(id), &()).await.map(|_| ())
     }
 
     pub async fn delete_entry_forever(&self, entry: &FileEntry) -> Result<(), FileServiceError> {
+        self.person_call(crate::LockedAction::MutateFiles)?;
         refuse_managed(entry)?;
         self.check_backup_mutation(Rule::App, &entry.id, Mutation::DeletePermanently)
             .await?;
-        self.delete_file_forever(&entry.id).await.map_err(map_client_error)?;
+        self.execute(&api::permanent_delete(&entry.id), &())
+            .await
+            .map(|_| ())
+            .map_err(map_client_error)?;
         Ok(())
     }
 
     pub async fn delete_entries_forever(&self, entries: &[FileEntry]) -> Result<BulkFileResult, FileServiceError> {
+        self.person_call(crate::LockedAction::MutateFiles)?;
         for entry in entries {
             refuse_managed(entry)?;
         }
@@ -376,6 +413,7 @@ impl Client {
     }
 
     pub async fn file_versions(&self, id: &str) -> Result<api::Versions, ClientError> {
+        self.person_call(crate::LockedAction::ViewFiles)?;
         self.execute(&api::versions(id), &()).await
     }
 
@@ -390,7 +428,8 @@ impl Client {
         file_id: &str,
         version_id: &str,
     ) -> Result<VersionRestoreResult, FileServiceError> {
-        let current_entry = self.get_file(file_id).await?;
+        self.person_call(crate::LockedAction::MutateFiles)?;
+        let current_entry = self.get_file_inner(file_id).await?;
         refuse_managed(&current_entry)?;
         // A restored version is new content of the file.
         self.check_backup_row(Rule::App, &current_entry, Mutation::Write)
@@ -400,7 +439,7 @@ impl Client {
             .as_deref()
             .ok_or(FileServiceError::InvalidRecord)?;
         let current = decrypt_file_metadata(session.master_key(), file_id, current_encrypted)?;
-        let versions = self.file_versions(file_id).await?;
+        let versions: api::Versions = self.execute(&api::versions(file_id), &()).await?;
         if versions.file_id != file_id {
             return Err(FileServiceError::InvalidRecord);
         }
@@ -474,6 +513,11 @@ impl Client {
     }
 
     pub async fn storage_usage(&self) -> Result<api::StorageUsage, ClientError> {
+        self.person_call(crate::LockedAction::ViewStatus)?;
+        self.storage_usage_inner().await
+    }
+
+    pub(crate) async fn storage_usage_inner(&self) -> Result<api::StorageUsage, ClientError> {
         self.execute(&api::usage(), &()).await
     }
 }

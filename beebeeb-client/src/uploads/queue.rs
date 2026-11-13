@@ -82,7 +82,7 @@ impl UploadService {
         if request.name.is_empty() || request.disk_limit == 0 {
             return Err(UploadServiceError::Source);
         }
-        let session_key = self.client.session_key()?;
+        let session_key = self.client.held_key()?;
         if let Some(replacement) = request.replacement.as_mut() {
             let metadata = beebeeb_core::encrypt::decrypt_file_metadata(
                 session_key.master_key(),
@@ -169,6 +169,7 @@ impl UploadService {
         network: NetworkKind,
         now_ms: i64,
     ) -> Result<Option<(i64, Vec<TransferRequest>)>, UploadServiceError> {
+        self.client.work_call()?;
         if limit == 0 {
             return Ok(None);
         }
@@ -245,7 +246,7 @@ impl UploadService {
             self.release(transfer.id, now_ms)?;
             return Err(UploadServiceError::SourceChangedRestarted);
         }
-        let session_key = self.client.session_key()?;
+        let session_key = self.client.held_key()?;
         let mut planner = match record.planner.as_deref() {
             Some(bytes) => {
                 let restored = match source_identity(&record.source_path) {
@@ -553,6 +554,11 @@ impl UploadService {
     }
 
     pub fn list(&self) -> Result<Vec<UploadSummary>, UploadServiceError> {
+        self.client.person_call(crate::LockedAction::ViewFiles)?;
+        self.list_inner()
+    }
+
+    pub(crate) fn list_inner(&self) -> Result<Vec<UploadSummary>, UploadServiceError> {
         self.store
             .lock()
             .map_err(|_| UploadServiceError::State)?
@@ -704,7 +710,7 @@ impl UploadService {
 
     /// Stop and discard every account-bound upload before store deletion.
     pub fn sign_out(&self, now_ms: i64) -> Result<SignOutPlan, UploadServiceError> {
-        let ids: Vec<i64> = self.list()?.into_iter().map(|item| item.id).collect();
+        let ids: Vec<i64> = self.list_inner()?.into_iter().map(|item| item.id).collect();
         let mut combined = SignOutPlan {
             cancel_tickets: Vec::new(),
             delete_files: Vec::new(),

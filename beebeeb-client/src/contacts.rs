@@ -70,6 +70,14 @@ pub enum ContactServiceError {
 
 impl Client {
     pub async fn fetch_contact_public_key(&self, contact_id: &str) -> Result<Vec<u8>, ContactServiceError> {
+        self.person_call(crate::LockedAction::ShareFiles)?;
+        self.fetch_contact_public_key_inner(contact_id).await
+    }
+
+    pub(crate) async fn fetch_contact_public_key_inner(
+        &self,
+        contact_id: &str,
+    ) -> Result<Vec<u8>, ContactServiceError> {
         Uuid::parse_str(contact_id).map_err(|_| ContactServiceError::InvalidId)?;
         let answer: beebeeb_api::routes::auth::PublicKey = self
             .execute(&beebeeb_api::routes::auth::public_key(contact_id), &())
@@ -92,7 +100,8 @@ impl Client {
         contact_id: &str,
         observed_at: i64,
     ) -> Result<ContactTrust, ContactServiceError> {
-        let public_key = self.fetch_contact_public_key(contact_id).await?;
+        self.person_call(crate::LockedAction::ShareFiles)?;
+        let public_key = self.fetch_contact_public_key_inner(contact_id).await?;
         observe_contact_key(store, contact_id, &public_key, observed_at).map_err(Into::into)
     }
 
@@ -102,7 +111,8 @@ impl Client {
         contact_id: &str,
         observed_at: i64,
     ) -> Result<(), ContactServiceError> {
-        let public_key = self.fetch_contact_public_key(contact_id).await?;
+        self.person_call(crate::LockedAction::ShareFiles)?;
+        let public_key = self.fetch_contact_public_key_inner(contact_id).await?;
         accept_contact_key(store, contact_id, &public_key, observed_at).map_err(Into::into)
     }
 
@@ -115,6 +125,7 @@ impl Client {
         public_key: &[u8],
         observed_at: i64,
     ) -> Result<ContactTrust, ContactServiceError> {
+        self.person_call(crate::LockedAction::ShareFiles)?;
         let trust = observe_contact_key(store, contact_id, public_key, observed_at)?;
         if trust == ContactTrust::KeyChanged {
             return Ok(trust);
@@ -144,6 +155,7 @@ impl Client {
         device_id: &str,
         contact_id: &str,
     ) -> Result<Option<ContactTrust>, ContactServiceError> {
+        self.person_call(crate::LockedAction::ShareFiles)?;
         let preference: beebeeb_api::routes::settings::Preference = self
             .execute(
                 &beebeeb_api::routes::settings::preference(&format!("client_meta.contact.{contact_id}")),

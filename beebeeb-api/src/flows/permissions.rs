@@ -20,6 +20,14 @@ pub enum LockedAction {
     UnlockScreen,
     /// Close the vault from any state that holds the key.
     LockVault,
+    /// Read file names, listings, content or thumbnails.
+    ViewFiles,
+    /// Make, read or end shares, invites, links, file requests and contact keys.
+    ShareFiles,
+    /// Approve or deny another device's request for the account key.
+    ApproveDevice,
+    /// Take a copy of the account key out of core.
+    UseKey,
 }
 
 pub const fn locked_account_allows(action: LockedAction) -> bool {
