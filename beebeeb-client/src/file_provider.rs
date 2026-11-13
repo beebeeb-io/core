@@ -217,6 +217,8 @@ impl FileProviderService {
         file: &DownloadFile,
         now_ms: i64,
     ) -> Result<FileProviderOutcome, FileProviderError> {
+        // The operating system's file provider is work: it runs on a locked screen.
+        downloads.work_call()?;
         let id = parse_id(&file.file_id)?;
         self.set_state(id, ItemWorkState::Running)?;
         let outcome = downloads.open_inner(file, now_ms).await;
@@ -258,6 +260,7 @@ impl FileProviderService {
         name: &str,
         parent_id: Option<String>,
     ) -> Result<FileRecord, FileProviderError> {
+        client.work_call()?;
         let result = client
             .create_folder_inner(session, name, parent_id)
             .await

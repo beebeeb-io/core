@@ -531,6 +531,7 @@ impl Client {
     ) -> Result<u64, DeviceError> {
         self.person_call(crate::LockedAction::SignOut)?;
         let listed = self.list_devices_inner().await?;
+        self.check_sign_out_device(&listed.devices, device_id, store)?;
         if last_device_warning(&listed.devices, device_id) && !confirm_last_device {
             return Err(DeviceError::LastDeviceConfirmationRequired);
         }
@@ -542,6 +543,26 @@ impl Client {
         local?;
         ended?;
         Ok(generation)
+    }
+
+    /// A sign-out removes a device. Where removing a device is refused (a locked screen),
+    /// the sign-out may remove this device only: the listed entry that carries this device's
+    /// stored hardware identity. Any other id is refused as the removal itself would be.
+    pub(crate) fn check_sign_out_device(
+        &self,
+        listed: &[devices::Device],
+        device_id: &str,
+        store: &dyn SecretStore,
+    ) -> Result<(), DeviceError> {
+        let Err(refused) = self.person_call(crate::LockedAction::RemoveDevice) else {
+            return Ok(());
+        };
+        let own = crate::session::HardwareIdentity::load_or_create(store)
+            .map_err(|_| DeviceError::Client(ClientError::State))?;
+        let this_device = listed
+            .iter()
+            .any(|device| device.id == device_id && device.hardware_id.as_deref() == Some(own.id()));
+        if this_device { Ok(()) } else { Err(refused.into()) }
     }
 
     /// Ends the calling session once its device has been removed. The server

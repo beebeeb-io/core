@@ -79,6 +79,8 @@ impl UploadService {
     }
 
     pub fn enqueue(&self, mut request: UploadRequest, now_ms: i64) -> Result<i64, UploadServiceError> {
+        // The transfer queue is work: sync and backup feed it on a locked screen.
+        self.client.work_call()?;
         if request.name.is_empty() || request.disk_limit == 0 {
             return Err(UploadServiceError::Source);
         }
@@ -710,6 +712,7 @@ impl UploadService {
 
     /// Stop and discard every account-bound upload before store deletion.
     pub fn sign_out(&self, now_ms: i64) -> Result<SignOutPlan, UploadServiceError> {
+        self.client.person_call(crate::LockedAction::SignOut)?;
         let ids: Vec<i64> = self.list_inner()?.into_iter().map(|item| item.id).collect();
         let mut combined = SignOutPlan {
             cancel_tickets: Vec::new(),

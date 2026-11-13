@@ -138,6 +138,15 @@ impl DownloadService {
         Self::new(client, store, cache_root, cache_limit_bytes, budget)
     }
 
+    /// The lock's gates for the free functions and services that work through this service.
+    pub(crate) fn person_call(&self, action: crate::LockedAction) -> Result<(), ClientError> {
+        self.client.person_call(action)
+    }
+
+    pub(crate) fn work_call(&self) -> Result<(), ClientError> {
+        self.client.work_call()
+    }
+
     pub fn observe(&self) -> broadcast::Receiver<DownloadEvent> {
         self.events.subscribe()
     }

@@ -310,12 +310,12 @@ fn every_public_call_asks_the_lock_or_is_listed_as_ungated() {
         (
             "uploads/queue.rs",
             include_str!("../uploads/queue.rs"),
-            // The transfer queue is work: sync and backup feed it and it keeps running.
+            // The transfer queue is work (`enqueue` and `next_transfers` ask as work); these
+            // only observe a queue that sync and backup feed, or stop what is in it.
             &[
                 "new",
                 "set_completion_handler",
                 "observe",
-                "enqueue",
                 "transfer_finished",
                 "pause",
                 "resume",
@@ -325,7 +325,6 @@ fn every_public_call_asks_the_lock_or_is_listed_as_ungated() {
                 "cancel_backup_uploads",
                 "active_backup_count",
                 "mark_backup_outcome_applied",
-                "sign_out",
                 "finalize_sign_out",
             ],
         ),
@@ -381,5 +380,89 @@ fn every_public_call_asks_the_lock_or_is_listed_as_ungated() {
             "{file}: the public functions that do not ask the lock"
         );
     }
-    assert_eq!(gated, 80, "the public functions that ask the lock");
+    assert_eq!(gated, 82, "the public functions that ask the lock");
+}
+
+/// Every `pub fn` and `pub async fn` of one source file, free or in an `impl`, with its body.
+fn public_functions(source: &str) -> Vec<(String, &str)> {
+    let mut found = Vec::new();
+    for indent in ["", "    "] {
+        let start = format!("\n{indent}pub ");
+        let end = format!("\n{indent}}}\n");
+        let mut rest = source;
+        while let Some(at) = rest.find(&start) {
+            rest = &rest[at + start.len()..];
+            let Some(signature) = rest.strip_prefix("async fn ").or_else(|| rest.strip_prefix("fn ")) else {
+                continue;
+            };
+            let name: String = signature
+                .chars()
+                .take_while(|character| character.is_alphanumeric() || *character == '_')
+                .collect();
+            let body = &rest[..rest.find(&end).unwrap_or(rest.len())];
+            found.push((name, body));
+        }
+    }
+    found
+}
+
+fn source_files(directory: &std::path::Path, into: &mut Vec<std::path::PathBuf>) {
+    for entry in std::fs::read_dir(directory).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        if name.starts_with("tests") || name == "test_support.rs" {
+            continue;
+        }
+        if path.is_dir() {
+            source_files(&path, into);
+        } else if name.ends_with(".rs") {
+            into.push(path);
+        }
+    }
+}
+
+/// The whole public surface of this crate, read from every source file: a public entry
+/// point (a method of `Client`, of a service or of the coordinator, or a free function) that
+/// reaches one of the ungated internals (`*_inner`, `held_key`) asks the lock itself first.
+/// Dropping one gate, or adding an ungated way in, fails here.
+#[test]
+fn no_public_entry_point_reaches_the_ungated_internals_without_asking_the_lock() {
+    // The strong installs: their `_inner` is their own body, and a proof stronger than the
+    // screen lock opens the app from every state.
+    let exempt = [
+        "auth/install.rs install_new_device",
+        "auth/install.rs install_new_device_replacing_account",
+        "auth/recovery.rs install_recovered_session",
+        "auth/recovery.rs install_recovered_session_replacing_account",
+    ];
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    source_files(&root, &mut files);
+    files.sort();
+    let (mut walked, mut asking, mut ungated) = (0, 0, Vec::new());
+    for path in &files {
+        let source = std::fs::read_to_string(path).unwrap();
+        let file = path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
+        for (name, body) in public_functions(&source) {
+            walked += 1;
+            let reaches = body.contains("_inner(") || body.contains("held_key(");
+            let asks = body.contains("person_call(") || body.contains("work_call(");
+            if reaches && asks {
+                asking += 1;
+            } else if reaches {
+                ungated.push(format!("{file} {name}"));
+            }
+        }
+    }
+    assert_eq!(
+        ungated, exempt,
+        "public entry points that reach an ungated internal without asking"
+    );
+    // The walk saw the surface: it is not green because it matched nothing.
+    assert!(files.len() >= 40, "{} source files", files.len());
+    assert!(walked >= 300, "{walked} public functions");
+    assert_eq!(
+        asking, 38,
+        "public entry points that reach an ungated internal and ask the lock"
+    );
 }

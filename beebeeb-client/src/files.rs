@@ -131,6 +131,7 @@ pub async fn duplicate_file(
     parent_id: Option<String>,
     now_ms: i64,
 ) -> Result<DuplicateResult, FileServiceError> {
+    downloads.person_call(crate::LockedAction::MutateFiles)?;
     let path = match downloads.open_inner(source, now_ms).await? {
         crate::downloads::DownloadResult::Ready(path) => path,
         crate::downloads::DownloadResult::HandOff {

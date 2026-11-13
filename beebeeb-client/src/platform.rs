@@ -143,7 +143,10 @@ impl ServiceCoordinator {
         account_data: &dyn AccountDataPurger,
         now_ms: i64,
     ) -> Result<SignOutReport, crate::devices::DeviceError> {
+        self.client.person_call(crate::LockedAction::SignOut)?;
         let listed = self.client.list_devices_inner().await?;
+        // On a locked screen a sign-out removes this device and no other.
+        self.client.check_sign_out_device(&listed.devices, device_id, secrets)?;
         if crate::devices::last_device_warning(&listed.devices, device_id) && !confirm_last_device {
             return Err(crate::devices::DeviceError::LastDeviceConfirmationRequired);
         }
