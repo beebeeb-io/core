@@ -6,10 +6,16 @@ impl Client {
     }
 
     pub async fn sign_out_this_app(&self, store: &dyn SecretStore) -> Result<(), AuthError> {
-        // A closed vault holds no credentials in memory: its stored session is ended with
-        // its own token. A person who cannot unlock can still leave.
+        // A closed vault holds no installed session in memory: its stored session is ended
+        // with its own token, and so are credentials a sign-in left in memory on the way to
+        // an unlock. A person who cannot unlock can still leave.
         let network = if self.lock_state() == LockState::VaultClosed {
-            self.end_stored_session(store).await
+            let in_memory = match self.authenticated_owner() {
+                Ok(_) => self.execute_retired_logout().await.map(|_| ()).map_err(AuthError::from),
+                Err(_) => Ok(()),
+            };
+            let stored = self.end_stored_session(store).await;
+            in_memory.and(stored)
         } else {
             self.execute_retired_logout().await.map(|_| ()).map_err(Into::into)
         };

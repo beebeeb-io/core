@@ -154,8 +154,6 @@ impl Client {
         if new_password.is_empty() {
             return Err(AuthError::MalformedAnswer);
         }
-        // The change replaces the session: the app is in the same lock state afterwards.
-        let lock_before = self.with_lock_flow(|flow| flow.clone())?;
         let first_confirmation = self.confirm_action(&current_password).await?;
         let registration = client_registration_start(new_password.as_bytes()).map_err(|_| AuthError::Crypto)?;
         let registration_state = Zeroizing::new(registration.state);
@@ -192,6 +190,11 @@ impl Client {
         }
         let stored = Session::load_for_user_proven(store, &changed.user_id, self.app_id())?
             .ok_or(AuthError::AccountOwnership)?;
+        // The change replaces the session, and the app is in the same lock state afterwards.
+        // The state is read here, not before the requests above: a screen lock that landed
+        // while they were on their way stays locked. From here to the install the app is
+        // closed, and a closed app cannot be screen-locked or opened by anything weaker.
+        let lock_before = self.with_lock_flow(|flow| flow.clone())?;
         self.set_authentication(changed.session_token.clone(), changed.user_id.clone())?;
         let _ = key_state;
         if let Err(error) = self.prove_session_key(stored.master_key()).await {
@@ -217,7 +220,12 @@ impl Client {
         lock::replace_screen_check(store, record);
         self.install_session(&refreshed)?;
         if beebeeb_api::flows::key_may_be_loaded(lock_before.state()) {
-            self.with_lock_flow(|flow| *flow = lock_before)?;
+            self.with_lock_flow(|flow| {
+                // Only what this call closed is put back; a state someone else set stays.
+                if flow.state() == LockState::VaultClosed {
+                    *flow = lock_before;
+                }
+            })?;
         }
         Ok(InstalledSession {
             owner: changed.user_id,

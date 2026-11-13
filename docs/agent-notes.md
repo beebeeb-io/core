@@ -512,6 +512,8 @@ check record and wrong-try rule `beebeeb_core::screen_lock`, and the service on 
   post-proof paths use `load_for_user_proven`. The start setting is `start_from_store`'s rule: a start
   that is closed for any reason writes the mark, so the restore path is closed with it until the
   strong install clears it; after that install every process that shares the store can restore again.
+  The setting alone does not refuse this path (it could not tell a started-and-unlocked app from a
+  fresh boot): a host that turns the setting on starts with `start_from_store` and nothing else.
 - **Strong installs.** `unlock_known_device`, `install_new_device` and `install_recovered_session`
   all clear the mark, drop or replace the check record, reset the count and open the flow, in the
   step that saves the session. Each install checks that the session it proved is still the one in the

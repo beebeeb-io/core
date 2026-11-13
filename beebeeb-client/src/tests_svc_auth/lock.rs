@@ -895,11 +895,30 @@ async fn a_password_change_on_this_device_replaces_the_old_passwords_record() {
         store.set(LOCK_SCREEN_CHECK, &record_for(PASSWORD)).unwrap();
         let client = screen_locked(&server, &store, password_path);
         client.unlock_screen_platform_verified(&store).unwrap();
+        // A screen lock that lands while the change is on its way (here: at its last
+        // request before the new session is proven) stays locked.
+        let locking = password_path.then(|| Arc::new(std::sync::atomic::AtomicBool::new(false)));
+        let client = Arc::new(client);
+        if let Some(locked) = locking.clone() {
+            let screen = client.clone();
+            server.on_request(move |path| {
+                if path == CHANGE_FINISH {
+                    screen.lock_screen().unwrap();
+                    locked.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            });
+        }
         client
             .change_password(password(PASSWORD), password(NEW_PASSWORD), &store)
             .await
             .unwrap();
-        assert_eq!(client.lock_state(), LockState::Open);
+        let expected = if locking.is_some() {
+            LockState::ScreenLocked
+        } else {
+            LockState::Open
+        };
+        assert_eq!(client.lock_state(), expected);
+        assert!(client.session_key().unwrap().is_current(&client));
         if password_path {
             let record = ScreenCheckRecord::from_bytes(&entry(&store, LOCK_SCREEN_CHECK).unwrap());
             assert_eq!(record.password_counter(), Some(9));
@@ -1009,6 +1028,21 @@ async fn a_sign_out_from_a_closed_vault_ends_the_stored_session_with_its_own_tok
     assert_eq!(server.logged_out_tokens(), [format!("Bearer {STORED_TOKEN}")]);
     assert_eq!(entry(&store, "session.token.test-app"), None);
     assert_eq!(store.read_count_for(KEY_ENTRY), 0);
+
+    // Half-way through an unlock (the password was accepted, nothing is installed yet) the
+    // new session is in memory beside the stored one: leaving ends both.
+    let server = LockServer::new();
+    let store = store_with_session();
+    store.set(LOCK_VAULT_CLOSED, b"1").unwrap();
+    let client = Client::new(config(false), server.clone()).unwrap();
+    client.start_from_store(&store).unwrap();
+    client.set_authentication(NEW_TOKEN, OWNER).unwrap();
+    client.sign_out_this_app(&store).await.unwrap();
+    assert_eq!(client.lock_state(), LockState::SignedOut);
+    assert_eq!(
+        server.logged_out_tokens(),
+        [format!("Bearer {NEW_TOKEN}"), format!("Bearer {STORED_TOKEN}")]
+    );
 }
 
 #[tokio::test]
