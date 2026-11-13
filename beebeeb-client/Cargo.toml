@@ -6,7 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-base64 = "0.22"
+base64 = "0.23"
 beebeeb-api = { path = "../beebeeb-api" }
 beebeeb-core = { path = "../beebeeb-core", default-features = false }
 beebeeb-transfer = { path = "../beebeeb-transfer", optional = true }
