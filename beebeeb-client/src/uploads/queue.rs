@@ -78,9 +78,24 @@ impl UploadService {
         self.events.subscribe()
     }
 
-    pub fn enqueue(&self, mut request: UploadRequest, now_ms: i64) -> Result<i64, UploadServiceError> {
-        // The transfer queue is work: sync and backup feed it on a locked screen.
+    /// Queues an upload a person asked for. Refused while the screen is locked.
+    pub fn enqueue(&self, request: UploadRequest, now_ms: i64) -> Result<i64, UploadServiceError> {
+        self.client.person_call(crate::LockedAction::MutateFiles)?;
+        self.enqueue_inner(request, now_ms)
+    }
+
+    /// Queues an upload of the work a locked screen keeps running: a host's sync of a local
+    /// change. Never for an upload a person starts from the window ([`Self::enqueue`]).
+    pub fn enqueue_work(&self, request: UploadRequest, now_ms: i64) -> Result<i64, UploadServiceError> {
         self.client.work_call()?;
+        self.enqueue_inner(request, now_ms)
+    }
+
+    pub(crate) fn work_call(&self) -> Result<(), ClientError> {
+        self.client.work_call()
+    }
+
+    pub(crate) fn enqueue_inner(&self, mut request: UploadRequest, now_ms: i64) -> Result<i64, UploadServiceError> {
         if request.name.is_empty() || request.disk_limit == 0 {
             return Err(UploadServiceError::Source);
         }

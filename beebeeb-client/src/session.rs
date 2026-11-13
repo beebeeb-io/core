@@ -71,6 +71,11 @@ impl HardwareIdentity {
         Ok(Self { id, secret })
     }
 
+    /// The stored hardware id, without making one.
+    pub(crate) fn stored_id(store: &dyn SecretStore) -> Result<Option<String>, SecretError> {
+        store.get(HARDWARE_ID)?.map(|value| stored_string(&value)).transpose()
+    }
+
     pub(crate) fn id(&self) -> &str {
         &self.id
     }

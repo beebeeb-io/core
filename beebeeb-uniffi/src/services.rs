@@ -316,6 +316,9 @@ pub(crate) fn map_client_error(error: impl std::error::Error + 'static) -> Servi
             return match client {
                 beebeeb_client::ClientError::Transport(_) => ServiceError::Network,
                 beebeeb_client::ClientError::InvalidAuthentication => ServiceError::Authentication,
+                // The server ended the session and core closed the vault: work is refused
+                // before a request could say so, and the host asks for a sign-in as it did.
+                beebeeb_client::ClientError::VaultClosed => ServiceError::SessionExpired,
                 _ => ServiceError::Unavailable,
             };
         }

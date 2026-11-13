@@ -247,7 +247,29 @@ async fn a_host_that_never_started_the_lock_is_refused_nothing() {
 #[test]
 fn every_public_call_asks_the_lock_or_is_listed_as_ungated() {
     // (file, source, the public functions that do not ask the lock)
-    let sources: [(&str, &str, &[&str]); 13] = [
+    let sources: [(&str, &str, &[&str]); 15] = [
+        (
+            "platform.rs",
+            include_str!("../platform.rs"),
+            // Construction, the start of search, and two sign-outs of the whole app, which
+            // every lock state allows and which name no device.
+            &["new", "start", "sign_out_app", "prepare_account_replacement"],
+        ),
+        (
+            "file_provider.rs",
+            include_str!("../file_provider.rs"),
+            // Construction and reads of the local tree: the operating system's file manager
+            // shows the sync folder on a locked screen by design. They hold no client.
+            &[
+                "new",
+                "with_budget",
+                "set_system_items",
+                "item",
+                "children",
+                "changes_since",
+                "work_state",
+            ],
+        ),
         ("files.rs", include_str!("../files.rs"), &[]),
         ("settings.rs", include_str!("../settings.rs"), &[]),
         ("contacts.rs", include_str!("../contacts.rs"), &[]),
@@ -310,8 +332,8 @@ fn every_public_call_asks_the_lock_or_is_listed_as_ungated() {
         (
             "uploads/queue.rs",
             include_str!("../uploads/queue.rs"),
-            // The transfer queue is work (`enqueue` and `next_transfers` ask as work); these
-            // only observe a queue that sync and backup feed, or stop what is in it.
+            // `enqueue` is a person's, `enqueue_work` and `next_transfers` are work; these only
+            // observe the queue that sync and backup feed, or stop what is in it.
             &[
                 "new",
                 "set_completion_handler",

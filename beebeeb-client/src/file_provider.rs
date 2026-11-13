@@ -285,6 +285,7 @@ impl FileProviderService {
         request: UploadRequest,
         now_ms: i64,
     ) -> Result<FileProviderOutcome, FileProviderError> {
+        uploads.work_call()?;
         let size = std::fs::metadata(&request.source_path)
             .map_err(|_| FileProviderError::State)?
             .len();
@@ -302,9 +303,9 @@ impl FileProviderService {
                 context_limit: self.budget.download_frame_bytes,
             });
         }
-        let upload_id = uploads.enqueue(request, now_ms)?;
+        let upload_id = uploads.enqueue_inner(request, now_ms)?;
         let summary = uploads
-            .list()?
+            .list_inner()?
             .into_iter()
             .find(|item| item.id == upload_id)
             .ok_or(FileProviderError::State)?;
@@ -325,6 +326,7 @@ impl FileProviderService {
         new_name: Option<&str>,
         new_parent: Option<Option<String>>,
     ) -> Result<FileRecord, FileProviderError> {
+        client.work_call()?;
         self.set_state(id, ItemWorkState::Running)?;
         let result = async {
             let node = self
@@ -352,6 +354,7 @@ impl FileProviderService {
     }
 
     pub async fn delete(&self, client: &Client, id: Uuid) -> Result<(), FileProviderError> {
+        client.work_call()?;
         self.set_state(id, ItemWorkState::Running)?;
         let result = async {
             let node = self
@@ -375,6 +378,7 @@ impl FileProviderService {
     /// never a permanent delete. A missing item is a terminal failure, never a
     /// permanent "syncing" row.
     pub async fn delete_local(&self, client: &Client, id: Uuid) -> Result<(), FileProviderError> {
+        client.work_call()?;
         self.set_state(id, ItemWorkState::Running)?;
         let result = async {
             if self

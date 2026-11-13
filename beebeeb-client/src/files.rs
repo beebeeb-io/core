@@ -145,12 +145,12 @@ pub async fn duplicate_file(
         }
         crate::downloads::DownloadResult::Saved => return Err(FileServiceError::InvalidRecord),
     };
-    let upload_id = uploads.enqueue(
+    let upload_id = uploads.enqueue_inner(
         crate::uploads::UploadRequest::new(path, new_name, mime_type, parent_id),
         now_ms,
     )?;
     let summary = uploads
-        .list()?
+        .list_inner()?
         .into_iter()
         .find(|item| item.id == upload_id)
         .ok_or(FileServiceError::InvalidRecord)?;

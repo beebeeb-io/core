@@ -699,10 +699,10 @@ impl BackupService {
             )
             .for_backup(&asset.local_identifier);
             request.wifi_only = configuration.wifi_only;
-            let upload_id = self.uploads.enqueue(request, now_ms)?;
+            let upload_id = self.uploads.enqueue_inner(request, now_ms)?;
             let summary = self
                 .uploads
-                .list()?
+                .list_inner()?
                 .into_iter()
                 .find(|item| item.id == upload_id)
                 .ok_or(BackupError::State)?;

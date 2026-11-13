@@ -538,7 +538,7 @@ impl Client {
         self.remove_device_inner(device_id).await?;
         let ended = self.end_session_after_device_removal().await;
         // The process first, then the store (see `Client::sign_out_this_app`).
-        let local = self.sign_out_authentication();
+        let local = self.sign_out_device_authentication();
         let generation = Session::sign_out_device(store)?;
         local?;
         ended?;
@@ -557,11 +557,12 @@ impl Client {
         let Err(refused) = self.person_call(crate::LockedAction::RemoveDevice) else {
             return Ok(());
         };
-        let own = crate::session::HardwareIdentity::load_or_create(store)
-            .map_err(|_| DeviceError::Client(ClientError::State))?;
-        let this_device = listed
-            .iter()
-            .any(|device| device.id == device_id && device.hardware_id.as_deref() == Some(own.id()));
+        // Read, never made: a device without a stored identity cannot name itself here.
+        let own = crate::session::HardwareIdentity::stored_id(store).ok().flatten();
+        let this_device = own.is_some()
+            && listed
+                .iter()
+                .any(|device| device.id == device_id && device.hardware_id == own);
         if this_device { Ok(()) } else { Err(refused.into()) }
     }
 

@@ -106,6 +106,10 @@ pub struct Client {
     transport: Arc<dyn Transport>,
     authentication: Mutex<Option<Authentication>>,
     generation: AtomicU64,
+    /// How often this process signed out: of the app, and of the whole device. An install
+    /// that was refused reads them to learn whether a sign-out is what overtook it.
+    sign_outs: AtomicU64,
+    device_sign_outs: AtomicU64,
     events: EngineEvents,
     /// The two-level lock of this app process. Taken alone, or after `authentication` by the
     /// steps that change the session and the lock as one ([`Client::with_session`]); never
@@ -165,6 +169,8 @@ impl Client {
             transport,
             authentication: Mutex::new(None),
             generation: AtomicU64::new(0),
+            sign_outs: AtomicU64::new(0),
+            device_sign_outs: AtomicU64::new(0),
             lock: Mutex::new(LockFlow::at_start(StartFacts {
                 session_stored: false,
                 ask_password_at_start: Some(false),
@@ -209,12 +215,24 @@ impl Client {
         token: impl Into<String>,
         expected_user: impl Into<String>,
     ) -> Result<u64, ClientError> {
+        self.set_authentication_reading_lock(token, expected_user)
+            .map(|(generation, _)| generation)
+    }
+
+    /// [`Self::set_authentication`], with the lock as it was just before these credentials
+    /// closed it: read in the same step, so nothing lands between the read and the close.
+    pub(crate) fn set_authentication_reading_lock(
+        &self,
+        token: impl Into<String>,
+        expected_user: impl Into<String>,
+    ) -> Result<(u64, LockFlow), ClientError> {
         let token = token.into();
         let expected_user = expected_user.into();
         if token.is_empty() || expected_user.is_empty() {
             return Err(ClientError::InvalidAuthentication);
         }
         self.with_session(|authentication, flow| {
+            let before = flow.clone();
             let generation = self.advance_generation();
             *authentication = Some(Authentication {
                 token: Zeroizing::new(token),
@@ -226,7 +244,7 @@ impl Client {
             // held the key no longer does, so its lock state must not keep describing the old
             // session. A strong install that follows opens it again; nothing weaker does.
             flow.session_ended();
-            generation
+            (generation, before)
         })
     }
 
@@ -405,12 +423,31 @@ impl Client {
 
     /// [`Self::clear_authentication`] for a sign-out: the app is signed out, not closed.
     pub(crate) fn sign_out_authentication(&self) -> Result<u64, ClientError> {
-        let generation = self.drop_session(LockFlow::signed_out);
+        let generation = self.drop_session(|flow| {
+            self.sign_outs.fetch_add(1, Ordering::AcqRel);
+            flow.signed_out();
+        });
         if generation.is_err() {
             // The session state is unusable; the lock still leaves the account.
             self.with_lock_flow(LockFlow::signed_out)?;
         }
         generation
+    }
+
+    /// [`Self::sign_out_authentication`] for a sign-out of the whole device: the stored
+    /// session, the key entry included, goes with it.
+    pub(crate) fn sign_out_device_authentication(&self) -> Result<u64, ClientError> {
+        self.device_sign_outs.fetch_add(1, Ordering::AcqRel);
+        self.sign_out_authentication()
+    }
+
+    /// The sign-outs of this process so far: (all, of the whole device).
+    #[cfg(feature = "auth")]
+    pub(crate) fn sign_outs(&self) -> (u64, u64) {
+        (
+            self.sign_outs.load(Ordering::Acquire),
+            self.device_sign_outs.load(Ordering::Acquire),
+        )
     }
 
     fn drop_session(&self, lock: impl FnOnce(&mut LockFlow)) -> Result<u64, ClientError> {

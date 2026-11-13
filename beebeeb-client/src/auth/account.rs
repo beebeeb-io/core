@@ -156,6 +156,10 @@ impl Client {
         store: &dyn SecretStore,
     ) -> Result<InstalledSession, AuthError> {
         self.person_call(crate::LockedAction::ChangeSettings)?;
+        // A closed vault holds no key to keep: the change is made from an open app.
+        if self.lock_state() == LockState::VaultClosed {
+            return Err(ClientError::VaultClosed.into());
+        }
         if new_password.is_empty() {
             return Err(AuthError::MalformedAnswer);
         }
@@ -199,9 +203,11 @@ impl Client {
         // The state is read here, not before the requests above: a screen lock that landed
         // while they were on their way stays locked. From here to the install the app is
         // closed, and a closed app cannot be screen-locked or opened by anything weaker.
-        let lock_before = self.with_lock_flow(|flow| flow.clone())?;
-        // Everything below belongs to the credentials set here, at this account generation.
-        let changed_at = self.set_authentication(changed.session_token.clone(), changed.user_id.clone())?;
+        // It is read in the step that sets the new credentials, so no lock lands in between.
+        // Everything below belongs to those credentials, at this account generation.
+        let sign_outs = self.sign_outs();
+        let (changed_at, lock_before) =
+            self.set_authentication_reading_lock(changed.session_token.clone(), changed.user_id.clone())?;
         let _ = key_state;
         if let Err(error) = self.prove_session_key(stored.master_key()).await {
             if !matches!(error, AuthError::Client(ClientError::StaleAccount)) {
@@ -230,6 +236,7 @@ impl Client {
         // Nothing of the new session is saved for a session that is no longer the one in the
         // process: a vault lock, a sign-out or an ended session that landed meanwhile wins.
         if self.generation() != changed_at {
+            self.forget_refused_save(store, sign_outs);
             return Err(ClientError::StaleAccount.into());
         }
         refreshed.save(store, self.app_id())?;
@@ -242,7 +249,7 @@ impl Client {
             }
         });
         if let Err(error) = installed {
-            self.forget_refused_save(store);
+            self.forget_refused_save(store, sign_outs);
             return Err(error.into());
         }
         Ok(InstalledSession {

@@ -219,6 +219,7 @@ impl Client {
         proven_at: u64,
         save_identity: impl FnOnce() -> Result<(), AuthError>,
     ) -> Result<(), AuthError> {
+        let sign_outs = self.sign_outs();
         // Nothing is written for a session that is no longer the one in the process.
         if self.generation() != proven_at {
             return Err(ClientError::StaleAccount.into());
@@ -240,17 +241,22 @@ impl Client {
             // The vault is closed (or the app signed out) by whatever landed: the mark that
             // was cleared a moment ago is written again, and a sign-out keeps its store.
             let _ = write_lock_flag(store, LOCK_VAULT_CLOSED, true);
-            self.forget_refused_save(store);
+            self.forget_refused_save(store, sign_outs);
             return Err(error.into());
         }
         Ok(())
     }
 
-    /// After an install that was refused because the session changed: when the app was
-    /// signed out meanwhile, the token this call saved is removed again, so a sign-out is
-    /// not undone in the store either.
-    pub(super) fn forget_refused_save(&self, store: &dyn SecretStore) {
-        if self.lock_state() == LockState::SignedOut {
+    /// After an install that was refused because the session changed: when this process
+    /// signed out since `before` ([`Client::sign_outs`], read before the first store write),
+    /// what this call wrote is removed again, so a sign-out is not undone in the store
+    /// either. A sign-out of the whole device purges the stored session again, the key entry
+    /// and the lock entries included; a sign-out of the app removes the app's token.
+    pub(super) fn forget_refused_save(&self, store: &dyn SecretStore, before: (u64, u64)) {
+        let (all, device) = self.sign_outs();
+        if device != before.1 {
+            let _ = Session::sign_out_device(store);
+        } else if all != before.0 {
             let _ = Session::sign_out_app(store, self.app_id());
         }
     }
