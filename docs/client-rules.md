@@ -49,8 +49,12 @@ runs) or `VaultClosed` (the key entry is not read; work is stopped), never open.
 with `unlock_screen_platform_verified` (only after the operating system's own user-verification prompt
 returned success for the current user) or `unlock_screen_with_password`; a closed vault opens only
 with `sign_in_on_device` (plus `submit_two_factor`) and `unlock_known_device`. While `ScreenLocked` a
-host shows no file name, account data or thumbnail, keeps the window out of screen capture, and
-refuses every action except unlock, lock vault and sign out (`screen_locked_allows`). After
+host shows no file name, account data or thumbnail and keeps the window out of screen capture. Core
+itself refuses every call a person drives except unlock, lock vault and sign out (`screen_locked_allows`,
+answered as `ClientError::ScreenLocked`; a sign-out there removes this device only), and keeps sync,
+transfers and backup running; the list is in `docs/agent-notes.md`, "What the screen lock refuses". A
+host never works around a refusal, and asks `Client::check_call` before a path core cannot see (a read
+of the local store or the search index that would show a name). After
 `SessionExpired` a host calls `Client::session_ended`. Both levels are locks on the app, not
 encryption of the device: copy says "locked" and "sync is paused", never "encrypted while locked",
 and never that the password protects the files or the key. The host's `SecretStore` must be

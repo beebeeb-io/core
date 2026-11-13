@@ -22,9 +22,12 @@ type Landing = Box<dyn FnOnce() + Send>;
 enum Write {
     Set(&'static str),
     Delete(&'static str),
+    /// Just after the entry was written, where the others land just before.
+    AfterSet(&'static str),
 }
 
-/// A store that runs one call, once, just before a chosen write reaches the entries.
+/// A store that runs one call, once, at a chosen write: just before it reaches the entries,
+/// or just after.
 struct RacingStore {
     inner: Arc<MemorySecretStore>,
     at: Write,
@@ -61,7 +64,13 @@ impl SecretStore for RacingStore {
         {
             self.land(self.at);
         }
-        self.inner.set(name, value)
+        self.inner.set(name, value)?;
+        if let Write::AfterSet(at) = self.at
+            && at == name
+        {
+            self.land(self.at);
+        }
+        Ok(())
     }
 
     fn get(&self, name: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretError> {
@@ -235,7 +244,7 @@ async fn a_vault_lock_overtaken_by_a_strong_unlock_keeps_its_mark() {
             })
         }
     };
-    let racing = RacingStore::new(store.clone(), Write::Set(LOCK_VAULT_CLOSED), unlock);
+    let racing = RacingStore::new(store.clone(), Write::AfterSet(LOCK_VAULT_CLOSED), unlock);
 
     let locked = client.lock_vault(&racing).await.unwrap();
     assert!(racing.landed());

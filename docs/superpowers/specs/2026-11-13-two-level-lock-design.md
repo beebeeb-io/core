@@ -338,9 +338,10 @@ Rules a client follows:
 - A client never reads the key entry itself and never compares passwords itself.
 - `unlock_screen_platform_verified` is called only after the operating system's own user-verification
   prompt returned success for the current user; a cancelled or unavailable prompt calls nothing.
-- While `ScreenLocked` a host shows no file names, no account data and no thumbnails, keeps the window out
-  of screen capture, and refuses every action except unlock, lock vault and sign out
-  (`screen_locked_allows`).
+- While `ScreenLocked` a host shows no file names, no account data and no thumbnails and keeps the window
+  out of screen capture. Core refuses every call a person drives except unlock, lock vault and sign out
+  (`screen_locked_allows`, applied by `call_may_run` at the calls of `beebeeb-client`; amended 2026-11-14,
+  before that the host applied it); the host applies the same rule to what core cannot see.
 
 Changes in core that this contract asks for: a call that drops the key but keeps the stored session
 (`lock_vault`); ending the replaced session; telling the server's guess limit apart from a judged
