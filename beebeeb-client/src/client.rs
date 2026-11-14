@@ -205,6 +205,7 @@ impl Client {
                     session_stored: false,
                     ask_password_at_start: Some(false),
                     vault_closed: Some(false),
+                    app_lock: Some(true),
                 }),
                 screen_lock_pending: None,
             }),

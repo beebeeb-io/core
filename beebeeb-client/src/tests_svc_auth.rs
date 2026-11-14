@@ -31,6 +31,7 @@ use crate::{
 };
 
 mod account;
+mod app_lock;
 mod device_link;
 mod lock;
 mod lock_gate;

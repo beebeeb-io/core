@@ -2,7 +2,8 @@
 
 Status: contract, no code yet. Date: 2026-11-13. Source: product decision 2495 ("two levels"), with the
 ruling that the rules and the cryptography live in this repository and every client only binds them.
-Reviewed once (section 11); the questions it left open are decided (section 10).
+Reviewed once (section 11); the questions it left open are decided (section 10). Amended 2026-11-14 for
+app lock, the screen level's per-device switch (section 10, "App lock").
 
 A native Beebeeb app is a sync client: background sync needs the account key. So "locked" cannot mean
 "the key is gone" by default. This contract defines two levels, says exactly what each one protects, and
@@ -16,13 +17,21 @@ never calls either one encryption of the device.
 | Sync | runs | stopped, said honestly |
 | Opened with | platform user verification (Windows Hello) first, or the account password | the account password proven to the server (plus the authenticator code when the account has one), then core's known-device unlock |
 | Network needed to open | no (password: checked locally when the server cannot be reached) | yes |
-| Survives a restart | the app always starts at least screen-locked | yes: a closed vault stays closed until the strong unlock |
-| Default | the app opens in this state at every start | off; on with "Ask for my password when Beebeeb starts" |
+| Survives a restart | the app starts screen-locked, unless the owner turned app lock off | yes: a closed vault stays closed until the strong unlock |
+| Default | on ("app lock"): the app opens in this state at every start and locks again after the chosen delay away | off; on with "Ask for my password when Beebeeb starts" |
+| Turned off | app lock off: the app starts open and never locks by itself; "Lock" by hand still locks | (app lock does not reach this level) |
 
 ## 1. Defaults
 
 - At operating-system start: no password. The stored key is loaded, sync starts, the app window opens
   screen-locked.
+- **App lock** (the screen level's per-device switch) is on by default: the app opens screen-locked and
+  the host locks it again when the person was away for the delay they chose, or when the operating
+  system's session is locked. Owner ruling, 2026-11-14: "app lock: off means that the app won't lock,
+  meaning anyone signing into the pc does not need to fill in a passwd again & can just use it
+  directly." Off, the app starts open and the automatic lock does nothing; "Lock" by hand still locks.
+  App lock never opens the vault level: with "Ask for my password when Beebeeb starts" on, or a closed
+  mark, the app starts vault-closed whatever app lock says.
 - "Ask for my password when Beebeeb starts" is off by default. When on, the app starts vault-closed: the
   stored key is not read at all at start, and sync does not start until the strong unlock.
 - A person can lock either level by hand at any time ("Lock", "Lock and pause sync"). A vault closed by
@@ -33,12 +42,15 @@ never calls either one encryption of the device.
 ```mermaid
 stateDiagram-v2
     [*] --> SignedOut: no stored session
-    [*] --> ScreenLocked: stored session, setting off, no closed mark (key loaded, sync starts)
-    [*] --> VaultClosed: setting on, or closed mark set, or either cannot be read (key not read)
+    [*] --> ScreenLocked: stored session, setting off, no closed mark, app lock on or unreadable (key loaded, sync starts)
+    [*] --> Open: stored session, setting off, no closed mark, app lock off (key loaded, sync starts)
+    [*] --> VaultClosed: setting on, or closed mark set, or either cannot be read (key not read; app lock does not matter)
 
     SignedOut --> Open: sign-in and install (new device or known device)
 
-    Open --> ScreenLocked: lock (by hand, host policy, OS session lock)
+    Open --> ScreenLocked: lock by hand ("Lock now"), whatever app lock says
+    Open --> ScreenLocked: automatic lock (away delay, OS session lock), app lock on or unreadable
+    Open --> Open: automatic lock, app lock off (nothing changes)
     ScreenLocked --> Open: platform verification passed
     ScreenLocked --> Open: password accepted (online check, or local check when offline)
     ScreenLocked --> ScreenLocked: wrong password (counted, backoff)
@@ -59,9 +71,15 @@ Rules of the machine:
 
 - `ScreenLocked` and `Open` differ only in what the host may show and do; the key and the work are the
   same. `VaultClosed` has no usable key in this app's process.
-- There is no arrow from `VaultClosed` to `ScreenLocked`, and none into `Open` except the strong unlock.
-  Platform verification and the local check never open `VaultClosed`: a weaker proof never opens the
-  stronger level, also not by restarting the app.
+- Out of `VaultClosed` lead only the strong unlock and sign-out: there is no arrow from `VaultClosed` to
+  `ScreenLocked`, and platform verification and the local check never open it. A weaker proof never
+  opens the stronger level, also not by restarting the app.
+- Into `Open` lead the strong unlock, a screen proof from `ScreenLocked`, and one arrow without a proof:
+  a start with app lock off, and only where that start would otherwise be `ScreenLocked`. App lock is
+  the screen level's alone and never opens `VaultClosed`.
+- Core holds no clock: the host decides when the person was away for the chosen delay, and asks core
+  (`lock_after_away`) what that means. Every lock the host applies by itself (the delay, the OS session
+  lock) goes through that call; only "Lock now" by hand is `lock(LockLevel::Screen)`.
 - Platform verification is a statement by the host that the operating system verified the user. Core
   cannot check it, so it is trusted only for the level that is a screen gate.
 - A session the server no longer accepts moves `Open` and `ScreenLocked` to `VaultClosed`: the key is
@@ -153,11 +171,12 @@ Through core's `SecretStore`, next to the session entries, never a plain file:
 | `lock.attempts` | failed-try count and the time of the last failure (3.5) |
 | `lock.ask_password_at_start` | the level-2 start setting |
 | `lock.vault_closed` | the closed mark of section 4 |
+| `lock.app_lock` | the level-1 switch "app lock": `1` on, `0` off; **absent is on**, anything else or a failed read counts as on |
 
 - `SecretStore` is a trait: on Apple platforms core's Keychain store; on Windows the host supplies the
   implementation over the Windows credential store (core has none today, and gets none from this
   contract). The host's store must be this-device-only and non-roaming, as the Keychain entries are.
-- All four are removed with the device session, at both places core removes one: the device-session
+- All five are removed with the device session, at both places core removes one: the device-session
   purge and the account-change branch of the session save. A record whose AAD does not match the stored
   owner is deleted and treated as absent.
 - `lock.screen_check` and `lock.attempts` are also deleted when the server ends the session and when the
@@ -285,13 +304,16 @@ The password counter is server prerequisite S1 (section 10).
 ```rust
 pub enum LockState { SignedOut, Open, ScreenLocked, VaultClosed }
 pub enum LockLevel { Screen, Vault }
-/// `None` = the entry could not be read: the vault starts closed.
-pub struct StartFacts { pub session_stored: bool, pub ask_password_at_start: Option<bool>, pub vault_closed: Option<bool> }
+/// `None` = the entry could not be read: the vault starts closed; an unreadable app lock counts as on.
+pub struct StartFacts { pub session_stored: bool, pub ask_password_at_start: Option<bool>, pub vault_closed: Option<bool>,
+    pub app_lock: Option<bool> }
+pub enum ScreenProof { PlatformVerified, PasswordChecked }
 
 impl LockFlow {
     pub fn at_start(facts: StartFacts) -> Self;
     pub fn state(&self) -> LockState;
-    pub fn lock(&mut self, level: LockLevel) -> Result<(), FlowError>;
+    pub fn lock(&mut self, level: LockLevel) -> Result<(), FlowError>;       // by hand: locks whatever app lock says
+    pub fn lock_after_away(&mut self, app_lock: Option<bool>);               // automatic: Open -> ScreenLocked unless app lock off
     pub fn platform_verified(&mut self) -> Result<(), FlowError>;      // ScreenLocked only
     pub fn password_checked(&mut self) -> Result<(), FlowError>;       // ScreenLocked only
     pub fn session_ended(&mut self);                                   // Open, ScreenLocked -> VaultClosed
@@ -301,6 +323,9 @@ impl LockFlow {
 pub const fn key_may_be_loaded(state: LockState) -> bool;   // Open, ScreenLocked
 pub const fn work_may_run(state: LockState) -> bool;        // Open, ScreenLocked
 pub const fn screen_locked_allows(action: LockedAction) -> bool;
+pub const fn away_locks_screen(app_lock: Option<bool>) -> bool;      // false only for Some(false)
+pub const fn app_lock_may_change(state: LockState, on: bool, proof: Option<ScreenProof>) -> Result<(), FlowError>;
+    // Open only (else NotReady); on: always; off: only with a proof given for this change (else StepOutOfOrder)
 ```
 
 `beebeeb-core::screen_lock` (new):
@@ -330,6 +355,11 @@ pub async fn lock_vault(&self, store: &dyn SecretStore) -> Result<VaultLocked, A
     // the new generation, and whether the closed mark was stored
 pub async fn set_ask_password_at_start(&self, on: bool, password: Option<Zeroizing<String>>,
     store: &dyn SecretStore, now_ms: u64) -> Result<(), AuthError>;
+pub fn lock_after_away(&self, store: &dyn SecretStore) -> Result<LockState, AuthError>;   // the state after
+pub fn app_lock(&self, store: &dyn SecretStore) -> bool;
+pub async fn set_app_lock(&self, on: bool, proof: Option<AppLockProof>, store: &dyn SecretStore,
+    now_ms: u64) -> Result<(), AuthError>;
+pub enum AppLockProof { PlatformVerified, Password(Zeroizing<String>) }   // Debug never prints the password
 ```
 
 Rules a client follows:
@@ -376,6 +406,16 @@ Replaced in the desktop engine once the native sign-in/unlock binding has merged
   `unlock_known_device`. The host adapter's `begin_unlock` stays and calls the level the state names.
 - The start-up restore that loads the key unconditionally: by `start_from_store`.
 - The engine's lock call: by `lock_screen` / `lock_vault`.
+- App lock: the settings switch reads `app_lock` and writes `set_app_lock` (turning it off first runs
+  the Windows user-verification prompt, or asks for the password, for that change). The host keeps the
+  chosen delay and its own idle timer; when the delay has passed, and when Windows locks the session,
+  it calls `lock_after_away` (never `lock_screen`, which is "Lock now" by hand only).
+- `start_from_store` can answer `Open` (app lock off): the start shows the account at once, with the
+  key loaded and sync started, as after an unlock.
+- Known limit: the delay lives in the host and core does not gate it. The delay offers no "never": a
+  host that let it run forever would be app lock off without the proof. The switch is the only way off.
+- With `ClientConfig::lock_password_path` off, only platform verification can turn app lock off (the
+  password proof answers `PasswordCheckUnavailable`).
 - `begin_hello` / `cancel_hello` (today an immediate refusal): bound to the Windows user-verification
   prompt for the app's window, then `unlock_screen_platform_verified`.
 - The engine's own credential-store module becomes the Windows `SecretStore` implementation.
@@ -387,7 +427,7 @@ Replaced in the desktop engine once the native sign-in/unlock binding has merged
 | Attacker | Screen lock | Vault lock |
 |---|---|---|
 | Shoulder-surfer (sees the screen) | Stops: file names, account data and thumbnails are not drawn; the window is excluded from capture. Does not stop: watching the password being typed (the field is masked; Hello shows nothing to copy). | Same. |
-| Someone at the unlocked OS session who runs nothing | Stops: opening the app, account and sharing actions, guessing the password quickly (backoff, then local check off). Does not stop: opening the sync folder in the file manager; files on demand still download, because sync runs. Tries may count toward the account's guess limit at the server (3.5). | Stops the same, plus fetching files that are not on the device. Does not stop: files already on the disk. |
+| Someone at the unlocked OS session who runs nothing | With app lock on: stops opening the app, account and sharing actions, guessing the password quickly (backoff, then local check off). **With app lock off: stops nothing**, by the owner's choice: anyone signed in to the PC opens the app (only "Lock now" by hand locks it). Either way does not stop: opening the sync folder in the file manager; files on demand still download, because sync runs. Tries may count toward the account's guess limit at the server (3.5). | Stops the same, plus fetching files that are not on the device, whatever app lock says. Does not stop: files already on the disk. |
 | The same person, running a program | Is "malware running as the user" below. | Same. |
 | Disk thief without the OS login | Nothing added by either level. The credential store and the files are as safe as the operating system makes them (login-bound store protection, disk encryption if on). Synced files and the local name cache on an unencrypted disk are readable. | Same. |
 | Disk thief with the OS login | Stops nothing: reads the stored key and session token directly, and the files. **Gains from this feature:** the check record, an offline guessing target for the account password at Argon2id 256 MiB per guess, which did not exist on the device before. | Stops nothing: the key is still in the store. The record is there too. |
@@ -407,11 +447,20 @@ the data on the server and in transit.
   once, a 401 on either leg of the online proof is not a wrong try, a server limit is not a wrong try; server side:
   a per-session limit on proof starts.
 - `flows/lock.rs`: every arrow of section 2 and every missing arrow (platform verification and the local
-  check on `VaultClosed` are refused; unreadable start facts start closed).
+  check on `VaultClosed` are refused; unreadable start facts start closed). App lock: the 27 start
+  combinations (one `Open`, two `ScreenLocked`, 24 `VaultClosed`); an unreadable app lock starts
+  screen-locked; app lock off with the start setting on or a closed mark starts closed; the automatic
+  lock locks with app lock on and changes nothing with it off or from any other state; "Lock now" locks
+  with it off; turning it off is refused without a proof and allowed with either one.
+- Client, app lock: an open start holds the key; an absent, `1`, non-flag or unreadable entry starts
+  screen-locked; app lock off never opens a closed start (key entry read 0 times); `set_app_lock` is
+  refused from the screen lock and without a proof, counts a wrong password, accepts the online
+  password, the offline local check and platform verification, and needs no password path for the
+  last one.
 - Client: start with the setting on or the mark set reads the key entry 0 times; lock vault, quit, start:
   still closed; after `lock_vault` every outstanding key copy is refused and work has stopped; online
   beats a stale record; a counter mismatch and an ended session delete the record; both purge places
-  remove all four entries; the strong unlock still works after the server forgot the device's hardware
+  remove all five entries; the strong unlock still works after the server forgot the device's hardware
   identity in a password change.
 - Desktop: the frames of section 7 on a real Windows build, with a Hello prompt and with Hello absent.
 
@@ -447,6 +496,32 @@ prerequisite is live:
   and turning the start setting off). The step-up that mints a confirmation for destructive account
   actions is not used for unlocking. Its refusals must tell a judged password, the server's limit and an
   ended session apart, and it carries a per-session limit on starts (3.5).
+
+### App lock (2026-11-14)
+
+The owner's ruling (2026-11-14, verbatim): "app lock: off means that the app won't lock, meaning anyone
+signing into the pc does not need to fill in a passwd again & can just use it directly." Together with
+the 2026-11-13 ruling that stands: app lock is on by default (the app opens screen-locked, unlocks with
+Windows Hello or the password, and locks again after the chosen delay away).
+
+- Decision (O-core-applock, 2026-11-14): turning app lock off needs a proof the screen unlock accepts,
+  given for that change (platform verification, or the password checked as the screen unlock checks it,
+  the offline local check included); turning it on needs nothing; core expresses it as
+  `app_lock_may_change` and `set_app_lock` refuses without the proof, because off lowers the protection
+  of the screen level only, so the bar is exactly the proof that opens that level. Asking for the
+  server-proven password (as the vault-level start setting does) would make the switch unusable offline
+  and protect nothing more: whoever passes the screen unlock holds the open app already.
+- Decision (O-core-applock, 2026-11-14): the setting is a per-device store entry (`lock.app_lock`, absent
+  and unreadable count as on) that the host passes in as a fact, never state held by `LockFlow`, because
+  the flow holds progress only, and one source of truth keeps the switch and the next start from
+  disagreeing (an app-only sign-out keeps the lock entries).
+- Decision (O-core-applock, 2026-11-14): every lock the host applies by itself (the away delay and the
+  operating system's session lock) goes through `lock_after_away`; only "Lock now" by hand uses
+  `lock(LockLevel::Screen)` / `lock_screen`, because the ruling names the case of someone signing in to
+  the PC again: with app lock off that must not ask for the password.
+- Decision (O-core-applock, 2026-11-14): the `beebeeb-client` binding (`start_from_store`,
+  `lock_after_away`, `app_lock`, `set_app_lock`) ships with the rule, because the desktop calls `Client`,
+  not the flow, and `start_from_store` builds `StartFacts`: without it an open start would hold no key.
 
 ## 11. Design review
 

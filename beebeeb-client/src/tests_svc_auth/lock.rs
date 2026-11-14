@@ -14,7 +14,7 @@ use tokio::sync::broadcast;
 
 use super::*;
 use crate::MemorySecretStore;
-use crate::session::{LOCK_ASK_AT_START, LOCK_ATTEMPTS, LOCK_SCREEN_CHECK, LOCK_VAULT_CLOSED};
+use crate::session::{LOCK_APP_LOCK, LOCK_ASK_AT_START, LOCK_ATTEMPTS, LOCK_SCREEN_CHECK, LOCK_VAULT_CLOSED};
 
 pub(super) const OWNER: &str = "0b3c7a52-5d0e-4f1a-9d2e-1c6f3a8b9e01";
 pub(super) const EMAIL: &str = "person@example.test";
@@ -686,26 +686,34 @@ async fn a_host_that_never_started_the_lock_keeps_its_session_on_a_refusal() {
     assert_eq!(client.lock_state(), LockState::SignedOut);
 }
 
+const ALL_LOCK_ENTRIES: [&str; 5] = [
+    LOCK_SCREEN_CHECK,
+    LOCK_ATTEMPTS,
+    LOCK_ASK_AT_START,
+    LOCK_VAULT_CLOSED,
+    LOCK_APP_LOCK,
+];
+
 fn seed_lock_entries(store: &dyn SecretStore) {
-    for name in [LOCK_SCREEN_CHECK, LOCK_ATTEMPTS, LOCK_ASK_AT_START, LOCK_VAULT_CLOSED] {
+    for name in ALL_LOCK_ENTRIES {
         store.set(name, b"0").unwrap();
     }
 }
 
 fn lock_entries_left(store: &dyn SecretStore) -> usize {
-    [LOCK_SCREEN_CHECK, LOCK_ATTEMPTS, LOCK_ASK_AT_START, LOCK_VAULT_CLOSED]
+    ALL_LOCK_ENTRIES
         .into_iter()
         .filter(|name| entry(store, name).is_some())
         .count()
 }
 
 #[test]
-fn both_purge_places_remove_all_four_lock_entries_and_an_app_sign_out_keeps_them() {
+fn both_purge_places_remove_all_five_lock_entries_and_an_app_sign_out_keeps_them() {
     // The device-session purge.
     let store = store_with_session();
     seed_lock_entries(&store);
     Session::sign_out_app(&store, "test-app").unwrap();
-    assert_eq!(lock_entries_left(&store), 4, "they belong to the account on the device");
+    assert_eq!(lock_entries_left(&store), 5, "they belong to the account on the device");
     Session::sign_out_device(&store).unwrap();
     assert_eq!(lock_entries_left(&store), 0);
 
@@ -723,7 +731,7 @@ fn both_purge_places_remove_all_four_lock_entries_and_an_app_sign_out_keeps_them
     let store = store_with_session();
     seed_lock_entries(&store);
     session(OWNER, "refreshed-token", 1).save(&store, "test-app").unwrap();
-    assert_eq!(lock_entries_left(&store), 4);
+    assert_eq!(lock_entries_left(&store), 5);
 }
 
 #[tokio::test]
@@ -736,7 +744,7 @@ async fn an_app_sign_out_leaves_the_lock_signed_out() {
     client.sign_out_this_app(&store).await.unwrap();
     assert_eq!(client.lock_state(), LockState::SignedOut);
     assert!(client.held_key().is_err());
-    assert_eq!(lock_entries_left(&store), 4);
+    assert_eq!(lock_entries_left(&store), 5);
 }
 
 pub(super) async fn accepted_password(client: &Client, store: &dyn SecretStore) -> PasswordAccepted {

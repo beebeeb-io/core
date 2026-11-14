@@ -16,9 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `set_ask_password_at_start`, `session_ended` and `refresh_lock_from_server`. The password path is
   behind `ClientConfig::lock_password_path` (default off) until the server side is live. No binding
   exports it yet.
+- App lock, the per-device switch of the screen level (on by default): `StartFacts::app_lock`,
+  `LockFlow::lock_after_away`, `flows::away_locks_screen`, `flows::app_lock_may_change` and
+  `flows::ScreenProof` in `beebeeb-api`; `Client::lock_after_away`, `Client::app_lock`,
+  `Client::set_app_lock` and `AppLockProof` in `beebeeb-client`, stored as `lock.app_lock`. With it off a
+  start that would be screen-locked starts open and the automatic lock changes nothing; "Lock now" still
+  locks and the vault level is unchanged. Turning it off needs a screen proof given for that change.
+  Breaking for code that builds `StartFacts` by hand: it has a fourth field.
 
 ### Changed
 
+- A wrong password typed as the proof for `set_app_lock` or `set_ask_password_at_start` is now
+  `AuthError::PasswordWrong { wait_ms, local_check_off }` (was `PasswordNotConfirmed`), so a host can
+  show the wait and that offline unlock is off after the tenth wrong try, as the screen unlock does.
+  Both calls also refuse (write nothing) when the app was screen-locked while the proof was checked.
+  An account's first `Session::save` clears every lock entry, and a device sign-out deletes
+  `lock.app_lock` first, so an interrupted sign-out cannot leave the setting off for the next account.
 - Core applies the screen lock itself. While `ScreenLocked`, every `beebeeb-client` call a person
   drives answers the new `ClientError::ScreenLocked` before anything is sent (`session_key`, the file,
   sharing, account, device and settings calls, the download, thumbnail and archive reads); unlock,
