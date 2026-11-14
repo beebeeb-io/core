@@ -90,7 +90,13 @@ impl Client {
 
     /// Locks the screen level by hand, by host policy or with the OS session. The key and
     /// the work stay as they are.
+    ///
+    /// A closed vault is never screen-locked, so the call is refused there. One case keeps
+    /// the request all the same: while a password change holds the app closed between its
+    /// last answer and its install, the lock that was asked for is applied when the change
+    /// installs, and the app comes back screen-locked.
     pub fn lock_screen(&self) -> Result<(), AuthError> {
+        self.screen_lock_asked();
         self.with_lock_flow(|flow| flow.lock(LockLevel::Screen))?
             .map_err(|error| refused("screen lock", error))
     }

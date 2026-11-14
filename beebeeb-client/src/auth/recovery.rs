@@ -390,6 +390,7 @@ impl Client {
     }
 
     pub async fn cancel_recovery(&self, id: &str) -> Result<(), AuthError> {
+        self.person_call(crate::LockedAction::UseRecovery)?;
         self.execute(&proposed::cancel_recovery(id), &())
             .await
             .map(|_| ())

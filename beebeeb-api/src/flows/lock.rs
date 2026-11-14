@@ -159,19 +159,31 @@ pub enum Call {
 pub enum CallRefused {
     /// The screen is locked and the call is not one of [`screen_locked_allows`].
     ScreenLocked,
-    /// The vault is closed: work is stopped until the strong unlock.
+    /// The vault is closed: work is stopped until the strong unlock, and a person may only
+    /// prove, lock or sign out ([`closed_vault_allows`]).
     VaultClosed,
+}
+
+/// What a person may do while `VaultClosed`: the proofs that lead out of it (a sign-in's key
+/// proof, a device link as the new device, recovery), lock the vault again, and sign out.
+/// Nothing else: a closed vault may still hold credentials (a sign-in or a password change
+/// on its way), and they are for that proof alone.
+pub const fn closed_vault_allows(action: LockedAction) -> bool {
+    matches!(action, LockedAction::LockVault)
+        || (super::locked_account_allows(action) && !matches!(action, LockedAction::ViewStatus))
 }
 
 /// The lock's answer for one call. The screen lock refuses what a person drives, except
 /// [`screen_locked_allows`], and leaves the work running; a closed vault refuses the work
-/// ([`work_may_run`]). `SignedOut` is also the state of a host that never started the lock
-/// through core and installs its sessions itself: nothing is refused there.
+/// ([`work_may_run`]) and what a person drives, except [`closed_vault_allows`]. `SignedOut`
+/// is also the state of a host that never started the lock through core and installs its
+/// sessions itself: nothing is refused there.
 pub const fn call_may_run(state: LockState, call: Call) -> Result<(), CallRefused> {
     match (state, call) {
         (LockState::ScreenLocked, Call::Person(action)) if !screen_locked_allows(action) => {
             Err(CallRefused::ScreenLocked)
         }
+        (LockState::VaultClosed, Call::Person(action)) if !closed_vault_allows(action) => Err(CallRefused::VaultClosed),
         (LockState::Open | LockState::ScreenLocked | LockState::VaultClosed, Call::Work) if !work_may_run(state) => {
             Err(CallRefused::VaultClosed)
         }
@@ -336,16 +348,32 @@ mod tests {
         // The same list is what core lets a person do in each state, and what it lets the
         // work do: the screen lock stops the person and not the work, a closed vault stops
         // the work, and a host that never started the lock is refused nothing.
+        let closed: Vec<_> = all.into_iter().filter(|action| closed_vault_allows(*action)).collect();
+        assert_eq!(
+            closed,
+            [
+                StartKeyProof,
+                FinishKeyProof,
+                StartDeviceLink,
+                ReadDeviceLinkResult,
+                AcknowledgeDeviceLink,
+                ExchangeDeviceLinkPake,
+                UseRecovery,
+                SetEmptyKeyAnchors,
+                SignOut,
+                LockVault,
+            ]
+        );
         for state in ALL {
             for action in all {
-                let refused = state == LockState::ScreenLocked && !allowed.contains(&action);
+                let expected = match state {
+                    LockState::ScreenLocked if !allowed.contains(&action) => Err(CallRefused::ScreenLocked),
+                    LockState::VaultClosed if !closed.contains(&action) => Err(CallRefused::VaultClosed),
+                    _ => Ok(()),
+                };
                 assert_eq!(
                     call_may_run(state, Call::Person(action)),
-                    if refused {
-                        Err(CallRefused::ScreenLocked)
-                    } else {
-                        Ok(())
-                    },
+                    expected,
                     "{state:?} {action:?}"
                 );
             }

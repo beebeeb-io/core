@@ -199,7 +199,12 @@ Secrets, input and bindings:
   `person_call` (refused as `ClientError::ScreenLocked` before anything is sent; only unlock, lock
   vault and sign out pass, and a sign-out there removes this device only), the work starts with
   `work_call` (refused on a closed vault), and a public entry point never reaches an ungated twin
-  (`*_inner`, `held_key`) without asking; the list is in `docs/agent-notes.md`, "What the screen lock
+  (`*_inner`, `held_key`) or sends a request without asking, unless `lock_gate.rs` names it with its
+  reason. A closed vault refuses a person's calls too (`closed_vault_allows`: only the proofs out of
+  it, a lock and a sign-out), also while it holds credentials, and a lock that cannot be read refuses.
+  A password change sets its credentials only while the generation it entered at still holds;
+  `set_session` reads the lock and installs in one hold. Who drives a work call is the host's word:
+  `enqueue_work`, `configure_saved` and the file provider's calls are never used for the window; the list is in `docs/agent-notes.md`, "What the screen lock
   refuses", and `tests_svc_auth/lock_gate.rs` walks the sources for it.
 
 Transfers:

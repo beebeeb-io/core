@@ -74,6 +74,8 @@ pub enum ServiceErrorKind {
     SubscriptionActive,
     EmailNotSent,
     ShareRefused,
+    ScreenLocked,
+    VaultClosed,
 }
 
 impl ServiceErrorKind {
@@ -102,6 +104,8 @@ impl ServiceErrorKind {
             Self::SubscriptionActive => "subscription_active",
             Self::EmailNotSent => "email_not_sent",
             Self::ShareRefused => "share_refused",
+            Self::ScreenLocked => "screen_locked",
+            Self::VaultClosed => "vault_closed",
         }
     }
 }
@@ -180,6 +184,15 @@ pub enum ServiceError {
     /// words for it.
     #[error("the share was refused ({code})")]
     ShareRefused { code: String },
+    /// The app is locked on this device and the call is one a person drives: core refused
+    /// it before anything was sent. The stored session is untouched; unlock, then retry.
+    #[error("the app is locked on this device")]
+    ScreenLocked,
+    /// The vault is closed: the work is stopped, and a person can only prove the account
+    /// password, lock or sign out. Not an expired session: never remove the stored session
+    /// on this answer.
+    #[error("the vault is closed until the account password is proven")]
+    VaultClosed,
 }
 
 impl ServiceError {
@@ -211,6 +224,8 @@ impl ServiceError {
             ServiceErrorKind::SubscriptionActive => Self::SubscriptionActive,
             ServiceErrorKind::EmailNotSent => Self::EmailNotSent,
             ServiceErrorKind::ShareRefused => Self::ShareRefused { code: String::new() },
+            ServiceErrorKind::ScreenLocked => Self::ScreenLocked,
+            ServiceErrorKind::VaultClosed => Self::VaultClosed,
         }
     }
 
@@ -316,9 +331,10 @@ pub(crate) fn map_client_error(error: impl std::error::Error + 'static) -> Servi
             return match client {
                 beebeeb_client::ClientError::Transport(_) => ServiceError::Network,
                 beebeeb_client::ClientError::InvalidAuthentication => ServiceError::Authentication,
-                // The server ended the session and core closed the vault: work is refused
-                // before a request could say so, and the host asks for a sign-in as it did.
-                beebeeb_client::ClientError::VaultClosed => ServiceError::SessionExpired,
+                // The lock's two refusals have their own kinds: neither says the session
+                // expired, and a host never removes the stored session on either.
+                beebeeb_client::ClientError::VaultClosed => ServiceError::VaultClosed,
+                beebeeb_client::ClientError::ScreenLocked => ServiceError::ScreenLocked,
                 _ => ServiceError::Unavailable,
             };
         }
@@ -473,6 +489,25 @@ mod service_error_tests {
         assert!(wrong.is_empty(), "refusals on the wrong case:\n{}", wrong.join("\n"));
         assert_eq!(kinds.len(), 9);
         assert!(!kinds.contains(&ServiceErrorKind::Unavailable));
+    }
+
+    /// The lock's refusals keep their own kinds: neither is an expired session.
+    #[test]
+    fn the_locks_refusals_have_their_own_kinds() {
+        assert!(matches!(
+            map_client_error(ClientError::ScreenLocked),
+            ServiceError::ScreenLocked
+        ));
+        assert!(matches!(
+            map_client_error(ClientError::VaultClosed),
+            ServiceError::VaultClosed
+        ));
+        assert_eq!(ServiceErrorKind::ScreenLocked.as_str(), "screen_locked");
+        assert_eq!(ServiceErrorKind::VaultClosed.as_str(), "vault_closed");
+        assert!(matches!(
+            ServiceError::new(ServiceErrorKind::VaultClosed),
+            ServiceError::VaultClosed
+        ));
     }
 
     fn server(status: u16, body: &str) -> ServiceError {

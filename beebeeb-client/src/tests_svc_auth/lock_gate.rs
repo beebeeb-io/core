@@ -121,6 +121,9 @@ async fn a_locked_screen_refuses_every_call_a_person_drives_and_sends_nothing() 
         "downloads.read_range" => downloads.read_range(&file, 0..1).await,
         "downloads.range_reader" => downloads.range_reader(&file),
         "uploads.list" => uploads.list(),
+        "uploads.pause" => uploads.pause(1, 1),
+        "uploads.resume" => uploads.resume(1, 1),
+        "uploads.cancel" => uploads.cancel(1, 1),
         "uploads.enqueue" => uploads.enqueue(
             crate::uploads::UploadRequest::new(root.path().join("picked.txt"), "picked.txt", None, None),
             1,
@@ -150,6 +153,8 @@ async fn a_locked_screen_refuses_every_call_a_person_drives_and_sends_nothing() 
         "change_password" => client.change_password(password(PASSWORD), password("another password 2026"), &store).await,
         "change_email" => client.change_email("new@example.test", password(PASSWORD), &store).await,
         "set_version_history" => client.set_version_history(true, 30).await,
+        "start_device_link" => client.start_device_link("a new device".into()).await,
+        "cancel_recovery" => client.cancel_recovery("recovery-1").await,
         "pending_device_links" => client.pending_device_links().await,
         "begin_typed_device_approval" => client.begin_typed_device_approval("link-1", "123456").await,
         "deny_device_link" => client.deny_device_link("link-1").await,
@@ -158,7 +163,7 @@ async fn a_locked_screen_refuses_every_call_a_person_drives_and_sends_nothing() 
         "list_account_sessions" => client.list_account_sessions().await,
         "revoke_account_session" => client.revoke_account_session("session-1").await,
     );
-    assert_eq!(count, 50, "every call above was refused");
+    assert_eq!(count, 55, "every call above was refused");
     assert_eq!(server.requests().len(), 0, "a refused call sends nothing");
     assert_eq!(
         client.lock_state(),
@@ -244,6 +249,95 @@ async fn the_work_runs_on_a_locked_screen_and_stops_on_a_closed_vault() {
     assert!(matches!(client.check_call(Call::Work), Err(ClientError::VaultClosed)));
 }
 
+/// A closed vault may still hold credentials: a sign-in or a password change on its way set
+/// them. They are for that proof alone. What a person drives is refused there too, before
+/// anything is sent; the proofs, a lock and a sign-out pass.
+#[tokio::test]
+async fn a_closed_vault_that_holds_credentials_refuses_what_a_person_drives() {
+    let server = LockServer::new();
+    let store = store_with_session();
+    let client = Arc::new(screen_locked(&server, &store, false));
+    client.set_authentication("accepted-token", OWNER).unwrap();
+    assert_eq!(client.lock_state(), LockState::VaultClosed);
+    assert_eq!(client.account_id().unwrap(), OWNER, "credentials are held");
+
+    macro_rules! closed {
+        ($($call:expr),+ $(,)?) => {$(
+            let answer = $call;
+            assert!(
+                matches!(&answer, Err(error) if format!("{error:?}").ends_with("VaultClosed)") || format!("{error:?}") == "VaultClosed"),
+                "{}: {answer:?}", stringify!($call)
+            );
+        )+};
+    }
+    closed!(
+        client.session_key().map(|_| ()),
+        client.list_files(None, false).await.map(|_| ()),
+        client.storage_usage().await.map(|_| ()),
+        client.my_share_links().await.map(|_| ()),
+    );
+    assert!(matches!(
+        client.list_devices().await,
+        Err(DeviceError::Client(ClientError::VaultClosed))
+    ));
+    assert!(matches!(
+        client.remove_device("device-2").await,
+        Err(DeviceError::Client(ClientError::VaultClosed))
+    ));
+    assert!(matches!(
+        client.setup_authenticator().await,
+        Err(AuthError::Client(ClientError::VaultClosed))
+    ));
+    assert_eq!(server.requests().len(), 0, "a refused call sends nothing");
+
+    // The proofs that lead out of a closed vault reach the server.
+    let link = client.start_device_link("a new device".into()).await;
+    assert!(
+        matches!(link, Err(DeviceError::Client(ClientError::Api(_)))),
+        "{link:?}"
+    );
+    assert_eq!(server.requests().len(), 1);
+    for allowed in [
+        LockedAction::StartKeyProof,
+        LockedAction::ReadDeviceLinkResult,
+        LockedAction::UseRecovery,
+        LockedAction::LockVault,
+        LockedAction::SignOut,
+    ] {
+        assert!(client.check_call(Call::Person(allowed)).is_ok(), "{allowed:?}");
+    }
+    assert!(matches!(
+        client.check_call(Call::Person(LockedAction::ViewStatus)),
+        Err(ClientError::VaultClosed)
+    ));
+}
+
+/// A lock that cannot be read refuses: it reads as closed, a person and the work are
+/// refused, and a restored session is not installed.
+#[test]
+fn an_unreadable_lock_refuses() {
+    let store = store_with_session();
+    let client = Arc::new(screen_locked(&LockServer::new(), &store, false));
+    let poisoning = client.clone();
+    let panicked = std::thread::spawn(move || {
+        let _ = poisoning.with_lock_flow(|_| panic!("the lock is left poisoned"));
+    })
+    .join();
+    assert!(panicked.is_err());
+
+    assert_eq!(client.lock_state(), LockState::VaultClosed);
+    assert!(matches!(client.session_key(), Err(ClientError::VaultClosed)));
+    assert!(matches!(
+        client.check_call(Call::Person(LockedAction::ViewFiles)),
+        Err(ClientError::VaultClosed)
+    ));
+    assert!(matches!(client.check_call(Call::Work), Err(ClientError::VaultClosed)));
+    assert!(matches!(
+        client.set_session(&session(OWNER, STORED_TOKEN, 1)),
+        Err(ClientError::State)
+    ));
+}
+
 /// A host that installs its sessions itself and never starts the lock through core is
 /// refused nothing: its lock state is `SignedOut`.
 #[tokio::test]
@@ -265,7 +359,7 @@ async fn a_host_that_never_started_the_lock_is_refused_nothing() {
 #[test]
 fn every_public_call_asks_the_lock_or_is_listed_as_ungated() {
     // (file, source, the public functions that do not ask the lock)
-    let sources: [(&str, &str, &[&str]); 15] = [
+    let sources: [(&str, &str, &[&str]); 16] = [
         (
             "platform.rs",
             include_str!("../platform.rs"),
@@ -301,19 +395,25 @@ fn every_public_call_asks_the_lock_or_is_listed_as_ungated() {
             &["open_with_passkey"],
         ),
         (
+            "auth/recovery.rs",
+            include_str!("../auth/recovery.rs"),
+            // The steps of a recovery: a proof stronger than the screen lock, made with the
+            // recovery's own secret. Cancelling by id is the session's, and asks.
+            &[
+                "start_recovery",
+                "recovery_status",
+                "complete_recovery",
+                "install_recovered_session",
+                "install_recovered_session_replacing_account",
+                "cancel_recovery_with_token",
+            ],
+        ),
+        (
             "devices.rs",
             include_str!("../devices.rs"),
-            // The new device's side of a device link, before it holds a key; the two PAKE
-            // messages belong to both sides and carry no account data.
-            &[
-                "start_device_link_for_sign_in",
-                "start_device_link",
-                "poll_device_link",
-                "acknowledge_device_link",
-                "poll_typed_device_link",
-                "send_device_link_pake",
-                "get_device_link_pake",
-            ],
+            // The first step of a device link from a sign-in: it sets the accepted
+            // credentials itself, which closes an app that held a key.
+            &["start_device_link_for_sign_in"],
         ),
         (
             "downloads.rs",
@@ -350,16 +450,14 @@ fn every_public_call_asks_the_lock_or_is_listed_as_ungated() {
         (
             "uploads/queue.rs",
             include_str!("../uploads/queue.rs"),
-            // `enqueue` is a person's, `enqueue_work` and `next_transfers` are work; these only
-            // observe the queue that sync and backup feed, or stop what is in it.
+            // `enqueue`, `pause`, `resume` and `cancel` are a person's, `enqueue_work` and
+            // `next_transfers` are work; these observe the queue, record what the work
+            // finished, or clean up for the backup and the archive service.
             &[
                 "new",
                 "set_completion_handler",
                 "observe",
                 "transfer_finished",
-                "pause",
-                "resume",
-                "cancel",
                 "cancel_sources_matching",
                 "pending_backup_outcomes",
                 "cancel_backup_uploads",
@@ -371,16 +469,15 @@ fn every_public_call_asks_the_lock_or_is_listed_as_ungated() {
         (
             "backup.rs",
             include_str!("../backup.rs"),
-            // The backup pass is work; everything but the pass itself is local bookkeeping.
+            // The pass and `configure_saved` are work, `configure` and `back_up_again` a
+            // person's; the rest reads the manifest or records what the platform reports.
             &[
                 "new",
                 "with_manifest_store",
-                "configure",
                 "manifest",
                 "observe",
                 "assets_changed",
                 "stopped",
-                "back_up_again",
                 "upload_completed",
                 "sign_out",
             ],
@@ -422,7 +519,7 @@ fn every_public_call_asks_the_lock_or_is_listed_as_ungated() {
             "{file}: the public functions that do not ask the lock"
         );
     }
-    assert_eq!(gated, 90, "the public functions that ask the lock");
+    assert_eq!(gated, 103, "the public functions that ask the lock");
 }
 
 /// Every `pub fn` and `pub async fn` of one source file, free or in an `impl`, with its body.
@@ -465,17 +562,42 @@ fn source_files(directory: &std::path::Path, into: &mut Vec<std::path::PathBuf>)
 
 /// The whole public surface of this crate, read from every source file: a public entry
 /// point (a method of `Client`, of a service or of the coordinator, or a free function) that
-/// reaches one of the ungated internals (`*_inner`, `held_key`) asks the lock itself first.
-/// Dropping one gate, or adding an ungated way in, fails here.
+/// reaches one of the ungated internals (`*_inner`, `held_key`) or sends a request itself
+/// (`.execute*`) asks the lock itself first, or is named here with its reason. Dropping one
+/// gate, or adding an ungated way in, fails here. The walk reads a function's own body: a
+/// request sent by a private helper it calls is not seen.
 #[test]
 fn no_public_entry_point_reaches_the_ungated_internals_without_asking_the_lock() {
-    // The strong installs: their `_inner` is their own body, and a proof stronger than the
-    // screen lock opens the app from every state.
     let exempt = [
+        // A sign-out: every lock state allows it.
+        "auth/install.rs sign_out_this_app",
+        // The strong installs: their `_inner` is their own body, and a proof stronger than
+        // the screen lock opens the app from every state.
         "auth/install.rs install_new_device",
         "auth/install.rs install_new_device_replacing_account",
+        // The lock's own call.
+        "auth/lock.rs refresh_lock_from_server",
+        // Steps of a sign-in, a recovery or a signup: proofs, made before a key is held or
+        // with their own secret.
+        "auth/passkey.rs open_with_passkey",
+        "auth/recovery.rs start_recovery",
+        "auth/recovery.rs recovery_status",
+        "auth/recovery.rs complete_recovery",
         "auth/recovery.rs install_recovered_session",
         "auth/recovery.rs install_recovered_session_replacing_account",
+        "auth/recovery.rs cancel_recovery_with_token",
+        "auth/sign_in.rs submit_two_factor",
+        "auth/sign_in.rs request_email_code",
+        "auth/sign_in.rs submit_email_code",
+        "auth/signup.rs fetch_onboarding",
+        "auth/signup.rs start_signup_email",
+        "auth/signup.rs verify_signup_email",
+        "auth/signup.rs create_account",
+        "devices.rs start_device_link_for_sign_in",
+        // Account-free: a share view opened with its own key.
+        "downloads.rs share_view_download",
+        // The archive service's clean-up of its own staged files when it is made.
+        "uploads/queue.rs cancel_sources_matching",
     ];
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
@@ -487,7 +609,7 @@ fn no_public_entry_point_reaches_the_ungated_internals_without_asking_the_lock()
         let file = path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
         for (name, body) in public_functions(&source) {
             walked += 1;
-            let reaches = body.contains("_inner(") || body.contains("held_key(");
+            let reaches = body.contains("_inner(") || body.contains("held_key(") || body.contains(".execute");
             let asks = body.contains("person_call(") || body.contains("work_call(");
             if reaches && asks {
                 asking += 1;
@@ -504,7 +626,7 @@ fn no_public_entry_point_reaches_the_ungated_internals_without_asking_the_lock()
     assert!(files.len() >= 40, "{} source files", files.len());
     assert!(walked >= 300, "{walked} public functions");
     assert_eq!(
-        asking, 41,
+        asking, 92,
         "public entry points that reach an ungated internal and ask the lock"
     );
 }
@@ -530,7 +652,7 @@ fn core_calls_the_ungated_twin_never_the_gated_call() {
         .collect();
     twins.sort();
     twins.dedup();
-    assert_eq!(twins.len(), 15, "{twins:?}");
+    assert_eq!(twins.len(), 18, "{twins:?}");
     let called: Vec<(String, usize)> = twins
         .into_iter()
         .map(|name| {
@@ -545,7 +667,15 @@ fn core_calls_the_ungated_twin_never_the_gated_call() {
         })
         .filter(|(_, count)| *count > 0)
         .collect();
+    // `cancel`: a platform canceller's, an extraction's and the archive service's own.
     // `create_folder`: the archive driver's own method of that name. `open`: other types'
-    // (a device link, a range opener, a file). Neither is a gated call of the client.
-    assert_eq!(called, [("create_folder".to_owned(), 2), ("open".to_owned(), 4)]);
+    // (a device link, a range opener, a file). None is a gated call of the client.
+    assert_eq!(
+        called,
+        [
+            ("cancel".to_owned(), 4),
+            ("create_folder".to_owned(), 2),
+            ("open".to_owned(), 4)
+        ]
+    );
 }

@@ -156,10 +156,8 @@ impl Client {
         store: &dyn SecretStore,
     ) -> Result<InstalledSession, AuthError> {
         self.person_call(crate::LockedAction::ChangeSettings)?;
-        // A closed vault holds no key to keep: the change is made from an open app.
-        if self.lock_state() == LockState::VaultClosed {
-            return Err(ClientError::VaultClosed.into());
-        }
+        // The change is for the session it starts with: this is its account generation.
+        let entered_at = self.generation();
         if new_password.is_empty() {
             return Err(AuthError::MalformedAnswer);
         }
@@ -205,9 +203,24 @@ impl Client {
         // closed, and a closed app cannot be screen-locked or opened by anything weaker.
         // It is read in the step that sets the new credentials, so no lock lands in between.
         // Everything below belongs to those credentials, at this account generation.
+        // They are set only while the session the change started with is still the one in
+        // the process: a vault lock or a sign-out that landed since the call began, also
+        // between the last answer and this step, wins. No key is loaded again for it.
         let sign_outs = self.sign_outs();
-        let (changed_at, lock_before) =
-            self.set_authentication_reading_lock(changed.session_token.clone(), changed.user_id.clone())?;
+        let screen_locks = self.screen_locks_asked();
+        let set = self.set_authentication_reading_lock(
+            changed.session_token.clone(),
+            changed.user_id.clone(),
+            Some(entered_at),
+        );
+        let (changed_at, lock_before) = match set {
+            Ok(set) => set,
+            Err(error) => {
+                // The server has changed the password: the old password's record goes.
+                lock::replace_screen_check(store, None);
+                return Err(error.into());
+            }
+        };
         let _ = key_state;
         if let Err(error) = self.prove_session_key(stored.master_key()).await {
             if !matches!(error, AuthError::Client(ClientError::StaleAccount)) {
@@ -246,6 +259,10 @@ impl Client {
         let installed = self.install_session_at(&refreshed, changed_at, |flow| {
             if beebeeb_api::flows::key_may_be_loaded(lock_before.state()) {
                 *flow = lock_before;
+                // A screen lock asked for while the app was held closed is not lost.
+                if self.screen_locks_asked() != screen_locks {
+                    let _ = flow.lock(beebeeb_api::flows::LockLevel::Screen);
+                }
             }
         });
         if let Err(error) = installed {

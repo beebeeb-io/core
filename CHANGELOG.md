@@ -29,6 +29,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is refused nothing. `UploadService::enqueue` is a person's call; a host's sync queues with the new
   `UploadService::enqueue_work`. `change_password` answers `ClientError::VaultClosed` on a closed vault.
   The UniFFI error map reports `VaultClosed` as `SessionExpired`.
+- A closed vault refuses the calls a person drives (`ClientError::VaultClosed`, nothing sent), also
+  while it holds credentials; the proofs that open it, a lock and a sign-out pass
+  (`flows::closed_vault_allows`). Now also asked: the new device's device-link calls and
+  `cancel_recovery` (refused on a locked screen), `UploadService::pause` / `resume` / `cancel`,
+  `BackupService::configure` / `back_up_again`. A start that puts a saved backup choice back uses the
+  new `BackupService::configure_saved`. A password change sets its new credentials only while the
+  session it started with is still the one in the process. The UniFFI error has two new cases,
+  `ScreenLocked` and `VaultClosed` (a closed vault is no longer reported as `SessionExpired`); a host
+  never removes the stored session on either.
 - A password change and the strong installs (`unlock_known_device`, `install_new_device`,
   `install_recovered_session`) install only for the session they proved: a vault lock or a sign-out
   that lands after their credentials were set (for a recovery: after its install began) wins and the

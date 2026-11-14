@@ -557,9 +557,24 @@ check record and wrong-try rule `beebeeb_core::screen_lock`, and the service on 
   `held_key`), and three source walks in `tests_svc_auth/lock_gate.rs` fail when a public function of a
   gated file neither asks nor is listed, when any public entry point reaches an ungated twin without
   asking, or when core's own code calls a gated call it has a twin for.
+- **A password change is for the session it starts with.** It reads the account generation where it
+  enters and sets its new credentials only while that generation still holds, in the same hold of the
+  session mutex that reads the lock state (`set_authentication_reading_lock` with `only_at`): a vault
+  lock or a sign-out that landed at any point since, also between the last answer and that step, wins
+  (`StaleAccount`, no key is proven or loaded again, the old check record is deleted because the server
+  has changed the password). The condition is the generation, never the state name: a host that never
+  starts the lock stays `SignedOut` throughout. A screen lock asked for while the change holds the app
+  closed is refused there (a closed vault is never screen-locked) and applied when the change installs.
+- **`Client::set_session`** reads the lock and installs in one hold too, and a lock that cannot be read
+  refuses it (`ClientError::State`).
 - **A recovery install** is for the account generation it starts at, not the one its recovery was
   completed at: a host may sign the old account out in between (`prepare_account_replacement`).
-- **Residuals.** On a device that has been offline since a password change elsewhere, the old password
+- **Residuals.** The store can lag the process after a refused strong install: the closed mark is
+  cleared before the conditional install and written again, best effort, after a refusal, and
+  `lock_vault` may already have answered `survives_restart: true`. A process that stops between the two
+  leaves a closed vault without its mark: the next start is `ScreenLocked` with the key loaded (when the
+  start setting is off) instead of closed. Clearing the mark after the install would open the reverse
+  race with a later vault lock. On a device that has been offline since a password change elsewhere, the old password
   still opens the screen lock (and only the screen). The counter is read just after the password was
   accepted, not in the same answer: a change that lands in between leaves a record that looks current
   until the server next refuses the old password online. Every Argon2id run blocks its caller for
@@ -572,22 +587,35 @@ check record and wrong-try rule `beebeeb_core::screen_lock`, and the service on 
 
 While `ScreenLocked`, a call a person drives answers `ClientError::ScreenLocked` (inside the service's
 own error where it has one) before anything is sent. A closed vault answers `ClientError::VaultClosed`
-to the work. `SignedOut` is also the state of a host that installs its sessions itself and never
-starts the lock through core: nothing is refused there.
+to the work and to what a person drives, whether or not it still holds credentials (a sign-in or a
+password change on its way sets them, and they are for that proof alone); only the proofs that lead
+out of it, a lock and a sign-out pass (`flows::closed_vault_allows`). A lock that cannot be read reads
+as closed and refuses. `SignedOut` is also the state of a host that installs its sessions itself and
+never starts the lock through core: nothing is refused there.
 
 | Class | Calls | `ScreenLocked` | `VaultClosed` |
 |---|---|---|---|
 | The lock's own | `lock_screen`, `unlock_screen_platform_verified`, `unlock_screen_with_password`, `lock_vault`, `session_ended`, `refresh_lock_from_server`, `lock_state`, `check_call` | run | run (each by its own rule) |
-| Sign-out | `sign_out_this_app`, `sign_out_whole_device`, `ServiceCoordinator::sign_out_app` / `sign_out_device` / `prepare_account_replacement`, `UploadService::sign_out` | run; a device sign-out removes **this device only** (the listed entry that carries this device's stored hardware id), any other id is refused, and so is every id when this device has no stored id or its entry carries none: such a device leaves with `sign_out_this_app` | run |
-| Sign-in and strong proofs | `sign_in*`, `submit_two_factor`, the email-code steps, `unlock_known_device`, `install_new_device*`, recovery, signup, `open_with_passkey`, the new device's side of a device link and its PAKE messages, `prove_session_key` | run: a proof stronger than the screen lock; setting its credentials closes the vault | run |
-| A person, files | `session_key`; `list_files`, `list_file_records_page`, `get_file`, `get_file_record`, `file_versions`, `storage_usage`, `create_folder`, `rename_entry`, `move_entry`, `trash_*`, `restore_*`, `delete_*_forever`, `restore_version`, `files::duplicate_file`; `DownloadService::open` / `save_to` / `video_range` / `read_range` / `range_reader` / `read_with`; `ThumbnailService::get`; `ArchiveService::open` / `preview` / `extract` / `open_entry`; `UploadService::list` / `enqueue` | refused | not gated by the lock (no key is held) |
-| A person, sharing | every call of `shares.rs` and the client calls of `contacts.rs` | refused | not gated by the lock |
-| A person, account | `setup_authenticator`, `enable_authenticator`, `remove_authenticator`, `request_account_deletion`, `change_password` (also `VaultClosed` on a closed vault), `change_email`, `create_passkey_copy`, the settings calls of `settings.rs`, `pending_device_links`, `approve_device_link`, `begin_typed_device_approval`, `approve_typed_device_link`, `deny_device_link`, `list_devices`, `remove_device`, `list_account_sessions`, `revoke_account_session`; `set_ask_password_at_start` needs `Open` | refused | not gated by the lock |
-| Work | the five sync calls of `sync.rs`; `UploadService::enqueue_work` (a host's sync of a local change) / `next_transfers`; `ThumbnailService::run_next`; `BackupService::next_batch`; `FileProviderService::fetch_contents` / `create_folder` / `create_file` / `modify` / `delete` / `delete_local` | run | refused |
-| Not gated | constructors, event subscriptions, cancels, cache clears, the queue's pause / resume / bookkeeping, `DownloadService::share_view_download` (account-free) | run | run |
+| Sign-out | `sign_out_this_app`, `sign_out_whole_device`, `ServiceCoordinator::sign_out_app` / `sign_out_device` / `prepare_account_replacement`, `UploadService::sign_out` | run; a device sign-out removes **this device only** (the listed entry that carries this device's stored hardware id), any other id is refused, and so is every id when this device has no stored id (an empty one is none) or its entry carries none: such a device leaves with `sign_out_this_app` | run, with the same this-device rule |
+| Sign-in and strong proofs, not gated | `sign_in*`, `submit_two_factor`, the email-code steps, `unlock_known_device`, `install_new_device*`, the recovery steps made with the recovery's own secret, signup, `open_with_passkey`, `start_device_link_for_sign_in`, `prove_session_key` | run: a proof stronger than the screen lock; setting its credentials closes the vault | run |
+| A device link as the new device, and a recovery cancelled by id | `start_device_link`, `poll_device_link`, `poll_typed_device_link`, `acknowledge_device_link`, `send_device_link_pake`, `get_device_link_pake`, `cancel_recovery` | refused: on a locked screen a key is held, and the poll would hand opened account key material to its caller | run |
+| A person, files | `session_key`; `list_files`, `list_file_records_page`, `get_file`, `get_file_record`, `file_versions`, `storage_usage`, `create_folder`, `rename_entry`, `move_entry`, `trash_*`, `restore_*`, `delete_*_forever`, `restore_version`, `files::duplicate_file`; `DownloadService::open` / `save_to` / `video_range` / `read_range` / `range_reader` / `read_with`; `ThumbnailService::get`; `ArchiveService::open` / `preview` / `extract` / `open_entry`; `UploadService::list` / `enqueue` / `pause` / `resume` / `cancel` | refused | refused |
+| A person, sharing | every call of `shares.rs` and the client calls of `contacts.rs` | refused | refused |
+| A person, account | `setup_authenticator`, `enable_authenticator`, `remove_authenticator`, `request_account_deletion`, `change_password`, `change_email`, `create_passkey_copy`, the settings calls of `settings.rs`, `pending_device_links`, `approve_device_link`, `begin_typed_device_approval`, `approve_typed_device_link`, `deny_device_link`, `list_devices`, `remove_device`, `list_account_sessions`, `revoke_account_session`, `BackupService::configure` / `back_up_again`; `set_ask_password_at_start` needs `Open` | refused | refused |
+| Work | the five sync calls of `sync.rs`; `UploadService::enqueue_work` (a host's sync of a local change) / `next_transfers`; `ThumbnailService::run_next`; `BackupService::next_batch` / `configure_saved` (a start putting the saved choice back); `FileProviderService::fetch_contents` / `create_folder` / `create_file` / `modify` / `delete` / `delete_local` | run | refused |
+| Not gated | constructors, event subscriptions, cache clears, a download's cancel, the queue's and the backup's bookkeeping of what the work finished, `UploadService::cancel_sources_matching` (the archive service's clean-up of its own staged files), `DownloadService::share_view_download` (account-free) | run | run |
 
-Core cannot see, and the host still refuses while the screen is locked (it may ask `Client::check_call`):
-anything it reads from the local store or renders from memory (`SearchService::query`, the file
-provider's `item` / `children` / `changes_since`, `load_local_settings`, a `Session` or records it
-already holds). The operating system's file manager reaches the sync folder on a locked screen by
-design (contract section 3).
+Who drives a work call is the host's word. Core cannot tell a synced change from a person's: a host
+that sends a person's upload through `enqueue_work` (it takes any source path and parent, and a
+`UploadRequest::replacement` writes a new version of any file id), a person's download, rename or trash
+through the file provider's `fetch_contents` / `create_file` / `modify` / `delete`, or reads the
+thumbnail path `ThumbnailService::run_next` returns for a job it queued, is not stopped by core. Those
+calls are for sync, backup and the operating system's file provider, never for the window.
+`enqueue_work` is not bound to a sync root: core holds no list of roots, and one supplied by the host
+would be the same word.
+
+Core cannot see either, and the host still refuses while the screen is locked (it may ask
+`Client::check_call`): anything it reads from the local store or renders from memory
+(`SearchService::query`, the file provider's `item` / `children` / `changes_since`,
+`load_local_settings`, a `Session` or records it already holds). The operating system's file manager
+reaches the sync folder on a locked screen by design (contract section 3).

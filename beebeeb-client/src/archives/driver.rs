@@ -367,7 +367,7 @@ impl Driver {
         for id in pending {
             if states.get(&id) == Some(&TransferState::Succeeded) {
                 landed += 1;
-            } else if let Ok(plan) = self.inner.uploads.cancel(id, now) {
+            } else if let Ok(plan) = self.inner.uploads.cancel_inner(id, now) {
                 for path in plan.delete_files {
                     let _ = std::fs::remove_file(path);
                 }

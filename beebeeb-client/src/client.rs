@@ -110,6 +110,9 @@ pub struct Client {
     /// that was refused reads them to learn whether a sign-out is what overtook it.
     sign_outs: AtomicU64,
     device_sign_outs: AtomicU64,
+    /// How often a screen lock was asked for. A password change reads it: a lock asked for
+    /// while the change held the app closed is applied when the change installs.
+    screen_locks_asked: AtomicU64,
     events: EngineEvents,
     /// The two-level lock of this app process. Taken alone, or after `authentication` by the
     /// steps that change the session and the lock as one ([`Client::with_session`]); never
@@ -171,6 +174,7 @@ impl Client {
             generation: AtomicU64::new(0),
             sign_outs: AtomicU64::new(0),
             device_sign_outs: AtomicU64::new(0),
+            screen_locks_asked: AtomicU64::new(0),
             lock: Mutex::new(LockFlow::at_start(StartFacts {
                 session_stored: false,
                 ask_password_at_start: Some(false),
@@ -215,16 +219,31 @@ impl Client {
         token: impl Into<String>,
         expected_user: impl Into<String>,
     ) -> Result<u64, ClientError> {
-        self.set_authentication_reading_lock(token, expected_user)
+        self.set_authentication_reading_lock(token, expected_user, None)
             .map(|(generation, _)| generation)
+    }
+
+    /// Counts a screen lock that was asked for, whatever became of it.
+    #[cfg(feature = "auth")]
+    pub(crate) fn screen_lock_asked(&self) {
+        self.screen_locks_asked.fetch_add(1, Ordering::AcqRel);
+    }
+
+    #[cfg(feature = "auth")]
+    pub(crate) fn screen_locks_asked(&self) -> u64 {
+        self.screen_locks_asked.load(Ordering::Acquire)
     }
 
     /// [`Self::set_authentication`], with the lock as it was just before these credentials
     /// closed it: read in the same step, so nothing lands between the read and the close.
+    /// With `only_at`, the credentials are set only while the account generation is still
+    /// that one: whatever landed since it was read (a vault lock, a sign-out, an ended
+    /// session) wins, nothing is set, and the answer is `StaleAccount`.
     pub(crate) fn set_authentication_reading_lock(
         &self,
         token: impl Into<String>,
         expected_user: impl Into<String>,
+        only_at: Option<u64>,
     ) -> Result<(u64, LockFlow), ClientError> {
         let token = token.into();
         let expected_user = expected_user.into();
@@ -232,6 +251,9 @@ impl Client {
             return Err(ClientError::InvalidAuthentication);
         }
         self.with_session(|authentication, flow| {
+            if only_at.is_some_and(|expected| self.generation() != expected) {
+                return Err(ClientError::StaleAccount);
+            }
             let before = flow.clone();
             let generation = self.advance_generation();
             *authentication = Some(Authentication {
@@ -244,8 +266,8 @@ impl Client {
             // held the key no longer does, so its lock state must not keep describing the old
             // session. A strong install that follows opens it again; nothing weaker does.
             flow.session_ended();
-            (generation, before)
-        })
+            Ok((generation, before))
+        })?
     }
 
     /// One step over the session and the lock together. Every step that drops, replaces or
@@ -309,10 +331,14 @@ impl Client {
     /// `Session::load_for_user` before it): it starts with `start_from_store`, which applies
     /// the "ask for my password at start" setting. This pair does not read that setting.
     pub fn set_session(&self, session: &Session) -> Result<u64, ClientError> {
-        if self.lock_state() == LockState::VaultClosed {
-            return Err(ClientError::VaultClosed);
-        }
-        self.install_session(session)
+        // The lock is read and the session installed in one step: a vault lock cannot land
+        // between the two. A lock that cannot be read refuses.
+        self.with_session(|authentication, flow| {
+            if flow.state() == LockState::VaultClosed {
+                return Err(ClientError::VaultClosed);
+            }
+            Ok(self.put_session(authentication, session))
+        })?
     }
 
     pub(crate) fn install_session(&self, session: &Session) -> Result<u64, ClientError> {

@@ -421,7 +421,21 @@ impl BackupService {
             .to_owned())
     }
 
+    /// Sets where and how this device backs up: a person's choice, refused on a locked
+    /// screen. A start that puts the saved choice back uses [`Self::configure_saved`].
     pub fn configure(&self, configuration: BackupConfiguration) -> Result<(), BackupError> {
+        self.client.person_call(crate::LockedAction::ChangeSettings)?;
+        self.configure_inner(configuration)
+    }
+
+    /// Puts back the configuration a person chose earlier, at a start of the app: work, so
+    /// the backup runs on a locked screen. Never for a choice made now ([`Self::configure`]).
+    pub fn configure_saved(&self, configuration: BackupConfiguration) -> Result<(), BackupError> {
+        self.client.work_call()?;
+        self.configure_inner(configuration)
+    }
+
+    fn configure_inner(&self, configuration: BackupConfiguration) -> Result<(), BackupError> {
         *self.configuration.lock().map_err(|_| BackupError::State)? = configuration;
         *self.checked_folder.lock().map_err(|_| BackupError::State)? = None;
         Ok(())
@@ -514,6 +528,7 @@ impl BackupService {
     /// from Trash is found again) or create a new one, then call this. Called
     /// with the deleted folder still configured, the next pass stops again.
     pub fn back_up_again(&self) -> Result<(), BackupError> {
+        self.client.person_call(crate::LockedAction::ChangeSettings)?;
         if self.manifest.pass_state()?.stopped.is_none() {
             return Ok(());
         }
