@@ -388,6 +388,8 @@ fn every_public_call_asks_the_lock_or_is_listed_as_ungated() {
     ];
     let mut gated = 0;
     for (file, source, ungated) in sources {
+        // A checkout with CRLF line ends reads the same.
+        let source = &source.replace("\r\n", "\n");
         let mut seen_ungated = Vec::new();
         for block in source.split("\nimpl ").skip(1) {
             let header = block.lines().next().unwrap_or_default();
@@ -481,7 +483,7 @@ fn no_public_entry_point_reaches_the_ungated_internals_without_asking_the_lock()
     files.sort();
     let (mut walked, mut asking, mut ungated) = (0, 0, Vec::new());
     for path in &files {
-        let source = std::fs::read_to_string(path).unwrap();
+        let source = std::fs::read_to_string(path).unwrap().replace("\r\n", "\n");
         let file = path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
         for (name, body) in public_functions(&source) {
             walked += 1;
@@ -518,7 +520,7 @@ fn core_calls_the_ungated_twin_never_the_gated_call() {
     source_files(&root, &mut files);
     let sources: Vec<String> = files
         .iter()
-        .map(|path| std::fs::read_to_string(path).unwrap())
+        .map(|path| std::fs::read_to_string(path).unwrap().replace("\r\n", "\n"))
         .collect();
     let mut twins: Vec<String> = sources
         .iter()

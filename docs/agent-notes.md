@@ -554,9 +554,9 @@ check record and wrong-try rule `beebeeb_core::screen_lock`, and the service on 
 - **Core applies the screen lock** (`flows::call_may_run`, `Client::check_call`; the list is the next
   section). A call asks once, where it enters core: one that was let in finishes when the screen
   locks under it (a password change does). Core's own callers use the ungated twins (`*_inner`,
-  `held_key`), and two source walks in `tests_svc_auth/lock_gate.rs` fail when a public function of a
-  gated file neither asks nor is listed, or when any public entry point reaches an ungated twin
-  without asking.
+  `held_key`), and three source walks in `tests_svc_auth/lock_gate.rs` fail when a public function of a
+  gated file neither asks nor is listed, when any public entry point reaches an ungated twin without
+  asking, or when core's own code calls a gated call it has a twin for.
 - **A recovery install** is for the account generation it starts at, not the one its recovery was
   completed at: a host may sign the old account out in between (`prepare_account_replacement`).
 - **Residuals.** On a device that has been offline since a password change elsewhere, the old password
