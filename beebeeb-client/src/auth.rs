@@ -36,7 +36,7 @@ mod signup;
 
 pub use account::*;
 pub use lock::*;
-pub use lock_password::ScreenUnlock;
+pub use lock_password::{AppLockProof, ScreenUnlock};
 pub use new_device::*;
 pub use passkey::*;
 pub use recovery::*;

@@ -7,14 +7,15 @@
 //! store. The screen lock gates the app window; the vault lock removes the key from this
 //! app's process and stops the work.
 
-use beebeeb_api::flows::{FlowError, LockFlow, StartFacts};
+use beebeeb_api::flows::{FlowError, LockFlow, StartFacts, away_locks_screen, key_may_be_loaded};
 use beebeeb_core::screen_lock::ScreenCheckRecord;
 
 pub use beebeeb_api::flows::LockState;
 
 use super::*;
 use crate::session::{
-    LOCK_ASK_AT_START, LOCK_ATTEMPTS, LOCK_SCREEN_CHECK, LOCK_VAULT_CLOSED, read_lock_flag, write_lock_flag,
+    LOCK_APP_LOCK, LOCK_ASK_AT_START, LOCK_ATTEMPTS, LOCK_SCREEN_CHECK, LOCK_VAULT_CLOSED, read_lock_flag,
+    read_lock_setting, write_lock_flag,
 };
 
 /// What [`Client::lock_vault`] did.
@@ -51,10 +52,12 @@ pub(super) fn refused(step: &'static str, error: FlowError) -> AuthError {
 impl Client {
     /// Starts the lock for this app process, once, before any session is installed.
     ///
-    /// With a stored session the app starts `ScreenLocked` (the key is loaded, work may
-    /// start) only when the start setting is off and no closed mark is set. When the setting
-    /// is on, the mark is set, or either cannot be read, it starts `VaultClosed` and the key
-    /// entry is not read at all.
+    /// With a stored session the key is loaded (and work may start) only when the start
+    /// setting is off and no closed mark is set: the app then starts `ScreenLocked`, or `Open`
+    /// when the owner turned app lock off ([`Client::set_app_lock`]; an app lock that cannot
+    /// be read starts screen-locked). When the start setting is on, the mark is set, or either
+    /// cannot be read, it starts `VaultClosed` whatever app lock says, and the key entry is
+    /// not read at all.
     pub fn start_from_store(&self, store: &dyn SecretStore) -> Result<LockState, AuthError> {
         if self.lock_state() != LockState::SignedOut || self.authenticated_owner().is_ok() {
             return Err(AuthError::InvalidTransition {
@@ -67,6 +70,7 @@ impl Client {
             session_stored: owner.is_some(),
             ask_password_at_start: read_lock_flag(store, LOCK_ASK_AT_START),
             vault_closed: read_lock_flag(store, LOCK_VAULT_CLOSED),
+            app_lock: read_lock_setting(store, LOCK_APP_LOCK, true),
         };
         let mut flow = LockFlow::at_start(facts);
         if flow.state() == LockState::VaultClosed && facts.vault_closed != Some(true) {
@@ -75,6 +79,7 @@ impl Client {
             // A mark that cannot be written leaves this process closed all the same.
             let _ = write_lock_flag(store, LOCK_VAULT_CLOSED, true);
         }
+        let _ = key_may_be_loaded; // STUB: today only a screen-locked start loads the key
         if let (LockState::ScreenLocked, Some(owner)) = (flow.state(), owner.as_deref()) {
             match Session::load_for_user_proven(store, owner, self.app_id())? {
                 Some(session) => {
@@ -99,6 +104,30 @@ impl Client {
     /// with the lock ([`Client::ask_screen_lock`]), so it cannot fall between the two.
     pub fn lock_screen(&self) -> Result<(), AuthError> {
         self.ask_screen_lock()?.map_err(|error| refused("screen lock", error))
+    }
+
+    /// The automatic lock. The host calls it when the person was away for the delay they
+    /// chose and when the operating system's session is locked; "Lock now" by hand is
+    /// [`Client::lock_screen`], which locks whatever app lock says.
+    ///
+    /// With app lock on (or an entry that cannot be read) it is [`Client::lock_screen`]; with
+    /// app lock off it changes nothing and asks for nothing. It never fails on the lock state:
+    /// from a screen-locked, closed or signed-out app nothing changes, so a host may call it
+    /// whenever its timer fires. The answer is the state after.
+    pub fn lock_after_away(&self, store: &dyn SecretStore) -> Result<LockState, AuthError> {
+        if true {
+            // STUB: today the host's only lock is `lock_screen`, whatever app lock says.
+            // A refusal (closed or signed out) changes nothing; a screen lock asked for while
+            // an install holds the app closed is kept and applied when that install lands.
+            let _ = self.ask_screen_lock()?;
+        }
+        Ok(self.lock_state())
+    }
+
+    /// The per-device "app lock" setting, for the host's switch: on unless it was read as
+    /// off. Changed with [`Client::set_app_lock`].
+    pub fn app_lock(&self, store: &dyn SecretStore) -> bool {
+        away_locks_screen(read_lock_setting(store, LOCK_APP_LOCK, true))
     }
 
     /// Opens the screen lock on the host's statement that the operating system verified the

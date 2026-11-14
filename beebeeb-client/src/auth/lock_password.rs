@@ -5,7 +5,7 @@
 //! The whole path sits behind `ClientConfig::lock_password_path`. The wire shape of the proof
 //! is in `beebeeb_api::proposed` (`password_proof_*`), and this file is its only caller.
 
-use beebeeb_api::flows::LockFlow;
+use beebeeb_api::flows::{FlowError, LockFlow, ScreenProof, app_lock_may_change};
 use beebeeb_api::proposed::password_proof_codes;
 use beebeeb_core::opaque_protocol::{LoginFinishError, client_login_finish_judged};
 use beebeeb_core::screen_lock::{
@@ -16,7 +16,44 @@ use super::account::is_unauthorized;
 use super::lock::{refused, replace_screen_check};
 use super::*;
 use crate::TransportError;
-use crate::session::{LOCK_ASK_AT_START, LOCK_ATTEMPTS, LOCK_SCREEN_CHECK, write_lock_flag};
+use crate::session::{LOCK_APP_LOCK, LOCK_ASK_AT_START, LOCK_ATTEMPTS, LOCK_SCREEN_CHECK, write_lock_flag};
+
+/// The proof for turning app lock off ([`Client::set_app_lock`]): given by the person for
+/// this change, right before it, and used once. The unlock that opened the app earlier is not
+/// one.
+pub enum AppLockProof {
+    /// The operating system's user-verification prompt (Windows Hello) returned success for
+    /// the current user just now. The host's statement, trusted as
+    /// [`Client::unlock_screen_platform_verified`] trusts it: a cancelled or unavailable prompt
+    /// gives no proof.
+    PlatformVerified,
+    /// The account password, typed for this change. Checked as the screen unlock checks it
+    /// (online, or the local check when the server cannot be reached) and counted as its
+    /// tries are.
+    Password(Zeroizing<String>),
+}
+
+impl std::fmt::Debug for AppLockProof {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::PlatformVerified => "PlatformVerified",
+            Self::Password(_) => "Password(..)",
+        })
+    }
+}
+
+/// A password check used as the proof for a setting: accepted, or the refusal that says why.
+fn proof_answer(judgement: Judgement) -> Result<(), AuthError> {
+    match judgement {
+        Judgement::Accepted => Ok(()),
+        Judgement::Wrong { .. } => Err(AuthError::PasswordNotConfirmed),
+        Judgement::Wait { wait_ms } => Err(AuthError::PasswordTryWait { wait_ms }),
+        Judgement::ServerLimit { wait_ms } => Err(AuthError::PasswordCheckLimited { wait_ms }),
+        Judgement::OfflineNoRecord => Err(AuthError::PasswordProofOffline),
+        Judgement::UpgradeNeeded => Err(AuthError::LegacyUpgradeNotAuthorized),
+        Judgement::SessionEnded => Err(ClientError::InvalidAuthentication.into()),
+    }
+}
 
 /// The answer of [`Client::unlock_screen_with_password`]. Only `Wrong` and `LocalCheckOff`
 /// are wrong tries; every other refusal counted nothing.
@@ -195,20 +232,57 @@ impl Client {
                 requirement: "the account password",
             })?;
         let generation = self.generation();
-        match self.counted_password_check(&password, store, now_ms, false).await? {
-            Judgement::Accepted => {
-                if self.generation() != generation {
-                    return Err(ClientError::StaleAccount.into());
-                }
-                write_lock_flag(store, LOCK_ASK_AT_START, false).map_err(Into::into)
-            }
-            Judgement::Wrong { .. } => Err(AuthError::PasswordNotConfirmed),
-            Judgement::Wait { wait_ms } => Err(AuthError::PasswordTryWait { wait_ms }),
-            Judgement::ServerLimit { wait_ms } => Err(AuthError::PasswordCheckLimited { wait_ms }),
-            Judgement::OfflineNoRecord => Err(AuthError::PasswordProofOffline),
-            Judgement::UpgradeNeeded => Err(AuthError::LegacyUpgradeNotAuthorized),
-            Judgement::SessionEnded => Err(ClientError::InvalidAuthentication.into()),
+        proof_answer(self.counted_password_check(&password, store, now_ms, false).await?)?;
+        if self.generation() != generation {
+            return Err(ClientError::StaleAccount.into());
         }
+        write_lock_flag(store, LOCK_ASK_AT_START, false).map_err(Into::into)
+    }
+
+    /// The per-device "app lock" setting, on by default. Off means the app does not lock its
+    /// screen by itself: it starts open ([`Client::start_from_store`]) and the automatic lock
+    /// ([`Client::lock_after_away`]) changes nothing. "Lock now" ([`Client::lock_screen`])
+    /// still locks, and the vault level does not follow it.
+    ///
+    /// Only an open app changes it. Turning it on needs nothing. Turning it off lowers what
+    /// the screen lock protects, so it needs a proof the screen unlock would accept, given for
+    /// this change (the rule is `beebeeb_api::flows::app_lock_may_change`): without one,
+    /// nothing is checked and nothing is written.
+    pub async fn set_app_lock(
+        &self,
+        on: bool,
+        proof: Option<AppLockProof>,
+        store: &dyn SecretStore,
+        now_ms: u64,
+    ) -> Result<(), AuthError> {
+        let screen_proof = proof.as_ref().map(|proof| match proof {
+            AppLockProof::PlatformVerified => ScreenProof::PlatformVerified,
+            AppLockProof::Password(_) => ScreenProof::PasswordChecked,
+        });
+        app_lock_may_change(self.lock_state(), on, screen_proof).map_err(|error| AuthError::InvalidTransition {
+            step: "app lock",
+            requirement: match error {
+                FlowError::StepOutOfOrder => "a proof the screen unlock accepts, given for this change",
+                FlowError::StepNotRequired | FlowError::NotReady => "the app is open",
+            },
+        })?;
+        if let (false, Some(AppLockProof::Password(password))) = (on, proof) {
+            if !self.lock_password_path() {
+                return Err(AuthError::PasswordCheckUnavailable);
+            }
+            if password.is_empty() {
+                return Err(AuthError::InvalidTransition {
+                    step: "app lock",
+                    requirement: "the account password",
+                });
+            }
+            let generation = self.generation();
+            proof_answer(self.counted_password_check(&password, store, now_ms, true).await?)?;
+            if self.generation() != generation {
+                return Err(ClientError::StaleAccount.into());
+            }
+        }
+        write_lock_flag(store, LOCK_APP_LOCK, on).map_err(Into::into)
     }
 
     /// One typed password, counted once whichever checks it goes through.
