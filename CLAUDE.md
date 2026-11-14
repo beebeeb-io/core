@@ -179,7 +179,11 @@ Secrets, input and bindings:
   device, and no copy may say so. A weaker proof never opens the stronger level: platform verification
   and the local check record open `ScreenLocked` only, and `VaultClosed` opens only through a strong
   install (`unlock_known_device`; a new-device or recovered install is one too), also after a
-  restart. A closed vault's key entry is never read before that (`Session::load_for_user` answers
+  restart. App lock (`lock.app_lock`, owner ruling 2026-11-14) belongs to the screen level alone: off
+  starts `Open` only where the start would be `ScreenLocked` and makes the automatic lock
+  (`lock_after_away`) change nothing, but never opens `VaultClosed` and never stops "Lock now"; an
+  absent entry is ON and an unreadable one counts as on (`read_lock_setting(.., true)`, never
+  `read_lock_flag`); turning it off needs a screen proof given for that change (`app_lock_may_change`). A closed vault's key entry is never read before that (`Session::load_for_user` answers
   `VaultClosed` while the mark is set; only `load_for_user_proven`, behind a proof, reads it), and the
   closed mark is cleared in the strong install and nowhere else. Credentials without a key
   (`set_authentication`) close an app that held one. A refused session closes the vault in the

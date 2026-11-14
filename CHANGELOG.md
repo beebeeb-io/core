@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `set_ask_password_at_start`, `session_ended` and `refresh_lock_from_server`. The password path is
   behind `ClientConfig::lock_password_path` (default off) until the server side is live. No binding
   exports it yet.
+- App lock, the per-device switch of the screen level (on by default): `StartFacts::app_lock`,
+  `LockFlow::lock_after_away`, `flows::away_locks_screen`, `flows::app_lock_may_change` and
+  `flows::ScreenProof` in `beebeeb-api`; `Client::lock_after_away`, `Client::app_lock`,
+  `Client::set_app_lock` and `AppLockProof` in `beebeeb-client`, stored as `lock.app_lock`. With it off a
+  start that would be screen-locked starts open and the automatic lock changes nothing; "Lock now" still
+  locks and the vault level is unchanged. Turning it off needs a screen proof given for that change.
+  Breaking for code that builds `StartFacts` by hand: it has a fourth field.
 
 ### Changed
 

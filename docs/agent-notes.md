@@ -476,12 +476,21 @@ machine `beebeeb_api::flows::LockFlow` (`SignedOut`, `Open`, `ScreenLocked`, `Va
 check record and wrong-try rule `beebeeb_core::screen_lock`, and the service on `Client`
 (`start_from_store`, `lock_state`, `lock_screen`, `unlock_screen_platform_verified`,
 `unlock_screen_with_password`, `lock_vault`, `set_ask_password_at_start`, `session_ended`,
-`refresh_lock_from_server`).
+`refresh_lock_from_server`, and for app lock `lock_after_away`, `app_lock`, `set_app_lock`).
 
 - **Store entries** (through `SecretStore`, removed at both purge places in `session.rs`, kept by an
   app-only sign-out): `lock.screen_check` (the 102-byte record), `lock.attempts` (13 bytes: version,
   failures u32 BE, last failure ms u64 BE), `lock.ask_password_at_start` and `lock.vault_closed`
-  (`1` / `0`; absent is off; anything else, or a failed read, starts the vault closed).
+  (`1` / `0`; absent is off; anything else, or a failed read, starts the vault closed), and
+  `lock.app_lock` (`1` / `0`; **absent is ON**, read with `read_lock_setting(.., true)`, never
+  `read_lock_flag`; anything else, or a failed read, counts as on).
+- **App lock** (owner ruling 2026-11-14) is the screen level's per-device switch. Off: a start that
+  would be `ScreenLocked` is `Open` (the key loaded, nothing asked), and the automatic lock
+  (`lock_after_away`: the host's away delay and the OS session lock) changes nothing; "Lock now"
+  (`lock_screen`) still locks. It never touches the vault level: the start setting or a closed mark
+  still starts `VaultClosed`. Turning it off needs a proof the screen unlock accepts, given for that
+  change (`flows::app_lock_may_change`; `AppLockProof::PlatformVerified` or `Password`, the password
+  checked and counted as the screen unlock does, offline local check included); on needs nothing.
 - **The record cannot say why it failed.** It holds no owner, so a record moved to another account
   or with an edited header fails its tag exactly as a wrong password does: `CheckOutcome::NoMatch`.
   `Unusable` is only a wrong length, version or pepper kind, or no owner. None of them ever matches.
@@ -612,13 +621,13 @@ never starts the lock through core: nothing is refused there.
 
 | Class | Calls | `ScreenLocked` | `VaultClosed` |
 |---|---|---|---|
-| The lock's own | `lock_screen`, `unlock_screen_platform_verified`, `unlock_screen_with_password`, `lock_vault`, `session_ended`, `refresh_lock_from_server`, `lock_state`, `check_call` | run | run (each by its own rule) |
+| The lock's own | `lock_screen`, `lock_after_away`, `app_lock`, `unlock_screen_platform_verified`, `unlock_screen_with_password`, `lock_vault`, `session_ended`, `refresh_lock_from_server`, `lock_state`, `check_call` | run | run (each by its own rule) |
 | Sign-out | `sign_out_this_app`, `sign_out_whole_device`, `ServiceCoordinator::sign_out_app` / `sign_out_device` / `prepare_account_replacement`, `UploadService::sign_out` | run; a device sign-out removes **this device only** (the listed entry that carries this device's stored hardware id), any other id is refused, and so is every id when this device has no stored id (an empty one is none) or its entry carries none: such a device leaves with `sign_out_this_app` | run, with the same this-device rule |
 | Sign-in and strong proofs, not gated | `sign_in*`, `submit_two_factor`, the email-code steps, `unlock_known_device`, `install_new_device*`, the recovery steps made with the recovery's own secret, signup, `open_with_passkey`, `start_device_link_for_sign_in`, `prove_session_key` | run: a proof stronger than the screen lock; setting its credentials closes the vault | run |
 | A device link as the new device, and a recovery cancelled by id | `start_device_link`, `poll_device_link`, `poll_typed_device_link`, `acknowledge_device_link`, `send_device_link_pake`, `get_device_link_pake`, `cancel_recovery` | refused: on a locked screen a key is held, and the poll would hand opened account key material to its caller | run |
 | A person, files | `session_key`; `list_files`, `list_file_records_page`, `get_file`, `get_file_record`, `file_versions`, `storage_usage`, `create_folder`, `rename_entry`, `move_entry`, `trash_*`, `restore_*`, `delete_*_forever`, `restore_version`, `files::duplicate_file`; `DownloadService::open` / `save_to` / `video_range` / `read_range` / `range_reader` / `read_with`; `ThumbnailService::get`; `ArchiveService::open` / `preview` / `extract` / `open_entry`; `UploadService::list` / `enqueue` / `pause` / `resume` / `cancel` | refused | refused |
 | A person, sharing | every call of `shares.rs` and the client calls of `contacts.rs` | refused | refused |
-| A person, account | `setup_authenticator`, `enable_authenticator`, `remove_authenticator`, `request_account_deletion`, `change_password`, `change_email`, `create_passkey_copy`, the settings calls of `settings.rs`, `pending_device_links`, `approve_device_link`, `begin_typed_device_approval`, `approve_typed_device_link`, `deny_device_link`, `list_devices`, `remove_device`, `list_account_sessions`, `revoke_account_session`, `BackupService::configure` / `back_up_again`; `set_ask_password_at_start` needs `Open` | refused | refused |
+| A person, account | `setup_authenticator`, `enable_authenticator`, `remove_authenticator`, `request_account_deletion`, `change_password`, `change_email`, `create_passkey_copy`, the settings calls of `settings.rs`, `pending_device_links`, `approve_device_link`, `begin_typed_device_approval`, `approve_typed_device_link`, `deny_device_link`, `list_devices`, `remove_device`, `list_account_sessions`, `revoke_account_session`, `BackupService::configure` / `back_up_again`; `set_ask_password_at_start` and `set_app_lock` need `Open` | refused | refused |
 | Work | the five sync calls of `sync.rs`; `UploadService::enqueue_work` (a host's sync of a local change) / `cancel_work` (the work's cancel of an upload it queued) / `next_transfers`; `ThumbnailService::run_next`; `BackupService::next_batch` / `configure_saved` (a start putting the saved choice back); `FileProviderService::fetch_contents` / `create_folder` / `create_file` / `modify` / `delete` / `delete_local` | run | refused |
 | Not gated | constructors, event subscriptions, cache clears, a download's cancel, the queue's and the backup's bookkeeping of what the work finished, `UploadService::cancel_sources_matching` (the archive service's clean-up of its own staged files), `DownloadService::share_view_download` (account-free) | run | run |
 
