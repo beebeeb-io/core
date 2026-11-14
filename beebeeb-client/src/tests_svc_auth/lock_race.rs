@@ -24,6 +24,8 @@ enum Write {
     Delete(&'static str),
     /// Just after the entry was written, where the others land just before.
     AfterSet(&'static str),
+    /// Just before the entry is read.
+    Get(&'static str),
 }
 
 /// A store that runs one call, once, at a chosen write: just before it reaches the entries,
@@ -74,6 +76,11 @@ impl SecretStore for RacingStore {
     }
 
     fn get(&self, name: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretError> {
+        if let Write::Get(at) = self.at
+            && at == name
+        {
+            self.land(self.at);
+        }
         self.inner.get(name)
     }
 
@@ -337,4 +344,79 @@ async fn a_recovered_install_overtaken_by_a_vault_lock_installs_nothing() {
     assert_eq!(client.lock_state(), LockState::VaultClosed);
     assert!(client.held_key().is_err());
     assert_eq!(mark(&store).as_deref(), Some(b"1".as_slice()));
+}
+
+/// Before the tail: a vault lock that lands between the last answer of a password change and
+/// the step that sets its new credentials (here: in the store read that follows the answer)
+/// is not taken as the state the change started in. The credentials are not set, no key is
+/// proven or loaded again, and the vault stays closed.
+#[tokio::test]
+async fn a_vault_lock_before_the_tail_of_a_password_change_wins() {
+    let server = LockServer::new();
+    let (client, store) = open_app(&server);
+    let racing = RacingStore::new(store.clone(), Write::Get("session.owner"), vault_lock(&client, &store));
+
+    stale(
+        client
+            .change_password(password(PASSWORD), password(NEW_PASSWORD), &racing)
+            .await,
+    );
+    assert!(racing.landed());
+    assert_eq!(client.lock_state(), LockState::VaultClosed);
+    assert!(client.held_key().is_err(), "a closed vault holds no key");
+    assert!(client.account_id().is_err(), "the new credentials were not set");
+    assert_eq!(
+        server.count("/api/v1/auth/key-proof/start"),
+        0,
+        "nothing is proven for it"
+    );
+    assert_eq!(mark(&store).as_deref(), Some(b"1".as_slice()));
+    assert_eq!(entry(store.as_ref(), TOKEN_ENTRY).unwrap(), STORED_TOKEN.as_bytes());
+    assert_eq!(
+        entry(store.as_ref(), LOCK_SCREEN_CHECK),
+        None,
+        "the old password's record is gone: the server has changed the password"
+    );
+}
+
+/// A sign-out that lands there, after the change read the stored session, is not undone.
+#[tokio::test]
+async fn a_sign_out_before_the_tail_of_a_password_change_wins() {
+    let server = LockServer::new();
+    let (client, store) = open_app(&server);
+    let racing = RacingStore::new(store.clone(), Write::Get(KEY_ENTRY), sign_out(&client, &store));
+
+    stale(
+        client
+            .change_password(password(PASSWORD), password(NEW_PASSWORD), &racing)
+            .await,
+    );
+    assert!(racing.landed());
+    assert_eq!(client.lock_state(), LockState::SignedOut);
+    assert!(client.held_key().is_err());
+    assert!(client.account_id().is_err());
+    assert_eq!(server.count("/api/v1/auth/key-proof/start"), 0);
+    assert_eq!(entry(store.as_ref(), TOKEN_ENTRY), None, "nothing is saved again");
+}
+
+/// A screen lock asked for while a password change holds the app closed is refused there (a
+/// closed vault is never screen-locked), and it is not lost: the change installs into a
+/// locked screen.
+#[tokio::test]
+async fn a_screen_lock_asked_for_in_the_tail_of_a_password_change_is_applied() {
+    let server = LockServer::new();
+    let (client, store) = open_app(&server);
+    let asking = client.clone();
+    let racing = RacingStore::new(store.clone(), Write::Set(TOKEN_ENTRY), move || {
+        assert_eq!(asking.lock_state(), LockState::VaultClosed);
+        assert!(asking.lock_screen().is_err());
+    });
+
+    client
+        .change_password(password(PASSWORD), password(NEW_PASSWORD), &racing)
+        .await
+        .unwrap();
+    assert!(racing.landed());
+    assert_eq!(client.lock_state(), LockState::ScreenLocked);
+    assert!(client.held_key().unwrap().is_current(&client));
 }
